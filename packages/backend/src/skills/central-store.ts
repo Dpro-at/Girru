@@ -2,7 +2,7 @@ import { readRegularFile } from '../services/read-regular-file.js';
 import { discoveryFs, isolatedReadRegularFile } from '../services/discovery-fs.js';
 /** Central Markdown skill content with a SQL index and explicit per-agent assignment. */
 import fs from 'node:fs/promises';
-import { constants } from 'node:fs';
+import { constants, type Dirent, type Stats } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
@@ -25,7 +25,9 @@ const safeRelative=(name:string)=>name.length<=400&&name.split('/').every(part=>
 async function readText(file:string,trusted=false){let data:Buffer;try{({data}=await (trusted?readRegularFile:isolatedReadRegularFile)(file,MAX_FILE));}catch(error){if((error as NodeJS.ErrnoException).code==='EFBIG')throw new SkillLibraryError('file_too_large');throw error;}if(data.includes(0))throw new SkillLibraryError('invalid_text');return data.toString('utf8');}
 
 async function bundle(directory:string,trusted=false):Promise<Bundle>{
- const io=trusted?fs:discoveryFs;
+ const io:{realpath:(file:string)=>Promise<string>;lstat:(file:string)=>Promise<Stats>;readdir:(file:string,options:{withFileTypes:true})=>Promise<Dirent[]>}=trusted?{
+  realpath:file=>fs.realpath(file),lstat:file=>fs.lstat(file),readdir:(file,options)=>fs.readdir(file,options),
+ }:{realpath:file=>discoveryFs.realpath(file),lstat:file=>discoveryFs.lstat(file),readdir:(file,options)=>discoveryFs.readdir(file,options)};
  const physical=await io.realpath(directory);if(physical!==path.resolve(directory)||(await io.lstat(directory)).isSymbolicLink())throw new SkillLibraryError('symlink_refused');
  const files:{path:string;content:string}[]=[];let total=0,redactions=0,omitted=0,nodes=0;
  const visit=async(folder:string,depth:number)=>{if(depth>8)throw new SkillLibraryError('bundle_too_large');for(const entry of await io.readdir(folder,{withFileTypes:true})){
