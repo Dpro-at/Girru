@@ -75,7 +75,7 @@ test('protected-folder requests happen only after click, discard entries and rec
 });
 test('broader access request opens a fixed protected resource without reading data or inventing a grant', async () => {
   const { requestFullDiskRegistration } = require('../src/permissions.cjs');
-  const path = require('node:path'); let closed = 0; const calls = [];
+  const path = require('node:path').posix; let closed = 0; const calls = [];
   const fs = { promises: { async open(target, flags) { calls.push({ target, flags }); return { async close() { closed++; } }; } } };
   assert.deepEqual(await requestFullDiskRegistration({ fs, path, home: '/fictional', platform: 'darwin' }), { status: 'probe-accessible' });
   assert.deepEqual(calls, [{ target: '/fictional/Library/Safari/Bookmarks.plist', flags: 'r' }]); assert.equal(closed, 1);
