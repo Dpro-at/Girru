@@ -1,3 +1,4 @@
+import { discoveryFs, isolatedReadRegularFile } from '../services/discovery-fs.js';
 /**
  * "Found on this computer" (DISCOVER-01, board M17): one scan finds what coding
  * agents left on this computer, grouped by project folder and kind, and hands
@@ -37,7 +38,7 @@ import os from 'node:os';
 import path from 'node:path';
 import yaml from 'js-yaml';
 import { q, sql } from '../repositories/sql-steps.js';
-import { readRegularFile } from '../services/read-regular-file.js';
+const readRegularFile = isolatedReadRegularFile;
 import { redactImportText } from '../memory/import/redact.js';
 import { claudeFolderCwd, listLocalSessions, matchProject, projectRoot, relocateGoneRoots, rootDrawerKey, type ProjectRoot } from '../memory/import/local-agents.js';
 import { registerProjectDocument, readProjectDocument } from '../memory/import/project-documents.js';
@@ -99,8 +100,8 @@ function init() {
 
 const homeRel = (home: string, file: string) => { if (!path.isAbsolute(file)) return file; // a path from another system (e.g. C:\\… on a Mac) as it is
   const r = path.relative(home, file); return r && !r.startsWith('..') && !path.isAbsolute(r) ? `~${path.sep}${r}` : file; };
-const isDir = async (p: string) => (await fs.lstat(p).catch(() => null))?.isDirectory() === true;
-const isFile = async (p: string) => (await fs.lstat(p).catch(() => null))?.isFile() === true;
+const isDir = async (p: string) => (await discoveryFs.lstat(p).catch(() => null))?.isDirectory() === true;
+const isFile = async (p: string) => (await discoveryFs.lstat(p).catch(() => null))?.isFile() === true;
 async function readText(file: string, max: number): Promise<{ text: string; mtime: string } | null> {
   try {
     const { data, stat } = await readRegularFile(file, max);
@@ -148,12 +149,12 @@ async function memoryFiles(home: string, roots: Map<string, ProjectRoot>): Promi
   const out: Found[] = [];
   const top = path.join(home, '.claude', 'projects');
   if (!(await isDir(path.join(home, '.claude'))) || !(await isDir(top))) return out;
-  let dirs: string[]; try { dirs = await fs.readdir(top); } catch { return out; }
+  let dirs: string[]; try { dirs = await discoveryFs.readdir(top); } catch { return out; }
   for (const d of dirs) {
     if (!(await isDir(path.join(top, d)))) continue;
     const mem = path.join(top, d, 'memory');
     if (!(await isDir(mem))) continue;
-    let files: string[]; try { files = (await fs.readdir(mem)).filter((f) => f.endsWith('.md') && f !== 'MEMORY.md'); } catch { continue; }
+    let files: string[]; try { files = (await discoveryFs.readdir(mem)).filter((f) => f.endsWith('.md') && f !== 'MEMORY.md'); } catch { continue; }
     if (!files.length) continue;
     // The Claude folder name is the folder on this computer; a conversation's folder may be from an older one.
     const cwd = await decodeClaudeFolder(d) ?? await claudeFolderCwd(path.join(top, d), home);
@@ -190,14 +191,14 @@ async function projectNotes(home: string, known: string[], allowed: { allow: str
   const rootOf = async (dir: string) => {
     if (roots.has(dir)) return roots.get(dir)!;
     const pr = await projectRoot(dir, home);
-    const git = pr && pr.root !== dir ? pr.root : (await fs.lstat(path.join(dir, '.git')).catch(() => null)) ? dir : null;
+    const git = pr && pr.root !== dir ? pr.root : (await discoveryFs.lstat(path.join(dir, '.git')).catch(() => null)) ? dir : null;
     const root = git ?? knownRoots.find((k) => dir === k || dir.startsWith(k + path.sep)) ?? dir;
     roots.set(dir, root); return root;
   };
   const walk = async (dir: string, depth: number): Promise<void> => {
     if (depth > 12 || visited > 600_000 || out.length >= 2000 || Date.now() > until || walked.has(dir) || P.isExcluded(dir, allowed.exclude)) return;
     walked.add(dir);
-    let entries; try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+    let entries; try { entries = await discoveryFs.readdir(dir, { withFileTypes: true }); } catch { return; }
     visited += entries.length;
     const slash = dir.split(path.sep).join('/');
     for (const e of entries) {
@@ -251,14 +252,14 @@ async function skills(home: string, roots: string[], includeGlobal = true): Prom
     ...roots.map((r) => ({ dir: path.join(r, '.claude', 'skills'), origin: 'project', root: r })),
   ];
   for (const p of places) {
-    let entries; try { entries = await fs.readdir(p.dir, { withFileTypes: true }); } catch { continue; }
+    let entries; try { entries = await discoveryFs.readdir(p.dir, { withFileTypes: true }); } catch { continue; }
     for (const e of entries.slice(0, 300)) {
       if (!e.isDirectory() || e.name.startsWith('.')) continue;
       const dir = path.join(p.dir, e.name);
       if (!(await isFile(path.join(dir, 'SKILL.md')))) continue;
       try {
         const b = await skillBundle(dir);
-        const st = await fs.stat(path.join(dir, 'SKILL.md'));
+        const st = await discoveryFs.stat(path.join(dir, 'SKILL.md'));
         out.push({ id: itemId('skill', path.relative(home, dir)), kind: 'skill', name: b.name, from: `${homeRel(home, dir)}${path.sep}SKILL.md`, root: p.root, file: dir, hash: b.hash, updatedAt: st.mtime.toISOString(), skill: { origin: p.origin, description: b.description.slice(0, 400) } });
       } catch { /* not a valid skill folder */ }
     }
@@ -275,7 +276,7 @@ async function mcpServers(home: string, roots: string[], mcp: LocalMcpImport): P
   for (const s of servers) {
     const root = s.project ? (await projectRoot(s.project, home))?.root ?? s.project : s.origin === 'project' ? path.dirname(s.file) : null;
     const secrets = [...Object.keys(s.input?.env ?? {}), ...Object.keys((s.input as any)?.headers ?? {})];
-    const st = await fs.stat(s.file).catch(() => null);
+    const st = await discoveryFs.stat(s.file).catch(() => null);
     out.push({ id: itemId('mcp', path.relative(home, s.file), `${s.project ?? ''}\0${s.key}`), kind: 'mcp', name: s.name, from: `${homeRel(home, s.file)}${secrets.length ? ` · ${secrets.length} secret${secrets.length === 1 ? '' : 's'} inside` : ''}${s.issue ? ` · ${s.issue.replace(/_/g, ' ')}` : ''}`, root, file: s.file, hash: s.hash ?? sha(`issue\0${s.issue}`), updatedAt: st?.mtime.toISOString() ?? new Date(0).toISOString(), mcp: { ...s, secrets } });
   }
   return out;
@@ -309,7 +310,7 @@ export async function sshHosts(home: string): Promise<Found[]> {
   if (!(await isDir(directory))) return [];
   const t = await readText(file, MAX_SSH_CONFIG);
   const found: Found[] = t ? parseSshConfig(t.text).map((h) => ({ id: itemId('ssh', path.relative(home, file), h.alias), kind: 'ssh' as const, name: h.alias, from: `${homeRel(home, file)}`, root: null, file, hash: sha(h.block), updatedAt: t.mtime, ssh: { alias: h.alias, host: h.host, user: h.user, port: h.port, key: h.key } })) : [];
-  let entries; try { entries = await fs.readdir(directory, { withFileTypes: true }); } catch { return found; }
+  let entries; try { entries = await discoveryFs.readdir(directory, { withFileTypes: true }); } catch { return found; }
   for (const entry of entries.filter(entry => entry.isFile() && !entry.isSymbolicLink() && entry.name.endsWith('.pub')).slice(0, 200)) {
     const publicFile = path.join(directory, entry.name), publicText = await readText(publicFile, 16 * 1024);
     const match = publicText && /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)|sk-ssh-ed25519@openssh.com|sk-ecdsa-sha2-nistp256@openssh.com) ([A-Za-z0-9+/]+={0,2})(?:[ \t].*)?\r?\n?$/.exec(publicText.text);
@@ -319,13 +320,13 @@ export async function sshHosts(home: string): Promise<Found[]> {
     const fingerprint = 'SHA256:' + createHash('sha256').update(bytes).digest('base64').replace(/=+$/, '');
     const privateName = entry.name.slice(0, -4), privateFile = path.join(directory, privateName);
     // Metadata only: never open, hash, copy or parse the private key.
-    const privateExists = (await fs.lstat(privateFile).catch(() => null))?.isFile() === true;
+    const privateExists = (await discoveryFs.lstat(privateFile).catch(() => null))?.isFile() === true;
     found.push({ id: itemId('ssh', path.relative(home, publicFile)), kind: 'ssh', name: entry.name, from: `${homeRel(home, publicFile)} · ${fingerprint}${privateExists ? ` · private file ${privateName} (name only)` : ''}`, root: null, file: publicFile, hash: sha(`${match[1]} ${match[2]} ${privateExists}`), updatedAt: publicText!.mtime,
       ssh: { alias: privateName, host: null, user: null, port: null, key: privateExists ? homeRel(home, privateFile) : null, identity: true } });
   }
   for (const entry of entries.filter(entry => entry.isFile() && !entry.isSymbolicLink() && /^id_(?:rsa|dsa|ecdsa|ed25519|ecdsa_sk|ed25519_sk)$/.test(entry.name)).slice(0, 200)) {
     if (entries.some(publicEntry => publicEntry.name === entry.name + '.pub')) continue;
-    const privateFile = path.join(directory, entry.name), stat = await fs.lstat(privateFile).catch(() => null);
+    const privateFile = path.join(directory, entry.name), stat = await discoveryFs.lstat(privateFile).catch(() => null);
     if (!stat?.isFile() || stat.isSymbolicLink()) continue;
     found.push({ id: itemId('ssh', path.relative(home, privateFile)), kind: 'ssh', name: entry.name, from: `${homeRel(home, privateFile)} · private filename only (not opened)`, root: null, file: privateFile, hash: sha(`metadata:${entry.name}`), updatedAt: stat.mtime.toISOString(), ssh: { alias: entry.name, host: null, user: null, port: null, key: homeRel(home, privateFile), identity: true } });
   }
@@ -360,7 +361,7 @@ async function databaseItems(home: string, roots: string[]): Promise<Found[]> {
   const out: Found[] = [];
   for (const root of roots.slice(0, 200)) {
     for (const db of await findDatabases(root).catch(() => [] as DatabaseFound[])) {
-      const st = await fs.stat(db.path).catch(() => null);
+      const st = await discoveryFs.stat(db.path).catch(() => null);
       out.push({ id: itemId('database', path.relative(home, db.path), db.id), kind: 'database', name: `${db.name} · ${db.engine}${db.tables ? ` · ${db.tables.length} tables` : ''}`, from: path.relative(root, db.path), root, file: db.path, hash: createHash('sha256').update(JSON.stringify(db)).digest('hex'), updatedAt: st?.mtime.toISOString() ?? new Date(0).toISOString(), database: db });
     }
   }
@@ -412,6 +413,7 @@ const mcpFor = (o: DiscoveryOptions) => o.mcp ?? new LocalMcpImport(o.home ?? os
 /** Reads everything (read only) and keeps the result for the list. */
 export async function scan(userId: string, opts: DiscoveryOptions = {}): Promise<Scan> {
   await init();
+  if(discoveryFs.diagnostics().pending)throw new DiscoveryError('permission_pending',423);
   const prev = running.get(userId); if (prev) return prev;
   const work = (async () => {
     const t0 = Date.now(); const home = opts.home ?? os.homedir();
@@ -513,7 +515,9 @@ export type DiscoveryView = { scannedAt: string | null; ms: number; leftOut: num
 /** The page: projects, items and their state (scans first when nothing was read yet). */
 export async function view(userId: string, opts: DiscoveryOptions & { rescan?: boolean; kinds?: readonly string[] } = {}): Promise<DiscoveryView> {
   await init();
+  if(discoveryFs.diagnostics().pending)throw new DiscoveryError('permission_pending',423);
   const s = !opts.rescan && scans.get(userId) || await scan(userId, opts);
+  if(discoveryFs.diagnostics().pending)throw new DiscoveryError('permission_pending',423);
   const home = opts.home ?? os.homedir(); const mcp = mcpFor(opts);
   const gs = await P.groups(userId);
   const groupOf = new Map<string, P.Group>(); for (const g of gs) for (const r of g.roots) groupOf.set(r, g);

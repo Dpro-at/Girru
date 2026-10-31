@@ -1,3 +1,4 @@
+import { discoveryFs } from '../../services/discovery-fs.js';
 /**
  * "Found on this computer" (DISCOVER-01, board M17). Owner only (auth gate:
  * /api/memory/import*) and only from this computer (loopback), like the other
@@ -40,6 +41,7 @@ const HASH = /^[a-f0-9]{64}$/;
 const record = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
 
 export async function discoveryRoutes(fastify: FastifyInstance, options: D.DiscoveryOptions = {}) {
+  fastify.addHook('onClose', async () => { discoveryFs.close(); });
   const config = { access: 'owner' as const };
   const owner = (request: FastifyRequest, reply: FastifyReply): Actor | null => {
     const a = actorOrReply(reply, actorOf(request), requireOwner);
@@ -73,7 +75,7 @@ export async function discoveryRoutes(fastify: FastifyInstance, options: D.Disco
   fastify.post(`${BASE}/scan`, { config }, async (request, reply) => {
     const a = owner(request, reply); if (!a) return reply;
     if (request.body !== undefined && (!record(request.body) || Object.keys(request.body).length)) return reply.code(400).send({ code: 'invalid_input' });
-    try { return await D.view(a.userId!, { ...options, rescan: true }); } catch (e) { return fail(reply, e); }
+    try { discoveryFs.retry();return await D.view(a.userId!, { ...options, rescan: true }); } catch (e) { return fail(reply, e); }
   });
   fastify.put(`${BASE}/settings`, { config }, async (request, reply) => {
     const a = owner(request, reply); if (!a) return reply;

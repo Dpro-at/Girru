@@ -1,3 +1,4 @@
+import { discoveryFs, isolatedReadRegularFile } from '../../services/discovery-fs.js';
 /**
  * Conversations other coding agents saved on this computer (MEM-IMPORT-01/02):
  *   claude-code   ~/.claude/projects/<project>/<session>.jsonl
@@ -21,9 +22,10 @@
  * the start of large files, so every conversation is listed, not only the newest.
  */
 import { createHash } from 'node:crypto';
-import { readRegularFile } from '../../services/read-regular-file.js';
+const readRegularFile = isolatedReadRegularFile;
 import { fileURLToPath } from 'node:url';
-import { createReadStream, type Dirent } from 'node:fs';
+import { type Dirent } from 'node:fs';
+import { Readable } from 'node:stream';
 import zlib from 'node:zlib';
 import Database from 'better-sqlite3';
 import fs from 'node:fs/promises';
@@ -79,7 +81,7 @@ export function readable(source: LocalSource, file: string, home?: string): bool
 function guard(source: LocalSource, file: string, home?: string) { if (!readable(source, file, home)) throw new Error('not a conversation file'); }
 
 async function walk(dir: string, depth: number, out: string[]) {
-  let entries; try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+  let entries; try { entries = await discoveryFs.readdir(dir, { withFileTypes: true }); } catch { return; }
   for (const e of entries) {
     const p = path.join(dir, e.name);
     if (e.isSymbolicLink()) continue;
@@ -94,7 +96,7 @@ async function sessionFiles(source: 'claude-code' | 'codex', home?: string): Pro
   return out;
 }
 async function statOf(file: string): Promise<{ mtime: number; size: number } | null> {
-  try { const st = await fs.lstat(file); return st.isFile() && st.size > 0 ? { mtime: st.mtimeMs, size: st.size } : null; } catch { return null; }
+  try { const st = await discoveryFs.lstat(file); return st.isFile() && st.size > 0 ? { mtime: st.mtimeMs, size: st.size } : null; } catch { return null; }
 }
 
 /** Runs `fn` on a private read-only copy of a SQLite store (the original is never opened for writing or locked). */
@@ -102,8 +104,8 @@ async function withSqliteCopy<T>(file: string, fn: (db: Database.Database) => T)
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'dpro-read-'));
   try {
     const copy = path.join(tmp, 'copy.db');
-    await fs.copyFile(file, copy);
-    await fs.copyFile(`${file}-wal`, `${copy}-wal`).catch(() => {});
+    await discoveryFs.copyToTemp(file, copy);
+    await discoveryFs.copyToTemp(`${file}-wal`, `${copy}-wal`).catch(() => {});
     const db = new Database(copy, { readonly: true, fileMustExist: true });
     try { return fn(db); } finally { db.close(); }
   } finally { await fs.rm(tmp, { recursive: true, force: true }); }
@@ -115,7 +117,7 @@ type AgyConversation = { turns: Turn[]; cwd: string | null; startedAt: string | 
 let agyCache: { file: string; stamp: string; data: Map<string, AgyConversation> } | null = null;
 /** Antigravity: the conversations in its search index (plain text), grouped by conversation (read once per change of the store). */
 async function readAntigravity(file: string): Promise<Map<string, AgyConversation>> {
-  const st = await fs.stat(file); const stamp = `${st.mtimeMs}:${st.size}`;
+  const st = await discoveryFs.stat(file); const stamp = `${st.mtimeMs}:${st.size}`;
   if (agyCache?.file === file && agyCache.stamp === stamp) return agyCache.data;
   const data = await readAntigravityStore(file);
   agyCache = { file, stamp, data };
@@ -203,12 +205,12 @@ async function enumerate(source: LocalSource, home?: string): Promise<Found[]> {
       } catch { /* unreadable: left out */ }
     }
   } else {
-    let dirs: Dirent[]; try { dirs = await fs.readdir(sourceRoot(source, home), { withFileTypes: true }); } catch { dirs = []; }
+    let dirs: Dirent[]; try { dirs = await discoveryFs.readdir(sourceRoot(source, home), { withFileTypes: true }); } catch { dirs = []; }
     for (const d of dirs) {
       if (!d.isDirectory()) continue;
       const dir = path.join(sourceRoot(source, home), d.name);
       const seen = new Set<string>();
-      let chats: Dirent[]; try { chats = await fs.readdir(path.join(dir, 'chats'), { withFileTypes: true }); } catch { chats = []; }
+      let chats: Dirent[]; try { chats = await discoveryFs.readdir(path.join(dir, 'chats'), { withFileTypes: true }); } catch { chats = []; }
       for (const f of chats) {
         const file = path.join(dir, 'chats', f.name);
         if (!f.isFile() || !readable(source, file, home)) continue;
@@ -263,8 +265,9 @@ function pushTurn(turns: Turn[], t: Turn) {
 export type SessionText = { turns: Turn[]; cwd: string | null; startedAt: string | null; title?: string };
 
 /** The lines of a JSONL log (a Codex archive is zstd-compressed); at most MAX_SESSION_BYTES of text. */
-async function* logLines(file: string): AsyncGenerator<string> {
-  const raw = createReadStream(file);
+async function* logLines(file: string, head = false): AsyncGenerator<string> {
+  const {data}=await isolatedReadRegularFile(file,head&&!file.endsWith('.zst')?HEAD_CHARS:MAX_SESSION_BYTES,{truncate:head});
+  const raw = Readable.from([data]);
   let input: NodeJS.ReadableStream = raw;
   if (file.endsWith('.zst')) {
     if (typeof (zlib as any).createZstdDecompress !== 'function') { raw.destroy(); throw new Error('unsupported'); }
@@ -284,7 +287,7 @@ async function* logLines(file: string): AsyncGenerator<string> {
 /** Claude Code or Codex log: its turns, folder and start (stops early with `head`, once the folder and first message are known). */
 async function readLog(source: 'claude-code' | 'codex', file: string, head = false): Promise<SessionText> {
   const turns: Turn[] = []; let cwd: string | null = null; let startedAt: string | null = null; let chars = 0;
-  for await (const line of logLines(file)) {
+  for await (const line of logLines(file, head)) {
     if (head && ((cwd && turns.some(t => t.role === 'user')) || (chars += line.length) > HEAD_CHARS)) break;
     if (!line.trim()) continue;
     let o: unknown; try { o = JSON.parse(line); } catch { continue; }
@@ -311,7 +314,7 @@ export async function readSession(ref: SessionRef, home?: string): Promise<Sessi
     if (!c) throw new Error('gone');
     return { turns: c.turns, cwd: await geminiProjectRoot(path.dirname(ref.key ? file : path.dirname(file)), home), startedAt: c.startedAt };
   }
-  const st = await fs.stat(file);
+  const st = await discoveryFs.stat(file);
   if (st.size > MAX_SESSION_BYTES) throw new Error('too large');
   const s = await readLog(source, file);
   if (!s.cwd && source === 'claude-code') s.cwd = await claudeFolderCwd(path.dirname(file), home);
@@ -342,7 +345,7 @@ async function headOf(f: Found, home?: string): Promise<Head | null> {
 }
 /** A Claude Code log without a folder: the folder another conversation in the same Claude project folder ran in. */
 export async function claudeFolderCwd(dir: string, home?: string): Promise<string | null> {
-  let names: string[]; try { names = await fs.readdir(dir); } catch { return null; }
+  let names: string[]; try { names = await discoveryFs.readdir(dir); } catch { return null; }
   for (const name of names.filter(n => n.endsWith('.jsonl')).sort()) {
     const file = path.join(dir, name); const st = await statOf(file);
     if (!st || !readable('claude-code', file, home)) continue;
@@ -366,13 +369,13 @@ const CODEX_WORKTREE = /[\\/]\.codex[\\/]worktrees[\\/][^\\/]+[\\/]([^\\/]+)/;
  * (the innermost one). Used for folders that are gone; for a folder that exists, git says where its repository is.
  */
 export function worktreeOwner(p: string): string { for (const re of WORKTREE) { const m = re.exec(p); if (m) return m[1]; } return p; }
-const isDir = async (p: string) => (await fs.stat(p).catch(() => null))?.isDirectory() === true;
+const isDir = async (p: string) => (await discoveryFs.stat(p).catch(() => null))?.isDirectory() === true;
 /** The git root above a folder; for a linked worktree, its main repository (never above the home folder). */
 async function gitRoot(dir: string, home: string): Promise<string | null> {
-  const top = await fs.realpath(home).catch(() => home);
+  const top = await discoveryFs.realpath(home).catch(() => home);
   for (let d = dir; d !== top && d !== home; ) {
     const g = path.join(d, '.git');
-    const st = await fs.lstat(g).catch(() => null);
+    const st = await discoveryFs.lstat(g).catch(() => null);
     if (st?.isDirectory()) return d;
     if (st?.isFile()) {
       let text = ''; try { text = (await readRegularFile(g, 4096)).data.toString('utf8'); } catch { /* unreadable */ }
@@ -391,7 +394,7 @@ export async function projectRoot(cwd: string | null, home = os.homedir()): Prom
   // A folder that is gone: a worktree folder stands for its repository, if that is here.
   const start = path.isAbsolute(cwd) && await isDir(cwd) ? cwd : worktreeOwner(cwd);
   if (!(path.isAbsolute(start) && await isDir(start))) return { root: start, name: segs(start).at(-1) ?? start, here: false };
-  const real = await fs.realpath(start).catch(() => start);
+  const real = await discoveryFs.realpath(start).catch(() => start);
   const root = await gitRoot(real, home) ?? real;
   return { root, name: segs(root).at(-1) ?? root, here: true };
 }

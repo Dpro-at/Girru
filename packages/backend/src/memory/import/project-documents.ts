@@ -1,3 +1,4 @@
+import { discoveryFs, isolatedReadRegularFile } from '../../services/discovery-fs.js';
 /** Owner-selected project documentation. Originals stay read-only; the private catalog survives restart. */
 import fs from 'node:fs/promises';
 import { constants } from 'node:fs';
@@ -36,9 +37,8 @@ const catalogFile = (user: string) => dataPath('project-document-catalogs', hash
 async function catalog(user: string): Promise<Record<string,Entry>> { try { return JSON.parse(await fs.readFile(catalogFile(user),'utf8')); } catch (e: any) { if(e.code==='ENOENT')return {};throw e; } }
 async function save(user: string, entries: Record<string,Entry>) { const file=catalogFile(user);await fs.mkdir(path.dirname(file),{recursive:true,mode:0o700});const temp=file+'.'+randomUUID()+'.tmp';await fs.writeFile(temp,JSON.stringify(entries),{mode:0o600,flag:'wx'});await fs.rename(temp,file); }
 async function read(entry: Entry) {
- const real=await fs.realpath(entry.file),relative=path.relative(entry.root,real);if(real!==entry.file || relative==='..' || relative.startsWith('..'+path.sep) || path.isAbsolute(relative) || !eligible(relative))throw Error('Document unavailable');
- const fd=await fs.open(real,constants.O_RDONLY|constants.O_NOFOLLOW);
- try { const s=await fd.stat();if(!s.isFile() || s.size>MAX_DOCUMENT_BYTES)throw Error('Document is too large');const b=Buffer.alloc(MAX_DOCUMENT_BYTES+1);const {bytesRead}=await fd.read(b,0,b.length,0);if(bytesRead>MAX_DOCUMENT_BYTES)throw Error('Document is too large');const text=b.subarray(0,bytesRead).toString('utf8');if(text.includes('\0'))throw Error('Not a text document');return {text,stat:s}; } finally {await fd.close();}
+ const real=await discoveryFs.realpath(entry.file),relative=path.relative(entry.root,real);if(real!==entry.file || relative==='..' || relative.startsWith('..'+path.sep) || path.isAbsolute(relative) || !eligible(relative))throw Error('Document unavailable');
+ const {data,stat}=await isolatedReadRegularFile(real,MAX_DOCUMENT_BYTES,{root:entry.root});const text=data.toString('utf8');if(text.includes('\0'))throw Error('Not a text document');return {text,stat};
 }
 async function scan(user: string, roots: unknown, options: ComputerScanOptions = {}) {
  const automatic = !!roots && typeof roots === 'object' && !Array.isArray(roots) && (roots as {auto?:unknown}).auto === true;
@@ -46,9 +46,9 @@ async function scan(user: string, roots: unknown, options: ComputerScanOptions =
  if(!Array.isArray(roots)||!roots.length||roots.length>8||roots.some(r=>typeof r!=='string'||r.length>2048||!path.isAbsolute(r)))throw Error('Choose 1–8 project folders');
  const entries=await catalog(user), found: ProjectDocument[]=[];let visited=0,limited=false;const seen=new Set<string>();
  for(const input of roots) {
-  const root=await fs.realpath(input);if(root===path.parse(root).root||(!automatic && root===os.homedir())||!(await fs.stat(root)).isDirectory())throw Error('Choose a project folder, not the whole computer or home folder');
+  const root=await discoveryFs.realpath(input);if(root===path.parse(root).root||(!automatic && root===os.homedir())||!(await discoveryFs.stat(root)).isDirectory())throw Error('Choose a project folder, not the whole computer or home folder');
   async function walk(dir: string, depth: number): Promise<void> {
-   let items;try{items=await fs.readdir(dir,{withFileTypes:true});}catch{return;}
+   let items;try{items=await discoveryFs.readdir(dir,{withFileTypes:true});}catch{return;}
    const priority=(name:string)=>named.test(name)?0:/^(Documents|Desktop|Projects|Developer|Work|docs)$/i.test(name)?1:2;
    items.sort((a,b)=>priority(a.name)-priority(b.name)||a.name.localeCompare(b.name));
    for(const item of items) {
@@ -77,7 +77,7 @@ export async function readProjectDocument(user: string,id: string) {
 }
 /** DISCOVER-01: add one known project note to the private catalog (same checks as a folder scan); returns its document id. */
 export async function registerProjectDocument(user: string, root: string, file: string) {
- const realRoot=await fs.realpath(root);const real=await fs.realpath(file);
+ const realRoot=await discoveryFs.realpath(root);const real=await discoveryFs.realpath(file);
  if(!real.startsWith(realRoot+path.sep)||!eligible(path.relative(realRoot,real)))throw Error('Not a project document');
  const entries=await catalog(user);const {text,stat}=await read({root:realRoot,file:real} as Entry);const digest=hash(text),id=hash(user+'\0'+digest).slice(0,32);
  entries[id]={id,root:realRoot,file:real,digest,relative:path.relative(realRoot,real),bytes:stat.size,updatedAt:stat.mtime.toISOString()};await save(user,entries);return id;
@@ -98,8 +98,8 @@ export async function scanProjectDocuments(user: string, roots: unknown, options
 type ComputerScanOptions={home?:string;roots?:string[];purpose?:'watch'};
 type ScanState={cursor:string;queue:{dir:string;root?:string;depth:number;offset:number}[];scanned:number;seen:string[];limited:boolean;deniedRoots?:number;unavailableRoots?:number;skippedFiles?:number;memoryHomes?:string[]};
 async function scanComputerPage(user:string,cursor:unknown,watch=false,options:ComputerScanOptions={}) {
- const file=catalogFile(user)+(watch?'.watch.scan':'.scan'),home=await fs.realpath(options.home??os.homedir());
- const ownData=await fs.realpath(dataRoot()).catch(()=>dataRoot());
+ const file=catalogFile(user)+(watch?'.watch.scan':'.scan'),home=await discoveryFs.realpath(options.home??os.homedir());
+ const ownData=await discoveryFs.realpath(dataRoot()).catch(()=>dataRoot());
  let state:ScanState;
  if(cursor!==undefined){
   if(typeof cursor!=='string'||!/^[a-f0-9]{32}$/.test(cursor))throw Error('Invalid scan cursor');
@@ -112,7 +112,7 @@ async function scanComputerPage(user:string,cursor:unknown,watch=false,options:C
  while(state.queue.length&&visited<2000&&documents.length<100){
   const current=state.queue[0];let items;
   if(current.dir===ownData||current.dir.startsWith(ownData+path.sep)){state.queue.shift();continue;}
-  try{items=await fs.readdir(current.dir,{withFileTypes:true});}catch(error:any){if(['EACCES','EPERM'].includes(error.code))state.deniedRoots=(state.deniedRoots??0)+1;else state.unavailableRoots=(state.unavailableRoots??0)+1;state.queue.shift();continue;}
+  try{items=await discoveryFs.readdir(current.dir,{withFileTypes:true});}catch(error:any){if(['EACCES','EPERM'].includes(error.code))state.deniedRoots=(state.deniedRoots??0)+1;else state.unavailableRoots=(state.unavailableRoots??0)+1;state.queue.shift();continue;}
   const priority=(name:string)=>named.test(name)?0:/^(Documents|Desktop|Projects|Developer|Work|docs)$/i.test(name)?1:2;
   items.sort((a,b)=>priority(a.name)-priority(b.name)||a.name.localeCompare(b.name));
   while(current.offset<items.length&&visited<2000&&documents.length<100){

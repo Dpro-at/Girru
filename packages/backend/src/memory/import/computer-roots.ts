@@ -1,3 +1,4 @@
+import { discoveryFs, isolatedReadRegularFile } from '../../services/discovery-fs.js';
 /** Read-only discovery roots. OS permission grants are checked by actual reads, never inferred. */
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -12,12 +13,12 @@ export async function computerRoots(options: { home?: string; roots?: string[]; 
     if (platform === 'win32') {
       for (const letter of 'CDEFGHIJKLMNOPQRSTUVWXYZ') {
         const drive = `${letter}:\\`;
-        if ((await fs.stat(drive).catch(() => null))?.isDirectory()) candidates.push(drive);
+        if ((await discoveryFs.stat(drive).catch(() => null))?.isDirectory()) candidates.push(drive);
       }
     } else {
       const bases = platform === 'darwin' ? ['/Volumes'] : [`/media/${os.userInfo().username}`, '/mnt'];
       for (const base of bases) {
-        try { for (const entry of await fs.readdir(base, { withFileTypes: true })) if (entry.isDirectory() || entry.isSymbolicLink()) candidates.push(path.join(base, entry.name)); }
+        try { for (const entry of await discoveryFs.readdir(base, { withFileTypes: true })) if (entry.isDirectory() || entry.isSymbolicLink()) candidates.push(path.join(base, entry.name)); }
         catch (error: any) { if (error.code !== 'ENOENT') unavailableRoots++; }
       }
     }
@@ -25,9 +26,9 @@ export async function computerRoots(options: { home?: string; roots?: string[]; 
   const roots: string[] = [];
   for (const candidate of candidates) {
     try {
-      const real = await fs.realpath(candidate);
+      const real = await discoveryFs.realpath(candidate);
       // Canonical aliases of the system disk collapse to the same single root.
-      if (!(await fs.stat(real)).isDirectory()) continue;
+      if (!(await discoveryFs.stat(real)).isDirectory()) continue;
       if (!roots.includes(real)) roots.push(real);
     } catch { unavailableRoots++; }
   }

@@ -1,3 +1,4 @@
+import { discoveryFs } from '../services/discovery-fs.js';
 /** Owner-scoped first-run inventory. Saves counts and source metadata, never creates agents or imports memories. */
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -27,11 +28,12 @@ export function startFirstRunDiscovery(user:string,options:Options={}):Promise<D
 async function begin(user: string, options: Options = {}): Promise<DiscoveryProgress> {
   if (active.has(user)) return firstRunDiscovery(user);
   const state = await read(user); if (state.status === 'done') return visible(state);
+  discoveryFs.retry();
   state.status = 'scanning'; state.notice = 'Discovering memory files, projects and coding tools…'; await save(user, state);
   const task = { work: Promise.resolve(), stopped: false }; active.set(user, task);
   task.work = (async () => {
     try {
-      const home = await fs.realpath(options.home ?? os.homedir());
+      const home = await discoveryFs.realpath(options.home ?? os.homedir());
       const allowed=async()=>{const owner=await q.one<{role:string;status:string}>('SELECT role,status FROM users WHERE id=?',user);return !task.stopped&&owner?.role==='owner'&&owner.status==='active';};
       const addInventory = async (sourceHome: string, roots: string[]) => {
         const found = await discoveryInventory(sourceHome, roots);
@@ -49,7 +51,7 @@ async function begin(user: string, options: Options = {}): Promise<DiscoveryProg
           for (const id of page.allDocumentIds) if (!state.documents.includes(id) && await automaticNoteSource(user, id, home)) state.documents.push(id);
           state.roots=[...new Set([...state.roots,...await preparedDiscoveryRoots(user)])];
           for (const sourceHome of page.memoryHomes) if (!state.homes.includes(sourceHome)) { await addInventory(sourceHome, []); state.homes.push(sourceHome); }
-          state.scanned = page.scanned; state.denied = page.deniedRoots; state.unavailable = page.unavailableRoots; state.limited = page.limited; state.cursor = page.nextCursor ?? undefined;
+          state.scanned = page.scanned; state.denied = Math.max(page.deniedRoots,discoveryFs.diagnostics().pending); state.unavailable = page.unavailableRoots; state.limited = page.limited || discoveryFs.diagnostics().pending>0; state.cursor = page.nextCursor ?? undefined;
         }
         state.counts.projects = state.roots.length; state.counts.notes = state.documents.length;
         state.notice = `Checked ${state.scanned} entries; found ${state.counts.projects} projects and ${state.counts.memories} memory files.`;

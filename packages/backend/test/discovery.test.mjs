@@ -353,7 +353,7 @@ test('standalone SSH identities expose public fingerprints and private filenames
     const found=await D.sshHosts(isolated);assert.equal(found.length,2);assert.equal(found[1].name,'id_rsa');assert.equal(found[1].ssh.identity,true);assert.equal(found[0].name,'id_ed25519.pub');
     assert.match(found[0].from,/SHA256:/);assert.match(found[0].from,/private file id_ed25519 \(name only\)/);
     assert.doesNotMatch(JSON.stringify(found),/PRIVATE-BYTES|fictional@example/);assert.equal(found[0].ssh.key,'~'+(process.platform==='win32'?'\\':'/')+'.ssh'+(process.platform==='win32'?'\\':'/')+'id_ed25519');
-    assert.ok(opened.includes(privateFile+'.pub'));assert.ok(!opened.includes(privateFile));
+    assert.match(found[0].from,/SHA256:/,'public bytes were fingerprinted in the isolated reader');assert.ok(!opened.includes(privateFile));
   } finally { f.default.open=original; }
 });
 

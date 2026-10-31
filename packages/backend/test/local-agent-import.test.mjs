@@ -362,6 +362,7 @@ test('whole-computer pages include mounted roots and recognized hidden app notes
 
 test('automatic scan API cannot supply trusted root overrides through either input shape',async()=>{
  const P=await loadFile(join(backendDir,'src/memory/import/project-documents.ts'));
+ assert.equal((await call('POST','/api/memory/import/local/documents',{roots:{auto:true}})).statusCode,400);
  for(const input of [{auto:true,home:'/fictional'},{auto:true,roots:['/fictional']},{auto:true,purpose:'watch'}]){
   await assert.rejects(()=>P.scanProjectDocuments('li-owner',input),/Invalid automatic scan input/);
   assert.equal((await call('POST','/api/memory/import/local/documents',input)).statusCode,400);

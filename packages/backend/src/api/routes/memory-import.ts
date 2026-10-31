@@ -125,7 +125,7 @@ export async function memoryImportRoutes(fastify: FastifyInstance) {
   });
   fastify.post('/api/memory/import/local/documents', { config }, async (request, reply) => {
     const owner=localOwner(request,reply);if(!owner)return reply;
-    try {if(body(request).auto===true&&Object.keys(body(request)).some(key=>!['auto','cursor'].includes(key)))throw Error('Invalid automatic scan input');const result=await scanProjectDocuments(owner.userId!,body(request).auto===true?{auto:true,...(body(request).cursor!==undefined?{cursor:body(request).cursor}:{})}:body(request).roots);const done=await importedSessions(owner.userId!);return { ...result, documents:result.documents.map(d=>({...d,imported:done.has(d.id)})) };}
+    try {if(body(request).auto===true?Object.keys(body(request)).some(key=>!['auto','cursor'].includes(key)):!Array.isArray(body(request).roots))throw Error('Invalid automatic scan input');const result=await scanProjectDocuments(owner.userId!,body(request).auto===true?{auto:true,...(body(request).cursor!==undefined?{cursor:body(request).cursor}:{})}:body(request).roots);const done=await importedSessions(owner.userId!);return { ...result, documents:result.documents.map(d=>({...d,imported:done.has(d.id)})) };}
     catch {return reply.code(400).send({code:'invalid_input'});}
   });
   fastify.get<{Params:{id:string}}>('/api/memory/import/local/documents/:id', {config},async(request,reply)=>{

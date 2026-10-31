@@ -65,7 +65,7 @@ export function DiscoveryView({ c, active, kinds, noFolders = false }: { c: Disc
   useEffect(() => { if (active && s.phase === 'idle') void c.load(); }, [active, c, s.phase]);
   useEffect(() => { if (active && !s.places.top) void c.loadPlaces(); }, [active, c, s.places.top]);
   if (s.phase === 'idle' || (s.phase === 'loading' && !s.view)) return <p className="fine-print" role="status">Reading this computer… (memory files, project notes, skills, MCP servers, SSH hosts)</p>;
-  if (s.phase === 'error' || !s.view) return <p className="fine-print">{s.notice} <button type="button" className="link-button" onClick={() => void c.load()}>Try again</button></p>;
+  if (s.phase === 'error' || !s.view) return <p className="fine-print">{s.notice} <button type="button" className="link-button" disabled={s.scanning} onClick={() => void (s.permissionPending ? c.scan() : c.load())}>{s.scanning ? 'Searching…' : 'Try again'}</button></p>;
   const v = s.view;
   const root = v.roots.find(r => r.id === s.rootId) ?? null;
   const shown = c.shown().filter(i => !kinds || kinds.includes(i.kind)); const counts = c.counts();

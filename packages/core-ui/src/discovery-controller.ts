@@ -16,6 +16,7 @@ export type DiscoveryUiState = Readonly<{
   secret: 'credentials' | 'leave';
   busy: boolean;
   scanning: boolean;
+  permissionPending: boolean;
   notice: string | null;
   result: string | null;
   /** DISCOVER-02: the folder tree, the owner's pending ticks (id → wanted), counts, and the merge panel. */
@@ -36,8 +37,10 @@ const CODE_TEXT: Record<string, string> = {
 };
 export const codeText = (code?: string) => (code ? CODE_TEXT[code] ?? code.replace(/_/g, ' ') : 'it could not be done');
 
+const PERMISSION_NOTICE = 'Some folders are waiting for permission or are not responding. On macOS, approve the permission prompt or check Privacy & Security in System Settings, then try again.';
+
 export class DiscoveryController {
-  #state: DiscoveryUiState = Object.freeze({ phase: 'idle', view: null, rootId: null, kind: 'all', state: 'all', selected: [], preview: null, previewLoading: null, secret: 'credentials', busy: false, scanning: false, notice: null, result: null, places: { top: null, children: {}, open: [], ticks: {}, counts: {} }, merge: null });
+  #state: DiscoveryUiState = Object.freeze({ phase: 'idle', view: null, rootId: null, kind: 'all', state: 'all', selected: [], preview: null, previewLoading: null, secret: 'credentials', busy: false, scanning: false, permissionPending: false, notice: null, result: null, places: { top: null, children: {}, open: [], ticks: {}, counts: {} }, merge: null });
   #listeners = new Set<() => void>(); #disposed = false; #ticket = 0;
   constructor(private readonly client: SessionClient) {}
   getSnapshot = () => this.#state;
@@ -49,7 +52,7 @@ export class DiscoveryController {
     const v = view as DiscoveryView;
     const ids = new Set(v.items.map(i => i.id));
     const rootId = this.#state.rootId && v.roots.some(r => r.id === this.#state.rootId) ? this.#state.rootId : v.roots.find(r => r.id !== 'computer' && r.fresh > 0)?.id ?? v.roots[0]?.id ?? null;
-    this.publish({ phase: 'ready', view: v, rootId, selected: this.#state.selected.filter(id => ids.has(id)) });
+    this.publish({ phase: 'ready', permissionPending: false, view: v, rootId, selected: this.#state.selected.filter(id => ids.has(id)) });
     return true;
   }
   async load() {
@@ -59,6 +62,7 @@ export class DiscoveryController {
       for (let attempt = 0; attempt < 6 && !this.#disposed; attempt++) {
         const r = await this.request('GET', DISCOVERY_PATH);
         if (r.status === 200 && this.take(r.body)) return;
+        if (r.status === 423) { this.publish({ phase: this.#state.view ? 'ready' : 'error', permissionPending: true, notice: PERMISSION_NOTICE }); return; }
         if (r.status !== 504 && r.status !== 503) { this.publish({ phase: 'error', notice: r.status === 403 ? 'Only the owner can read this computer, on this computer.' : 'This computer could not be read. Try again.' }); return; }
         await new Promise(res => setTimeout(res, 1500));
       }
@@ -67,7 +71,7 @@ export class DiscoveryController {
   }
   async scan() {
     if (this.#state.scanning) return; this.publish({ scanning: true, notice: null, result: null });
-    try { const r = await this.request('POST', `${DISCOVERY_PATH}/scan`); if (r.status !== 200 || !this.take(r.body)) this.publish({ notice: 'The scan did not finish. Try again.' }); }
+    try { const r = await this.request('POST', `${DISCOVERY_PATH}/scan`); if (r.status === 423) this.publish({ phase: this.#state.view ? 'ready' : 'error', permissionPending: true, notice: PERMISSION_NOTICE }); else if (r.status !== 200 || !this.take(r.body)) this.publish({ notice: 'The scan did not finish. Try again.' }); }
     catch { this.publish({ notice: 'The scan did not finish (no connection).' }); }
     finally { this.publish({ scanning: false }); }
   }
