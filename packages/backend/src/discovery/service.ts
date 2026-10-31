@@ -242,12 +242,12 @@ async function notes(home: string, roots: string[]): Promise<Found[]> {
 }
 
 // ---- skills ----
-async function skills(home: string, roots: string[]): Promise<Found[]> {
+async function skills(home: string, roots: string[], includeGlobal = true): Promise<Found[]> {
   const out: Found[] = [];
   const places: { dir: string; origin: string; root: string | null }[] = [
-    { dir: path.join(home, '.claude', 'skills'), origin: 'claude', root: null },
+    ...(includeGlobal ? [{ dir: path.join(home, '.claude', 'skills'), origin: 'claude', root: null },
     { dir: path.join(home, '.codex', 'skills'), origin: 'codex', root: null },
-    { dir: path.join(home, '.agents', 'skills'), origin: 'shared', root: null },
+    { dir: path.join(home, '.agents', 'skills'), origin: 'shared', root: null }] : []),
     ...roots.map((r) => ({ dir: path.join(r, '.claude', 'skills'), origin: 'project', root: r })),
   ];
   for (const p of places) {
@@ -330,6 +330,19 @@ export async function sshHosts(home: string): Promise<Found[]> {
     found.push({ id: itemId('ssh', path.relative(home, privateFile)), kind: 'ssh', name: entry.name, from: `${homeRel(home, privateFile)} · private filename only (not opened)`, root: null, file: privateFile, hash: sha(`metadata:${entry.name}`), updatedAt: stat.mtime.toISOString(), ssh: { alias: entry.name, host: null, user: null, port: null, key: homeRel(home, privateFile), identity: true } });
   }
   return found;
+}
+
+/** Canonical project roots already prepared by the device scan (private backend metadata). */
+export async function preparedDiscoveryRoots(userId:string){await init();return (await q.all<{root:string}>('SELECT root FROM discovery_computer_roots WHERE user_id = ?',userId)).map(row=>row.root);}
+
+/** Counts-only inventory adapter for authenticated first-run discovery. No DB or activation work. */
+export async function discoveryInventory(home: string, roots: string[]) {
+  const known = new Map<string, ProjectRoot>();
+  const memories = roots.length ? [] : await memoryFiles(home, known);
+  const foundSkills = await skills(home, roots, roots.length === 0);
+  const foundMcp = await mcpServers(home, roots, new LocalMcpImport(home));
+  const identities = roots.length ? [] : (await sshHosts(home)).filter(file => file.ssh?.identity);
+  return { ids: { memory: memories.map(file => itemId('memory', file.file)), skill: foundSkills.map(file => itemId('skill', file.file)), mcp: foundMcp.map(file => itemId('mcp', file.file, file.mcp?.key??file.name)), ssh: identities.map(file => itemId('ssh', file.file)) }, roots: [...known.values()].filter(root=>root.here).map(root=>root.root) };
 }
 
 // ---- design and databases (DESIGN-FIND-01, PROJECT-TECH-01) ----

@@ -40,9 +40,9 @@ async function read(entry: Entry) {
  const fd=await fs.open(real,constants.O_RDONLY|constants.O_NOFOLLOW);
  try { const s=await fd.stat();if(!s.isFile() || s.size>MAX_DOCUMENT_BYTES)throw Error('Document is too large');const b=Buffer.alloc(MAX_DOCUMENT_BYTES+1);const {bytesRead}=await fd.read(b,0,b.length,0);if(bytesRead>MAX_DOCUMENT_BYTES)throw Error('Document is too large');const text=b.subarray(0,bytesRead).toString('utf8');if(text.includes('\0'))throw Error('Not a text document');return {text,stat:s}; } finally {await fd.close();}
 }
-async function scan(user: string, roots: unknown) {
+async function scan(user: string, roots: unknown, options: ComputerScanOptions = {}) {
  const automatic = !!roots && typeof roots === 'object' && !Array.isArray(roots) && (roots as {auto?:unknown}).auto === true;
- if(automatic)return scanComputerPage(user,(roots as {cursor?:unknown}).cursor,(roots as {purpose?:unknown}).purpose==='watch', roots as ComputerScanOptions);
+ if(automatic){if(Object.keys(roots as object).some(key=>!['auto','cursor'].includes(key)))throw Error('Invalid automatic scan input');return scanComputerPage(user,(roots as {cursor?:unknown}).cursor,options.purpose==='watch',options);}
  if(!Array.isArray(roots)||!roots.length||roots.length>8||roots.some(r=>typeof r!=='string'||r.length>2048||!path.isAbsolute(r)))throw Error('Choose 1–8 project folders');
  const entries=await catalog(user), found: ProjectDocument[]=[];let visited=0,limited=false;const seen=new Set<string>();
  for(const input of roots) {
@@ -89,13 +89,13 @@ export async function previewProjectDocument(user: string,id: string) {
 }
 
 const scans = new Map<string, Promise<unknown>>();
-export async function scanProjectDocuments(user: string, roots: unknown) {
+export async function scanProjectDocuments(user: string, roots: unknown, options: ComputerScanOptions = {}) {
  const previous=scans.get(user)??Promise.resolve();
- const next=previous.catch(()=>{}).then(()=>scan(user,roots));scans.set(user,next);
+ const next=previous.catch(()=>{}).then(()=>scan(user,roots,options));scans.set(user,next);
  try{return await next;}finally{if(scans.get(user)===next)scans.delete(user);}
 }
 
-type ComputerScanOptions={home?:string;roots?:string[]};
+type ComputerScanOptions={home?:string;roots?:string[];purpose?:'watch'};
 type ScanState={cursor:string;queue:{dir:string;root?:string;depth:number;offset:number}[];scanned:number;seen:string[];limited:boolean;deniedRoots?:number;unavailableRoots?:number;skippedFiles?:number;memoryHomes?:string[]};
 async function scanComputerPage(user:string,cursor:unknown,watch=false,options:ComputerScanOptions={}) {
  const file=catalogFile(user)+(watch?'.watch.scan':'.scan'),home=await fs.realpath(options.home??os.homedir());

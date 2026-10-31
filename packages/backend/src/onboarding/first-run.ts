@@ -17,9 +17,11 @@ import path from 'node:path';
 import { all, lockName, one, run, sql, type Step } from '../repositories/sql-steps.js';
 import { subscriptionSearchDirs } from '../services/subscription-chat.js';
 import { listLocalModels } from '../llm/local-models.js';
+import { firstRunDiscovery } from './discovery.js';
+import { enableFirstRunAutomaticImport } from '../memory/import/automatic-project-import.js';
 import { addAssistantMessage, createConversation } from '../repositories/chat-conversations.js';
 
-export const FIRST_RUN_STEPS = ['tools', 'model', 'team'] as const;
+export const FIRST_RUN_STEPS = ['discovery', 'tools', 'model', 'team'] as const;
 export type FirstRunStep = (typeof FIRST_RUN_STEPS)[number];
 export type WorkspaceType = 'individual' | 'company';
 export type FirstRunState = Readonly<{ pending: boolean; step: FirstRunStep; workspaceType?: WorkspaceType; companyName?: string }>;
@@ -35,7 +37,7 @@ const stepOf = (v: unknown): FirstRunStep => (FIRST_RUN_STEPS as readonly unknow
 /** Inside the owner-creation transaction: the new owner goes through the setup steps once. */
 export function* startFirstRunStep(userId: string, workspaceType?: WorkspaceType, companyName?: string): Step<void> {
   yield* run(`INSERT INTO onboarding_state (user_id, current_step, answers, completed, skipped, updated_at)
-    VALUES (?, 1, ?, 0, 0, CURRENT_TIMESTAMP)`, userId, JSON.stringify({ firstRun: true, firstRunStep: 'tools', ...(workspaceType ? { workspaceType, companyName: workspaceType === 'company' ? companyName : undefined } : {}) }));
+    VALUES (?, 1, ?, 0, 0, CURRENT_TIMESTAMP)`, userId, JSON.stringify({ firstRun: true, firstRunStep: 'discovery', ...(workspaceType ? { workspaceType, companyName: workspaceType === 'company' ? companyName : undefined } : {}) }));
 }
 
 export async function firstRunState(userId: string): Promise<FirstRunState> {
@@ -46,12 +48,14 @@ export async function firstRunState(userId: string): Promise<FirstRunState> {
 
 /** Remembers the step reached, so a restart continues where the owner left. */
 export async function saveFirstRunStep(userId: string, step: FirstRunStep, workspaceType?: WorkspaceType, companyName?: string): Promise<FirstRunState> {
+  const discoveryDone = (await firstRunDiscovery(userId)).status === 'done';
   await sql().tx(function* () {
     yield* lockName(`onboarding_state:${userId}`);
     const row = yield* one<Row>('SELECT answers, completed FROM onboarding_state WHERE user_id = ?', userId);
     const a = answersOf(row?.answers);
     if (!row || row.completed !== 0 || a.firstRun !== true) return;
-    yield* run('UPDATE onboarding_state SET answers = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?', JSON.stringify({ ...a, firstRunStep: step, ...(workspaceType ? { workspaceType, companyName: workspaceType === 'company' ? companyName : undefined } : {}) }), userId);
+    if (a.firstRunStep === 'discovery' && step !== 'discovery' && !discoveryDone) throw Object.assign(new Error('Discovery must complete first'), {code:'discovery_required'});
+    yield* run('UPDATE onboarding_state SET answers = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?', JSON.stringify({ ...a, ...(a.firstRunStep === 'discovery' && step !== 'discovery' && discoveryDone ? {firstRunDiscovery:true} : {}), firstRunStep: step, ...(workspaceType ? { workspaceType, companyName: workspaceType === 'company' ? companyName : undefined } : {}) }), userId);
   });
   return firstRunState(userId);
 }
@@ -162,6 +166,7 @@ export async function finishFirstRun(userId: string): Promise<{ conversationId: 
   const state = await sql().read(one<Row>('SELECT answers, completed FROM onboarding_state WHERE user_id = ?', userId));
   const a = answersOf(state?.answers);
   if (!state || a.firstRun !== true) return { conversationId: null };
+  if (a.firstRunStep === 'discovery') throw Object.assign(new Error('Discovery must complete first'), {code:'discovery_required'});
   if (state.completed === 1) return { conversationId: typeof a.welcomeChat === 'string' ? a.welcomeChat : null };
   const owner = await sql().read(one<{ full_name: string | null }>('SELECT full_name FROM users WHERE id = ?', userId));
   const agents = await sql().read(all<AgentRow>('SELECT id, name, department, is_primary FROM agents_config ORDER BY is_primary DESC, created_at ASC'));
@@ -176,5 +181,6 @@ export async function finishFirstRun(userId: string): Promise<{ conversationId: 
     yield* run('UPDATE onboarding_state SET completed = 1, completed_at = CURRENT_TIMESTAMP, answers = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
       JSON.stringify({ ...a, welcomeChat: chat.id }), userId);
   });
+  if(a.firstRunDiscovery===true)await enableFirstRunAutomaticImport(userId);
   return { conversationId: chat.id };
 }

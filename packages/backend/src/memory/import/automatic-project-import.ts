@@ -8,24 +8,34 @@ import {q} from '../../repositories/sql-steps.js';
 import {scanProjectDocuments} from './project-documents.js';
 import {getJob,importedSessions,latestImportJob,startImport,type ExtractFn} from './local-import.js';
 export type AutomaticImportSettings={enabled:boolean;intervalMinutes:15|30|60;nextRun:number;lastRun:number|null;status:'idle'|'scanning'|'importing'|'review'|'error';lastImported:number;lastProposed:number;notice:string};
-type Saved=AutomaticImportSettings&{userId:string;cursor?:string;pending?:string[];scanningComplete?:boolean;memoryHomes?:string[]};
+type Saved=AutomaticImportSettings&{userId:string;configured?:boolean;cursor?:string;pending?:string[];scanningComplete?:boolean;memoryHomes?:string[]};
 const folder=()=>dataPath('automatic-project-import');
 const file=(user:string)=>path.join(folder(),createHash('sha256').update(user).digest('hex')+'.json');
-const defaults=(userId:string):Saved=>({userId,enabled:false,intervalMinutes:60,nextRun:0,lastRun:null,status:'idle',lastImported:0,lastProposed:0,notice:'Automatic import is off. Manual imports wait for approval. Enabled automatic imports save new memories directly.'});
-async function read(user:string):Promise<Saved>{try{return JSON.parse(await fs.readFile(file(user),'utf8'));}catch(e:any){if(e.code==='ENOENT')return defaults(user);throw e;}}
+const defaults=(userId:string):Saved=>({userId,configured:false,enabled:false,intervalMinutes:60,nextRun:0,lastRun:null,status:'idle',lastImported:0,lastProposed:0,notice:'Automatic import is off. Manual imports wait for approval. Enabled automatic imports save new memories directly.'});
+async function read(user:string):Promise<Saved>{try{const value=JSON.parse(await fs.readFile(file(user),'utf8'));return {...value,configured:value.configured??true};}catch(e:any){if(e.code==='ENOENT')return defaults(user);throw e;}}
 const writes=new Map<string,Promise<Saved>>();
 async function patch(user:string,update:(s:Saved)=>Saved):Promise<Saved>{
  const previous=writes.get(user)??Promise.resolve(defaults(user));
  const next=previous.catch(()=>defaults(user)).then(async()=>{const value=update(await read(user));await fs.mkdir(folder(),{recursive:true,mode:0o700});const temp=file(user)+'.'+randomUUID()+'.tmp';await fs.writeFile(temp,JSON.stringify(value),{mode:0o600,flag:'wx'});await fs.rename(temp,file(user));return value;});
  writes.set(user,next);try{return await next;}finally{if(writes.get(user)===next)writes.delete(user);}
 }
-const visible=({userId:_,cursor:__,pending:___,scanningComplete:____,memoryHomes:_____,...settings}:Saved):AutomaticImportSettings=>settings;
+const visible=({userId:_,cursor:__,pending:___,scanningComplete:____,memoryHomes:_____,configured:______,...settings}:Saved):AutomaticImportSettings=>settings;
 export async function automaticImportSettings(user:string){return visible(await read(user));}
 export async function configureAutomaticImport(user:string,input:unknown,now=Date.now()){
  const b=input as Record<string,unknown>;
  if(!b||typeof b!=='object'||Array.isArray(b)||Object.keys(b).some(k=>!['enabled','intervalMinutes'].includes(k))||typeof b.enabled!=='boolean'||![15,30,60].includes(b.intervalMinutes as number))throw Error('Invalid automatic import settings');
- return visible(await patch(user,s=>({...s,enabled:b.enabled as boolean,intervalMinutes:b.intervalMinutes as 15|30|60,nextRun:b.enabled?now:0,...(!b.enabled?{status:'idle' as const,notice:'Automatic import is off. Saved import jobs remain available.'}:{notice:'Automatic import is enabled: new redacted memories are saved without a review prompt.'})})));
+ return visible(await patch(user,s=>({...s,configured:true,enabled:b.enabled as boolean,intervalMinutes:b.intervalMinutes as 15|30|60,nextRun:b.enabled?now:0,...(!b.enabled?{status:'idle' as const,notice:'Automatic import is off. Saved import jobs remain available.'}:{notice:'Automatic import is enabled: new redacted memories are saved without a review prompt.'})})));
 }
+/** First-run inventory prepares durable sources without enabling or writing memories before a team exists. */
+export async function prepareAutomaticImport(user:string,documents:string[],homes:string[]) {
+ return visible(await patch(user,s=>({...s,pending:[...new Set([...(s.pending??[]),...documents])],memoryHomes:[...new Set([...(s.memoryHomes??[]),...homes])],cursor:undefined,scanningComplete:true})));
+}
+/** First-run consent may enable an absent setting, but can never overwrite an explicit stored off choice. */
+export async function enableFirstRunAutomaticImport(user:string) {
+ const state=await read(user);
+ return state.configured ? visible(state) : configureAutomaticImport(user,{enabled:true,intervalMinutes:15});
+}
+
 let timer:ReturnType<typeof setInterval>|undefined,stopped=false;
 const active=new Map<string,Promise<void>>();
 type ScanPage={documents:{id:string}[];nextCursor?:string|null;allDocumentIds?:string[];memoryHomes?:string[];deniedRoots?:number;unavailableRoots?:number;skippedFiles?:number;scanned?:number};
@@ -34,6 +44,7 @@ async function run(user:string,opts:Options){
  const now=opts.now??Date.now();await patch(user,s=>({...s,lastRun:now,nextRun:now+s.intervalMinutes*60000,status:'scanning',lastImported:0,lastProposed:0,notice:'Searching for new or changed project files…'}));
  const allowed=async()=>{if(stopped||!(await read(user)).enabled)return false;const owner=await q.one<{role:string;status:string}>('SELECT role,status FROM users WHERE id=?',user);return owner?.role==='owner'&&owner.status==='active';};
  try{
+  if(!await q.one('SELECT id FROM agents_config LIMIT 1')){await patch(user,s=>({...s,status:'review',notice:'Files are prepared. Automatic memory import waits until your first agent is ready.'}));return;}
   const structured = await import('../../discovery/service.js');
   let memoryCount=0,memoryFailed=0,denied=0,unavailable=0,skipped=0;
   const memoryHomes=new Set<string>([opts.home??os.homedir(),...((await read(user)).memoryHomes??[])]);
@@ -45,7 +56,7 @@ async function run(user:string,opts:Options){
   const saved=await read(user),known=await importedSessions(user),ids=new Set<string>((saved.pending??[]).filter(id=>!known.has(id)));let cursor=saved.cursor;
   if(!saved.scanningComplete)do{
    if(!await allowed())return;
-   const page:ScanPage=opts.scan?await opts.scan(user,cursor):await scanProjectDocuments(user,{auto:true,purpose:'watch',...(opts.home?{home:opts.home}:{}),...(cursor?{cursor}:{})});
+   const page:ScanPage=opts.scan?await opts.scan(user,cursor):await scanProjectDocuments(user,{auto:true,...(cursor?{cursor}:{})},{purpose:'watch',...(opts.home?{home:opts.home}:{})});
    for(const id of page.allDocumentIds??page.documents.map(doc=>doc.id))if(!known.has(id)&&!ids.has(id)&&await structured.automaticNoteSource(user,id,opts.home??os.homedir()))ids.add(id);
    for(const home of page.memoryHomes??[])memoryHomes.add(home);
    denied=page.deniedRoots??0;unavailable=page.unavailableRoots??0;skipped=page.skippedFiles??0;

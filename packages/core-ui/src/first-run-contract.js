@@ -5,18 +5,19 @@
 import { validCompanyName } from './owner-setup-contract.js';
 
 export const FIRST_RUN_PATH = '/api/first-run';
-const STEPS = ['tools', 'model', 'team'];
+const STEPS = ['discovery', 'tools', 'model', 'team'];
 const TOOLS = ['claude', 'codex', 'gemini'];
 const record = x => typeof x === 'object' && x !== null && !Array.isArray(x);
 const text = (x, max) => typeof x === 'string' && x.length <= max;
 const command = x => x === null || (text(x, 300) && !/[\r\n]/.test(x));
 
 export function firstRunRoute(path) {
-  return path === FIRST_RUN_PATH || path === `${FIRST_RUN_PATH}/tools` || path === `${FIRST_RUN_PATH}/local-model` || path === `${FIRST_RUN_PATH}/finish`;
+  return path === FIRST_RUN_PATH || path === `${FIRST_RUN_PATH}/discovery` || path === `${FIRST_RUN_PATH}/tools` || path === `${FIRST_RUN_PATH}/local-model` || path === `${FIRST_RUN_PATH}/finish`;
 }
 export function allowedFirstRun(method, path, body) {
   if (!firstRunRoute(path)) return false;
   if (path === FIRST_RUN_PATH && method === 'PUT') return record(body) && Object.keys(body).every(k => ['step', 'workspaceType', 'companyName'].includes(k)) && STEPS.includes(body.step) && (!Object.hasOwn(body, 'workspaceType') || ['individual', 'company'].includes(body.workspaceType)) && (body.workspaceType === 'company' ? validCompanyName(body.companyName) : !Object.hasOwn(body, 'companyName'));
+  if (path === `${FIRST_RUN_PATH}/discovery`) return ['GET', 'POST'].includes(method) && body === undefined;
   if (path === `${FIRST_RUN_PATH}/finish`) return method === 'POST' && body === undefined;
   return method === 'GET' && body === undefined;
 }
@@ -24,6 +25,15 @@ const code = status => ({ code: status === 401 ? 'unauthorized' : status === 403
 /** Only the known fields of each answer pass back to the page; commands are single lines. */
 export function firstRunResponse(path, status, body) {
   if (status !== 200 || !record(body)) return code(status);
+  if (path === `${FIRST_RUN_PATH}/discovery`) {
+    const count = value => Number.isSafeInteger(value) && value >= 0 && value <= 1000000000;
+    const keys = ['projects', 'memories', 'notes', 'skills', 'mcp', 'ssh'];
+    if (!['idle', 'scanning', 'done', 'error'].includes(body.status) || !count(body.scanned) || !record(body.counts)
+      || !keys.every(key => count(body.counts[key])) || !count(body.denied) || !count(body.unavailable)
+      || typeof body.limited !== 'boolean' || !text(body.notice, 300)) throw Error('protocol');
+    return { status: body.status, scanned: body.scanned, counts: Object.fromEntries(keys.map(key => [key, body.counts[key]])),
+      denied: body.denied, unavailable: body.unavailable, limited: body.limited, notice: body.notice };
+  }
   if (path === FIRST_RUN_PATH) {
     if (typeof body.pending !== 'boolean' || !STEPS.includes(body.step)) throw Error('protocol');
     if (Object.hasOwn(body, 'workspaceType') && !['individual', 'company'].includes(body.workspaceType)) throw Error('protocol');

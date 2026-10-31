@@ -3495,3 +3495,9 @@ label.setup-kind { display:flex; align-items:center; justify-content:flex-start;
 
 .app-shell .setup-company-name { display:flex; flex-direction:column; align-items:stretch; gap:6px; margin:4px 0 0; font-size:13px; font-weight:550; }
 .setup-company-name input { min-height:38px; padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:var(--surface); font-weight:400; }
+
+.setup-discovery-counts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:24px 0; }
+.setup-discovery-counts > div { padding:16px; border:1px solid var(--border); border-radius:8px; background:var(--surface); }
+.setup-discovery-counts dt { color:var(--text-2); font-size:13px; }
+.setup-discovery-counts dd { margin:8px 0 0; font-size:28px; font-weight:600; color:var(--text); }
+@media(max-width:600px) { .setup-discovery-counts { grid-template-columns:repeat(2,minmax(0,1fr)); } }

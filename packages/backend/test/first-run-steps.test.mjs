@@ -29,7 +29,7 @@ await db.initialize();
 const app = Fastify();
 await app.register(setupRoutes);
 await app.register(authRoutes);
-await app.register(firstRunRoutes);
+await app.register(firstRunRoutes,{discovery:{home:dir,roots:[dir]}});
 await app.ready();
 test.after(async () => { await app.close(); closeDatabase(); rmSync(dir, { recursive: true, force: true }); });
 
@@ -37,10 +37,31 @@ const OWNER = { name: 'Mohamed Test', email: 'owner@example.test', password: 'Fr
 let token = '';
 const call = (method, url, payload) => app.inject({ method, url, payload, headers: { authorization: `Bearer ${token}` } });
 
-test('a new owner starts the setup steps at AI tools; steps are remembered', async () => {
+test('a new owner discovers device sources before tools or agents; progress is owner-only and steps are remembered', async () => {
   assert.equal((await app.inject({ method: 'POST', url: '/api/setup/admin', payload: { ...OWNER, workspaceType: 'company', companyName: 'Example Company', setupToken: issueSetupToken() } })).statusCode, 200);
   token = (await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: OWNER.email, password: OWNER.password } })).json().token;
-  assert.deepEqual((await call('GET', '/api/first-run')).json(), { pending: true, step: 'tools', workspaceType: 'company', companyName: 'Example Company' });
+  assert.deepEqual((await call('GET', '/api/first-run')).json(), { pending: true, step: 'discovery', workspaceType: 'company', companyName: 'Example Company' });
+  assert.equal((await call('PUT','/api/first-run',{step:'tools'})).statusCode,409,'discovery cannot be skipped');
+  assert.equal((await call('POST','/api/first-run/finish')).statusCode,409,'finish cannot bypass discovery');
+  assert.equal((await app.inject({method:'GET',url:'/api/first-run/discovery'})).statusCode,401);
+  assert.equal((await call('POST','/api/first-run/discovery',{home:'/fictional'})).statusCode,400);
+  assert.equal((await app.inject({method:'POST',url:'/api/first-run/discovery',headers:{authorization:`Bearer ${token}`},remoteAddress:'203.0.113.9'})).statusCode,403);
+  mkdirSync(join(dir,'Projects','inventory'),{recursive:true});writeFileSync(join(dir,'Projects','inventory','AGENTS.md'),'# Inventory\nUse signed release manifests.\n');
+  mkdirSync(join(dir,'.claude','projects','-fictional-first','memory'),{recursive:true});writeFileSync(join(dir,'.claude','projects','-fictional-first','memory','user.md'),'---\nname: Fixture preference\ntype: user\n---\nPrivate fixture content must not leave inventory.\n');
+  mkdirSync(join(dir,'.claude','skills','fixture-skill'),{recursive:true});writeFileSync(join(dir,'.claude','skills','fixture-skill','SKILL.md'),'---\nname: fixture-skill\ndescription: Fictional inventory skill\n---\nUse bounded inventory.\n');
+  mkdirSync(join(dir,'.codex'),{recursive:true});writeFileSync(join(dir,'.codex','config.toml'),'[mcp_servers.fixture]\ncommand = "node"\nargs = ["fictional.js"]\n');
+  mkdirSync(join(dir,'.ssh'),{recursive:true});writeFileSync(join(dir,'.ssh','id_ed25519'),'PRIVATE-FIXTURE-NOT-READ');
+  const beforeAgents=db.prepare('SELECT count(*) AS n FROM agents_config').get().n;
+  const starts=await Promise.all([call('POST','/api/first-run/discovery'),call('POST','/api/first-run/discovery')]);assert.ok(starts.every(response=>response.statusCode===200));
+  await (await import('../src/onboarding/discovery.ts')).stopFirstRunDiscovery();
+  assert.equal((await call('POST','/api/first-run/discovery')).statusCode,200,'saved discovery resumes after shutdown');
+  let inventory;
+  for(let i=0;i<200;i++){inventory=(await call('GET','/api/first-run/discovery')).json();if(inventory.status==='done'||inventory.status==='error')break;await new Promise(resolve=>setTimeout(resolve,10));}
+  assert.equal(inventory.status,'done',JSON.stringify(inventory));assert.ok(inventory.counts.projects>=1);assert.ok(inventory.counts.notes>=1);assert.equal(inventory.counts.memories,1);assert.equal(inventory.counts.skills,1);assert.equal(inventory.counts.mcp,1);assert.equal(inventory.counts.ssh,1);
+  assert.doesNotMatch(JSON.stringify(inventory),/signed release manifests|PRIVATE-FIXTURE|Private fixture|fixture-skill|Projects|inventory\/|user_id|documents/,'only counts and fixed notices leave the backend');
+  assert.equal(db.prepare('SELECT count(*) AS n FROM agents_config').get().n,beforeAgents,'inventory never creates agents');
+  assert.deepEqual((await call('POST','/api/first-run/discovery')).json(),inventory,'completed inventory is not restarted');
+  assert.equal((await call('PUT','/api/first-run',{step:'tools'})).json().step,'tools');
   for (const workspaceType of [null, 'owner', {}, []]) assert.equal((await call('PUT', '/api/first-run', { step: 'model', workspaceType })).statusCode, 400);
   assert.equal((await call('PUT', '/api/first-run', { step: 'team' })).json().companyName, 'Example Company');
   const individual = (await call('PUT', '/api/first-run', { step: 'team', workspaceType: 'individual' })).json();
@@ -99,6 +120,7 @@ test('finish opens one Welcome chat with the Main agent\'s greeting and the firs
   assert.deepEqual((await call('POST', '/api/first-run/finish')).json(), first, 'repeat returns the same chat');
   assert.equal((await call('GET', '/api/first-run')).json().pending, false);
   const [message] = await listConversationMessages(first.conversationId);
+  assert.equal((await (await import('../src/memory/import/automatic-project-import.ts')).automaticImportSettings((await sql().read(one('SELECT id FROM users WHERE email=?',OWNER.email))).id)).enabled,true,'new discovery acknowledgement enables import only after setup finish');
   assert.equal(message.role, 'assistant');
   assert.match(message.content, /Hi Mohamed/);
   assert.match(message.content, /Where do you want to talk to me\?/);
