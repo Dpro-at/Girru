@@ -162,7 +162,7 @@ export function DiscoveryView({ c, active, kinds, noFolders = false }: { c: Disc
           <span className="fine-print" dir="auto">Goes to {p.to}</span>
         </div>
         <pre className="disc-text" dir="auto">{p.text}{p.truncated ? '\n…' : ''}</pre>
-        {p.blocked && <p className="card-notice" role="alert">{blockedReason(p.blocked)}</p>}
+        {p.blocked && <p className={p.blocked === 'metadata_only' ? 'fine-print' : 'card-notice'} role={p.blocked === 'metadata_only' ? 'status' : 'alert'}>{blockedReason(p.blocked)}</p>}
         {p.kind === 'mcp' && p.secrets.length > 0 && !p.blocked && <fieldset className="disc-secret">
           <legend>{p.secrets.length === 1 ? 'A secret was found' : `${p.secrets.length} secrets were found`} ({p.secrets.join(', ')})</legend>
           <label className="check"><input type="radio" name="disc-secret" checked={s.secret === 'credentials'} onChange={() => c.setSecret('credentials')}/>Save it in Credentials (encrypted)</label>

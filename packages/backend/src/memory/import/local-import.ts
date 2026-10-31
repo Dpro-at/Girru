@@ -344,7 +344,7 @@ async function runImport(job: SavedImport, extract: ExtractFn, home: string | un
             const owner=await q.one<{role:string;status:string}>('SELECT role,status FROM users WHERE id=?',job.userId);
             if(owner?.role!=='owner'||owner.status!=='active') break;
             const proposal=await getProposal(job.userId,id);
-            if (proposal?.status==='pending' && proposal.source==='import' && proposal.importBatchId===preview.id) await approveProposal(job.userId,id,job.userId,proposal.reviewHash);
+            if (proposal?.status==='pending' && proposal.source==='import' && proposal.importBatchId===preview.id) await approveProposal(job.userId,id,job.userId,proposal.reviewHash,{beforeCommit:async()=>{if(halted()||!(await automaticImportSettings(job.userId)).enabled)return false;const current=await q.one<{role:string;status:string}>('SELECT role,status FROM users WHERE id=?',job.userId);return current?.role==='owner'&&current.status==='active';}});
           }
         }
       }

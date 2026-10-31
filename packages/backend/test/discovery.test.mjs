@@ -120,13 +120,17 @@ test('one scan finds every kind, grouped by project folder, with where each goes
   assert.deepEqual(v.items.filter((i) => i.kind === 'skill').map((i) => [i.name, i.state]).sort(), [['shop-release', 'decision'], ['writer', 'decision']]);
   const mcp = find(v, 'mcp', 'shop-admin'); assert.match(mcp.from, /1 secret inside/); assert.equal(mcp.rootId, shopRoot.id); assert.match(mcp.to, /off · secret → Credentials/);
   assert.ok(find(v, 'mcp', 'docs'));
-  assert.deepEqual(v.items.filter((i) => i.kind === 'ssh').map((i) => i.name), ['devbox', 'build'], 'wildcard hosts are left out');
-  assert.ok(!v.items.some((i) => /(?:^|[\\/])(?:\.env|id_ed25519)$/.test(i.name)), '.env and key files are not items');
+  assert.deepEqual(v.items.filter((i) => i.kind === 'ssh').map((i) => i.name), ['devbox', 'build', 'id_ed25519'], 'wildcard hosts are left out; standalone key filenames are visible as metadata');
+  assert.ok(!v.items.some((i) => /(?:^|[\\/])\.env$/.test(i.name)), '.env is never an item');
+  assert.equal(find(v,'ssh','id_ed25519').state,'decision');
+  assert.match(find(v,'ssh','id_ed25519').to,/metadata only/);
 });
 
 test('preview is redacted; an MCP token and an SSH key never show', async () => {
   const m = (await call('GET', `${BASE}/items/${find(v, 'mcp', 'shop-admin').id}`)).json().item;
   never(JSON.stringify(m)); assert.deepEqual(m.secrets, ['SHOP_TOKEN']); assert.match(m.text, /SHOP_TOKEN/);
+  const keyItem=find(v,'ssh','id_ed25519');const keyPreview=(await call('GET',`${BASE}/items/${keyItem.id}`)).json().item;never(JSON.stringify(keyPreview));assert.equal(keyPreview.blocked,'metadata_only');
+  const refused=await D.importItems('dc-owner',[{id:keyItem.id,previewHash:keyPreview.previewHash}],{home});assert.equal(refused[0].code,'metadata_only');
   const s = (await call('GET', `${BASE}/items/${find(v, 'ssh', 'devbox').id}`)).json().item;
   never(JSON.stringify(s)); assert.match(s.text, /IdentityFile id_ed25519 \(name only/); assert.match(s.text, /Port 2222/);
 });
@@ -303,4 +307,67 @@ test('system folders are never allowed, by path or by id, also on a drive', asyn
   assert.ok(!top.some((p) => p.name === 'Library'), 'never offered');
   const id = P.placeId(join(home, 'Library'));
   assert.notEqual((await call('PUT', `${BASE}/places`, { allow: [id] })).statusCode, 200, 'an id that was never offered is refused');
+});
+
+
+test('automatic structured memory is redacted, versioned, replay-safe and stops when consent is withdrawn', async () => {
+  db.prepare("INSERT INTO users (id,email,username,password_hash,role,status) VALUES ('dc-auto','auto@example.test','auto','x','owner','active')").run();
+  const isolated=join(dir,'automatic-memory-home'), memory=join(isolated,'.claude','projects','-fictional-auto','memory');
+  w(join(memory,'preference.md'),'---\nname: Automatic preference\ntype: user\n---\nUse readable release notes.\n');
+  const allow=async()=>true;
+  let result=await D.importAutomaticMemoryFiles('dc-auto',isolated,allow);
+  assert.equal(result.imported,1);assert.equal(result.failed,0);
+  let source=db.prepare("SELECT item_id,ref FROM discovery_items WHERE user_id='dc-auto'").get();
+  const original=source.ref;
+  assert.equal((await D.importAutomaticMemoryFiles('dc-auto',isolated,allow)).imported,0);
+  w(join(memory,'preference.md'),'---\nname: Automatic preference\ntype: user\n---\nUse reviewed release notes.\n');
+  assert.equal((await D.importAutomaticMemoryFiles('dc-auto',isolated,allow)).imported,1);
+  source=db.prepare("SELECT ref FROM discovery_items WHERE user_id='dc-auto'").get();assert.equal(source.ref,original);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM memories WHERE user_id='dc-auto'").get().n,1,'changed source updates its memory');
+  w(join(memory,'preference.md'),'---\nname: Automatic preference\ntype: user\n---\nUse readable release notes.\n');
+  assert.equal((await D.importAutomaticMemoryFiles('dc-auto',isolated,allow)).imported,1);
+  assert.match(db.prepare("SELECT content FROM memories WHERE id=?").get(original).content,/Use readable release notes/,'A to B to A applies a new transition');
+  db.prepare("DELETE FROM discovery_items WHERE user_id='dc-auto'").run();
+  assert.equal((await D.importAutomaticMemoryFiles('dc-auto',isolated,allow)).imported,1,'approved receipt recovers a missing source checkpoint');
+  assert.equal(db.prepare("SELECT count(*) AS n FROM memories WHERE user_id='dc-auto'").get().n,1,'approval is never replayed as a second add');
+  db.prepare("UPDATE discovery_items SET state='ignored' WHERE user_id='dc-auto'").run();
+  w(join(memory,'preference.md'),'---\nname: Automatic preference\ntype: user\n---\nIgnored update.\n');
+  assert.equal((await D.importAutomaticMemoryFiles('dc-auto',isolated,allow)).imported,0);
+  w(join(memory,'second.md'),'---\nname: Second preference\ntype: user\n---\nUse a concise changelog.\n');
+  let checks=0;
+  result=await D.importAutomaticMemoryFiles('dc-auto',isolated,async()=>++checks<4);
+  assert.equal(result.imported,0,'withdrawal after proposal creation prevents the memory write');
+  assert.equal(db.prepare("SELECT count(*) AS n FROM memories WHERE user_id='dc-auto'").get().n,1);
+  result=await D.importAutomaticMemoryFiles('dc-auto',isolated,allow);assert.equal(result.imported,1,'pending receipt resumes after re-enabling');
+});
+
+test('standalone SSH identities expose public fingerprints and private filenames without opening private bytes', async () => {
+  const f=await import('node:fs/promises'), isolated=join(dir,'ssh-identity-home'), privateFile=join(isolated,'.ssh','id_ed25519');
+  const kind=Buffer.from('ssh-ed25519'), size=Buffer.alloc(4);size.writeUInt32BE(kind.length);
+  const key=Buffer.concat([size,kind,Buffer.alloc(4,0),Buffer.alloc(32,7)]);key.writeUInt32BE(32,4+kind.length);
+  w(privateFile,'PRIVATE-BYTES-MUST-NEVER-BE-READ');w(privateFile+'.pub',`ssh-ed25519 ${key.toString('base64')} fictional@example.invalid\n`);
+  w(join(isolated,'.ssh','id_rsa'),'PRIVATE-STANDALONE-NEVER-READ');
+  const original=f.default.open,opened=[];
+  f.default.open=async(...args)=>{opened.push(String(args[0]));assert.ok(![privateFile,join(isolated,'.ssh','id_rsa')].includes(String(args[0])));return original(...args);};
+  try {
+    const found=await D.sshHosts(isolated);assert.equal(found.length,2);assert.equal(found[1].name,'id_rsa');assert.equal(found[1].ssh.identity,true);assert.equal(found[0].name,'id_ed25519.pub');
+    assert.match(found[0].from,/SHA256:/);assert.match(found[0].from,/private file id_ed25519 \(name only\)/);
+    assert.doesNotMatch(JSON.stringify(found),/PRIVATE-BYTES|fictional@example/);assert.equal(found[0].ssh.key,'~'+(process.platform==='win32'?'\\':'/')+'.ssh'+(process.platform==='win32'?'\\':'/')+'id_ed25519');
+    assert.ok(opened.includes(privateFile+'.pub'));assert.ok(!opened.includes(privateFile));
+  } finally { f.default.open=original; }
+});
+
+test('automatic project roots stay visible and reveal project MCP while honoring ignored and unwatched notes', async () => {
+  const docs=await loadFile(join(backendDir,'src/memory/import/project-documents.ts'));
+  const root=join(home,'Other','fresh-project');w(join(root,'.git','HEAD'),'ref: refs/heads/main\n');
+  w(join(root,'AGENTS.md'),'# Fresh project\nUse reviewed release manifests.\n');
+  w(join(root,'.mcp.json'),JSON.stringify({mcpServers:{'fresh-project-mcp':{command:'node',args:['fictional.js']}}}));
+  const id=await docs.registerProjectDocument('dc-auto',root,join(root,'AGENTS.md'));
+  assert.equal(await D.automaticNoteSource('dc-auto',id,home),true);
+  let found=await D.view('dc-auto',{home,rescan:true});
+  const note=found.items.find(item=>item.kind==='note'&&found.roots.find(project=>project.id===item.rootId)?.name==='fresh-project');assert.ok(note);
+  assert.ok(found.items.some(item=>item.kind==='mcp'&&item.name==='fresh-project-mcp'),'newly discovered project MCP is included in the same scan');
+  await D.setRootWatch('dc-auto',note.rootId,false);assert.equal(await D.automaticNoteSource('dc-auto',id,home),false);
+  await D.setRootWatch('dc-auto',note.rootId,true);await D.view('dc-auto',{home,rescan:true});
+  await D.ignore('dc-auto',note.id,true);assert.equal(await D.automaticNoteSource('dc-auto',id,home),false);
 });

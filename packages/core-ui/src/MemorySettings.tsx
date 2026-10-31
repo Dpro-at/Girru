@@ -113,8 +113,9 @@ function SourcesPane({ client, disc }: { client: SessionClient; disc?: Discovery
   const bridge = useOnce(() => new MemoryBridgeController(client), [client]);
   useEffect(() => { if (tab === 'apps' && bridge) void bridge.load(); }, [tab, bridge]);
   return <div className="mem-settings-body">
-    <p className="fine-print">Where memory comes from. New things wait in Needs you; nothing is imported without you (unless the schedule says so).</p>
+    <p className="fine-print">Choose where memory comes from. Automatic memory import follows the setting below; other discoveries wait for review.</p>
     <div className="dk-segmented" role="group" aria-label="Sources">{([['computer', 'On this computer'], ['conversations', 'Conversations'], ['apps', 'Coding apps']] as const).map(([v, l]) => <button key={v} type="button" aria-pressed={tab === v} onClick={() => setTab(v)}>{l}</button>)}</div>
+    {tab === 'computer' && <AutomaticMemoryImport client={client}/>}
     {tab === 'computer' && disc && <><DiscoveryView c={disc} active kinds={['memory', 'note', 'tool', 'design', 'database']} noFolders/>
       <p className="fine-print">Skills, MCP servers and SSH hosts found by the same scan go to their own sections (Skills, MCP connections, Terminal), not here. Folders: Settings › Memory › Folders and drives.</p></>}
     {tab === 'conversations' && <LocalImport client={client} active onReview={() => {}}/>}
@@ -180,27 +181,68 @@ function AccessPane({ client, tree }: { client: SessionClient; tree: import('./m
 // ---------------------------------------------------------------- Schedule
 function SchedulePane({ client, disc, health }: { client: SessionClient; disc: DiscoveryController; health: MemoryHealthController }) {
   const ds = use(disc); const hs = use(health);
-  const [auto, setAuto] = useState<{ enabled: boolean; intervalMinutes: 15 | 30 | 60 } | null>(null);
   const [note, setNote] = useState<string | null>(null);
   useEffect(() => { if (hs?.phase === 'idle') void health.load('company'); }, [health]);
-  useEffect(() => { void (async () => { try { const r = await client.request({ method: 'GET', path: '/api/memory/import/local/automatic' } as never); if (r.status === 200) { const s = (r.body as { settings: { enabled: boolean; intervalMinutes: 15 | 30 | 60 } }).settings; setAuto({ enabled: s.enabled, intervalMinutes: s.intervalMinutes }); } } catch { /* shown as unknown */ } })(); }, [client]);
-  async function saveAuto(next: { enabled: boolean; intervalMinutes: 15 | 30 | 60 }) {
-    setAuto(next);
-    try { const r = await client.request({ method: 'PUT', path: '/api/memory/import/local/automatic', body: next } as never); setNote(r.status === 200 ? 'Saved.' : 'Not saved.'); } catch { setNote('Not saved (no connection).'); }
-  }
   const v = ds?.view; const id = hs?.importDraft;
   return <div className="mem-settings-body">
     <p className="fine-print">One place for everything Girru does on its own. (Was set in three places before: Health, Project files, Found on this computer.)</p>
     <label className="settings-row"><span>Read this computer again<span className="fine-print">finds new and changed files; imports nothing on its own</span></span>
       <select value={v ? (v.settings.watch ? v.settings.intervalMinutes : 0) : 0} disabled={!v} onChange={e => { const n = Number(e.target.value); void disc.setWatch(n > 0, (n || v!.settings.intervalMinutes) as 15 | 30 | 60); }}>
         <option value={0}>Only when I scan</option><option value={15}>Every 15 minutes</option><option value={30}>Every 30 minutes</option><option value={60}>Every 60 minutes</option></select></label>
-    <label className="settings-row"><span>Import new project notes<span className="fine-print">the local model reads them; important facts still ask you</span></span>
-      <select value={auto ? (auto.enabled ? auto.intervalMinutes : 0) : 0} disabled={!auto} onChange={e => { const n = Number(e.target.value); void saveAuto({ enabled: n > 0, intervalMinutes: (n || auto!.intervalMinutes) as 15 | 30 | 60 }); }}>
-        <option value={0}>Ask me</option><option value={15}>Save on their own, every 15 minutes</option><option value={30}>Save on their own, every 30 minutes</option><option value={60}>Save on their own, every 60 minutes</option></select></label>
+    <AutomaticMemoryImport client={client}/>
     <label className="settings-row"><span>Import from other agents' conversations</span>
       <select value={id ? (id.enabled ? id.intervalMinutes : 0) : 0} disabled={!id} onChange={e => { const n = Number(e.target.value); health.editImport(n ? { enabled: true, intervalMinutes: n as 15 | 30 | 60 } : { enabled: false }); void health.saveRules().then(() => setNote('Saved.')); }}>
         <option value={0}>Off</option><option value={15}>Every 15 minutes</option><option value={30}>Every 30 minutes</option><option value={60}>Every 60 minutes</option></select></label>
     <p className="fine-print">The weekly summary time is in Rules.</p>
     {(note || ds?.result) && <p className="fine-print" role="status">{note ?? ds?.result}</p>}
   </div>;
+}
+
+
+type AutomaticSettings = {
+  enabled: boolean; intervalMinutes: 15 | 30 | 60; status?: string;
+  lastImported?: number; lastProposed?: number; notice?: string;
+};
+
+function AutomaticMemoryImport({ client }: { client: SessionClient }) {
+  const [settings, setSettings] = useState<AutomaticSettings | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  useEffect(() => {
+    if (busy) return;
+    let live = true;
+    async function load() {
+      try {
+        const response = await client.request({ method: 'GET', path: '/api/memory/import/local/automatic' } as never);
+        if (!live) return;
+        if (response.status !== 200) { setError('Automatic import settings are unavailable.'); return; }
+        setSettings((response.body as { settings: AutomaticSettings }).settings);
+        setError(null);
+      } catch { if (live) setError('Cannot connect to automatic import.'); }
+    }
+    void load();
+    const timer = setInterval(() => void load(), 15000);
+    return () => { live = false; clearInterval(timer); };
+  }, [client, busy]);
+  async function save(value: number) {
+    if (!settings || busy) return;
+    setBusy(true); setSaveError(null);
+    try {
+      const response = await client.request({ method: 'PUT', path: '/api/memory/import/local/automatic', body: {
+        enabled: value > 0, intervalMinutes: value || settings.intervalMinutes,
+      } } as never);
+      if (response.status === 200) setSettings((response.body as { settings: AutomaticSettings }).settings);
+      else setSaveError('Not saved. Your previous setting is unchanged.');
+    } catch { setSaveError('Not saved. Check the connection and try again.'); }
+    finally { setBusy(false); }
+  }
+  return <section aria-label="Automatic memory import">
+    <label className="settings-row"><span>Automatically import memory files<span className="fine-print">Find recognized memory and project notes across accessible folders and connected drives, including hidden coding-app folders. Save memory automatically; project notes use the local model. Source files stay unchanged.</span></span>
+      <select disabled={!settings || busy} value={settings?.enabled ? settings.intervalMinutes : 0} onChange={e => void save(Number(e.target.value))}>
+        <option value={0}>Off</option><option value={15}>Every 15 minutes</option><option value={30}>Every 30 minutes</option><option value={60}>Every 60 minutes</option>
+      </select></label>
+    <p className="fine-print">Skills, MCP connections and SSH identities are discovered separately. Importing memory does not enable them or copy private SSH keys.</p>
+    <p className="fine-print" role="status">{saveError ?? error ?? (settings ? settings.notice || (settings.enabled ? `Automatic import: ${settings.status ?? 'idle'}.` : 'Automatic import is off.') : 'Loading automatic import settings…')}</p>
+  </section>;
 }

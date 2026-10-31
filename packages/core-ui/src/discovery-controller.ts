@@ -110,7 +110,7 @@ export class DiscoveryController {
   }
   /** Import the opened item (with the owner's choice for an MCP secret). */
   async importOpen() {
-    const p = this.#state.preview; if (!p || this.#state.busy) return;
+    const p = this.#state.preview; if (!p || p.blocked || this.#state.busy) return;
     await this.importWith([{ id: p.id, previewHash: p.previewHash, ...(p.kind === 'mcp' && p.secrets.length ? { secret: this.#state.secret } : {}) }]);
   }
   /** Import the given items: each is previewed first (an MCP secret is left out unless chosen in its preview). */

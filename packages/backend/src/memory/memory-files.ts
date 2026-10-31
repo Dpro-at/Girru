@@ -680,7 +680,7 @@ async function bestEffort(what: string, fn: () => Promise<unknown>): Promise<voi
  * and nothing is written (409 `already_decided`).
  */
 export async function approveProposal(
-  userId: string, id: string, decidedBy: string, expectedReviewHash: unknown, opts: { keepBoth?: boolean } = {},
+  userId: string, id: string, decidedBy: string, expectedReviewHash: unknown, opts: { keepBoth?: boolean; beforeCommit?: () => Promise<boolean> } = {},
 ): Promise<ApplyResult> {
   const proposal = await sql().read(decidable(userId, id, expectedReviewHash));
   const storage = getMemoryStorage();
@@ -700,6 +700,7 @@ export async function approveProposal(
     if (c.op !== 'delete') embeddings.set(i, await storage.embed(c.after.content));
   }
 
+  if (opts.beforeCommit && !await opts.beforeCommit()) throw new MemoryFileError('Automatic import is disabled', 400);
   const applied = { added: [] as string[], updated: [] as string[], deleted: [] as string[] };
   const written: Memory[] = [];
   const removed: Memory[] = [];

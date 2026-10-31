@@ -40,13 +40,13 @@ import { q, sql } from '../repositories/sql-steps.js';
 import { readRegularFile } from '../services/read-regular-file.js';
 import { redactImportText } from '../memory/import/redact.js';
 import { claudeFolderCwd, listLocalSessions, matchProject, projectRoot, relocateGoneRoots, rootDrawerKey, type ProjectRoot } from '../memory/import/local-agents.js';
-import { registerProjectDocument } from '../memory/import/project-documents.js';
+import { registerProjectDocument, readProjectDocument } from '../memory/import/project-documents.js';
 import { startImport } from '../memory/import/local-import.js';
 import { listProjects, type Project } from '../repositories/chat-conversations.js';
 import { centralSkills, skillBundle, SkillLibraryError } from '../skills/central-store.js';
 import { LocalMcpImport, LocalMcpError, type FoundMcp } from '../mcp-client/local-import.js';
 import { deleteServer } from '../mcp-client/service.js';
-import { approveProposal, createChangeProposal, MemoryFileError, resolveFileAgent, type MemoryChange } from '../memory/memory-files.js';
+import { approveProposal, createChangeProposal, getProposal, MemoryFileError, resolveFileAgent, type MemoryChange } from '../memory/memory-files.js';
 import { parseDrawerId, type DrawerRef } from '../memory/drawers.js';
 import * as P from './places.js';
 import { findDatabases, findDesign, type DatabaseFound, type DesignFound } from './project-tech.js';
@@ -65,7 +65,7 @@ type Found = {
   memory?: { type: string; description: string; body: string };
   skill?: { origin: string; description: string };
   mcp?: FoundMcp & { secrets: string[] };
-  ssh?: { alias: string; host: string | null; user: string | null; port: number | null; key: string | null };
+  ssh?: { alias: string; host: string | null; user: string | null; port: number | null; key: string | null; identity?: boolean };
   note?: { root: string };
   tool?: { type: 'command' | 'sub-agent'; skillName: string; content: string };
   skillTaken?: { agents: number };
@@ -89,6 +89,9 @@ function init() {
   return ready ??= (async () => {
     await q.run('CREATE TABLE IF NOT EXISTS discovery_items (user_id TEXT NOT NULL, item_id TEXT NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL, root TEXT, state TEXT NOT NULL, ref TEXT, hash TEXT, updated_at TEXT NOT NULL, PRIMARY KEY (user_id, item_id))');
     await q.run('CREATE TABLE IF NOT EXISTS discovery_roots (user_id TEXT NOT NULL, root_id TEXT NOT NULL, watch INTEGER NOT NULL, PRIMARY KEY (user_id, root_id))');
+    await q.run('CREATE TABLE IF NOT EXISTS discovery_computer_homes (user_id TEXT NOT NULL, home TEXT NOT NULL, PRIMARY KEY (user_id, home))');
+    await q.run('CREATE TABLE IF NOT EXISTS discovery_computer_notes (user_id TEXT NOT NULL, file TEXT NOT NULL, root TEXT, PRIMARY KEY (user_id, file))');
+    await q.run('CREATE TABLE IF NOT EXISTS discovery_computer_roots (user_id TEXT NOT NULL, root TEXT NOT NULL, PRIMARY KEY (user_id, root))');
     await q.run('CREATE TABLE IF NOT EXISTS discovery_settings (user_id TEXT PRIMARY KEY, watch INTEGER NOT NULL, interval_minutes INTEGER NOT NULL)');
     await q.run('CREATE TABLE IF NOT EXISTS ssh_hosts (user_id TEXT NOT NULL, alias TEXT NOT NULL, host TEXT, login TEXT, port INTEGER, key_name TEXT, created_at TEXT NOT NULL, PRIMARY KEY (user_id, alias))');
   })().catch((e) => { ready = undefined; throw e; });
@@ -144,8 +147,10 @@ export async function decodeClaudeFolder(name: string, platformSep = path.sep): 
 async function memoryFiles(home: string, roots: Map<string, ProjectRoot>): Promise<Found[]> {
   const out: Found[] = [];
   const top = path.join(home, '.claude', 'projects');
+  if (!(await isDir(path.join(home, '.claude'))) || !(await isDir(top))) return out;
   let dirs: string[]; try { dirs = await fs.readdir(top); } catch { return out; }
   for (const d of dirs) {
+    if (!(await isDir(path.join(top, d)))) continue;
     const mem = path.join(top, d, 'memory');
     if (!(await isDir(mem))) continue;
     let files: string[]; try { files = (await fs.readdir(mem)).filter((f) => f.endsWith('.md') && f !== 'MEMORY.md'); } catch { continue; }
@@ -298,10 +303,33 @@ export function parseSshConfig(text: string): { alias: string; host: string | nu
   }
   return out.slice(0, 200);
 }
-async function sshHosts(home: string): Promise<Found[]> {
-  const file = path.join(home, '.ssh', 'config');
-  const t = await readText(file, MAX_SSH_CONFIG); if (!t) return [];
-  return parseSshConfig(t.text).map((h) => ({ id: itemId('ssh', path.relative(home, file), h.alias), kind: 'ssh' as const, name: h.alias, from: `${homeRel(home, file)}`, root: null, file, hash: sha(h.block), updatedAt: t.mtime, ssh: { alias: h.alias, host: h.host, user: h.user, port: h.port, key: h.key } }));
+/** Configured hosts plus public-key fingerprints. Matching private files are only lstat'ed. */
+export async function sshHosts(home: string): Promise<Found[]> {
+  const directory = path.join(home, '.ssh'), file = path.join(directory, 'config');
+  if (!(await isDir(directory))) return [];
+  const t = await readText(file, MAX_SSH_CONFIG);
+  const found: Found[] = t ? parseSshConfig(t.text).map((h) => ({ id: itemId('ssh', path.relative(home, file), h.alias), kind: 'ssh' as const, name: h.alias, from: `${homeRel(home, file)}`, root: null, file, hash: sha(h.block), updatedAt: t.mtime, ssh: { alias: h.alias, host: h.host, user: h.user, port: h.port, key: h.key } })) : [];
+  let entries; try { entries = await fs.readdir(directory, { withFileTypes: true }); } catch { return found; }
+  for (const entry of entries.filter(entry => entry.isFile() && !entry.isSymbolicLink() && entry.name.endsWith('.pub')).slice(0, 200)) {
+    const publicFile = path.join(directory, entry.name), publicText = await readText(publicFile, 16 * 1024);
+    const match = publicText && /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)|sk-ssh-ed25519@openssh.com|sk-ecdsa-sha2-nistp256@openssh.com) ([A-Za-z0-9+/]+={0,2})(?:[ \t].*)?\r?\n?$/.exec(publicText.text);
+    if (!match) continue;
+    const bytes = Buffer.from(match[2], 'base64');
+    if (bytes.length < 20 || bytes.readUInt32BE(0) > bytes.length - 4 || bytes.subarray(4, 4 + bytes.readUInt32BE(0)).toString('ascii') !== match[1]) continue;
+    const fingerprint = 'SHA256:' + createHash('sha256').update(bytes).digest('base64').replace(/=+$/, '');
+    const privateName = entry.name.slice(0, -4), privateFile = path.join(directory, privateName);
+    // Metadata only: never open, hash, copy or parse the private key.
+    const privateExists = (await fs.lstat(privateFile).catch(() => null))?.isFile() === true;
+    found.push({ id: itemId('ssh', path.relative(home, publicFile)), kind: 'ssh', name: entry.name, from: `${homeRel(home, publicFile)} · ${fingerprint}${privateExists ? ` · private file ${privateName} (name only)` : ''}`, root: null, file: publicFile, hash: sha(`${match[1]} ${match[2]} ${privateExists}`), updatedAt: publicText!.mtime,
+      ssh: { alias: privateName, host: null, user: null, port: null, key: privateExists ? homeRel(home, privateFile) : null, identity: true } });
+  }
+  for (const entry of entries.filter(entry => entry.isFile() && !entry.isSymbolicLink() && /^id_(?:rsa|dsa|ecdsa|ed25519|ecdsa_sk|ed25519_sk)$/.test(entry.name)).slice(0, 200)) {
+    if (entries.some(publicEntry => publicEntry.name === entry.name + '.pub')) continue;
+    const privateFile = path.join(directory, entry.name), stat = await fs.lstat(privateFile).catch(() => null);
+    if (!stat?.isFile() || stat.isSymbolicLink()) continue;
+    found.push({ id: itemId('ssh', path.relative(home, privateFile)), kind: 'ssh', name: entry.name, from: `${homeRel(home, privateFile)} · private filename only (not opened)`, root: null, file: privateFile, hash: sha(`metadata:${entry.name}`), updatedAt: stat.mtime.toISOString(), ssh: { alias: entry.name, host: null, user: null, port: null, key: homeRel(home, privateFile), identity: true } });
+  }
+  return found;
 }
 
 // ---- design and databases (DESIGN-FIND-01, PROJECT-TECH-01) ----
@@ -377,25 +405,35 @@ export async function scan(userId: string, opts: DiscoveryOptions = {}): Promise
     const projects = await listProjects(userId).catch(() => [] as Project[]);
     const unwatched = new Set((await q.all<{ root_id: string }>('SELECT root_id FROM discovery_roots WHERE user_id = ? AND watch = 0', userId)).map((r) => r.root_id));
     const known = new Map<string, ProjectRoot>();
-    const mem = await memoryFiles(home, known);
+    const homes = new Set([home, ...(await q.all<{home:string}>('SELECT home FROM discovery_computer_homes WHERE user_id = ?', userId)).map(row=>row.home)]);
+    const mem: Found[] = [];
+    for (const sourceHome of homes) for (const file of await memoryFiles(sourceHome, known)) { if(sourceHome!==home)file.id=itemId('memory',file.file);mem.push(file); }
     const roots = new Set<string>();
     for (const r of known.values()) if (r.here) roots.add(r.root);
     for (const s of await listLocalSessions(home).catch(() => [])) if (s.root && path.isAbsolute(s.root) && await isDir(s.root)) roots.add(s.root);
     for (const p of projects) if (p.folder && await isDir(p.folder)) roots.add(p.folder);
+    for (const row of await q.all<{root:string}>('SELECT root FROM discovery_computer_roots WHERE user_id = ?', userId)) if (await isDir(row.root)) roots.add(row.root);
     // A folder from an older computer (or a removed worktree) joins the same project here.
     const here = () => [...roots].map((r) => ({ root: r, name: path.basename(r), here: true }));
     let moved = await relocateGoneRoots([...known.values(), ...here()], home);
     for (const m of mem) { const to = m.root ? moved.get(m.root) : null; if (to) { m.root = to.root; roots.add(to.root); } }
     const list = [...roots].filter((r) => r !== home);
-    const mcp = await mcpServers(home, list, mcpFor(opts));
-    const mcpRoots = await Promise.all([...new Set(mcp.map((m) => m.root).filter((r): r is string => !!r && !roots.has(r)))].map((r) => projectRoot(r, home)));
-    moved = await relocateGoneRoots([...mcpRoots, ...here()], home);
-    for (const m of mcp) { const to = m.root ? moved.get(m.root) : null; if (to) m.root = to.root; }
     const kinds = await P.kinds(userId);
     const allowed = await P.allowedFolders(userId);
     const pn = await projectNotes(home, list.filter((r) => !P.isExcluded(r, allowed.exclude)), allowed, kinds);
+    const seenNotes = new Set(pn.found.map(file=>file.id));
+    for(const entry of await q.all<{file:string;root:string|null}>('SELECT file, root FROM discovery_computer_notes WHERE user_id = ? LIMIT 5000',userId)){
+      if(P.isExcluded(entry.file,allowed.exclude)||!kinds.notes)continue;
+      const id=itemId('note',path.relative(home,entry.file));if(seenNotes.has(id))continue;
+      const text=await readText(entry.file,MAX_NOTE);if(!text)continue;seenNotes.add(id);
+      pn.found.push({id,kind:'note',name:path.relative(entry.root??home,entry.file),from:'project notes',root:entry.root,file:entry.file,hash:sha(text.text),updatedAt:text.mtime,note:{root:entry.root??path.dirname(entry.file)}});
+    }
     for (const n of pn.found) if (n.root) roots.add(n.root);
     const all = [...roots].filter((r) => r !== home && !P.isExcluded(r, allowed.exclude));
+    const mcp = await mcpServers(home, all, mcpFor(opts));
+    const mcpRoots = await Promise.all([...new Set(mcp.map((m) => m.root).filter((r): r is string => !!r && !roots.has(r)))].map((r) => projectRoot(r, home)));
+    moved = await relocateGoneRoots([...mcpRoots, ...here()], home);
+    for (const m of mcp) { const to = m.root ? moved.get(m.root) : null; if (to) m.root = to.root; }
     const techRoots = all.filter((r) => !unwatched.has(rootId(r)));
     const found = [...mem, ...(kinds.notes ? await notes(home, all) : []), ...pn.found, ...(kinds.skills ? await skills(home, all) : []), ...(kinds.mcp ? mcp : []), ...(kinds.ssh ? await sshHosts(home) : []),
       ...(kinds.design ? await designItems(home, techRoots) : []), ...(kinds.databases ? await databaseItems(home, techRoots) : [])]
@@ -418,7 +456,7 @@ async function skillInDpro(userId: string, name: string, saved: Row | undefined)
   return { ...s, agents: Number(agents), ours: saved?.ref === s.id };
 }
 /** Where an item goes in Girru, and the memory drawer for memory files. */
-function destination(f: Pick<Found, 'kind' | 'root' | 'memory' | 'mcp'> & { skillTaken?: { agents: number } }, ctx: Ctx): { to: string; drawer: string } {
+function destination(f: Pick<Found, 'kind' | 'root' | 'memory' | 'mcp'> & { skillTaken?: { agents: number }; ssh?: Found['ssh'] }, ctx: Ctx): { to: string; drawer: string } {
   const group = f.root ? ctx.groupOf?.get(f.root) : undefined;
   // A merged project: the first of its folders that is a Girru project, else the merged project's own drawer.
   const project = group ? group.roots.map((r) => matchProject(r, r, ctx.projects)).find(Boolean) : f.root ? matchProject(f.root, f.root, ctx.projects) : undefined;
@@ -437,7 +475,7 @@ function destination(f: Pick<Found, 'kind' | 'root' | 'memory' | 'mcp'> & { skil
   if (f.kind === 'tool') return { to: 'Skills · off until assigned', drawer: '' };
   if (f.kind === 'skill') return { to: f.skillTaken ? `Skills · replaces the skill this page added${f.skillTaken.agents ? ` (used by ${f.skillTaken.agents} agent${f.skillTaken.agents === 1 ? '' : 's'})` : ''}` : 'Skills · off until assigned', drawer: '' };
   if (f.kind === 'mcp') return { to: `MCP · off${f.mcp?.secrets.length ? ' · secret → Credentials' : ''}`, drawer: '' };
-  return { to: 'SSH hosts · names only', drawer: '' };
+  return { to: f.ssh?.identity ? 'SSH identity · metadata only; no connection created' : 'SSH hosts · names only', drawer: '' };
 }
 
 async function rows(userId: string): Promise<Map<string, Row>> {
@@ -452,7 +490,7 @@ async function stateOf(f: Found, row: Row | undefined, mcp: LocalMcpImport): Pro
     return s ? (s.content_hash === f.hash ? 'imported' : 'decision') : 'decision';
   }
   if (f.kind === 'mcp') return f.mcp?.input && await mcp.existing(f.mcp.input) ? 'imported' : 'decision';
-  if (f.kind === 'tool') return 'decision';
+  if (f.kind === 'tool' || f.ssh?.identity) return 'decision';
   // Added on its own by the scan (applyProjectTech).
   if (f.kind === 'design' || f.kind === 'database') return 'imported';
   return 'new';
@@ -544,11 +582,11 @@ export async function preview(userId: string, id: string, opts: DiscoveryOptions
     const db = f.database;
     text = [`${db.engine} · ${db.name}`, db.host ? `Host: ${db.host}${db.port ? `:${db.port}` : ''}` : '', db.database ? `Database: ${db.database}` : '', db.image ? `Image: ${db.image}` : '',
       db.tables ? `Tables (${db.tables.length}): ${db.tables.join(', ')}` : db.tablesNote ? `Tables: ${db.tablesNote}` : '', 'Never a row, never a password.'].filter(Boolean).join('\n');
-  } else if (f.ssh) text = [`Host ${f.ssh.alias}`, f.ssh.host ? `  HostName ${f.ssh.host}` : '', f.ssh.user ? `  User ${f.ssh.user}` : '', f.ssh.port ? `  Port ${f.ssh.port}` : '', f.ssh.key ? `  IdentityFile ${f.ssh.key} (name only; the key is never read)` : ''].filter(Boolean).join('\n');
+  } else if (f.ssh) text = [f.ssh.identity ? `SSH identity ${f.ssh.alias}\n${f.from}` : `Host ${f.ssh.alias}`, f.ssh.host ? `  HostName ${f.ssh.host}` : '', f.ssh.user ? `  User ${f.ssh.user}` : '', f.ssh.port ? `  Port ${f.ssh.port}` : '', f.ssh.key ? `  IdentityFile ${f.ssh.key} (name only; the key is never read)` : ''].filter(Boolean).join('\n');
   const clean = redactImportText(text).text;
   return {
     id, kind: f.kind, name: redactImportText(f.name).text, from: redactImportText(f.from).text, to: dest.to, state: await stateOf(f, saved, mcpFor(opts)),
-    text: clean.slice(0, 20000), truncated: clean.length > 20000, secrets: f.mcp?.secrets ?? [], blocked: f.mcp?.issue ?? (taken && !taken.ours ? 'skill_name_taken' : null),
+    text: clean.slice(0, 20000), truncated: clean.length > 20000, secrets: f.mcp?.secrets ?? [], blocked: f.ssh?.identity ? 'metadata_only' : f.mcp?.issue ?? (taken && !taken.ours ? 'skill_name_taken' : null),
     previewHash: sha(`${f.kind}\0${f.id}\0${f.hash}\0${dest.to}\0${inDpro?.content_hash ?? ''}`),
   };
 }
@@ -576,6 +614,87 @@ async function currentMemory(userId: string, id: string) {
   // The same 1-10 importance the memory files use (memory-files.ts importanceOf).
   return m ? { type: m.type, importance: Math.min(10, Math.max(1, Math.round((typeof m.importance_score === 'number' ? m.importance_score : 0.5) * 10))), content: m.content } : undefined;
 }
+/** Automatic structured memory only. Never installs skills, MCP servers, commands or credentials. */
+export async function importAutomaticMemoryFiles(userId: string, home: string, allowed: () => Promise<boolean>) {
+  await init();
+  await q.run('CREATE TABLE IF NOT EXISTS discovery_auto_receipts (user_id TEXT NOT NULL, item_id TEXT NOT NULL, hash TEXT NOT NULL, proposal_id TEXT NOT NULL, PRIMARY KEY (user_id, item_id, hash))');
+  let imported = 0, failed = 0;
+  if(!await allowed())return {imported:0,failed:0};
+  await q.run('INSERT INTO discovery_computer_homes (user_id, home) VALUES (?, ?) ON CONFLICT (user_id, home) DO NOTHING',userId,home);
+  const found = await memoryFiles(home, new Map());
+  const excluded = await P.allowedFolders(userId);
+  const unwatched = new Set((await q.all<{ root_id: string }>('SELECT root_id FROM discovery_roots WHERE user_id = ? AND watch = 0', userId)).map(row => row.root_id));
+  for (const f of found) {
+    if (home !== os.homedir()) f.id = itemId('memory', f.file);
+    if (!await allowed()) break;
+    if (unwatched.has(rootId(f.root)) || (f.root && P.isExcluded(f.root, excluded.exclude))) continue;
+    const saved = (await rows(userId)).get(f.id);
+    if (saved?.state === 'ignored' || saved?.state === 'kept' || saved?.hash === f.hash) continue;
+    try {
+      // A source can change during discovery: never apply a stale snapshot.
+      const current = await readText(f.file, MAX_MEMORY_FILE);
+      if (!current || sha(current.text) !== f.hash) { failed++; continue; }
+      const ctx: Ctx = { projects: await listProjects(userId).catch(() => []), home };
+      const after = { type: MEMORY_TYPE[f.memory!.type] ?? 'fact', importance: f.memory!.type === 'feedback' ? 7 : 6, content: memoryContent(f) };
+      let sourceRef = saved?.ref ?? null;
+      let before = sourceRef ? await currentMemory(userId, sourceRef) : undefined;
+      const receipt = await q.one<{ proposal_id: string }>('SELECT proposal_id FROM discovery_auto_receipts WHERE user_id = ? AND item_id = ? AND hash = ?', userId, f.id, f.hash);
+      let proposal = receipt ? await getProposal(userId, receipt.proposal_id) : null;
+      if (proposal?.status === 'approved') {
+        const recovered = (await q.one<{ memory_id: string }>('SELECT memory_id FROM memory_versions WHERE user_id = ? AND proposal_id = ? ORDER BY version DESC LIMIT 1', userId, proposal.id))?.memory_id;
+        const current = recovered ? await currentMemory(userId, recovered) : undefined;
+        if (current && JSON.stringify(current) === JSON.stringify(after)) {
+          await save(userId, f, 'imported', recovered!, f.hash); imported++; continue;
+        }
+        // A → B → A is a new transition, not a replay of A's old approval.
+        sourceRef = current ? recovered! : sourceRef; before = current ?? before; proposal = null;
+      }
+      if (!proposal || proposal.status === 'stale' || proposal.status === 'cancelled') {
+        if (!await allowed()) break;
+        proposal = await createChangeProposal({ userId, agentId: await resolveFileAgent(), drawer: parseDrawerId(destination(f, ctx).drawer) as DrawerRef,
+          changes: before && sourceRef ? [{ op: 'update', id: sourceRef, before, after }] : [{ op: 'add', after }], source: 'import', reasons: ['Automatic local memory file import'], createdBy: userId, skipPendingLimit: true });
+        await q.run('INSERT INTO discovery_auto_receipts (user_id, item_id, hash, proposal_id) VALUES (?, ?, ?, ?) ON CONFLICT (user_id, item_id, hash) DO UPDATE SET proposal_id = excluded.proposal_id', userId, f.id, f.hash, proposal.id);
+      }
+      if (proposal.status === 'rejected') continue;
+      let ref = sourceRef;
+      if (proposal.status === 'approved') {
+        // An approval and its history are atomic. Recover a crash before the source receipt was saved.
+        ref = (await q.one<{ memory_id: string }>('SELECT memory_id FROM memory_versions WHERE user_id = ? AND proposal_id = ? ORDER BY version DESC LIMIT 1', userId, proposal.id))?.memory_id ?? ref;
+        if (!ref) { failed++; continue; }
+      } else {
+        if (!await allowed()) break;
+        const result = await approveProposal(userId, proposal.id, userId, proposal.reviewHash, { beforeCommit: allowed });
+        ref = result.applied.updated[0] ?? result.applied.added[0] ?? ref;
+      }
+      await save(userId, f, 'imported', ref, f.hash);
+      imported++;
+    } catch { failed++; }
+  }
+  return { imported, failed };
+}
+
+/** Keep automatic note imports and the Sources list on the same source/hash record. */
+export async function automaticNoteSource(userId: string, id: string, home = os.homedir(), imported = false) {
+  await init();
+  let document;
+  try { document = await readProjectDocument(userId, id); } catch { return false; }
+  if (!document) return false;
+  const entry = document.entry, sourceId = itemId('note', path.relative(home, entry.file));
+  const saved = (await rows(userId)).get(sourceId);
+  if (saved?.state === 'ignored' || saved?.state === 'kept') return false;
+  const exclusions = await P.allowedFolders(userId);
+  if (P.isExcluded(entry.file, exclusions.exclude)) return false;
+  const project = await projectRoot(entry.root, home);
+  const candidateRoot = project?.root ?? entry.root;
+  const root = candidateRoot === home || candidateRoot === path.parse(candidateRoot).root ? null : candidateRoot;
+  if (await q.one('SELECT root_id FROM discovery_roots WHERE user_id = ? AND root_id = ? AND watch = 0', userId, rootId(root))) return false;
+  await q.run('INSERT INTO discovery_computer_notes (user_id, file, root) VALUES (?, ?, ?) ON CONFLICT (user_id, file) DO UPDATE SET root = excluded.root',userId,entry.file,root);
+  if (root) await q.run('INSERT INTO discovery_computer_roots (user_id, root) VALUES (?, ?) ON CONFLICT (user_id, root) DO NOTHING', userId, root);
+  if (imported) await save(userId, { id: sourceId, kind: 'note', name: path.relative(root??home, entry.file), root }, 'imported', id, entry.digest);
+  scans.delete(userId);
+  return true;
+}
+
 async function save(userId: string, f: Pick<Found, 'id' | 'kind' | 'name' | 'root'>, state: Row['state'], ref: string | null, hash: string | null) {
   await q.run(`INSERT INTO discovery_items (user_id, item_id, kind, name, root, state, ref, hash, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT (user_id, item_id) DO UPDATE SET kind = excluded.kind, name = excluded.name, root = excluded.root, state = excluded.state, ref = excluded.ref, hash = excluded.hash, updated_at = excluded.updated_at`,
@@ -631,6 +750,7 @@ export async function importItems(userId: string, items: { id: string; previewHa
         await save(userId, f, 'imported', r.duplicate ? null : r.id, f.hash);
       } else {
         const h = f.ssh!;
+        if (h.identity) throw new DiscoveryError('metadata_only');
         await q.run(`INSERT INTO ssh_hosts (user_id, alias, host, login, port, key_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT (user_id, alias) DO UPDATE SET host = excluded.host, login = excluded.login, port = excluded.port, key_name = excluded.key_name`, userId, h.alias, h.host, h.user, h.port, h.key, new Date().toISOString());
         await save(userId, f, 'imported', h.alias, f.hash);

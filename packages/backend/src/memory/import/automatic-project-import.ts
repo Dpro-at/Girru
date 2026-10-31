@@ -1,13 +1,14 @@
 /** Opt-in local project import schedule. Enabled schedules save their own redacted extracted facts automatically. */
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import {createHash,randomUUID} from 'node:crypto';
 import {dataPath} from '../../config/data-root.js';
 import {q} from '../../repositories/sql-steps.js';
 import {scanProjectDocuments} from './project-documents.js';
 import {getJob,importedSessions,latestImportJob,startImport,type ExtractFn} from './local-import.js';
 export type AutomaticImportSettings={enabled:boolean;intervalMinutes:15|30|60;nextRun:number;lastRun:number|null;status:'idle'|'scanning'|'importing'|'review'|'error';lastImported:number;lastProposed:number;notice:string};
-type Saved=AutomaticImportSettings&{userId:string};
+type Saved=AutomaticImportSettings&{userId:string;cursor?:string;pending?:string[];scanningComplete?:boolean;memoryHomes?:string[]};
 const folder=()=>dataPath('automatic-project-import');
 const file=(user:string)=>path.join(folder(),createHash('sha256').update(user).digest('hex')+'.json');
 const defaults=(userId:string):Saved=>({userId,enabled:false,intervalMinutes:60,nextRun:0,lastRun:null,status:'idle',lastImported:0,lastProposed:0,notice:'Automatic import is off. Manual imports wait for approval. Enabled automatic imports save new memories directly.'});
@@ -18,7 +19,7 @@ async function patch(user:string,update:(s:Saved)=>Saved):Promise<Saved>{
  const next=previous.catch(()=>defaults(user)).then(async()=>{const value=update(await read(user));await fs.mkdir(folder(),{recursive:true,mode:0o700});const temp=file(user)+'.'+randomUUID()+'.tmp';await fs.writeFile(temp,JSON.stringify(value),{mode:0o600,flag:'wx'});await fs.rename(temp,file(user));return value;});
  writes.set(user,next);try{return await next;}finally{if(writes.get(user)===next)writes.delete(user);}
 }
-const visible=({userId:_,...settings}:Saved):AutomaticImportSettings=>settings;
+const visible=({userId:_,cursor:__,pending:___,scanningComplete:____,memoryHomes:_____,...settings}:Saved):AutomaticImportSettings=>settings;
 export async function automaticImportSettings(user:string){return visible(await read(user));}
 export async function configureAutomaticImport(user:string,input:unknown,now=Date.now()){
  const b=input as Record<string,unknown>;
@@ -27,16 +28,33 @@ export async function configureAutomaticImport(user:string,input:unknown,now=Dat
 }
 let timer:ReturnType<typeof setInterval>|undefined,stopped=false;
 const active=new Map<string,Promise<void>>();
-type Options={now?:number;extract?:ExtractFn;home?:string;scan?:(user:string,cursor?:string)=>Promise<{documents:{id:string}[];nextCursor?:string|null}>;pollMs?:number};
+type ScanPage={documents:{id:string}[];nextCursor?:string|null;allDocumentIds?:string[];memoryHomes?:string[];deniedRoots?:number;unavailableRoots?:number;skippedFiles?:number;scanned?:number};
+type Options={now?:number;extract?:ExtractFn;home?:string;scan?:(user:string,cursor?:string)=>Promise<{documents:{id:string}[];nextCursor?:string|null;allDocumentIds?:string[];memoryHomes?:string[];deniedRoots?:number;unavailableRoots?:number;skippedFiles?:number;scanned?:number}>;pollMs?:number};
 async function run(user:string,opts:Options){
  const now=opts.now??Date.now();await patch(user,s=>({...s,lastRun:now,nextRun:now+s.intervalMinutes*60000,status:'scanning',lastImported:0,lastProposed:0,notice:'Searching for new or changed project files…'}));
- const allowed=async()=>!stopped&&(await read(user)).enabled;
+ const allowed=async()=>{if(stopped||!(await read(user)).enabled)return false;const owner=await q.one<{role:string;status:string}>('SELECT role,status FROM users WHERE id=?',user);return owner?.role==='owner'&&owner.status==='active';};
  try{
+  const structured = await import('../../discovery/service.js');
+  let memoryCount=0,memoryFailed=0,denied=0,unavailable=0,skipped=0;
+  const memoryHomes=new Set<string>([opts.home??os.homedir(),...((await read(user)).memoryHomes??[])]);
+  const importedHomes=new Set<string>();
+  const importMemory=async()=>{for(const home of memoryHomes){if(importedHomes.has(home)||!await allowed())continue;const result=await structured.importAutomaticMemoryFiles(user,home,allowed);memoryCount+=result.imported;memoryFailed+=result.failed;importedHomes.add(home);}};
+  await importMemory();
   const previous=await latestImportJob(user);
-  if(previous&&previous.done<previous.total){await patch(user,s=>({...s,status:'review',notice:'An existing import is running or needs attention. Review its saved progress first.'}));return;}
-  const known=await importedSessions(user),ids=new Set<string>();let cursor:string|undefined;
-  do{if(!await allowed())return;const page=opts.scan?await opts.scan(user,cursor):await scanProjectDocuments(user,{auto:true,purpose:'watch',...(cursor?{cursor}:{})});for(const doc of page.documents)if(!known.has(doc.id))ids.add(doc.id);cursor='nextCursor' in page?page.nextCursor??undefined:undefined;}while(cursor);
-  const pending=[...ids];let count=0,proposed=0;
+  if(previous&&previous.done<previous.total){await patch(user,s=>({...s,status:'review',lastImported:memoryCount,lastProposed:memoryCount,notice:`${memoryCount} structured memory files saved. Project notes wait for the current import or local model; saved progress is retained.`}));return;}
+  const saved=await read(user),known=await importedSessions(user),ids=new Set<string>((saved.pending??[]).filter(id=>!known.has(id)));let cursor=saved.cursor;
+  if(!saved.scanningComplete)do{
+   if(!await allowed())return;
+   const page:ScanPage=opts.scan?await opts.scan(user,cursor):await scanProjectDocuments(user,{auto:true,purpose:'watch',...(opts.home?{home:opts.home}:{}),...(cursor?{cursor}:{})});
+   for(const id of page.allDocumentIds??page.documents.map(doc=>doc.id))if(!known.has(id)&&!ids.has(id)&&await structured.automaticNoteSource(user,id,opts.home??os.homedir()))ids.add(id);
+   for(const home of page.memoryHomes??[])memoryHomes.add(home);
+   denied=page.deniedRoots??0;unavailable=page.unavailableRoots??0;skipped=page.skippedFiles??0;
+   cursor=page.nextCursor??undefined;
+   await patch(user,s=>({...s,cursor,pending:[...ids],scanningComplete:!cursor,memoryHomes:[...memoryHomes],lastImported:memoryCount,lastProposed:memoryCount,notice:`Searching accessible files: ${page.scanned??0} entries checked, ${ids.size} new project notes found, ${memoryCount} structured memory files saved.`}));
+   await importMemory();
+   await new Promise<void>(resolve=>setImmediate(resolve));
+  }while(cursor);
+  const pending=[] as string[];for(const id of ids)if(await structured.automaticNoteSource(user,id,opts.home??os.homedir()))pending.push(id);let count=memoryCount,proposed=memoryCount;
   for(let offset=0;offset<pending.length;offset+=400){
    if(!await allowed())return;
    await patch(user,s=>({...s,status:'importing',notice:`Importing new project files (${count}/${pending.length})…`}));
@@ -44,9 +62,11 @@ async function run(user:string,opts:Options){
    while(job.status==='running'){if(!await allowed())return;await new Promise<void>(r=>{setTimeout(r,opts.pollMs??1000);});job=(await getJob(user,job.id))!;}
    count+=job.done;proposed+=job.proposed;
    await patch(user,s=>({...s,lastImported:count,lastProposed:proposed}));
-   if(job.status!=='done'){await patch(user,s=>({...s,status:'review',notice:'Import paused with saved progress. Check the local model or review waiting memories, then resume.'}));return;}
+   if(job.status!=='done'){await patch(user,s=>({...s,status:'review',notice:'Project notes are waiting for the local model or saved import progress. Structured memory files need no model; check the current import to resume.'}));return;}
+   if(await allowed())for(const id of pending.slice(offset,offset+400))await structured.automaticNoteSource(user,id,opts.home??os.homedir(),true);
+   await patch(user,s=>({...s,pending:pending.slice(offset+400)}));
   }
-  await patch(user,s=>({...s,status:'idle',lastImported:count,lastProposed:proposed,notice:proposed?`${proposed} new memories processed automatically. Open Memory to see saved items.`:'Search complete. No new information needs review.'}));
+  await patch(user,s=>({...s,status:'idle',cursor:undefined,pending:[],scanningComplete:false,memoryHomes:[],lastImported:count,lastProposed:proposed,notice:`Search complete. ${memoryCount} structured memory files saved; ${count-memoryCount} project notes processed by the local model.${denied?` ${denied} folders denied access.`:''}${unavailable?` ${unavailable} folders unavailable.`:''}${skipped||memoryFailed?` ${skipped+memoryFailed} unreadable or changed files skipped.`:''}`}));
  }catch{await patch(user,s=>({...s,status:'error',notice:'Automatic import could not finish. Saved progress is retained; retry or check the current import.'}));}
 }
 /** Explicit tick is testable with a clock and local fixtures; importing this module starts no work. */
