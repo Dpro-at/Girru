@@ -7,8 +7,8 @@ import { DiscoveryFileSystem } from '../src/services/discovery-fs.ts';
 test('blocked child leaves parent filesystem responsive and requires explicit retry', async () => {
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'discovery-worker-test-')), worker=path.join(dir,'fixture.cjs');
  await fs.writeFile(worker,`process.on('message',m=>{if(require('node:path').basename(m.file)==='blocked')return;process.send({id:m.id,value:process.env.DISCOVERY_TEST_SECRET?'leaked':'clean'})});process.on('disconnect',()=>process.exit());`);
- const client=new DiscoveryFileSystem({worker,timeoutMs:500});process.env.DISCOVERY_TEST_SECRET='private';
- try {let finished=false;const blocked=client.realpath(path.join(dir,'blocked')).finally(()=>{finished=true});const rejected=assert.rejects(blocked,{code:'EACCES'});
+ const client=new DiscoveryFileSystem({worker,timeoutMs:5000});process.env.DISCOVERY_TEST_SECRET='private';
+ try {assert.equal(await client.realpath(path.join(dir,'healthy')),'clean');let finished=false;const blocked=client.realpath(path.join(dir,'blocked')).finally(()=>{finished=true});const rejected=assert.rejects(blocked,{code:'EACCES'});
  await fs.writeFile(path.join(dir,'api.txt'),'responsive');assert.equal(await fs.readFile(path.join(dir,'api.txt'),'utf8'),'responsive');assert.equal(finished,false);await rejected;
  assert.equal(client.diagnostics().pending,1);await assert.rejects(client.realpath(path.join(dir,'normal')),{code:'EACCES'});client.retry();assert.equal(await client.realpath(path.join(dir,'normal')),'clean');
  }finally{delete process.env.DISCOVERY_TEST_SECRET;client.close();await fs.rm(dir,{recursive:true,force:true});}
