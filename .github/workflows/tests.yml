@@ -80,4 +80,4 @@ jobs:
         run: npm ci --ignore-scripts --prefix packages/desktop
       - name: Test packaging, runtime staging and process lifecycle
         shell: bash
-        run: node --import ./scripts/test-temp-root.mjs --test --test-timeout=90000 packages/desktop/test/build-dependencies.test.cjs packages/desktop/test/stage-nabu.test.cjs packages/desktop/test/lifecycle.test.cjs
+        run: node --import ./scripts/test-temp-root.mjs --test --test-timeout=90000 packages/desktop/test/build-dependencies.test.cjs packages/desktop/test/stage-nabu.test.cjs packages/desktop/test/lifecycle.test.cjs packages/desktop/test/permissions.test.cjs packages/desktop/test/desktop-notifications.test.cjs packages/desktop/test/system-tray.test.cjs

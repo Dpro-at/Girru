@@ -34,6 +34,7 @@ jobs:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
       npm_config_fund: 'false'
       npm_config_audit: 'false'
+      npm_config_fetch_retries: '5'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
