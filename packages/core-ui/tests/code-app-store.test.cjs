@@ -8,7 +8,7 @@ test('Code comes from the server app list like Terminal, Trading and GenVR',()=>
 });
 test('Store › Made by Girru lists the apps that come with Girru, Code included',()=>{
  assert.deepEqual(builtinApps.map(x=>x.id).sort(),['code','genvr','terminal','trading']);
- const ws=fs.readFileSync(path.join(__dirname,'../src/AppsWorkspace.tsx'),'utf8');assert.match(fs.readFileSync(path.join(__dirname,'../../backend/src/services/store-catalogue.ts'),'utf8'),/id:'girru:code'/);assert.match(fs.readFileSync(path.join(__dirname,'../src/SignedInShell.tsx'),'utf8'),/onOpenApp=\{id=>\{if\(id==='code'\)openCode\(\);else setPage\(id\);\}\}/);
+ const ws=fs.readFileSync(path.join(__dirname,'../src/AppsWorkspace.tsx'),'utf8');assert.match(fs.readFileSync(path.join(__dirname,'../../backend/src/services/store-catalogue.ts'),'utf8'),/id:'girru:code'/);assert.match(fs.readFileSync(path.join(__dirname,'../src/SignedInShell.tsx'),'utf8'),/onOpenApp=\{id=>\{if\(id==='browser'\)setPage\('browser'\);else if\(id==='code'\)openCode\(\);else setPage\(id\);\}\}/);
 });
 test('without the desktop editor, Open Code is shown but disabled',()=>{
  const h={open(){},onAccountConnections(){},onPermissions(){}};

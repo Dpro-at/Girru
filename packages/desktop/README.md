@@ -77,3 +77,13 @@ The workflow uses Node 24.21.0 and package lockfiles, runs UI/import/desktop ret
 Updates replace application binaries while retaining the selected workspace and operating-system profile. Never package a developer database, `.data`, `.env`, local account configuration or live keys. Do not migrate or merge existing workspaces as part of installation. Existing installations must retain their saved workspace selection; ambiguous discovery requires an explicit choice rather than creating another owner.
 
 For packaging diagnostics, the workflow platform selector can verify one platform independently. Draft publication is allowed only with the default all-platform selection.
+
+### Browser workspace (local development)
+
+The optional full-Chromium Browser runtime is developed in the [applications repository](https://github.com/Dpro-at/girru-store/tree/main/apps/browser). A local trial can select its source root with `DPRO_BROWSER_ROOT` and a dedicated browser profile with `DPRO_BROWSER_PROFILE`. Never select an existing Chrome or Girru application data directory as the browser runtime profile.
+
+Browser opens inside the normal Girru workspace with Girru tabs, address/navigation controls and device sizes. A hidden CEF Chrome sidecar supplies the active page over a loopback-only frame/input bridge. This local surface is not native NSView reparenting; embedded extension permission dialogs, file dialogs, clipboard edge cases, web-page accessibility and media performance need their own acceptance before production distribution. The current native bootstrap has been tested only on macOS arm64.
+
+`/api/browser/app` is handled by the local UI bridge after an authenticated-owner check. Its closed command schema does not accept executable paths, connection credentials, arbitrary scripts or agent identities. Credentials stay in the dedicated private browser profile. The backend receives only the fixed `DPRO_BROWSER_CONNECTION_FILE` location through trusted desktop startup configuration.
+
+Installing the separate Browser extension registers `browser_workspace`. Existing agent tool grants and approval rules still apply; installation never enables it for all staff. Pairing uses the backend's actual agent/chat context, and each agent's MCP scope contains only its assigned tabs. Actual Chrome profile discovery does not automatically import credentials or delegate imported owner sessions to agents.

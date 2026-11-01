@@ -1,3 +1,4 @@
+const {BROWSER_APP_PATH,allowedBrowserApp,browserAppResponse}=require('../src/browser-app-contract.js');
 const {createVoiceLibrary}=require('./voice-library-host.cjs');
 const {VOICE_LIBRARY_PATH,allowedVoiceLibrary,voiceLibraryResponse}=require('../src/voice-library-contract.js');
 const { meetingsRoute, allowedMeetings, meetingsResponse } = require('../src/meetings-contract.js');
@@ -102,6 +103,7 @@ const agent = x => {
     : { id: x.id, version: x.version, nameUnavailable: true, ...profile(x) };
 };
 function allowed(method, target, body) {
+  if(target===BROWSER_APP_PATH)return allowedBrowserApp(method,target,body);
   if(target===VOICE_LIBRARY_PATH)return allowedVoiceLibrary(method,target,body);
   if (target === CHAT_VOICE_PATH) return allowedChatVoice(method,target,body);
   if(upgradeRoute(target))return allowedUpgrade(method,target,body);
@@ -300,7 +302,7 @@ const launchTokenShape = /^[A-Za-z0-9_-]{43}$/;
  * launchToken (desktop app) is the per-launch secret the backend requires on
  * every request; it is added here and never reaches the page.
  */
-function createApplicationServer({ packageRoot = root, channel, stage1ReadOnly = false, upstreamPort = 42521, launchToken = null, timeoutMs = 10000, streamTimeoutMs = CHAT_DEADLINE_MS, streamIdleMs = CHAT_IDLE_MS, runStreamMs = RUN_STREAM_MS, runIdleMs = RUN_IDLE_MS } = {}) {
+function createApplicationServer({ browserController = null, packageRoot = root, channel, stage1ReadOnly = false, upstreamPort = 42521, launchToken = null, timeoutMs = 10000, streamTimeoutMs = CHAT_DEADLINE_MS, streamIdleMs = CHAT_IDLE_MS, runStreamMs = RUN_STREAM_MS, runIdleMs = RUN_IDLE_MS } = {}) {
   if (typeof stage1ReadOnly !== 'boolean') throw Error('Invalid stage1 configuration');
   const validPort = x => Number.isInteger(x) && x >= 1 && x <= 65535;
   if (launchToken !== null && !(typeof launchToken === 'string' && launchTokenShape.test(launchToken))) throw Error('Invalid launch configuration');
@@ -395,7 +397,7 @@ function createApplicationServer({ packageRoot = root, channel, stage1ReadOnly =
       const payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body));
       const port = typeof upstreamPort === 'function' ? upstreamPort() : upstreamPort;
       if (!validPort(port)) return send(503);
-      if (raw === STUDIO_TICKET_PATH || raw === CHAT_VOICE_PATH || raw === VOICE_LIBRARY_PATH) {
+      if (raw === BROWSER_APP_PATH || raw === STUDIO_TICKET_PATH || raw === CHAT_VOICE_PATH || raw === VOICE_LIBRARY_PATH) {
         // Answered here, not by the backend: the backend confirms the caller is the owner first.
         const me = await new Promise(resolve => {
           const check = http.request({ hostname: HOST, port, path: '/api/auth/me', method: 'GET', agent: false, headers: { ...(launchToken ? { [LAUNCH_HEADER]: launchToken } : {}), Host: `${HOST}:${port}`, Accept: 'application/json', Authorization: auth, ...(req.headers.origin ? { Origin: origin } : {}) } }, response => {
@@ -407,6 +409,7 @@ function createApplicationServer({ packageRoot = root, channel, stage1ReadOnly =
         });
         const user = me && typeof me === 'object' ? me.user : null;
         if (!user || user.role !== 'owner' || typeof user.id !== 'string') return send(403, { code: 'forbidden' });
+        if(raw===BROWSER_APP_PATH){try{const value=browserController?await (req.method==='GET'?browserController.status():body.action==='open'?browserController.open():browserController.command(body)):{available:false,running:false};return send(200,browserAppResponse(200,value));}catch{return send(503,{code:'browser_unavailable'});}}
         if(raw===VOICE_LIBRARY_PATH){try{return send(200,voiceLibraryResponse(200,await voiceLibrary.call(user.id,body)));}catch{return send(503,{code:'voice_failed'});}}
         if (raw === CHAT_VOICE_PATH) {
           try { return send(200, chatVoiceResponse(200, await voiceLibrary.chatCall(user.id, body, chatVoice))); }

@@ -8,7 +8,7 @@ export type FooterPrefs=FooterValue;
 type State=Readonly<{prefs:FooterPrefs;undo:FooterPrefs|null;notice:string}>;
 
 /** One name and icon per section, the same in the footer, its menu and Settings. */
-export const footerSections:Record<FooterSection,{label:string;icon:UiIconName}>={chat:{label:'Chat',icon:'message'},agents:{label:'Agents',icon:'users'},library:{label:'Library',icon:'book'},board:{label:'Board',icon:'board'},memory:{label:'Memory',icon:'database'},approvals:{label:'Approvals',icon:'shield'},store:{label:'Store',icon:'store'},genvr:{label:'GenVR',icon:'globe'},terminal:{label:'Terminal',icon:'terminal'},code:{label:'Code',icon:'code'},skills:{label:'Skills',icon:'star'},personalities:{label:'Personalities',icon:'smile'},specialties:{label:'Specialties',icon:'layers'}};
+export const footerSections:Record<FooterSection,{label:string;icon:UiIconName}>={chat:{label:'Chat',icon:'message'},agents:{label:'Agents',icon:'users'},library:{label:'Library',icon:'book'},board:{label:'Board',icon:'board'},memory:{label:'Memory',icon:'database'},approvals:{label:'Approvals',icon:'shield'},store:{label:'Store',icon:'store'},genvr:{label:'GenVR',icon:'globe'},terminal:{label:'Terminal',icon:'terminal'},code:{label:'Code',icon:'code'},browser:{label:'Browser',icon:'globe'},skills:{label:'Skills',icon:'star'},personalities:{label:'Personalities',icon:'smile'},specialties:{label:'Specialties',icon:'layers'}};
 export const usualFooter=():FooterPrefs=>footerPrefs(DEFAULT_FOOTER) as FooterPrefs;
 
 /**

@@ -35,6 +35,7 @@ const shapes = {
   alert: <><circle cx="12" cy="12" r="9"/><path d="M12 7v6"/><path d="M12 16.5v.5"/></>,
   diff: <><path d="M6 3v12"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M18 8.5V12a3 3 0 0 1-3 3H9"/><path d="M11 13l-2 2 2 2"/></>,
   folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>,
+  'arrow-right': <><path d="M5 12h14m-6-6 6 6-6 6"/></>,
   'arrow-left': <><path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/></>,
   avatar: <><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></>,
   'meeting-camera': <><rect x="2" y="5" width="14" height="14" rx="2"/><path d="m16 10 6-4v12l-6-4"/></>,
