@@ -64,3 +64,22 @@ test('waiting messages come back when the chat opens again (they wait for Send n
   await c.setThinking('deep');
   assert.deepEqual(puts.at(-1), { thinking: 'deep' });
 });
+
+
+test('project sheet uses the native directory picker, preserves cancel and supports Windows and Unix paths',async()=>{
+ const {chooseProjectDirectories}=require('../src/ChatComposerControls.tsx');const calls=[];
+ const bridge={chooseProjectFolders:async options=>{calls.push(options);return ['/home/user/project','C:\\Users\\owner\\Project','/home/user/project','relative','bad\0path'];}};
+ assert.deepEqual(await chooseProjectDirectories(false,bridge),['/home/user/project']);assert.deepEqual(calls[0],{multiple:false});
+ assert.deepEqual(await chooseProjectDirectories(true,bridge),['/home/user/project','C:\\Users\\owner\\Project']);assert.deepEqual(calls[1],{multiple:true});
+ assert.deepEqual(await chooseProjectDirectories(true,{chooseProjectFolders:async()=>[]}),[]);
+ assert.equal(await chooseProjectDirectories(false,{}),null,'browser fallback only without the native bridge');
+ await assert.rejects(chooseProjectDirectories(false,{chooseProjectFolders:async()=>{throw Error('closed');}}));
+ const source=require('node:fs').readFileSync(require('node:path').join(__dirname,'../src/ChatComposerControls.tsx'),'utf8');
+ assert.match(source,/void choose\('main'\)/);assert.match(source,/void choose\('add'\)/);
+});
+
+
+test('Code chat resizing preserves editor space and supports narrow windows',()=>{
+ const {codeChatWidth}=require('../src/CodeChatResize.tsx');assert.equal(codeChatWidth(420,1280),420);assert.equal(codeChatWidth(1200,1280),960);assert.equal(codeChatWidth(100,1280),280);assert.equal(codeChatWidth(780,800),480);
+ const source=require('node:fs').readFileSync(require('node:path').join(__dirname,'../src/ChatView.tsx'),'utf8');assert.match(source,/!embeddedCode && mode === 'live'.*<Meetings/);assert.match(source,/embeddedCode&&<CodeChatResize/);
+});

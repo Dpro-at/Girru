@@ -1,3 +1,4 @@
+import {CodeChatResize} from './CodeChatResize';
 import { DepartmentBadge } from './DepartmentBadge';
 import { MeetingPanels } from './MeetingPanels';
 import { Meetings } from './Meetings';
@@ -67,7 +68,7 @@ export const LIVE_ROWS = 4;
  * finished turn folds its work into "Worked for …". Behaviour lives in
  * ConversationsController; this file is layout and local view state only.
  */
-export function ChatView({ controller, mode, productName = 'Girru', client, onAddConnector, onOpenCard, onOpenMemory, onChooseContext, onSetUpModel, onOpenApprovals, onOpenAgent, onOpenRules, terminalRequest = 0, boardRequest = 0, placeRequest = 0, active = true, titleSlot = null }: { titleSlot?: HTMLElement | null; placeRequest?: number; controller: ConversationsController; mode: 'live' | 'mock'; productName?: string; terminalRequest?: number; boardRequest?: number; client?: SessionClient; onChooseContext?:()=>void; onAddConnector?: () => void; onSetUpModel?: () => void; onOpenApprovals?: () => void; onOpenAgent?: (agentId: string) => void; onOpenRules?: (agentId: string, category: string) => void; onOpenCard?: (boardId: string, cardId: string) => void; onOpenMemory?: (drawerId: string, memoryId: string) => void; active?: boolean }) {
+export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, productName = 'Girru', client, onAddConnector, onOpenCard, onOpenMemory, onChooseContext, onSetUpModel, onOpenApprovals, onOpenAgent, onOpenRules, terminalRequest = 0, boardRequest = 0, placeRequest = 0, active = true, titleSlot = null }: { embeddedCode?:boolean; onOpenCode?:(folder:string,file?:string)=>void; titleSlot?: HTMLElement | null; placeRequest?: number; controller: ConversationsController; mode: 'live' | 'mock'; productName?: string; terminalRequest?: number; boardRequest?: number; client?: SessionClient; onChooseContext?:()=>void; onAddConnector?: () => void; onSetUpModel?: () => void; onOpenApprovals?: () => void; onOpenAgent?: (agentId: string) => void; onOpenRules?: (agentId: string, category: string) => void; onOpenCard?: (boardId: string, cardId: string) => void; onOpenMemory?: (drawerId: string, memoryId: string) => void; active?: boolean }) {
   const s = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const [meetingMeta, setMeetingMeta] = useState<MeetingRecord | null>(null);
   const [meetingCall, setMeetingCall] = useState(false), [meetingStage, setMeetingStage] = useState<HTMLDivElement | null>(null);
@@ -240,6 +241,8 @@ export function ChatView({ controller, mode, productName = 'Girru', client, onAd
   const project = controller.activeProject();
   // CHAT-BUILD-01 stage 4 (CH8): the side panel opens on Details; hidden, it is a thin rail. The terminal is its own panel under the chat.
   const [pane, setPane] = useState<PaneName | null>('details');
+  const [codeExpanded,setCodeExpanded]=useState(false);
+  useEffect(()=>{if(embeddedCode)setPane(null);},[embeddedCode]);
   const [focusPart, setFocusPart] = useState<{ id: PanelPart; n: number } | null>(null);
   const [termOpen, setTermOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -357,6 +360,7 @@ export function ChatView({ controller, mode, productName = 'Girru', client, onAd
     if (!last) return;
     openRemember(last, s.turns.filter(t => t.content.trim()).map(t => `${t.role === 'user' ? 'You' : nameOf(t.agentId ?? convAgentId)}: ${t.content.trim()}`).join('\n\n'));
   };
+  const openChatCode=async()=>{if(!onOpenCode)return;if(!await controller.ensureCodeConversation())return;const folder=controller.activeProject()?.folder??await controller.editorDirectory();if(folder)onOpenCode(folder);};
   const moreItems = (): MenuItem[] => {
     if (!s.activeId || !activeConv) return [];
     const id = s.activeId;
@@ -366,6 +370,7 @@ export function ChatView({ controller, mode, productName = 'Girru', client, onAd
       ...(s.projects.length ? ['sep' as const, ...[{ id: '', name: 'No project' }, ...s.projects].map(p => ({ label: p.id ? `Move to ${p.name}` : 'Move out of the project', icon: 'folder' as const, checked: (activeConv.projectId ?? '') === p.id, run: () => void controller.moveToProject(id, p.id) }))] : []),
       'sep',
       { label: 'Open in a new window', icon: 'open', shortcut: '⌘O', run: () => openChatWindow(id) },
+      ...(onOpenCode ? [{label:'Open in Code',icon:'code' as const,run:()=>void openChatCode()}] : []),
       { label: 'Continue in another folder…', icon: 'folder', run: () => setChatSheet('continue') },
       { label: 'Export…', icon: 'download', shortcut: '⇧⌘S', run: () => setExportKey(Date.now()) },
       ...(mode === 'live' ? [{ label: avatarOn ? 'Hide the avatar' : 'Show the agent as an avatar', icon: 'avatar' as const, checked: avatarOn, run: toggleAvatar }] : []),
@@ -395,19 +400,22 @@ export function ChatView({ controller, mode, productName = 'Girru', client, onAd
     void read(); const t = setInterval(() => void read(), 3000);
     return () => { on = false; clearInterval(t); };
   }, [client, s.activeId, s.runId]);
-  const moments = { client, conversationId: s.activeId, onOpenApprovals, steps, changeCards,
+  const moments = { client, conversationId: s.activeId, onOpenApprovals, steps, changeCards, nativeCode:embeddedCode,
     // CH6/CH10 team moments: Hand it again adds to the box (never sends), Set a model opens the agent, Always allow opens What agents may do.
     onOpenAgent, onOpenRules, onDraft: (text: string) => { const d = controller.getSnapshot().draft.trim(); controller.edit(d ? `${d}\n\n${text}` : text); },
     agentAbout: (id?: string) => s.agents.find(a => a.id === id)?.about, subAgentOf: (id?: string) => s.agents.find(a => a.id === id)?.subAgentOf, onStop: () => void controller.stopAll(), agentName: (id?: string) => (id ? s.agents.find(a => a.id === id)?.name ?? id : nameOf(convAgentId)),
     onSwitchAuto: () => controller.selectModel('auto'), onReviewChanges: () => setPane('changes'), onChanged: () => void controller.refreshGit(), onDecided: () => void controller.pickUpContinuation(),
     onStartFresh: (summary: string) => { const title = activeConv?.title ?? 'the last chat'; controller.newChat(); controller.edit(`Continue from “${title}”. ${summary}`.slice(0, 4000)); } };
-  return <MomentsContext.Provider value={moments}><div className="chat-layout" data-panel={pane ?? 'rail'} data-empty={empty || undefined} data-max={(maximized && termOpen) || undefined}>
+  return <MomentsContext.Provider value={moments}><div className="chat-layout" data-code-expanded={embeddedCode&&codeExpanded||undefined} data-panel={pane ?? 'rail'} data-empty={empty || undefined} data-max={(maximized && termOpen) || undefined}>
+  {embeddedCode&&<CodeChatResize onResize={()=>setCodeExpanded(false)}/>}
   <div className="chat-screen" onDragOver={e=>{if(e.dataTransfer.types.includes('Files'))e.preventDefault();}} onDrop={e=>{if(e.dataTransfer.files.length){e.preventDefault();void onFiles(e.dataTransfer.files);}}}>
+    {embeddedCode&&<div className="code-chat-heading"><strong>{activeConv?.title||'Chat'}</strong><button type="button" className="tool" aria-label={codeExpanded?'Narrow chat':'Expand chat'} aria-expanded={codeExpanded} title={codeExpanded?'Narrow chat':'Expand chat'} onClick={()=>setCodeExpanded(v=>!v)}><UiIcon name="expand" size={14}/></button></div>}
     {/* CH1: the chat's tools sit in the window's title bar (Terminal · Add to board · ⋯ · side panel); no second bar. */}
     {active && titleSlot && createPortal(<span className="chat-title-tools" role="toolbar" aria-label="This chat">
       {pane === null && s.activeId && s.turns.length > 0 && <TitleFaces names={chatPeople(s.turns, convAgentId, nameOf)} onOpen={() => openPart('team')}/>}
       {client && s.activeId && s.threadPhase !== 'loading' && <ExportMenu key={s.activeId} client={client} conversationId={s.activeId} disabled={running} openKey={exportKey} bare/>}
       {terminal && owner && <button type="button" className="tool" aria-pressed={termOpen} aria-label="Terminal" title={termOpen ? 'Hide the terminal (⌃`)' : 'Terminal (⌃`)'} onClick={() => setTermOpen(v => !v)}><UiIcon name="terminal" size={15}/></button>}
+      {onOpenCode && <button type="button" className="tool" aria-label="Open in Code" title="Open this project in Code" onClick={()=>void openChatCode()}><UiIcon name="code" size={15}/></button>}
       {canBoard && <button type="button" className="tool chat-to-board" onClick={() => cardForm ? setCardForm(null) : openCardForm()} aria-pressed={!!cardForm} aria-label="Add to board" title="Add to board (⌘B)">
         <UiIcon name="board" size={15}/></button>}
       {s.activeId && activeConv && <button type="button" className="tool chat-more" aria-label="More for this chat" title="Rename · Pin · Move to project · Export · Remember the whole chat · Delete…" aria-haspopup="menu"
@@ -415,7 +423,7 @@ export function ChatView({ controller, mode, productName = 'Girru', client, onAd
       <button type="button" className="tool" aria-pressed={pane !== null} aria-label={pane !== null ? 'Hide the side panel' : 'Show the side panel'} title={pane !== null ? 'Hide the side panel (⌥⌘I)' : 'Show the side panel (⌥⌘I)'}
         onClick={() => setPane(p => p === null ? 'details' : null)}><UiIcon name="inspector" size={15}/></button>
     </span>, titleSlot)}
-    {mode === 'live' && client && client.getSnapshot().user?.role === 'owner' && <Meetings key={s.activeId ?? 'new'} client={client} controller={controller} active={active} onMeetingChanged={setMeetingMeta} callTarget={meetingStage} onCallChanged={setMeetingCall} onOpenCard={onOpenCard}/>}
+    {!embeddedCode && mode === 'live' && client && client.getSnapshot().user?.role === 'owner' && <Meetings key={s.activeId ?? 'new'} client={client} controller={controller} active={active} onMeetingChanged={setMeetingMeta} callTarget={meetingStage} onCallChanged={setMeetingCall} onOpenCard={onOpenCard}/>}
     <MeetingPanels active={meetingCall} onStage={setMeetingStage}>
     {mode === 'live' && avatarOn && !meetingMeta && <ChatAvatar turns={s.turns} agentId={convAgentId ?? s.agentId ?? ''} agentName={nameOf(convAgentId ?? s.agentId)} onClose={toggleAvatar}/>}
     <div className="chat-thread" ref={thread} onScroll={onScroll} aria-label="Conversation">
@@ -423,10 +431,10 @@ export function ChatView({ controller, mode, productName = 'Girru', client, onAd
       {empty ? <div className="chat-empty">
         {/* CHAT-BUILD-01 stage 3 (CH5): one sentence and three ideas. */}
         <span className="chat-empty-tile" aria-hidden="true"><UiIcon name="message" size={22}/></span>
-        <h2 className="chat-wordmark">What should the team do?</h2>
+        <h2 className="chat-wordmark">{embeddedCode?'What are we working on?':'What should the team do?'}</h2>
         <p className="chat-tagline">{mode === 'mock'
           ? 'Offline practice: replies are fictional and nothing leaves this page.'
-          : 'Write it the way you would tell a person. The team picks who does what.'}</p>
+          : embeddedCode ? 'Ask about this project, review changes, or work with your agent.' : 'Write it the way you would tell a person. The team picks who does what.'}</p>
         {/* CH5 first run: nothing on this computer can answer yet (no local model, no key, no signed-in coding app). */}
         {mode === 'live' && owner && s.modelsLoaded && s.models.length === 0 && onSetUpModel && <div className="first-run-card" role="note">
           <UiIcon name="cpu" size={20}/>
@@ -526,10 +534,10 @@ export function ChatView({ controller, mode, productName = 'Girru', client, onAd
       onOpenPane={p => (p === 'terminal' ? setTermOpen(true) : setPane(p))} onStop={() => void controller.stopAll()}
       onSchedule={() => setScheduleOpen(true)} onAddFolder={() => project && setProjectSheet({ id: project.id })} onContinue={() => setChatSheet('continue')} focusPart={focusPart}
       switcher={<PaneSwitch items={paneButtons} pane={pane} onPane={setPane}/>}/>
-    : pane === null && <DetailsRail controller={controller} onOpen={openPart}/>}
+    : pane === null && !embeddedCode && <DetailsRail controller={controller} onOpen={openPart}/>}
   {scheduleOpen && client && s.activeId && <ScheduleSheet client={client} chatId={s.activeId} onClose={() => setScheduleOpen(false)}/>}
   {panes && (pane === 'changes' || pane === 'files') && <aside className="chat-panel chat-pane" aria-label={pane === 'changes' ? 'Changes' : 'Files'} onKeyDown={e => { if (e.key === 'Escape') setPane(null); }}><PaneSwitch items={paneButtons} pane={pane} onPane={setPane}/>
-    {pane === 'changes' ? <ChangesPane panes={panes}/> : <FilesPane panes={panes}/>}
+    {pane === 'changes' ? <ChangesPane panes={panes}/> : <FilesPane panes={panes} onOpenCode={onOpenCode&&project?.folder?file=>onOpenCode(project.folder!,file):undefined}/>}
   </aside>}
 
   </div></MomentsContext.Provider>;

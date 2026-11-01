@@ -90,7 +90,7 @@ export function conversationPath(path) {
   m = /^\/api\/chat\/conversations\/([^/?#]+)\/messages(?:\?limit=([1-9]\d{0,2})(?:&before=([^&#]+))?)?$/.exec(path);
   if (m) return uuid(m[1]) && (m[2] === undefined || Number(m[2]) <= 500) && (m[3] === undefined || uuid(m[3])) ? { kind: 'messages', id: m[1] } : null;
   // CHAT-BUILD-01 stage 4 (CH8): the side panel's data for one chat.
-  m = /^\/api\/chat\/conversations\/([^/?#]+)\/(usage|team|schedule|stop)$/.exec(path);
+  m = /^\/api\/chat\/conversations\/([^/?#]+)\/(usage|team|schedule|stop|editor-directory)$/.exec(path);
   if (m) return uuid(m[1]) ? { kind: `chat-${m[2]}`, id: m[1] } : null;
   m = /^\/api\/chat\/conversations\/([^/?#]+)\/apps\/([a-f0-9]{32})\/stop$/.exec(path);
   if (m) return uuid(m[1]) ? { kind: 'app-stop', id: m[1], run: m[2] } : null;
@@ -123,6 +123,7 @@ export function allowedConversation(method, path, body) {
   if (approvalPath(path)) return allowedApproval(method, path, body);
   const p = conversationPath(path);
   if (!p) return false;
+  if (p.kind === 'chat-editor-directory') return method === 'POST' && body === undefined;
   if (p.kind === 'chat-usage' || p.kind === 'chat-team') return method === 'GET' && body === undefined;
   if (p.kind === 'chat-stop' || p.kind === 'app-stop') return method === 'POST' && body === undefined;
   if (p.kind === 'chat-schedule') return method === 'GET' || method === 'DELETE' ? body === undefined : method === 'PUT' && scheduleOk(body);
@@ -285,6 +286,7 @@ export function conversationResponse(path, status, body) {
     if (!validRunId(body.runId)) throw Error('protocol');
     return { ...(body.completed === true && record(body.assistantMessage) && body.assistantMessage.role === 'assistant' && body.assistantMessage.runId === body.runId ? { completed: true, assistantMessage: message(body.assistantMessage) } : {}), ...replyRound(body.replyRound), runId: body.runId, ...(body.replayed === true ? { replayed: true } : {}), ...(record(body.userMessage) ? { userMessage: message(body.userMessage) } : {}) };
   }
+  if (p.kind === 'chat-editor-directory') { if (!folderOk(body.folder) || !/^(?:\/|[A-Za-z]:[\/\\]|\\\\)/.test(body.folder)) throw Error('protocol'); return { folder: body.folder }; }
   if (p.kind === 'chat-usage') return { usage: (Array.isArray(body.usage) ? body.usage : []).slice(0, 50).filter(record).map(u => ({ model: str(u.model, 120), tokensIn: num(u.tokensIn) ?? 0, tokensOut: num(u.tokensOut) ?? 0, replies: num(u.replies) ?? 0 })) };
   if (p.kind === 'chat-team') return { team: (Array.isArray(body.team) ? body.team : []).slice(0, 20).filter(record).map(t => ({ agentId: str(t.agentId, 128), agentName: str(t.agentName, 80), model: str(t.model, 120), status: ['started', 'answered', 'waiting_approval', 'failed'].includes(t.status) ? t.status : 'failed', at: str(t.at, 40) })),
     steps: (Array.isArray(body.steps) ? body.steps : []).slice(0, 20).filter(x => record(x) && typeof x.agentId === 'string' && typeof x.tool === 'string' && /^[A-Za-z0-9_.:-]{1,80}$/.test(x.tool)).map(x => ({ agentId: str(x.agentId, 128), tool: x.tool, at: str(x.at, 40) })),

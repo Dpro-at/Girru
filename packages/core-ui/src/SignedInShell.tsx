@@ -89,7 +89,8 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
   const nativeEditor=useNabuAvailability();
   useEffect(()=>{if(page!=='code'){const {top,bottom}=editorBounds();void window.dproApp?.nabu?.select('chat',top,bottom).catch(()=>{});}},[page]);
   useEffect(()=>()=>{void window.dproApp?.nabu?.select('chat',48,32).catch(()=>{});},[]);
-  const openCode=()=>{setPage('code');const {top,bottom}=editorBounds();void window.dproApp?.nabu?.select('code',top,bottom).catch(()=>{});};
+  const openCode=async()=>{if(!chat||!await chat.ensureCodeConversation())return;const folder=await chat.editorDirectory();if(folder)openProjectCode(folder);};
+  const openProjectCode=(folder:string,file?:string)=>{const {top,bottom,right}=editorBounds();void window.dproApp?.nabu?.open(folder,file??null,top,bottom,right).then(result=>{if(result?.mode==='code')setPage('code');}).catch(()=>{});};
   const appearance = useAppTheme();
   const theme = appearance.theme;
   // The title-bar switch goes back to "system" when it lands on the system's own theme.
@@ -203,7 +204,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
       </div>
       <p className="titlebar-title">{page === 'chat' && activeProject && <span className="titlebar-tile" aria-hidden="true"><UiIcon name="folder" size={12}/></span>}{pageTitle}{page === 'chat' && activeProject && <button type="button" className="titlebar-project" title={activeProject.folder ?? activeProject.name} aria-label={`${activeProject.name} · show its folder in Details`} onClick={() => setPlaceRequest(n => n + 1)}>{activeProject.name}</button>}</p>
       {/* CH1/SH1: Commands sits in the middle of the title bar; the theme lives in Settings › General and in Commands. */}
-      <button type="button" className="titlebar-cmdk" onClick={() => setPalette(true)} aria-label="Search or run a command (⌘K)"><UiIcon name="search" size={13}/>Commands<kbd>⌘K</kbd></button>
+      <button type="button" className="titlebar-cmdk" onClick={() => {if(page==='code'&&window.dproApp?.nabu?.showCommands)void window.dproApp.nabu.showCommands();else setPalette(true);}} aria-label={page==='code'?'Code commands':'Search or run a command (⌘K)'}><UiIcon name="search" size={13}/>Commands<kbd>⌘K</kbd></button>
       <div className="titlebar-tools end" ref={setTitleSlot}/>
     </header>
     <aside className="sidebar">
@@ -223,8 +224,8 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
     </aside>
     <main id="content" className="page-area">
       {notice}
-      <section className="page page-chat" aria-label="Chat" hidden={page !== 'chat'}>
-        {chat ? <ChatView active={page === 'chat'} titleSlot={titleSlot} onChooseContext={newChat} terminalRequest={terminalRequest} boardRequest={boardRequest} placeRequest={placeRequest} controller={chat} mode={mode} client={client} onAddConnector={() => setPage('mcp')} onSetUpModel={() => openSettings('replies')} onOpenApprovals={() => setPage('approvals')} onOpenAgent={id => { setAgentFocus(f => ({ id, n: (f?.n ?? 0) + 1 })); setPage('agents'); }} onOpenRules={user.role === 'owner' ? (agent, category) => { setApprovalsPlace(r => ({ place: 'perms', agent, category, n: (r?.n ?? 0) + 1 })); setPage('approvals'); } : undefined}
+      <section className="page page-chat" aria-label="Chat" hidden={page !== 'chat' && page !== 'code'}>
+        {chat ? <ChatView embeddedCode={page==='code'} onOpenCode={nativeEditor&&owner?openProjectCode:undefined} active={page === 'chat'||page==='code'} titleSlot={titleSlot} onChooseContext={newChat} terminalRequest={terminalRequest} boardRequest={boardRequest} placeRequest={placeRequest} controller={chat} mode={mode} client={client} onAddConnector={() => setPage('mcp')} onSetUpModel={() => openSettings('replies')} onOpenApprovals={() => setPage('approvals')} onOpenAgent={id => { setAgentFocus(f => ({ id, n: (f?.n ?? 0) + 1 })); setPage('agents'); }} onOpenRules={user.role === 'owner' ? (agent, category) => { setApprovalsPlace(r => ({ place: 'perms', agent, category, n: (r?.n ?? 0) + 1 })); setPage('approvals'); } : undefined}
           onOpenCard={(boardId, cardId) => { setPage('board'); void board?.reveal(boardId, cardId); }}
           onOpenMemory={(drawerId, memoryId) => { setMemoryFocus(f => ({ drawerId, memoryId, n: (f?.n ?? 0) + 1 })); setPage('memory'); }}/> : null}
       </section>
@@ -239,7 +240,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
         <section className="page page-skills mem-desk" hidden={page !== 'skills'}><SkillsSection client={client} active={page === 'skills'} slot={slot} onOpenAgents={()=>setPage('agents')}/></section>
         <section className="page page-ui mem-desk" hidden={page !== 'terminal'}><TerminalSection client={client} active={page === 'terminal'} slot={slot} onOpenTerminal={openTerminal}/></section>
       </>}
-      <section className="page page-ui" hidden={page!=='code'}><p role="status" className="fine-print">Select Code in the bottom bar to open or reconnect the project editor.</p></section>
+      <section className="page page-ui" hidden={page!=='code'||!!chat}><p role="status" className="fine-print">Select Code in the bottom bar to open or reconnect the project editor.</p></section>
       <section className="page page-store" hidden={page!=='store'}><StoreWorkspace client={client} active={page==='store'} sidebarSlot={slot} request={storeRequest} canCode={nativeEditor&&owner} onOpenApp={id=>{if(id==='code')openCode();else setPage(id);}} onAccounts={()=>openSettings('accounts')} footerItem={owner?id=>footerToolItem(footerPrefsNow,id,x=>footer.toggle(x)):undefined} onPermissions={()=>{if(user.role!=='owner'){setPage('agents');return;}setApprovalsPlace(r=>({place:'perms',n:(r?.n??0)+1}));setPage('approvals');}}/></section>
       {user.role==='owner'&&<section className="page page-trading" hidden={page!=='trading'}><TradingWorkspace client={client} active={page==='trading'} sidebarSlot={slot} onBack={openMyApps}/></section>}
       <section className="page page-genvr" hidden={page !== 'genvr'}><GenVRPage key={user.id} client={client} active={page === 'genvr'}/></section>

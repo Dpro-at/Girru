@@ -33,16 +33,21 @@ if (window.location.protocol === 'file:') {
 contextBridge.exposeInMainWorld('dproApp', {
   notifyDone: () => ipcRenderer.invoke('dpro:notify-done'),
   nabu: {
+    review: value => ipcRenderer.invoke('dpro:nabu-review', value),
+    clearReview: id => ipcRenderer.invoke('dpro:nabu-review-clear', id),
+    onReviewDecision: callback => { const listener = (_event,value) => callback(value); ipcRenderer.on('dpro:nabu-review-decision',listener); return () => ipcRenderer.removeListener('dpro:nabu-review-decision',listener); },
     status: () => ipcRenderer.invoke('dpro:nabu-status'),
-    select: (mode, top, bottom) => ipcRenderer.invoke('dpro:nabu-select', { mode, top, bottom }),
-    layout: (top, bottom) => ipcRenderer.send('dpro:nabu-layout', { top, bottom }),
+    showCommands: () => ipcRenderer.invoke('dpro:nabu-commands'),
+    open: (folder, file, top, bottom, right = 0) => ipcRenderer.invoke('dpro:nabu-open', { folder, file: file ?? null, top, bottom, right }),
+    select: (mode, top, bottom, right = 0) => ipcRenderer.invoke('dpro:nabu-select', { mode, top, bottom, right }),
+    layout: (top, bottom, right = 0) => ipcRenderer.send('dpro:nabu-layout', { top, bottom, right }),
     onState: callback => {
       const listener = (_event, value) => callback(value);
       ipcRenderer.on('dpro:nabu-state', listener);
       return () => ipcRenderer.removeListener('dpro:nabu-state', listener);
     },
   },
-  chooseProjectFolders: () => ipcRenderer.invoke('dpro:choose-project-folders'),
+  chooseProjectFolders: options => ipcRenderer.invoke('dpro:choose-project-folders', options),
   openChatWindow: id => ipcRenderer.invoke('dpro:open-chat-window', String(id)),
   setSetupWindow: compact => ipcRenderer.invoke('dpro:setup-window', compact === true),
   revealFolder: folder => ipcRenderer.invoke('dpro:reveal-folder', String(folder)),
@@ -64,4 +69,13 @@ contextBridge.exposeInMainWorld('dproApp', {
     ipcRenderer.on('dpro:navigate', listener);
     return () => ipcRenderer.removeListener('dpro:navigate', listener);
   },
+});
+
+// Reuse the signed-in shell's actual footer actions and role gates.
+ipcRenderer.on('dpro:code-footer', (_event, id) => {
+  const names = { chat: 'Chat', agents: 'Agents', library: 'Library', board: 'Board', memory: 'Memory', approvals: 'Approvals', store: 'Store', terminal: 'Terminal', genvr: 'GenVR', skills: 'Skills', personalities: 'Personalities', specialties: 'Specialties', settings: 'Settings' };
+  if (!Object.hasOwn(names, id)) return;
+  const name = names[id];
+  const button = Array.from(document.querySelectorAll('.shell-footer button[aria-label]')).find(b => b.getAttribute('aria-label') === name || b.getAttribute('aria-label')?.startsWith(name + ','));
+  button?.click();
 });

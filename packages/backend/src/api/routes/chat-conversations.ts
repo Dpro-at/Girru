@@ -213,7 +213,8 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
   const resolvedReplyAgent=subscriptionModel(effectiveModel)?replyAgent??configured?.id:replyAgent;
   if(subscriptionModel(effectiveModel)&&(!subscriptionEnabled()||t.role!=='owner'))return send(400,{code:'no_folder',error:'Coding apps are available only to the owner in the desktop app.'});
   // CORE-PICKER-03: without a project folder a coding app works in this conversation's own private folder.
-  const codingFolder = subscriptionModel(effectiveModel) ? project?.folder ?? await chatWorkspace(c.id) : undefined;
+  const codeEnabled = await getPref(userId, `chat.code:${c.id}`) === true;
+  const codingFolder = subscriptionModel(effectiveModel) || codeEnabled ? project?.folder ?? await chatWorkspace(c.id) : undefined;
   const prior = await listConversationMessages(c.id);
   // CHAT-BUILD-01: a retry after a lost 202 (same runId, same conversation) gets the accepted turn back, never a second one.
   const continuation = t.continuationMessageId ? prior.find(m => m.id === t.continuationMessageId && m.role === 'user') : undefined;
@@ -310,7 +311,7 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
       ...(project?.folders.some((f) => f.write) ? { writeFolders: project.folders.filter((f) => f.write).map((f) => f.path) } : {}),
       ...(project ? { memoryScope: { project: project.slug }, ...(project.folder ? { fileReadRoot: project.folder } : {}) } : {}),
       ...(codingFolder ? { fileReadRoot: codingFolder } : {}),
-      systemPromptAppend: [t.participantContext ?? '', t.participantReply ? 'You are the selected participant in this shared conversation. Give only your own reply, in your own personality and department; never impersonate or answer on behalf of another participant.' : '', approvedResults, project ? projectNote(project.name, project.folder, project.repoUrl, project.folders) : '', PLAN_NOTE, c.mode === 'plan' ? PLAN_FIRST_NOTE : c.mode === 'ask' ? ASK_NOTE : '', HANDOFF_NOTE, [...prior, userMessage].some((m) => new RegExp(SECRET_REF_RE.source).test(m.content)) ? SECRET_NOTE : '', prior.some((m) => m.role === 'assistant' && (m.agentId ?? c.agentId ?? null) !== (replyAgent ?? null)) ? TEAM_NOTE : ''].filter(Boolean).join('\n\n'),
+      systemPromptAppend: [codeEnabled ? 'Code is open on this conversation folder. Use the separately granted edit tool for reviewed changes to existing project files. The write tool still writes only to your own agent workspace; do not substitute it for a project edit. If edit is unavailable, explain that the owner must enable that file-edit capability. Never claim a file changed until the tool confirms it. A stale proposal must be read and proposed again.' : '', t.participantContext ?? '', t.participantReply ? 'You are the selected participant in this shared conversation. Give only your own reply, in your own personality and department; never impersonate or answer on behalf of another participant.' : '', approvedResults, project ? projectNote(project.name, project.folder, project.repoUrl, project.folders) : '', PLAN_NOTE, c.mode === 'plan' ? PLAN_FIRST_NOTE : c.mode === 'ask' ? ASK_NOTE : '', HANDOFF_NOTE, [...prior, userMessage].some((m) => new RegExp(SECRET_REF_RE.source).test(m.content)) ? SECRET_NOTE : '', prior.some((m) => m.role === 'assistant' && (m.agentId ?? c.agentId ?? null) !== (replyAgent ?? null)) ? TEAM_NOTE : ''].filter(Boolean).join('\n\n'),
       ...(effectiveModel ? { model: effectiveModel, ...(effectiveModel === AUTO_MODEL ? {} : { provider: modelProvider(effectiveModel) }) } : {}),
     })),
   });
@@ -642,6 +643,17 @@ export async function chatConversationRoutes(fastify: FastifyInstance) {
     if (!(await deleteConversation(caller(request), id))) return notFound(reply);
     await removeChatWorkspace(id).catch(() => {});
     return { ok: true };
+  });
+
+  fastify.post('/api/chat/conversations/:id/editor-directory', { config: { access: 'owner' } }, async (request: Req, reply) => {
+    if ((request as any).chatUserRole !== 'owner') return reply.code(403).send({ code: 'forbidden' });
+    if (request.body !== undefined && request.body !== null) return bad(reply, 'No directory input is accepted');
+    const c = await findConversation(caller(request), request.params.id!);
+    if (!c) return notFound(reply);
+    const project = c.projectId ? await findProject(caller(request), c.projectId) : null;
+    const folder = project?.folder ?? await chatWorkspace(c.id);
+    await setPref(caller(request), `chat.code:${c.id}`, true);
+    return { folder };
   });
 
   fastify.get('/api/chat/conversations/:id/messages', async (request: Req, reply) => {

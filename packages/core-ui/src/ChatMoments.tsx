@@ -1,3 +1,6 @@
+import {NativeFileReview} from './NativeFileReview';
+import {FileEditReview} from './FileEditReview';
+import {editReview} from './edit-review';
 // CHAT-BUILD-01 stage 5 (CH2, CH6, CH10): the quiet lines and cards in the conversation that make a
 // team of agents trustworthy — Allow once / Deny where an agent waits for you, hand-off cards, what you
 // said while it worked, text that tried to give orders, the chat summed up, a plan limit, undo what an
@@ -17,6 +20,7 @@ import { DocumentEditor } from './DocumentEditor';
 import { TASK_MAX, taskText } from './approvals-contract.js';
 
 export type Moments = {
+  nativeCode?:boolean;
   client?: SessionClient; conversationId?: string | null; agentName?: (id?: string) => string;
   /** CH6: an agent's short description, whose sub-agent it is, and the step each delegated agent runs now (while a reply works). */
   agentAbout?: (id?: string) => string | undefined; subAgentOf?: (id?: string) => string | undefined; steps?: readonly { agentId: string; tool: string; at: string }[];
@@ -76,7 +80,7 @@ export const DENY_UNDO_MS = 6000;
  * CH6 Change the task… (a waiting hand-off only): the owner rewrites the task in the long-text editor; the server makes a
  * new paramsHash over the edited text, so Allow once covers exactly it. `onTask` hears the task the card will allow. */
 export function ApprovalCard({ call, who, what, onTask }: { call: ToolCall; who?: string; what?: string; onTask?: (text: string, changed: boolean) => void }) {
-  const { client, conversationId, onOpenApprovals, onOpenRules, onDecided } = useContext(MomentsContext);
+  const { nativeCode, client, conversationId, onOpenApprovals, onOpenRules, onDecided } = useContext(MomentsContext);
   const [state, setState] = useState<'waiting' | 'busy' | 'review' | 'saidNo' | 'allowed' | 'denied' | 'gone'>('waiting');
   const denyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const more = useMenu();
@@ -148,16 +152,19 @@ export function ApprovalCard({ call, who, what, onTask }: { call: ToolCall; who?
   </div>;
   if (state === 'gone') return <p className="moment-line">{notice || 'This request is no longer waiting. See Approvals.'}</p>;
   const view = detail ? paramView(detail.params, detail.maskedFields ?? []) : null;
+  const fileReview=detail?editReview(detail.toolName,detail.params,detail.maskedFields??[]):null;
+  const reviewComplete=!!fileReview||!!view?.complete;
+  if(nativeCode&&fileReview&&detail)return <><NativeFileReview value={{id,path:fileReview.path,before:(detail.params as Record<string,string>).before,after:(detail.params as Record<string,string>).after}} onDecision={decision=>{if(state==='review'){if(decision==='approve'){if(detail.verificationRequired)setVerify(true);else void allow();}else void sendDeny();}}}/>{verify&&<ApprovalVerificationSheet client={client} id={detail.id} paramsHash={detail.paramsHash} toolName={title} onClose={()=>setVerify(false)} onApprove={receipt=>{setVerify(false);void allow(receipt);}}/>}</>;
   return <div className="moment-card" data-tone="needs">
     <p><UiIcon name="alert" size={14}/><span><b>{who ?? 'The agent'}</b> wants to: {title}</span></p>
-    {view && (view.complete ? <dl className="approval-plain">{view.rows.map(([k, v]) => <div key={k}><dt>{k}</dt><dd dir="auto">{v}</dd></div>)}</dl>
+    {fileReview?<FileEditReview review={fileReview}/>:view && (view.complete ? <dl className="approval-plain">{view.rows.map(([k, v]) => <div key={k}><dt>{k}</dt><dd dir="auto">{v}</dd></div>)}</dl>
       : <p className="moment-hint">The full request is too long to show here. Check it in Approvals.</p>)}
     <div className="moment-actions">
-      {state === 'review' && view?.complete
+      {state === 'review' && reviewComplete
         ? <button type="button" className="moment-main" onClick={() => (detail?.verificationRequired ? setVerify(true) : void allow())}>Allow once</button>
         : <button type="button" className="moment-main" disabled={state === 'busy'} onClick={() => void review()}>Review…</button>}
       <button type="button" className="link-button" disabled={state === 'busy'} onClick={() => void deny()}>Deny</button>
-      {state === 'review' && view?.complete && taskOf(detail) !== null && (() => {
+      {state === 'review' && reviewComplete && taskOf(detail) !== null && (() => {
         const hidden = (detail?.maskedFields ?? []).some(f => f === 'request' || f.startsWith('request.'));
         return <button type="button" className="link-button" disabled={hidden} title={hidden ? 'Part of this task is hidden; change it in Approvals or ask the lead again' : 'Change the task before you allow it'}
           onClick={() => { setTaskError(''); setTask(taskOf(detail)); }}>Change the task…</button>;

@@ -80,3 +80,44 @@ test('opening an active child attaches without sending or repeating the request'
   assert.equal(sends, 0); assert.match(c.getSnapshot().notice, /group replies paused/i);
   assert.equal(c.getSnapshot().turns.filter(t => t.role === 'user').length, 1);
 });
+
+
+test('editor directory boundary accepts only the fixed action and projects only a valid folder',()=>{
+ const {allowedConversation}=require('../src/conversation-contract.js');const url=`/api/chat/conversations/${CID}/editor-directory`;
+ assert.equal(allowedConversation('POST',url),true);assert.equal(allowedConversation('GET',url),false);assert.equal(allowedConversation('POST',url,{folder:'/other'}),false);
+ assert.deepEqual(conversationResponse(url,200,{folder:'/tmp/project',token:'private'}),{folder:'/tmp/project'});
+ assert.throws(()=>conversationResponse(url,200,{folder:'relative'}));
+});
+
+
+test('Code selects an ordinary project chat and keeps meeting drafts and attachments separate',async t=>{
+ const ordinary={...conversation,id:'10f58d11-3325-4ff0-bad0-24b2efee2abc',title:'Project chat'};const meeting={...conversation,meeting:{id:'meeting-001',state:'active'}};
+ const list=[meeting,ordinary];const client={getSnapshot:()=>({phase:'authenticated',epoch:1,user:{role:'owner'}}),subscribe:()=>()=>{},request:async r=>{
+  if(r.path.includes('/messages'))return {status:200,body:{conversation:list.find(x=>r.path.includes(x.id)),messages:[],activeRunId:null}};
+  if(r.path==='/api/chat/conversations')return {status:200,body:{conversations:list}};
+  return {status:200,body:{agents:[],models:[],projects:[],sidebar:{}}};
+ }};
+ const c=new ConversationsController(client);t.after(()=>c.dispose());await c.load();await c.open(CID);c.edit('Keep this meeting draft');c.attach([{name:'meeting.md',text:'private draft'}]);
+ assert.equal(await c.ensureCodeConversation(),ordinary.id);assert.equal(c.getSnapshot().draft,'');assert.equal(c.getSnapshot().attachments.length,0);
+ c.edit('Ordinary chat draft');await c.open(CID);assert.equal(c.getSnapshot().draft,'Keep this meeting draft');assert.equal(c.getSnapshot().attachments[0].name,'meeting.md');
+ await c.ensureCodeConversation();assert.equal(c.getSnapshot().draft,'Ordinary chat draft');
+});
+
+test('file review shows exact removed and added text and refuses hidden or oversized proposals',()=>{
+ const {editReview}=require('../src/edit-review.ts');const p={path:'hello.txt',before:'same\nold\ntail',after:'same\nnew\ntail'};
+ const v=editReview('edit',p);assert.equal(v.rows.find(x=>x.kind==='del').text,'old');assert.equal(v.rows.find(x=>x.kind==='add').text,'new');
+ assert.equal(editReview('write',p),null);assert.equal(editReview('edit',p,['before']),null);assert.equal(editReview('edit',{...p,after:'x'.repeat(24001)}),null);
+});
+
+
+test('opening Code from a new project draft saves one ordinary conversation and retains that draft',async t=>{
+ const pid='f525e81e-60ba-450c-8f01-deac0beb459a';const saved={...conversation,title:'Code',projectId:pid};const project={id:pid,name:'Review',slug:'review',folder:'/tmp/review',repoUrl:null};let created=0;
+ const client={getSnapshot:()=>({phase:'authenticated',epoch:1,user:{role:'owner'}}),subscribe:()=>()=>{},request:async r=>{
+  if(r.method==='POST'&&r.path==='/api/chat/conversations'){created++;assert.equal(r.body.projectId,pid);return{status:201,body:{conversation:saved}};}
+  if(r.path.includes('/messages'))return{status:200,body:{conversation:saved,messages:[],activeRunId:null}};
+  return{status:200,body:{conversations:[],projects:[project],agents:[],models:[],sidebar:{}}};
+ }};
+ const c=new ConversationsController(client);t.after(()=>c.dispose());await c.load();await c.loadProjects();c.filterProject(pid);c.edit('Keep these unsent project notes');
+ assert.equal(await c.ensureCodeConversation(),CID);assert.equal(c.activeProject().id,pid);assert.equal(c.getSnapshot().draft,'Keep these unsent project notes');
+ assert.equal(await c.ensureCodeConversation(),CID);assert.equal(created,1);
+});

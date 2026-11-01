@@ -306,6 +306,41 @@ export class ConversationsController {
     const id = c?.projectId ?? (this.#state.activeId ? null : this.#state.projectFilter || null);
     return id ? this.#state.projects.find(p => p.id === id) : undefined;
   }
+  #codeDrafts: Map<string, Pick<ConversationsState, 'draft' | 'attachments' | 'images'>> | null = null;
+  private codeDraftFor(next: string) {
+    if (!this.#codeDrafts || next === this.#state.activeId) return {};
+    this.#codeDrafts.set(this.#state.activeId ?? '_new', { draft: this.#state.draft, attachments: this.#state.attachments, images: this.#state.images });
+    return this.#codeDrafts.get(next) ?? {draft:'',attachments:[],images:[]};
+  }
+  /** Code uses an ordinary project chat, while a meeting and its unsent draft remain separate. */
+  async ensureCodeConversation(): Promise<string | null> {
+    const current=this.#state.conversations.find(c=>c.id===this.#state.activeId);
+    if(current&&!current.meeting)return current.id;
+    const projectId=current?.projectId??this.#state.projectFilter??'';
+    let target=this.#state.conversations.find(c=>!c.meeting&&(c.projectId??'')===(projectId??''));
+    if(!target){
+      try {
+        const response=await this.call('POST','/api/chat/conversations',{title:'Code',...(projectId?{projectId}:{}),...(current?.agentId?{agentId:current.agentId}:{})});
+        if(response.status!==201||!record(response.body))return null;
+        target=response.body.conversation as Conversation;this.publish({conversations:[target,...this.#state.conversations.filter(c=>c.id!==target!.id)]});
+      }catch{return null;}
+    }
+    this.#codeDrafts??=new Map();
+    const freshDraft=!current?{draft:this.#state.draft,attachments:this.#state.attachments,images:this.#state.images}:null;
+    if(freshDraft)this.#codeDrafts.set(target.id,freshDraft);
+    await this.open(target.id);
+    if(freshDraft)this.#codeDrafts.delete('_new');
+    return this.#state.activeId===target.id&&this.#state.threadPhase==='ready'?target.id:null;
+  }
+  async editorDirectory(): Promise<string | null> {
+    const id = this.#state.activeId;
+    if (!id || !this.live()) return null;
+    try {
+      const r = await this.call('POST', `/api/chat/conversations/${id}/editor-directory`);
+      if (this.#state.activeId !== id) return null;
+      return r.status === 200 && record(r.body) && typeof r.body.folder === 'string' ? r.body.folder : null;
+    } catch { this.publish({notice:'Could not open this chat folder in Code.'}); return null; }
+  }
   /** Reloads the project's git state (branch, changes, ahead/behind). */
   refreshGit() { return this.loadGit(); }
   private async loadGit() {
@@ -375,7 +410,7 @@ export class ConversationsController {
   newChat() {
     this.#follow?.abort(); this.#openSeq++;
     this.rememberLast(null);
-    this.publish({ activeId: null, model: 'auto', turns: [], threadPhase: 'empty', runId: null, starting: false, stopping: false, reconnecting: false, queue: [], queuePaused: false, elsewhere: false, notice: undefined, agentId: '', replyAgent: '', git: null, focus: null, hasEarlier: false, loadingEarlier: false, mode: 'auto', thinking: 'normal' });
+    this.publish({ ...this.codeDraftFor('_new'), activeId: null, model: 'auto', turns: [], threadPhase: 'empty', runId: null, starting: false, stopping: false, reconnecting: false, queue: [], queuePaused: false, elsewhere: false, notice: undefined, agentId: '', replyAgent: '', git: null, focus: null, hasEarlier: false, loadingEarlier: false, mode: 'auto', thinking: 'normal' });
     void this.loadGit();
   }
 
@@ -388,7 +423,7 @@ export class ConversationsController {
     this.rememberLast(id);
     const seq = ++this.#openSeq;
     const known = this.#state.conversations.find(c => c.id === id);
-    this.publish({ activeId: id, turns: [], threadPhase: 'loading', runId: null, starting: false, stopping: false, reconnecting: false, queue: [], queuePaused: false, elsewhere: false, notice: undefined, agentId: known?.agentId ?? '', model: known?.model ?? '', replyAgent: '', focus: null, hasEarlier: false, loadingEarlier: false });
+    this.publish({ ...this.codeDraftFor(id), activeId: id, turns: [], threadPhase: 'loading', runId: null, starting: false, stopping: false, reconnecting: false, queue: [], queuePaused: false, elsewhere: false, notice: undefined, agentId: known?.agentId ?? '', model: known?.model ?? '', replyAgent: '', focus: null, hasEarlier: false, loadingEarlier: false });
     try {
       await this.#modelWrites;if(!this.live()||seq!==this.#openSeq)return;
       const r = await this.call('GET', `/api/chat/conversations/${id}/messages?limit=${PAGE_LIMIT}`);

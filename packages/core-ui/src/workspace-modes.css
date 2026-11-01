@@ -1,5 +1,30 @@
 .workspace-modes { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .workspace-mode-notice { font-size: 12px; max-inline-size: 24em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-mode-notice:empty { display: none; }
-.titlebar[data-nabu-mode="code"] .titlebar-tools { visibility: hidden; pointer-events: none; }
+.titlebar[data-nabu-mode="code"] .titlebar-tools:not(.end) { visibility: hidden; pointer-events: none; }
 @media (max-width: 1000px) { .workspace-mode-notice { max-inline-size: 12em; } }
+
+.app-shell[data-section="code"] .page-chat { inline-size:min(var(--code-chat-width,420px),calc(100vw - 320px)); margin-inline-start:auto; border-inline-start:1px solid var(--border); background:var(--canvas); }
+.app-shell[data-section="code"] .page-chat:has(.chat-layout[data-code-expanded]), .app-shell[data-section="code"] .page-chat:has(.chat-layout[data-panel="details"]), .app-shell[data-section="code"] .page-chat:has(.chat-layout[data-panel="files"]), .app-shell[data-section="code"] .page-chat:has(.chat-layout[data-panel="changes"]) { inline-size:min(780px,calc(100vw - 320px)); }
+.app-shell[data-section="code"] .page-chat .chat-column {inline-size:100%;max-inline-size:none;padding:0}
+.app-shell[data-section="code"] .page-chat .chat-thread {padding:12px}
+.app-shell[data-section="code"] .page-chat .chat-dock {padding:8px 10px 10px}
+.app-shell[data-section="code"] .page-chat .chat-composer-row {flex-wrap:wrap;row-gap:6px}
+.app-shell[data-section="code"] .page-chat .chat-empty {padding:18px 12px}
+.app-shell[data-section="code"] > .shell-footer {visibility:hidden}
+.code-chat-heading {display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-block-end:1px solid var(--border);font-size:12px;flex:none}
+.code-chat-heading strong {overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.app-shell[data-section="code"] .chat-layout[data-panel="rail"] {grid-template-columns:minmax(0,1fr)}
+
+.file-edit-review {min-inline-size:0;overflow:hidden;border:1px solid var(--border);border-radius:6px;margin-block:8px}
+.file-edit-review>header {display:flex;align-items:center;gap:6px;padding:7px 8px;font-size:11px}
+.file-edit-review>header strong {overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-edit-review>header>span {margin-inline-start:auto;white-space:nowrap;color:var(--text-3)}
+.file-edit-review .diff {max-block-size:360px;overflow:auto;font-size:11px}
+.file-edit-review code {white-space:pre}
+
+.app-shell[data-section="code"] .page-chat {position:relative}
+.code-chat-resize {position:absolute;inset-inline-start:0;inset-block:0;inline-size:7px;z-index:8;cursor:col-resize;touch-action:none;background:transparent;outline-offset:-2px}
+.code-chat-resize:hover,.code-chat-resize:focus-visible {background:var(--accent)}
+.app-shell[data-section="code"] .page-chat .chat-layout {position:relative}
