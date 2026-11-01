@@ -17,12 +17,15 @@ test('transferred library persists named synthetic voices, per-owner Main Agent 
  await fs.writeFile(path.join(directory,'library.json'),JSON.stringify(library));
  await fs.writeFile(path.join(directory,'chatterbox-multilingual-v3.installed.json'),'{}');
  const python=path.join(directory,'python');await fs.writeFile(python,'fixture');
- const host=createVoiceLibrary({packageRoot:path.resolve(__dirname,'..'),env:{DPRO_GENVR_VOICES:directory,DPRO_VOICE_PYTHON:python,DPRO_GENVR_STATE:directory}});t.after(()=>host.close());
- let status=await host.call('owner-a');assert.equal(status.voices[0].name,'Saved name');assert.equal(status.selectedVoiceId,'');assert.equal(status.models.length,6);assert.ok(status.demos.length>20);
+ const portableService={models:async()=>[{id:'chatterbox-torch',installed:true,runtimeAvailable:true,compatible:true,defaultable:true}],presets:()=>[],isBusy:()=>false,close(){}};
+ const host=createVoiceLibrary({packageRoot:path.resolve(__dirname,'..'),portableService,env:{DPRO_GENVR_VOICES:directory,DPRO_VOICE_PYTHON:python,DPRO_GENVR_STATE:directory}});t.after(()=>host.close());
+ let status=await host.call('owner-a');assert.equal(status.voices[0].name,'Saved name');assert.equal(status.selectedVoiceId,'');assert.equal(status.models.length,3);assert.ok(status.demos.length>20);
+ if(process.platform!=='darwin'||process.arch!=='arm64')await assert.rejects(host.call('owner-a',{action:'assign',voiceId:id}),/model_missing/);
+ await host.call('owner-a',{action:'default_engine',model:'chatterbox-torch'});
  await host.call('owner-a',{action:'assign',voiceId:id});await host.call('owner-a',{action:'preferences',readAloud:true,language:'ar'});
  assert.equal((await host.call('owner-a')).selectedVoiceId,id);assert.equal((await host.call('owner-b')).selectedVoiceId,'');
  const persisted=JSON.parse(await fs.readFile(path.join(directory,'library.json'),'utf8'));assert.equal(persisted.assignments['original-avatar:self'],id);
- const restarted=createVoiceLibrary({packageRoot:path.resolve(__dirname,'..'),env:{DPRO_GENVR_VOICES:directory}});t.after(()=>restarted.close());status=await restarted.call('owner-a');assert.equal(status.readAloud,true);assert.equal(status.language,'ar');assert.equal(status.selectedVoiceId,id);
+ const restarted=createVoiceLibrary({packageRoot:path.resolve(__dirname,'..'),portableService,env:{DPRO_GENVR_VOICES:directory}});t.after(()=>restarted.close());status=await restarted.call('owner-a');assert.equal(status.readAloud,true);assert.equal(status.language,'ar');assert.equal(status.selectedVoiceId,id);
  await assert.rejects(host.call('owner-b',{action:'job',jobId:id}),e=>e.code==='forbidden');
 });
 test('clone stores only valid PCM samples with consent metadata and a chosen name',async t=>{
