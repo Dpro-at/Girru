@@ -1,7 +1,7 @@
 {
   "name": "@agent-player/desktop",
   "productName": "Girru",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "private": true,
   "description": "Girru desktop app",
   "license": "MIT",

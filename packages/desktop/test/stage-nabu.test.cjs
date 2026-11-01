@@ -14,6 +14,10 @@ function checkout(root) {
   for (const name of ['run-dep', 'dev-dep']) pkg(path.join(editor, 'node_modules', name), name);
   write(path.join(editor, 'out', 'server-main.js'), '');
   write(path.join(editor, 'product.json'), '{}');
+  write(path.join(editor, 'LICENSE.txt'), 'MIT');
+  write(path.join(editor, 'ThirdPartyNotices.txt'), 'Notices');
+  write(path.join(root, 'nabu', 'account', 'private.ts'), 'not runtime');
+  pkg(path.join(editor, 'node_modules', 'server-dep'), 'server-dep', { version:'electron-build' });
   write(path.join(editor, 'resources', 'r.txt'), '');
   pkg(path.join(editor, 'remote'), 'remote', { dependencies: { 'server-dep': '1.0.0' } });
   pkg(path.join(editor, 'remote', 'node_modules', 'server-dep'), 'server-dep');
@@ -35,6 +39,9 @@ test('copies only the run-time parts and the kept extensions', t => {
   const result = stage({ nabu: path.join(root, 'nabu-code'), out });
   const has = rel => fs.existsSync(path.join(out, ...rel.split('/')));
   assert.equal(result.extensions, 2);
+  assert.equal(has('nabu/account/private.ts'),false);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(out,'editor/node_modules/server-dep/package.json'))).version,'1.0.0');
+  assert.ok(has('editor/LICENSE.txt'));assert.ok(has('editor/ThirdPartyNotices.txt'));
   for (const rel of ['nabu/runtime.json', 'nabu/dpro/editor-runtime.mjs', 'editor/out/server-main.js', 'editor/product.json', 'editor/node_modules/run-dep', 'editor/node_modules/server-dep', 'editor/remote/node_modules/server-dep', 'editor/extensions/git/out/extension.js']) assert.ok(has(rel), rel);
   assert.equal(has('editor/node_modules/dev-dep'), false, 'development packages stay out');
   assert.equal(has('editor/extensions/copilot'), false, 'dropped extensions stay out');

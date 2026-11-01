@@ -28,7 +28,7 @@ const { execFileSync } = require('node:child_process');
 const DROPPED = new Set(['copilot', 'github', 'github-authentication', 'microsoft-authentication', 'vscode-api-tests', 'vscode-colorize-tests', 'vscode-colorize-perf-tests', 'vscode-test-resolver', 'mermaid-markdown-features']);
 /** Packages kept once for all extensions (same version only). */
 const SHARED = /^(@vscode\/extension-telemetry|@microsoft\/|@nevware21\/)/;
-const EDITOR_PARTS = ['out', 'product.json', 'package.json', 'resources'];
+const EDITOR_PARTS = ['out', 'product.json', 'package.json', 'resources', 'LICENSE.txt', 'ThirdPartyNotices.txt'];
 
 function parseArgs(argv) {
   const here = path.resolve(__dirname, '..');
@@ -94,11 +94,12 @@ function shareCommon(extensionsDir, extensions) {
 function stage({ nabu, out }) {
   const editor = path.join(nabu, 'editor');
   const runtime = JSON.parse(fs.readFileSync(path.join(nabu, 'nabu', 'runtime.json'), 'utf8'));
-  if (runtime.protocolVersion !== 1 || !fs.statSync(path.join(nabu, 'nabu', runtime.entry)).isFile()) throw new Error('Nabu runtime entry not found');
+  if (runtime.protocolVersion !== 1 || runtime.entry !== 'dpro/editor-runtime.mjs' || !fs.statSync(path.join(nabu, 'nabu', runtime.entry)).isFile()) throw new Error('Nabu runtime entry not found');
   for (const part of [...EDITOR_PARTS, 'remote/node_modules']) if (!fs.existsSync(path.join(editor, part))) throw new Error(`Nabu editor is not built: ${part} is missing`);
   fs.rmSync(out, { recursive: true, force: true });
 
-  copy(path.join(nabu, 'nabu'), path.join(out, 'nabu'));
+  copy(path.join(nabu, 'nabu', 'runtime.json'), path.join(out, 'nabu', 'runtime.json'));
+  copy(path.join(nabu, 'nabu', runtime.entry), path.join(out, 'nabu', runtime.entry));
   for (const part of EDITOR_PARTS) copy(path.join(editor, part), path.join(out, 'editor', part));
   copy(path.join(editor, 'remote', 'node_modules'), path.join(out, 'editor', 'remote', 'node_modules'));
   copy(path.join(editor, 'remote', 'package.json'), path.join(out, 'editor', 'remote', 'package.json'));
@@ -106,7 +107,9 @@ function stage({ nabu, out }) {
   for (const rel of productionPackages(editor)) copy(path.join(editor, rel), path.join(out, 'editor', rel));
   const modules = path.join(out, 'editor', 'node_modules');
   for (const name of packageNames(path.join(editor, 'remote', 'node_modules'))) {
-    if (!fs.existsSync(path.join(modules, name))) copy(path.join(editor, 'remote', 'node_modules', name), path.join(modules, name));
+    // The host is bundled Node, so server packages take precedence over Electron-targeted packages.
+    fs.rmSync(path.join(modules, name), { recursive: true, force: true });
+    copy(path.join(editor, 'remote', 'node_modules', name), path.join(modules, name));
   }
 
   const extensionsFrom = path.join(editor, 'extensions'); const extensionsTo = path.join(out, 'editor', 'extensions');
