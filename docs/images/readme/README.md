@@ -4,6 +4,6 @@ Provider marks are extracted from Dpro-maintained model artwork. OpenAI, Claude,
 
 Channel marks are reused from the Dpro brand collection: WhatsApp (SVG Repo, CC0), Telegram and Discord (Simple Icons-style marks), Slack (brand-colour raster), and locally drawn email/web glyphs. Brand marks remain the property of their respective owners.
 
-The GDPR/DSGVO and EU AI Act badges are original descriptive artwork. They are not official EU marks, certification seals, or compliance claims.
+The GDPR/DSGVO and EU AI Act PNG badges reuse the existing Dpro brand artwork. Their use in the README is qualified by its design-target and not-certification caption. They are not official EU certification seals. The earlier descriptive SVG alternatives remain unused.
 
 Source registries: https://simpleicons.org/ and https://www.svgrepo.com/. Dpro maintains the combined artwork; third-party marks are used only to identify integrations.

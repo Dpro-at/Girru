@@ -30,8 +30,8 @@ An open-source operating system for AI agents—bringing your agents, models, to
 </p>
 
 <p>
-  <img src="docs/images/readme/gdpr.svg" alt="GDPR / DSGVO — design target, not certification" height="40">
-  <img src="docs/images/readme/eu-ai-act.svg" alt="EU AI Act — design target, not certification" height="40">
+  <img src="docs/images/readme/gdpr-dsgvo.png" alt="GDPR / DSGVO — design target, not certification" height="34">
+  <img src="docs/images/readme/eu-ai-act.png" alt="EU AI Act — design target, not certification" height="34">
 </p>
 
 *Privacy and AI governance design targets—not certifications.*
