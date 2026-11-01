@@ -68,7 +68,7 @@ export function allowedDiscovery(method, path, body) {
     && new Set(body.items.map(i => i.id)).size === body.items.length;
 }
 
-const CODES = { 400: ['invalid_input', 'system_folder'], 403: ['not_loopback', 'forbidden'], 404: ['not_found'], 409: ['preview_changed', 'not_imported', 'not_removable', 'skill_in_use', 'skill_name_taken'] };
+const CODES = { 423: ['permission_pending'], 400: ['invalid_input', 'system_folder'], 403: ['not_loopback', 'forbidden'], 404: ['not_found'], 409: ['preview_changed', 'not_imported', 'not_removable', 'skill_in_use', 'skill_name_taken'] };
 const kinds = k => (record(k) ? Object.fromEntries(FILE_KINDS.map(n => [n, k[n] !== false])) : Object.fromEntries(FILE_KINDS.map(n => [n, true])));
 const settings = s => (record(s) && typeof s.watch === 'boolean' && [15, 30, 60].includes(s.intervalMinutes) ? { watch: s.watch, intervalMinutes: s.intervalMinutes, kinds: kinds(s.kinds) } : null);
 const PLACE_STATES = ['allow', 'exclude'];

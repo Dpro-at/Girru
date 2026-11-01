@@ -8,7 +8,7 @@ const { allowedFirstRun, firstRunResponse, firstRunRoute } = require('../src/fir
 const { SetupSteps } = require('../src/FirstRunSetup.tsx');
 const { NoticeCard, MomentsContext } = require('../src/ChatMoments.tsx');
 
-test('FIRSTRUN-01 contract: only the four paths and their exact shapes pass', () => {
+test('FIRSTRUN-01 contract: only the reviewed paths and their exact shapes pass', () => {
   assert.equal(firstRunRoute('/api/first-run'), true);
   assert.equal(firstRunRoute('/api/first-run/other'), false);
   assert.equal(allowedFirstRun('GET', '/api/first-run', undefined), true);
@@ -34,9 +34,9 @@ test('FIRSTRUN-01 contract: commands stay single lines; unknown tools and fields
   assert.deepEqual(firstRunResponse('/api/first-run', 403, {}), { code: 'forbidden' });
 });
 
-test('setup steps show the four steps with the current one marked', () => {
+test('setup steps include discovery before tools and team', () => {
   const html = renderToStaticMarkup(React.createElement(SetupSteps, { current: 'Local model' }));
-  for (const s of ['Account', 'AI tools', 'Local model', 'Team']) assert.match(html, new RegExp(s));
+  for (const s of ['Account', 'Your files', 'AI tools', 'Local model', 'Team']) assert.match(html, new RegExp(s));
   assert.match(html, /aria-current="step"[^>]*>Local model/);
 });
 
@@ -82,4 +82,71 @@ test('company name is asked only for a company, and requires a bounded single-li
   assert.doesNotMatch(renderToStaticMarkup(React.createElement(WorkspaceTypeStep, { ...props, value: 'individual' })), /Company name/);
   for (const companyName of ['', ' padded ', 'x'.repeat(101), 'two\nlines', null]) assert.equal(allowedFirstRun('PUT', '/api/first-run', { step: 'tools', workspaceType: 'company', companyName }), false);
   assert.equal(allowedFirstRun('PUT', '/api/first-run', { step: 'tools', companyName: 'No type' }), false);
+});
+
+
+test('first-run discovery accepts only fixed requests and bounded public counts', () => {
+  const path = '/api/first-run/discovery';
+  const { allowed } = require('../scripts/application-server.cjs');
+  for (const method of ['GET', 'POST']) {
+    assert.equal(allowedFirstRun(method, path, undefined), true);
+    assert.equal(allowedRequest(method, path, undefined), true);
+    assert.equal(allowed(method, path, undefined), true);
+    assert.equal(allowedFirstRun(method, path, { root: '/' }), false);
+  }
+  assert.equal(allowedFirstRun('DELETE', path, undefined), false);
+  const body = { status: 'scanning', scanned: 100, counts: { projects: 3, memories: 8, notes: 4, skills: 2, mcp: 1, ssh: 2 }, denied: 1, unavailable: 0, limited: false, notice: 'Searching…', paths: ['/private/example'], privateKey: 'fictional-secret' };
+  const once = firstRunResponse(path, 200, body);
+  assert.deepEqual(firstRunResponse(path, 200, once), once);
+  assert.equal(once.paths, undefined); assert.equal(once.privateKey, undefined);
+  for (const invalid of [-1, Infinity, 1.2, '3']) assert.throws(() => firstRunResponse(path, 200, { ...body, counts: { ...body.counts, ssh: invalid } }), /protocol/);
+  assert.deepEqual(firstRunResponse('/api/first-run', 200, { pending: true, step: 'discovery' }), { pending: true, step: 'discovery' });
+});
+
+test('setup discovery shows inventory categories and blocks Next until the scan finishes', () => {
+  const { DiscoveryStep } = require('../src/FirstRunSetup.tsx');
+  const client = { request() { throw Error('render must not start a request'); } };
+  const html = renderToStaticMarkup(React.createElement(DiscoveryStep, { client, onNext() {} }));
+  for (const label of ['Projects', 'Memory files', 'Project notes', 'Skills', 'MCP connections', 'SSH identities']) assert.ok(html.includes(label));
+  assert.match(html, /Searching this computer/);
+  assert.match(html, /disabled=""[^>]*>Next/);
+  assert.ok(html.includes('private SSH key contents are never read'));
+});
+
+
+test('completed discovery shows public counts and enables Next; errors keep it blocked', () => {
+  const { DiscoveryInventoryView } = require('../src/FirstRunSetup.tsx');
+  const result = { status: 'done', scanned: 500, counts: { projects: 12, memories: 43, notes: 27, skills: 16, mcp: 3, ssh: 2 }, denied: 1, unavailable: 2, limited: true, notice: 'Discovery complete.' };
+  const props = { result, onRetry() {}, onNext() {} };
+  const html = renderToStaticMarkup(React.createElement(DiscoveryInventoryView, props));
+  assert.match(html, /<dd>12<\/dd>/);
+  assert.match(html, /<dd>43<\/dd>/);
+  assert.match(html, /500 entries checked/);
+  assert.match(html, /1 folder denied access/);
+  assert.match(html, /Some locations could not be fully searched/);
+  assert.doesNotMatch(html, /disabled=""[^>]*>Next/);
+  const failed = renderToStaticMarkup(React.createElement(DiscoveryInventoryView, { ...props, error: true }));
+  assert.match(failed, /disabled=""[^>]*>Next/);
+  assert.match(failed, /Try again/);
+});
+
+test('discovery folder labels remain bounded basenames through both bridge projections', () => {
+  const path = '/api/first-run/discovery';
+  const body = { status: 'scanning', scanned: 5, counts: { projects: 2, memories: 0, notes: 0, skills: 0, mcp: 0, ssh: 0 }, denied: 0, unavailable: 0, limited: false, notice: 'Searching…', folderNames: ['Example project', '/private/hidden', 'C:\\Users\\private', 'line\nbreak', 'unused'] };
+  const once = firstRunResponse(path, 200, body);
+  assert.deepEqual(once.folderNames, ['Example project']);
+  assert.deepEqual(firstRunResponse(path, 200, once), once);
+  const { DiscoveryInventoryView } = require('../src/FirstRunSetup.tsx');
+  const html = renderToStaticMarkup(React.createElement(DiscoveryInventoryView, { result: once, onRetry() {}, onNext() {} }));
+  assert.ok(html.includes('Example project'));
+  assert.doesNotMatch(html, /private\/hidden|Users\\private|line\nbreak/);
+});
+
+test('typed discovery samples expose display names only and reject path-shaped labels', () => {
+  const path = '/api/first-run/discovery';
+  const body = { status: 'scanning', scanned: 5, counts: { projects: 2, memories: 0, notes: 0, skills: 1, mcp: 1, ssh: 1 }, denied: 0, unavailable: 0, limited: false, notice: 'Searching…', samples: [{ kind: 'ssh', name: 'id_ed25519', content: 'never-project-this' }, { kind: 'skill', name: 'Design review' }, { kind: 'mcp', name: '/private/server' }, { kind: 'other', name: 'Unknown' }, { kind: 'file', name: 'line\nbreak' }] };
+  const once = firstRunResponse(path, 200, body);
+  assert.deepEqual(once.samples, [{kind:'ssh', name:'id_ed25519'}, {kind:'skill', name:'Design review'}]);
+  assert.deepEqual(firstRunResponse(path, 200, once), once);
+  assert.doesNotMatch(JSON.stringify(once), /never-project-this|private\/server|Unknown/);
 });

@@ -28,6 +28,7 @@ export function skillFileSummary(text:string){
 /** Why a found item cannot be added, in plain words (codes never reach the screen). */
 export function blockedReason(code:string){
  const say:Record<string,string>={
+  metadata_only:'SSH identity found. Its path and public fingerprint are shown for reference; the private key stays on this computer and is not imported.',
   skill_name_taken:'Girru already has another skill with this name. It is not replaced from here; compare them in Skills.',
   unsupported_configuration:'Its settings use a form Girru cannot run yet, so it cannot be added.',
  };

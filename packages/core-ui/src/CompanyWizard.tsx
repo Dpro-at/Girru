@@ -31,7 +31,7 @@ export function TeamFlow({ controller, mode, workspaceType, onBack, onHired, onC
   // FR7: "What is your work?" is asked once, before the departments; null = not answered yet, '' = general work.
   const [kind, setKind] = useState<string | null>(null);
   const [kindQuery, setKindQuery] = useState('');
-  const [allKinds, setAllKinds] = useState(false);
+  const [allKinds, setAllKinds] = useState(true);
   const busy = ['loading', 'planning', 'hiring'].includes(s.phase);
   const bulk = s.total !== undefined || s.shares.length > 0 || !!s.batch;
   const entries = useLibrary(controller.client, s.shares, busy, controller);
@@ -95,9 +95,9 @@ export function TeamFlow({ controller, mode, workspaceType, onBack, onHired, onC
     const invalid = s.shares.some(x => !validSpecialties(x.specialties, x.count));
     return <section className="setup-pane" aria-label="Your team">
       <h2>Your team</h2>
-      <p>{total} {total === 1 ? 'agent' : 'agents'} over {s.shares.length} {s.shares.length === 1 ? 'department' : 'departments'}. {s.shares.length > 6 ? 'Click a department to change its agent count, jobs or personality.' : 'Drag a line to move agents; click a department to change its jobs or personality.'}</p>
-      {s.shares.length > 0 && <TeamPicture shares={s.shares} busy={busy} onOpen={setOpen} onMove={(a, b, [l, r]) => { controller.editShare(a.department, { count: l }); controller.editShare(b.department, { count: r }); }}/>}
-      <ul className="setup-split">{s.shares.map(x => <li key={x.department}><b>{x.departmentLabel}</b><span>{jobsLine(x)}</span>{!validSpecialties(x.specialties, x.count) && <span className="badge">Check specialties</span>}</li>)}</ul>
+      <p>{total} {total === 1 ? 'agent' : 'agents'} over {s.shares.length} {s.shares.length === 1 ? 'department' : 'departments'}. {mode === 'setup' || s.shares.length > 6 ? 'Click a department to change its agent count, jobs or personality.' : 'Drag a line to move agents; click a department to change its jobs or personality.'}</p>
+      {mode === 'setup' ? <div className="setup-review-grid">{s.shares.map(x => <button type="button" className="setup-review-row" key={x.department} disabled={busy} onClick={() => setOpen(x.department)} aria-label={`${x.departmentLabel}: ${x.count} agents. Edit jobs and personality`}><UiIcon name={departmentIcon(x.departmentLabel)} size={20}/><b>{x.departmentLabel}</b><span>{x.count}</span><UiIcon name="pencil" size={14}/></button>)}</div> : s.shares.length > 0 && <TeamPicture shares={s.shares} busy={busy} onOpen={setOpen} onMove={(a, b, [l, r]) => { controller.editShare(a.department, { count: l }); controller.editShare(b.department, { count: r }); }}/>}
+      {mode !== 'setup' && <ul className="setup-split">{s.shares.map(x => <li key={x.department}><b>{x.departmentLabel}</b><span>{jobsLine(x)}</span>{!validSpecialties(x.specialties, x.count) && <span className="badge">Check specialties</span>}</li>)}</ul>}
       {share && <DepartmentJobs share={share} busy={busy} controller={controller} entries={entries} onClose={() => setOpen(null)}/>}
       <p className="fine-print">Everyone starts Careful and asks you before doing anything outside Girru.</p>
       {s.notice && <p role="status">{s.notice}</p>}
@@ -188,7 +188,7 @@ function DepartmentJobs({ share, busy, controller, entries, onClose }: { share: 
   const choices = (controller.getSnapshot().catalogue?.specialties ?? []).filter(c => c.department === share.department && !rows.some(r => r.name.toLowerCase() === c.name.toLowerCase()));
   return <div ref={box} tabIndex={-1} className="setup-popover" role="dialog" aria-label={`${share.departmentLabel}: jobs`} onKeyDown={e => { if (e.key === 'Escape') onClose(); }}>
     <header><b>{share.departmentLabel} · {share.count}</b><button type="button" className="tool" aria-label="Close" title="Close" onClick={onClose}><UiIcon name="close" size={13}/></button></header>
-    <span className="setup-popover-label">Jobs</span>
+    <div className="setup-editor-grid"><section className="setup-editor-jobs"><h3>Jobs</h3>
     <ul>{rows.map((r, i) => <li key={r.name || i}><span>{r.name}</span><span className="setup-stepper">
       <button type="button" className="tool" aria-label={`One less ${r.name}`} disabled={busy || r.count < 1} onClick={() => set(i, r.count - 1)}><UiIcon name="minus" size={12}/></button>
       <b>{r.count}</b>
@@ -196,9 +196,9 @@ function DepartmentJobs({ share, busy, controller, entries, onClose }: { share: 
     {choices.length > 0 && <label className="setup-popover-add">Add a job<select value="" disabled={busy} onChange={e => { const c = choices.find(x => x.name === e.target.value); if (c) { controller.editSpecialties(share.department, [...rows, { name: c.name, description: c.description, count: 1 }]); controller.editShare(share.department, { count: share.count + 1 }); } }}>
       <option value="">Choose from Specialties…</option>{choices.filter(c => !c.group).map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
       {[...new Set(choices.map(c => c.group).filter((g): g is string => !!g))].map(g => <optgroup key={g} label={g}>{choices.filter(c => c.group === g).map(c => <option key={c.name} value={c.name}>{c.name}</option>)}</optgroup>)}</select></label>}
-    <span className="setup-popover-label">Personality</span>
+    </section><section className="setup-editor-personality"><h3>Personality</h3>
     <div aria-label={`Personality for ${share.departmentLabel}`}><PersonalityPicker client={controller.client} value={share.personalities?.specialist} defaultId="temperament-balanced" disabled={busy} onPick={e => controller.editShare(share.department, { role: 'specialist', personality: { id: e.id, revision: e.revision } })}/></div>
-    <small className="fine-print">{personalityLine(share, entries)}</small>
+    <small className="fine-print">{personalityLine(share, entries)}</small></section></div>
   </div>;
 }
 

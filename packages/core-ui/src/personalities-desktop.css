@@ -135,7 +135,7 @@
 /* Face picker (hiring, company wizard) */
 .pl-picker{position:relative;display:grid;gap:5px;font-size:12px}.pl-picker-label{color:var(--muted)}
 .pl-picker-button{justify-content:flex-start!important;gap:8px;min-block-size:32px;padding:0 10px;border-radius:8px;background:var(--secondary)}
-.pl-picker-button>span{flex:1;text-align:start}
+.pl-picker-button>.pl-picker-name{flex:1;min-inline-size:0;text-align:start}.pl-picker-button>.pl-face{flex:none;aspect-ratio:1}
 .pl-picker small{font-size:11px;color:var(--muted)}
 .pl-picker-faces{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;max-block-size:320px;overflow:auto}
 .pl-picker-faces button{display:grid!important;justify-items:center;gap:4px;padding:8px 4px;border-radius:8px;background:transparent;font-size:11.5px;text-align:center}

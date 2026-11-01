@@ -65,7 +65,7 @@ export function DiscoveryView({ c, active, kinds, noFolders = false }: { c: Disc
   useEffect(() => { if (active && s.phase === 'idle') void c.load(); }, [active, c, s.phase]);
   useEffect(() => { if (active && !s.places.top) void c.loadPlaces(); }, [active, c, s.places.top]);
   if (s.phase === 'idle' || (s.phase === 'loading' && !s.view)) return <p className="fine-print" role="status">Reading this computer… (memory files, project notes, skills, MCP servers, SSH hosts)</p>;
-  if (s.phase === 'error' || !s.view) return <p className="fine-print">{s.notice} <button type="button" className="link-button" onClick={() => void c.load()}>Try again</button></p>;
+  if (s.phase === 'error' || !s.view) return <p className="fine-print">{s.notice} <button type="button" className="link-button" disabled={s.scanning} onClick={() => void (s.permissionPending ? c.scan() : c.load())}>{s.scanning ? 'Searching…' : 'Try again'}</button></p>;
   const v = s.view;
   const root = v.roots.find(r => r.id === s.rootId) ?? null;
   const shown = c.shown().filter(i => !kinds || kinds.includes(i.kind)); const counts = c.counts();
@@ -162,7 +162,7 @@ export function DiscoveryView({ c, active, kinds, noFolders = false }: { c: Disc
           <span className="fine-print" dir="auto">Goes to {p.to}</span>
         </div>
         <pre className="disc-text" dir="auto">{p.text}{p.truncated ? '\n…' : ''}</pre>
-        {p.blocked && <p className="card-notice" role="alert">{blockedReason(p.blocked)}</p>}
+        {p.blocked && <p className={p.blocked === 'metadata_only' ? 'fine-print' : 'card-notice'} role={p.blocked === 'metadata_only' ? 'status' : 'alert'}>{blockedReason(p.blocked)}</p>}
         {p.kind === 'mcp' && p.secrets.length > 0 && !p.blocked && <fieldset className="disc-secret">
           <legend>{p.secrets.length === 1 ? 'A secret was found' : `${p.secrets.length} secrets were found`} ({p.secrets.join(', ')})</legend>
           <label className="check"><input type="radio" name="disc-secret" checked={s.secret === 'credentials'} onChange={() => c.setSecret('credentials')}/>Save it in Credentials (encrypted)</label>

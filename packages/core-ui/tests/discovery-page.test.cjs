@@ -195,3 +195,50 @@ test("don't show: one item, several, a kind from a project; merge two projects a
   await c.dismissSuggestion(c.getSnapshot().view.suggestions[0]);
   assert.ok(calls.some(r => /dismiss$/.test(r.path)));
 });
+
+test('SSH identity metadata is reviewable without an import action or private-key content', async () => {
+  const fixture = backend();
+  const client = { request: async request => {
+    const result = await fixture.client.request(request);
+    if (request.path === `${BASE}/items/${I(6)}` && result.status === 200) {
+      result.body.item = { ...result.body.item, state: 'decision', name: 'id_ed25519.pub',
+        text: 'Public fingerprint: SHA256:fictional-public-fingerprint\nPrivate file: ~/.ssh/id_ed25519 (name only)', blocked: 'metadata_only' };
+    }
+    return result;
+  } };
+  const controller = new DiscoveryController(client);
+  await controller.load(); await controller.open(I(6));
+  const html = renderToStaticMarkup(React.createElement(DiscoveryView, { c: controller, active: false }));
+  assert.ok(html.includes('SSH identity found.'));
+  assert.ok(html.includes('private key stays on this computer'));
+  assert.ok(html.includes('SHA256:fictional-public-fingerprint'));
+  assert.ok(!html.includes('role="alert"'));
+  const before = fixture.calls.length;
+  await controller.importOpen();
+  assert.equal(fixture.calls.length, before, 'metadata-only previews cannot send an import request');
+  controller.dispose();
+});
+
+test('pending filesystem permission preserves known sources and retries only after an explicit scan', async () => {
+  const fixture = backend(); const calls = []; let locked = false;
+  const client = { request: async request => {
+    calls.push(request);
+    if (locked && [BASE, `${BASE}/scan`].includes(request.path)) return { status: 423, body: discoveryResponse(request.path, 423, { code: 'permission_pending', path: '/private/example' }) };
+    return fixture.client.request(request);
+  } };
+  const controller = new DiscoveryController(client);
+  await controller.load(); const previous = controller.getSnapshot().view;
+  locked = true; const before = calls.length; await controller.load();
+  assert.equal(calls.length, before + 1, 'does not repeatedly retry a pending permission');
+  assert.equal(controller.getSnapshot().permissionPending, true);
+  assert.equal(controller.getSnapshot().phase, 'ready');
+  assert.equal(controller.getSnapshot().view, previous, 'a blocked read never replaces sources with missing items');
+  assert.deepEqual(discoveryResponse(BASE, 423, { code: 'permission_pending', path: '/private/example' }), { code: 'permission_pending' });
+  const html = renderToStaticMarkup(React.createElement(DiscoveryView, { c: controller, active: false }));
+  assert.ok(html.includes('Privacy &amp; Security'));
+  locked = false; await controller.scan();
+  assert.equal(calls.at(-1).method, 'POST');
+  assert.equal(calls.at(-1).path, `${BASE}/scan`);
+  assert.equal(controller.getSnapshot().permissionPending, false);
+  controller.dispose();
+});

@@ -1,3 +1,4 @@
+import { discoveryFs, isolatedReadRegularFile } from '../services/discovery-fs.js';
 /**
  * A project's design and local databases, found in its folder (read only).
  *
@@ -25,7 +26,7 @@ import os from 'node:os';
 import path from 'node:path';
 import yaml from 'js-yaml';
 import Database from 'better-sqlite3';
-import { readRegularFile } from '../services/read-regular-file.js';
+const readRegularFile = isolatedReadRegularFile;
 import { redactImportText } from '../memory/import/redact.js';
 
 const SKIP = new Set(['node_modules', 'vendor', '.git', 'dist', 'build', '.next', '.nuxt', '.svelte-kit', 'coverage', 'Pods', 'target', 'venv', '.venv', '__pycache__', '.cache', '.turbo', '.idea', '.vscode', 'tmp', '.local-runtime', '.claude', 'worktrees']);
@@ -68,7 +69,7 @@ async function walkFiles(root: string, keep: (rel: string, name: string) => bool
   const walk = async (dir: string, depth: number): Promise<void> => {
     if (depth > MAX_DEPTH || entries > MAX_ENTRIES || Date.now() > until || out.length >= 2000) return;
     let list: fsSync.Dirent[];
-    try { list = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+    try { list = await discoveryFs.readdir(dir, { withFileTypes: true }); } catch { return; }
     entries += list.length;
     for (const e of list) {
       if (e.isSymbolicLink()) continue;
@@ -212,7 +213,7 @@ export async function findDesign(root: string): Promise<DesignFound | null> {
     const rel = path.relative(root, file);
     if (IMAGE.test(name)) {
       if (logos.length >= 40) continue;
-      const st = await fs.stat(file).catch(() => null);
+      const st = await discoveryFs.stat(file).catch(() => null);
       if (!st || st.size > MAX_IMAGE) continue;
       const kind = /favicon|apple-touch/i.test(name) ? 'favicon' : /icon/i.test(name) && !/logo/i.test(name) ? 'icon' : 'logo';
       logos.push({ path: file, kind, bytes: st.size });
@@ -262,24 +263,18 @@ const DB_IMAGE = /(postgres|postgis|timescale|mysql|mariadb|mongo|redis|valkey|m
 const dbId = (kind: string, file: string, key = '') => sha(`${kind}\0${file}\0${key}`).slice(0, 16);
 
 async function isSqlite(file: string): Promise<boolean> {
-  let h: fs.FileHandle | undefined;
-  try {
-    h = await fs.open(file, fsSync.constants.O_RDONLY | (fsSync.constants.O_NOFOLLOW ?? 0));
-    const buf = Buffer.alloc(16);
-    await h.read(buf, 0, 16, 0);
-    return buf.toString('latin1') === 'SQLite format 3\0';
-  } catch { return false; } finally { await h?.close().catch(() => undefined); }
+  try { return (await isolatedReadRegularFile(file,16,{truncate:true})).data.toString('binary') === 'SQLite format 3\0'; } catch { return false; }
 }
 
 /** Table names of a SQLite file, read from a copy in a throwaway folder (never a row; the original is never opened by SQLite). */
 export async function sqliteTables(file: string): Promise<{ tables: string[] | null; note?: 'too-large' | 'unreadable'; bytes: number }> {
-  const st = await fs.stat(file).catch(() => null);
+  const st = await discoveryFs.stat(file).catch(() => null);
   if (!st) return { tables: null, note: 'unreadable', bytes: 0 };
   if (st.size > MAX_SQLITE_COPY) return { tables: null, note: 'too-large', bytes: st.size };
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dpro-sqlite-copy-'));
   try {
     const copy = path.join(dir, 'copy.sqlite');
-    await fs.copyFile(file, copy);
+    await discoveryFs.copyToTemp(file, copy);
     const db = new Database(copy, { readonly: true, fileMustExist: true });
     try {
       const rows = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name LIMIT 500").all() as Array<{ name: string }>;

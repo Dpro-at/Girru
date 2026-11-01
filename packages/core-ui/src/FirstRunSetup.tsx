@@ -1,3 +1,5 @@
+import { DiscoveryStream } from './DiscoveryStream';
+import { SetupOrb } from './SetupOrb';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { SessionClient } from './session';
 import { UiIcon } from './ui-icons';
@@ -12,8 +14,8 @@ import { WorkspaceTypeStep, type WorkspaceType } from './WorkspaceTypeStep';
 import { useAppTheme } from './app-navigation';
 
 /** FIRSTRUN-01 (boards FR2–FR3): the steps after the owner account, in the one setup window. */
-export type FirstRunStep = 'tools' | 'model' | 'team';
-const STEPS = ['Account', 'AI tools', 'Local model', 'Team'] as const;
+export type FirstRunStep = 'discovery' | 'tools' | 'model' | 'team';
+const STEPS = ['Account', 'Your files', 'AI tools', 'Local model', 'Team'] as const;
 type AiTool = { id: 'claude' | 'codex' | 'gemini'; name: string; installed: boolean; signedIn: boolean; install: string | null; signIn: string; needs?: 'node' };
 type LocalChoice = { id: string; label: string; sizeGb: number; note: string; minMemoryGb: number; installed?: boolean };
 type LocalStep = { memoryGb: number; recommended: string; choices: LocalChoice[]; ollama: boolean; installed: string[]; download: string | null; commands: Record<string, string | null> };
@@ -66,6 +68,7 @@ function useSetupTerminal(client: SessionClient) {
 
 export function FirstRunSetup({ client, initialStep, workspaceType: initialType, companyName: initialName, onDone }: { client: SessionClient; initialStep: FirstRunStep; workspaceType?: WorkspaceType; companyName?: string; onDone: (chatId: string | null) => void }) {
   const [step, setStep] = useState<FirstRunStep>(initialStep);
+  const [stepNotice, setStepNotice] = useState<string>();
   const [workspaceType, setWorkspaceType] = useState(initialType);
   const [companyName, setCompanyName] = useState(initialName);
   const [savingType, setSavingType] = useState(false);
@@ -84,7 +87,12 @@ export function FirstRunSetup({ client, initialStep, workspaceType: initialType,
   useEffect(() => { void window.dproApp?.setSetupWindow?.(true).catch(() => {}); }, []);
   // "Skip" on the local model needs a signed-in subscription, also when setup continues at that step.
   useEffect(() => { void get<{ tools: AiTool[] }>(client, '/api/first-run/tools').then(r => { if (r) setSignedIn(r.tools.some(t => t.signedIn)); }); }, [client]);
-  const go = (s: FirstRunStep) => { setStep(s); void save(client, s); };
+  const go = async (s: FirstRunStep) => {
+    setStepNotice(undefined);
+    const response = await save(client, s);
+    if (response?.status === 200) setStep(s);
+    else setStepNotice('Could not save this step. Try again before continuing.');
+  };
   const finish = async () => {
     let chatId: string | null = null;
     try { const r = await client.request({ method: 'POST', path: '/api/first-run/finish' } as never); chatId = (r.body as { conversationId?: string } | null)?.conversationId ?? null; } catch { /* the workspace opens anyway */ }
@@ -94,12 +102,70 @@ export function FirstRunSetup({ client, initialStep, workspaceType: initialType,
   const appearance = useAppTheme();
   return <div className="shell app-shell first-run-shell" data-theme={appearance.theme} lang="en" dir="ltr"><main className="first-run-setup" aria-label="Set up Girru">
     {!workspaceType || (workspaceType === 'company' && !companyName) ? <WorkspaceTypeStep value={workspaceType} companyName={companyName} busy={savingType} notice={typeNotice} onNext={(type, name) => void chooseType(type, name)}/> : <>
-    <SetupSteps current={step === 'tools' ? 'AI tools' : step === 'model' ? 'Local model' : 'Team'}/>
+    {step !== 'discovery' && <SetupOrb/>}
+    <SetupSteps current={step === 'discovery' ? 'Your files' : step === 'tools' ? 'AI tools' : step === 'model' ? 'Local model' : 'Team'}/>
+    {stepNotice && <p className="setup-note" role="alert">{stepNotice}</p>}
+    {step === 'discovery' && <DiscoveryStep client={client} onNext={() => go('tools')}/>}
     {step === 'tools' && <ToolsStep client={client} terminal={terminal} onSignedIn={setSignedIn} onNext={() => go('model')}/>}
     {step === 'model' && <ModelStep client={client} terminal={terminal} canSkip={signedIn} onBack={() => go('tools')} onNext={() => go('team')}/>}
     {step === 'team' && <TeamStep client={client} workspaceType={workspaceType} onBack={() => go('model')} onDone={finish}/>}
     </>}
   </main></div>;
+}
+
+export type SetupDiscovery = {
+  samples?: Array<{kind: 'folder' | 'file' | 'memory' | 'skill' | 'mcp' | 'ssh'; name: string}>;
+  folderNames?: string[];
+  status: 'idle' | 'scanning' | 'done' | 'error'; scanned: number;
+  counts: Record<'projects' | 'memories' | 'notes' | 'skills' | 'mcp' | 'ssh', number>;
+  denied: number; unavailable: number; limited: boolean; notice: string;
+};
+
+export function DiscoveryStep({ client, onNext }: { client: SessionClient; onNext: () => void }) {
+  const [result, setResult] = useState<SetupDiscovery | null>(null);
+  const [error, setError] = useState(false);
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    let live = true; let timer: ReturnType<typeof setTimeout> | undefined;
+    async function read(start = false) {
+      try {
+        let response = await client.request({ method: 'GET', path: '/api/first-run/discovery' } as never);
+        if (response.status !== 200) throw Error();
+        let next = response.body as SetupDiscovery;
+        if (start && (next.status === 'idle' || next.status === 'scanning' || (retry > 0 && next.status === 'error'))) {
+          response = await client.request({ method: 'POST', path: '/api/first-run/discovery' } as never);
+          if (response.status !== 200) throw Error();
+          next = response.body as SetupDiscovery;
+        }
+        if (!live) return;
+        setResult(next); setError(false);
+        if (next.status === 'scanning') timer = setTimeout(() => void read(), 1000);
+      } catch { if (live) setError(true); }
+    }
+    void read(true);
+    return () => { live = false; clearTimeout(timer); };
+  }, [client, retry]);
+  return <DiscoveryInventoryView result={result} error={error} onRetry={() => setRetry(value => value + 1)} onNext={onNext}/>;
+}
+
+export function DiscoveryInventoryView({ result, error = false, onRetry, onNext }: { result: SetupDiscovery | null; error?: boolean; onRetry: () => void; onNext: () => void }) {
+  const running = !error && (!result || result.status === 'idle' || result.status === 'scanning');
+  const labels = { projects: 'Projects', memories: 'Memory files', notes: 'Project notes', skills: 'Skills', mcp: 'MCP connections', ssh: 'SSH identities' } as const;
+  return <section className="setup-pane setup-discovery" data-running={running || undefined} aria-label="Find your files">
+    <h2>Discovering your work</h2>
+    <p>Finding projects, memory and tools on this computer.</p>
+    <div className="setup-discovery-visual"><DiscoveryStream items={result?.samples?.length ? result.samples : (result?.folderNames ?? []).map(name => ({ kind: 'folder' as const, name }))}/><SetupOrb large active={running}/></div>
+    {(running || result?.status === 'done') && <div className="setup-search-progress" data-complete={result?.status === 'done' || undefined}><progress aria-label={running ? 'Searching this computer' : 'Search complete'} {...(running ? {} : {value:1,max:1})}/><span aria-hidden="true"/></div>}
+    <p role="status">{error ? 'Could not read the search progress. Try again.' : result?.notice || 'Starting the search…'}</p>
+    <dl className="setup-discovery-counts">{(Object.keys(labels) as Array<keyof typeof labels>).map(key => <div key={key}><UiIcon name={key === 'projects' ? 'folder' : key === 'ssh' ? 'key' : key === 'skills' ? 'sparkle' : key === 'mcp' ? 'tool' : 'file'} size={20}/><dt>{labels[key]}</dt><dd>{(result?.counts[key] ?? 0).toLocaleString('en-US')}</dd></div>)}</dl>
+    <p className="fine-print">{result?.scanned ?? 0} entries checked{result?.denied ? ` · ${result.denied} ${result.denied === 1 ? 'folder' : 'folders'} denied access` : ''}{result?.unavailable ? ` · ${result.unavailable} ${result.unavailable === 1 ? 'folder' : 'folders'} unavailable` : ''}.</p>
+    {result?.limited && <p className="setup-note">Some locations could not be fully searched. The results show what Girru could reach.</p>}
+    <p className="fine-print">Your source files stay unchanged. Memory imports begin after your team is ready. Skills and MCP connections wait for your approval; private SSH key contents are never read or imported.</p>
+    <div className="setup-actions">
+      {(error || result?.status === 'error') && <button type="button" onClick={onRetry}>Try again</button>}
+      <button type="button" className="primary" disabled={error || result?.status !== 'done'} onClick={onNext}>Next</button>
+    </div>
+  </section>;
 }
 
 type Terminal = ReturnType<typeof useSetupTerminal>;

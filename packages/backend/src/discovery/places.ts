@@ -1,3 +1,4 @@
+import { discoveryFs, isolatedReadRegularFile } from '../services/discovery-fs.js';
 /**
  * Folders the owner allows Girru to read, file kinds, "don't show" rules and
  * merged projects (DISCOVER-02, board M18). Nothing outside an allowed folder
@@ -43,7 +44,7 @@ export function initPlaces() {
   })().catch((e) => { ready = undefined; throw e; });
 }
 
-const isDir = async (p: string) => (await fs.stat(p).catch(() => null))?.isDirectory() === true;
+const isDir = async (p: string) => (await discoveryFs.stat(p).catch(() => null))?.isDirectory() === true;
 const inside = (p: string, parent: string) => p === parent || p.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep);
 
 /** The drives of this computer (not the system disk itself). */
@@ -56,11 +57,11 @@ async function drives(platform = process.platform): Promise<string[]> {
   const bases = platform === 'darwin' ? ['/Volumes'] : [`/media/${os.userInfo().username}`, '/mnt'];
   const out: string[] = [];
   for (const b of bases) {
-    let entries; try { entries = await fs.readdir(b, { withFileTypes: true }); } catch { continue; }
+    let entries; try { entries = await discoveryFs.readdir(b, { withFileTypes: true }); } catch { continue; }
     for (const e of entries) {
       const p = path.join(b, e.name);
       // macOS lists the system disk as a link to "/": that is not a separate drive.
-      if (e.isSymbolicLink() && (await fs.realpath(p).catch(() => '')) === '/') continue;
+      if (e.isSymbolicLink() && (await discoveryFs.realpath(p).catch(() => '')) === '/') continue;
       if (await isDir(p)) out.push(p);
     }
   }
@@ -81,7 +82,7 @@ export function isSystemPath(p: string, home = os.homedir()): boolean {
   return first !== null && SYSTEM.has(first) && first !== 'Users' && first !== 'home';
 }
 async function subfolders(dir: string, limit = 400, home = os.homedir()): Promise<string[]> {
-  let entries; try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return []; }
+  let entries; try { entries = await discoveryFs.readdir(dir, { withFileTypes: true }); } catch { return []; }
   return entries.filter((e) => e.isDirectory() && !e.isSymbolicLink() && !e.name.startsWith('.') && !e.name.startsWith('$') && e.name !== 'node_modules' && !isSystemPath(path.join(dir, e.name), home)).map((e) => path.join(dir, e.name)).sort((a, b) => a.localeCompare(b)).slice(0, limit);
 }
 
@@ -138,7 +139,7 @@ export async function setPlaces(userId: string, input: { allow?: string[]; deny?
 /** A folder or drive typed by the owner: it must exist; the system disk itself and system folders are refused. */
 export async function checkAddedFolder(p: unknown): Promise<string> {
   if (typeof p !== 'string' || !p.trim() || p.length > 2048 || p.includes('\0') || !path.isAbsolute(p)) throw new PlacesError('invalid_input');
-  const real = await fs.realpath(p).catch(() => null);
+  const real = await discoveryFs.realpath(p).catch(() => null);
   if (!real || !(await isDir(real))) throw new PlacesError('not_found', 404);
   if (real === path.parse(real).root && process.platform !== 'win32') throw new PlacesError('system_folder');
   if (isSystemPath(real)) throw new PlacesError('system_folder');
@@ -149,13 +150,13 @@ export async function countFolder(p: string, limit = 50_000, ms = 4000): Promise
   let files = 0, bytes = 0, capped = false; const until = Date.now() + ms;
   const walk = async (d: string): Promise<void> => {
     if (capped) return;
-    let entries; try { entries = await fs.readdir(d, { withFileTypes: true }); } catch { return; }
+    let entries; try { entries = await discoveryFs.readdir(d, { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
       if (files >= limit || Date.now() > until) { capped = true; return; }
       if (e.isSymbolicLink() || e.name.startsWith('.') || e.name === 'node_modules') continue;
       const f = path.join(d, e.name);
       if (e.isDirectory()) await walk(f);
-      else if (e.isFile()) { files++; bytes += (await fs.lstat(f).catch(() => null))?.size ?? 0; }
+      else if (e.isFile()) { files++; bytes += (await discoveryFs.lstat(f).catch(() => null))?.size ?? 0; }
     }
   };
   await walk(p);

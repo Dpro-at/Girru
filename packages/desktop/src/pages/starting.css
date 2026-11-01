@@ -1,0 +1,10 @@
+:root{color-scheme:dark;--bg:#0e1119;--fg:#edf0f8;--muted:#a4aec1;--line:#ffffff20;--accent:#528bff}
+body{background:radial-gradient(ellipse at 50% 35%,#202034,#0e1119 68%)}
+.starting{width:min(650px,calc(100vw - 48px));text-align:center;justify-items:center;gap:18px}
+#startup-orb{display:block;width:clamp(180px,30vh,290px);height:clamp(180px,30vh,290px);margin-bottom:14px}
+#startup-orb[hidden]{display:none}
+.starting h1{font-size:26px;font-weight:580;letter-spacing:-.6px}
+.starting #start-status{font-size:13px;min-height:20px}
+.starting .progress-track{width:min(460px,90%);height:4px;background:#283650;margin:4px 0}
+.starting .progress-track span{background:linear-gradient(90deg,#528bff,#80d6ff)}
+.starting .fine-print{font-size:11px;color:#7f8ba2}

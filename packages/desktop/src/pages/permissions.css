@@ -28,3 +28,24 @@ button:disabled { cursor: default; opacity: .5; }
 .permissions-page footer { position: sticky; bottom: -28px; background: var(--bg); padding: 12px 0 20px; }
 
 .permission-notification-actions { display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
+
+/* Same calm native setup treatment as the account and team steps. */
+:root{color-scheme:dark;--bg:#0e1119;--fg:#edf0f8;--muted:#a4aec1;--line:#ffffff20;--accent:#528bff}
+body{background:radial-gradient(ellipse at 50% 20%,#202034,#0e1119 65%)}
+.permissions-page{width:min(980px,100%);padding:24px 40px 0}
+.permissions-page header{text-align:center}
+.permissions-page header .brand-mark{display:none}
+#permission-orb{width:90px;height:90px;display:block;margin:0 auto 12px}
+#permission-orb[hidden]{display:none}
+.permissions-page h1{font-size:28px;letter-spacing:-.6px;margin:4px 0 8px}
+.permissions-page header p{font-size:13px;max-width:70ch;margin:0 auto}
+.permission-list{margin:20px 0 12px;border:1px solid var(--line);border-radius:12px;padding:0 20px;background:linear-gradient(135deg,#ffffff07,#ffffff02)}
+.permission-row{padding:18px 0;gap:24px}
+.permission-row:last-child{border:0}
+.permission-row h2{font-size:14px}.permission-row p{font-size:12px;max-width:65ch}.permission-row small{font-size:11px}
+.permission-row h2 small{margin-inline-start:6px;font-weight:400}
+.permissions-page>p{font-size:11px;line-height:1.5}
+.permissions-page footer{bottom:0;padding:16px 0;background:#10141ff2;border-top:1px solid var(--line);backdrop-filter:blur(16px)}
+.permissions-page footer .primary{background:linear-gradient(#629aff,#3475f5);border:1px solid #80aeff66}
+@media(max-height:780px){.permissions-page{padding-top:12px}#permission-orb{width:64px;height:64px}.permission-row{padding:12px 0}.permission-list{margin-top:14px}}
+@media(max-width:600px){.permissions-page{padding:18px 20px 0}.permission-list{padding:0 12px}.permission-row{gap:12px}}

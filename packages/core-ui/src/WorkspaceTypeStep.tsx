@@ -1,3 +1,4 @@
+import { SetupOrb } from './SetupOrb';
 import { useState } from 'react';
 import { validCompanyName } from './owner-setup-contract.js';
 import { UiIcon } from './ui-icons';
@@ -11,6 +12,7 @@ export function WorkspaceTypeStep({ value, companyName: initialName, busy = fals
   const ready = !!pick && (pick !== 'company' || validCompanyName(companyName.trim()));
   const next = () => { if (ready && pick && !busy) onNext(pick, pick === 'company' ? companyName.trim() : undefined); };
   return <section className="setup-pane setup-intro" aria-label="Who is Girru for?">
+    <SetupOrb/>
     <h2>Who is Girru for?</h2>
     <p>Choose how you will use this workspace.</p>
     <div className="setup-audience" role="radiogroup" aria-label="Workspace type">

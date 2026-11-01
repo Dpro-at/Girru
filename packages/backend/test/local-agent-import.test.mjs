@@ -254,7 +254,7 @@ test('one project file: selected-folder discovery, redacted preview, durable imp
  writeFileSync(join(folder,'node_modules','AGENTS.md'),'Never import this dependency.');writeFileSync(join(docs,'secrets.md'),SECRET);
  const scan=await scanProjectDocuments('li-owner',[folder]);assert.equal(scan.documents.length,1,'identical content is listed once');
  const pages=join(dir,'scan-page');mkdirSync(pages);for(let i=0;i<2010;i++)writeFileSync(join(pages,`noise-${i}.json`),'{}');
- let automatic=await scanProjectDocuments('li-owner',{auto:true});assert.ok(automatic.documents.some(d=>d.id===scan.documents[0].id),'automatic computer scan finds project documents');
+ let automatic=await scanProjectDocuments('li-owner',{auto:true},{roots:[dir]});assert.ok(automatic.documents.some(d=>d.id===scan.documents[0].id),'automatic computer scan finds project documents');
  assert.ok(automatic.nextCursor,'large scan continues in bounded pages');
  await assert.rejects(()=>scanProjectDocuments('li-user',{auto:true,cursor:automatic.nextCursor}));
  const discovered=new Set(automatic.documents.map(d=>d.id));let pageCount=1;
@@ -327,4 +327,57 @@ test('a failed checkpoint after skipping an imported source cannot advance its c
  await L.stopLocalImports();
  const { savedImports } = await loadFile(join(backendDir,'src/memory/import/local-import-store.ts'));
  const saved = (await savedImports()).find(j=>j.id===job.id); assert.equal(saved.cursor, 1); assert.equal(saved.ids.length, 1);
+});
+
+test('whole-computer pages include mounted roots and recognized hidden app notes without credentials or tools', async () => {
+ const P=await loadFile(join(backendDir,'src/memory/import/project-documents.ts'));
+ const R=await loadFile(join(backendDir,'src/memory/import/computer-roots.ts'));
+ const f=await import('node:fs/promises');
+ const base=join(dir,'whole-device-fixture'),home=join(base,'home'),volume=join(base,'volume');
+ const write=async(file,text)=>{await f.mkdir(join(file,'..'),{recursive:true});await f.writeFile(file,text)};
+ await write(join(home,'.claude','CLAUDE.md'),'Global coding instructions.');
+ await write(join(home,'.codex','AGENTS.md'),'Global Codex instructions.');
+ await write(join(home,'.codex','memories','memory_summary.md'),'Codex durable project summary.');
+ await write(join(home,'.gemini','GEMINI.md'),'Global Gemini instructions.');
+ await write(join(home,'.codex','auth.json'),'credential sentinel never read');
+ await write(join(home,'Girru.app','Contents','docs','README.md'),'Bundled application docs must not be imported.');
+ await write(join(home,'.claude','commands','deploy.md'),'Do not install this command.');
+ await write(join(home,'.claude','projects','fictional','memory','project.md'),'Structured memories use their dedicated reader.');
+ for(let i=0;i<105;i++)await write(join(volume,'docs',`page-${i}.md`),`Mounted project document ${i}.`);
+ await write(join(volume,'Windows','docs','hidden.md'),'System documents are skipped.');
+ await write(join(home,'docs','api_tokens.md'),'Secret-named documents are skipped.');
+ const roots=await R.computerRoots({roots:[home,join(home,'.codex'),volume,join(base,'missing')]});
+ assert.equal(roots.roots.length,2);assert.equal(roots.unavailableRoots,1);
+ let page=await P.scanProjectDocuments('whole-device-owner',{auto:true},{purpose:'watch',home,roots:[base]});
+ assert.ok(page.nextCursor,'result pages are bounded');
+ const all=[...page.documents];const homes=new Set(page.memoryHomes);let count=1;
+ while(page.nextCursor){page=await P.scanProjectDocuments('whole-device-owner',{auto:true,cursor:page.nextCursor},{purpose:'watch',home});all.push(...page.documents);for(const h of page.memoryHomes)homes.add(h);count++;}
+ assert.ok(count>1);assert.equal(all.length,109);assert.equal(all.find(doc=>doc.relative===join('.codex','AGENTS.md')).root,await f.realpath(home),'hidden notes belong to their containing home, not the device scan root');assert.equal(page.allDocumentIds.length,109,'durable page receipts retain every source for restart recovery');
+ const text=(await Promise.all(all.map(async doc=>(await P.readProjectDocument('whole-device-owner',doc.id)).text))).join('\n');
+ assert.match(text,/Codex durable project summary/);assert.match(text,/Global Gemini/);assert.match(text,/Mounted project document 104/);
+ assert.doesNotMatch(text,/credential sentinel|Do not install|System documents|Secret-named|Bundled application docs/);
+ assert.ok(homes.has(await f.realpath(home)),'Claude memory root is handed to the dedicated structured reader');
+});
+
+
+test('automatic scan API cannot supply trusted root overrides through either input shape',async()=>{
+ const P=await loadFile(join(backendDir,'src/memory/import/project-documents.ts'));
+ assert.equal((await call('POST','/api/memory/import/local/documents',{roots:{auto:true}})).statusCode,400);
+ for(const input of [{auto:true,home:'/fictional'},{auto:true,roots:['/fictional']},{auto:true,purpose:'watch'}]){
+  await assert.rejects(()=>P.scanProjectDocuments('li-owner',input),/Invalid automatic scan input/);
+  assert.equal((await call('POST','/api/memory/import/local/documents',input)).statusCode,400);
+  assert.equal((await call('POST','/api/memory/import/local/documents',{roots:input})).statusCode,400);
+ }
+});
+
+
+test('first-run inventory preparation preserves explicit off and enables only an unconfigured preference',async()=>{
+ const A=await loadFile(join(backendDir,'src/memory/import/automatic-project-import.ts'));
+ await A.configureAutomaticImport('inventory-explicit-off',{enabled:false,intervalMinutes:60});
+ await A.prepareAutomaticImport('inventory-explicit-off',['a'.repeat(32)],[dir]);
+ assert.equal((await A.enableFirstRunAutomaticImport('inventory-explicit-off')).enabled,false);
+ await A.prepareAutomaticImport('inventory-new-owner',['b'.repeat(32)],[dir]);
+ assert.equal((await A.automaticImportSettings('inventory-new-owner')).enabled,false,'preparation is not consent');
+ const enabled=await A.enableFirstRunAutomaticImport('inventory-new-owner');assert.equal(enabled.enabled,true);assert.equal(enabled.intervalMinutes,15);
+ assert.ok(!Object.hasOwn(enabled,'configured'));assert.ok(!Object.hasOwn(enabled,'pending'),'private scan state never reaches the wire');
 });

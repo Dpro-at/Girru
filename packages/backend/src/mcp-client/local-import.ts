@@ -1,3 +1,4 @@
+import { discoveryFs, isolatedReadRegularFile } from '../services/discovery-fs.js';
 import fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import os from 'node:os';
@@ -98,12 +99,12 @@ export class LocalMcpImport {
  private scans=new Map<string,Scan>(); private queue: Promise<unknown>=Promise.resolve();
  constructor(readonly home=os.homedir()){}
  private async read(file:string) {
-  const home=await fs.realpath(this.home);const resolved=await fs.realpath(file);
+  const home=await discoveryFs.realpath(this.home);const resolved=await discoveryFs.realpath(file);
   if(!resolved.startsWith(home+path.sep))throw new LocalMcpError('source_unavailable');
   // Reject symlinks in every component below the selected home.
-  let current=home;for(const part of path.relative(home,resolved).split(path.sep)){current=path.join(current,part);if((await fs.lstat(current)).isSymbolicLink())throw new LocalMcpError('source_unavailable');}
+  let current=home;for(const part of path.relative(home,resolved).split(path.sep)){current=path.join(current,part);if((await discoveryFs.lstat(current)).isSymbolicLink())throw new LocalMcpError('source_unavailable');}
   if(path.resolve(file)!==resolved && path.resolve(file)!==path.join(path.resolve(this.home),path.relative(home,resolved)))throw new LocalMcpError('source_unavailable');
-  const handle=await fs.open(file,constants.O_RDONLY|constants.O_NOFOLLOW);try{const stat=await handle.stat();if(!stat.isFile()||stat.size>1024*1024)throw new LocalMcpError('source_unavailable');const buffer=Buffer.alloc(1024*1024+1);let size=0;while(size<buffer.length){const read=await handle.read(buffer,size,buffer.length-size,null);if(!read.bytesRead)break;size+=read.bytesRead;}if(size>1024*1024)throw new LocalMcpError('source_unavailable');return buffer.subarray(0,size).toString('utf8');}finally{await handle.close();}
+  return (await isolatedReadRegularFile(file,1024*1024,{root:home})).data.toString('utf8');
  }
  private async configurations(file:string):Promise<any> {const text=await this.read(file);return file.endsWith('.toml')?{mcpServers:parseMcpToml(text)}:JSON.parse(text);}
  async scan(owner:string) {
