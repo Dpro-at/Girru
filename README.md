@@ -42,7 +42,7 @@ An open-source operating system for AI agents—bringing your agents, models, to
 
 **Formerly known as Agent Player.**
 
-**🏗️ Built by Dpro. Building since May 2025.**
+**🏗️ A product of Dpro. Building since May 2025.**
 
 [🌐 Website](https://girru.dev/) · [⬇️ Download](https://github.com/Dpro-at/Girru/releases) · [📜 Changelog](https://girru.dev/changelog/) · [🤝 Contribute](CONTRIBUTING.md)
 
@@ -162,14 +162,7 @@ Run supported workflows on your infrastructure, manage access to knowledge and t
 
 Our privacy and AI governance design targets include:
 
-| Region | Relevant frameworks |
-|---|---|
-| 🇪🇺 **European Union** | **GDPR / DSGVO · EU AI Act** |
-| 🇺🇸 **United States — California** | **CCPA, as amended by CPRA** |
-| 🇬🇧 **United Kingdom** | **UK GDPR · DPA 2018 · PECR** |
-| 🇨🇭 **Switzerland** | **FADP** |
-| 🇨🇦 **Canada** | **PIPEDA**, alongside applicable provincial laws |
-| 🇸🇬 **Singapore** | **PDPA** |
+**GDPR / DSGVO · EU AI Act · CCPA / CPRA · UK GDPR · DPA 2018 · PECR · FADP · PIPEDA · PDPA**
 
 These are requirements we aim to support through product design and deployment controls. They are **not certifications or a claim of universal compliance**.
 
@@ -194,8 +187,48 @@ Girru brings these foundations together:
 | 🔌 **Tools and MCP** | Connections to additional capabilities |
 | 🧩 **Apps and extensions** | Specialised workflows |
 | ⚙️ **Model selection** | Supported models chosen for different agents and tasks |
+| 💻 **Code workspace** | Integrated project editing and agent-assisted coding; development acceptance ongoing |
+| 🧑‍🚀 **3D avatars** | Compatible characters that give agents a visual identity |
+| 🌍 **GenVR** | 3D worlds, simulation, and film production workflows in development |
+| 🔊 **Voice and voice cloning** | Spoken interaction, voice selection, and custom voices through supported speech engines |
 
 Availability and configuration vary by release and integration.
+
+## 🎭 Shape every agent’s personality and specialty
+
+Build a team of distinct specialists, each with a working style suited to its responsibilities.
+
+Configure each agent’s personality, specialty, role, department, preferred model, and permissions.
+
+- 🎨 **Personality** — Adjust traits such as creativity, caution, independence, thoroughness, and communication style.
+- 🎯 **Specialties** — Give agents focused expertise and instructions for their work.
+- 👥 **Roles and departments** — Organise responsibilities across your team.
+- ⚙️ **Models and permissions** — Choose supported models and control access to tools and resources.
+
+Shared context helps your specialists collaborate while their identities and access boundaries remain distinct. Available controls depend on the installed version.
+
+## 🧑‍🚀 Give every agent an avatar and a voice
+
+Give your team a recognisable presence alongside its personalities and specialties.
+
+- 🎭 **3D avatars** — Choose an available character or upload a compatible avatar for your agent.
+- 🔊 **Distinct voices** — Select supported voices to give different agents their own sound.
+- 🎙️ **Custom voices and voice cloning** — Use supported speech integrations to create a personalised voice from recordings you own or have permission to use.
+- 🌍 **Creative continuity** — Our GenVR direction connects character identity with scenes, stories, and virtual production.
+
+Avatar formats, voice selection, and voice-cloning availability depend on the installed version, speech engine, and integration. Some speech services require separate credentials or payment; supported local engines depend on your hardware and setup.
+
+## 📚 Learn from your work. Improve with experience.
+
+Our goal is for your agents to build on completed tasks, your feedback, and approved lessons—preserving useful experience in memory and refining reusable skills over time.
+
+- 🧠 **Retain useful lessons** — Carry relevant decisions, corrections, and task knowledge into future work.
+- 💬 **Learn from feedback** — Use your guidance to improve future approaches.
+- 🧰 **Develop reusable skills** — Build toward turning successful methods into repeatable instructions and workflows.
+- 🔄 **Share relevant experience** — Make approved knowledge available to other agents within memory and permission boundaries.
+- ✅ **Keep you in control** — Review and manage what the team retains through supported memory controls.
+
+Memory foundations are implemented; automatic skill refinement and learning coverage are evolving. Here, learning means retaining context and improving instructions and workflows—not automatically retraining the underlying AI models.
 
 ## 🤝 Meet with your AI team
 
@@ -226,6 +259,7 @@ Bring conversations into your workspace through supported integrations.
 | #️⃣ **Slack** | Slack integration |
 | ✉️ **Email** | Email integration |
 | 🌐 **Web chat** | Browser-based conversations |
+| 📞 **Phone calls** | Inbound and outbound calling through the Call Center extension and supported telephony providers |
 
 Each channel has its own setup, credentials, permissions, and supported operations. Consult the documentation for your installed version.
 
@@ -339,16 +373,6 @@ For setup instructions, see the [installation guide](docs/INSTALLATION.md).
 
 For source development, start with [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## 🗓️ Project history
-
-Girru began as **Agent Player**. It later became **Girru**, continuing the same project and its vision for an Agent OS.
-
-The first release, **v0.1.0**, followed on **20 July 2025**.
-
-Development continues toward a connected Agent OS for knowledge, collaboration, tools, and interaction with virtual and physical environments.
-
-Explore the [project timeline and releases](https://girru.dev/changelog/).
-
 ## 🤝 Build with us
 
 Girru is free and open source.
@@ -369,7 +393,7 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
 **[9MTM](https://github.com/9mtm)** — Creator & Lead Developer
 
-**Built by [Dpro](https://dpro.at/en/).**
+**A product of [Dpro](https://dpro.at/en/).**
 
 ## ⚖️ License
 
