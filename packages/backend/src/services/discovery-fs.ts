@@ -11,6 +11,7 @@ const failure = (code: string) => Object.assign(new Error('Local filesystem acce
 const worker = fileURLToPath(new URL('./discovery-fs-worker.cjs', import.meta.url));
 export class DiscoveryFileSystem {
   private child?: ChildProcess;
+  private children = new Set<ChildProcess>();
   private tail: Promise<unknown> = Promise.resolve();
   private next = 0;
   private blocked = new Set<string>();
@@ -28,8 +29,9 @@ export class DiscoveryFileSystem {
     if (this.child?.connected) return this.child;
     const env: NodeJS.ProcessEnv = {};
     for (const key of ['HOME', 'USERPROFILE', 'TMPDIR', 'TMP', 'TEMP', 'SystemRoot', 'SYSTEMROOT', 'WINDIR']) if (process.env[key]) env[key] = process.env[key];
-    const child = spawn(process.execPath, [this.options.worker ?? worker], { cwd: path.dirname(this.options.worker ?? worker), env, stdio: ['ignore', 'ignore', 'ignore', 'ipc'], windowsHide: true });
+    const child = spawn(process.execPath, [this.options.worker ?? worker], { cwd: path.dirname(worker), env, stdio: ['ignore', 'ignore', 'ignore', 'ipc'], windowsHide: true });
     child.unref(); child.channel?.unref(); child.on('error', () => {});
+    this.children.add(child); child.once('exit', () => this.children.delete(child));
     this.child = child; return child;
   }
   private request(op: string, file: string, extra: Record<string, unknown> = {}): Promise<any> {
@@ -69,7 +71,15 @@ export class DiscoveryFileSystem {
     return { data: Buffer.from(result.data, 'base64'), stat: hydrate(result.stat) as unknown as Stats, truncated: result.truncated as boolean };
   }
   async copyToTemp(file: string, target: string) { await this.request('copyToTemp', file, { target }); }
-  close() { this.child?.kill('SIGKILL'); this.child = undefined; }
+  async close() {
+    this.child = undefined;
+    await Promise.all([...this.children].map(child => new Promise<void>(resolve => {
+      if (child.exitCode !== null || child.signalCode !== null) return resolve();
+      const timer = setTimeout(resolve, 2500);
+      child.once('exit', () => { clearTimeout(timer); resolve(); });
+      child.kill('SIGKILL');
+    })));
+  }
 }
 export const discoveryFs = new DiscoveryFileSystem();
 export const isolatedReadRegularFile = discoveryFs.readRegularFile.bind(discoveryFs);

@@ -37,7 +37,7 @@ await app.register(setupRoutes);
 await app.register(authRoutes);
 await app.register(firstRunRoutes,{discovery:{home:dir,roots:[dir]}});
 await app.ready();
-test.after(async () => { await (await import('../src/onboarding/discovery.ts')).stopFirstRunDiscovery(); await app.close(); (await import('../src/services/discovery-fs.ts')).discoveryFs.close(); closeDatabase(); process.chdir(backendDir); rmSync(dir, { recursive: true, force: true, maxRetries: 10 }); });
+test.after(async () => { await (await import('../src/onboarding/discovery.ts')).stopFirstRunDiscovery(); await app.close(); await (await import('../src/services/discovery-fs.ts')).discoveryFs.close(); closeDatabase(); process.chdir(backendDir); rmSync(dir, { recursive: true, force: true, maxRetries: 10 }); });
 
 const OWNER = { name: 'Mohamed Test', email: 'owner@example.test', password: 'Fresh-Install-Pass-42!' };
 let token = '';
