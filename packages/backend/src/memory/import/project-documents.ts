@@ -1,3 +1,4 @@
+import { replaceDiscoveryFile } from '../../services/replace-discovery-file.js';
 import { discoveryFs, isolatedReadRegularFile } from '../../services/discovery-fs.js';
 /** Owner-selected project documentation. Originals stay read-only; the private catalog survives restart. */
 import fs from 'node:fs/promises';
@@ -35,7 +36,7 @@ function eligible(relative: string) { const parts=relative.split(path.sep); if(p
 
 const catalogFile = (user: string) => dataPath('project-document-catalogs', hash(user)+'.json');
 async function catalog(user: string): Promise<Record<string,Entry>> { try { return JSON.parse(await fs.readFile(catalogFile(user),'utf8')); } catch (e: any) { if(e.code==='ENOENT')return {};throw e; } }
-async function save(user: string, entries: Record<string,Entry>) { const file=catalogFile(user);await fs.mkdir(path.dirname(file),{recursive:true,mode:0o700});const temp=file+'.'+randomUUID()+'.tmp';await fs.writeFile(temp,JSON.stringify(entries),{mode:0o600,flag:'wx'});await fs.rename(temp,file); }
+async function save(user: string, entries: Record<string,Entry>) { const file=catalogFile(user);await fs.mkdir(path.dirname(file),{recursive:true,mode:0o700});const temp=file+'.'+randomUUID()+'.tmp';await fs.writeFile(temp,JSON.stringify(entries),{mode:0o600,flag:'wx'});await replaceDiscoveryFile(temp,file); }
 async function read(entry: Entry) {
  const real=await discoveryFs.realpath(entry.file),relative=path.relative(entry.root,real);if(real!==entry.file || relative==='..' || relative.startsWith('..'+path.sep) || path.isAbsolute(relative) || !eligible(relative))throw Error('Document unavailable');
  const {data,stat}=await isolatedReadRegularFile(real,MAX_DOCUMENT_BYTES,{root:entry.root});const text=data.toString('utf8');if(text.includes('\0'))throw Error('Not a text document');return {text,stat};
@@ -133,6 +134,6 @@ async function scanComputerPage(user:string,cursor:unknown,watch=false,options:C
   if(current.offset>=items.length)state.queue.shift();
  }
  state.seen=[...seen];await save(user,entries);
- await fs.writeFile(file+'.tmp',JSON.stringify(state),{mode:0o600});await fs.rename(file+'.tmp',file);
+ await fs.writeFile(file+'.tmp',JSON.stringify(state),{mode:0o600});await replaceDiscoveryFile(file+'.tmp',file);
  return {documents,limited:state.limited,scanned:state.scanned,deniedRoots:state.deniedRoots??0,unavailableRoots:state.unavailableRoots??0,skippedFiles:state.skippedFiles??0,memoryHomes:state.memoryHomes??[],allDocumentIds:state.seen,nextCursor:state.queue.length?state.cursor:null};
 }

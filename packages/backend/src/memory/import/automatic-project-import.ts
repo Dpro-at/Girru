@@ -1,3 +1,4 @@
+import { replaceDiscoveryFile } from '../../services/replace-discovery-file.js';
 /** Opt-in local project import schedule. Enabled schedules save their own redacted extracted facts automatically. */
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -16,7 +17,7 @@ async function read(user:string):Promise<Saved>{try{const value=JSON.parse(await
 const writes=new Map<string,Promise<Saved>>();
 async function patch(user:string,update:(s:Saved)=>Saved):Promise<Saved>{
  const previous=writes.get(user)??Promise.resolve(defaults(user));
- const next=previous.catch(()=>defaults(user)).then(async()=>{const value=update(await read(user));await fs.mkdir(folder(),{recursive:true,mode:0o700});const temp=file(user)+'.'+randomUUID()+'.tmp';await fs.writeFile(temp,JSON.stringify(value),{mode:0o600,flag:'wx'});await fs.rename(temp,file(user));return value;});
+ const next=previous.catch(()=>defaults(user)).then(async()=>{const value=update(await read(user));await fs.mkdir(folder(),{recursive:true,mode:0o700});const temp=file(user)+'.'+randomUUID()+'.tmp';await fs.writeFile(temp,JSON.stringify(value),{mode:0o600,flag:'wx'});await replaceDiscoveryFile(temp,file(user));return value;});
  writes.set(user,next);try{return await next;}finally{if(writes.get(user)===next)writes.delete(user);}
 }
 const visible=({userId:_,cursor:__,pending:___,scanningComplete:____,memoryHomes:_____,configured:______,...settings}:Saved):AutomaticImportSettings=>settings;

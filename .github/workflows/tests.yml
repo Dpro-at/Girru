@@ -90,4 +90,13 @@ jobs:
         run: |
           npm ci --prefix packages/backend
           cd packages/backend
-          node --import tsx --import ../../scripts/test-temp-root.mjs --test --test-timeout=90000 test/first-run-steps.test.mjs test/local-agent-import.test.mjs
+          node --import tsx --import ../../scripts/test-temp-root.mjs --test --test-timeout=90000 test/first-run-steps.test.mjs test/replace-discovery-file.test.mjs test/local-agent-import.test.mjs
+
+      - name: Repeat Windows first-run checkpoint replacement
+        if: runner.os == 'Windows'
+        shell: bash
+        working-directory: packages/backend
+        run: |
+          for attempt in {1..10}; do
+            node --import tsx --import ../../scripts/test-temp-root.mjs --test --test-timeout=90000 test/first-run-steps.test.mjs
+          done
