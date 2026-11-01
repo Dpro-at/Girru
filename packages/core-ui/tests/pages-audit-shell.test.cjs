@@ -24,7 +24,7 @@ test('an MCP connection is not an app: it lives in Settings › MCP connections,
  assert.match(shell,/else if\(page==='mcp'\)openSettings\('mcp'\);/);
 });
 test('places inside Library, the Store and Settings show the way back on top of their sidebar (board SH1)',()=>{
- assert.match(shell,/placeParent[^=]*=\s*\{ personalities: 'library', specialties: 'library', skills: 'library', terminal: 'store' \}/);
+ assert.match(shell,/placeParent[^=]*=\s*\{ personalities: 'library', specialties: 'library', skills: 'library', rules: 'library', terminal: 'store' \}/);
  assert.match(shell,/settingsCurrent=\{page==='settings'\}/);
  assert.match(shell,/className="agent-return place-return" onClick=\{\(\)=>setPage\(placeParent\[page\]!\)\}/);
  assert.match(shell,/onOpenMcp=\{\(\)=>setPage\('mcp'\)\} onOpenApprovals=\{\(\)=>setPage\('approvals'\)\}/);assert.doesNotMatch(shell,/connectorsFocus/);
@@ -35,4 +35,15 @@ test('MCP connections stays inside Settings: its places nest under its row, no "
  assert.match(st,/t\.value==='mcp'&&active_==='mcp'&&<div ref=\{setMcpNav\}/);
  assert.match(st,/<McpSection client=\{client!\} active=\{active\} nav=\{mcpNav\}/);
  assert.doesNotMatch(shell,/<McpSection /);
+});
+
+test('Library exposes the same Rules editor to the owner without expanding member access',()=>{
+ const {libraryPlaces}=require('../src/LibrarySection.tsx');
+ assert.deepEqual(libraryPlaces(true).map(p=>p.id),['personalities','specialties','skills','rules']);
+ assert.equal(libraryPlaces().some(p=>p.id==='rules'),false);
+ assert.equal(libraryPlaces(false).some(p=>p.id==='rules'),false);
+ assert.match(shell,/<LibrarySection canManageRules=\{owner\}/);
+ assert.match(shell,/Library › Rules/);
+ const rules=fs.readFileSync(path.join(__dirname,'../src/RulesLibrary.tsx'),'utf8');
+ assert.match(rules,/<AgentRules client=\{client\} active=\{active\} agents=\{agents\}/);
 });

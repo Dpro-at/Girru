@@ -55,7 +55,7 @@ function motionCatalog(root) {
   return { entries, problems };
 }
 
-function createStudioHost({ env = process.env, packageRoot } = {}) {
+function createStudioHost({ env = process.env, packageRoot, voiceProvider } = {}) {
   const home = os.homedir();
   const state = path.resolve(env.DPRO_GENVR_STATE || path.join(home, '.genvr', 'dpro-studio'));
   const libraryRoot = env.DPRO_GENVR_LIBRARY ? path.resolve(env.DPRO_GENVR_LIBRARY) : null;
@@ -83,7 +83,8 @@ function createStudioHost({ env = process.env, packageRoot } = {}) {
   async function start() {
     const { createLiveStudioBridge } = await import(pathToFileURL(path.join(vendor, 'live-studio-bridge.mjs')).href);
     const { createLocalVoice } = await import(pathToFileURL(path.join(vendor, 'local-voice.mjs')).href);
-    voice = createLocalVoice({
+    const generated = (audio, sessionId, projectId) => { const rows = bridge.list().filter(row => row.projectId === projectId); return bridge.call(audio.control ? 'avatar_speech_control' : 'avatar_speech', audio, sessionId ?? (rows.length === 1 ? rows[0].id : undefined)); };
+    voice = voiceProvider ? await voiceProvider(generated) : createLocalVoice({
       directory: path.resolve(env.DPRO_GENVR_VOICES || path.join(home, '.genvr', 'voices')),
       python: env.GENVR_VOICE_PYTHON || undefined,
       modelCache: path.resolve(env.DPRO_GENVR_VOICE_MODELS || path.join(home, '.genvr', 'voice-models')),

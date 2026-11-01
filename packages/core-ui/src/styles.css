@@ -1,4 +1,6 @@
 @import './sections-cleanup.css';
+@import './chat-voice.css';
+@import './voice-settings.css';
 @import './meetings.css';
 @import './mcp-in-settings.css';
 @import './org-chart.css';
