@@ -339,9 +339,9 @@ For setup instructions, see the [installation guide](docs/INSTALLATION.md).
 
 For source development, start with [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## 🗓️ Building since May 2025
+## 🗓️ Project history
 
-Girru began as **Agent Player** on **30 May 2025**. It later became **Girru**, continuing the same project and its vision for an Agent OS.
+Girru began as **Agent Player**. It later became **Girru**, continuing the same project and its vision for an Agent OS.
 
 The first release, **v0.1.0**, followed on **20 July 2025**.
 
@@ -369,7 +369,7 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
 **[9MTM](https://github.com/9mtm)** — Creator & Lead Developer
 
-**Built by [Dpro](https://dpro.at/en/). Building since May 2025.**
+**Built by [Dpro](https://dpro.at/en/).**
 
 ## ⚖️ License
 
