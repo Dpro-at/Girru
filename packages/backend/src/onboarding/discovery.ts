@@ -1,3 +1,4 @@
+import { replaceDiscoveryFile } from '../services/replace-discovery-file.js';
 import { discoveryFs } from '../services/discovery-fs.js';
 /** Owner-scoped first-run inventory. Saves counts and source metadata, never creates agents or imports memories. */
 import fs from 'node:fs/promises';
@@ -22,7 +23,7 @@ const visible = ({ status, scanned, counts, denied, unavailable, limited, notice
 export const displaySamples = (samples: readonly DiscoverySample[]): DiscoverySample[] => samples.filter(item => ['folder','file','memory','skill','mcp','ssh'].includes(item.kind) && typeof item.name === 'string' && item.name.length > 0 && item.name.length <= 64 && !/[\\/\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(item.name)).slice(-18);
 const updateSamples = (state: Saved, incoming: DiscoverySample[]) => { const all = [...state.samples ?? [], ...incoming]; state.samples = (['folder','file','memory','skill','mcp','ssh'] as const).flatMap(kind => [...new Map(displaySamples(all.filter(item => item.kind === kind)).map(item => [item.name,item])).values()].slice(-3)); };
 async function read(user: string): Promise<Saved> { try { return JSON.parse(await fs.readFile(filename(user), 'utf8')); } catch (error: any) { if (error.code === 'ENOENT') return initial(); throw error; } }
-async function save(user: string, state: Saved) { const file = filename(user); await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 }); const temp = file + '.' + randomUUID() + '.tmp'; await fs.writeFile(temp, JSON.stringify(state), { mode: 0o600, flag: 'wx' }); await fs.rename(temp, file); }
+async function save(user: string, state: Saved) { const file = filename(user); await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 }); const temp = file + '.' + randomUUID() + '.tmp'; await fs.writeFile(temp, JSON.stringify(state), { mode: 0o600, flag: 'wx' }); await replaceDiscoveryFile(temp, file); }
 const active = new Map<string, { work: Promise<void>; stopped: boolean }>();
 export async function firstRunDiscovery(user: string): Promise<DiscoveryProgress> { return visible(await read(user)); }
 const starting=new Map<string,Promise<DiscoveryProgress>>();
