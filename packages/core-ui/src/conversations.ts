@@ -18,7 +18,7 @@ import type { Turn } from './turns';
 export type Conversation = WireConversation;
 export type Project = WireProject;
 /** about: the first words of the agent's description ("Frontend developer"), shown after its name; subAgentOf: whose sub-agent it is. */
-export type AgentChoice = Readonly<{ id: string; name: string; primary?: boolean; about?: string; subAgentOf?: string }>;
+export type AgentChoice = Readonly<{ id: string; name: string; department?: string | null; primary?: boolean; about?: string; subAgentOf?: string }>;
 export type ModelOption = Readonly<{ id: string; provider: 'ollama' | 'claude' | 'lmstudio' | 'subscription'; label: string; size: string; think?: boolean; variants?: readonly Readonly<{ id: string; label: string; note?: string }>[] }>;
 /** CH3: the Thinking choice applies (Auto and each agent's own pass it where the model can; Claude Code / Codex sessions; a listed model marked think). */
 export const canThink = (model: string, models: readonly ModelOption[]): boolean => {
@@ -151,6 +151,13 @@ export class ConversationsController {
   selectAgent(agentId: string) { if (!this.#state.activeId) this.publish({ agentId }); }
   /** In an open conversation: which agent writes the next replies ('' = the conversation's own agent). */
   setReplyAgent(agentId: string) { if (agentId === '' || this.#state.agents.some(a => a.id === agentId)) this.publish({ replyAgent: agentId }); }
+  /** A paged meeting roster may include an invited agent outside the loaded chat picker page. */
+  setMeetingReplyAgent(agent: AgentChoice) {
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(agent.id) || !agent.name || agent.name.length > 200) return;
+    const agents = this.#state.agents.some(a => a.id === agent.id) ? this.#state.agents.map(a => a.id === agent.id ? { ...a, name: agent.name, department: agent.department } : a) : [...this.#state.agents, { id: agent.id, name: agent.name, department: agent.department }];
+    this.publish({ agents, replyAgent: agent.id });
+  }
+
   /** The agent an "@Name" in the text points to (longest name wins), if any. */
   mentioned(text: string): AgentChoice | undefined {
     const lower = text.toLowerCase();
@@ -342,7 +349,7 @@ export class ConversationsController {
       const r = await this.client.request({ method: 'GET', path: '/api/agents' });
       if (!this.live() || r.status !== 200 || !record(r.body) || !Array.isArray(r.body.agents)) return;
       const about = (d: unknown) => { const t = typeof d === 'string' ? d.split(/[.\n]/)[0].trim() : ''; return t && t.length <= 64 ? t : ''; };
-      this.publish({ agents: (r.body.agents as { id: string; name?: string; isPrimary?: boolean; description?: string; subAgentOf?: string | null }[]).map(a => ({ id: a.id, name: a.name ?? a.id, ...(a.isPrimary ? { primary: true } : {}), ...(about(a.description) ? { about: about(a.description) } : {}), ...(typeof a.subAgentOf === 'string' && a.subAgentOf ? { subAgentOf: a.subAgentOf } : {}) })) });
+      this.publish({ agents: (r.body.agents as { id: string; name?: string; department?: string | null; isPrimary?: boolean; description?: string; subAgentOf?: string | null }[]).map(a => ({ id: a.id, name: a.name ?? a.id, department: typeof a.department === 'string' ? a.department : null, ...(a.isPrimary ? { primary: true } : {}), ...(about(a.description) ? { about: about(a.description) } : {}), ...(typeof a.subAgentOf === 'string' && a.subAgentOf ? { subAgentOf: a.subAgentOf } : {}) })) });
     } catch { /* the picker stays on the primary agent */ }
   }
 
@@ -463,9 +470,10 @@ export class ConversationsController {
   clearFocus() { if (this.#state.focus) this.publish({ focus: null }); }
 
   /** Sends the draft (or `text`); while the agent works, the message waits in the queue. */
-  async send(text?: string) {
+  async send(text?: string, frame?: { name: string; type: string; data: string }) {
+    if (frame && (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(frame.type) || frame.data.length > MAX_IMAGE_CHARS)) { this.publish({ notice: 'The meeting frame is not a supported image or is too large. Nothing was sent.' }); return; }
     const files = text === undefined ? this.#state.attachments : [];
-    const images = text === undefined ? this.#state.images : [];
+    const images = frame ? [{ ...frame, name: frame.name.slice(0,120), key: this.newId() }] : text === undefined ? this.#state.images : [];
     const typed = text ?? this.#state.draft;
     const message = withAttachments((text ?? this.#state.draft).trim() || (images.length ? `(${images.length === 1 ? 'An image' : `${images.length} images`} attached)` : ''), files);
     if (!this.live() || !message) return;
@@ -512,7 +520,7 @@ export class ConversationsController {
         const u = await this.call('POST', `/api/chat/conversations/${id}/images`, { data: img.data, name: img.name });
         if (!this.live() || seq !== this.#openSeq) return;
         if (u.status !== 201 || !record(u.body) || !record(u.body.image) || typeof u.body.image.id !== 'string') {
-          this.publish({ starting: false, turns: this.#state.turns.filter(t => t !== optimistic), draft: this.#state.draft || typed, attachments: files, images,
+          this.publish({ starting: false, turns: this.#state.turns.filter(t => t !== optimistic), draft: this.#state.draft || typed, attachments: files, images: frame ? this.#state.images : images,
             notice: `${img.name} could not be attached${record(u.body) && typeof u.body.error === 'string' ? `: ${u.body.error}` : '.'} Nothing was sent.` });
           return;
         }

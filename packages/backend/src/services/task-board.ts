@@ -410,6 +410,10 @@ export function renameColumn(ownerId: string, boardId: string, columnId: string,
 }
 
 export function createCard(ownerId: string, boardId: string, body: Record<string, unknown>, opts: { conversationId?: string } = {}): Promise<BoardCard> {
+  return sql().tx(() => createCardSteps(ownerId, boardId, body, opts), { immediate: true });
+}
+
+export function* createCardSteps(ownerId: string, boardId: string, body: Record<string, unknown>, opts: { conversationId?: string } = {}): Step<BoardCard> {
   onlyKeys(body, ['columnId', 'title', 'description', 'priority', 'dueDate', 'agents', 'departments', 'type', 'startDate', 'cover', 'labels']);
   const title = line(body.title, 'title', MAX_TITLE);
   const type = body.type === undefined ? 'task' : cardType(body.type);
@@ -422,7 +426,6 @@ export function createCard(ownerId: string, boardId: string, body: Record<string
   const agents = body.agents === undefined ? [] : idList(body.agents, 'agents', MAX_CARD_AGENTS);
   const deps = body.departments === undefined ? [] : departments(body.departments);
   datesOk(start, due);
-  return sql().tx(function* () {
     const d = yield* dialect();
     yield* boardRow(ownerId, boardId);
     const col = yield* columnOf(boardId, body.columnId);
@@ -436,7 +439,6 @@ export function createCard(ownerId: string, boardId: string, body: Record<string
     if (opts.conversationId) yield* run('UPDATE board_cards SET conversation_id = ? WHERE id = ?', opts.conversationId, id);
     yield* logActivity(id, 'created', { kind: 'user', id: ownerId }, (yield* moveKind(boardId, col.id)).name);
     return (yield* cardsOf(boardId, true, id))[0];
-  }, { immediate: true });
 }
 
 /**

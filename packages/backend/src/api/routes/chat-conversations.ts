@@ -1,3 +1,4 @@
+import { assertMeetingWriter, invalidateMeetingSummary, MeetingError } from '../../services/meetings.js';
 import {subscriptionModel,subscriptionEnabled,chatWorkspace,removeChatWorkspace} from '../../services/subscription-chat.js';
 import {projectFolders} from '../../services/project-folder-picker.js';
 /**
@@ -182,7 +183,7 @@ interface TurnStart { code: number; body: Record<string, unknown>; retryAfter?: 
  * Starts one turn of a saved conversation (checked input). Shared by POST runs and by the
  * continuation after the owner decides a waiting approval (CHAT-BUILD-01).
  */
-async function startTurn(t: { userId: string; role: string; c: Conversation; runId: string; message: string; model?: string; agentId?: string; images?: string[] }): Promise<TurnStart> {
+export async function startTurn(t: { userId: string; role: string; c: Conversation; runId: string; message: string; displayMessage?: string; model?: string; agentId?: string; images?: string[] }): Promise<TurnStart> {
   const { userId, c } = t;
   const b = { runId: t.runId, message: t.message, model: t.model, agentId: t.agentId };
   const send = (code: number, body: Record<string, unknown>): TurnStart => ({ code, body });
@@ -214,6 +215,7 @@ async function startTurn(t: { userId: string; role: string; c: Conversation; run
   if (accepted) return send(202, { runId: b.runId, replayed: true, userMessage: accepted });
   // CHAT-SECRETS-01: secrets go encrypted into the key store; the message keeps references only.
   const vaulted = await vaultSecretsInText(userId, c.id, b.message);
+  const displayed = t.displayMessage === undefined ? vaulted : await vaultSecretsInText(userId, c.id, t.displayMessage);
   const journal = { run_id: b.runId, user_id: userId, session_id: c.id, agent_id: b.agentId ?? null, started_at: Date.now() };
   const reviewTools = await needsRecoveryReview(c.id);
   // CHAT-BUILD-01: approvals decided since the previous turn began come back into the chat as data.
@@ -221,7 +223,7 @@ async function startTurn(t: { userId: string; role: string; c: Conversation; run
   const accept = async (): Promise<TurnStart | null> => {
     // Marked as starting before the row exists, so a parallel request never takes it for a stale row.
     starting.add(b.runId);
-    try { await acceptChatRun(journal, vaulted.text); return null; } catch {
+    try { await acceptChatRun(journal, displayed.text); return null; } catch {
       starting.delete(b.runId);
       // Unique run/session indexes arbitrate racing starts across awaits.
       const active = chatRuns.activeFor(c.id);
@@ -246,7 +248,7 @@ async function startTurn(t: { userId: string; role: string; c: Conversation; run
   let userMessage: ConversationMessage, messages: ReturnType<typeof historyFor>, turns: HistoryTurn[], handoff: Awaited<ReturnType<typeof packHandoffText>> | null;
   try {
     userMessage = (await listConversationMessages(c.id)).find(m => m.runId === b.runId && m.role === 'user')!;
-    const named = namedReplies([...prior, userMessage], team, replyAgent, c.agentId);
+    const named = namedReplies([...prior, { ...userMessage, content: vaulted.text }], team, replyAgent, c.agentId);
     // CHAT-GAPS-01: calls that waited on the owner show the decided result in the tool work record.
     const outcomes = await approvalOutcomes(userId, c.id, named).catch(() => undefined);
     messages = historyFor(named, HISTORY_CHARS, outcomes);
@@ -322,7 +324,9 @@ export async function sendScheduled(userId: string, sessionId: string, message: 
   const c = await findConversation(userId, sessionId);
   const user = await q.one<{ role: string; status: string }>('SELECT role, status FROM users WHERE id = ?', userId);
   if (!c || c.archived || !user || user.status !== 'active' || user.role !== 'owner' || chatRuns.activeFor(c.id)) return false;
+  try { await assertMeetingWriter(userId,c.id,c.agentId); } catch(error) { if(error instanceof MeetingError)return false; throw error; }
   const out = await startTurn({ userId, role: user.role, c, runId: runKey.slice(0, 128), message, ...(c.model ? { model: c.model } : {}) });
+  if(out.code===202)await invalidateMeetingSummary(userId,c.id);
   return out.code === 202;
 }
 
@@ -382,12 +386,15 @@ function sidebarChangeOk(x: unknown): boolean {
 }
 
 /** Status for the sidebar: `running` (a turn is answering) and `waiting` (approvals waiting for the owner). */
-export async function withStatus(userId: string, list: Conversation[]): Promise<Array<Conversation & { running?: true; waiting?: number; schedule?: { next: string; paused: boolean } }>> {
+export async function withStatus(userId: string, list: Conversation[]): Promise<Array<Conversation & { running?: true; waiting?: number; schedule?: { next: string; paused: boolean }; meeting?: { id: string; state: string } }>> {
+  if (!list.length) return [];
+  const meetingRows = await q.all<{id:string;conversation_id:string;state:string}>(`SELECT id,conversation_id,state FROM meetings WHERE owner_id=? AND conversation_id IN (${list.map(() => '?').join(',')})`,userId,...list.map(c=>c.id));
+  const meetings = new Map(meetingRows.map(m=>[m.conversation_id,{id:m.id,state:m.state}]));
   const schedules = await schedulesByChat(userId);
   const waiting = new Map((await q.all<{ session_id: string; n: number }>("SELECT session_id, COUNT(*) AS n FROM tool_approvals WHERE user_id = ? AND status = 'pending' AND session_id IS NOT NULL GROUP BY session_id", userId).catch(() => []))
     .map((r) => [r.session_id, Number(r.n)]));
   const at = (iso: string) => new Date(iso).toLocaleString('en', { weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
-  return list.map((c) => ({ ...c, ...(chatRuns.activeFor(c.id) ? { running: true as const } : {}), ...(waiting.get(c.id) ? { waiting: waiting.get(c.id) } : {}),
+  return list.map((c) => ({ ...c, ...(meetings.has(c.id) ? {meeting:meetings.get(c.id)!} : {}), ...(chatRuns.activeFor(c.id) ? { running: true as const } : {}), ...(waiting.get(c.id) ? { waiting: waiting.get(c.id) } : {}),
     ...(schedules.has(c.id) ? { schedule: { next: schedules.get(c.id)!.paused ? 'paused' : at(schedules.get(c.id)!.nextRun), paused: schedules.get(c.id)!.paused } } : {}) }));
 }
 
@@ -664,7 +671,9 @@ export async function chatConversationRoutes(fastify: FastifyInstance) {
     // CHAT-PRO-02 I: another agent of the team may write this reply (owner only: other users talk to the conversation's agent).
     if (b.agentId !== undefined && (typeof b.agentId !== 'string' || !AGENT_ID.test(b.agentId))) return bad(reply, 'invalid agentId');
     if (b.images !== undefined && (!Array.isArray(b.images) || b.images.length > MAX_IMAGES_PER_MESSAGE || b.images.some((id: unknown) => !readChatImage(c.id, id)))) return bad(reply, `images must be up to ${MAX_IMAGES_PER_MESSAGE} images saved with this chat`);
+    try { await assertMeetingWriter(userId, c.id, b.agentId ?? c.agentId); } catch (error) { if(error instanceof MeetingError) return reply.code(error.status).send({code:error.code,error:error.message});throw error; }
     const out = await startTurn({ userId, role: (request as any).chatUserRole, c, runId: b.runId, message: b.message, model: b.model, agentId: b.agentId, images: b.images });
+    if (out.code === 202) await invalidateMeetingSummary(userId, c.id);
     if (out.retryAfter) reply.header('Retry-After', out.retryAfter);
     return reply.code(out.code).send(out.body);
   });

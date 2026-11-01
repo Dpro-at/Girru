@@ -117,7 +117,7 @@ test('initialize and tools/list over stdio', async () => {
     assert.match(init.result.instructions, /spawn_small_agent/);
     const list = await srv.request('tools/list', {});
     const tools = list.result.tools;
-    assert.deepEqual(tools.map((t) => t.name), ['workspace_settings', 'trading_practice', 'workspace_apps', 'workspace_store', 'agents', 'chats', 'workspace_approvals', 'workspace_rules', 'workspace_tasks', 'workspace_footer', 'account_settings', 'workspace_backups', 'skill_library', 'personality_library', 'specialty_library', 'spawn_small_agent', 'get_result', 'list_runs', 'list_handoffs', 'read_handoff', 'edit_handoff']);
+    assert.deepEqual(tools.map((t) => t.name), ['meetings', 'workspace_settings', 'trading_practice', 'workspace_apps', 'workspace_store', 'agents', 'chats', 'workspace_approvals', 'workspace_rules', 'workspace_tasks', 'workspace_footer', 'account_settings', 'workspace_backups', 'skill_library', 'personality_library', 'specialty_library', 'spawn_small_agent', 'get_result', 'list_runs', 'list_handoffs', 'read_handoff', 'edit_handoff']);
     const spawnTool = tools.find(t=>t.name==='spawn_small_agent');
     assert.deepEqual(spawnTool.inputSchema.required, ['task']);
     assert.deepEqual(Object.keys(spawnTool.inputSchema.properties).sort(), ['drawers', 'kind', 'max_steps', 'read_dir', 'task', 'tools']);

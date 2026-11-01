@@ -194,6 +194,7 @@ export const TIER_RULES: readonly Rule[] = [
   { methods: ['POST'], exact: '/api/agents/:id/sub-agents', access: 'owner' }, // add a sub-agent (AGENTS-ORG-01)
   { methods: ['GET'], exact: '/api/agents/:id/sub-agent-work', access: 'owner' }, // its sub-agents' work (AGENTS-ORG-01)
   { methods: ['POST'], exact: '/api/agents/:id/sub-agent-work/:runId/stop', access: 'owner' }, // stop a quick helper run (AGENTS-ORG-01)
+  { methods: '*', prefix: '/api/meetings', access: 'owner' },
   { methods: '*', prefix: '/api/boards', access: 'owner' },        // company task board (BOARD-01)
   { methods: '*', prefix: '/api/chat/projects', access: 'owner' }, // chat projects name host folders the agent may read (CHAT-PRO-02 A)
   { methods: '*', prefix: '/api/chat/transcribe', access: 'owner' }, // microphone: runs local speech-to-text programs (CHAT-PRO-02 C)

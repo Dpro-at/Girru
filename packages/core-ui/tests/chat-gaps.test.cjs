@@ -273,10 +273,10 @@ test('CH3 + CH8: chips inside the box, a red chip per file that cannot be read; 
   assert.match(css, /\.app-shell \.chat-details \.details-icon \{ inline-size:24px; block-size:24px;/);
 });
 
-test('CH5 + CH6: a new chat keeps the box in the middle with ideas as pills; hand-off cards show face, name and state on the right', () => {
+test('CH5 + CH6: a new chat keeps its composer without suggested-message pills; hand-off cards show face, name and state on the right', () => {
   const view = src('ChatView.tsx'), moments = src('ChatMoments.tsx'), css = src('styles.css');
   assert.match(view, /data-empty=\{empty \|\| undefined\}/);
-  assert.ok(view.indexOf('{empty && <div className="chat-suggestions">') > view.indexOf('</form>'), 'ideas sit under the box');
+  assert.doesNotMatch(view, /className="chat-suggestions"|const SUGGESTIONS/);
   assert.match(css, /\.app-shell \.chat-layout\[data-empty\] > \.chat-panel, \.app-shell \.chat-layout\[data-empty\] > \.details-rail \{ display:none; \}/);
   assert.match(moments, /<span className="handoff-verb">/);
   assert.match(moments, /className="moment-hint handoff-state"/);

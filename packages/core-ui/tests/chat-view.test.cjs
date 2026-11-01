@@ -27,7 +27,7 @@ test('send creates the conversation, follows the run and stores the work; the li
   const { c, calls } = await fixture(t);
   await c.load();
   assert.equal(c.getSnapshot().listPhase, 'ready');
-  assert.match(view(c), /chat-suggestion/);
+  assert.doesNotMatch(view(c), /chat-suggestion/);
   c.edit('Plan the launch week\nwith details');
   const sending = c.send();
   assert.equal(c.getSnapshot().draft, '', 'the box clears at once');

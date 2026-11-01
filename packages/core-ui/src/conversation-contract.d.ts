@@ -38,7 +38,7 @@ export function conversationRoute(path: string): boolean;
 export function allowedConversation(method: string, path: string, body?: unknown): boolean;
 export function conversationResponse(path: string, status: number, body: unknown): unknown;
 
-export type WireConversation = { model?: string; id: string; title: string | null; agentId: string | null; projectId: string | null; pinned: boolean; preview: string; createdAt: string; updatedAt: string; archived?: boolean; parentId?: string; running?: boolean; waiting?: number; mode?: ChatMode; thinking?: ChatThinking; queued?: { key: string; text: string }[]; schedule?: { next: string; paused: boolean } };
+export type WireConversation = { model?: string; id: string; title: string | null; agentId: string | null; projectId: string | null; pinned: boolean; preview: string; createdAt: string; updatedAt: string; archived?: boolean; parentId?: string; running?: boolean; waiting?: number; mode?: ChatMode; thinking?: ChatThinking; queued?: { key: string; text: string }[]; schedule?: { next: string; paused: boolean }; meeting?: { id: string; state: 'active' | 'paused' | 'review' | 'completed' } };
 export type WireToolCall = { id: string; name: string; input: string; output?: string; isError?: boolean; ms?: number; approvalId?: string };
 export type WirePart = { kind: 'text'; text: string } | { kind: 'reasoning'; text: string; ms?: number } | { kind: 'tools'; step: number; calls: WireToolCall[] }
   | { kind: 'steer'; text: string; step: number } | { kind: 'notice'; code: 'injection' | 'summarized' | 'plan_limit' | 'images_not_seen'; text?: string }

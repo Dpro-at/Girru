@@ -53,12 +53,13 @@ const dataDir = () => selectedData || (process.env.DPRO_DESKTOP_DATA_DIR ? path.
 const settingsDir = () => app.getPath('userData');
 
 function hardenSession() {
-  // Only the microphone (dictation) and clipboard writes, only for the app's own origin.
+  require('./meeting-screen.cjs').installMeetingScreenCapture({ electron, session: session.defaultSession, getOrigin: () => appOrigin, getWindows: () => [mainWindow, ...chatWindows].filter(Boolean) });
+  // Media and clipboard writes only for this origin; screen capture also requires the trusted picker.
   session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
     const origin = (() => { try { return new URL(details.requestingUrl || contents.getURL()).origin; } catch { return null; } })();
-    callback(origin !== null && origin === appOrigin && (permission === 'media' || permission === 'clipboard-sanitized-write'));
+    callback(origin !== null && origin === appOrigin && (permission === 'media' || permission === 'display-capture' || permission === 'clipboard-sanitized-write'));
   });
-  session.defaultSession.setPermissionCheckHandler((_contents, permission, requestingOrigin) => requestingOrigin === appOrigin && (permission === 'media' || permission === 'clipboard-sanitized-write'));
+  session.defaultSession.setPermissionCheckHandler((_contents, permission, requestingOrigin) => requestingOrigin === appOrigin && (permission === 'media' || permission === 'display-capture' || permission === 'clipboard-sanitized-write'));
 }
 
 function openExternal(url) {

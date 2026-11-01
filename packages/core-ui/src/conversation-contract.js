@@ -165,6 +165,7 @@ function conversation(x) {
     ...(x.running === true ? { running: true } : {}), ...(Number.isSafeInteger(x.waiting) && x.waiting > 0 ? { waiting: Math.min(x.waiting, 999) } : {}),
     ...(CHAT_MODES.includes(x.mode) && x.mode !== 'auto' ? { mode: x.mode } : {}), ...(CHAT_THINKING.includes(x.thinking) && x.thinking !== 'normal' ? { thinking: x.thinking } : {}),
     ...(Array.isArray(x.queued) && queueOk(x.queued) && x.queued.length ? { queued: x.queued.map(q => ({ key: q.key, text: q.text })) } : {}),
+    ...(record(x.meeting) && typeof x.meeting.id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(x.meeting.id) && ['active','paused','review','completed'].includes(x.meeting.state) ? { meeting: { id: x.meeting.id, state: x.meeting.state } } : {}),
     ...(record(x.schedule) && typeof x.schedule.next === 'string' ? { schedule: { next: x.schedule.next.slice(0, 40), paused: x.schedule.paused === true } } : {}) };
 }
 

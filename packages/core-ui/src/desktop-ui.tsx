@@ -78,13 +78,14 @@ export function Popover({ open, onClose, label, children, wide }: { open: boolea
 /** A sheet: a short task that blocks only this window (Esc = Cancel, Enter in a field = the main button). */
 export function Sheet({ title, onClose, children, actions, wide }: { title: string; onClose: () => void; children: ReactNode; actions?: ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose); close.current = onClose;
   useEffect(() => {
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); } };
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close.current(); } };
     window.addEventListener('keydown', key, true);
     const first = ref.current?.querySelector<HTMLElement>('[autofocus], textarea, input, select, button.primary');
     first?.focus();
     return () => window.removeEventListener('keydown', key, true);
-  }, [onClose]);
+  }, []);
   return <div className="dk-sheet-scrim" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
     <div ref={ref} className="dk-sheet" data-wide={wide || undefined} role="dialog" aria-modal="true" aria-label={title}>
       <h3 className="dk-sheet-title">{title}</h3>

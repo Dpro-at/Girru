@@ -63,7 +63,7 @@ test('rows are plain names with status only when there is something', () => {
   assert.equal((html.match(/class="chat-row-waits"/g) || []).length, 1);
   assert.match(html, /aria-label="2 waiting for you">2</);
   assert.equal((html.match(/class="chat-row-working"/g) || []).length, 1, 'in Other chats (Running now is shown via Edit)');
-  assert.doesNotMatch(html, /session-kind|<select/, 'no icon per row, no project select');
+  assert.doesNotMatch(html, /session-kind|<select/, 'no separate session selector or project select');
 });
 
 test('signed out: one screen, one action', () => {
@@ -82,3 +82,5 @@ test('the sidebar layout is saved per person through the backend, never in brows
   const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '../src/chat-sidebar-prefs.ts'), 'utf8');
   assert.doesNotMatch(src, /localStorage|sessionStorage/);
 });
+
+test('normal, scheduled and meeting chats share sidebar rows with explicit type markers',()=>{const list=[chat(1),chat(2,{schedule:{next:'Tomorrow',paused:false}}),chat(3,{meeting:{id:'meeting-3',state:'active'}})],state={access:'ready',listPhase:'ready',conversations:list,projects:[],activeId:null,runId:null,sidebar:DEFAULT_PREFS};const controller={subscribe:()=>()=>{},getSnapshot:()=>state,loadSidebar(){},saveSidebar(){}};const html=renderToStaticMarkup(React.createElement(ConversationList,{controller,onOpen(){}}));assert.match(html,/class="chat-row-type" aria-label="Chat"/);assert.match(html,/class="chat-row-type" aria-label="Scheduled chat"/);assert.match(html,/class="chat-row-type" aria-label="Meeting"/);const wire=conversationResponse('/api/chat/conversations',200,{conversations:[{...list[2],meeting:{id:'meeting-3',state:'active',private:'secret'}}]}).conversations[0];assert.deepEqual(wire.meeting,{id:'meeting-3',state:'active'});assert.doesNotMatch(JSON.stringify(wire),/secret/);assert.equal(conversationResponse('/api/chat/conversations',200,{conversations:[{...list[2],meeting:{id:'../bad',state:'active'}}]}).conversations[0].meeting,undefined);});

@@ -1,3 +1,4 @@
+import { DepartmentBadge } from './DepartmentBadge';
 // CHAT-BUILD-01 stage 3 (CH3, CH5): the composer's controls and the project picker/sheet.
 // Left of the box: + (files, long editor) and Mode — how the team works. Right: who answers,
 // what it answers with (provider · model · thinking). Everything else is a key, a popover or a menu.
@@ -96,7 +97,7 @@ export function ModeButton({ value, onChange, open, setOpen }: { value: ChatMode
   </span>;
 }
 
-export type Who = { id: string; name: string; note?: string };
+export type Who = { id: string; name: string; note?: string; department?: string | null };
 /** Who answers (⌘J): the team (the main agent leads and hands parts out) or one agent. */
 export function WhoButton({ team, agents, value, label, onChange, open, setOpen }: { team: Who; agents: readonly Who[]; value: string; label: string; onChange: (id: string) => void; open: boolean; setOpen: (v: boolean) => void }) {
   const [q, setQ] = useState('');
@@ -105,7 +106,7 @@ export function WhoButton({ team, agents, value, label, onChange, open, setOpen 
   const pick = (id: string) => { onChange(id); setOpen(false); setQ(''); };
   return <span className="composer-anchor" data-pop-anchor>
     <button type="button" className="composer-pill" aria-label={`Who answers: ${current.name}`} title="Who answers (⌘J)" aria-expanded={open} onClick={() => setOpen(!open)}>
-      <span className="composer-face" aria-hidden="true">{current.name.slice(0, 1).toUpperCase()}</span><span>{value ? current.name : 'Team'}</span><span className="pill-chev" aria-hidden="true"><UiIcon name="chevron" size={11}/></span></button>
+      <span className="composer-face" aria-hidden="true">{current.name.slice(0, 1).toUpperCase()}</span><span>{value ? current.name : 'Team'}</span>{value && current.department !== undefined && <DepartmentBadge department={current.department} compact/>}<span className="pill-chev" aria-hidden="true"><UiIcon name="chevron" size={11}/></span></button>
     <Pop open={open} onClose={() => { setOpen(false); setQ(''); }} label="Who answers" wide>
       <input className="pop-search" placeholder="Search agents…" aria-label="Search agents" value={q} onChange={e => setQ(e.target.value)}
         onKeyDown={e => { if (e.key === 'Enter' && shown[0]) { e.preventDefault(); pick(shown[0].id); } }}/>
@@ -113,7 +114,7 @@ export function WhoButton({ team, agents, value, label, onChange, open, setOpen 
         <button type="button" role="radio" aria-checked={!value} className="pop-row tall" onClick={() => pick('')}><span className="composer-face" aria-hidden="true">{team.name.slice(0, 1).toUpperCase()}</span><span className="pop-text"><b>Team</b><small>{team.name} leads and hands out parts</small></span></button></>}
       {shown.length > 0 && <p className="pop-title">One agent</p>}
       {shown.map(a => <button key={a.id} type="button" role="radio" aria-checked={a.id === value} className="pop-row tall" onClick={() => pick(a.id)}>
-        <span className="composer-face" aria-hidden="true">{a.name.slice(0, 1).toUpperCase()}</span><span className="pop-text"><b>{a.name}</b>{a.note && <small>{a.note}</small>}</span></button>)}
+        <span className="composer-face" aria-hidden="true">{a.name.slice(0, 1).toUpperCase()}</span><span className="pop-text"><b>{a.name}</b>{a.department !== undefined && <DepartmentBadge department={a.department}/>}{a.note && <small>{a.note}</small>}</span></button>)}
       {q && !shown.length && <p className="pop-note">No agent is called “{q}”.</p>}
     </Pop>
   </span>;

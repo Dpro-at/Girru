@@ -29,7 +29,8 @@ export function dateGroups<T extends { updatedAt: string }>(items: readonly T[],
 /** CH1: a chat dragged onto a project moves there (the server keeps a started chat on its folder). */
 const CHAT_DRAG = 'application/x-girru-chat';
 const noSearch = () => () => {};
-const idleSearch = (): ChatSearchState => ({ query: '', phase: 'idle', results: [], truncated: false });
+const EMPTY_SEARCH: ChatSearchState = Object.freeze({ query: '', phase: 'idle', results: [], truncated: false });
+const idleSearch = (): ChatSearchState => EMPTY_SEARCH;
 type Chat = Conversation & { schedule?: { next?: string } };
 
 /**
@@ -121,6 +122,7 @@ export function ConversationList({ controller, onOpen, search, onNewChat, onAddT
       : <button key={c.id} type="button" className="chat-row" data-child={child || undefined} aria-current={c.id === s.activeId ? 'true' : undefined} title={title(c)}
         onClick={() => open(c)} onContextMenu={(e: ReactMouseEvent) => menu.at(e, rowItems(c))} onKeyDown={e => keyMenu(e, rowItems(c))}
         draggable={s.access !== 'denied' && s.projects.length > 0} onDragStart={e => { e.dataTransfer.setData(CHAT_DRAG, c.id); e.dataTransfer.effectAllowed = 'move'; }}>
+        <span className="chat-row-type" aria-label={c.meeting ? 'Meeting' : c.schedule ? 'Scheduled chat' : 'Chat'} title={c.meeting ? `Meeting · ${c.meeting.state === 'completed' ? 'Finished' : c.meeting.state}` : c.schedule ? 'Scheduled chat' : 'Chat'}><UiIcon name={c.meeting ? 'users' : c.schedule ? 'calendar' : 'message'} size={12}/></span>
         <span className="chat-row-name" dir="auto">{title(c)}</span>
         {(c.running || (c.id === s.activeId && !!s.runId)) && <span className="chat-row-working" title="Working now" aria-label="Working now"/>}
         {c.waiting ? <span className="chat-row-waits" title={`${c.waiting} ${c.waiting === 1 ? 'approval waits' : 'approvals wait'} for you`} aria-label={`${c.waiting} waiting for you`}>{c.waiting}</span> : null}
