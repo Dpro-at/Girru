@@ -29,6 +29,9 @@ test('staged UI bridge imports outside the checkout and refuses a missing runtim
     const script = "const m=require(process.argv[1]);if(typeof m.createApplicationServer!=='function')process.exit(2)";
     const options = { cwd: root, env: { ...process.env, NODE_PATH: '', HOME: root }, encoding: 'utf8', timeout: 15000, stdio: 'pipe' };
     assert.doesNotThrow(() => execFileSync(process.execPath, ['-e', script, entry], options));
+    const voiceScript="(async()=>{const path=require('node:path'),fs=require('node:fs');const ui=process.argv[1];for(const file of ['chat-voice-worker.py','portable-voice-worker.py','voice-engine/voice-worker.py','voice-engine/voice-requirements.txt'])fs.accessSync(path.join(ui,'scripts',file));const host=require(path.join(ui,'scripts/voice-library-host.cjs')).createVoiceLibrary({packageRoot:ui,env:{DPRO_GENVR_VOICES:path.join(ui,'test-voices'),DPRO_GENVR_STATE:path.join(ui,'test-state')}});try{const s=await host.call('fixture');if(s.models.length!==6||s.engineId!=='')throw Error('Incomplete voice runtime');}finally{host.close();}})().catch(e=>{console.error(e.message);process.exitCode=1;})";
+    assert.doesNotThrow(()=>execFileSync(process.execPath,['-e',voiceScript,ui],options));
+
     fs.renameSync(path.join(ui, 'scripts', 'genvr-studio-host.cjs'), path.join(root, 'removed-studio.cjs'));
     assert.throws(() => execFileSync(process.execPath, ['-e', script, entry], options), error => /Cannot find module.*genvr-studio-host/.test(error.stderr));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
