@@ -20,10 +20,10 @@ const fingerprint = (value: unknown, requestId: string): Promise<string> => new 
  scrypt(JSON.stringify(value), `girru-meeting-v1:${requestId}`, 64, { N: 16384, r: 8, p: 1 }, (error, key) => error ? reject(error) : resolve(key.toString('hex')));
 });
 export type Selection = { mode: 'all' | 'departments' | 'agents'; departments: string[]; agentIds: string[]; headsOnly: boolean };
-export type Meeting = { id: string; conversationId: string; title: string; objective: string; state: string; version: number; count: number; cursor: number; activeRunId: string | null; speaker: Agent | null; summary: string; selection: Selection; decisions: Decision[]; reviewReady: boolean };
+export type Meeting = { id: string; conversationId: string; title: string; objective: string; state: string; version: number; count: number; cursor: number; activeRunId: string | null; speaker: Agent | null; summary: string; selection: Selection; decisions: Decision[]; reviewReady: boolean; coordinator: Agent | null };
 export type Agent = { id: string; name: string; department: string | null; role: string | null };
 export type Decision = { id: string; title: string; description: string; agentId: string | null; department: string | null; dueDate: string | null; enabled: boolean; boardId: string | null; cardId: string | null };
-type Row = { id: string; owner_id: string; conversation_id: string; request_hash: string; title: string; objective: string; state: string; version: number; cursor: number; active_run_id: string | null; summary: string; review_run_id: string | null; selection: string };
+type Row = { id: string; owner_id: string; conversation_id: string; request_hash: string; title: string; objective: string; state: string; version: number; cursor: number; active_run_id: string | null; summary: string; review_run_id: string | null; selection: string; coordinator_agent_id: string | null };
 const locks = new Map<string, Promise<unknown>>();
 export async function meetingLock<T>(id: string, work: () => Promise<T>): Promise<T> { const previous = locks.get(id) ?? Promise.resolve(); const next = previous.catch(() => {}).then(work); locks.set(id, next); try { return await next; } finally { if (locks.get(id) === next) locks.delete(id); } }
 export function selectionInput(value: unknown): Selection {
@@ -54,7 +54,7 @@ export async function meetingRoster(owner: string, raw: Record<string, any>) {
  const search = b.q === undefined ? '' : text(b.q, 100, false).toLowerCase();
  const selection = selectionInput({ mode: b.mode ?? 'all', departments: b.departments ? String(b.departments).split(',') : [], agentIds: [], headsOnly: b.heads === '1' });
  let { where, args } = selectionWhere(selection), join = '';
- if (b.meetingId !== undefined) { if (!meetingId(b.meetingId)) missing(); await sql().read(owned(owner, b.meetingId)); join = ' JOIN meeting_participants p ON p.agent_id = a.id AND p.meeting_id = ?'; args = [b.meetingId, ...args]; }
+ if (b.meetingId !== undefined) { where += ' AND p.attending=1'; if (!meetingId(b.meetingId)) missing(); await sql().read(owned(owner, b.meetingId)); join = ' JOIN meeting_participants p ON p.agent_id = a.id AND p.meeting_id = ?'; args = [b.meetingId, ...args]; }
  if (search) { where += " AND (lower(a.name) LIKE ? ESCAPE '!' OR lower(COALESCE(a.department,'')) LIKE ? ESCAPE '!')"; const pattern = '%' + search.replace(/[!%_]/g, c => '!' + c) + '%'; args.push(pattern, pattern); }
  const count = await q.one<{ n: number }>(`SELECT COUNT(*) AS n FROM agents_config a${join} WHERE ${where}`, ...args);
  const agents = await q.all<Agent>(`SELECT a.id, a.name, a.department, a.role FROM agents_config a${join} WHERE ${where} ORDER BY lower(a.name), a.id LIMIT ? OFFSET ?`, ...args, limit, offset);
@@ -75,8 +75,11 @@ export async function createMeeting(owner: string, raw: unknown) {
   if (!agents.length || agents.length > 5000) invalid('Select between 1 and 5000 agents');
   if (selection.mode === 'agents' && agents.length !== selection.agentIds.length) invalid('One or more selected agents are unavailable');
   if (selection.mode === 'departments' && selection.departments.some(d => !agents.some(a => a.department?.toLowerCase() === d))) invalid(selection.headsOnly ? 'One selected department has no head. Choose its agents instead.' : 'One selected department has no agents');
-  yield* run('INSERT INTO chat_sessions (id,user_id,title,model,agent_id,project_id,mode,thinking) VALUES (?,?,?,?,?,?,?,?)', conversationId, owner, title, 'default', agents[0].id, b.projectId ?? null, 'ask', null);
-  yield* run('INSERT INTO meetings (id,owner_id,conversation_id,request_hash,title,objective,selection,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)', id, owner, conversationId, hash, title, objective, JSON.stringify(selection), now, now);
+  const coordinator=(yield* one<Agent>('SELECT id,name,department,role FROM agents_config WHERE is_primary=1 ORDER BY id LIMIT 1'))??agents[0];
+  if(!agents.some(a=>a.id===coordinator.id))agents.push(coordinator);
+  if(agents.length>5000)invalid('A meeting supports at most 5000 participants including its coordinator');
+  yield* run('INSERT INTO chat_sessions (id,user_id,title,model,agent_id,project_id,mode,thinking) VALUES (?,?,?,?,?,?,?,?)', conversationId, owner, title, 'default', coordinator.id, b.projectId ?? null, 'ask', null);
+  yield* run('INSERT INTO meetings (id,owner_id,conversation_id,request_hash,title,objective,selection,created_at,updated_at,coordinator_agent_id) VALUES (?,?,?,?,?,?,?,?,?,?)', id, owner, conversationId, hash, title, objective, JSON.stringify(selection), now, now, coordinator.id);
   for (let i = 0; i < agents.length; i++) yield* run('INSERT INTO meeting_participants(meeting_id,agent_id,position) VALUES (?,?,?)', id, agents[i].id, i);
  }, { immediate: true });
  return getMeeting(owner, id);
@@ -94,12 +97,13 @@ async function reconcile(owner: string, id: string) {
 }
 export async function getMeeting(owner: string, id: string): Promise<Meeting> {
  if (!meetingId(id)) missing(); const row = await reconcile(owner, id);
- const count = await q.one<{ n: number }>('SELECT COUNT(*) AS n FROM meeting_participants WHERE meeting_id = ?', id);
+ const count = await q.one<{ n: number }>('SELECT COUNT(*) AS n FROM meeting_participants WHERE meeting_id = ? AND attending=1', id);
  const speaker = row.active_run_id ? await q.one<Agent>('SELECT a.id,a.name,a.department,a.role FROM meeting_turns t JOIN agents_config a ON a.id=t.agent_id WHERE t.run_id = ?', row.active_run_id) : undefined;
  const decisions = await q.all<{ id: string; title: string; description: string; agent_id: string | null; department: string | null; due_date: string | null; enabled: number; board_id: string | null; card_id: string | null }>('SELECT * FROM meeting_decisions WHERE meeting_id = ? ORDER BY position', id);
  const ready = await q.one("SELECT run_id FROM meeting_turns WHERE meeting_id = ? AND kind = 'summary' AND status = 'complete' LIMIT 1", id);
- const passed = await q.one<{n:number}>('SELECT COUNT(*) AS n FROM meeting_participants WHERE meeting_id = ? AND position < ?', id, Number(row.cursor));
- return { id, conversationId: row.conversation_id, title: row.title, objective: row.objective, state: row.state, version: Number(row.version), count: Number(count?.n ?? 0), cursor: Number(passed?.n ?? 0), activeRunId: row.active_run_id, speaker: speaker ?? null, summary: row.summary, selection: JSON.parse(row.selection), reviewReady: !!ready, decisions: decisions.map(d => ({ id: d.id, title: d.title, description: d.description, agentId: d.agent_id, department: d.department, dueDate: d.due_date, enabled: !!d.enabled, boardId: d.board_id, cardId: d.card_id })) };
+ const passed = await q.one<{n:number}>('SELECT COUNT(*) AS n FROM meeting_participants WHERE meeting_id = ? AND attending=1 AND position < ?', id, Number(row.cursor));
+ const coordinator=row.coordinator_agent_id?await q.one<Agent>('SELECT id,name,department,role FROM agents_config WHERE id=?',row.coordinator_agent_id):undefined;
+ return { coordinator:coordinator??null, id, conversationId: row.conversation_id, title: row.title, objective: row.objective, state: row.state, version: Number(row.version), count: Number(count?.n ?? 0), cursor: Number(passed?.n ?? 0), activeRunId: row.active_run_id, speaker: speaker ?? null, summary: row.summary, selection: JSON.parse(row.selection), reviewReady: !!ready, decisions: decisions.map(d => ({ id: d.id, title: d.title, description: d.description, agentId: d.agent_id, department: d.department, dueDate: d.due_date, enabled: !!d.enabled, boardId: d.board_id, cardId: d.card_id })) };
 }
 export async function meetingsFor(owner: string, conversationId?: string) {
  if (conversationId !== undefined && !meetingId(conversationId)) invalid('Invalid conversation');
@@ -130,7 +134,7 @@ export async function nextMeetingTurn(owner: string, id: string, raw: unknown, s
   const previous = yield* one<{ run_id: string; request_hash: string }>('SELECT * FROM meeting_turns WHERE meeting_id = ? AND request_id = ?', id, b.requestId);
   if (previous) { if (previous.request_hash !== hash) conflict('Turn request was already used'); return { replay: previous.run_id, row }; }
   if (row.state !== 'active' || row.active_run_id || chatRuns.activeFor(row.conversation_id)) conflict('Pause, busy or closed meeting');
-  const agent = b.agentId ? yield* one<Agent & { position: number }>('SELECT a.id,a.name,a.department,a.role,p.position FROM agents_config a JOIN meeting_participants p ON p.agent_id=a.id WHERE p.meeting_id = ? AND a.id = ?', id, b.agentId) : yield* one<Agent & { position: number }>('SELECT a.id,a.name,a.department,a.role,p.position FROM agents_config a JOIN meeting_participants p ON p.agent_id=a.id WHERE p.meeting_id = ? AND p.position >= ? ORDER BY p.position LIMIT 1', id, kind === 'summary' ? 0 : Number(row.cursor));
+  const agent = b.agentId ? yield* one<Agent & { position: number }>('SELECT a.id,a.name,a.department,a.role,p.position FROM agents_config a JOIN meeting_participants p ON p.agent_id=a.id WHERE p.meeting_id = ? AND p.attending=1 AND a.id = ?', id, b.agentId) : yield* one<Agent & { position: number }>('SELECT a.id,a.name,a.department,a.role,p.position FROM agents_config a JOIN meeting_participants p ON p.agent_id=a.id WHERE p.meeting_id = ? AND p.attending=1 AND p.position >= ? ORDER BY p.position LIMIT 1', id, kind === 'summary' ? 0 : Number(row.cursor));
   if (!agent) conflict(b.agentId ? 'The agent is not invited' : 'Every invited agent has had a turn. Select a participant to ask again');
   const runId = randomUUID();
   const changed = yield* run('UPDATE meetings SET active_run_id = ?, cursor = ?, version = version+1 WHERE id = ? AND version = ? AND state = ? AND active_run_id IS NULL', runId, !b.agentId && kind === 'discussion' ? Number(agent!.position) + 1 : Number(row.cursor), id, row.version, 'active');
@@ -219,7 +223,7 @@ export async function assertMeetingWriter(owner: string, conversation: string, a
  if (!row) return;
  if (row.state !== 'active') conflict('Resume the meeting before sending another message');
  const id = agentId || (await q.one<{agent_id:string}>('SELECT agent_id FROM chat_sessions WHERE id=?',conversation))?.agent_id;
- if (!id || !await q.one('SELECT agent_id FROM meeting_participants WHERE meeting_id=? AND agent_id=?',row.id,id)) invalid('Choose an invited meeting participant');
+ if (!id || !await q.one('SELECT agent_id FROM meeting_participants WHERE meeting_id=? AND agent_id=? AND attending=1',row.id,id)) invalid('Choose an invited meeting participant');
 }
 
 /** A new owner contribution invalidates the earlier generated summary, retaining the editable draft until the next review. */

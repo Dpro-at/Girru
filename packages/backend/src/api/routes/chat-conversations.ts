@@ -1,3 +1,5 @@
+import { meetingAttendanceChat } from '../../services/meeting-attendance.js';
+import { dispatchReplyRound, replyRoundStatus, replyRoundWriter, stopReplyRound } from '../../services/chat-reply-rounds.js';
 import { assertMeetingWriter, invalidateMeetingSummary, MeetingError } from '../../services/meetings.js';
 import {subscriptionModel,subscriptionEnabled,chatWorkspace,removeChatWorkspace} from '../../services/subscription-chat.js';
 import {projectFolders} from '../../services/project-folder-picker.js';
@@ -183,13 +185,16 @@ interface TurnStart { code: number; body: Record<string, unknown>; retryAfter?: 
  * Starts one turn of a saved conversation (checked input). Shared by POST runs and by the
  * continuation after the owner decides a waiting approval (CHAT-BUILD-01).
  */
-export async function startTurn(t: { userId: string; role: string; c: Conversation; runId: string; message: string; displayMessage?: string; model?: string; agentId?: string; images?: string[] }): Promise<TurnStart> {
+export async function startTurn(t: { userId: string; role: string; c: Conversation; runId: string; message: string; displayMessage?: string; model?: string; agentId?: string; images?: string[]; continuationMessageId?: string; onFinished?: (status: string) => Promise<void>; participantReply?: boolean; participantContext?: string; canStart?: () => Promise<boolean> }): Promise<TurnStart> {
   const { userId, c } = t;
   const b = { runId: t.runId, message: t.message, model: t.model, agentId: t.agentId };
   const send = (code: number, body: Record<string, unknown>): TurnStart => ({ code, body });
   const team = await agentNames();
   if (b.agentId !== undefined && (!team.has(b.agentId) || t.role !== 'owner')) return send(400, { error: 'unknown agent' });
+  const heldRound = await replyRoundWriter(userId, c.id, b.runId);
+  if (heldRound) return send(409, { code: 'conversation_busy', runId: heldRound });
   const replyAgent: string | undefined = b.agentId ?? c.agentId ?? undefined;
+  try { await assertMeetingWriter(userId,c.id,replyAgent); } catch(error) { if(error instanceof MeetingError)return send(error.status,{code:error.code,error:error.message});throw error; }
   const existing = chatRuns.get(b.runId);
   // CHAT-BUILD-01: a replay carries the stored user message, so the client never shows a second copy.
   const replay = async () => send(202, { runId: b.runId, replayed: true, ...await listConversationMessages(c.id).then((m) => { const u = m.find((x) => x.runId === b.runId && x.role === 'user'); return u ? { userMessage: u } : {}; }, () => ({})) });
@@ -211,6 +216,8 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
   const codingFolder = subscriptionModel(effectiveModel) ? project?.folder ?? await chatWorkspace(c.id) : undefined;
   const prior = await listConversationMessages(c.id);
   // CHAT-BUILD-01: a retry after a lost 202 (same runId, same conversation) gets the accepted turn back, never a second one.
+  const continuation = t.continuationMessageId ? prior.find(m => m.id === t.continuationMessageId && m.role === 'user') : undefined;
+  if (t.continuationMessageId && !continuation) return send(400, { code: 'invalid_continuation' });
   const accepted = prior.find((m) => m.runId === b.runId && m.role === 'user');
   if (accepted) return send(202, { runId: b.runId, replayed: true, userMessage: accepted });
   // CHAT-SECRETS-01: secrets go encrypted into the key store; the message keeps references only.
@@ -221,9 +228,10 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
   // CHAT-BUILD-01: approvals decided since the previous turn began come back into the chat as data.
   const approvedResults = reviewTools ? await recoveryApprovalResults(userId, c.id) : await approvalResultsSince(userId, c.id, prior.filter((m) => m.role === 'user').at(-1)?.createdAt).catch(() => '');
   const accept = async (): Promise<TurnStart | null> => {
+    if (t.canStart && !await t.canStart()) return send(409, { code: 'group_paused' });
     // Marked as starting before the row exists, so a parallel request never takes it for a stale row.
     starting.add(b.runId);
-    try { await acceptChatRun(journal, displayed.text); return null; } catch {
+    try { await acceptChatRun(journal, displayed.text, !continuation); return null; } catch {
       starting.delete(b.runId);
       // Unique run/session indexes arbitrate racing starts across awaits.
       const active = chatRuns.activeFor(c.id);
@@ -247,7 +255,7 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
   if (images.length) await q.run("UPDATE chat_messages SET parts = ? WHERE run_id = ? AND role = 'user'", JSON.stringify([{ kind: 'images', images: images.map((i) => ({ id: i.id, type: i.type, name: i.name })) }]), b.runId).catch(() => undefined);
   let userMessage: ConversationMessage, messages: ReturnType<typeof historyFor>, turns: HistoryTurn[], handoff: Awaited<ReturnType<typeof packHandoffText>> | null;
   try {
-    userMessage = (await listConversationMessages(c.id)).find(m => m.runId === b.runId && m.role === 'user')!;
+    userMessage = continuation ? { ...continuation, runId: b.runId, content: vaulted.text } : (await listConversationMessages(c.id)).find(m => m.runId === b.runId && m.role === 'user')!;
     const named = namedReplies([...prior, { ...userMessage, content: vaulted.text }], team, replyAgent, c.agentId);
     // CHAT-GAPS-01: calls that waited on the owner show the decided result in the tool work record.
     const outcomes = await approvalOutcomes(userId, c.id, named).catch(() => undefined);
@@ -270,8 +278,10 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
     chatMode: c.mode ?? 'auto', thinking: c.thinking ?? 'normal', ...(project?.folders.length ? { readRoots: project.folders.map((f) => f.path) } : {}),
     // CHAT-BUILD-01 stage 5: Steer now, and notices from tools (text that tried to give orders).
     takeSteers: () => chatRuns.get(b.runId)?.takeSteers() ?? [], notice: (code, text) => chatRuns.get(b.runId)?.notice(code, text) };
+  if (t.canStart && !await t.canStart()) { await recoverStaleRun(b.runId).catch(() => false); return send(409, { code: 'group_paused' }); }
   chatRuns.start({
     runId: b.runId, userId, sessionId: c.id, agentId: b.agentId ?? null,
+    onFinished: t.onFinished,
     // A failed checkpoint leaves the outcome unknown: close the row as interrupted (later turns ask before every tool).
     onUnstored: async () => { await recoverStaleRun(b.runId); },
     onPersisted: async status => {
@@ -300,7 +310,7 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
       ...(project?.folders.some((f) => f.write) ? { writeFolders: project.folders.filter((f) => f.write).map((f) => f.path) } : {}),
       ...(project ? { memoryScope: { project: project.slug }, ...(project.folder ? { fileReadRoot: project.folder } : {}) } : {}),
       ...(codingFolder ? { fileReadRoot: codingFolder } : {}),
-      systemPromptAppend: [approvedResults, project ? projectNote(project.name, project.folder, project.repoUrl, project.folders) : '', PLAN_NOTE, c.mode === 'plan' ? PLAN_FIRST_NOTE : c.mode === 'ask' ? ASK_NOTE : '', HANDOFF_NOTE, [...prior, userMessage].some((m) => new RegExp(SECRET_REF_RE.source).test(m.content)) ? SECRET_NOTE : '', prior.some((m) => m.role === 'assistant' && (m.agentId ?? c.agentId ?? null) !== (replyAgent ?? null)) ? TEAM_NOTE : ''].filter(Boolean).join('\n\n'),
+      systemPromptAppend: [t.participantContext ?? '', t.participantReply ? 'You are the selected participant in this shared conversation. Give only your own reply, in your own personality and department; never impersonate or answer on behalf of another participant.' : '', approvedResults, project ? projectNote(project.name, project.folder, project.repoUrl, project.folders) : '', PLAN_NOTE, c.mode === 'plan' ? PLAN_FIRST_NOTE : c.mode === 'ask' ? ASK_NOTE : '', HANDOFF_NOTE, [...prior, userMessage].some((m) => new RegExp(SECRET_REF_RE.source).test(m.content)) ? SECRET_NOTE : '', prior.some((m) => m.role === 'assistant' && (m.agentId ?? c.agentId ?? null) !== (replyAgent ?? null)) ? TEAM_NOTE : ''].filter(Boolean).join('\n\n'),
       ...(effectiveModel ? { model: effectiveModel, ...(effectiveModel === AUTO_MODEL ? {} : { provider: modelProvider(effectiveModel) }) } : {}),
     })),
   });
@@ -637,15 +647,19 @@ export async function chatConversationRoutes(fastify: FastifyInstance) {
   fastify.get('/api/chat/conversations/:id/messages', async (request: Req, reply) => {
     const c = await findConversation(caller(request), request.params.id!);
     if (!c) return notFound(reply);
+    const meetingMeta=await q.one<{id:string;state:string}>('SELECT id,state FROM meetings WHERE owner_id=? AND conversation_id=?',caller(request),c.id);
+    const visibleConversation=meetingMeta?{...c,meeting:meetingMeta}:c;
+    const round = await replyRoundStatus(caller(request), c.id);
     const active = chatRuns.activeFor(c.id);
+    const roundMeta = round ? { replyRound: round } : {};
     // CHAT-BUILD-01: ?limit=N[&before=<messageId>] answers one page (newest last) so long chats keep opening.
     const query = (request.query ?? {}) as Record<string, unknown>;
-    if (query.limit === undefined && query.before === undefined) return { conversation: c, messages: await listConversationMessages(c.id), activeRunId: active?.id ?? null };
+    if (query.limit === undefined && query.before === undefined) return { ...roundMeta, conversation: visibleConversation, messages: await listConversationMessages(c.id), activeRunId: active?.id ?? null };
     const limit = Number(query.limit ?? PAGE_MESSAGES);
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500 || (query.before !== undefined && (typeof query.before !== 'string' || !ID.test(query.before)))) return bad(reply, 'limit must be 1-500; before must be a message id');
     const page = await pageConversationMessages(c.id, { before: query.before as string | undefined, limit, maxChars: PAGE_CHARS });
     if (!page) return notFound(reply);
-    return { conversation: c, messages: page.messages, hasMore: page.hasMore, activeRunId: active?.id ?? null };
+    return { ...roundMeta, conversation: visibleConversation, messages: page.messages, hasMore: page.hasMore, activeRunId: active?.id ?? null };
   });
 
   // ---- export as Markdown (CHAT-PRO-02 F): the caller's own conversation, secrets removed ----
@@ -671,8 +685,10 @@ export async function chatConversationRoutes(fastify: FastifyInstance) {
     // CHAT-PRO-02 I: another agent of the team may write this reply (owner only: other users talk to the conversation's agent).
     if (b.agentId !== undefined && (typeof b.agentId !== 'string' || !AGENT_ID.test(b.agentId))) return bad(reply, 'invalid agentId');
     if (b.images !== undefined && (!Array.isArray(b.images) || b.images.length > MAX_IMAGES_PER_MESSAGE || b.images.some((id: unknown) => !readChatImage(c.id, id)))) return bad(reply, `images must be up to ${MAX_IMAGES_PER_MESSAGE} images saved with this chat`);
+    if ((request as any).chatUserRole==='owner') { try { const attendance=await meetingAttendanceChat(userId,c.id,b.runId,b.message);if(attendance)return reply.code(attendance.code).send(attendance.body); } catch(error) { if(error instanceof MeetingError)return reply.code(error.status).send({code:error.code,error:error.message});throw error; } }
     try { await assertMeetingWriter(userId, c.id, b.agentId ?? c.agentId); } catch (error) { if(error instanceof MeetingError) return reply.code(error.status).send({code:error.code,error:error.message});throw error; }
-    const out = await startTurn({ userId, role: (request as any).chatUserRole, c, runId: b.runId, message: b.message, model: b.model, agentId: b.agentId, images: b.images });
+    const input = { userId, role: (request as any).chatUserRole, c, runId: b.runId, message: b.message, model: b.model, agentId: b.agentId, images: b.images };
+    const out = await dispatchReplyRound(input, startTurn) ?? await startTurn(input);
     if (out.code === 202) await invalidateMeetingSummary(userId, c.id);
     if (out.retryAfter) reply.header('Retry-After', out.retryAfter);
     return reply.code(out.code).send(out.body);
@@ -914,6 +930,7 @@ export async function chatConversationRoutes(fastify: FastifyInstance) {
   fastify.post('/api/chat/runs/:runId/stop', async (request: Req, reply) => {
     const run = chatRuns.get(request.params.runId!);
     if (!run || run.userId !== caller(request)) return notFound(reply);
+    await stopReplyRound(caller(request), run.id);
     run.requestStop();
     // CHAT-BUILD-01: Stop also reaches the agents this conversation delegated work to.
     const delegated = stopDelegations(run.sessionId);

@@ -206,7 +206,13 @@ function project(x) {
     folders: Array.isArray(x.folders) ? x.folders.slice(0, 8).filter(f => record(f) && typeof f.path === 'string').map(f => ({ path: f.path.slice(0, 1024), write: f.write === true })) : [] };
 }
 
-const ERROR_CODES = { 503: ['stt_unavailable', 'checkpoint_unavailable'], 500: ['stt_failed'], 400: ['invalid_request', 'invalid_project', 'bad_path', 'no_folder', 'stt_invalid', 'invalid_variable', 'invalid_image'], 404: ['not_found'], 409: ['conversation_busy', 'run_id_reused', 'folder_fixed'], 429: ['rate_limited', 'stt_busy'] };
+function replyRound(x) {
+  if (!record(x) || !validRunId(x.id) || !validRunId(x.activeRunId) || !['active', 'paused', 'complete'].includes(x.state) || !Number.isInteger(x.total) || x.total < 1 || x.total > 20 || !Number.isInteger(x.remaining) || x.remaining < 0 || x.remaining > x.total) return {};
+  const a = x.speaker;
+  const speaker = record(a) && typeof a.id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(a.id) && typeof a.name === 'string' && a.name.length <= 200 && (a.department === null || typeof a.department === 'string' && a.department.length <= 200) ? { id: a.id, name: a.name, department: a.department } : undefined;
+  return { replyRound: { id: x.id, state: x.state, activeRunId: x.activeRunId, total: x.total, remaining: x.remaining, ...(speaker ? { speaker } : {}) } };
+}
+const ERROR_CODES = { 503: ['stt_unavailable', 'checkpoint_unavailable'], 500: ['stt_failed'], 400: ['invalid_request', 'attendance_needs_scope', 'invalid_meeting', 'ambiguous_group_mentions', 'group_too_large', 'invalid_project', 'bad_path', 'no_folder', 'stt_invalid', 'invalid_variable', 'invalid_image'], 404: ['not_found'], 409: ['conversation_busy', 'meeting_conflict', 'group_paused', 'run_id_reused', 'folder_fixed'], 429: ['rate_limited', 'stt_busy'] };
 
 /** A link on github.com only (repository, branch or compare page). */
 const githubUrl = x => typeof x === 'string' && x.length <= 600 && /^https:\/\/github\.com\/[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}(\/[A-Za-z0-9._~%\/-]*(\.\.\.[A-Za-z0-9._~%\/-]+)?(\?expand=1)?)?$/.test(x);
@@ -273,11 +279,11 @@ export function conversationResponse(path, status, body) {
   if (p.kind === 'one') { if (body.ok !== true) throw Error('protocol'); return { ok: true }; }
   if (p.kind === 'messages') {
     if (!Array.isArray(body.messages) || body.messages.length > 20000) throw Error('protocol');
-    return { conversation: conversation(body.conversation), messages: body.messages.map(message), activeRunId: validRunId(body.activeRunId) ? body.activeRunId : null, ...(body.hasMore === true ? { hasMore: true } : {}) };
+    return { ...replyRound(body.replyRound), conversation: conversation(body.conversation), messages: body.messages.map(message), activeRunId: validRunId(body.activeRunId) ? body.activeRunId : null, ...(body.hasMore === true ? { hasMore: true } : {}) };
   }
   if (p.kind === 'runs') {
     if (!validRunId(body.runId)) throw Error('protocol');
-    return { runId: body.runId, ...(body.replayed === true ? { replayed: true } : {}), ...(record(body.userMessage) ? { userMessage: message(body.userMessage) } : {}) };
+    return { ...(body.completed === true && record(body.assistantMessage) && body.assistantMessage.role === 'assistant' && body.assistantMessage.runId === body.runId ? { completed: true, assistantMessage: message(body.assistantMessage) } : {}), ...replyRound(body.replyRound), runId: body.runId, ...(body.replayed === true ? { replayed: true } : {}), ...(record(body.userMessage) ? { userMessage: message(body.userMessage) } : {}) };
   }
   if (p.kind === 'chat-usage') return { usage: (Array.isArray(body.usage) ? body.usage : []).slice(0, 50).filter(record).map(u => ({ model: str(u.model, 120), tokensIn: num(u.tokensIn) ?? 0, tokensOut: num(u.tokensOut) ?? 0, replies: num(u.replies) ?? 0 })) };
   if (p.kind === 'chat-team') return { team: (Array.isArray(body.team) ? body.team : []).slice(0, 20).filter(record).map(t => ({ agentId: str(t.agentId, 128), agentName: str(t.agentName, 80), model: str(t.model, 120), status: ['started', 'answered', 'waiting_approval', 'failed'].includes(t.status) ? t.status : 'failed', at: str(t.at, 40) })),
