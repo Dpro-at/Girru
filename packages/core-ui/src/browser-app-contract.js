@@ -7,7 +7,8 @@ export function allowedBrowserApp(method,path,body){
  if(method==='GET')return body===undefined;
  if(method!=='POST'||!object(body))return false;
  const keys=Object.keys(body),id=body.id===undefined||typeof body.id==='string'&&/^[a-f0-9-]{36}$/.test(body.id),only=names=>id&&keys.every(k=>['action','id',...names].includes(k));
- if(['open','state','onboard'].includes(body.action))return keys.join()==='action';
+ if(body.action==='respond-prompt')return keys.length===3&&keys.every(k=>['action','prompt','button'].includes(k))&&[body.prompt,body.button].every(x=>typeof x==='string'&&/^[A-Fa-f0-9-]{36}$/.test(x));
+ if(['open','state','onboard','prompts'].includes(body.action))return keys.join()==='action';
  if(['back','forward','reload'].includes(body.action))return only([]);
  if(body.action==='new')return only(['url'])&&(body.url===undefined||web(body.url));
  if(['select','close'].includes(body.action))return only(['id'])&&typeof body.id==='string'&&/^[a-f0-9-]{36}$/.test(body.id);
@@ -24,6 +25,7 @@ export function allowedBrowserApp(method,path,body){
 export function browserAppResponse(status,body){
  if(status!==200)return {code:body?.code==='forbidden'?'forbidden':'browser_unavailable'};
  if(Array.isArray(body?.tabs)&&Array.isArray(body?.agents))return {active:typeof body.active==='string'?body.active:null,tabs:body.tabs.slice(0,48).filter(x=>object(x)&&typeof x.id==='string').map(x=>({id:x.id,agentId:String(x.agentId),title:String(x.title||'New tab').slice(0,200),url:String(x.url||'').slice(0,4096),viewport:x.viewport?{width:x.viewport.width,height:x.viewport.height,mobile:x.viewport.mobile===true}:null})),agents:body.agents.slice(0,5001).map(x=>({id:String(x.id),name:String(x.name).slice(0,80),department:String(x.department||'').slice(0,80)}))};
+ if(Array.isArray(body?.prompts))return {prompts:body.prompts.slice(0,8).filter(p=>object(p)&&typeof p.id==='string'&&/^[A-Fa-f0-9-]{36}$/.test(p.id)&&Array.isArray(p.texts)&&p.texts.length>0&&p.texts.length<=512&&p.texts.every(t=>typeof t==='string'&&t.length<=4096)&&Array.isArray(p.actions)&&p.actions.length>0&&p.actions.length<=16&&p.actions.every(a=>object(a)&&typeof a.id==='string'&&/^[A-Fa-f0-9-]{36}$/.test(a.id)&&typeof a.label==='string'&&a.label.length>0&&a.label.length<=4096&&typeof a.enabled==='boolean')).map(p=>({id:p.id,texts:p.texts,actions:p.actions.map(a=>({id:a.id,label:a.label,enabled:a.enabled}))}))};
  if(Number.isSafeInteger(body?.seq))return {seq:body.seq,...(typeof body.image==='string'&&body.image.length<=6000000&&/^[A-Za-z0-9+/]*={0,2}$/.test(body.image)?{image:body.image}:{})};
  if(body?.ok===true)return {ok:true};
  return {available:body?.available===true,running:body?.running===true};

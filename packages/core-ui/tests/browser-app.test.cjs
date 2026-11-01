@@ -37,3 +37,13 @@ test('delayed browser input and frames can stay bound to their original tab',()=
  assert.equal(allowedBrowserApp('POST',BROWSER_APP_PATH,{action:'input',id:'../other',kind:'text',text:'hello'}),false);
  const source=require('node:fs').readFileSync(require('node:path').join(__dirname,'../src/BrowserWorkspace.tsx'),'utf8');assert.match(source,/call\(\{action:'input',id,\.\.\.body\}\)/);
 });
+test('native browser prompts preserve all permission text and only accept exact issued actions',()=>{
+ const id='11111111-1111-4111-8111-111111111111';
+ assert.equal(allowedBrowserApp('POST',BROWSER_APP_PATH,{action:'prompts'}),true);
+ assert.equal(allowedBrowserApp('POST',BROWSER_APP_PATH,{action:'respond-prompt',prompt:id,button:id}),true);
+ for(const extra of [{token:'secret'},{agentId:'other'},{script:'accept()'}])assert.equal(allowedBrowserApp('POST',BROWSER_APP_PATH,{action:'respond-prompt',prompt:id,button:id,...extra}),false);
+ const request={id,texts:['Add Example?','Read and change site data'],actions:[{id,label:'Cancel',enabled:true,node:'private'}],root:'private'};
+ assert.deepEqual(browserAppResponse(200,{ok:true,prompts:[request]}),{prompts:[{id,texts:request.texts,actions:[{id,label:'Cancel',enabled:true}]}]});
+ for(const texts of [['Add Example?','x'.repeat(4097)],Array(513).fill('Permission')])assert.deepEqual(browserAppResponse(200,{prompts:[{...request,texts}]}),{prompts:[]},'incomplete permission descriptions must not be presented as complete');
+ assert.equal(allowedBrowserApp('POST',BROWSER_APP_PATH,{action:'respond-prompt',prompt:'../other',button:id}),false);
+});
