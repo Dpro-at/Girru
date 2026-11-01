@@ -10,10 +10,10 @@ import { actorOrReply, requireAccount } from '../../repositories/scope.js';
 import { getPref, setPref } from '../../repositories/user-prefs.js';
 
 // Library (Personalities, Specialties, Skills) shows by default; MCP connections live in Settings, not in the footer.
-export const FOOTER_SECTIONS = ['chat', 'agents', 'library', 'board', 'memory', 'approvals', 'store', 'genvr', 'terminal', 'code', 'skills', 'personalities', 'specialties'] as const;
+export const FOOTER_SECTIONS = ['chat', 'agents', 'library', 'board', 'memory', 'approvals', 'store', 'genvr', 'terminal', 'code', 'browser', 'skills', 'personalities', 'specialties'] as const;
 type Section = typeof FOOTER_SECTIONS[number];
 export interface FooterPrefs { order: Section[]; hidden: Section[]; iconsOnly: boolean; approvalsWhenWaiting: boolean }
-const DEFAULT_HIDDEN: Section[] = ['genvr', 'terminal', 'code', 'skills', 'personalities', 'specialties'];
+const DEFAULT_HIDDEN: Section[] = ['genvr', 'terminal', 'code', 'browser', 'skills', 'personalities', 'specialties'];
 const ADDED_AFTER: Partial<Record<Section, Section>> = { library: 'agents' };
 /** SA6: Apps became Store › My apps; an older saved order keeps the Store where Apps was. */
 const renamed = (id: unknown) => id === 'apps' ? 'store' : id;

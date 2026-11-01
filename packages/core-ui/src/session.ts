@@ -1,3 +1,4 @@
+import {BROWSER_APP_PATH,allowedBrowserApp,browserAppResponse} from './browser-app-contract.js';
 import {VOICE_LIBRARY_PATH,allowedVoiceLibrary,voiceLibraryResponse} from './voice-library-contract.js';
 import { CHAT_VOICE_PATH, allowedChatVoice, chatVoiceResponse } from './chat-voice-contract.js';
 import { meetingsRoute, allowedMeetings, meetingsResponse } from './meetings-contract.js';
@@ -144,6 +145,7 @@ export function allowedRequest(method: string, path: string, body?: unknown): bo
   if (memoryRecallRoute(path)) return allowedMemoryRecall(method, path, body);
   if (memoryBridgeRoute(path)) return allowedMemoryBridge(method, path, body);
   if (discoveryRoute(path)) return allowedDiscovery(method, path, body);
+  if (allowedBrowserApp(method,path,body)) return true;
   if (allowedChatVoice(method, path, body)) return true;
   if (allowedGenVR(method, path, body) || allowedChannel(method, path, body) || allowedPersonality(method, path, body) || allowedHire(method, path, body) || allowedBoard(method, path, body) || allowedConversation(method, path, body) || allowedAgentCard(method, path, body) || allowedTerminal(method, path, body) || allowedConnector(method, path, body) || allowedLocalImport(method, path, body) || allowedChatBoard(method, path, body) || allowedChatMemory(method, path, body) || allowedChatSearch(method, path, body) || allowedChatExport(method, path, body) || allowedChatSecrets(method, path, body)) return true;
   const agentId = /^\/api\/agents\/([^/?#]+)$/.exec(path)?.[1];
@@ -190,6 +192,7 @@ function safeResponse(path: string, response: WireResponse): WireResponse {
 }
 function projectResponse(path: string, response: WireResponse): WireResponse {
   if(path===VOICE_LIBRARY_PATH)return {status:response.status,body:voiceLibraryResponse(response.status,response.body)};
+  if(path===BROWSER_APP_PATH)return {status:response.status,body:browserAppResponse(response.status,response.body)};
   if (path === CHAT_VOICE_PATH) return {status:response.status,body:chatVoiceResponse(response.status,response.body)};
   if(upgradeRoute(path))return {status:response.status,body:upgradeResponse(path,response.status,response.body)};
   if(packRoute(path))return {status:response.status,body:packResponse(path,response.status,response.body)};
