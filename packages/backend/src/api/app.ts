@@ -1,3 +1,4 @@
+import { meetingRoutes } from './routes/meetings.js';
 import {workspacePackRoutes} from './routes/workspace-pack.js';
 import {tradingMarketRoutes} from './routes/trading-market.js';
 import {tradingPaperPracticeRoutes} from './routes/trading-paper-practice.js';
@@ -354,6 +355,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await fastify.register(chatAddonsRoutes,{home:process.env.DPRO_ADDON_METADATA_HOME});
   await fastify.register(storeRoutes,{home:process.env.DPRO_ADDON_METADATA_HOME});
   await fastify.register(chatRoutes);
+  await fastify.register(meetingRoutes);
   await fastify.register(chatConversationRoutes); // saved conversations + resumable runs (CHAT-REBUILD-01)
   await fastify.register(agentHandoffRoutes); // CORE-MEM-HANDOFF: the agents' handoff notes (owner only)
   await fastify.register(memoryBridgeRoutes); // MEM-BRIDGE-01: owner API + the dpro-memory MCP server's two loopback routes

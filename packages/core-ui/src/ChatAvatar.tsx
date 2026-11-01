@@ -19,11 +19,14 @@ export function speakable(text: string): string {
 }
 
 /** The agent's face in the chat: it shows when the agent works and speaks finished replies with its saved voice. */
-export function ChatAvatar({ turns, agentId, agentName, onClose }: { turns: readonly Turn[]; agentId: string; agentName: string; onClose: () => void }) {
+export function ChatAvatar({ turns, agentId, agentName, onClose, speechEnabled = true, onSpeakingChange }: { onSpeakingChange?: (speaking: boolean) => void; speechEnabled?: boolean; turns: readonly Turn[]; agentId: string; agentName: string; onClose: () => void }) {
+  const speechChanged = useRef(onSpeakingChange); speechChanged.current = onSpeakingChange;
+  useEffect(() => () => speechChanged.current?.(false), []);
   const frame = useRef<HTMLIFrameElement>(null), channel = useRef(crypto.randomUUID());
   const [phase, setPhase] = useState<Phase>('loading'), [voices, setVoices] = useState<Voice[]>([]), [notice, setNotice] = useState('');
   const [choices, setChoicesState] = useState<Choices>(() => readChoices(agentId));
   const [settingsOpen, setSettingsOpen] = useState(false);
+  useEffect(() => { const timer = setTimeout(() => setPhase(value => value === 'loading' ? 'unavailable' : value), 15000); return () => clearTimeout(timer); }, []);
   const setChoices = (patch: Partial<Choices>) => setChoicesState(current => { const next = { ...current, ...patch }; remembered.set(agentId || 'default', next); return next; });
   const post = (value: Record<string, unknown>) => frame.current?.contentWindow?.postMessage({ type: 'dpro-avatar', channel: channel.current, ...value }, window.location.origin);
   const latest = useRef({ agentName, choices }); latest.current = { agentName, choices };
@@ -34,12 +37,12 @@ export function ChatAvatar({ turns, agentId, agentName, onClose }: { turns: read
       const data = event.data;
       if (data.operation === 'ready') { post({ operation: 'start', layout: 'compact', agentName: latest.current.agentName, voiceId: latest.current.choices.voiceId }); return; }
       if (data.operation === 'mounted') { setPhase('ready'); return; }
-      if (data.operation === 'unavailable') { setPhase('unavailable'); return; }
+      if (data.operation === 'unavailable') { speechChanged.current?.(false); setPhase('unavailable'); return; }
       if (data.operation === 'voices') { if (Array.isArray(data.voices)) setVoices(data.voices as Voice[]); else setNotice('Saved voices could not be loaded. Speech stays off.'); return; }
       if (data.operation === 'voice' && typeof data.voiceId === 'string') { setChoices({ voiceId: data.voiceId }); return; }
       if (data.operation === 'prefs' && data.prefs && typeof data.prefs === 'object') { setChoices({ speak: data.prefs.speak === true, size: ['s', 'm', 'l'].includes(data.prefs.size) ? data.prefs.size : 'm' }); return; }
       if (data.operation === 'settings') { setSettingsOpen(data.open === true); return; }
-      if (data.operation === 'state') { setPhase(data.state === 'speaking' ? 'speaking' : data.state === 'preparing' ? 'preparing' : 'ready'); if (typeof data.error === 'string') setNotice(/library is full/i.test(data.error) ? 'The voice library is full (100 recordings). Remove old recordings in the Studio voice library.' : data.error); }
+      if (data.operation === 'state') { speechChanged.current?.(data.state === 'speaking' || data.state === 'preparing'); setPhase(data.state === 'speaking' ? 'speaking' : data.state === 'preparing' ? 'preparing' : 'ready'); if (typeof data.error === 'string') setNotice(/library is full/i.test(data.error) ? 'The voice library is full (100 recordings). Remove old recordings in the Studio voice library.' : data.error); }
     };
     window.addEventListener('message', receive); return () => window.removeEventListener('message', receive);
   }, []);
@@ -55,13 +58,14 @@ export function ChatAvatar({ turns, agentId, agentName, onClose }: { turns: read
     spoken.current = last.key; post({ operation: 'mood', expression: 'smile', duration: 2500 });
     const voice = voices.find(v => v.id === choices.voiceId);
     const text = speakable(last.content);
-    if (choices.speak && voice && text) post({ operation: 'speak', text, voiceId: voice.id, language: voice.language ?? 'ar' });
-  }, [last?.key, last?.status, phase === 'loading', voices, choices.speak, choices.voiceId]);
+    if (speechEnabled && choices.speak && voice && text) post({ operation: 'speak', text, voiceId: voice.id, language: voice.language ?? 'ar' });
+  }, [last?.key, last?.status, phase === 'loading', voices, choices.speak, choices.voiceId, speechEnabled]);
   const voice = voices.find(v => v.id === choices.voiceId);
   // Settings is the package's own window; while it is open the frame fills the Girru window so it has room.
   const wide = settingsOpen;
   return <section className={`chat-avatar${wide ? ' is-full' : ''}`} aria-label={`${agentName} avatar`} style={wide ? undefined : { height: HEIGHT[choices.size] }}>
     <iframe ref={frame} title={`${agentName} avatar`} className="chat-avatar-frame" src={`/genvr/avatar.html#${channel.current}`} sandbox="allow-scripts allow-same-origin"/>
+    {(phase === 'loading' || phase === 'unavailable') && <div className="chat-avatar-placeholder" role="status"><span className="chat-avatar-placeholder-face" aria-hidden="true">{agentName.trim().slice(0,1).toUpperCase() || 'G'}</span><strong>{agentName}</strong><small>{phase === 'loading' ? 'Preparing the avatar…' : 'Avatar unavailable. Audio and chat remain available.'}</small></div>}
     {wide ? null : <div className="chat-avatar-bar">
       <span className={`chat-avatar-state is-${phase}`} role="status"><span aria-hidden="true" className="dot"/>{agentName} · {LABEL[phase]}</span>
       <span className="chat-avatar-voice">{choices.speak ? voice ? `Voice: ${voice.name}` : 'Choose a voice in Settings to hear replies' : 'Speech off'}</span>

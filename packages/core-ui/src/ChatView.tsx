@@ -1,3 +1,7 @@
+import { DepartmentBadge } from './DepartmentBadge';
+import { MeetingPanels } from './MeetingPanels';
+import { Meetings } from './Meetings';
+import type { MeetingRecord } from './meetings-contract.js';
 import { ChatDetails, DetailsRail } from './ChatDetails';
 import type { PanelPart } from './ChatDetails';
 import { ApprovalCard, ChangesLine, DelegationCard, MomentsContext, NoticeCard, SteerLine, TaskList, TitleFaces, chatPeople, redoTarget } from './ChatMoments';
@@ -55,11 +59,6 @@ export const QUIET_MS = 1500;
 /** In a long live step only the newest tool rows stay open; older ones fold. */
 export const LIVE_ROWS = 4;
 
-const SUGGESTIONS = [
-  'Plan this week and put the tasks on the board',
-  'Review what the agents did today',
-  'Draft a short update in Arabic and English',
-];
 
 /**
  * The chat page: a reading column (the user's messages right-aligned in a
@@ -70,6 +69,9 @@ const SUGGESTIONS = [
  */
 export function ChatView({ controller, mode, productName = 'Girru', client, onAddConnector, onOpenCard, onOpenMemory, onChooseContext, onSetUpModel, onOpenApprovals, onOpenAgent, onOpenRules, terminalRequest = 0, boardRequest = 0, placeRequest = 0, active = true, titleSlot = null }: { titleSlot?: HTMLElement | null; placeRequest?: number; controller: ConversationsController; mode: 'live' | 'mock'; productName?: string; terminalRequest?: number; boardRequest?: number; client?: SessionClient; onChooseContext?:()=>void; onAddConnector?: () => void; onSetUpModel?: () => void; onOpenApprovals?: () => void; onOpenAgent?: (agentId: string) => void; onOpenRules?: (agentId: string, category: string) => void; onOpenCard?: (boardId: string, cardId: string) => void; onOpenMemory?: (drawerId: string, memoryId: string) => void; active?: boolean }) {
   const s = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
+  const [meetingMeta, setMeetingMeta] = useState<MeetingRecord | null>(null);
+  const [meetingCall, setMeetingCall] = useState(false), [meetingStage, setMeetingStage] = useState<HTMLDivElement | null>(null);
+  useEffect(() => { if (meetingCall) { setPane(null); setTermOpen(false); } }, [meetingCall]);
   const thread = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const [following, setFollowing] = useState(true);
@@ -226,11 +228,12 @@ export function ChatView({ controller, mode, productName = 'Girru', client, onAd
   };
 
   const lastUser = [...s.turns].reverse().find(t => t.role === 'user');
-  const agentName = s.agents.find(a => a.id === s.agentId)?.name;
+  const agentName = s.agents.find(a => a.id === (meetingMeta ? s.replyAgent || s.agentId : s.agentId))?.name;
   const who = whoAnswers(s.model, s.models);
   const activeConv = s.conversations.find(c => c.id === s.activeId);
   const convAgentId = activeConv?.agentId ?? null;
   const nameOf = (id: string | null | undefined) => (id ? s.agents.find(a => a.id === id)?.name : s.agents.find(a => a.primary)?.name) ?? 'Main agent';
+  const departmentOf = (id?: string | null) => (id ? s.agents.find(a => a.id === id) : s.agents.find(a => a.primary))?.department;
   const convAgentName = nameOf(convAgentId);
   const empty = s.turns.length === 0 && s.threadPhase !== 'loading';
 
@@ -412,7 +415,9 @@ export function ChatView({ controller, mode, productName = 'Girru', client, onAd
       <button type="button" className="tool" aria-pressed={pane !== null} aria-label={pane !== null ? 'Hide the side panel' : 'Show the side panel'} title={pane !== null ? 'Hide the side panel (⌥⌘I)' : 'Show the side panel (⌥⌘I)'}
         onClick={() => setPane(p => p === null ? 'details' : null)}><UiIcon name="inspector" size={15}/></button>
     </span>, titleSlot)}
-    {mode === 'live' && avatarOn && <ChatAvatar turns={s.turns} agentId={convAgentId ?? s.agentId ?? ''} agentName={nameOf(convAgentId ?? s.agentId)} onClose={toggleAvatar}/>}
+    {mode === 'live' && client && client.getSnapshot().user?.role === 'owner' && <Meetings key={s.activeId ?? 'new'} client={client} controller={controller} active={active} onMeetingChanged={setMeetingMeta} callTarget={meetingStage} onCallChanged={setMeetingCall} onOpenCard={onOpenCard}/>}
+    <MeetingPanels active={meetingCall} onStage={setMeetingStage}>
+    {mode === 'live' && avatarOn && !meetingMeta && <ChatAvatar turns={s.turns} agentId={convAgentId ?? s.agentId ?? ''} agentName={nameOf(convAgentId ?? s.agentId)} onClose={toggleAvatar}/>}
     <div className="chat-thread" ref={thread} onScroll={onScroll} aria-label="Conversation">
       {s.threadPhase === 'loading' && <p className="chat-loading" role="status"><span className="pulse" aria-hidden="true"/>Opening the conversation</p>}
       {empty ? <div className="chat-empty">
@@ -434,7 +439,7 @@ export function ChatView({ controller, mode, productName = 'Girru', client, onAd
         {s.hasEarlier && <button type="button" className="ghost-action chat-earlier" disabled={s.loadingEarlier} onClick={() => void controller.loadEarlier()}>{s.loadingEarlier ? 'Loading earlier messages…' : 'Show earlier messages'}</button>}
         {s.turns.map((t, i) => t.role === 'user'
           ? <UserMessage key={t.key} turn={t} highlight={flash === t.key} onKey={client ? setKeysOpen : undefined} onEdit={running ? undefined : text => { controller.edit(text); input.current?.focus(); }} onRemember={canRemember && messageRef(t) ? () => openRemember(t, t.content) : undefined}/>
-          : <AssistantTurn recovery={t.code === 'run_interrupted' && client && s.activeId ? <RecoveryApprovals key={`${s.activeId}:${client.getSnapshot().epoch}`} client={client} conversationId={s.activeId}/> : undefined} key={t.key} turn={t} highlight={flash === t.key} writer={nameOf(t.agentId ?? convAgentId)} writerRole={s.agents.find(a => a.id === (t.agentId ?? convAgentId))?.primary || (!(t.agentId ?? convAgentId) && s.agents.some(a => a.primary)) ? 'main agent' : undefined} last={i === s.turns.length - 1} onRetry={lastUser ? () => void controller.send(t.code === 'run_interrupted' ? 'Continue the interrupted work from the saved checkpoints. Review what is already done and inspect unknown outcomes before repeating any action. Ask me to approve each tool call.' : lastUser.content) : undefined}
+          : <AssistantTurn recovery={t.code === 'run_interrupted' && client && s.activeId ? <RecoveryApprovals key={`${s.activeId}:${client.getSnapshot().epoch}`} client={client} conversationId={s.activeId}/> : undefined} key={t.key} turn={t} highlight={flash === t.key} writer={nameOf(t.agentId ?? convAgentId)} writerDepartment={departmentOf(t.agentId ?? convAgentId)} writerRole={s.agents.find(a => a.id === (t.agentId ?? convAgentId))?.primary || (!(t.agentId ?? convAgentId) && s.agents.some(a => a.primary)) ? 'main agent' : undefined} last={i === s.turns.length - 1} onRetry={lastUser ? () => void controller.send(t.code === 'run_interrupted' ? 'Continue the interrupted work from the saved checkpoints. Review what is already done and inspect unknown outcomes before repeating any action. Ask me to approve each tool call.' : lastUser.content) : undefined}
             onSuggest={owner && cardsCtl && s.activeId ? openCardForm : undefined} onRemember={canRemember && messageRef(t) ? text => openRemember(t, text) : undefined}
             proposals={t.runId && memCtl ? <MemoryProposals controller={memCtl} items={byRun.get(t.runId) ?? []}/> : null} recall={recallCtl} onWrongPlace={moveCtl ? m => void moveCtl.open(m) : undefined}/>)}
         {moveCtl && <MoveDialog c={moveCtl} from="From a reply’s “wrong place”"/>}
@@ -488,7 +493,7 @@ export function ChatView({ controller, mode, productName = 'Girru', client, onAd
         {slash.length > 0 && <SlashList query={slashQuery!} index={pick} onPick={runSlash}/>}
         {suggestions.length > 0 && <ul className="mention-list" role="listbox" aria-label="Agents">{suggestions.map((a, i) =>
           <li key={a.id} role="option" aria-selected={i === Math.min(pick, suggestions.length - 1)}><button type="button" onMouseDown={e => { e.preventDefault(); choose(a.name); }}>
-            <span className="avatar" aria-hidden="true">{a.name.slice(0, 1).toUpperCase()}</span>{a.name}</button></li>)}</ul>}
+            <span className="avatar" aria-hidden="true">{a.name.slice(0, 1).toUpperCase()}</span>{a.name}<DepartmentBadge department={a.department} compact/></button></li>)}</ul>}
         <textarea id="chat-input" ref={input} rows={1} dir="auto" value={s.draft} maxLength={100000}
           placeholder={running ? 'Steer the work now, or ⌥Enter to send it after this reply' : agentName ? `Message ${agentName}` : s.turns.length ? 'Reply, or type @ to bring in a teammate…' : 'Ask anything, add files, or type @…'}
           onChange={e => controller.edit(e.target.value)} onPaste={e=>{if(e.clipboardData.files.length){e.preventDefault();void onFiles(e.clipboardData.files);}}} onKeyDown={onKeyDown} disabled={s.access === 'denied'}/>
@@ -499,8 +504,8 @@ export function ChatView({ controller, mode, productName = 'Girru', client, onAd
           <PlusButton onFiles={() => picker.current?.click()} onLong={() => setLongDraft(true)}/>
           <ModeButton value={s.mode} onChange={m => void controller.setMode(m)} open={popover === 'mode'} setOpen={v => setPopover(v ? 'mode' : null)}/>
           <span className="composer-spacer"/>
-          {s.agents.length > 0 && <WhoButton team={{ id: '', name: (s.activeId ? convAgentName : s.agents.find(a => a.primary)?.name) ?? 'Main agent' }}
-            agents={s.agents.filter(a => s.activeId ? (a.id !== convAgentId && !(a.primary && !convAgentId)) : !a.primary).map(a => ({ id: a.id, name: a.name }))}
+          {!meetingMeta && s.agents.length > 0 && <WhoButton team={{ id: '', name: (s.activeId ? convAgentName : s.agents.find(a => a.primary)?.name) ?? 'Main agent', department: departmentOf(convAgentId) }}
+            agents={s.agents.filter(a => s.activeId ? (a.id !== convAgentId && !(a.primary && !convAgentId)) : !a.primary).map(a => ({ id: a.id, name: a.name, department: a.department }))}
             value={s.activeId ? s.replyAgent : s.agentId} label={s.activeId ? convAgentName : 'Team'}
             onChange={id => (s.activeId ? controller.setReplyAgent(id) : controller.selectAgent(id))} open={popover === 'who'} setOpen={v => setPopover(v ? 'who' : null)}/>}
           {owner && <ModelButton controller={controller} open={popover === 'model'} setOpen={v => setPopover(v ? 'model' : null)}/>}
@@ -510,10 +515,8 @@ export function ChatView({ controller, mode, productName = 'Girru', client, onAd
             : <button type="submit" className="round-button" disabled={(!s.draft.trim() && !s.attachments.length) || s.access === 'denied'} aria-label={busy ? 'Queue the message' : 'Send'}><UiIcon name="arrow-up" size={15}/></button>}
         </div>
       </form>
-      {/* CH5: an empty chat keeps the box in the middle, with three ideas under it. */}
-      {empty && <div className="chat-suggestions">{SUGGESTIONS.map(t =>
-        <button key={t} type="button" className="chat-suggestion" onClick={() => {controller.edit(t);input.current?.focus();}}>{t}</button>)}</div>}
     </div>
+    </MeetingPanels>
     {terminal && termOpen && <section className="chat-terminal" aria-label="Terminal"><TerminalPane tabs={terminal.tabs} prefs={terminal.prefs} projectId={folderProject} maximized={maximized} onToggleMax={() => setMaximized(v => !v)} onClose={() => { setMaximized(false); setTermOpen(false); }}/></section>}
   </div>
   {pane === 'details' ? <ChatDetails controller={controller} client={client} recall={recallCtl} onSettings={onAddConnector} onSignIn={onSetUpModel} onClose={() => setPane(null)}
@@ -729,7 +732,7 @@ function SecretChip({ type, id, onOpen }: { type: string; id: string; onOpen?: (
 }
 
 /** One assistant turn: live parts in order while running; work folded once finished. */
-function AssistantTurn({ turn, last, onRetry, writer, writerRole, recovery, onSuggest, onRemember, proposals, highlight, recall, onWrongPlace }: { turn: Turn; last: boolean; onRetry?: () => void; writer?: string; writerRole?: string; recovery?: ReactNode; onSuggest?: (s: CardSuggestion) => void; onRemember?: (text: string) => void; proposals?: ReactNode; highlight?: boolean; recall?: ChatRecallController | null; onWrongPlace?: (m: { id: string; text: string; drawerId: string }) => void }) {
+function AssistantTurn({ turn, last, onRetry, writer, writerDepartment, writerRole, recovery, onSuggest, onRemember, proposals, highlight, recall, onWrongPlace }: { turn: Turn; last: boolean; onRetry?: () => void; writer?: string; writerDepartment?: string | null; writerRole?: string; recovery?: ReactNode; onSuggest?: (s: CardSuggestion) => void; onRemember?: (text: string) => void; proposals?: ReactNode; highlight?: boolean; recall?: ChatRecallController | null; onWrongPlace?: (m: { id: string; text: string; drawerId: string }) => void }) {
   const live = turn.status === 'running';
   const plan = turnPlan(turn.parts);
   const suggestions = turnSuggestions(turn.parts);
@@ -740,7 +743,7 @@ function AssistantTurn({ turn, last, onRetry, writer, writerRole, recovery, onSu
   const [quiet, since] = useQuiet(turn, live);
   return <article className="chat-assistant" aria-busy={live || undefined} data-message-id={turn.key} data-highlight={highlight || undefined}>
     {/* CH1/CH2: who wrote it, their role and the time, beside their face. */}
-    {writer ? <p className="reply-writer"><span className="avatar" aria-hidden="true">{writer.slice(0, 1).toUpperCase()}</span>{writer}{(writerRole || turn.at) && <span className="reply-meta">{[writerRole, turn.at ? clockTime(turn.at) : ''].filter(Boolean).map(x => ` · ${x}`).join('')}</span>}</p> : <p className="sr-only">Agent</p>}
+    {writer ? <p className="reply-writer"><span className="avatar" aria-hidden="true">{writer.slice(0, 1).toUpperCase()}</span><span className="reply-writer-name">{writer}</span><DepartmentBadge department={writerDepartment}/>{(writerRole || turn.at) && <span className="reply-meta">{[writerRole, turn.at ? clockTime(turn.at) : ''].filter(Boolean).map(x => ` · ${x}`).join('')}</span>}</p> : <p className="sr-only">Agent</p>}
     {/* CHAT-BUILD-01 stage 5 (CH1): the plan's steps live in Tasks above the box; here only one quiet line. */}
     {live && plan && <p className="moment-line"><UiIcon name="list" size={12}/>Plan: {plan.length} {plan.length === 1 ? 'step' : 'steps'}, {plan.filter(s => s.status === 'done').length} done · the steps are in Tasks above the box</p>}
     {live

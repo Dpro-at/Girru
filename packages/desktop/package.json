@@ -67,7 +67,8 @@
       "identity": "-",
       "hardenedRuntime": false,
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "Girru uses the microphone only when you press the microphone button to dictate a message.",
+        "NSCameraUsageDescription": "Girru uses the camera only when you enable video in a meeting.",
+        "NSMicrophoneUsageDescription": "Girru uses the microphone when you choose to dictate a message or speak in a meeting.",
         "NSAppDataUsageDescription": "Girru checks protected-folder access only when you request broader file access. It does not read file contents during this check.",
         "NSDocumentsFolderUsageDescription": "Girru accesses your Documents folder when you enable file access and choose tasks that use those files.",
         "NSDownloadsFolderUsageDescription": "Girru accesses your Downloads folder when you enable file access and choose tasks that use those files.",

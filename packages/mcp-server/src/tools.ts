@@ -37,6 +37,11 @@ const FOOTER_IDS=['chat','agents','library','board','memory','approvals','store'
 
 export const TOOL_DEFINITIONS = [
   {
+    name:'meetings',title:'Department meetings',
+    description:'Owner-session only. Read meetings, departments and paged participants. On the owner’s explicit instruction create a meeting with selected departments, all departments, heads only or exact agents; invitations do not start any model call. Edit draft decisions only while the owner is reviewing the meeting. Starting speaking rounds, media capture, approving decisions and creating their tasks are performed by the owner in the app and are not offered by this tool. Never claim a task exists until a saved card id is returned by the meeting.',
+    inputSchema:{type:'object',properties:{operation:{type:'string',enum:['list','read','departments','participants','create','draft']},id:{type:'string',maxLength:64},query:{type:'string',maxLength:100},offset:{type:'integer',minimum:0,maximum:1000000},body:{type:'object'}},required:['operation'],additionalProperties:false},
+  },
+  {
     name:'workspace_settings',title:'Portable workspace settings',
     description:'Owner-session only. Export selected agents, personalities, specialties and Markdown skills, or preview a supplied JSON pack. Keys, accounts, conversations and memories are excluded. Import requires the owner’s explicit instruction after reviewing the preview, its fingerprint and confirmed=true. Imports copies with safe permissions; retry the same file after an uncertain result. Never automatically import or share a file externally.',
     inputSchema:{type:'object',properties:{operation:{type:'string',enum:['export','preview','import']},body:{type:'object'}},required:['operation','body'],additionalProperties:false},
@@ -333,6 +338,7 @@ export async function callTool(name: string, rawArgs: unknown, deps: HandlerDeps
       case 'workspace_rules': return await workspaceRulesTool(args,deps);
       case 'workspace_tasks': return await workspaceTasksTool(args,deps);
       case 'chats': return await chatsTool(args,deps);
+      case 'meetings': return await meetingsTool(args,deps);
       case 'workspace_footer': return await workspaceFooterTool(args,deps);
       case 'account_settings': return await accountSettingsTool(args,deps);
       case 'workspace_backups': return await workspaceBackupsTool(args,deps);
@@ -1117,3 +1123,18 @@ const APPS_READS={
  addons:{note:'Plugins and hooks from coding apps on this computer (read only).',paths:[['addons','/api/chat/addons']]},
  catalogue:{note:'The apps that come with Girru (included: already in My apps), Girru\u2019s app catalogue and the coding-app catalogue (read only). Installing is done by the owner in the app.',paths:[['included','/api/apps'],['apps','/api/marketplace/search?limit=100&offset=0'],['codingApps','/api/chat/addons/catalogue']]},
 } as const;
+
+async function meetingsTool(args:Record<string,unknown>,{backend}:HandlerDeps):Promise<ToolCallResult>{
+ const path='/api/meetings',id=(v:unknown)=>{if(typeof v!=='string'||!/^[A-Za-z0-9_-]{1,64}$/.test(v))throw new InputError('Invalid meeting id');return v;};
+ let result:any;
+ switch(args.operation){
+  case 'list':only(args,['operation']);result=await backend.request('GET',path);return ok('Recent meetings.',{meetings:Array.isArray(result.meetings)?result.meetings.map((m:any)=>({id:m.id,conversationId:m.conversationId,title:m.title,state:m.state})):[]});
+  case 'departments':only(args,['operation']);result=await backend.request('GET',path+'/departments');return ok('Meeting departments.',{departments:result.departments,totalAgents:result.totalAgents});
+  case 'participants':{only(args,['operation','id','query','offset']);const query=new URLSearchParams({limit:'50'});if(args.id!==undefined)query.set('meetingId',id(args.id));if(args.query!==undefined){if(typeof args.query!=='string'||args.query.length>100)throw new InputError('Search is too long');query.set('q',args.query);}if(args.offset!==undefined){if(!Number.isSafeInteger(args.offset)||Number(args.offset)<0||Number(args.offset)>1000000)throw new InputError('Invalid offset');query.set('offset',String(args.offset));}result=await backend.request('GET',path+'/roster?'+query);return ok('Invited participants (one page).',{agents:Array.isArray(result.agents)?result.agents.slice(0,50).map((a:any)=>({id:a.id,name:a.name,department:a.department,role:a.role})):[],total:result.total,nextOffset:result.nextOffset});}
+  case 'read':only(args,['operation','id']);result=await backend.request('GET',path+'/'+id(args.id));break;
+  case 'create':{only(args,['operation','body']);const b=obj(args.body);only(b,['requestId','title','objective','selection','projectId']);id(b.requestId);if(typeof b.title!=='string'||!b.title.trim()||b.title.length>160||typeof b.objective!=='string'||!b.objective.trim()||b.objective.length>4000)throw new InputError('Topic and objective are required');const selection=obj(b.selection);only(selection,['mode','departments','agentIds','headsOnly']);if(!['all','departments','agents'].includes(String(selection.mode))||typeof selection.headsOnly!=='boolean'||!Array.isArray(selection.departments)||selection.departments.length>100||selection.departments.some(d=>typeof d!=='string'||!/^[a-z0-9][a-z0-9 _-]{0,63}$/.test(d))||!Array.isArray(selection.agentIds)||selection.agentIds.length>5000)throw new InputError('Invalid participant selection');selection.agentIds.forEach(id);if(b.projectId!=null)id(b.projectId);result=await backend.request('POST',path,b);break;}
+  case 'draft':{only(args,['operation','id','body']);const b=obj(args.body);only(b,['expectedVersion','summary','decisions']);if(!Number.isSafeInteger(b.expectedVersion)||typeof b.summary!=='string'||b.summary.length>20000||!Array.isArray(b.decisions)||b.decisions.length>200)throw new InputError('Invalid draft');for(const item of b.decisions){const d=obj(item);only(d,['id','title','description','agentId','department','dueDate','enabled']);id(d.id);if(typeof d.title!=='string'||!d.title.trim()||d.title.length>160||typeof d.description!=='string'||d.description.length>8000||typeof d.enabled!=='boolean')throw new InputError('Invalid action');if(d.agentId!=null)id(d.agentId);}result=await backend.request('PUT',path+'/'+id(args.id)+'/decisions',b);break;}
+  default:throw new InputError('Meetings support list, read, departments, participants, create and draft only. The owner approves and starts calls in the app.');
+ }
+ const m=result.meeting??{};return ok('Meeting '+String(m.title??'')+'. Decisions remain proposals until approved in the app.',{meeting:{id:m.id,conversationId:m.conversationId,title:m.title,state:m.state,version:m.version,count:m.count,summary:typeof m.summary==='string'?m.summary.slice(0,6000):'',decisions:Array.isArray(m.decisions)?m.decisions.slice(0,30).map((d:any)=>({id:d.id,title:d.title,description:typeof d.description==='string'?d.description.slice(0,2000):'',agentId:d.agentId,department:d.department,dueDate:d.dueDate,enabled:d.enabled,boardId:d.boardId,cardId:d.cardId})):[],moreDecisions:Math.max(0,(m.decisions?.length??0)-30)}});
+}
