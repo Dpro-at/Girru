@@ -15,7 +15,8 @@ test('⌘K reaches every Store, Library and Settings place; the approvals count 
 });
 test('Settings opens from the footer gear and ⌘, — no extra sidebar gear or account-menu item',()=>{
  assert.doesNotMatch(shell,/sidebar-settings/);assert.doesNotMatch(shell,/>Settings<\/button>/);
- assert.match(shell,/aria-label="Search or run a command \(⌘K\)"><UiIcon name="search" size=\{13\}\/>Commands<kbd>⌘K/);
+ assert.match(shell,/aria-label=\{page==='code'\?'Code commands':'Search or run a command \(⌘K\)'\}><UiIcon name="search" size=\{13\}\/>Commands<kbd>⌘K/);
+ assert.match(shell,/if\(page==='code'&&window\.dproApp\?\.nabu\?\.showCommands\)void window\.dproApp\.nabu\.showCommands\(\);else setPalette\(true\);/);
 });
 test('an MCP connection is not an app: it lives in Settings › MCP connections, never in My apps (S-10)',()=>{const {tileActions}=require('../src/WorkspaceApplications.tsx');
  assert.deepEqual(tileActions({id:'a',kind:'mcp',name:'X'},{owner:true},{open(){},onAccountConnections(){},onPermissions(){}}),[]);

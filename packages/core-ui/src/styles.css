@@ -3086,14 +3086,14 @@ button.danger-solid { background:var(--danger); color:#fff; }
 /* CH5 match (2026-10-28): a new chat — the box in the middle, one sentence, three ideas; no side panel yet. */
 .app-shell .chat-layout[data-empty] { grid-template-columns:minmax(0,1fr); }
 .app-shell .chat-layout[data-empty] > .chat-panel, .app-shell .chat-layout[data-empty] > .details-rail { display:none; }
-.app-shell .chat-layout[data-empty] .chat-screen { justify-content:center; }
-.app-shell .chat-layout[data-empty] .chat-thread { flex:0 0 auto; overflow:visible; }
+.app-shell .chat-layout[data-empty] .chat-screen { justify-content:flex-start; }
+.app-shell .chat-layout[data-empty] .chat-thread { flex:1 1 auto; min-block-size:0; overflow:auto; }
 .app-shell .chat-layout[data-empty] .chat-empty { max-inline-size:668px; margin:0 auto; padding:0 0 18px; align-items:center; text-align:center; }
 .chat-empty-tile { inline-size:44px; block-size:44px; display:grid; place-items:center; border-radius:14px; margin-block-end:18px; color:var(--text-2); background:color-mix(in srgb,var(--text) 10%,transparent); }
 .shell[data-theme="dark"] .app-shell .chat-empty-tile, .app-shell[data-theme="dark"] .chat-empty-tile { background:#20252E; color:#A3AFC6; }
 .app-shell .chat-layout[data-empty] .chat-wordmark { font-size:20px !important; font-weight:700; margin:0 0 14px; }
 .app-shell .chat-layout[data-empty] .chat-tagline { font-size:13.5px; max-inline-size:none; color:var(--text-3); }
-.app-shell .chat-layout[data-empty] .chat-dock { padding:0 48px; background:transparent; }
+.app-shell .chat-layout[data-empty] .chat-dock { padding:0 48px 16px; background:transparent; }
 .app-shell .chat-layout[data-empty] .chat-composer { max-inline-size:668px; }
 .app-shell .chat-layout[data-empty] .chat-composer textarea { font-size:14px; }
 .app-shell .chat-layout[data-empty] .chat-suggestions { display:flex; flex-direction:row; flex-wrap:wrap; justify-content:center; gap:8px; margin:18px auto 0; max-inline-size:860px; }

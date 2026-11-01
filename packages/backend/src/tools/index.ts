@@ -33,7 +33,7 @@ import { defaultGrants, loadAgentGrants, loadAgentGrantsSync } from './grants.js
 import {
   execTool,
   readTool,
-  writeTool,
+  writeTool, editTool,
   webFetchTool,
   executeCodeTool,
 } from './core/index.js';
@@ -120,7 +120,7 @@ const extensionTools: Tool[] = [];
 const CORE_TOOLS: Tool[] = [
   teamListTool, teamDelegateTool, teamResultsTool, quickHelperTool, quickHelperResultTool,
   specialtyLibraryTool, specialtyApplyTool,
-  execTool, readTool, writeTool, webFetchTool, executeCodeTool,
+  execTool, readTool, writeTool, editTool, webFetchTool, executeCodeTool,
   browserNavigateTool, browserScreenshotTool, browserExtractTool, browserInteractTool,
   memorySaveTool, memorySearchTool, memoryReflectTool, memoryStatsTool, memoryEditTool, memoryDeleteTool, memoryForgetTool, memoryGraphTool,
   memoryDoctorTool, memoryDoctorFixTool, memoryMoveTool,

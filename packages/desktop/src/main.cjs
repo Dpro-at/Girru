@@ -214,11 +214,12 @@ async function scanData(extra) {
   return discovered;
 }
 // Only the active local workspace can open this user-driven folder chooser.
-ipcMain.handle('dpro:choose-project-folders', async event => {
+ipcMain.handle('dpro:choose-project-folders', async (event, options) => {
+  if(options!==undefined&&(!options||typeof options!=='object'||Array.isArray(options)||Object.keys(options).join(',')!=='multiple'||typeof options.multiple!=='boolean'))return [];
   if (!runtime || !mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) return [];
   let origin;try {origin=new URL(event.senderFrame.url).origin;}catch{return [];}
   if (origin !== appOrigin || !appOrigin.startsWith('http://127.0.0.1:')) return [];
-  const result=await dialog.showOpenDialog(mainWindow,{title:'Choose project folders to scan for documentation',properties:['openDirectory','multiSelections']});
+  const result=await dialog.showOpenDialog(mainWindow,{title:options?.multiple===false?'Choose a project folder':'Choose project folders',properties:options?.multiple===false?['openDirectory']:['openDirectory','multiSelections']});
   return result.canceled ? [] : result.filePaths.slice(0,8);
 });
 const notificationControl = require('./desktop-notifications.cjs').createDesktopNotifications({

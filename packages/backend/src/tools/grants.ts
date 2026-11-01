@@ -252,7 +252,7 @@ function* ensureGrantProfileStep(agentId: string, available: Available): Step<Pr
     const profile = yield* readProfile(agentId);
     if (profile && profile.source !== 'legacy-pending') return profile;
     if (profile) {
-      const names = available.filter((t) => !isToolExecClass(t) && !isMcpToolName(t.name)).map((t) => t.name);
+      const names = available.filter((t) => !isToolExecClass(t) && !isMcpToolName(t.name) && t.name !== 'edit').map((t) => t.name);
       yield* writeGrantRows(agentId, names.map((tool) => ({ tool, scopes: null })), 'system:legacy');
       yield* run(`UPDATE agent_grant_profiles SET source = 'legacy', updated_at = ${nowText(d)} WHERE agent_id = ?`, agentId);
     } else {

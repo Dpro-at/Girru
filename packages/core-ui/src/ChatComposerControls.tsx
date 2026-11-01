@@ -235,6 +235,14 @@ export function ProjectChip({ controller, onNewProject }: { controller: Conversa
   </span>;
 }
 
+/** null means browser fallback; an empty result means the native picker was cancelled. */
+export async function chooseProjectDirectories(multiple: boolean, bridge?: {chooseProjectFolders?:(options?:{multiple:boolean})=>Promise<string[]>}):Promise<string[]|null>{
+  if(!bridge?.chooseProjectFolders)return null;
+  const paths=await bridge.chooseProjectFolders({multiple});
+  if(!Array.isArray(paths))throw Error('Invalid folder selection');
+  return [...new Set(paths.filter(p=>typeof p==='string'&&p.length>0&&p.length<=4096&&!p.includes('\0')&&/^(?:\/|[A-Za-z]:[\/\\]|\\\\)/.test(p)))].slice(0,multiple?8:1);
+}
+
 /** New project / Folders and variables…: name, folders (main + added, read only or read and write) and encrypted variables. */
 export function ProjectSheet({ controller, id, folder, onClose }: { controller: ConversationsController; id: string | null; folder?: string; onClose: () => void }) {
   const s = controller.getSnapshot();
@@ -251,6 +259,23 @@ export function ProjectSheet({ controller, id, folder, onClose }: { controller: 
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   useEffect(() => { if (id) void controller.variables(id).then(v => setVars(v ?? [])); }, [controller, id]);
+  const [choosing,setChoosing]=useState(false);
+  const present=useRef(true);
+  useEffect(()=>{present.current=true;return()=>{present.current=false;};},[]);
+  const applyFolders=(kind:'main'|'add',paths:string[])=>{
+    if(kind==='main'){const p=paths[0];if(p){setMain(p);setFolders(old=>old.filter(f=>f.path!==p));setName(old=>old.trim()?old:folderName(p).slice(0,80));}}
+    else setFolders(old=>{const seen=new Set([main,...old.map(f=>f.path)]);return [...old,...paths.filter(p=>!seen.has(p)&&!!seen.add(p)).map(path=>({path,write:false}))].slice(0,8);});
+  };
+  const choose=async(kind:'main'|'add')=>{
+    if(choosing)return;setError(null);setChoosing(true);
+    try{
+      const bridge=(window as unknown as {dproApp?:{chooseProjectFolders?:(options?:{multiple:boolean})=>Promise<string[]>}}).dproApp;
+      const paths=await chooseProjectDirectories(kind==='add',bridge);
+      if(!present.current)return;
+      if(paths===null)setPicking(kind);else applyFolders(kind,paths);
+    }catch{if(present.current)setError('The folder chooser could not open. Try again.');}
+    finally{if(present.current)setChoosing(false);}
+  };
   const [saved, setSaved] = useState<string | null>(id);
   const save = async () => {
     setBusy(true); setError(null);
@@ -272,12 +297,12 @@ export function ProjectSheet({ controller, id, folder, onClose }: { controller: 
       : <button type="button" className="link-button danger" onClick={() => setConfirmDelete(true)}>Delete project…</button>)}
     <span className="dk-spacer"/>
     <button type="button" onClick={onClose}>Cancel</button>
-    <button type="button" className="primary" disabled={busy || !name.trim() || !main} onClick={() => void save()}>{id ? 'Save' : 'Create project'}</button></>}>
+    <button type="button" className="primary" disabled={busy || choosing || !name.trim() || !main} onClick={() => void save()}>{id ? 'Save' : 'Create project'}</button></>}>
     <label className="sheet-field"><span>Name</span><input autoFocus value={name} maxLength={80} onChange={e => setName(e.target.value)} placeholder="Project name"/></label>
-    <div className="sheet-field"><span>Folders <button type="button" className="link-button" onClick={() => setPicking('add')} disabled={!main}><UiIcon name="plus" size={11}/>Add</button></span>
+    <div className="sheet-field"><span>Folders <button type="button" className="link-button" onClick={() => void choose('add')} disabled={!main||choosing||folders.length>=8}><UiIcon name="plus" size={11}/>Add</button></span>
       <div className="sheet-folders">
         <div className="sheet-folder"><UiIcon name="folder" size={14}/><span className="pop-text"><b>{main ? `${folderName(main)} · main folder` : 'Main folder'}</b><small dir="ltr">{main || 'Choose the folder this project works in'}</small></span>
-          <button type="button" className="link-button" onClick={() => setPicking('main')}>{main ? 'Change…' : 'Choose…'}</button></div>
+          <button type="button" className="link-button" disabled={choosing} onClick={() => void choose('main')}>{main ? 'Change…' : 'Choose…'}</button></div>
         {folders.map((f, i) => <div key={f.path} className="sheet-folder"><UiIcon name="folder" size={14}/><span className="pop-text"><b>{folderName(f.path)}</b><small dir="ltr">{f.path}</small></span>
           <select aria-label={`Access to ${folderName(f.path)}`} value={f.write ? 'write' : 'read'} onChange={e => setFolders(folders.map((x, j) => (j === i ? { ...x, write: e.target.value === 'write' } : x)))}>
             <option value="read">Read only</option><option value="write">Read and write</option></select>
@@ -294,8 +319,7 @@ export function ProjectSheet({ controller, id, folder, onClose }: { controller: 
     </div>
     {error && <p className="project-error" role="alert">{error}</p>}
     {picking && <ProjectFolderPicker controller={controller} onClose={() => setPicking(null)} onSelect={p => {
-      if (picking === 'main') { setMain(p); if (!name.trim()) setName(folderName(p).slice(0, 80)); }
-      else if (p !== main && !folders.some(f => f.path === p) && folders.length < 8) setFolders([...folders, { path: p, write: false }]);
+      applyFolders(picking,[p]);
       setPicking(null);
     }}/>}
   </Sheet>;

@@ -9,7 +9,7 @@
 // Run: node --import tsx --test test/chat-runs.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -175,5 +175,41 @@ test('meeting attendance commands through the real chat API change presence with
  }
  const rows=(await call('r-owner','GET',`/api/chat/conversations/${m.conversationId}/messages`)).json().messages;assert.equal(rows.filter(m=>m.role==='user').length,3);assert.equal(rows.filter(m=>m.role==='assistant').length,3);assert.equal(bodies.length,before);
  const absent=await group(c,'@Hayden please answer');assert.equal(absent.statusCode,400);assert.equal(bodies.length,before);
+});
+test('editor directory is owner scoped, reuses the saved project and refuses caller supplied paths',async()=>{
+ const c=await R.createConversation('r-owner',{agentId:'r-agent'});
+ const url=`/api/chat/conversations/${c.id}/editor-directory`;
+ assert.equal((await call('r-other','POST',url)).statusCode,403);
+ assert.equal((await call('r-owner','POST',url,{folder:'/other/path'})).statusCode,400);
+ const result=await call('r-owner','POST',url);assert.equal(result.statusCode,200);assert.equal(result.json().folder,await (await import(join(backendDir,'src/services/subscription-chat.ts'))).chatWorkspace(c.id));
+ assert.equal((await call('r-owner','POST',`/api/chat/conversations/${(await R.createConversation('r-other',{agentId:'r-agent'})).id}/editor-directory`)).statusCode,404);
+ const folder=join(dir,'editor-project');mkdirSync(folder,{recursive:true});const project=await R.createProject('r-owner',{name:'Editor fixture',folder});const linked=await R.createConversation('r-owner',{agentId:'r-agent',projectId:project.id});
+ assert.equal((await call('r-owner','POST',`/api/chat/conversations/${linked.id}/editor-directory`)).json().folder,realpathSync(folder));
+});
+test('project edits wait before Ask approval, apply exact reviewed text and reject stale or unowned scopes',async()=>{
+ const folder=join(dir,'edit-project');mkdirSync(folder,{recursive:true});const file=join(folder,'hello.txt');writeFileSync(file,'old\n');
+ const project=await R.createProject('r-owner',{name:'File review fixture',folder});const chat=await R.createConversation('r-owner',{agentId:'r-agent',projectId:project.id});
+ const context={workspaceDir:dir,userId:'r-owner',sessionId:chat.id,agentId:'r-agent',fileReadRoot:realpathSync(folder)};
+ const edit={path:'hello.txt',before:'old\n',after:'new\n'};
+ const denied=await (await tools.createAgentToolsRegistry(context)).execute('edit',edit);assert.ok(denied.error,'no implicit new grant');assert.equal(readFileSync(file,'utf8'),'old\n');
+ await grants.setAgentGrants('r-agent',{grants:['x_echo','read','edit']},'r-owner',tools.createToolsRegistry({workspaceDir:dir}).listRegistered());
+ const {withChatRun}=await import(join(backendDir,'src/services/chat-run-context.ts'));const {getApprovalDetail,approveAndRun}=await import(join(backendDir,'src/tools/approvals.ts'));
+ const registry=await tools.createAgentToolsRegistry(context);
+ const pending=await withChatRun({chatMode:'ask',reviewTools:false,beforeTool:async()=>'',afterTool:async()=>{}},()=>registry.execute('edit',edit));
+ assert.equal(pending.details.status,'pending_approval');assert.equal(readFileSync(file,'utf8'),'old\n');
+ const detail=await getApprovalDetail(pending.details.approvalId);assert.deepEqual(detail.params,edit);
+ assert.equal((await approveAndRun(detail.id,'r-owner',detail.paramsHash)).result.error,undefined);assert.equal(readFileSync(file,'utf8'),'new\n');
+ const stale=await registry.execute('edit',edit);assert.ok(stale.error);assert.equal(readFileSync(file,'utf8'),'new\n');
+ const auto=await withChatRun({chatMode:'auto',reviewTools:false,beforeTool:async()=>'',afterTool:async()=>{}},()=>registry.execute('edit',{...edit,before:'new\n',after:'auto\n'}));assert.equal(auto.error,undefined);assert.equal(readFileSync(file,'utf8'),'auto\n');
+ for(const patch of [{userId:'r-other'},{fileReadRoot:dir},{sessionId:'foreign-session'}]){const value=await (await tools.createAgentToolsRegistry({...context,...patch})).execute('edit',{...edit,before:'auto\n',after:'bad'});assert.ok(value.error);assert.equal(readFileSync(file,'utf8'),'auto\n');}
+ const pendingStale=await withChatRun({chatMode:'ask',reviewTools:false,beforeTool:async()=>'',afterTool:async()=>{}},()=>registry.execute('edit',{...edit,before:'auto\n',after:'proposal\n'}));
+ const staleDetail=await getApprovalDetail(pendingStale.details.approvalId);writeFileSync(file,'manual\n');
+ assert.ok((await approveAndRun(staleDetail.id,'r-owner',staleDetail.paramsHash)).result.error);assert.equal(readFileSync(file,'utf8'),'manual\n');
+ const pendingRevoked=await withChatRun({chatMode:'ask',reviewTools:false,beforeTool:async()=>'',afterTool:async()=>{}},()=>registry.execute('edit',{...edit,before:'manual\n',after:'revoked\n'}));
+ const revokedDetail=await getApprovalDetail(pendingRevoked.details.approvalId);await grants.setAgentGrants('r-agent',{grants:['x_echo','read']},'r-owner',tools.createToolsRegistry({workspaceDir:dir}).listRegistered());
+ assert.ok((await approveAndRun(revokedDetail.id,'r-owner',revokedDetail.paramsHash)).result.error);assert.equal(readFileSync(file,'utf8'),'manual\n');
+ const {checkedFileEdit}=await import(join(backendDir,'src/tools/core/edit.ts'));
+ const binary=join(folder,'binary.txt');writeFileSync(binary,Buffer.from([255]));assert.throws(()=>checkedFileEdit(folder,'binary.txt','�','text'));assert.deepEqual(readFileSync(binary),Buffer.from([255]));
+ for(const path of ['../outside.txt','.env','secret.key'])assert.throws(()=>checkedFileEdit(folder,path,'','no'));
 });
 test.after(async()=>{await app.close();});

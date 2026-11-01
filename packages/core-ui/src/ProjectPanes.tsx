@@ -78,7 +78,7 @@ function DiffView({ load, view }: { load: NonNullable<ReturnType<PanesController
 }
 
 /** The project folder as a tree; a file opens as read-only text. */
-export function FilesPane({ panes }: { panes: PanesController }) {
+export function FilesPane({ panes, onOpenCode }: { panes: PanesController; onOpenCode?:(file:string)=>void }) {
   const s = useSyncExternalStore(panes.subscribe, panes.getSnapshot, panes.getSnapshot);
   useEffect(() => { if (s.projectId && !s.tree['']) void panes.loadFolder(''); }, [panes, s.projectId, s.tree]);
   const [q, setQ] = useState('');
@@ -87,7 +87,7 @@ export function FilesPane({ panes }: { panes: PanesController }) {
     const f = s.file.load;
     return <div className="pane" aria-label="File">
       <div className="pane-head"><button type="button" className="row-tool" aria-label="Back to files" onClick={() => panes.closeFile()}><UiIcon name="arrow-left" size={12}/></button>
-        <span className="pane-path" dir="ltr" title={s.file.path}>{s.file.path}</span>{f.phase === 'ready' && <span className="muted">{size(f.data.size)}</span>}</div>
+        <span className="pane-path" dir="ltr" title={s.file.path}>{s.file.path}</span>{f.phase === 'ready' && <span className="muted">{size(f.data.size)}</span>}{onOpenCode&&f.phase==='ready'&&!f.data.hidden&&<button type="button" className="row-tool" aria-label="Open file in Code" title="Open file in Code" onClick={()=>onOpenCode(s.file!.path)}><UiIcon name="code" size={13}/></button>}</div>
       {f.phase === 'loading' ? <p className="pane-empty">Loading…</p> : f.phase === 'error' ? <p className="pane-empty error">{f.message}</p>
         : f.data.hidden ? <p className="pane-empty">Hidden: this file may hold secrets.</p>
         : f.data.binary || f.data.text === null ? <p className="pane-empty">Binary file; it cannot be shown as text.</p>
