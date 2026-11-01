@@ -341,6 +341,8 @@ export interface StartRunInput {
   agentId?: string | null;
   execute: (reply: FastifyReply) => Promise<unknown>;
   onPersisted?: (status: TurnStatus) => Promise<void>;
+  /** Called only after the stored run is closed, so a next participant can acquire the writer. */
+  onFinished?: (status: TurnStatus) => Promise<void>;
   /** CHAT-BUILD-01: the turn could not be stored; the caller must still close its journal row. */
   onUnstored?: () => Promise<void>;
 }
@@ -375,15 +377,19 @@ export class ChatRunRegistry {
       run.settle(this.now());
       await run.publishChecked();
       const status: TurnStatus = run.error ? 'error' : run.stopping ? 'stopped' : 'complete';
+      let durableStatus = status;
       try {
         await this.persist(run.sessionId, { runId: run.id, content: run.answer, parts: run.parts, status, durationMs: this.now() - run.startedAt, agentId: input.agentId ?? null });
         await input.onPersisted?.(status);
       } catch (err) {
+        durableStatus = 'error';
         console.error('[ChatRuns] Could not store the turn', { runId: run.id, name: (err as Error)?.name ?? 'Error' });
         await input.onUnstored?.().catch(() => undefined);
       }
       run.raw.end();
       run.finish(status, this.now());
+      try { await input.onFinished?.(durableStatus); }
+      catch { console.error('[ChatRuns] Follow-up paused', { runId: run.id }); }
     })();
     return run;
   }

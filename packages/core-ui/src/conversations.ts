@@ -31,6 +31,7 @@ export type ConversationsState = Readonly<{
   listPhase: 'idle' | 'loading' | 'ready' | 'error';
   conversations: readonly Conversation[];
   activeId: string | null;
+  meetingRevision?: number;
   threadPhase: 'empty' | 'loading' | 'ready' | 'error';
   turns: readonly Turn[];
   draft: string;
@@ -112,7 +113,7 @@ export function splitAttached(content: string): { text: string; files: { name: s
 }
 
 const emptyState = (): ConversationsState => Object.freeze({
-    access: 'ready', listPhase: 'idle', conversations: [], activeId: null, threadPhase: 'empty', turns: [], draft: '', agentId: '', replyAgent: '', agents: [], models: [], model: 'auto', projects: [], projectFilter: '', git: null,
+    access: 'ready', meetingRevision: 0, listPhase: 'idle', conversations: [], activeId: null, threadPhase: 'empty', turns: [], draft: '', agentId: '', replyAgent: '', agents: [], models: [], model: 'auto', projects: [], projectFilter: '', git: null,
     runId: null, starting: false, stopping: false, reconnecting: false, queue: [], queuePaused: false, elsewhere: false, attachments: [], images: [], focus: null, hasEarlier: false, loadingEarlier: false, sidebar: DEFAULT_PREFS, mode: 'auto', thinking: 'normal',
 });
 
@@ -126,6 +127,7 @@ export class ConversationsController {
   #pickSeq = 0;
   #disposed = false;
   #history: string[] = [];
+  #replyRoundId: string | null = null;
 
   constructor(private readonly client: SessionClient, private readonly newId: () => string = () => crypto.randomUUID(), private readonly now: () => number = Date.now) {
     this.#epoch = client.getSnapshot().epoch;
@@ -394,10 +396,11 @@ export class ConversationsController {
       if (r.status === 404) { this.publish({ threadPhase: 'error', notice: 'This conversation no longer exists.', conversations: this.#state.conversations.filter(c => c.id !== id) }); return; }
       if (r.status !== 200 || !record(r.body)) { this.publish({ threadPhase: 'error', notice: 'The conversation could not be loaded.' }); return; }
       const messages = r.body.messages as WireMessage[];
+      const roundAgent = this.readReplyRound(r.body);
       const active = r.body.activeRunId as string | null;
       // A running turn is rebuilt from its events, not from a stored row.
       const turns = messages.map(fromWire);
-      if (active) turns.push(liveTurn(active, this.now()));
+      if (active) turns.push(liveTurn(active, this.now(), roundAgent));
       const conversation=r.body.conversation as Conversation;this.replace(conversation);
       // CHAT-BUILD-01 stage 3: messages that waited when the window closed wait again (Send now sends them).
       const waiting = conversation.queued ?? [];
@@ -405,6 +408,7 @@ export class ConversationsController {
         mode: conversation.mode ?? 'auto', thinking: conversation.thinking ?? 'normal', queue: waiting, queuePaused: waiting.length > 0 && !active, elsewhere: !!active });
       void this.loadGit();
       if (active) void this.follow(active, seq);
+      else if (this.#replyRoundId) void this.finished(seq);
     } catch { if (this.live() && seq === this.#openSeq) this.publish({ threadPhase: 'error', notice: 'The conversation could not be loaded.' }); }
   }
 
@@ -418,14 +422,16 @@ export class ConversationsController {
       const r = await this.call('GET', `/api/chat/conversations/${id}/messages?limit=${PAGE_LIMIT}`);
       if (!this.live() || seq !== this.#openSeq || this.#state.runId || this.#state.starting || r.status !== 200 || !record(r.body) || !Array.isArray(r.body.messages)) return false;
       const page = (r.body.messages as WireMessage[]).map(fromWire);
+      const roundAgent = this.readReplyRound(r.body);
       const active = r.body.activeRunId as string | null;
       const shown = new Set(this.#state.turns.map(t => t.key));
-      if (!active && page.every(t => shown.has(t.key))) return false;
+      if (!active && page.every(t => shown.has(t.key))) { if (this.#replyRoundId) void this.finished(seq); return !!this.#replyRoundId; }
       const fresh = new Set(page.map(t => t.key));
       const runs = new Set(page.map(t => t.runId).filter(Boolean));
       const kept = this.#state.turns.filter(t => !fresh.has(t.key) && !t.key.startsWith('run:') && !t.key.startsWith('pending:') && !(t.runId && runs.has(t.runId)));
-      this.publish({ turns: [...kept, ...page, ...(active ? [liveTurn(active, this.now())] : [])], runId: active });
+      this.publish({ turns: [...kept, ...page, ...(active ? [liveTurn(active, this.now(), roundAgent)] : [])], runId: active });
       if (active) void this.follow(active, seq);
+      else if (this.#replyRoundId) void this.finished(seq);
       return true;
     } catch { return false; /* the next refresh tries again */ }
   }
@@ -484,8 +490,9 @@ export class ConversationsController {
     }
     if(this.#pendingModelWrites)await this.#modelWrites;if(!this.live())return;
     if(this.#state.activeId&&this.#modelSaveFailures.has(this.#state.activeId)){this.publish({notice:'The model choice was not saved. Choose it again before sending.'});return;}
+    const attendanceControl = !!this.#state.conversations.find(c=>c.id===this.#state.activeId)?.meeting && !images.length && /(?:يحضر|تحضر|احضر|حضروا|انضم|يدخل|استدع|ادعو|تخرج|يخرج|يطلع|انسحب|ينسحب|يبقى|يبقون|خلي|فقط|قسم|\binvite\b|\bdismiss\b|\bkeep\b|\bleave\b|\bonly\b)/iu.test(message);
     if ((this.#state.runId || this.#state.starting) && images.length) { this.publish({ notice: 'Images go with a message once the team is done with this one. Send them after the reply.' }); return; }
-    if (this.#state.runId || this.#state.starting) {
+    if ((this.#state.runId || this.#state.starting) && (!attendanceControl || this.#state.starting)) {
       this.publish({ queue: [...this.#state.queue, { key: this.newId(), text: message }], ...(text === undefined ? { draft: '' } : {}) });
       this.#saveQueue(this.#state.activeId, this.#state.queue);
       return;
@@ -548,11 +555,14 @@ export class ConversationsController {
       if (r.status !== 202 || !record(r.body)) {
         const code = record(r.body) ? r.body.code : undefined;
         this.publish({ starting: false, turns: this.#state.turns.filter(t => t !== optimistic), draft: this.#state.draft || message,
-          notice: code === 'rate_limited' ? 'Too many conversations are answering right now. Your message is back in the box; send it again in a moment.' : r.status === 413 ? 'The message is too long to send. Shorten it or attach it as a file.' : 'The message was not sent. It is back in the box.' });
+          notice: code === 'attendance_needs_scope' ? 'Specify the department and whether to invite, dismiss or keep its participants.' : code === 'group_too_large' ? 'Choose up to 20 speakers here, or use a meeting round for a larger group.' : code === 'ambiguous_group_mentions' ? 'Two agents share a mentioned name. Choose the intended agent before sending.' : code === 'group_paused' ? 'The group paused before starting. Send a new request when you are ready.' : code === 'rate_limited' ? 'Too many conversations are answering right now. Your message is back in the box; send it again in a moment.' : r.status === 413 ? 'The message is too long to send. Shorten it or attach it as a file.' : 'The message was not sent. It is back in the box.' });
         return;
       }
+      if (r.body.completed === true && record(r.body.assistantMessage)) { this.publish({ starting:false, runId:null, meetingRevision:(this.#state.meetingRevision??0)+1, turns:this.#state.turns.filter(t=>t!==optimistic) });await this.open(id);void this.refreshList();return; }
+      this.readReplyRound(r.body);
+      const roundSpeaker = record(r.body.replyRound) && record(r.body.replyRound.speaker) && typeof r.body.replyRound.speaker.id === 'string' ? r.body.replyRound.speaker.id : agentForRun;
       const stored = record(r.body.userMessage) ? fromWire(r.body.userMessage as WireMessage) : userTurn(`user:${runId}`, message, runId);
-      this.publish({ starting: false, runId, elsewhere: false, turns: [...this.#state.turns.filter(t => t !== optimistic), stored, liveTurn(runId, this.now(), agentForRun)] });
+      this.publish({ starting: false, runId, elsewhere: false, turns: [...this.#state.turns.filter(t => t !== optimistic), stored, liveTurn(runId, this.now(), roundSpeaker)] });
       void this.follow(runId, seq);
       void this.refreshList(); // the first message names the conversation
     } catch {
@@ -576,7 +586,7 @@ export class ConversationsController {
         if (progressed) failures = 0;
         after = last;
         if (this.#state.reconnecting) this.publish({ reconnecting: false });
-        if (ended) { this.finished(); return; }
+        if (ended) { await this.finished(openSeq); return; }
         // A reader that closed with nothing new waits a moment before re-attaching (never a tight loop).
         if (!progressed && Date.now() - began < 2000) { if (++failures > RETRY_MS.length * 4) throw new SessionFailure('unavailable'); await new Promise(r => setTimeout(r, 400)); }
       } catch (error) {
@@ -625,7 +635,50 @@ export class ConversationsController {
     this.publish({ turns: this.#state.turns.map(t => (t.status === 'running' ? { ...t, status } : t)) });
   }
 
-  private finished() {
+  private readReplyRound(body: Record<string, unknown>) {
+    const round = record(body.replyRound) ? body.replyRound : null;
+    this.#replyRoundId = round?.state === 'active' && typeof round.id === 'string' ? round.id : null;
+    if (round && record(round.speaker) && typeof round.speaker.id === 'string' && typeof round.speaker.name === 'string') {
+      const speaker = { id: round.speaker.id, name: round.speaker.name, department: typeof round.speaker.department === 'string' ? round.speaker.department : null };
+      this.publish({ agents: this.#state.agents.some(a => a.id === speaker.id) ? this.#state.agents.map(a => a.id === speaker.id ? { ...a, ...speaker } : a) : [...this.#state.agents, speaker] });
+      return speaker.id;
+    }
+  }
+
+  /** Follow saved participant runs, including the short handoff between two writers. */
+  private async followReplyRound(endedRun: string | null, seq: number): Promise<'following' | 'paused' | 'complete'> {
+    const id = this.#state.activeId, roundId = this.#replyRoundId;
+    if (!id || !roundId) return 'complete';
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if (!this.live() || seq !== this.#openSeq || id !== this.#state.activeId) return 'paused';
+      if (attempt) await new Promise(resolve => setTimeout(resolve, 300));
+      const r = await this.call('GET', `/api/chat/conversations/${id}/messages?limit=${PAGE_LIMIT}`);
+      if (!this.live() || seq !== this.#openSeq || id !== this.#state.activeId) return 'paused';
+      if (r.status !== 200 || !record(r.body) || !Array.isArray(r.body.messages)) throw Error('round unavailable');
+      const round = record(r.body.replyRound) ? r.body.replyRound : null;
+      this.readReplyRound(r.body);
+      const page = (r.body.messages as WireMessage[]).map(fromWire), fresh = new Set(page.map(t => t.key));
+      const savedRuns = new Set(page.map(t => t.runId).filter(Boolean));
+      const kept = this.#state.turns.filter(t => !fresh.has(t.key) && !t.key.startsWith('run:') && !t.key.startsWith('pending:') && !(t.runId && savedRuns.has(t.runId)));
+      const active = typeof r.body.activeRunId === 'string' && r.body.activeRunId !== endedRun ? r.body.activeRunId : null;
+      const speaker = round && record(round.speaker) && typeof round.speaker.id === 'string' ? round.speaker.id : undefined;
+      this.publish({ turns: [...kept, ...page, ...(active ? [liveTurn(active, this.now(), speaker)] : [])] });
+      if (active) { this.publish({ runId: active, stopping: false, notice: undefined }); void this.follow(active, seq); return 'following'; }
+      if (!round || round.id !== roundId || round.state === 'complete') return 'complete';
+      if (round.state === 'paused') { this.publish({ notice: 'The group replies paused. Review the last reply before asking the remaining participants to continue.' }); return 'paused'; }
+    }
+    this.publish({ notice: 'The group is still preparing its next reply. Reopen this chat to check its saved progress.' });
+    return 'paused';
+  }
+
+  private async finished(seq = this.#openSeq) {
+    if (this.#replyRoundId) {
+      try {
+        const progress = await this.followReplyRound(this.#state.runId, seq);
+        if (progress === 'following' || !this.live() || seq !== this.#openSeq) return;
+        if (progress === 'paused') { this.publish({ runId: null, stopping: false, reconnecting: false, queuePaused: this.#state.queue.length > 0 }); return; }
+      } catch { this.publish({ runId: null, reconnecting: false, queuePaused: this.#state.queue.length > 0, notice: 'Lost the connection to the group. Reopen this chat to see its saved replies.' }); return; }
+    }
     const stopped = this.#state.turns.at(-1)?.status === 'stopped';
     // CHAT-BUILD-01 stage 5 (CH10): long work that ends while the window is in the back sends a desktop notification.
     const last = this.#state.turns.at(-1);
