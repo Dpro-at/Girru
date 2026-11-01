@@ -50,8 +50,13 @@ function createChatVoice({ packageRoot, env = process.env, spawnWorker = spawn, 
      if (j.status === 'cancelled') child.kill('SIGTERM');
     });
     if (j.status === 'cancelled') return;
-    const size = (await fs.stat(output)).size; if (size < 44 || size > 2*1024*1024) throw Error('size');
-    const audio = await fs.readFile(output); if (audio.toString('ascii',0,4) !== 'RIFF' || audio.toString('ascii',8,12) !== 'WAVE') throw Error('format');
+    const file = await fs.open(output,'r'); let audio;
+    try {
+     const buffer=Buffer.alloc(2*1024*1024+1);let length=0;
+     while(length<buffer.length){const {bytesRead}=await file.read(buffer,length,buffer.length-length,null);if(!bytesRead)break;length+=bytesRead;}
+     if(length<44||length>2*1024*1024)throw Error('size');audio=buffer.subarray(0,length);
+    } finally {await file.close();}
+    if (audio.toString('ascii',0,4) !== 'RIFF' || audio.toString('ascii',8,12) !== 'WAVE') throw Error('format');
     j.audio = audio.toString('base64'); j.status = 'done';
    } catch { if (j.status !== 'cancelled') j.status = 'failed'; }
    finally { j.finished = Date.now(); j.child = null; if (busy === j.id) busy = null; if (temp) await fs.rm(temp,{recursive:true,force:true}).catch(()=>{}); }
