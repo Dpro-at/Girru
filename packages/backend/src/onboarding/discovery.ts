@@ -71,7 +71,10 @@ async function begin(user: string, options: Options = {}): Promise<DiscoveryProg
       for (let offset = state.inventoryOffset??0; offset < roots.length; offset += 10) { if (!await allowed()) return; await addInventory(home, roots.slice(offset, offset + 10)); state.inventoryOffset=offset+10;await save(user, state); await new Promise<void>(resolve => setImmediate(resolve)); }
       await prepareAutomaticImport(user, state.documents, state.homes);
       state.status = 'done'; state.notice = `Discovery complete. Files are prepared; memory import starts after your team is ready.${state.denied ? ' Some folders denied access.' : ''}${state.unavailable ? ' Some locations were unavailable.' : ''}${state.limited ? ' Some results reached the scan limit.' : ''}`; await save(user, state);
-    } catch { state.status = 'error'; state.notice = 'Discovery could not finish. Saved progress is retained; retry to continue.'; await save(user, state); }
+    } catch (error: unknown) {
+      const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'UNKNOWN';
+      console.warn('[First-run discovery] Stopped:', /^[A-Z_0-9]{1,40}$/.test(code) ? code : 'UNKNOWN');
+      state.status = 'error'; state.notice = 'Discovery could not finish. Saved progress is retained; retry to continue.'; await save(user, state); }
   })().catch(()=>{}).finally(() => { if (active.get(user) === task) active.delete(user); });
   return visible(state);
 }

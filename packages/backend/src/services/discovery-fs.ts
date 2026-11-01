@@ -28,7 +28,7 @@ export class DiscoveryFileSystem {
     if (this.child?.connected) return this.child;
     const env: NodeJS.ProcessEnv = {};
     for (const key of ['HOME', 'USERPROFILE', 'TMPDIR', 'TMP', 'TEMP', 'SystemRoot', 'SYSTEMROOT', 'WINDIR']) if (process.env[key]) env[key] = process.env[key];
-    const child = spawn(process.execPath, [this.options.worker ?? worker], { env, stdio: ['ignore', 'ignore', 'ignore', 'ipc'], windowsHide: true });
+    const child = spawn(process.execPath, [this.options.worker ?? worker], { cwd: path.dirname(this.options.worker ?? worker), env, stdio: ['ignore', 'ignore', 'ignore', 'ipc'], windowsHide: true });
     child.unref(); child.channel?.unref(); child.on('error', () => {});
     this.child = child; return child;
   }

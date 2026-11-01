@@ -7,9 +7,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
+const backendDir = process.cwd();
 const dir = mkdtempSync(join(tmpdir(), 'ap-first-run-steps-'));
+// Start the persistent transformer outside the disposable working directory.
+const warmup = join(dir, 'transformer-warmup.ts');
+writeFileSync(warmup, 'export const ready: boolean = true;\n');
+await import((await import('node:url')).pathToFileURL(warmup).href);
 process.chdir(dir);
 process.env.HOME = dir;
+process.env.USERPROFILE = dir;
 process.env.DATABASE_PATH = join(dir, '.data', 'agent-player.db');
 process.env.JWT_SECRET = randomBytes(64).toString('hex'); // throwaway, test only
 process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway, test only
@@ -31,7 +37,7 @@ await app.register(setupRoutes);
 await app.register(authRoutes);
 await app.register(firstRunRoutes,{discovery:{home:dir,roots:[dir]}});
 await app.ready();
-test.after(async () => { await app.close(); closeDatabase(); rmSync(dir, { recursive: true, force: true }); });
+test.after(async () => { await (await import('../src/onboarding/discovery.ts')).stopFirstRunDiscovery(); await app.close(); (await import('../src/services/discovery-fs.ts')).discoveryFs.close(); closeDatabase(); process.chdir(backendDir); rmSync(dir, { recursive: true, force: true, maxRetries: 10 }); });
 
 const OWNER = { name: 'Mohamed Test', email: 'owner@example.test', password: 'Fresh-Install-Pass-42!' };
 let token = '';

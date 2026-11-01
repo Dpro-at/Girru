@@ -84,3 +84,10 @@ jobs:
 
       - name: Test isolated filesystem reads without application dependencies
         run: node --experimental-transform-types --import ./scripts/test-temp-root.mjs --test --test-timeout=90000 packages/backend/test/discovery-fs.test.mjs
+
+      - name: Test first-run discovery and local import on desktop platforms
+        shell: bash
+        run: |
+          npm ci --prefix packages/backend
+          cd packages/backend
+          node --import tsx --import ../../scripts/test-temp-root.mjs --test --test-timeout=90000 test/first-run-steps.test.mjs test/local-agent-import.test.mjs
