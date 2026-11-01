@@ -1,274 +1,386 @@
 <div align="center">
 
-# Girru
+# Girru — Agent OS
 
-### 🚀 **Your Company of AI Employees** 🚀
+### 🧭 Talk to one. Get a whole company.
 
-**Ask once. The right agent takes it, decides, and gets it done with you.**
+**🤖 Your AI agents. One team. Unified memory.**
 
-**Work WITH AI, not replaced by it.**
+An open-source operating system for AI agents—bringing your agents, models, tools, and projects into one workspace.
 
-*Made by Dpro.*
+**🏠 Local-first · 🛡️ Security-focused · 🔓 Open source**
 
-![Desktop App](https://img.shields.io/badge/💻-Desktop%20App-blue?style=for-the-badge)
-![Open Source](https://img.shields.io/badge/📖-Open%20Source-brightgreen?style=for-the-badge)
-![MIT License](https://img.shields.io/badge/⚖️-MIT%20License-yellow?style=for-the-badge)
-![Your Own AI Plan](https://img.shields.io/badge/🔑-Use%20Your%20Own%20AI%20Plan-purple?style=for-the-badge)
-![Cross-Platform](https://img.shields.io/badge/🌐-Windows%20%7C%20macOS%20%7C%20Linux-cyan?style=for-the-badge)
-![Local First](https://img.shields.io/badge/🔒-Local%20First-red?style=for-the-badge)
+**Your hardware. Your accounts. Your control.**
 
-**[🌐 Website: girru.dev](https://girru.dev)** · **[⬇️ Download the app](#install)** · **[🛠️ Run from source](#source)** · **[🤝 Contribute](#contribute)**
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/readme/providers-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/readme/providers-light.svg">
+  <img src="docs/images/readme/providers-light.svg" alt="OpenAI, Claude, Gemini and Ollama" height="30">
+</picture>
+
+*Supported provider and local-runtime families. Connection methods vary.*
+
+<p>
+  <img src="docs/images/readme/telegram.svg" alt="Telegram" title="Telegram" height="26"> &nbsp;&nbsp;
+  <img src="docs/images/readme/whatsapp.svg" alt="WhatsApp" title="WhatsApp" height="26"> &nbsp;&nbsp;
+  <img src="docs/images/readme/discord.svg" alt="Discord" title="Discord" height="26"> &nbsp;&nbsp;
+  <img src="docs/images/readme/slack.png" alt="Slack" title="Slack" height="26"> &nbsp;&nbsp;
+  <img src="docs/images/readme/email.svg" alt="Email" title="Email" height="26"> &nbsp;&nbsp;
+  <img src="docs/images/readme/web-chat.svg" alt="Web chat" title="Web chat" height="26">
+</p>
+
+<p>
+  <img src="docs/images/readme/gdpr.svg" alt="GDPR / DSGVO — design target, not certification" height="40">
+  <img src="docs/images/readme/eu-ai-act.svg" alt="EU AI Act — design target, not certification" height="40">
+</p>
+
+*Privacy and AI governance design targets—not certifications.*
+
+**Formerly known as Agent Player.**
+
+**🏗️ Built by Dpro. Building since May 2025.**
+
+[🌐 Website](https://girru.dev/) · [⬇️ Download](https://github.com/Dpro-at/Girru/releases) · [📜 Changelog](https://girru.dev/changelog/) · [🤝 Contribute](CONTRIBUTING.md)
 
 </div>
 
 ---
 
-Girru works the way a real professional team works. You do not pick a tool or write a prompt for every step. You make a request, Girru routes it to the agent whose job it is, and that agent decides how to do it, asks you when it needs to, and reports back. Each agent has its own **role**, **personality**, **memory** and **permissions**. Together they are your company.
+## 🌐 One workspace for your entire AI team
 
-**Two ways to get it:**
-- 💻 **Install the desktop app** on Windows, macOS or Linux and start working.
-- 🛠️ **Run the source code** yourself, change anything, and help build it with us.
+Your project should not start over every time you switch assistants.
 
-**Capabilities:**
-- 👥 **Agent Employees** - Roles, personalities, long-term memory and their own permissions
-- 🧭 **Smart Routing** - Every request goes to the right specialist, who decides how to do it
-- 📋 **Shared Task Board** - One board for you and your agents: plan, delegate, track
-- 🔑 **Your Own AI Plan** - Works through Claude Code and Codex with your Claude or ChatGPT subscription
-- 💸 **Token Saving** - Light work runs on a small local model; your paid model handles the hard parts
-- 🌍 **3D Worlds, Games & Films** - Build worlds, characters, games and films with GenVR
-- 📈 **Market Watch & Trading** - Follow stocks, get alerts, buy and sell, with paper mode to practise
-- 🛡️ **Compliance Agents** - Review sites and apps against EU and US data-protection rules
-- 📱 **Phone** - Talk to your team and follow the work from your phone
-- 💬 **Multi-Channel** - Telegram, WhatsApp, Discord, Slack, email and web chat
+Girru brings conversations, knowledge, tasks, tools, and agent roles into a connected workspace. Organise agents into departments, give them specialties and permissions, and choose the supported models they use.
 
-## 🏷️ New Name, Same Project
+We are building **Agent OS**: the systems agents need to collaborate, preserve context, and carry work from your request to a result you can review.
 
-Girru started in **May 2025** as **Agent Player**, with its own website at **[agent-player.com](https://agent-player.com)** (the 2025 site, kept online as it was). For a short time in 2026 it was called **Dpro**. It is now **Girru**, made by Dpro, and its new home is **[girru.dev](https://girru.dev)**.
+Our direction connects everyday digital work with creative worlds, simulation, robotics, and electronics.
 
-It is the same open-source project under the same MIT license. The repository moved from `9mtm/Agent-Player` to **[Dpro-at/Girru](https://github.com/Dpro-at/Girru)**, and old links redirect here. Release files up to 1.3.2 still carry the older names.
+## 🏠 Talk to one local coordinator
 
----
+Talk to a local agent that coordinates your team.
 
-## 📸 Screenshots
+Our architecture puts local coordination at the centre: understand your request, select relevant context, apply configured permissions and filtering rules, and delegate work to suitable agents.
 
-### 3D World Engine
-![3D World Engine](docs/images/avatar-viewer.png)
-*Your agents get a presence inside interactive 3D worlds*
-
-### Market Watch & Trading
-![Trading Dashboard](docs/images/alpaca.png)
-*Follow the market and trade, in paper or live mode*
-
-### Control Panel
-![Control Panel](docs/images/panel1.jpg)
-*Manage your agents, tasks and integrations in one place*
-
-### 3D Characters
-![3D Characters](docs/images/avatars.webp)
-*Give every agent its own 3D character: pick one, or upload your own*
-
----
-
-## 🧭 How It Works
+Use supported local models alongside connected providers such as OpenAI, Anthropic, and Google. Available connection methods vary by integration and release.
 
 ```text
-Your request ──► Routing ──► The right agent ──► Decision ──► Work ──► Report
-                                   │                                    │
-                                   └──── shared task board ◄────────────┘
+                         You
+                          │
+                          ▼
+                 Local coordinator
+                          │
+                          ▼
+       Permissions · Context selection · Filtering
+                          │
+              ┌───────────┴───────────┐
+              ▼                       ▼
+         Local agents          Connected providers
+              │                       │
+              └───────────┬───────────┘
+                          ▼
+             Results · Tasks · Approvals
+                          │
+                          ▼
+              Controlled shared memory
 ```
 
-1. **You ask** in the app, from your phone, or from a channel you already use.
-2. **Girru routes** the request to the agent whose role fits it.
-3. **The agent decides**: it plans, splits the work into tasks, and hands steps to other agents when needed.
-4. **Everyone works on one task board**, yours and the agents', so you always see who is doing what.
-5. **You stay in control**: agents ask before sensitive actions and act only within the permissions you give them.
+Ask your team:
 
----
+> “Bring together the design and development departments, review this project, and propose the next steps.”
 
-## 🎯 Key Features
+The goal is one connected workflow: discussion, findings, proposed actions, your approval, and assigned tasks.
 
-| Area | What it does | Status |
-|---|---|---|
-| 👥 **Agent employees** | Roles, personalities, long-term memory and per-agent permissions | ✅ Available |
-| 📋 **Shared task board** | One board for you and your agents: plan, delegate, track | ✅ Available |
-| 🧠 **Any model** | Cloud models or local models on your own machine, chosen per agent | ✅ Available |
-| 🔑 **Your own AI subscriptions** | Claude Code and Codex with the plan you already have, no separate API bill | ✅ Available |
-| 💸 **Token saving** | Light work goes to a small local model, so paid tokens go where they matter | ✅ Available |
-| 💬 **Channels** | Telegram, WhatsApp, Discord, Slack, email and web chat | ✅ Available |
-| 📈 **Market watch & trading** | Follow stocks, get alerts, buy and sell; paper mode for practice | ✅ Extension |
-| 🔌 **Extensions** | Add only what you need: calendar, SEO, security scanner, server monitor and more | ✅ Available |
-| 📥 **Bring your history** | Import past chats and memory from other AI apps into your team | 🚧 In development |
-| 🛡️ **Compliance agents** | Review sites and apps against EU and US data-protection rules | 🚧 In development |
-| 📱 **Phone** | Talk to your team and follow work from your phone | 🚧 In development |
-| 🌍 **3D worlds with GenVR** | The world engine in the platform, powered next by GenVR | 🚧 In development |
+Supported local workflows can stay on your machine. External providers receive the permitted context needed for their requests. Coordination and filtering coverage depend on the workflow and installed version.
 
----
+## 🧠 Unified memory across your AI team
 
-## 🔑 Use the AI You Already Pay For
+**Explain your project once. Keep its knowledge working for your team.**
 
-Girru does not ask you for another API bill. It works through the official **Claude Code** and **Codex** tools on your machine, signed in with **your own** Claude or ChatGPT subscription.
+We are developing a unified memory system so supported agents and providers can work from consistent context, reducing the need to repeat information and manually update separate assistants.
 
-- 💸 **Saves tokens by design** - Lookups, summaries, sorting and first drafts go to a small local model, so your plan is spent on the hard parts.
-- 📥 **Brings your history with you** - Import your past chats and memory so your team already knows how you work *(in development)*.
-- 📈 **Grows with you** - Studios and heavy users move to a higher plan or add credit directly with Claude or ChatGPT. Girru never resells or shares accounts.
+- 📁 **Project knowledge** — Keep requirements, decisions, preferences, and working context together.
+- 🔄 **Continuity across agents** — Build on earlier work across conversations and providers.
+- 📥 **Knowledge imports** — Bring supported project documents and local agent memory into Girru.
+- ⚙️ **Automatic import controls** — Choose how supported sources are discovered and updated.
+- ✏️ **Memory management** — Review, correct, retain, or forget information.
+- 🔐 **Controlled sharing** — Share relevant knowledge within defined access boundaries.
 
-> Usage stays subject to each provider's own plan limits and terms.
+**Unified memory does not mean unrestricted access.** Ownership, scope, and permissions remain part of the system.
 
----
+Cross-provider coverage is expanding. Sharing context does not transfer a provider’s underlying model or change its training.
 
-## 🌍 GenVR: Worlds, Games & Films
+## 🔑 Use the AI subscriptions you already pay for
 
-Girru is being connected to **GenVR**, our own open-source world platform. With it your agents work inside 3D worlds with you:
+**Supported subscription connections require no additional API key or separate API billing.**
 
-- 🏗️ **Build worlds** - Terrain, roads, water, houses and thousands of items; design characters and control every detail.
-- 🎮 **Make games without code** - Zones, vehicles, counters, rules and rankings. Open worlds, VR metaverse spaces, and later console games.
-- 🎬 **Make films and series** - Record shots, edit on a timeline, add titles, subtitles and voices, then publish.
-- 🎥 **Direct with your agents** - An agent builds and films inside the world with the same tools you use.
+Work through supported tools such as **Claude Code** and **Codex**, using your existing Claude or ChatGPT subscription.
 
-> GenVR is in development and will be released separately. Console publishing depends on each platform holder's developer programme.
+API connections and local models remain additional choices.
 
----
-
-## 🛡️ Compliance Agents
-
-Specialised agents review your websites and apps against data-protection rules in the **EU** (GDPR / DSGVO, EU AI Act) and the **United States** (for example CCPA / CPRA). They scan cookies, consent and privacy flows, list what needs fixing and help you fix it.
-
-They build on **[Web Respect](https://github.com/9mtm/Web-Respect)**, our free, open-source cookie banner, accessibility and privacy toolkit with a local cookie scanner and data-deletion request controls.
-
-> Compliance agents help you find and fix issues; they are not legal advice or a certification.
-
----
-
-## 💡 Who It Is For
-
-| You are | What Girru gives you |
+| Connection | What you use |
 |---|---|
-| 🙋 **An individual** | A personal team that works for you, a task board and your phone |
-| 👨‍💻 **A developer** | API, CLI and MCP, extensions, and the freedom to use local or cloud models |
-| 🎮 **A game developer** | Worlds and games without code through GenVR, with agents that build alongside you |
-| 🎬 **A film, series or content creator** | Characters, scenes, filming and editing, with agents that direct with you |
-| 📈 **A stock watcher or trader** | Market watch, alerts and trading, with paper mode to practise first |
-| 🏢 **A company** | Agent employees with roles and permissions; every request goes to the right specialist, including compliance reviews |
-| 🎞️ **A studio or heavy user** | The same team on your own Claude or ChatGPT plan, with local models taking the routine load |
+| 🔑 **Supported subscription connection** | Your existing subscription, within its usage limits |
+| ☁️ **Optional API connection** | Your own API credentials and provider billing |
+| 🏠 **Local model** | Your hardware and a supported local runtime |
 
-> Trading involves risk. Girru does not give financial advice; every trading decision is yours. Start in paper mode.
+Provider support and subscription support are different: an integration does not automatically include access through a consumer subscription.
 
----
+You keep your own accounts. Girru does not resell or share subscriptions. Provider terms and plan limits apply.
 
-<a id="install"></a>
+## 🛡️ Security first
 
-## 💻 Install the Desktop App
+Connecting agents should preserve your control over information and actions.
 
-Download the installer for your system (all versions on the **[Releases page](https://github.com/Dpro-at/Girru/releases)**):
+Girru’s security approach centres on local operation, separated memory, scoped access, protected credentials, and approval gates.
 
-| System | Download | How |
-|---|---|---|
-| 🪟 **Windows** | 👉 **[Download .exe](https://github.com/Dpro-at/Girru/releases/download/v1.3.2/Dpro-1.3.2-win-x64.exe)** | Run it and follow the setup wizard |
-| 🍎 **macOS** | 👉 **[Apple silicon (M1 and newer)](https://github.com/Dpro-at/Girru/releases/download/v1.3.2/Dpro-1.3.2-mac-arm64.dmg)** · **[Intel](https://github.com/Dpro-at/Girru/releases/download/v1.3.2/Dpro-1.3.2-mac-x64.dmg)** | Open it and drag the app to Applications. The app is not signed yet: the first time, right-click it and choose Open |
-| 🐧 **Linux** | 👉 **[Download .AppImage](https://github.com/Dpro-at/Girru/releases/download/v1.3.2/Dpro-1.3.2-linux-x64.AppImage)** | Make it executable and run it |
+| Protection | Purpose |
+|---|---|
+| 🧠 **Memory separation** | Keep private context separate and share within defined boundaries |
+| 👤 **Owner-scoped access** | Restrict data access to the appropriate owner |
+| 🔐 **Agent permissions** | Control access to tools and resources |
+| ✅ **Approval gates** | Require your decision for protected actions |
+| 📥 **Controlled imports** | Govern sources and filter sensitive information in supported import paths |
+| 🔑 **Credential protection** | Keep secrets behind backend access controls |
+| 🧹 **Configured outbound filtering** | Control context forwarded through supported workflows |
 
-```bash
-# Linux
-chmod +x Dpro-1.3.2-linux-x64.AppImage
-./Dpro-1.3.2-linux-x64.AppImage
-```
+Local deployment gives you control over storage and connections. Cloud models and external integrations process the information sent to them.
 
-**What you get:**
-- ✅ **Tray app** - Start, stop and restart with one click
-- ✅ **Guided setup** - Your account and your AI plan, step by step
-- ✅ **Local first** - Every service listens on `127.0.0.1`; your data stays on your machine
-- ✅ **Clean uninstall** - Remove the app, with the choice to keep or delete your data
+Filtering operates within its supported scope; it does not guarantee detection of every kind of sensitive information.
 
-📖 **Full guide:** [docs/INSTALLATION.md](docs/INSTALLATION.md)
+Report vulnerabilities through [SECURITY.md](SECURITY.md).
 
----
+## 🏢 Designed with organisational requirements in mind
 
-<a id="source"></a>
+Girru is being developed for individuals and organisations that need control over where their AI work runs and how information is shared.
 
-## 🛠️ Run from Source
+Run supported workflows on your infrastructure, manage access to knowledge and tools, and choose which external services your team uses.
 
-Want to run it yourself, change it, or build on it? The full source is here.
+Our privacy and AI governance design targets include:
 
-**Requirements:** Node.js 20+, pnpm 8+, Git. Python 3.12+ only for voice features.
+| Region | Relevant frameworks |
+|---|---|
+| 🇪🇺 **European Union** | **GDPR / DSGVO · EU AI Act** |
+| 🇺🇸 **United States — California** | **CCPA, as amended by CPRA** |
+| 🇬🇧 **United Kingdom** | **UK GDPR · DPA 2018 · PECR** |
+| 🇨🇭 **Switzerland** | **FADP** |
+| 🇨🇦 **Canada** | **PIPEDA**, alongside applicable provincial laws |
+| 🇸🇬 **Singapore** | **PDPA** |
 
-```bash
-git clone https://github.com/Dpro-at/Girru.git girru
-cd girru
-pnpm install
+These are requirements we aim to support through product design and deployment controls. They are **not certifications or a claim of universal compliance**.
 
-cd packages/backend
-pnpm install
-cp .env.example .env
-# Edit .env: add the model key(s) you want to use
-```
+Applicable obligations depend on the organisation, jurisdiction, data, and use case. Local operation alone does not establish compliance.
 
-**Run (two terminals):**
+## 🧰 Ready-to-use systems for capable agents
 
-```bash
-# Terminal 1 - backend
-cd packages/backend
-pnpm dev
-```
+A productive agent needs context, tools, responsibilities, and a way to organise its work.
 
-```bash
-# Terminal 2 - app
-pnpm dev
-```
+Girru brings these foundations together:
 
-### 📁 Repository
+| System | What it provides |
+|---|---|
+| 👥 **Agents and departments** | Teams with defined responsibilities |
+| 🎯 **Specialties** | Configuration for particular kinds of work |
+| 🎭 **Personalities** | Adjustable working styles and behaviour |
+| 🧠 **Memory** | Persistent knowledge and project context |
+| 💬 **Conversations** | Connected discussion and work |
+| 📋 **Tasks** | Assignments, ownership, and progress |
+| 🗓️ **Scheduling** | Planned and recurring workflows |
+| ✅ **Approvals** | Owner control over protected decisions |
+| 🔌 **Tools and MCP** | Connections to additional capabilities |
+| 🧩 **Apps and extensions** | Specialised workflows |
+| ⚙️ **Model selection** | Supported models chosen for different agents and tasks |
+
+Availability and configuration vary by release and integration.
+
+## 🤝 Meet with your AI team
+
+Bring selected agents and departments into a shared discussion.
+
+The current development implementation includes:
+
+- 👥 Participants from multiple departments.
+- 💬 Shared conversation history, attachments, and model controls.
+- 🖥️ A main call or screen stage with a resizable chat sidebar.
+- 🎙️ Local speech transcription with automatic pause-detected turns.
+- 📷 Camera and screen previews, with image-frame attachments.
+- 📋 Meeting summaries you review before proposed actions become tasks.
+
+Ordinary chats, scheduled conversations, and meetings use the same core conversation workspace.
+
+Real-provider voice and vision, camera hardware, and packaged platform acceptance remain under validation. Current voice interaction uses detected speech turns rather than continuous full-duplex provider audio/video streaming.
+
+## 📡 Connect through your channels
+
+Bring conversations into your workspace through supported integrations.
+
+| Channel | Connection |
+|---|---|
+| ✈️ **Telegram** | Telegram integration |
+| 💬 **WhatsApp** | WhatsApp integration |
+| 🎮 **Discord** | Discord integration |
+| #️⃣ **Slack** | Slack integration |
+| ✉️ **Email** | Email integration |
+| 🌐 **Web chat** | Browser-based conversations |
+
+Each channel has its own setup, credentials, permissions, and supported operations. Consult the documentation for your installed version.
+
+## 🧩 Extend your workspace
+
+Add capabilities through supported apps, extensions, and MCP integrations.
+
+Specialised areas include:
+
+- 📈 Market tools and trading workflows.
+- 🔎 SEO and research.
+- 🛡️ Security-related workflows.
+- 🖥️ Monitoring and operational tools.
+- 🌍 Creative environments and GenVR integration.
+
+Configure what your work requires. Each integration has its own permissions, dependencies, availability, and operating requirements.
+
+## 🌍 GenVR — worlds your agents can work inside
+
+Our GenVR direction connects your AI team with interactive 3D environments.
+
+Build scenes, arrange objects, use your own characters, and develop experiences with your agents. Control scene elements and camera composition using your mouse and keyboard.
+
+The roadmap brings together:
+
+- 🏗️ **World building** — Create environments and arrange their contents.
+- 🎭 **3D characters** — Use your characters in stories, scenes, and interactions.
+- 🎮 **Interactive experiences** — Develop scenarios, rules, and agent behaviour.
+- 🎬 **Virtual production** — Stage, film, edit, and produce creative work.
+- 🤖 **Simulation** — Build repeatable environments for testing and learning.
+
+GenVR integration and these workflows are under development.
+
+## 🎬 Create films and series with your own 3D characters
+
+Work with AI to bring your characters and stories to life.
+
+Our production vision combines storytelling, scene construction, character direction, camera work, editing, and output in one connected GenVR environment.
+
+- ✍️ Develop ideas, scripts, episodes, and shot plans with your agents.
+- 🎭 Stage scenes around your own 3D characters.
+- 🖱️ Position scene elements using mouse and keyboard.
+- 🎥 Direct camera angles, movement, and composition.
+- ✂️ Build toward integrated editing, sound, titles, and final output.
+
+**From an idea to a scene, and from a scene to a film or series.**
+
+This describes the creative production roadmap. Individual capabilities will be documented as they are implemented and validated.
+
+## 🤖 From virtual experience to physical robots
+
+We want useful knowledge to travel with your agent—from digital work to simulated environments and supported physical devices.
+
+Our robotics direction connects Girru’s memory with GenVR scenarios and hardware-specific integrations.
+
+The intended workflow is to:
+
+1. 🌍 Create scenarios representing real tasks and environments.
+2. 🧪 Train or evaluate movement, interactions, and decisions through suitable simulation tools.
+3. 🧠 Preserve useful task knowledge and experience.
+4. 🔄 Transfer compatible memory, policies, or behaviours to supported robots.
+5. ✅ Validate operation on the actual hardware.
+
+This direction includes compatible robots you already own or connect in the future, once the required integration is available.
+
+Simulation-to-real transfer requires appropriate training methods, hardware adapters, and safety validation. Shared memory alone does not provide reliable physical skills.
+
+## 🔧 Electronics, PCB design, and IoT
+
+Our electronics roadmap covers **PCB design, Arduino, Raspberry Pi, sensors, actuators, and IoT devices**.
+
+We aim to connect the workflow:
 
 ```text
-packages/
-  backend/     API, agents, tools, memory and extensions (Fastify + SQLite)
-  core-ui/     The new Girru interface: Chat, Agents, Memory, Tasks, Settings, Channels
-  cli/         Command-line client
-  mcp-server/  MCP server for outside AI clients
-  channels/    Channel connector package
-src/           Current web application (Next.js)
-installer/     Desktop installer
-docs/          Documentation
+Circuit and PCB design
+         ↓
+Firmware development
+         ↓
+Device connection
+         ↓
+Agent tools and memory
+         ↓
+Testing and controlled operation
 ```
 
-**Tech stack:** Next.js, React 19, Fastify 5, SQLite, Three.js, Tauri
+Design the electronics, develop the software, connect the device, and integrate it with your agent’s working environment.
 
----
+Integrated electronics and general robotics support are roadmap work, not capabilities guaranteed by the current release.
 
-<a id="contribute"></a>
+## 🚧 Project status
 
-## 🤝 Contribute
+Girru is actively developed. Source branches and local previews can contain capabilities not yet included in published installers.
 
-Girru is built in the open, and every contribution counts: code, extensions, translations, bug reports and ideas.
+| Area | Current position |
+|---|---|
+| 👥 **Agent workspace, conversations, tasks, memory, and configuration** | Implemented; actively improved |
+| 🔑 **Supported subscription, API, and local-model connections** | Available; setup varies |
+| 🧠 **Unified memory, source discovery, and automatic imports** | Foundations implemented; coverage and validation expanding |
+| 🤝 **Meetings and automatic voice turns** | Development implementation; acceptance ongoing |
+| 🏠 **Local coordination and outbound filtering** | Coverage depends on workflow, integration, and release |
+| 🌍 **GenVR creative production and simulation** | In development |
+| 🤖 **Robotics transfer and integrated electronics** | Roadmap |
 
-1. 🍴 **Fork** the repository and create a branch.
-2. 🛠️ **Make your change** and run the checks.
-3. 📬 **Open a pull request** and tell us what it does and why.
+See the [changelog](https://girru.dev/changelog/) and release notes for the capabilities and limitations of each version.
 
-📖 See **[CONTRIBUTING.md](CONTRIBUTING.md)** for setup, code style and the pull request process. Building an extension? Start with [EXTENSIONS_REGISTRY.md](EXTENSIONS_REGISTRY.md).
+## 💻 Get Girru
 
----
+Visit the **[Releases page](https://github.com/Dpro-at/Girru/releases)** for published installers and platform-specific notes.
 
-## 🔒 Security
+For setup instructions, see the [installation guide](docs/INSTALLATION.md).
 
-Your data stays on your machine. Services bind to localhost, secrets stay in your local `.env`, and agents act only within the permissions you grant. Report a vulnerability through [SECURITY.md](SECURITY.md).
+For source development, start with [CONTRIBUTING.md](CONTRIBUTING.md).
 
----
+## 🗓️ Building since May 2025
 
-## 📜 Changelog
+Girru began as **Agent Player** on **30 May 2025**. It later became **Girru**, continuing the same project and its vision for an Agent OS.
 
-See [CHANGELOG.md](CHANGELOG.md) for version history and recent updates.
+The first release, **v0.1.0**, followed on **20 July 2025**.
 
----
+Development continues toward a connected Agent OS for knowledge, collaboration, tools, and interaction with virtual and physical environments.
 
-## 👤 Built By
+Explore the [project timeline and releases](https://girru.dev/changelog/).
 
-**Mohamed Alarade** ([@9mtm](https://github.com/9mtm)) - Creator & Lead Developer
+## 🤝 Build with us
 
----
+Girru is free and open source.
+
+Contributions are welcome across development, integrations, testing, documentation, translations, accessibility, and design.
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+
+💡 Have an idea or found a problem? [Open an issue](https://github.com/Dpro-at/Girru/issues).
+
+🛡️ For security concerns, follow [SECURITY.md](SECURITY.md).
+
+## ⭐ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Dpro-at/Girru&type=Date)](https://www.star-history.com/#Dpro-at/Girru&Date)
+
+## 👤 Creator
+
+**[9MTM](https://github.com/9mtm)** — Creator & Lead Developer
+
+**Built by [Dpro](https://dpro.at/en/). Building since May 2025.**
 
 ## ⚖️ License
 
-MIT - See [LICENSE](LICENSE) for details. Third-party notices: [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+MIT — see [LICENSE](LICENSE).
+
+Third-party components retain their respective licences. See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
 ---
 
-**Follow 9mtm:** [GitHub](https://github.com/9mtm) · [LinkedIn](https://www.linkedin.com/in/9mtm)
+<div align="center">
+
+### 🤖 Girru — Agent OS
+
+**One team. Unified memory. Your control.**
+
+[🌐 Website](https://girru.dev/) · [💻 GitHub](https://github.com/Dpro-at/Girru) · [🏢 Dpro](https://dpro.at/en/)
+
+</div>
