@@ -1,3 +1,5 @@
+const {createVoiceLibrary}=require('./voice-library-host.cjs');
+const {VOICE_LIBRARY_PATH,allowedVoiceLibrary,voiceLibraryResponse}=require('../src/voice-library-contract.js');
 const { meetingsRoute, allowedMeetings, meetingsResponse } = require('../src/meetings-contract.js');
 const {upgradeRoute,allowedUpgrade,upgradeResponse}=require('../src/specialty-update-contract.js');
 const {packRoute,allowedPack,packResponse}=require('../src/workspace-pack-contract.js');
@@ -24,6 +26,8 @@ const {allowedTemplates,templatePath,templatesResponse}=require('../src/specialt
 const { allowedMcpImport, mcpImportPath, mcpImportResponse } = require('../src/mcp-import-contract.js');
 const { allowedSkillLibrary, skillLibraryPath, skillLibraryResponse } = require('../src/skill-library-contract.js');
 const { createGenVRAssets } = require('./genvr-assets.cjs');
+const { createChatVoice } = require('./chat-voice-host.cjs');
+const { CHAT_VOICE_PATH, allowedChatVoice, chatVoiceResponse } = require('../src/chat-voice-contract.js');
 const { createStudioHost } = require('./genvr-studio-host.cjs');
 const { allowedGenVR, genvrRoute, genvrResponse, GENVR_BYTES, STUDIO_TICKET_PATH } = require('../src/genvr-contract.js');
 const { allowedChannel, channelRoute, channelResponse } = require('../src/agent-connect-contract.js');
@@ -98,6 +102,8 @@ const agent = x => {
     : { id: x.id, version: x.version, nameUnavailable: true, ...profile(x) };
 };
 function allowed(method, target, body) {
+  if(target===VOICE_LIBRARY_PATH)return allowedVoiceLibrary(method,target,body);
+  if (target === CHAT_VOICE_PATH) return allowedChatVoice(method,target,body);
   if(upgradeRoute(target))return allowedUpgrade(method,target,body);
   if(packRoute(target))return allowedPack(method,target,body);
   if(marketRoute(target))return allowedMarket(method,target,body);
@@ -229,6 +235,7 @@ function project(target, status, body) {
   if (libraryPath(target)) return libraryResponse(target,status,body);
   if (templatePath(target)) return templatesResponse(target,status,body);
   if (skillLibraryPath(target)) return skillLibraryResponse(target,status,body);
+  if (target === CHAT_VOICE_PATH) return chatVoiceResponse(status,body);
   if (genvrRoute(target)) return genvrResponse(target, status, body);
   if (channelRoute(target)) return channelResponse(target, status, body);
   if (connectorRoute(target)) return connectorResponse(target, status, body);
@@ -301,13 +308,20 @@ function createApplicationServer({ packageRoot = root, channel, stage1ReadOnly =
   if (!Number.isInteger(streamTimeoutMs) || streamTimeoutMs < 1 || streamTimeoutMs > CHAT_DEADLINE_MS || !Number.isInteger(streamIdleMs) || streamIdleMs < 1 || streamIdleMs > CHAT_IDLE_MS) throw Error('Invalid stream limits');
   if (!Number.isInteger(runStreamMs) || runStreamMs < 1 || runStreamMs > RUN_STREAM_MS || !Number.isInteger(runIdleMs) || runIdleMs < 1 || runIdleMs > RUN_IDLE_MS) throw Error('Invalid run stream limits');
   // Live bridge (MCP + local voice) and the owner's private library for the GenVR frame.
-  const studio = createStudioHost({ packageRoot });
+  const studio = createStudioHost({ packageRoot, voiceProvider:generated=>voiceLibrary.shared(generated) });
+  const chatVoice = createChatVoice({ packageRoot, blocked:()=>voiceLibrary.isBusy() });
+  const voiceLibrary=createVoiceLibrary({packageRoot,blocked:()=>chatVoice.isBusy()});
   let studioToken = null;
   void studio.token().then(t => { studioToken = t; }, () => {});
   const serveGenVR = createGenVRAssets(packageRoot, () => studioToken);
   const assets = readCurrent(packageRoot, channel); // Pin validated bytes for this server lifetime.
   const server = http.createServer({ maxHeaderSize: 16384, requestTimeout: 10000, headersTimeout: 10000 }, async (req, res) => {
     for (const [k, v] of Object.entries(HEADERS)) res.setHeader(k, v);
+    // Explicit chat talk mode uses only this origin's microphone and generated local audio.
+    if(!stage1ReadOnly){
+      res.setHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=()');
+      res.setHeader('Content-Security-Policy', HEADERS['Content-Security-Policy'] + "; media-src 'self' blob:");
+    }
     const send = (status, body = null, type = 'application/json; charset=utf-8') => {
       if (res.destroyed || res.writableEnded) return;
       if (res.headersSent) { res.destroy(); return; }
@@ -367,7 +381,7 @@ function createApplicationServer({ packageRoot = root, channel, stage1ReadOnly =
     const length = Number(req.headers['content-length'] || 0);
     const audio = req.method === 'POST' && raw === '/api/chat/transcribe';
     // Agent files are up to 1 MB of text; JSON escaping can double it.
-    const limit = meetingsRoute(raw) ? 512 * 1024 : agentLibraryRoute(raw) ? 2_400_000 : packRoute(raw) ? 2_100_000 : genvrRoute(raw) ? GENVR_BYTES + 65536 : audio ? AUDIO_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/images$/.test(raw) ? IMAGE_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/runs$/.test(raw) ? RUN_LIMIT : LIMIT;
+    const limit = raw===VOICE_LIBRARY_PATH ? 4_200_000 : meetingsRoute(raw) ? 512 * 1024 : agentLibraryRoute(raw) ? 2_400_000 : packRoute(raw) ? 2_100_000 : genvrRoute(raw) ? GENVR_BYTES + 65536 : audio ? AUDIO_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/images$/.test(raw) ? IMAGE_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/runs$/.test(raw) ? RUN_LIMIT : LIMIT;
     if (!Number.isSafeInteger(length) || length < 0 || length > limit) return send(413);
     if (req.headers['content-type'] && !/^application\/json(?:;\s*charset=utf-8)?$/i.test(req.headers['content-type'])) return send(415);
     try {
@@ -381,7 +395,7 @@ function createApplicationServer({ packageRoot = root, channel, stage1ReadOnly =
       const payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body));
       const port = typeof upstreamPort === 'function' ? upstreamPort() : upstreamPort;
       if (!validPort(port)) return send(503);
-      if (raw === STUDIO_TICKET_PATH) {
+      if (raw === STUDIO_TICKET_PATH || raw === CHAT_VOICE_PATH || raw === VOICE_LIBRARY_PATH) {
         // Answered here, not by the backend: the backend confirms the caller is the owner first.
         const me = await new Promise(resolve => {
           const check = http.request({ hostname: HOST, port, path: '/api/auth/me', method: 'GET', agent: false, headers: { ...(launchToken ? { [LAUNCH_HEADER]: launchToken } : {}), Host: `${HOST}:${port}`, Accept: 'application/json', Authorization: auth, ...(req.headers.origin ? { Origin: origin } : {}) } }, response => {
@@ -393,6 +407,11 @@ function createApplicationServer({ packageRoot = root, channel, stage1ReadOnly =
         });
         const user = me && typeof me === 'object' ? me.user : null;
         if (!user || user.role !== 'owner' || typeof user.id !== 'string') return send(403, { code: 'forbidden' });
+        if(raw===VOICE_LIBRARY_PATH){try{return send(200,voiceLibraryResponse(200,await voiceLibrary.call(user.id,body)));}catch{return send(503,{code:'voice_failed'});}}
+        if (raw === CHAT_VOICE_PATH) {
+          try { return send(200, chatVoiceResponse(200, await voiceLibrary.chatCall(user.id, body, chatVoice))); }
+          catch (e) { const code = ['voice_busy','voice_unavailable','invalid_input','forbidden'].includes(e.code) ? e.code : 'voice_failed'; return send(code === 'forbidden' ? 403 : code === 'voice_busy' ? 409 : 503, {code}); }
+        }
         return send(200, studio.issueTicket(user.id));
       }
       const headers = { ...(launchToken ? { [LAUNCH_HEADER]: launchToken } : {}), Host: `${HOST}:${port}`, Accept: chat || runEvents || termStream ? 'text/event-stream' : 'application/json', ...(chat ? { 'Idempotency-Key': req.headers['idempotency-key'] } : {}), ...(auth ? { Authorization: auth } : {}), ...(raw === '/api/auth/login' ? { [DEVICE_LABEL_HEADER]: deviceLabel(req.headers['user-agent']) } : {}), ...(req.headers.origin ? { Origin: origin } : {}), ...(payload ? { 'Content-Type': 'application/json', 'Content-Length': payload.length } : {}) };
@@ -510,7 +529,7 @@ function createApplicationServer({ packageRoot = root, channel, stage1ReadOnly =
   });
   server.on('checkContinue', (_req, res) => { res.writeHead(417); res.end(); });
   server.on('listening', () => { const a = server.address(); if (a && typeof a === 'object') void studio.listening(`http://${HOST}:${a.port}`).catch(() => {}); });
-  server.on('close', () => { void studio.close(); });
+  server.on('close', () => { chatVoice.close();voiceLibrary.close(); void studio.close(); });
   server.on('upgrade', (_req, socket) => socket.destroy());
   server.on('connect', (_req, socket) => socket.destroy());
   server.on('clientError', (_error, socket) => socket.destroy());

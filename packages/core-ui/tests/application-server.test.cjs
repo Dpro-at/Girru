@@ -5,7 +5,8 @@ const http = require('node:http');
 const fs = require('node:fs');
 const { createApplicationServer, allowed, LIMIT, RESPONSE_LIMIT } = require('../scripts/application-server.cjs');
 const { allowedRequest, SessionClient, createSameOriginTransport } = require('../src/session.ts');
-const { HEADERS } = require('../scripts/preview.cjs');
+const { HEADERS: PREVIEW_HEADERS } = require('../scripts/preview.cjs');
+const HEADERS = {...PREVIEW_HEADERS, 'Permissions-Policy':'camera=(), microphone=(self), geolocation=()', 'Content-Security-Policy':PREVIEW_HEADERS['Content-Security-Policy'] + "; media-src 'self' blob:"};
 const listen = server => new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', () => resolve(server.address().port)); });
 const close = server => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
 const token = 'fiction-only-token';
@@ -125,7 +126,7 @@ test('client disconnect cancels in-flight upstream', async t => {
   const req = http.get({ host:'127.0.0.1', port:s.port, path:'/api/auth/me', headers:{Authorization:`Bearer ${token}`} }); req.on('error',()=>{});
   await entered; req.destroy(); await closed; assert.equal(s.calls.length,1);
 });
-test('validated static candidate has same CSP; fixture entry unchanged; no query live toggle', async t => {
+test('validated static candidate allows only local media and same-origin microphone; fixture entry unchanged; no query live toggle', async t => {
   const before = fs.readFileSync(require('node:path').join(__dirname,'../dist/current.json'));
   const s = await setup(t);
   // Native fetch adds no Authorization to static requests.

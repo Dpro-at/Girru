@@ -11,8 +11,8 @@ test('Library: its own sidebar and page with Personalities, Specialties and Skil
  for(const s of ['Personalities','Specialties','Skills'])assert.match(html,new RegExp('>'+s+'<'));
  assert.match(html,/aria-label="Library places"/);
  const shell=src('SignedInShell.tsx');
- assert.match(shell,/<LibrarySection active=\{page==='library'\} sidebarSlot=\{slot\} onOpen=\{place=>setPage\(place\)\}\/>/);
- assert.match(shell,/library:entry\('library',owner\)/);
+ assert.match(shell,/<LibrarySection canManageRules=\{owner\} active=\{page==='library'\} sidebarSlot=\{slot\} onOpen=\{place=>setPage\(place\)\}\/>/);
+ assert.match(shell,/library:\{\.\.\.entry\('library',owner\)/);
  for(const id of ['skills','personalities','specialties'])assert.match(shell,new RegExp(`${id}:entry\\('${id}',owner,go\\('${id}'\\),undefined,'library'\\)`));
  assert.doesNotMatch(shell,/mcp:entry\(/);
  const {footerSections}=require('../src/footer-prefs.ts');assert.deepEqual(footerSections.library,{label:'Library',icon:'book'});assert.equal(footerSections.mcp,undefined);

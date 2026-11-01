@@ -1,0 +1,384 @@
+[
+  {
+    "id": "chatterbox-torch",
+    "name": "Chatterbox Multilingual v2 \u00b7 CPU / GPU",
+    "repo": "ResembleAI/chatterbox",
+    "packages": [
+      "chatterbox-tts==0.1.7"
+    ],
+    "module": "chatterbox",
+    "languages": [
+      "ar",
+      "da",
+      "de",
+      "el",
+      "en",
+      "es",
+      "fi",
+      "fr",
+      "he",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "ms",
+      "nl",
+      "no",
+      "pl",
+      "pt",
+      "ru",
+      "sv",
+      "sw",
+      "tr",
+      "zh"
+    ],
+    "license": "MIT",
+    "features": [
+      "Text to speech",
+      "Voice cloning",
+      "CPU; CUDA when available"
+    ],
+    "revision": "5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18",
+    "files": [
+      {
+        "path": "Cangjie5_TC.json",
+        "size": 1920163,
+        "sha256": null,
+        "git": "d77891f84ca1db0d6f7058a4ee081d4bb0bfe88e"
+      },
+      {
+        "path": "conds.pt",
+        "size": 107374,
+        "sha256": "6552d70568833628ba019c6b03459e77fe71ca197d5c560cef9411bee9d87f4e",
+        "git": "e13b43d1ce809473454627428ff413ebfc7e8660"
+      },
+      {
+        "path": "grapheme_mtl_merged_expanded_v1.json",
+        "size": 69989,
+        "sha256": null,
+        "git": "d27fb3f2fd38ca39b7bbfbf83a13b3c617e551df"
+      },
+      {
+        "path": "s3gen.pt",
+        "size": 1057165844,
+        "sha256": "9b9ff07e60b20c136e2b1b3d7563a24604e8d2c4c267888d1ee929dd0151d2a3",
+        "git": "d4ef76740efef1aeb5eb1415214083288cf2cfde"
+      },
+      {
+        "path": "t3_mtl23ls_v2.safetensors",
+        "size": 2143989752,
+        "sha256": "b1237586127ce98e7800a68e49938eb5092846862aabcb6e17b2fda7889a6c75",
+        "git": "482ccdb7195ef1a44cafee78c72020bdb89c7e86"
+      },
+      {
+        "path": "ve.pt",
+        "size": 5698626,
+        "sha256": "4b16d836bc598509860f6fa068165a8bb5e9ac84f05582dfcf278a5a372879f1",
+        "git": "adae22451d455ceb0592efc42464cadb21978b2a"
+      }
+    ],
+    "downloadBytes": 3208951748,
+    "platforms": [
+      "darwin-arm64",
+      "win32-x64",
+      "linux-x64"
+    ],
+    "source": "https://huggingface.co/ResembleAI/chatterbox",
+    "note": "Portable PyTorch backend for Apple Silicon and Windows x64. Intel Macs use an ONNX engine instead. CPU generation can be slow; runtime downloads add disk usage."
+  },
+  {
+    "id": "supertonic-3",
+    "name": "Supertonic 3 \u00b7 Compact multilingual",
+    "repo": "supertone-oss-archive/supertonic-3",
+    "packages": [
+      "supertonic==1.3.1"
+    ],
+    "module": "supertonic",
+    "languages": [
+      "ar",
+      "bg",
+      "hr",
+      "cs",
+      "da",
+      "nl",
+      "en",
+      "et",
+      "fi",
+      "fr",
+      "de",
+      "el",
+      "hi",
+      "hu",
+      "id",
+      "it",
+      "ja",
+      "ko",
+      "lv",
+      "lt",
+      "pl",
+      "pt",
+      "ro",
+      "ru",
+      "sk",
+      "sl",
+      "es",
+      "sv",
+      "tr",
+      "uk",
+      "vi"
+    ],
+    "license": "MIT runtime / OpenRAIL-M weights",
+    "features": [
+      "Text to speech",
+      "10 built-in voices",
+      "CPU; no GPU required"
+    ],
+    "note": "Upstream archived; pinned offline release. Voice cloning is not included.",
+    "revision": "aafc6e32416a594460b32413efc49d7fe4ce6d46",
+    "files": [
+      {
+        "path": "LICENSE",
+        "size": 15007,
+        "sha256": null,
+        "git": "1e2cbe6cef94c8cdf3ed1fcebc0f5317ca7ad5a1"
+      },
+      {
+        "path": "README.md",
+        "size": 9189,
+        "sha256": null,
+        "git": "6f4f5c5d7afbe9d45bc107ebc9c6629c3ea5c135"
+      },
+      {
+        "path": "config.json",
+        "size": 174,
+        "sha256": null,
+        "git": "19c2e8b0aa701c1017ca22a22cd519354854e4b1"
+      },
+      {
+        "path": "onnx/duration_predictor.onnx",
+        "size": 3700147,
+        "sha256": "c3eb91414d5ff8a7a239b7fe9e34e7e2bf8a8140d8375ffb14718b1c639325db",
+        "git": "3dc0f3ca70185b0ecb20ee812832fa8fd87d5f77"
+      },
+      {
+        "path": "onnx/text_encoder.onnx",
+        "size": 36416150,
+        "sha256": "c7befd5ea8c3119769e8a6c1486c4edc6a3bc8365c67621c881bbb774b9902ff",
+        "git": "001b50875741258a8681a472d63929b2e18abe55"
+      },
+      {
+        "path": "onnx/tts.json",
+        "size": 8253,
+        "sha256": null,
+        "git": "28575b0793c92607a0f0a292550df9bd17709a79"
+      },
+      {
+        "path": "onnx/unicode_indexer.json",
+        "size": 277676,
+        "sha256": null,
+        "git": "3aaf4d33024aff0be455633c24b3636b3a810150"
+      },
+      {
+        "path": "onnx/vector_estimator.onnx",
+        "size": 256534781,
+        "sha256": "883ac868ea0275ef0e991524dc64f16b3c0376efd7c320af6b53f5b780d7c61c",
+        "git": "e5e45d221db3825dc28fe20039cfca7e329cfd18"
+      },
+      {
+        "path": "onnx/vocoder.onnx",
+        "size": 101424195,
+        "sha256": "085de76dd8e8d5836d6ca66826601f615939218f90e519f70ee8a36ed2a4c4ba",
+        "git": "b50be323eb0a124468b665e0e3e8380710090744"
+      },
+      {
+        "path": "voice_styles/F1.json",
+        "size": 292046,
+        "sha256": null,
+        "git": "421365f307ed1535d8da16845031d0e9fa3e60c5"
+      },
+      {
+        "path": "voice_styles/F2.json",
+        "size": 292423,
+        "sha256": null,
+        "git": "b09a3a433df8a4856d1d7d64736a56ddf37a4ea3"
+      },
+      {
+        "path": "voice_styles/F3.json",
+        "size": 290794,
+        "sha256": null,
+        "git": "a366f94c77c4b440404071f1a52bed3ccf83a5ff"
+      },
+      {
+        "path": "voice_styles/F4.json",
+        "size": 291808,
+        "sha256": null,
+        "git": "39c78a52795320c6101b7eaf984c0e2352fbdc18"
+      },
+      {
+        "path": "voice_styles/F5.json",
+        "size": 291479,
+        "sha256": null,
+        "git": "06983f8816ad00a8eeb7efd37a33d457587e16f8"
+      },
+      {
+        "path": "voice_styles/M1.json",
+        "size": 291748,
+        "sha256": null,
+        "git": "bddfff85a7c4c140c11620bd7005d86681dccdac"
+      },
+      {
+        "path": "voice_styles/M2.json",
+        "size": 292055,
+        "sha256": null,
+        "git": "602ff6c4d6d48cdb71c37461f7c175d71fe8b34b"
+      },
+      {
+        "path": "voice_styles/M3.json",
+        "size": 290198,
+        "sha256": null,
+        "git": "000b60436b77619b933fdc33628ad737595e6794"
+      },
+      {
+        "path": "voice_styles/M4.json",
+        "size": 291522,
+        "sha256": null,
+        "git": "aae253ae81185fa06a6469c3f1cdff04ed121ddf"
+      },
+      {
+        "path": "voice_styles/M5.json",
+        "size": 291469,
+        "sha256": null,
+        "git": "0536b252698830f8536c077edcb94e1ce4768ab6"
+      }
+    ],
+    "downloadBytes": 401301114,
+    "platforms": [
+      "darwin-arm64",
+      "darwin-x64",
+      "win32-x64",
+      "linux-x64"
+    ],
+    "source": "https://huggingface.co/supertone-oss-archive/supertonic-3"
+  },
+  {
+    "id": "kitten-nano",
+    "name": "KittenTTS Nano \u00b7 English",
+    "repo": "KittenML/kitten-tts-nano-0.1",
+    "packages": [
+      "kittentts==0.1.3"
+    ],
+    "module": "kittentts",
+    "languages": [
+      "en"
+    ],
+    "license": "Apache-2.0",
+    "features": [
+      "Text to speech",
+      "8 built-in voices",
+      "CPU; no GPU required"
+    ],
+    "note": "Pinned lightweight Nano model. English only; no voice cloning.",
+    "revision": "7d99aae46867223af52d5ea16d076d8839ce1a2e",
+    "files": [
+      {
+        "path": "README.md",
+        "size": 1141,
+        "sha256": null,
+        "git": "6a136b236220d1b36851e7f2a66667e87e987d84"
+      },
+      {
+        "path": "config.json",
+        "size": 177,
+        "sha256": null,
+        "git": "37a1a9c9cafd684eb1786e262fa9c10fa6eed694"
+      },
+      {
+        "path": "kitten_tts_nano_v0_1.onnx",
+        "size": 23847845,
+        "sha256": "8818e8f06eb34bc9d17ba3987a9b513c5759e2f5f119b1242cfbb503d12bdc0a",
+        "git": "74827275114f93a2fe0d9d0b888aef443e944696"
+      },
+      {
+        "path": "voices.npz",
+        "size": 10294,
+        "sha256": "d1f3b3ce46c5fa79fa0019824bf572fea74f6a84c88b079cfecd700118d00b62",
+        "git": "c78371d66a78ebb5f1e590aa06ec5e91c4b2823d"
+      }
+    ],
+    "downloadBytes": 23859457,
+    "platforms": [
+      "darwin-arm64",
+      "darwin-x64",
+      "win32-x64",
+      "linux-x64"
+    ],
+    "source": "https://huggingface.co/KittenML/kitten-tts-nano-0.1"
+  },
+  {
+    "id": "piper-voices",
+    "name": "Piper \u00b7 Arabic and English",
+    "repo": "rhasspy/piper-voices",
+    "packages": [
+      "piper-tts==1.8.0"
+    ],
+    "module": "piper",
+    "languages": [
+      "ar",
+      "en"
+    ],
+    "license": "GPL-3.0 runtime / separate voice terms",
+    "features": [
+      "Text to speech",
+      "Arabic Kareem + English Lessac",
+      "CPU; no voice cloning"
+    ],
+    "note": "Voice-specific dataset terms are included in each model card. Runtime is installed separately, not copied into Girru.",
+    "revision": "b4e358ffcb232591bf73a540e70f7de528e4174a",
+    "files": [
+      {
+        "path": "ar/ar_JO/kareem/medium/MODEL_CARD",
+        "size": 283,
+        "sha256": null,
+        "git": "5499b54a46815442889e683c2e4fdaa00a4b1109"
+      },
+      {
+        "path": "ar/ar_JO/kareem/medium/ar_JO-kareem-medium.onnx",
+        "size": 63201294,
+        "sha256": "9e95cab07b679da603bba17c4dec7ab3111320571964ee95c0379603c086491e",
+        "git": "60c623f82460a65d8ab2971f007cc2c944cc5448"
+      },
+      {
+        "path": "ar/ar_JO/kareem/medium/ar_JO-kareem-medium.onnx.json",
+        "size": 5024,
+        "sha256": null,
+        "git": "b59e045bb026c7000fb0d4f8269d0cfbff4e8989"
+      },
+      {
+        "path": "en/en_US/lessac/medium/MODEL_CARD",
+        "size": 351,
+        "sha256": null,
+        "git": "c0b9a3d60eb5b2e852aedb2a806031f85d02d40b"
+      },
+      {
+        "path": "en/en_US/lessac/medium/en_US-lessac-medium.onnx",
+        "size": 63201294,
+        "sha256": "5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f",
+        "git": "96c54a44122cdf5bc67d5d2cb24e2979dec53f93"
+      },
+      {
+        "path": "en/en_US/lessac/medium/en_US-lessac-medium.onnx.json",
+        "size": 4885,
+        "sha256": null,
+        "git": "c67cea2c9a7a6501d89f7b2cdff411bc49e54a28"
+      }
+    ],
+    "downloadBytes": 126413131,
+    "platforms": [
+      "darwin-arm64",
+      "darwin-x64",
+      "win32-x64",
+      "linux-x64"
+    ],
+    "source": "https://huggingface.co/rhasspy/piper-voices"
+  }
+]

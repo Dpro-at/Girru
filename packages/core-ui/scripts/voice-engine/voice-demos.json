@@ -1,0 +1,140 @@
+[
+  {
+    "id": "arabic-demo",
+    "language": "ar",
+    "url": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/ar_f/ar_prompts2.flac",
+    "referenceText": "في الشهر الماضي، وصلنا إلى معلم جديد بمليارين من المشاهدات على قناتنا على يوتيوب."
+  },
+  {
+    "id": "da-demo",
+    "language": "da",
+    "url": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/da_m1.flac",
+    "referenceText": "Sidste måned nåede vi en ny milepæl med to milliarder visninger på vores YouTube-kanal."
+  },
+  {
+    "id": "de-demo",
+    "language": "de",
+    "url": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/de_f1.flac",
+    "referenceText": "Letzten Monat haben wir einen neuen Meilenstein erreicht: zwei Milliarden Aufrufe auf unserem YouTube-Kanal."
+  },
+  {
+    "id": "greek-demo",
+    "language": "el",
+    "url": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/el_m.flac",
+    "referenceText": "Τον περασμένο μήνα, φτάσαμε σε ένα νέο ορόσημο με δύο δισεκατομμύρια προβολές στο κανάλι μας στο YouTube."
+  },
+  {
+    "id": "english-demo",
+    "language": "en",
+    "url": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/en_f1.flac",
+    "referenceText": "Last month, we reached a new milestone with two billion views on our YouTube channel."
+  },
+  {
+    "id": "es-demo",
+    "language": "es",
+    "url": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/es_f1.flac",
+    "referenceText": "El mes pasado alcanzamos un nuevo hito: dos mil millones de visualizaciones en nuestro canal de YouTube."
+  },
+  {
+    "id": "fi-demo",
+    "language": "fi",
+    "url": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/fi_m.flac",
+    "referenceText": "Viime kuussa saavutimme uuden virstanpylvään kahden miljardin katselukerran kanssa YouTube-kanavallamme."
+  },
+  {
+    "id": "fr-demo",
+    "language": "fr",
+    "url": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/fr_f1.flac",
+    "referenceText": "Le mois dernier, nous avons atteint un nouveau jalon avec deux milliards de vues sur notre chaîne YouTube."
+  },
+  {
+    "id": "he-demo",
+    "language": "he",
+    "url": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/he_m1.flac",
+    "referenceText": "בחודש שעבר הגענו לאבן דרך חדשה עם שני מיליארד צפיות בערוץ היוטיוב שלנו."
+  },
+  {
+    "id": "hi-demo",
+    "language": "hi",
+    "url": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/hi_f1.flac",
+    "referenceText": "पिछले महीने हमने एक नया मील का पत्थर छुआ: हमारे YouTube चैनल पर दो अरब व्यूज़।"
+  },
+  {
+    "id": "it-demo",
+    "language": "it",
+    "url": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/it_m1.flac",
+    "referenceText": "Il mese scorso abbiamo raggiunto un nuovo traguardo: due miliardi di visualizzazioni sul nostro canale YouTube."
+  },
+  {
+    "id": "ja-demo",
+    "language": "ja",
+    "url": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/ja/ja_prompts1.flac",
+    "referenceText": "先月、私たちのYouTubeチャンネルで二十億回の再生回数という新たなマイルストーンに到達しました。"
+  },
+  {
+    "id": "ko-demo",
+    "language": "ko",
+    "url": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/ko_f.flac",
+    "referenceText": "지난달 우리는 유튜브 채널에서 이십억 조회수라는 새로운 이정표에 도달했습니다."
+  },
+  {
+    "id": "ms-demo",
+    "language": "ms",
+    "url": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/ms_f.flac",
+    "referenceText": "Bulan lepas, kami mencapai pencapaian baru dengan dua bilion tontonan di saluran YouTube kami."
+  },
+  {
+    "id": "nl-demo",
+    "language": "nl",
+    "url": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/nl_m.flac",
+    "referenceText": "Vorige maand bereikten we een nieuwe mijlpaal met twee miljard weergaven op ons YouTube-kanaal."
+  },
+  {
+    "id": "no-demo",
+    "language": "no",
+    "url": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/no_f1.flac",
+    "referenceText": "Forrige måned nådde vi en ny milepæl med to milliarder visninger på YouTube-kanalen vår."
+  },
+  {
+    "id": "pl-demo",
+    "language": "pl",
+    "url": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/pl_m.flac",
+    "referenceText": "W zeszłym miesiącu osiągnęliśmy nowy kamień milowy z dwoma miliardami wyświetleń na naszym kanale YouTube."
+  },
+  {
+    "id": "pt-demo",
+    "language": "pt",
+    "url": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/pt_m1.flac",
+    "referenceText": "No mês passado, alcançámos um novo marco: dois mil milhões de visualizações no nosso canal do YouTube."
+  },
+  {
+    "id": "ru-demo",
+    "language": "ru",
+    "url": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/ru_m.flac",
+    "referenceText": "В прошлом месяце мы достигли нового рубежа: два миллиарда просмотров на нашем YouTube-канале."
+  },
+  {
+    "id": "sv-demo",
+    "language": "sv",
+    "url": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/sv_f.flac",
+    "referenceText": "Förra månaden nådde vi en ny milstolpe med två miljarder visningar på vår YouTube-kanal."
+  },
+  {
+    "id": "sw-demo",
+    "language": "sw",
+    "url": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/sw_m.flac",
+    "referenceText": "Mwezi uliopita, tulifika hatua mpya ya maoni ya bilioni mbili kweny kituo chetu cha YouTube."
+  },
+  {
+    "id": "tr-demo",
+    "language": "tr",
+    "url": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/tr_m.flac",
+    "referenceText": "Geçen ay YouTube kanalımızda iki milyar görüntüleme ile yeni bir dönüm noktasına ulaştık."
+  },
+  {
+    "id": "zh-demo",
+    "language": "zh",
+    "url": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/zh_f2.flac",
+    "referenceText": "上个月，我们达到了一个新的里程碑. 我们的YouTube频道观看次数达到了二十亿次，这绝对令人难以置信。"
+  }
+]

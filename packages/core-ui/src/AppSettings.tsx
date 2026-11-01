@@ -1,3 +1,4 @@
+import {VoiceSettings} from './VoiceSettings';
 import {FooterSettings} from './FooterSettings';
 import {ChatNoticeSettings} from './ChatNoticeSettings';
 import {PrimaryReplySettings} from './PrimaryReplySettings';
@@ -29,12 +30,13 @@ import { McpSection } from './ToolSections';
 import type { UiIconName } from './ui-icons';
 /** Places that are sections of their own; their Settings rows open them. MCP connections stays in Settings with its places nested, like Memory. */
 type Tool='mcp'|'library';
-type Place='general'|'account'|'replies'|'move'|'permissions'|'verification'|'approval-rules'|'keys'|'accounts'|'channels'|'memory'|'schedules'|'departments'|'apps'|Tool|'backups'|'about';
+type Place='voice'|'general'|'account'|'replies'|'move'|'permissions'|'verification'|'approval-rules'|'keys'|'accounts'|'channels'|'memory'|'schedules'|'departments'|'apps'|Tool|'backups'|'about';
 /** Old names ('models', 'sharing', 'connections') still open their places. */
 export type SettingsTab=Place|'models'|'sharing'|'connections';
 type Row={value:Place;label:string;icon:UiIconName;words:string;note?:string;jump?:boolean};
 // Search finds settings inside the pages, not only page names.
 const ROWS:Record<Place,Row>={
+ voice:{value:'voice',label:'Voice',icon:'speaker',words:'voice speech audio generate clone saved voices microphone text to speech local models main agent',note:'Your voice library, speech models and Main Agent voice.'},
  general:{value:'general',label:'General',icon:'sun',words:'theme appearance light dark system footer sections icons language english notifications notify done',note:'Appearance, the footer and notifications. Changes save by themselves.'},
  account:{value:'account',label:'Account',icon:'contact',words:'two-step sign-in authenticator recovery codes password sign out everywhere devices sessions email role',note:'Your identity, two-step sign-in and the devices signed in.'},
  replies:{value:'replies',label:'Models and replies',icon:'cpu',words:'models tools main agent primary model ollama local coding apps claude code codex gemini antigravity answer chat reply source',note:'Choose where your agents get their replies.'},
@@ -77,7 +79,7 @@ export function AppSettings({ onOpenStore, signedIn, preference, onTheme, onAcco
   const user=signedIn?client?.getSnapshot().user:undefined,owner=user?.role==='owner',live=signedIn&&!!client;
   const ownerOnly=(keys:Place[])=>owner?keys:[];
   const groups:{name:string;keys:Place[]}[]=live?[
-    {name:'Application',keys:['general','account','replies',...ownerOnly(['move'])]},
+    {name:'Application',keys:['general','account','replies',...ownerOnly(['voice','move'])]},
     {name:'Security',keys:[...ownerOnly(['permissions']),...(user?.role!=='guest'?['verification' as const]:[]),...ownerOnly(['approval-rules']),'keys']},
     {name:'Connections',keys:ownerOnly(['accounts','channels',...(client?['mcp' as const]:[]),'memory'])},
     {name:'Workspace',keys:[...ownerOnly(['departments','schedules']),...(onOpenApps?['apps' as const]:[]),...(onOpenTool?ownerOnly(['library']):[])]},
@@ -113,6 +115,7 @@ export function AppSettings({ onOpenStore, signedIn, preference, onTheme, onAcco
         {live&&owner&&<><PrimaryReplySettings client={client!} onAgents={onAgents}/><ReplyAppsSettings client={client!} onOpenChat={onOpenChat} onOpenStore={onOpenStore}/></>}
       </>}
       {active_==='move'&&owner&&<WorkspacePackSettings client={client!}/>}
+      {active_==='voice'&&owner&&<VoiceSettings client={client!}/>}
       {active_==='permissions'&&owner&&<>
         <AgentPermissionsGrid client={client!} active={active} onAgent={id=>setPermAgent(id)}/>
         <h3 className="settings-sub-title">One agent's tools and memory</h3>

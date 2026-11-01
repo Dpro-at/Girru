@@ -1,3 +1,4 @@
+import { ChatVoice } from './ChatVoice';
 import {CodeChatResize} from './CodeChatResize';
 import { DepartmentBadge } from './DepartmentBadge';
 import { MeetingPanels } from './MeetingPanels';
@@ -523,6 +524,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
             : <button type="submit" className="round-button" disabled={(!s.draft.trim() && !s.attachments.length) || s.access === 'denied'} aria-label={busy ? 'Queue the message' : 'Send'}><UiIcon name="arrow-up" size={15}/></button>}
         </div>
       </form>
+      {client && owner && mode === 'live' && !meetingMeta && <ChatVoice client={client} controller={controller} active={active}/>}
     </div>
     </MeetingPanels>
     {terminal && termOpen && <section className="chat-terminal" aria-label="Terminal"><TerminalPane tabs={terminal.tabs} prefs={terminal.prefs} projectId={folderProject} maximized={maximized} onToggleMax={() => setMaximized(v => !v)} onClose={() => { setMaximized(false); setTermOpen(false); }}/></section>}

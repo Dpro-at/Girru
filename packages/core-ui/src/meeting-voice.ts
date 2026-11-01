@@ -78,7 +78,7 @@ export class MeetingVoice {
   if (this.disposed || !['muted'].includes(this.state.phase)) return;
   const epoch = ++this.epoch; this.publish({ phase: 'opening', enabled: true, error: undefined });
   try { const device = await this.open(audio => { void this.transcribe(audio, epoch); }, () => { if (epoch === this.epoch) this.fail('The microphone stopped. Check its permission and unmute to try again.'); }); if (this.disposed || epoch !== this.epoch) { device.close(); return; } this.device = device; this.sync(); }
-  catch { if (epoch === this.epoch) this.fail('Microphone access was cancelled or denied. Allow access, then unmute to try again.'); }
+  catch (error) { if (epoch === this.epoch) this.fail(error instanceof Error && error.name === 'NotFoundError' ? 'No microphone is connected. Connect a microphone, then try again. You can still type and hear replies.' : 'Microphone access was cancelled or denied. Allow access, then unmute to try again.'); }
  }
  mute() { this.epoch++; this.processing = false; this.device?.close(); this.device = null; this.publish({ enabled: false, phase: this.state.phase === 'off' ? 'off' : 'muted' }); }
  private fail(message: string) { this.mute(); this.publish({ error: message }); }

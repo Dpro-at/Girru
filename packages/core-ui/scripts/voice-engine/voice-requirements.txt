@@ -1,0 +1,2 @@
+# Optional Apple Silicon speech runtime. Model weights download separately.
+mlx-audio[tts]==0.5.9
