@@ -8,14 +8,15 @@ function createBrowserRuntime({root, node, profile}) {
   const connectionFile = path.join(profile, 'connections', 'owner-runtime.json');
   let child, starting;
   async function connection() {
-    const value = JSON.parse(await fs.readFile(connectionFile, 'utf8'));
+    const handle=await fs.open(connectionFile,'r');let value;
+    try{const buffer=Buffer.alloc(4097),{bytesRead}=await handle.read(buffer,0,buffer.length,0);if(bytesRead>4096)throw Error('Invalid browser connection');value=JSON.parse(buffer.subarray(0,bytesRead).toString('utf8'));}finally{await handle.close();}
     if (value.presentation !== 'embedded') throw Error('Open the embedded browser runtime');
-    if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(value.url) || !/^[a-f0-9]{64}$/.test(value.token)) throw Error('Invalid browser connection');
+    if (!/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(value.url) || Number(new URL(value.url).port)<1 || Number(new URL(value.url).port)>65535 || !/^[a-f0-9]{64}$/.test(value.token)) throw Error('Invalid browser connection');
     return value;
   }
   async function command(body) {
     const value = await connection();
-    const reply = await fetch(value.url + '/ui', {method:'POST', headers:{Authorization:'Bearer '+value.token, 'Content-Type':'application/json'}, body:JSON.stringify(body), signal:AbortSignal.timeout(['state','frame'].includes(body.action)?2000:30000)});
+    const reply = await fetch(value.url + '/ui', {method:'POST', redirect:'error', headers:{Authorization:'Bearer '+value.token, 'Content-Type':'application/json'}, body:JSON.stringify(body), signal:AbortSignal.timeout(['state','frame'].includes(body.action)?2000:30000)});
     if (!reply.ok) throw Error('Browser unavailable');
     return reply.json();
   }
