@@ -20,6 +20,8 @@ An open-source operating system for AI agents—bringing your agents, models, to
 
 *Supported provider and local-runtime families. Connection methods vary.*
 
+**📱 Mobile companion · ⌚ Smartwatch companion — roadmap**
+
 <p>
   <img src="docs/images/readme/telegram.svg" alt="Telegram" title="Telegram" height="26"> &nbsp;&nbsp;
   <img src="docs/images/readme/whatsapp.svg" alt="WhatsApp" title="WhatsApp" height="26"> &nbsp;&nbsp;
