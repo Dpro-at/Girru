@@ -1,5 +1,5 @@
 /** Owner-scoped meeting orchestration reuses saved chat turns and task-board cards. */
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID, scrypt } from 'node:crypto';
 import { q, sql, one, all, run, type Step, type SqlParam } from '../repositories/sql-steps.js';
 import { createCardSteps } from './task-board.js';
 import { chatRuns } from './chat-runs.js';
@@ -15,7 +15,10 @@ export const meetingId = (v: unknown): v is string => typeof v === 'string' && I
 const object = (v: unknown): Record<string, any> => v && typeof v === 'object' && !Array.isArray(v) ? v : invalid('Expected an object');
 const keys = (v: unknown, allowed: string[]) => { const b = object(v); if (Object.keys(b).some(k => !allowed.includes(k))) invalid('Unknown meeting field'); return b; };
 const text = (v: unknown, max: number, required = true): string => { if (typeof v !== 'string' || v.length > max || (required && !v.trim()) || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(v)) invalid('Invalid meeting text'); return redactImportText((v as string).trim()).text; };
-const fingerprint = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+// Request receipts may reflect low-entropy text; derive them asynchronously with a per-request salt.
+const fingerprint = (value: unknown, requestId: string): Promise<string> => new Promise((resolve, reject) => {
+ scrypt(JSON.stringify(value), `girru-meeting-v1:${requestId}`, 64, { N: 16384, r: 8, p: 1 }, (error, key) => error ? reject(error) : resolve(key.toString('hex')));
+});
 export type Selection = { mode: 'all' | 'departments' | 'agents'; departments: string[]; agentIds: string[]; headsOnly: boolean };
 export type Meeting = { id: string; conversationId: string; title: string; objective: string; state: string; version: number; count: number; cursor: number; activeRunId: string | null; speaker: Agent | null; summary: string; selection: Selection; decisions: Decision[]; reviewReady: boolean };
 export type Agent = { id: string; name: string; department: string | null; role: string | null };
@@ -62,7 +65,7 @@ export async function createMeeting(owner: string, raw: unknown) {
  if (!meetingId(b.requestId)) invalid('A request id is required');
  const title = text(b.title, 160), objective = text(b.objective, 4000), selection = selectionInput(b.selection);
  if (b.projectId !== undefined && b.projectId !== null && !meetingId(b.projectId)) invalid('Invalid project');
- const hash = fingerprint({ title, objective, selection, projectId: b.projectId ?? null });
+ const hash = await fingerprint({ title, objective, selection, projectId: b.projectId ?? null }, b.requestId);
  const id = b.requestId, conversationId = randomUUID(), now = new Date().toISOString();
  await sql().tx(function* () {
   const existing = yield* one<Row>('SELECT * FROM meetings WHERE id = ?', id);
@@ -120,7 +123,7 @@ export async function nextMeetingTurn(owner: string, id: string, raw: unknown, s
  const kind = b.kind ?? 'discussion'; if (!['discussion', 'summary'].includes(kind)) invalid('Invalid turn');
  const message = b.message === undefined ? '' : text(b.message, 12000, false);
  if (b.images !== undefined && (!Array.isArray(b.images) || b.images.length > 5 || b.images.some((x: unknown) => !meetingId(x)))) invalid('Invalid image references');
- const hash = fingerprint({ agentId: b.agentId ?? null, message, kind, images: b.images ?? [] });
+ const hash = await fingerprint({ agentId: b.agentId ?? null, message, kind, images: b.images ?? [] }, b.requestId);
  await reconcile(owner, id);
  const reserved = await sql().tx(function* () {
   const row = yield* owned(owner, id);
