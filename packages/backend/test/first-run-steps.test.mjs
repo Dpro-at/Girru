@@ -58,7 +58,9 @@ test('a new owner discovers device sources before tools or agents; progress is o
   let inventory;
   for(let i=0;i<200;i++){inventory=(await call('GET','/api/first-run/discovery')).json();if(inventory.status==='done'||inventory.status==='error')break;await new Promise(resolve=>setTimeout(resolve,10));}
   assert.equal(inventory.status,'done',JSON.stringify(inventory));assert.ok(inventory.counts.projects>=1);assert.ok(inventory.counts.notes>=1);assert.equal(inventory.counts.memories,1);assert.equal(inventory.counts.skills,1);assert.equal(inventory.counts.mcp,1);assert.equal(inventory.counts.ssh,1);
-  assert.doesNotMatch(JSON.stringify(inventory),/signed release manifests|PRIVATE-FIXTURE|Private fixture|fixture-skill|Projects|inventory\/|user_id|documents/,'only counts and fixed notices leave the backend');
+  assert.doesNotMatch(JSON.stringify(inventory),/signed release manifests|PRIVATE-FIXTURE|Private fixture|Projects|inventory\/|user_id|documents/,'only counts, bounded display names and fixed notices leave the backend');
+  assert.ok(inventory.samples.some(item=>item.kind==='ssh'&&item.name==='id_ed25519'));assert.ok(inventory.samples.some(item=>item.kind==='skill'&&item.name==='fixture-skill'));assert.ok(inventory.samples.every(item=>!/[\\/]/.test(item.name)));
+  assert.ok(inventory.folderNames.includes('inventory'));assert.ok(inventory.folderNames.length<=4);assert.ok(inventory.folderNames.every(name=>!/[\\/]/.test(name)));
   assert.equal(db.prepare('SELECT count(*) AS n FROM agents_config').get().n,beforeAgents,'inventory never creates agents');
   assert.deepEqual((await call('POST','/api/first-run/discovery')).json(),inventory,'completed inventory is not restarted');
   assert.equal((await call('PUT','/api/first-run',{step:'tools'})).json().step,'tools');

@@ -5,6 +5,19 @@ const fs = require('node:fs'); const os = require('node:os'); const path = requi
 const { probe, decide, candidates } = require('../src/data-discovery.cjs');
 const backend = path.resolve(__dirname, '../../backend');
 const Database = require(require.resolve('better-sqlite3', { paths: [backend] }));
+test('automatic fresh workspace is isolated, persisted and keeps existing files untouched', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dpro-fresh-workspace-'));
+  try {
+    fs.writeFileSync(path.join(root, 'existing.txt'), 'keep');
+    const { createWorkspace, readSelection } = require('../src/workspace-selection.cjs');
+    const dir = createWorkspace(root);
+    assert.equal(path.dirname(dir), path.join(root, 'workspaces'));
+    assert.equal(readSelection(root), fs.realpathSync(dir));
+    assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'workspace.json'))).newWorkspace, true);
+    assert.equal(fs.readFileSync(path.join(root, 'existing.txt'), 'utf8'), 'keep');
+    assert.deepEqual(fs.readdirSync(dir), []);
+  } finally { fs.rmSync(root, {recursive:true,force:true}); }
+});
 test('read-only discovery distinguishes owner, system accounts, empty and corrupt DB without mutation', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dpro-discovery-'));
   try {
@@ -26,6 +39,9 @@ test('fail closed on ambiguity, unreadable database or stale selection', () => {
   assert.equal(decide([one,{dir:'/bad',state:'unreadable'}]).kind,'choose');
   assert.equal(decide([one],'/missing').kind,'choose');
   assert.equal(decide([{dir:'/empty',state:'unconfigured'}]).kind,'choose');
+  assert.deepEqual(decide([{dir:'/fresh',state:'missing'}]),{kind:'new'});
+  assert.equal(decide([{dir:'/fresh',state:'missing'}],'/stale').kind,'choose');
+  assert.equal(decide([]).kind,'choose');
   assert.deepEqual(decide([one,two],'/b'),{kind:'existing',dir:'/b'});
 });
 test('explicit test data prevents discovery escaping into personal paths', () => {

@@ -32,7 +32,7 @@ export function firstRunResponse(path, status, body) {
       || !keys.every(key => count(body.counts[key])) || !count(body.denied) || !count(body.unavailable)
       || typeof body.limited !== 'boolean' || !text(body.notice, 300)) throw Error('protocol');
     return { status: body.status, scanned: body.scanned, counts: Object.fromEntries(keys.map(key => [key, body.counts[key]])),
-      denied: body.denied, unavailable: body.unavailable, limited: body.limited, notice: body.notice };
+      denied: body.denied, unavailable: body.unavailable, limited: body.limited, notice: body.notice, ...(Array.isArray(body.samples) ? { samples: body.samples.slice(0, 18).filter(item => record(item) && ['folder','file','memory','skill','mcp','ssh'].includes(item.kind) && text(item.name, 64) && item.name.length > 0 && !/[\\/\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(item.name)).map(item => ({kind: item.kind, name: item.name})) } : {}), ...(Array.isArray(body.folderNames) ? { folderNames: body.folderNames.slice(0, 4).filter(name => text(name, 64) && name.length > 0 && !/[\\/\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(name)) } : {}) };
   }
   if (path === FIRST_RUN_PATH) {
     if (typeof body.pending !== 'boolean' || !STEPS.includes(body.step)) throw Error('protocol');

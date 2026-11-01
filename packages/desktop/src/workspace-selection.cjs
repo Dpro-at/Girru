@@ -10,4 +10,14 @@ function readSelection(settingsDir) {
     try { return fs.realpathSync(value.dir); } catch { return value.dir; }
   } catch (error) { return error.code === 'ENOENT' ? null : INVALID_SELECTION; }
 }
-module.exports = { readSelection, INVALID_SELECTION };
+/** New installs use an isolated app-owned folder; existing data is never replaced. */
+function createWorkspace(settingsDir) {
+  const dir = path.join(settingsDir, 'workspaces', require('node:crypto').randomUUID());
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const file = path.join(settingsDir, 'workspace.json');
+  const temporary = file + '.' + require('node:crypto').randomUUID() + '.tmp';
+  fs.writeFileSync(temporary, JSON.stringify({ dir, newWorkspace: true }), { mode: 0o600, flag: 'wx' });
+  fs.renameSync(temporary, file);
+  return dir;
+}
+module.exports = { readSelection, createWorkspace, INVALID_SELECTION };

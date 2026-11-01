@@ -1,3 +1,4 @@
+import { SetupOrb } from './SetupOrb';
 import { generatePassword, passwordStrength } from './password-tools.js';
 import {UiIcon} from './ui-icons';
 import { PublicShell } from './PublicShell';
@@ -186,6 +187,7 @@ function OwnerSetup({ client, setupCode, initialPage }: { client: SessionClient;
       setNotice(result.code);
     }
   }}>
+    <SetupOrb/>
     <SetupSteps current="Account"/>
     <h2>Create your account</h2>
     <p>You are the owner of this workspace. Your information stays on this computer.</p>

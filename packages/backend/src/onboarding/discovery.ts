@@ -7,15 +7,20 @@ import { createHash, randomUUID } from 'node:crypto';
 import { q } from '../repositories/sql-steps.js';
 import { dataPath } from '../config/data-root.js';
 import { scanProjectDocuments } from '../memory/import/project-documents.js';
-import { automaticNoteSource, discoveryInventory, preparedDiscoveryRoots } from '../discovery/service.js';
+import { automaticNoteSource, discoveryInventory, preparedDiscoveryRoots, preparedDiscoveryFileNames } from '../discovery/service.js';
 import { prepareAutomaticImport } from '../memory/import/automatic-project-import.js';
 
-export type DiscoveryProgress = { status: 'idle' | 'scanning' | 'done' | 'error'; scanned: number; counts: { projects: number; memories: number; notes: number; skills: number; mcp: number; ssh: number }; denied: number; unavailable: number; limited: boolean; notice: string };
+export type DiscoverySample = { kind: 'folder' | 'file' | 'memory' | 'skill' | 'mcp' | 'ssh'; name: string };
+export type DiscoveryProgress = { samples?: DiscoverySample[]; folderNames?: string[]; status: 'idle' | 'scanning' | 'done' | 'error'; scanned: number; counts: { projects: number; memories: number; notes: number; skills: number; mcp: number; ssh: number }; denied: number; unavailable: number; limited: boolean; notice: string };
 type Saved = DiscoveryProgress & { cursor?: string; documents: string[]; roots: string[]; homes: string[]; ids: Record<'memory' | 'skill' | 'mcp' | 'ssh', string[]>; inventoryOffset?: number; phase: 'files' | 'inventory' };
 type Options = { home?: string; roots?: string[] };
 const filename = (user: string) => dataPath('first-run-discovery', createHash('sha256').update(user).digest('hex') + '.json');
 const initial = (): Saved => ({ status: 'idle', scanned: 0, counts: { projects: 0, memories: 0, notes: 0, skills: 0, mcp: 0, ssh: 0 }, denied: 0, unavailable: 0, limited: false, notice: 'Ready to discover files on this computer.', documents: [], roots: [], homes: [], ids: { memory: [], skill: [], mcp: [], ssh: [] }, phase: 'files' });
-const visible = ({ status, scanned, counts, denied, unavailable, limited, notice }: Saved): DiscoveryProgress => ({ status, scanned, counts, denied, unavailable, limited, notice });
+/** Display only project basenames; never send source paths or tool/key identifiers. */
+export const discoveryFolderNames = (roots: readonly string[]): string[] => [...new Set(roots.slice(-32).map(root => path.basename(root)).filter(name => name.length > 0 && name.length <= 64 && !/[\\/\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(name)))].slice(-4);
+const visible = ({ status, scanned, counts, denied, unavailable, limited, notice, roots, samples }: Saved): DiscoveryProgress => ({ status, scanned, counts, denied, unavailable, limited, notice, ...(roots.length ? { folderNames: discoveryFolderNames(roots) } : {}), ...(samples?.length ? { samples: displaySamples(samples) } : {}) });
+export const displaySamples = (samples: readonly DiscoverySample[]): DiscoverySample[] => samples.filter(item => ['folder','file','memory','skill','mcp','ssh'].includes(item.kind) && typeof item.name === 'string' && item.name.length > 0 && item.name.length <= 64 && !/[\\/\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(item.name)).slice(-18);
+const updateSamples = (state: Saved, incoming: DiscoverySample[]) => { const all = [...state.samples ?? [], ...incoming]; state.samples = (['folder','file','memory','skill','mcp','ssh'] as const).flatMap(kind => [...new Map(displaySamples(all.filter(item => item.kind === kind)).map(item => [item.name,item])).values()].slice(-3)); };
 async function read(user: string): Promise<Saved> { try { return JSON.parse(await fs.readFile(filename(user), 'utf8')); } catch (error: any) { if (error.code === 'ENOENT') return initial(); throw error; } }
 async function save(user: string, state: Saved) { const file = filename(user); await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 }); const temp = file + '.' + randomUUID() + '.tmp'; await fs.writeFile(temp, JSON.stringify(state), { mode: 0o600, flag: 'wx' }); await fs.rename(temp, file); }
 const active = new Map<string, { work: Promise<void>; stopped: boolean }>();
@@ -37,6 +42,7 @@ async function begin(user: string, options: Options = {}): Promise<DiscoveryProg
       const allowed=async()=>{const owner=await q.one<{role:string;status:string}>('SELECT role,status FROM users WHERE id=?',user);return !task.stopped&&owner?.role==='owner'&&owner.status==='active';};
       const addInventory = async (sourceHome: string, roots: string[]) => {
         const found = await discoveryInventory(sourceHome, roots);
+        updateSamples(state, found.samples);
         for (const kind of ['memory', 'skill', 'mcp', 'ssh'] as const) state.ids[kind] = [...new Set([...state.ids[kind], ...found.ids[kind]])];
         state.roots = [...new Set([...state.roots, ...found.roots])];
         state.counts = { projects: state.roots.length, notes: state.documents.length, memories: state.ids.memory.length, skills: state.ids.skill.length, mcp: state.ids.mcp.length, ssh: state.ids.ssh.length };
@@ -53,6 +59,7 @@ async function begin(user: string, options: Options = {}): Promise<DiscoveryProg
           for (const sourceHome of page.memoryHomes) if (!state.homes.includes(sourceHome)) { await addInventory(sourceHome, []); state.homes.push(sourceHome); }
           state.scanned = page.scanned; state.denied = Math.max(page.deniedRoots,discoveryFs.diagnostics().pending); state.unavailable = page.unavailableRoots; state.limited = page.limited || discoveryFs.diagnostics().pending>0; state.cursor = page.nextCursor ?? undefined;
         }
+        updateSamples(state, [...discoveryFolderNames(state.roots).map(name => ({ kind: 'folder' as const, name })), ...(await preparedDiscoveryFileNames(user)).map(name => ({ kind: 'file' as const, name }))]);
         state.counts.projects = state.roots.length; state.counts.notes = state.documents.length;
         state.notice = `Checked ${state.scanned} entries; found ${state.counts.projects} projects and ${state.counts.memories} memory files.`;
         if (!state.cursor) state.phase = 'inventory';

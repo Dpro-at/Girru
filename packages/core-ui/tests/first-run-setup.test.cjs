@@ -129,3 +129,24 @@ test('completed discovery shows public counts and enables Next; errors keep it b
   assert.match(failed, /disabled=""[^>]*>Next/);
   assert.match(failed, /Try again/);
 });
+
+test('discovery folder labels remain bounded basenames through both bridge projections', () => {
+  const path = '/api/first-run/discovery';
+  const body = { status: 'scanning', scanned: 5, counts: { projects: 2, memories: 0, notes: 0, skills: 0, mcp: 0, ssh: 0 }, denied: 0, unavailable: 0, limited: false, notice: 'Searching…', folderNames: ['Example project', '/private/hidden', 'C:\\Users\\private', 'line\nbreak', 'unused'] };
+  const once = firstRunResponse(path, 200, body);
+  assert.deepEqual(once.folderNames, ['Example project']);
+  assert.deepEqual(firstRunResponse(path, 200, once), once);
+  const { DiscoveryInventoryView } = require('../src/FirstRunSetup.tsx');
+  const html = renderToStaticMarkup(React.createElement(DiscoveryInventoryView, { result: once, onRetry() {}, onNext() {} }));
+  assert.ok(html.includes('Example project'));
+  assert.doesNotMatch(html, /private\/hidden|Users\\private|line\nbreak/);
+});
+
+test('typed discovery samples expose display names only and reject path-shaped labels', () => {
+  const path = '/api/first-run/discovery';
+  const body = { status: 'scanning', scanned: 5, counts: { projects: 2, memories: 0, notes: 0, skills: 1, mcp: 1, ssh: 1 }, denied: 0, unavailable: 0, limited: false, notice: 'Searching…', samples: [{ kind: 'ssh', name: 'id_ed25519', content: 'never-project-this' }, { kind: 'skill', name: 'Design review' }, { kind: 'mcp', name: '/private/server' }, { kind: 'other', name: 'Unknown' }, { kind: 'file', name: 'line\nbreak' }] };
+  const once = firstRunResponse(path, 200, body);
+  assert.deepEqual(once.samples, [{kind:'ssh', name:'id_ed25519'}, {kind:'skill', name:'Design review'}]);
+  assert.deepEqual(firstRunResponse(path, 200, once), once);
+  assert.doesNotMatch(JSON.stringify(once), /never-project-this|private\/server|Unknown/);
+});

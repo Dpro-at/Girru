@@ -1,3 +1,5 @@
+import { DiscoveryStream } from './DiscoveryStream';
+import { SetupOrb } from './SetupOrb';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { SessionClient } from './session';
 import { UiIcon } from './ui-icons';
@@ -100,6 +102,7 @@ export function FirstRunSetup({ client, initialStep, workspaceType: initialType,
   const appearance = useAppTheme();
   return <div className="shell app-shell first-run-shell" data-theme={appearance.theme} lang="en" dir="ltr"><main className="first-run-setup" aria-label="Set up Girru">
     {!workspaceType || (workspaceType === 'company' && !companyName) ? <WorkspaceTypeStep value={workspaceType} companyName={companyName} busy={savingType} notice={typeNotice} onNext={(type, name) => void chooseType(type, name)}/> : <>
+    {step !== 'discovery' && <SetupOrb/>}
     <SetupSteps current={step === 'discovery' ? 'Your files' : step === 'tools' ? 'AI tools' : step === 'model' ? 'Local model' : 'Team'}/>
     {stepNotice && <p className="setup-note" role="alert">{stepNotice}</p>}
     {step === 'discovery' && <DiscoveryStep client={client} onNext={() => go('tools')}/>}
@@ -111,6 +114,8 @@ export function FirstRunSetup({ client, initialStep, workspaceType: initialType,
 }
 
 export type SetupDiscovery = {
+  samples?: Array<{kind: 'folder' | 'file' | 'memory' | 'skill' | 'mcp' | 'ssh'; name: string}>;
+  folderNames?: string[];
   status: 'idle' | 'scanning' | 'done' | 'error'; scanned: number;
   counts: Record<'projects' | 'memories' | 'notes' | 'skills' | 'mcp' | 'ssh', number>;
   denied: number; unavailable: number; limited: boolean; notice: string;
@@ -146,12 +151,13 @@ export function DiscoveryStep({ client, onNext }: { client: SessionClient; onNex
 export function DiscoveryInventoryView({ result, error = false, onRetry, onNext }: { result: SetupDiscovery | null; error?: boolean; onRetry: () => void; onNext: () => void }) {
   const running = !error && (!result || result.status === 'idle' || result.status === 'scanning');
   const labels = { projects: 'Projects', memories: 'Memory files', notes: 'Project notes', skills: 'Skills', mcp: 'MCP connections', ssh: 'SSH identities' } as const;
-  return <section className="setup-pane" aria-label="Find your files">
-    <h2>Find your work on this computer</h2>
-    <p>Girru looks for your projects, memory and coding tools before creating your agent. Hidden coding-app folders and accessible connected drives are included.</p>
-    {running && <progress aria-label="Searching this computer"/>}
+  return <section className="setup-pane setup-discovery" data-running={running || undefined} aria-label="Find your files">
+    <h2>Discovering your work</h2>
+    <p>Finding projects, memory and tools on this computer.</p>
+    <div className="setup-discovery-visual"><DiscoveryStream items={result?.samples?.length ? result.samples : (result?.folderNames ?? []).map(name => ({ kind: 'folder' as const, name }))}/><SetupOrb large active={running}/></div>
+    {(running || result?.status === 'done') && <div className="setup-search-progress" data-complete={result?.status === 'done' || undefined}><progress aria-label={running ? 'Searching this computer' : 'Search complete'} {...(running ? {} : {value:1,max:1})}/><span aria-hidden="true"/></div>}
     <p role="status">{error ? 'Could not read the search progress. Try again.' : result?.notice || 'Starting the search…'}</p>
-    <dl className="setup-discovery-counts">{(Object.keys(labels) as Array<keyof typeof labels>).map(key => <div key={key}><dt>{labels[key]}</dt><dd>{result?.counts[key] ?? 0}</dd></div>)}</dl>
+    <dl className="setup-discovery-counts">{(Object.keys(labels) as Array<keyof typeof labels>).map(key => <div key={key}><UiIcon name={key === 'projects' ? 'folder' : key === 'ssh' ? 'key' : key === 'skills' ? 'sparkle' : key === 'mcp' ? 'tool' : 'file'} size={20}/><dt>{labels[key]}</dt><dd>{(result?.counts[key] ?? 0).toLocaleString('en-US')}</dd></div>)}</dl>
     <p className="fine-print">{result?.scanned ?? 0} entries checked{result?.denied ? ` · ${result.denied} ${result.denied === 1 ? 'folder' : 'folders'} denied access` : ''}{result?.unavailable ? ` · ${result.unavailable} ${result.unavailable === 1 ? 'folder' : 'folders'} unavailable` : ''}.</p>
     {result?.limited && <p className="setup-note">Some locations could not be fully searched. The results show what Girru could reach.</p>}
     <p className="fine-print">Your source files stay unchanged. Memory imports begin after your team is ready. Skills and MCP connections wait for your approval; private SSH key contents are never read or imported.</p>

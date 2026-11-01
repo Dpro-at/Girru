@@ -191,8 +191,9 @@ async function applyMode() {
       await scanData();
       let decision = discovery.decide(discovered, readSelection());
       try { const saved = JSON.parse(fs.readFileSync(path.join(settingsDir(), 'workspace.json'), 'utf8')); if (saved.newWorkspace === true && saved.dir.startsWith(path.join(settingsDir(), 'workspaces') + path.sep) && discovered.find(r => r.dir === saved.dir)?.state === 'unconfigured') decision = { kind: 'existing', dir: saved.dir }; } catch { /* no confirmed new workspace */ }
-      if (decision.kind !== 'existing') return showPage('welcome.html');
-      selectedData = decision.dir;
+      if (decision.kind === 'new') selectedData = require('./workspace-selection.cjs').createWorkspace(settingsDir());
+      else if (decision.kind === 'existing') selectedData = decision.dir;
+      else return showPage('welcome.html');
       if (!readSelection()) {
         const file = path.join(settingsDir(), 'workspace.json');
         fs.writeFileSync(file + '.tmp', JSON.stringify({ dir: selectedData }), { mode: 0o600 }); fs.renameSync(file + '.tmp', file);

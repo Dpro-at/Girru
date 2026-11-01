@@ -47,6 +47,7 @@ function decide(rows, savedDir) {
   if (saved?.state === 'existing') return { kind: 'existing', dir: saved.dir };
   // Never interpret a broken database or stale saved selection as a new installation.
   if (savedDir || rows.some(r => r.state === 'unreadable')) return { kind: 'choose' };
+  if (rows.length > 0 && rows.every(r => r.state === 'missing')) return { kind: 'new' };
   const owners = rows.filter(r => r.state === 'existing');
   return owners.length === 1 ? { kind: 'existing', dir: owners[0].dir } : { kind: 'choose' };
 }

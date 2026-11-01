@@ -333,17 +333,19 @@ export async function sshHosts(home: string): Promise<Found[]> {
   return found;
 }
 
+/** Display basenames from already prepared note metadata, without opening source files. */
+export async function preparedDiscoveryFileNames(userId:string){await init();return (await q.all<{file:string}>('SELECT file FROM discovery_computer_notes WHERE user_id = ? ORDER BY rowid DESC LIMIT 3',userId)).map(row=>path.basename(row.file));}
 /** Canonical project roots already prepared by the device scan (private backend metadata). */
 export async function preparedDiscoveryRoots(userId:string){await init();return (await q.all<{root:string}>('SELECT root FROM discovery_computer_roots WHERE user_id = ?',userId)).map(row=>row.root);}
 
-/** Counts-only inventory adapter for authenticated first-run discovery. No DB or activation work. */
+/** Read-only counts and display metadata for authenticated first-run discovery; no activation work. */
 export async function discoveryInventory(home: string, roots: string[]) {
   const known = new Map<string, ProjectRoot>();
   const memories = roots.length ? [] : await memoryFiles(home, known);
   const foundSkills = await skills(home, roots, roots.length === 0);
   const foundMcp = await mcpServers(home, roots, new LocalMcpImport(home));
   const identities = roots.length ? [] : (await sshHosts(home)).filter(file => file.ssh?.identity);
-  return { ids: { memory: memories.map(file => itemId('memory', file.file)), skill: foundSkills.map(file => itemId('skill', file.file)), mcp: foundMcp.map(file => itemId('mcp', file.file, file.mcp?.key??file.name)), ssh: identities.map(file => itemId('ssh', file.file)) }, roots: [...known.values()].filter(root=>root.here).map(root=>root.root) };
+  return { samples: [...memories.slice(-3).map(file => ({ kind: 'memory' as const, name: path.basename(file.file) })), ...foundSkills.slice(-3).map(file => ({ kind: 'skill' as const, name: file.name })), ...foundMcp.slice(-3).map(file => ({ kind: 'mcp' as const, name: file.name })), ...identities.slice(-3).map(file => ({ kind: 'ssh' as const, name: file.name }))], ids: { memory: memories.map(file => itemId('memory', file.file)), skill: foundSkills.map(file => itemId('skill', file.file)), mcp: foundMcp.map(file => itemId('mcp', file.file, file.mcp?.key??file.name)), ssh: identities.map(file => itemId('ssh', file.file)) }, roots: [...known.values()].filter(root=>root.here).map(root=>root.root) };
 }
 
 // ---- design and databases (DESIGN-FIND-01, PROJECT-TECH-01) ----
