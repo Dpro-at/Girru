@@ -20,16 +20,18 @@ An open-source operating system for AI agents—bringing your agents, models, to
 
 *Supported provider and local-runtime families. Connection methods vary.*
 
-**📱 Mobile companion · ⌚ Smartwatch companion — roadmap**
-
 <p>
   <img src="docs/images/readme/telegram.svg" alt="Telegram" title="Telegram" height="26"> &nbsp;&nbsp;
   <img src="docs/images/readme/whatsapp.svg" alt="WhatsApp" title="WhatsApp" height="26"> &nbsp;&nbsp;
   <img src="docs/images/readme/discord.svg" alt="Discord" title="Discord" height="26"> &nbsp;&nbsp;
   <img src="docs/images/readme/slack.png" alt="Slack" title="Slack" height="26"> &nbsp;&nbsp;
   <img src="docs/images/readme/email.svg" alt="Email" title="Email" height="26"> &nbsp;&nbsp;
-  <img src="docs/images/readme/web-chat.svg" alt="Web chat" title="Web chat" height="26">
+  <img src="docs/images/readme/web-chat.svg" alt="Web chat" title="Web chat" height="26"> &nbsp;&nbsp;
+  <img src="docs/images/readme/mobile.svg" alt="Mobile companion — roadmap" title="Mobile companion — roadmap" height="26"> &nbsp;&nbsp;
+  <img src="docs/images/readme/smartwatch.svg" alt="Smartwatch companion — roadmap" title="Smartwatch companion — roadmap" height="26">
 </p>
+
+*Mobile and smartwatch companions are on the roadmap.*
 
 <p>
   <img src="docs/images/readme/gdpr-dsgvo.png" alt="GDPR / DSGVO — design target, not certification" height="34">
