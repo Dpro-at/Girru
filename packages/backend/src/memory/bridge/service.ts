@@ -26,7 +26,7 @@ import { createHash } from 'node:crypto';
 import { applyRegistration, previewRegistration, RegistrationError, undoRegistration } from './registration.js';
 import { runBackflow, type BackflowResult } from './backflow.js';
 import { ensureToken, revokeToken, tokenMatches, checkSessionProof } from './auth.js';
-import { CapabilityError, requireScope, verifyCapability } from './capability.js';
+import { CapabilityError, requireScope, verifyCapability, type Capability } from './capability.js';
 import { isPilotProject } from '../outbox/pilot.js';
 import {
   allFolderSettings, audit, auditLog, bridgeOwner, clientEnabled, clientStates, folderSettings, lastCalls, listRegistrations, patchFolder,
@@ -332,12 +332,13 @@ export async function mcpCall(c: unknown, token: unknown, cwd: unknown, tool: un
   if (typeof tool !== 'string' || !(MCP_TOOLS as readonly string[]).includes(tool)) throw new BridgeError('Unknown tool', 400, 'unknown_tool');
   const folderProject = typeof cwd === 'string' ? await projectForFolder(ownerId, cwd) : null;
   let project: Project | null = folderProject;
-  if (capability !== undefined && capability !== null && capability !== '') {
-    let cap;
-    try { cap = await verifyCapability(capability); requireScope(cap, tool); } catch (err) {
-      if (err instanceof CapabilityError) throw new BridgeError(err.message, err.status, err.code);
-      throw err;
-    }
+  // Every call is checked; only a call that carries no capability at all goes on without one.
+  let cap: Capability | null = null;
+  try { cap = await verifyCapability(capability); requireScope(cap, tool); } catch (err) {
+    if (!(err instanceof CapabilityError)) throw err;
+    if (err.code !== 'absent') throw new BridgeError(err.message, err.status, err.code);
+  }
+  if (cap) {
     if (cap.ownerId !== ownerId || (cap.client && cap.client !== cl)) throw new BridgeError('Not allowed', 401, 'unauthenticated');
     project = (await findProject(ownerId, cap.projectId)) ?? null;
     if (!project) throw new BridgeError('The project of this session no longer exists', 404, 'unknown_project');

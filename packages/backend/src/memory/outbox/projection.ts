@@ -215,6 +215,8 @@ async function runOnce(scope: string, opts: RunOptions): Promise<RunResult> {
       if (kept) fs.writeFileSync(path.join(dir, `brief.outside-${nextVersion}.md`), kept, { flag: 'wx', mode: 0o644 });
     }
     const tmp = stage(dir, text);
+    // The fingerprint of what Girru wrote: the staged file's bytes as they are on disk.
+    const hash = fileHash(tmp);
     try {
       await opts.beforeRename?.();
       // Re-check: a newer projection or an outside edit since we looked wins.
@@ -232,7 +234,6 @@ async function runOnce(scope: string, opts: RunOptions): Promise<RunResult> {
       fs.rmSync(tmp, { force: true });
       throw err;
     }
-    const hash = sha(text);
     const done = await q.run(`UPDATE projection_state SET target = ?, watermark = ?, projection_version = ?, content_hash = ?, status = 'up_to_date',
       attempts = 0, last_error = NULL, updated_at = ${nowText(q.dialect)} WHERE consumer = ? AND scope = ? AND projection_version = ?`,
       target, max, nextVersion, hash, BRIEF_CONSUMER, scope, s.projectionVersion);

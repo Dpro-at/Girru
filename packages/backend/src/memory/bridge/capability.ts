@@ -82,8 +82,12 @@ export async function issueCapability(input: IssueInput): Promise<{ token: strin
   return { token, capability };
 }
 
-/** The live capability of a token, or a CapabilityError (401) when unknown, expired or revoked. */
+/**
+ * The live capability of a token, or a CapabilityError: 401 `absent` when the
+ * call carries none, 401 when it is unknown, malformed, expired or revoked.
+ */
 export async function verifyCapability(token: unknown): Promise<Capability> {
+  if (token === undefined || token === null || token === '') throw new CapabilityError('No session capability', 401, 'absent');
   if (typeof token !== 'string' || !TOKEN.test(token)) throw new CapabilityError('Not allowed', 401, 'unauthenticated');
   const h = hashOf(token);
   const r = await q.one<any>('SELECT * FROM session_capabilities WHERE token_hash = ?', h);
