@@ -51,6 +51,7 @@ const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
 
 const { getDatabase, closeDatabase } = await import(join(backendDir, 'src/db/database.ts'));
+const { projectKeyOf } = await import(join(backendDir, 'src/memory/project-keys.ts')); // project memory key (id while GIRRU_STORE_P3 is on)
 const db = getDatabase();
 await db.initialize();
 const { getCredentialStorage } = await import(join(backendDir, 'src/credentials/storage.ts'));
@@ -127,13 +128,13 @@ const folder = join(dir, 'work', 'alpha');
 mkdirSync(folder, { recursive: true });
 const project = (await ok('POST', '/api/chat/projects', { name: 'Alpha', folder }, 201)).project;
 const conv = (await ok('POST', '/api/chat/conversations', { title: 'Alpha work', projectId: project.id }, 201)).conversation;
-const PD = `project:${project.slug}`;
+const PD = `project:${projectKeyOf(project)}`;
 const mkt = (await ok('POST', '/api/memory/scopes/departments', { name: 'Marketing' }, 201)).department;
-await moveProject(project.slug, mkt.id);
+await moveProject(projectKeyOf(project), mkt.id);
 /** Every agent (the seeded main agent answers chat turns, plus the three above). */
 const TOTAL = db.prepare('SELECT COUNT(*) AS n FROM agents_config').get().n;
 const CHAT_AGENT = db.prepare("SELECT id FROM agents_config WHERE id = 'main-agent'").get()?.id ?? 'ms-main';
-const ctxFor = (agentId, drawers = D.selectDrawers({ audience: 'owner', project: project.slug })) =>
+const ctxFor = (agentId, drawers = D.selectDrawers({ audience: 'owner', project: projectKeyOf(project) })) =>
   ({ workspaceDir: dir, userId: OWNER, agentId, sessionId: conv.id, memoryDrawers: drawers });
 const shared = {};
 
@@ -240,7 +241,7 @@ test('2. explorer filters (source, agent, importance, date, drawer kind) and the
 });
 
 test('3. memory -> linked entities; one memory with usage, entities and readers (API + tools)', async () => {
-  const m = await remember({ content: 'The Ledger Service replaces the Legacy Router.', drawer: { kind: 'project', key: project.slug } });
+  const m = await remember({ content: 'The Ledger Service replaces the Legacy Router.', drawer: { kind: 'project', key: projectKeyOf(project) } });
   shared.ledger = m;
   const g = await ok('GET', `/api/memory/graph/memories/${m.id}`);
   const names = g.entities.map((e) => e.name);
@@ -276,7 +277,7 @@ test('4. company / department access columns gate pinned facts; role templates c
   await ok('POST', '/api/memory/scopes/pinned', { scope: 'company', text: 'We are Girru.' }, 201);
   await ok('POST', '/api/memory/scopes/pinned', { scope: `department:${mkt.id}`, text: 'Marketing posts on Tuesdays.' }, 201);
   await ok('POST', '/api/memory/scopes/pinned', { scope: PD, text: 'Alpha uses teal.' }, 201);
-  const perms = (agent) => loadRunPermissions(agent, [], { userId: OWNER, project: project.slug });
+  const perms = (agent) => loadRunPermissions(agent, [], { userId: OWNER, project: projectKeyOf(project) });
   assert.deepEqual((await perms('ms-main')).scopeRead, ['company', 'department']);
 
   // Nobody reads department facts (a scope column rule) -> the reply has company and project facts only.
@@ -286,7 +287,7 @@ test('4. company / department access columns gate pinned facts; role templates c
   assert.match(sys, /We are Girru\./);
   assert.match(sys, /Alpha uses teal\./);
   assert.doesNotMatch(sys, /Tuesdays/);
-  const eff = await ok('GET', `/api/memory/access/effective/ms-main?project=${project.slug}`);
+  const eff = await ok('GET', `/api/memory/access/effective/ms-main?project=${projectKeyOf(project)}`);
   assert.equal(eff.kinds.department.read, false);
   assert.deepEqual(eff.effective.scopeRead, ['company']);
   assert.ok(eff.kinds.department.readWhy.some((w) => w.layer === 'company' && w.value === 'deny'));
@@ -333,7 +334,7 @@ test('4. company / department access columns gate pinned facts; role templates c
   assert.ok(pages.allowedMemoryPages('POST', '/api/memory/access/preview', { changes: [{ op: 'set_rule', scope: 'company', drawerKind: 'company', read: 'deny' }] }));
   assert.ok(pages.allowedMemoryPages('POST', '/api/memory/access/preview', { changes: [{ op: 'save_template', name: 'X', memoryRead: ['owner'], memoryWrite: [], scopeRead: ['company'], scopeWrite: ['company'] }] }));
   assert.ok(!pages.allowedMemoryPages('POST', '/api/memory/access/preview', { changes: [{ op: 'save_template', name: 'X', memoryRead: ['owner'], memoryWrite: [], scopeRead: ['department'], scopeWrite: ['company'] }] }));
-  const effPath = `/api/memory/access/effective/ms-designer?project=${project.slug}`;
+  const effPath = `/api/memory/access/effective/ms-designer?project=${projectKeyOf(project)}`;
   const effOnce = pages.memoryPagesResponse(effPath, 200, await ok('GET', effPath));
   assert.deepEqual(pages.memoryPagesResponse(effPath, 200, effOnce), effOnce);
   assert.deepEqual(effOnce.effective.scopeRead, ['department']);
@@ -360,7 +361,7 @@ test('5. agents with access to a scope: list, counts, readers of a memory (API +
   assert.deepEqual([page2.agents.length, page2.nextCursor], [1, null]);
   assert.ok(!page1.agents.some((a) => a.id === page2.agents[0].id), 'pages do not overlap');
   const counts = await ok('GET', '/api/memory/access/counts?column=project');
-  assert.deepEqual([counts.company, counts.departments[mkt.id], counts.projects[project.slug], counts.total], [TOTAL, 0, 1, TOTAL]);
+  assert.deepEqual([counts.company, counts.departments[mkt.id], counts.projects[projectKeyOf(project)], counts.total], [TOTAL, 0, 1, TOTAL]);
   assert.equal(counts.projects['beta-notes'], TOTAL, 'General keeps the default');
   assert.equal(counts.projects['gamma-old'], undefined, 'archived projects are not counted');
   const readers = (await ok('GET', `/api/memory/scopes/memories/${shared.ledger.id}`)).memory.readers;
@@ -371,9 +372,9 @@ test('5. agents with access to a scope: list, counts, readers of a memory (API +
   assert.equal(await status('GET', '/api/memory/access/agents?scope=project:no-such-project'), 404);
   assert.equal(await status('GET', '/api/memory/access/agents?scope=company', undefined, MEMBER), 403);
   const viaTool = await T.memoryScopesTool.execute({ action: 'who', scope: PD, column: 'project' }, ctxFor('ms-main'));
-  assert.match(viaTool.content[0].text, new RegExp(`^1 of ${TOTAL} agents may read project in project:alpha.*Designer`));
+  assert.match(viaTool.content[0].text, new RegExp(`^1 of ${TOTAL} agents may read project in project:${projectKeyOf(project)}.*Designer`));
   const countsTool = await T.memoryScopesTool.execute({ action: 'access_counts', column: 'project' }, ctxFor('ms-main'));
-  assert.equal(countsTool.data.projects[project.slug], 1);
+  assert.equal(countsTool.data.projects[projectKeyOf(project)], 1);
   assert.ok((await T.memoryScopesTool.execute({ action: 'who', scope: PD }, { ...ctxFor('ms-main'), userId: MEMBER })).error);
 });
 
@@ -525,10 +526,10 @@ test('8. doctor: graph orphans are reported and removed after a confirm', async 
 
 test('9. agent-view map: the graph limited to what one agent may read (API + tool)', async () => {
   // Rules from test 5: Marketing denies project drawers, the designer has an exception in Alpha.
-  const designer = await ok('GET', `/api/memory/graph/agent-view/ms-designer?project=${project.slug}`);
+  const designer = await ok('GET', `/api/memory/graph/agent-view/ms-designer?project=${projectKeyOf(project)}`);
   assert.ok(designer.drawers.includes(PD));
   assert.ok(designer.entities.some((e) => e.name === 'Ledger Service'));
-  const writer = await ok('GET', `/api/memory/graph/agent-view/ms-writer?project=${project.slug}`);
+  const writer = await ok('GET', `/api/memory/graph/agent-view/ms-writer?project=${projectKeyOf(project)}`);
   assert.ok(!writer.drawers.includes(PD) && writer.readable.includes('owner'));
   assert.ok(!writer.entities.some((e) => e.name === 'Ledger Service'));
   const noProject = await ok('GET', '/api/memory/graph/agent-view/ms-designer');
@@ -538,9 +539,9 @@ test('9. agent-view map: the graph limited to what one agent may read (API + too
   assert.equal(await status('GET', '/api/memory/graph/agent-view/ms-designer?project=no-such'), 404);
   assert.equal(await status('GET', '/api/memory/graph/agent-view/ms-designer', undefined, MEMBER), 403);
   // The tool never shows more than its own run's open drawers.
-  const inRun = await T.memoryGraphTool.execute({ op: 'agent_view', agent_id: 'ms-designer', project: project.slug }, ctxFor('ms-main'));
+  const inRun = await T.memoryGraphTool.execute({ op: 'agent_view', agent_id: 'ms-designer', project: projectKeyOf(project) }, ctxFor('ms-main'));
   assert.ok(inRun.data.view.entities.some((e) => e.name === 'Ledger Service'), inRun.error);
-  const ownerOnly = await T.memoryGraphTool.execute({ op: 'agent_view', agent_id: 'ms-designer', project: project.slug }, ctxFor('ms-main', [{ kind: 'owner' }]));
+  const ownerOnly = await T.memoryGraphTool.execute({ op: 'agent_view', agent_id: 'ms-designer', project: projectKeyOf(project) }, ctxFor('ms-main', [{ kind: 'owner' }]));
   assert.ok(!ownerOnly.data.view.entities.some((e) => e.name === 'Ledger Service'));
   assert.ok((await T.memoryGraphTool.execute({ op: 'agent_view', agent_id: 'ms-designer' }, { ...ctxFor('ms-main'), userId: MEMBER })).error);
 });
