@@ -25,6 +25,8 @@ function checkout(root) {
     const dir = path.join(editor, 'extensions', ext);
     pkg(dir, ext, { dependencies: { '@vscode/extension-telemetry': '1.0.0', [`${ext}-server`]: '1.0.0' }, devDependencies: { 'ext-dev': '1.0.0' } });
     write(path.join(dir, 'out', 'extension.js'), '');
+    write(path.join(dir, 'server', 'test', 'pathCompletionFixtures', 'foo.asar'), '');
+    write(path.join(dir, 'test', 'fixture.txt'), 'test only');
     pkg(path.join(dir, 'node_modules', '@vscode', 'extension-telemetry'), '@vscode/extension-telemetry');
     pkg(path.join(dir, 'node_modules', `${ext}-server`), `${ext}-server`);
     pkg(path.join(dir, 'node_modules', 'ext-dev'), 'ext-dev');
@@ -46,6 +48,8 @@ test('copies only the run-time parts and the kept extensions', t => {
   assert.equal(has('editor/node_modules/dev-dep'), false, 'development packages stay out');
   assert.equal(has('editor/extensions/copilot'), false, 'dropped extensions stay out');
   assert.equal(has('editor/extensions/git/node_modules/ext-dev'), false);
+  assert.equal(has('editor/extensions/git/server/test'), false, 'dummy ASAR test fixtures must not reach installer integrity scanning');
+  assert.equal(has('editor/extensions/git/test'), false);
   // Telemetry kept once where Node finds it; packages an extension opens by path stay in its own folder.
   assert.ok(has('editor/extensions/node_modules/@vscode/extension-telemetry'));
   assert.equal(has('editor/extensions/git/node_modules/@vscode/extension-telemetry'), false);
