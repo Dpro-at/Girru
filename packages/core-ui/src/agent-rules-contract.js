@@ -55,8 +55,12 @@ function rule(r) {
     status: r.status === 'suggested' ? 'suggested' : 'active', source: r.source === 'agent' ? 'agent' : r.source === 'girru' ? 'girru' : 'owner', shipped: r.shipped === true, locked: r.locked === true,
     suggestedBy: str(r.suggestedBy, 120), reason: str(r.reason, 500), version: Number.isSafeInteger(r.version) ? r.version : 1,
     createdAt: str(r.createdAt, 40) ?? '', updatedAt: str(r.updatedAt, 40) ?? '',
+    // STORE-MAP-01 P2: the rule's precedence group, when the backend orders by precedence.
+    ...(RULE_GROUPS.includes(r.group) ? { group: r.group } : {}),
   };
 }
+/** STORE-MAP-01 P2 (AG6): precedence groups, strongest first. */
+export const RULE_GROUPS = ['safety', 'project', 'agents', 'departments', 'all'];
 const rules = x => (Array.isArray(x) ? x.slice(0, 400).map(rule) : []);
 const ACTIONS = ['create', 'add', 'update', 'unchanged', 'tracked', 'link'];
 function files(f) {
@@ -75,10 +79,10 @@ function taskFile(t) {
 export function agentRulesResponse(path, status, body) {
   if (status === 200 || status === 201) {
     if (!record(body)) throw Error('protocol');
-    if (path === RULES_PATH && 'rules' in body) return { rules: rules(body.rules), suggestions: rules(body.suggestions), departments: Array.isArray(body.departments) ? body.departments.filter(d => typeof d === 'string').slice(0, 100) : [], starter: Array.isArray(body.starter) ? body.starter.filter(d => typeof d === 'string').slice(0, 20) : [] };
+    if (path === RULES_PATH && 'rules' in body) return { rules: rules(body.rules), suggestions: rules(body.suggestions), departments: Array.isArray(body.departments) ? body.departments.filter(d => typeof d === 'string').slice(0, 100) : [], starter: Array.isArray(body.starter) ? body.starter.filter(d => typeof d === 'string').slice(0, 20) : [], precedence: body.precedence === true };
     if ('rule' in body) return { rule: rule(body.rule) };
     if ('files' in body) return { files: files(body.files) };
-    if ('rules' in body) return { rules: rules(body.rules) };
+    if ('rules' in body) return { rules: rules(body.rules), ...(body.precedence === true ? { precedence: true } : {}) };
     if ('added' in body) return { added: rules(body.added) };
     if ('conflicts' in body) return { checked: body.checked === true, conflicts: Array.isArray(body.conflicts) ? body.conflicts.slice(0, 10).filter(c => record(c) && typeof c.a === 'string' && typeof c.b === 'string').map(c => ({ a: c.a, b: c.b, why: str(c.why, 200) ?? '' })) : [] };
     if ('versions' in body) return { versions: Array.isArray(body.versions) ? body.versions.slice(0, 200).filter(v => record(v) && Number.isSafeInteger(v.version) && typeof v.text === 'string').map(v => ({ version: v.version, text: v.text.slice(0, 2000), when: str(v.when, 300), changedAt: str(v.changedAt, 40) ?? '' })) : [] };

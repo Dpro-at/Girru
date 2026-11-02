@@ -304,6 +304,11 @@ const GROUP_TITLE: Record<RuleGroup, string> = {
  * project, then rules naming this agent, its department, all agents. When two
  * disagree the one in the higher group wins; inside a group the later one does.
  */
+/** P2: the rules an agent gets, strongest group first (inside a group the written order), each with its group. */
+export async function effectiveByPrecedence(agentId: string, projectId: string | null): Promise<Array<AgentRule & { group: RuleGroup }>> {
+  const rules = await effectiveRules(agentId, projectId);
+  return RULE_PRECEDENCE.flatMap((g) => rules.filter((r) => ruleGroup(r) === g).map((r) => ({ ...r, group: g })));
+}
 export async function rulesByPrecedence(agentId: string, projectId: string | null): Promise<string> {
   const rules = await effectiveRules(agentId, projectId).catch(() => []);
   if (!rules.length) return '';

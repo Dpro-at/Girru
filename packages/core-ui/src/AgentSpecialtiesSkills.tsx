@@ -1,5 +1,6 @@
 import {useEffect,useState} from 'react';
 import type {SessionClient} from './session';
+import {useStoreP2} from './store-switches';
 import type {PartDone} from './agent-card';
 import {TEMPLATES_PATH as P} from './specialty-contract.js';
 import {ContextMenu,Sheet,useMenu} from './desktop-ui';
@@ -21,6 +22,7 @@ async function rpc<T>(client:SessionClient,method:string,path:string,body?:unkno
  * and specialties never give tools or permissions.
  */
 export function AgentSpecialtiesSkills({client,agentId,onDone}:{client:SessionClient;agentId:string;onDone:PartDone}){
+ const p2=useStoreP2(client);
  const [ready,setReady]=useState<Specialty[]>([]),[linked,setLinked]=useState<Specialty[]>([]),[configs,setConfigs]=useState<Record<string,Config>>({}),[skills,setSkills]=useState<Skill[]>([]),[selected,setSelected]=useState<string[]>([]),[revision,setRevision]=useState(0);
  const [phase,setPhase]=useState<'loading'|'ready'|'saving'|'error'>('loading'),[notice,setNotice]=useState(''),[reload,setReload]=useState(0),[giving,setGiving]=useState(false),[adding,setAdding]=useState(false);
  const menu=useMenu();
@@ -63,7 +65,7 @@ export function AgentSpecialtiesSkills({client,agentId,onDone}:{client:SessionCl
    {inherited.size?<div className="ag-chips">{[...inherited].map(([id,from])=>{const direct=selected.includes(id);return <span key={id} className="ag-chip" data-on={direct||undefined} title={direct?`From ${from} · also given directly`:`From ${from}`} onContextMenu={direct?e=>menu.at(e,directMenu(id)):undefined}><UiIcon name="star" size={13}/>{name(id)}<UiIcon name="link" size={12}/>{direct&&<button type="button" className="ag-chip-x" aria-label={`More for ${name(id)}`} title="Also given directly · Take back" disabled={busy} onClick={e=>menu.at(e,directMenu(id))} onKeyDown={e=>{if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();takeBackDirect(id);}}}><UiIcon name="more" size={12}/></button>}</span>;})}</div>:<p className="ag-muted">None yet.</p>}
    <h4>Extra for this agent</h4>
    {extra.length?<div className="ag-chips">{extra.map(id=><span key={id} className="ag-chip" data-on><UiIcon name="star" size={13}/>{name(id)}<button type="button" className="ag-chip-x" aria-label={`Take back ${name(id)}`} title="Take back (Delete)" disabled={busy} onClick={()=>void setSkills_(selected.filter(x=>x!==id),`${name(id)} taken back`)}><UiIcon name="close" size={12}/></button></span>)}</div>:<p className="ag-muted">None.</p>}
-   <small className="ag-muted">Skills and specialties never give tools or permissions; those stay in Permissions.</small>
+   <small className="ag-muted">Skills and specialties never give tools or permissions; those stay in Permissions.{p2?' The agent sees each one’s name and first line until it opens it.':''}</small>
   </section>
   {giving&&<GiveSpecialty all={ready.filter(t=>!linked.some(x=>x.id===t.id))} onClose={()=>setGiving(false)} onPick={t=>{setGiving(false);void link(t,true);}}/>}
   {adding&&<AddSkills skills={skills.filter(x=>!selected.includes(x.id)&&!inherited.has(x.id))} room={MAX_SKILLS-selected.length} onClose={()=>setAdding(false)} onAdd={ids=>{setAdding(false);if(ids.length)void setSkills_([...selected,...ids],ids.length===1?`${name(ids[0])} added`:`${ids.length} skills added`);}}/>}

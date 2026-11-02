@@ -24,13 +24,14 @@
  *   400 { error, code: 'invalid_rule' } · 404 { error, code: 'not_found' }
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { storeP2Enabled } from '../../services/agent-context/switch.js';
 import { authorizeActiveRole } from '../../auth/route-guards.js';
 import { q } from '../../repositories/sql-steps.js';
 import { RuleFilesError, filesState, setTasks, syncWrittenProjects, writeFiles } from '../../services/agent-rule-files.js';
 import { TASKS_FILE, ensureTaskFile, fileProblems, openTasks, syncTasks, taskFileOn, watchTaskFiles } from '../../services/task-file.js';
 import {
   RuleInputError, STARTER_RULES, suggestRule, UNDO_MS, addStarterRules, createRule, decideSuggestion, deleteRule, editRule,
-  effectiveRules, listRules, putBack, ruleConflicts, restoreVersion, ruleVersions, undoDelete,
+  effectiveByPrecedence, effectiveRules, listRules, putBack, ruleConflicts, restoreVersion, ruleVersions, undoDelete,
 } from '../../services/agent-rules.js';
 
 const OWNER_ONLY = ['owner'] as const;
@@ -93,7 +94,7 @@ export async function agentRulesRoutes(fastify: FastifyInstance) {
   fastify.get('/api/agent-rules', { config }, async (request: Req, reply) => {
     if (owner(request, reply) === null) return reply;
     const deps = await q.all<{ department: string }>("SELECT DISTINCT lower(department) AS department FROM agents_config WHERE department IS NOT NULL AND department <> '' ORDER BY 1");
-    return { ...(await listRules()), departments: deps.map((d) => d.department), starter: STARTER_RULES };
+    return { ...(await listRules()), departments: deps.map((d) => d.department), starter: STARTER_RULES, precedence: storeP2Enabled() };
   });
   fastify.post('/api/agent-rules', { config, bodyLimit: 20000 }, async (request: Req, reply) => {
     const by = owner(request, reply); if (by === null) return reply;
@@ -115,13 +116,17 @@ export async function agentRulesRoutes(fastify: FastifyInstance) {
     if (owner(request, reply) === null) return reply;
     const { agentId, projectId } = request.query;
     if (typeof agentId !== 'string' || !agentId || agentId.length > 120) return reply.code(400).send({ error: 'agentId is required', code: 'invalid_rule' });
-    return { rules: await effectiveRules(agentId, typeof projectId === 'string' && projectId ? projectId : null) };
+    const project = typeof projectId === 'string' && projectId ? projectId : null;
+    // STORE-MAP-01 P2 (AG6): strongest group first, each rule with its group.
+    if (storeP2Enabled()) return { rules: await effectiveByPrecedence(agentId, project), precedence: true };
+    return { rules: await effectiveRules(agentId, project) };
   });
   fastify.get('/api/agent-rules/conflicts', { config }, async (request: Req, reply) => {
     if (owner(request, reply) === null) return reply;
     const { agentId, projectId } = request.query;
     if (typeof agentId !== 'string' || !agentId || agentId.length > 120) return reply.code(400).send({ error: 'agentId is required', code: 'invalid_rule' });
-    return ruleConflicts(await effectiveRules(agentId, typeof projectId === 'string' && projectId ? projectId : null));
+    const project = typeof projectId === 'string' && projectId ? projectId : null;
+    return ruleConflicts(storeP2Enabled() ? await effectiveByPrecedence(agentId, project) : await effectiveRules(agentId, project));
   });
   fastify.put('/api/agent-rules/:id', { config, bodyLimit: 20000 }, async (request: Req, reply) => {
     if (owner(request, reply) === null) return reply;

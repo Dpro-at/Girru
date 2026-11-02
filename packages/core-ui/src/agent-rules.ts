@@ -4,7 +4,9 @@
 import type { SessionClient } from './session';
 
 export type RuleWho = 'all' | 'departments' | 'agents';
-export type Rule = Readonly<{ id: string; text: string; when: string | null; projectId: string | null; who: RuleWho; targets: readonly string[]; paused: boolean; status: 'active' | 'suggested'; source: 'owner' | 'agent' | 'girru'; shipped: boolean; locked: boolean; suggestedBy: string | null; reason: string | null; version: number; createdAt: string; updatedAt: string }>;
+export type Rule = Readonly<{ id: string; text: string; when: string | null; projectId: string | null; who: RuleWho; targets: readonly string[]; paused: boolean; status: 'active' | 'suggested'; source: 'owner' | 'agent' | 'girru'; shipped: boolean; locked: boolean; suggestedBy: string | null; reason: string | null; version: number; createdAt: string; updatedAt: string;
+  /** STORE-MAP-01 P2: precedence group, on the list an agent gets when the backend orders by precedence. */
+  group?: PrecedenceGroup }>;
 export type RuleVersion = Readonly<{ version: number; text: string; when: string | null; changedAt: string }>;
 export type RuleProject = Readonly<{ id: string; name: string; folder?: string | null }>;
 export type FilesState = Readonly<{ projectId: string; hasFolder: boolean; mode: 'private' | 'project'; written: boolean; upToDate: boolean; files: readonly { name: string; action: 'create' | 'add' | 'update' | 'unchanged' | 'tracked' | 'link' }[]; rules: string;
@@ -12,9 +14,16 @@ export type FilesState = Readonly<{ projectId: string; hasFolder: boolean; mode:
   tasks?: Readonly<{ on: boolean; file: string; open: number; problems: readonly { line: number; message: string }[] }> }>;
 export type RuleAgent = Readonly<{ id: string; name: string; department: string | null }>;
 export type RuleGroup = Readonly<{ id: string; title: string; icon: 'bulb' | 'globe' | 'folder' | 'avatar'; rules: readonly Rule[] }>;
+/** STORE-MAP-01 P2 (AG6): precedence groups, strongest first. */
+export type PrecedenceGroup = 'safety' | 'project' | 'agents' | 'departments' | 'all';
+export const PRECEDENCE_TITLES: Readonly<Record<PrecedenceGroup, string>> = { safety: 'Safety (always on)', project: 'This project', agents: 'For this agent', departments: 'Its department', all: 'All agents' };
+export const PRECEDENCE_ORDER: readonly PrecedenceGroup[] = ['safety', 'project', 'agents', 'departments', 'all'];
+
 export type RulesState = Readonly<{
   phase: 'idle' | 'loading' | 'ready' | 'error'; files: Readonly<Record<string, FilesState>>; rules: readonly Rule[]; suggestions: readonly Rule[]; departments: readonly string[]; projects: readonly RuleProject[];
   selected: string | null; notice: string | null; toast: { id: number; text: string; undo: boolean } | null; lastDeleted: string | null; busy: boolean;
+  /** STORE-MAP-01 P2: the backend applies rules by precedence group (the page says so). */
+  precedence: boolean;
 }>;
 export type RuleChange = Partial<{ text: string; when: string | null; projectId: string | null; who: RuleWho; targets: string[]; paused: boolean }>;
 
@@ -61,7 +70,7 @@ export function reaches(r: Pick<Rule, 'who' | 'targets' | 'projectId'>, agent: R
 
 export class RulesController {
   #client: SessionClient;
-  #state: RulesState = Object.freeze({ phase: 'idle', files: {}, rules: [], suggestions: [], departments: [], projects: [], selected: null, notice: null, toast: null, lastDeleted: null, busy: false });
+  #state: RulesState = Object.freeze({ phase: 'idle', files: {}, rules: [], suggestions: [], departments: [], projects: [], selected: null, notice: null, toast: null, lastDeleted: null, busy: false, precedence: false });
   #listeners = new Set<() => void>();
   #toastId = 0;
   constructor(client: SessionClient) { this.#client = client; }
@@ -84,7 +93,7 @@ export class RulesController {
       if (r.status !== 200 || !record(r.body)) { this.#publish({ phase: 'error', notice: err(r.body, 'Rules could not be read.') }); return; }
       const projects = record(p.body) && Array.isArray(p.body.projects) ? (p.body.projects as Record<string, unknown>[]).map(x => ({ id: String(x.id), name: String(x.name ?? 'Project'), folder: typeof x.folder === 'string' ? x.folder : null })) : [];
       const b = r.body;
-      this.#publish({ phase: 'ready', rules: (b.rules as Rule[]) ?? [], suggestions: (b.suggestions as Rule[]) ?? [], departments: (b.departments as string[]) ?? [], projects });
+      this.#publish({ phase: 'ready', rules: (b.rules as Rule[]) ?? [], suggestions: (b.suggestions as Rule[]) ?? [], departments: (b.departments as string[]) ?? [], projects, precedence: b.precedence === true });
       // RULES-03: each project with a folder: are its coding app files written and up to date?
       void Promise.all(projects.filter(p => p.folder).map(async p => [p.id, await this.filesState(p.id)] as const)).then(list => this.#publish({ files: Object.fromEntries(list.filter((x): x is readonly [string, FilesState] => !!x[1])) }));
     } catch { this.#publish({ phase: 'error', notice: 'Rules could not be read.' }); }

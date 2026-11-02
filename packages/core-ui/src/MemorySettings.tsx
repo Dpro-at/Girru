@@ -3,6 +3,7 @@
 // Sources · Projects · Access · Health and backup · Schedule. Each pane reuses
 // the controller the old Memory tabs used, so nothing is lost on the way.
 import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useStoreP2 } from './store-switches';
 import type { SessionClient } from './session';
 import { MemoryHealthController } from './memory-health';
 import { HealthView } from './MemoryHealth';
@@ -72,8 +73,11 @@ const STANDING = [
   ['Follows the design it found', 'never invents colours or logos when the project has them'],
   ['Leaves a handoff note when it stops', 'done, left, next'],
 ] as const;
+/** STORE-MAP-01 P2 (MD4): what agents save, first in the list while the switch is on. */
+const SAVE_ROW = ['Saves only what will matter later', 'decisions with their reason, your preferences, facts needed again, lessons; never drafts, small talk or secrets'] as const;
 function RulesPane({ client, health, scopes }: { client: SessionClient; health: MemoryHealthController; scopes?: MemoryScopesController }) {
   const s = use(health); const ss = use(scopes);
+  const p2 = useStoreP2(client);
   const [scope, setScope] = useState('company');
   // How long Trash keeps things: the company's rules (MEM-TRASH-01).
   const [trashDays, setTrashDays] = useState<number | null>(null);
@@ -102,7 +106,7 @@ function RulesPane({ client, health, scopes }: { client: SessionClient; health: 
     {saved && <p className="fine-print" role="status">{saved}</p>}
     <details className="preference-help"><summary>Default project behaviour</summary><h4>What every agent does in a project, without being told</h4>
     <p className="fine-print">This comes with Girru’s skill for every agent and coding app. It is on for all projects; you never have to remind it.</p>
-    <ul className="mem-standing">{STANDING.map(([a, b]) => <li key={a}><UiIcon name="check" size={13}/><span><b>{a}</b><span className="fine-print">{b}</span></span></li>)}</ul>
+    <ul className="mem-standing">{(p2 ? [SAVE_ROW, ...STANDING] : STANDING).map(([a, b]) => <li key={a}><UiIcon name="check" size={13}/><span><b>{a}</b><span className="fine-print">{b}</span></span></li>)}</ul>
     <p className="fine-print">DESIGN.md is written into each project folder (only between Girru's markers). Switch it off per project in Memory › the project › Design.</p></details>
   </div>;
 }

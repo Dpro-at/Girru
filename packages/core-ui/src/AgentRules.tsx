@@ -1,7 +1,8 @@
 // RULES-01: Agents › Rules (board AgentsRules). A short list grouped by where a rule applies;
 // select a rule and the inspector edits it in place (saves by itself). One main button, New rule.
 // Pause, Duplicate, Earlier versions and Delete in ⋯ and the right-click menu; Delete has Undo.
-// The eye shows the exact list one agent gets in one project, in order (the later one wins).
+// The eye shows the exact list one agent gets in one project, in order (the later one wins; with the
+// STORE-MAP-01 P2 switch, strongest precedence group first and the later one wins inside a group).
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
 import { UiIcon } from './ui-icons';
@@ -9,7 +10,7 @@ import type { UiIconName } from './ui-icons';
 import { Avatar, ContextMenu, IconButton, Notice, Popover, Sheet, useMenu } from './desktop-ui';
 import type { MenuItem } from './desktop-ui';
 import { DocumentEditor } from './DocumentEditor';
-import { RulesController, followers, reaches, ruleGroups, ruleLine, whoWords } from './agent-rules';
+import { PRECEDENCE_ORDER, PRECEDENCE_TITLES, RulesController, followers, reaches, ruleGroups, ruleLine, whoWords } from './agent-rules';
 import type { FilesState, Rule, RuleAgent, RuleChange, RuleVersion, RuleWho } from './agent-rules';
 import type { SessionClient } from './session';
 
@@ -170,7 +171,9 @@ function RuleInspector({ c, rule, agents, onHistory, onMenu }: { c: RulesControl
     {rule && !suggested && <p className="rules-from">{rule.shipped ? <><UiIcon name="sparkle" size={13}/>Comes with Girru{rule.version > 1 ? <> · you changed it · <button type="button" className="link-button" onClick={() => void c.putBack(rule.id)}>Put back as it came</button></> : null}</> : rule.source === 'agent' ? <>Suggested by {by}, used by you</> : <>Written by you</>}{!rule.shipped && <> · {new Date(rule.createdAt.replace(' ', 'T') + (rule.createdAt.includes('Z') ? '' : 'Z')).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</>}</p>}
     {rule && !suggested && rule.version > 1 && <button type="button" className="link-button rules-versions" onClick={onHistory}><UiIcon name="history" size={13}/>{rule.version - 1} earlier {rule.version === 2 ? 'version' : 'versions'}</button>}
     {suggested && <span className="rules-decide"><button type="button" disabled={s.busy} onClick={() => void c.decide(rule!.id, false)}>Dismiss</button><button type="button" className="primary" disabled={s.busy} onClick={() => void c.decide(rule!.id, true)}>Use this rule</button></span>}
-    <small className="fine-print rules-order">A rule without “When” always applies. A project rule comes after an everywhere rule, and a rule for chosen agents comes last. When two disagree, the later one wins.</small>
+    <small className="fine-print rules-order">{s.precedence
+      ? 'A rule without “When” always applies. When two disagree, the stronger one wins, in this order: safety rules, this project, rules for this agent, its department, all agents. An agent’s own instructions, specialties and skills never override a rule.'
+      : 'A rule without “When” always applies. A project rule comes after an everywhere rule, and a rule for chosen agents comes last. When two disagree, the later one wins.'}</small>
     {editor && <DocumentEditor title="Rule" files={[{ id: 'rule', name: 'Rule.md', content: text }]} maxLength={2000} onChange={(_, t) => setText(t)} onClose={() => { setEditor(false); if (text.trim() && text.trim() !== rule?.text) save({ text: text.trim() }); }}/>}
   </div>;
 }
@@ -196,19 +199,33 @@ function AgentSees({ c, agents, projects, initial, onClose }: { c: RulesControll
   const textOf = (id: string) => { const r = list?.find(x => x.id === id); return r ? ruleLine(r) : ''; };
   const open = (id: string) => { c.select(id); onClose(); };
   const tier = (r: Rule) => (r.who === 'agents' ? 'this agent' : r.projectId ? projects.find(p => p.id === r.projectId)?.name ?? 'project' : 'everywhere');
+  const item = (r: Rule) => <li key={r.id} dir="auto">{r.when && <span className="rules-when-lead">When {r.when}: </span>}{r.text} <span className="fine-print">· {tier(r)}</span></li>;
+  // STORE-MAP-01 P2: the backend sends the list strongest group first, each rule with its group.
+  const byGroup = !!list?.length && list.every(r => r.group);
+  // Who wins when two disagree: the stronger group; inside one group (or without groups) the later one.
+  const winner = (a: string, b: string) => {
+    const ra = list?.find(x => x.id === a), rb = list?.find(x => x.id === b);
+    if (!byGroup || !ra?.group || !rb?.group || ra.group === rb.group) return b;
+    return PRECEDENCE_ORDER.indexOf(ra.group) < PRECEDENCE_ORDER.indexOf(rb.group) ? a : b;
+  };
   return <Sheet title="What an agent sees" onClose={onClose} wide actions={<button type="button" className="primary" onClick={onClose}>Done</button>}>
     <div className="rules-sees-pick">
       <label className="dk-field">Agent<select value={agentId} onChange={e => setAgentId(e.target.value)}>{agents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
       <label className="dk-field">In<select value={projectId} onChange={e => setProjectId(e.target.value)}><option value="">A chat without a project</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
     </div>
-    {list === null ? <p className="fine-print" role="status">Reading…</p> : list.length ? <ol className="rules-sees">{list.map(r => <li key={r.id} dir="auto">{r.when && <span className="rules-when-lead">When {r.when}: </span>}{r.text} <span className="fine-print">· {tier(r)}</span></li>)}</ol>
-      : <p className="fine-print">No rule reaches this agent here.</p>}
+    {list === null ? <p className="fine-print" role="status">Reading…</p> : !list.length ? <p className="fine-print">No rule reaches this agent here.</p>
+      : byGroup ? PRECEDENCE_ORDER.filter(g => list.some(r => r.group === g)).map(g => <section key={g} className="rules-sees-group" aria-label={PRECEDENCE_TITLES[g]}>
+          <h4 className="rules-sees-head">{PRECEDENCE_TITLES[g]}</h4>
+          <ol className="rules-sees" start={list.findIndex(r => r.group === g) + 1}>{list.filter(r => r.group === g).map(item)}</ol></section>)
+      : <ol className="rules-sees">{list.map(item)}</ol>}
     {check === 'checking' && <p className="fine-print" role="status">Checking for rules that disagree…</p>}
     {check && check !== 'checking' && check.conflicts.map(x => <div key={`${x.a}-${x.b}`} className="rules-conflict" role="alert"><UiIcon name="alert" size={14}/>
-      <span>Two rules disagree: “{textOf(x.a)}” and “{textOf(x.b)}”.{x.why ? ` ${x.why}` : ''} The later one, “{textOf(x.b)}”, wins.
+      <span>Two rules disagree: “{textOf(x.a)}” and “{textOf(x.b)}”.{x.why ? ` ${x.why}` : ''} {byGroup ? 'The stronger one' : 'The later one'}, “{textOf(winner(x.a, x.b))}”, wins.
         <span className="rules-conflict-open"><button type="button" className="link-button" onClick={() => open(x.a)}>Open the first</button><button type="button" className="link-button" onClick={() => open(x.b)}>Open the second</button></span></span></div>)}
     {check && check !== 'checking' && !check.checked && <p className="fine-print">The local model could not check whether rules disagree right now.</p>}
-    <p className="fine-print">This is the list, in this order, that the agent gets before a task. When two disagree, the later one wins; two rules for different cases do not disagree. Paused rules are left out.</p>
+    <p className="fine-print">{byGroup
+      ? 'This is the list the agent gets before a task, strongest group first: Safety (always on) · This project · For this agent · Its department · All agents. Inside a group the later rule wins. Paused rules are left out.'
+      : 'This is the list, in this order, that the agent gets before a task. When two disagree, the later one wins; two rules for different cases do not disagree. Paused rules are left out.'}</p>
   </Sheet>;
 }
 

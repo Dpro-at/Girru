@@ -191,3 +191,23 @@ test('MD4 and MD9: save criteria lead memory_save and the brief; recalled memori
     assert.match(on.text, new RegExp(`restored every Sunday night\\. \\(as of \\d{4}-\\d{2}-\\d{2} · project:${project.slug}\\)`));
   });
 });
+
+test('routes for the app: the switch, and the eye list strongest group first with groups', async () => {
+  const get = (url) => app.inject({ method: 'GET', url, headers: auth });
+  assert.deepEqual((await get('/api/store-switches')).json(), { p2: false });
+  assert.equal((await get('/api/agent-rules')).json().precedence, false);
+  const before = (await get(`/api/agent-rules/effective?agentId=cc-agent&projectId=${project.id}`)).json();
+  assert.ok(!('precedence' in before) && before.rules.every((r) => !('group' in r)), 'off: unchanged');
+  await withP2(async () => {
+    assert.deepEqual((await get('/api/store-switches')).json(), { p2: true });
+    assert.equal((await get('/api/agent-rules')).json().precedence, true);
+    const eye = (await get(`/api/agent-rules/effective?agentId=cc-agent&projectId=${project.id}`)).json();
+    assert.equal(eye.precedence, true);
+    const order = ['safety', 'project', 'agents', 'departments', 'all'];
+    const groups = eye.rules.map((r) => r.group);
+    assert.ok(groups.every((g, i) => i === 0 || order.indexOf(g) >= order.indexOf(groups[i - 1])), groups.join(','));
+    assert.ok(groups.includes('safety') && groups.includes('project') && groups.includes('departments'));
+  });
+  const other = await app.inject({ method: 'GET', url: '/api/store-switches' });
+  assert.equal(other.statusCode, 401, 'owner only');
+});
