@@ -254,6 +254,14 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
     const { startStorePilot } = await import('../memory/outbox/start.js');
     await startStorePilot().catch((err) => console.warn('[Store pilot] start failed:', (err as Error)?.message));
 
+    // STORE-MAP-01 P3: fill the one list of departments and its ids (GIRRU_STORE_P3 only; idempotent; a failure never stops the start).
+    const { storeP3Enabled } = await import('../services/store-p3.js');
+    if (storeP3Enabled()) {
+      const { syncDepartments } = await import('../services/departments.js');
+      // Small tables: done before the first request so lists never miss a department.
+      await syncDepartments().catch((err) => console.warn('[Store P3] departments backfill failed:', (err as Error)?.message));
+    }
+
     // MEM-UX-02: exported memory files follow the database (untouched files only).
     const { startMemoryFilesSync } = await import('../memory/files-sync.js');
     startMemoryFilesSync();

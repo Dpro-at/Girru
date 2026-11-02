@@ -32,6 +32,8 @@ import type { DrawerRef } from '../drawers.js';
 import type { Memory } from '../types.js';
 import { bumpAccessVersionStep, invalidateAccess, previewSnapshotEditStep } from './access.js';
 import { invalidateScopeTree } from './tree.js';
+import { departmentTable, storeP3Enabled } from '../../services/store-p3.js';
+import { detachDepartmentStep, mirrorLegacyStep } from '../../services/departments.js';
 import {
   GENERAL_DEPARTMENT, ScopeInputError, assertProjectSlug, departmentStep, listProjectsStep, projectStep, upsertProjectRowStep, type ProjectScope,
 } from './store.js';
@@ -359,7 +361,10 @@ export async function deleteDepartment(ownerId: string, id: string, expectedPrev
     yield* run('UPDATE memory_project_scopes SET department_id = NULL WHERE owner_id = ? AND department_id = ?', ownerId, id);
     yield* run("DELETE FROM memory_pinned_facts WHERE owner_id = ? AND scope_kind = 'department' AND scope_id = ?", ownerId, id);
     yield* deleteScopeRulesStep(ownerId, 'department', id);
-    yield* run('DELETE FROM memory_departments WHERE owner_id = ? AND id = ?', ownerId, id);
+    // P3: the one list also holds the agents' departments; they, their boards and rules let go first.
+    if (storeP3Enabled()) yield* detachDepartmentStep(ownerId, id);
+    yield* run(`DELETE FROM ${departmentTable()} WHERE owner_id = ? AND id = ?`, ownerId, id);
+    if (storeP3Enabled()) yield* mirrorLegacyStep(ownerId);
     yield* bumpAccessVersionStep(ownerId);
     return preview;
   }, { immediate: true });

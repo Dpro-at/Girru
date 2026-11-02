@@ -16,6 +16,7 @@
 import { randomUUID } from 'node:crypto';
 import { all, one, run, sql, type Step } from '../../repositories/sql-steps.js';
 import { isValidDrawerKey, type DrawerRef } from '../drawers.js';
+import { departmentTable, storeP3Enabled } from '../../services/store-p3.js';
 
 export const GENERAL_DEPARTMENT = 'general';
 export const GENERAL_NAME = 'General';
@@ -71,14 +72,14 @@ export function assertProjectSlug(slug: unknown): asserts slug is string {
 // ---------------------------------------------------------------------------
 
 export function* listDepartmentsStep(ownerId: string): Step<Department[]> {
-  const rows = yield* all<{ id: string; name: string }>('SELECT id, name FROM memory_departments WHERE owner_id = ? ORDER BY norm_name, id', ownerId);
+  const rows = yield* all<{ id: string; name: string }>(`SELECT id, name FROM ${departmentTable()} WHERE owner_id = ? ORDER BY norm_name, id`, ownerId);
   return [{ id: GENERAL_DEPARTMENT, name: GENERAL_NAME, isDefault: true }, ...rows.map((r) => ({ id: r.id, name: r.name, isDefault: false }))];
 }
 
 export function* departmentStep(ownerId: string, id: string): Step<Department | null> {
   if (id === GENERAL_DEPARTMENT) return { id, name: GENERAL_NAME, isDefault: true };
   if (typeof id !== 'string' || !DEPARTMENT_ID.test(id)) return null;
-  const r = yield* one<{ id: string; name: string }>('SELECT id, name FROM memory_departments WHERE owner_id = ? AND id = ?', ownerId, id);
+  const r = yield* one<{ id: string; name: string }>(`SELECT id, name FROM ${departmentTable()} WHERE owner_id = ? AND id = ?`, ownerId, id);
   return r ? { id: r.id, name: r.name, isDefault: false } : null;
 }
 
@@ -90,13 +91,15 @@ export async function createDepartment(ownerId: string, nameInput: unknown, by: 
   const name = cleanName(nameInput, 'department');
   return sql().tx(function* () {
     if (normName(name) === normName(GENERAL_NAME)) throw new ScopeInputError('That department already exists', 409, 'name_taken');
-    if (yield* one('SELECT 1 AS x FROM memory_departments WHERE owner_id = ? AND norm_name = ?', ownerId, normName(name))) {
+    if (yield* one(`SELECT 1 AS x FROM ${departmentTable()} WHERE owner_id = ? AND norm_name = ?`, ownerId, normName(name))) {
       throw new ScopeInputError('That department already exists', 409, 'name_taken');
     }
-    const n = (yield* one<{ n: number }>('SELECT COUNT(*) AS n FROM memory_departments WHERE owner_id = ?', ownerId))?.n ?? 0;
+    const n = (yield* one<{ n: number }>(`SELECT COUNT(*) AS n FROM ${departmentTable()} WHERE owner_id = ?`, ownerId))?.n ?? 0;
     if (Number(n) >= MAX_DEPARTMENTS) throw new ScopeInputError('Too many departments', 409, 'too_many');
     const id = `dept-${randomUUID().slice(0, 12)}`;
-    yield* run('INSERT INTO memory_departments (id, owner_id, name, norm_name, created_by) VALUES (?, ?, ?, ?, ?)', id, ownerId, name, normName(name), by);
+    yield* run(`INSERT INTO ${departmentTable()} (id, owner_id, name, norm_name, created_by) VALUES (?, ?, ?, ?, ?)`, id, ownerId, name, normName(name), by);
+    // P3: the old table mirrors the one list, so the switch can go off again.
+    if (storeP3Enabled()) yield* run('INSERT INTO memory_departments (id, owner_id, name, norm_name, created_by) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING', id, ownerId, name, normName(name), by);
     return { id, name, isDefault: false };
   }, { immediate: true });
 }
@@ -104,6 +107,13 @@ export async function createDepartment(ownerId: string, nameInput: unknown, by: 
 export async function renameDepartment(ownerId: string, id: string, nameInput: unknown): Promise<Department> {
   if (id === GENERAL_DEPARTMENT) throw new ScopeInputError('The General department cannot be renamed');
   const name = cleanName(nameInput, 'department');
+  if (normName(name) === normName(GENERAL_NAME)) throw new ScopeInputError('That department already exists', 409, 'name_taken');
+  if (storeP3Enabled()) {
+    // P3: the one list; agents, boards and rules follow the new name too.
+    const { renameDepartmentEverywhere } = await import('../../services/departments.js');
+    const d = await renameDepartmentEverywhere(ownerId, id, name);
+    return { id: d.id, name: d.name, isDefault: false };
+  }
   return sql().tx(function* () {
     const d = yield* departmentStep(ownerId, id);
     if (!d) throw new ScopeInputError('Department not found', 404, 'not_found');
