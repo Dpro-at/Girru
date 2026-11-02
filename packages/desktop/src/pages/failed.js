@@ -10,6 +10,14 @@ if (kind === 'migration_failed') {
   $('title').textContent = 'The update could not finish';
   show('lead', 'Nothing was lost. The step that failed was undone, and nothing after it ran.');
   $('reason').textContent = `The update to ${version(params.get('thisVersion'))} stopped at the step “${params.get('step') || 'unknown'}”.`;
+  const previous = params.get('previous');
+  if (previous) {
+    // FD4a: the one main button puts back the backup from before the update and opens the version you had.
+    show('lead', 'Girru can put back your data exactly as it was before the update and open the version you had.');
+    show('restore', `Restore and open ${version(previous)}`);
+    $('retry').classList.remove('primary');
+    $('restore').addEventListener('click', () => { $('restore').disabled = true; void window.dproDesktop.restoreFromFailed(); });
+  }
   const id = params.get('errorId');
   if (id) {
     show('error-id', `Error id ${id} · copy it if you ask for help`);
