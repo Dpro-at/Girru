@@ -17,6 +17,7 @@ import type { DrawerRef } from '../drawers.js';
 import { pinnedFactsForReply } from '../scopes/pinned.js';
 import { latestBridgeHandoff } from './store.js';
 import { CLIENT_NAMES, SERVER_NAME, type BridgeClient } from './clients.js';
+import { projectKeyOf } from '../project-keys.js';
 
 export const MAX_PINNED = 40;
 const MAX_FACT_CHARS = 400;
@@ -34,20 +35,20 @@ export function clean(text: string, max = MAX_FACT_CHARS): string {
   return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t;
 }
 
-export const projectDrawer = (p: Pick<Project, 'slug'>): DrawerRef => ({ kind: 'project', key: p.slug });
+export const projectDrawer = (p: Pick<Project, 'id' | 'slug'>): DrawerRef => ({ kind: 'project', key: projectKeyOf(p) });
 
 /**
  * The owner's pinned facts for this project: company, its department, the
  * project (an archived project: company only). Company facts are the owner's
  * rules for all work, so a coding agent in this folder gets them too.
  */
-export async function pinnedFacts(ownerId: string, project: Pick<Project, 'slug'>): Promise<PinnedFact[]> {
-  const r = await pinnedFactsForReply(ownerId, project.slug);
+export async function pinnedFacts(ownerId: string, project: Pick<Project, 'id' | 'slug'>): Promise<PinnedFact[]> {
+  const r = await pinnedFactsForReply(ownerId, projectKeyOf(project));
   return r.facts.map((f) => ({ id: f.id, scope: f.scope, content: clean(f.text) })).filter((f) => f.content);
 }
 
 /** The project's approved memories, most important first, newest first on a tie. */
-export async function approvedMemories(ownerId: string, project: Pick<Project, 'slug'>, limit = MAX_PINNED): Promise<ApprovedMemory[]> {
+export async function approvedMemories(ownerId: string, project: Pick<Project, 'id' | 'slug'>, limit = MAX_PINNED): Promise<ApprovedMemory[]> {
   const rows = await getMemoryStorage().getByDrawers(ownerId, [projectDrawer(project)]);
   return rows
     .map((m) => ({ m, at: new Date(m.createdAt as any).getTime() || 0, imp: Number(m.importance ?? 5) }))

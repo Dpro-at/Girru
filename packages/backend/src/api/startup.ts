@@ -70,6 +70,11 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
   await (await import('../services/backups.js')).loadBackupsFolder();
   console.log('[Server] ✅ Database initialized\n');
 
+  // STORE-MAP-01 P3: project memory keys follow the switch (ids while on, slugs again when it goes off),
+  // before anything reads memory. Small set-based updates; a failure is logged and start-up goes on.
+  const { moveProjectKeys } = await import('../memory/project-keys.js');
+  await moveProjectKeys().catch((err) => console.warn('[Store P3] project keys not moved:', (err as Error)?.message));
+
   // APPS-06: apps moved to the Girru Store keep their data under their Store table names (once, after a backup).
   try { await (await import('../services/legacy-app-tables.js')).moveLegacyAppTables(); }
   catch (err) { console.warn('[Server] Old app tables not moved:', (err as Error).message); }

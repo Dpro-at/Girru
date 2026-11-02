@@ -112,3 +112,25 @@ test('an older Girru never opens newer data (PostgreSQL)', { skip }, async () =>
   }
   await initializeDatabase();
 });
+
+test('project keys move to ids and back (PostgreSQL)', { skip }, async () => {
+  const assert = (await import('node:assert/strict')).default;
+  const projects = await import('../src/repositories/chat-conversations.ts');
+  const keys = await import('../src/memory/project-keys.ts');
+  delete process.env.GIRRU_STORE_P3;
+  const p = await projects.createProject(owner, { name: `Gamma ${tag}` });
+  const mem = await m.learning.saveVersioned(m.learning.newMemory(owner, { kind: 'project', key: p.slug }, { type: 'fact', importance: 5, content: 'Gamma ships monthly.' }, { source: 'owner' }), owner, 'test');
+  await m.learning.saveVersioned(m.learning.newMemory(owner, { kind: 'project', key: `notes-${tag}` }, { type: 'fact', importance: 5, content: 'Loose notes.' }, { source: 'owner' }), owner, 'test');
+  process.env.GIRRU_STORE_P3 = '1';
+  const r = await keys.moveProjectKeys('id');
+  assert.ok(r.some((x) => x.created >= 1));
+  assert.equal((await m.q.all('SELECT drawer_key FROM memories WHERE id = ?', mem.id))[0].drawer_key, p.id);
+  assert.equal((await m.q.all('SELECT drawer_key FROM memory_versions WHERE memory_id = ? LIMIT 1', mem.id))[0].drawer_key, p.id);
+  assert.equal(await keys.currentProjectKey(owner, p.slug), p.id);
+  delete process.env.GIRRU_STORE_P3;
+  await keys.moveProjectKeys('slug');
+  assert.equal((await m.q.all('SELECT drawer_key FROM memories WHERE id = ?', mem.id))[0].drawer_key, p.slug);
+  await m.q.run('DELETE FROM memory_project_keys WHERE owner_id = ?', owner);
+  await m.q.run('DELETE FROM memory_key_state WHERE owner_id = ?', owner);
+  await m.q.run('DELETE FROM chat_projects WHERE user_id = ?', owner);
+});

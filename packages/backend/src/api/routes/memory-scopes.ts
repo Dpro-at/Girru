@@ -52,6 +52,7 @@ import { actorOrReply, requireOwner } from '../../repositories/scope.js';
 import { resolveFileAgent } from '../../memory/memory-files.js';
 import { setChecked } from '../../memory/validity.js';
 import { storeP3Enabled } from '../../services/store-p3.js';
+import { currentProjectKey } from '../../memory/project-keys.js';
 import {
   ScopeInputError, accessOverview, addPinnedFact, applyAccessChanges, applyProjectAction, createDepartment, deleteDepartment, effectiveAccess,
   exploreScope, exportProject, invalidateScopeTree, listAgentScopes, listPinnedFacts, parseActionInput, parsePinnedScope, pinnedScopeId,
@@ -91,6 +92,27 @@ function requireConfirm(b: Record<string, unknown>): void {
   if (b.confirm !== true) throw new ScopeInputError('Confirm the change (confirm: true)', 400, 'confirm_required');
 }
 
+/**
+ * STORE-MAP-01 P3 compatibility (one release): a project named by its old slug
+ * (a link, a saved filter, a merge target) is answered with its id.
+ */
+async function oldProjectNames(ownerId: string, request: FastifyRequest): Promise<void> {
+  if (!storeP3Enabled()) return;
+  const params = request.params as Record<string, string> | undefined;
+  if (params?.slug) params.slug = await currentProjectKey(ownerId, params.slug);
+  const fix = async (o: Record<string, unknown> | undefined, k: string) => {
+    const v = o?.[k];
+    if (typeof v !== 'string') return;
+    if (k === 'target') o![k] = await currentProjectKey(ownerId, v);
+    else if (v.startsWith('project:')) o![k] = `project:${await currentProjectKey(ownerId, v.slice(8))}`;
+  };
+  const query = request.query as Record<string, unknown> | undefined;
+  const b = request.body && typeof request.body === 'object' && !Array.isArray(request.body) ? request.body as Record<string, unknown> : undefined;
+  await fix(query, 'scope');
+  await fix(b, 'scope');
+  await fix(b, 'target');
+}
+
 export async function memoryScopeRoutes(fastify: FastifyInstance) {
   const config = { access: 'owner' as const };
   type Handler = (owner: Actor, request: FastifyRequest, reply: FastifyReply) => Promise<unknown>;
@@ -99,7 +121,10 @@ export async function memoryScopeRoutes(fastify: FastifyInstance) {
     handler: async (request, reply) => {
       const owner = ownerOf(request, reply);
       if (owner === null) return reply;
-      try { return await handler(owner, request, reply); } catch (err) { return send(reply, err); }
+      try {
+        await oldProjectNames(owner.userId!, request);
+        return await handler(owner, request, reply);
+      } catch (err) { return send(reply, err); }
     },
   });
 

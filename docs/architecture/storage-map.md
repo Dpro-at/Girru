@@ -48,10 +48,10 @@ Girru's own servers store none of this. Updates and the Store index come from th
 | Field | Owner (edit here) | Copies and views | Conflict rule | State |
 |---|---|---|---|---|
 | Text, type, importance | `memories` row | per-memory Markdown copy; drawer export files; project brief; `AGENTS.md` section; MCP answers | Edits in a drawer export or from a coding tool become a proposal the owner approves | Today |
-| Version for compare-and-set | `memories` row | — | A write with an old version is refused | Planned |
-| Drawer (owner, project, experience, task, people) | `memories` row | the drawer's export file | Moving a memory is an edit of the row | Today; project key is the project slug — **Planned:** project id |
-| Valid from / valid until / replaced by | `memories` row | shown as "as of" in recall | A new fact on the same topic replaces the old one instead of keeping both | Planned |
-| Source and trust | `memories` row | — | Untrusted text is labelled as data in every prompt | Planned (a partial "untrusted" label exists for agent `MEMORY.md` and imports) |
+| Version for compare-and-set | `memory_versions` (last version) | — | An edit that sends `expectedVersion` from an older version is refused with the current text | Today (when the caller sends it) |
+| Drawer (owner, project, experience, task, people) | `memories` row | the drawer's export file | Moving a memory is an edit of the row | Today; project key is the project slug — the project id with `GIRRU_STORE_P3` |
+| Valid from / valid until / replaced by | `memories` row | shown as "as of" in recall | A new fact on the same topic replaces the old one instead of keeping both | With `GIRRU_STORE_P3` |
+| Source and trust | `memories` row | — | Untrusted text is labelled as data in every prompt | With `GIRRU_STORE_P3` (source and trust are stored; the memory panel shows them next) |
 | Embedding | derived from the text | — | Never edited; recomputed when the text or the model changes | Today |
 | History | `memory_versions` (append-only) | Trash | Delete keeps the history (undo); Forget removes it | Today |
 | Pinned facts (company, department, project) | `memory_pinned_facts` | project brief; `AGENTS.md`; prompts | Owner edits only | Today |
@@ -93,7 +93,7 @@ The task file `.girru/tasks.md` is the one place where a file owns text:
 | Field | Owner | Conflict rule | State |
 |---|---|---|---|
 | Title and body (done, left, next, log) | the task file, read as a revision | A file edit and a board edit made against the same exported version produce a **conflict** the owner resolves, not a silent overwrite | Today: two-way sync — **Planned:** checked against the last exported version |
-| Card id (`T-n`), column, department, agent | the board in the database | The file shows the name and carries the id; a renamed agent or department is rewritten from the id | Today by name — **Planned:** by id |
+| Card id (`T-n`), column, department, agent | the board in the database | The file shows the name and carries the id; a renamed agent or department is rewritten from the id | Today by name — with `GIRRU_STORE_P3` a department rename or merge follows into boards and cards; agents **Planned** |
 | Run status and steps | the task runner | Read-only everywhere else | Today |
 | Link to memory and handoffs | the database | — | Planned |
 
@@ -149,6 +149,15 @@ A first version of the change log, the session capability and the shared agent c
 - **Session capability:** the owner issues one with `POST /api/memory-bridge/projects/:projectId/capabilities` (`scopes`: `brief:read`, `memory:read`, `memory:propose`, `handoff:write`; optional `client`, `ttlMs` up to 24 hours) and revokes it with `DELETE /api/memory-bridge/capabilities/:id`. Girru's launcher passes the token to the coding tool's process as `GIRRU_SESSION_CAPABILITY`; only its hash is stored. The project comes from the capability; a folder path in a call never grants access, and a folder of another project is refused.
 - **Sync status:** `GET /api/memory-bridge/projects/:projectId/sync`; `POST` with `{"action":"rebuild"}` re-renders from the current records, `{"action":"use_girru_version"}` resolves a conflict by keeping the outside file next to the brief and writing Girru's version.
 - Lines removed from `brief.md`, or the whole file, are never read back: the file is regenerated and no memory is forgotten.
+
+### Foundations (off by default)
+
+`GIRRU_STORE_P3=1` turns on:
+
+- **One list of departments** for agents and projects (`departments`). Renaming or merging a department follows into agents, boards, cards, specialty templates, hire items, meeting decisions and rule targets; a merge can be undone; deleting one lets its agents and rules go (a rule left without a department is paused). Owner routes: `GET/POST /api/departments`, `PATCH /api/departments/:id`, `POST /api/departments/:id/merge`, `POST /api/departments/merges/:mergeId/undo`, `POST /api/departments/questions/:id`.
+- **Projects by id in memory:** at start-up every project key moves from the slug to the project's id; a key with no project becomes a real project. Deleting a project keeps its memory under its own id, so a new project with the same name starts empty. Links that name a project by its slug keep working for one release. With the switch off again, the keys move back.
+- **Source, trust and replaced facts:** new memories record where they came from (owner, agent, coding app, import, channel) and how far to trust them (checked, unchecked, imported); a background job fills older rows. A new fact on a known topic replaces the old one, which stays in History and is never recalled. `PUT /api/memory/scopes/memories/:id/checked` marks a memory as checked or undoes it.
+- **Start-up after an update:** Girru stops before writing anything when the data was written by a newer Girru, and a failed update step is named with an error id; the desktop start page explains both.
 
 ### One agent context and one Girru section (off by default)
 

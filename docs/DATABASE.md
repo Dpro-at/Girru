@@ -220,6 +220,48 @@ locked_until DATETIME
 
 ---
 
+## Memory
+
+Memory lives in the main database. A memory belongs to one **drawer**: `owner`, `project`, `experience`, `task` or `people`. Every change is versioned.
+
+### memories
+One remembered fact, preference, decision, lesson or event.
+- `id`, `user_id` - owner of the memory
+- `type`, `content`, `importance_score`, `memory_layer`
+- `drawer_kind`, `drawer_key` - the drawer; for a project drawer the key is the project's slug, or its id while `GIRRU_STORE_P3` is on
+- `topic_key` - a stable topic; one current memory per topic and drawer
+- `embedding`, `embedding_model`, `embedding_dims` - the vector used for search
+- `source_agent_id`, `metadata` - who saved it and from where
+- `source`, `source_ref`, `trust` - owner, agent, coding_app, import, channel or system; checked, unchecked or imported (filled while `GIRRU_STORE_P3` is on)
+- `valid_from`, `valid_to`, `superseded_by` - since when it is true; when and by which memory it was replaced. A replaced memory keeps `status = 'replaced'`: it stays in History and is never recalled
+
+### memory_versions
+Append-only history of each memory (`create`, `update`, `delete`, `forget`, `baseline`), with who made the change and why. Its `version` is the number an editor sends as `expectedVersion`; an edit based on an older version is refused with the current text.
+
+### memory_project_scopes, memory_departments, departments
+State of a project drawer (name, department, pinned, archived, Trash) and the departments projects belong to. While `GIRRU_STORE_P3` is on, `departments` is the one list for agents and projects; `memory_departments` is kept equal to it so the switch can go off again. `department_merges` keeps what a merge moved so it can be undone; `department_questions` holds what an upgrade could not decide alone.
+
+### memory_pinned_facts, memory_access_rules, memory_access_scope_rules, memory_scope_rules
+Pinned facts per company, department or project; which agents may read or write which drawers; review rules per scope.
+
+### memory_project_keys, memory_key_state
+Which project slugs were moved to project ids, and whether an owner's project keys are slugs or ids now. Start-up moves the keys to follow `GIRRU_STORE_P3`.
+
+### change_scopes, change_events, projection_state
+The change log of opted-in project drawers (one event per write, in the same transaction) and the state of each generated copy (brief file, status). Used by the storage pilot.
+
+### memory_cache_revisions
+A counter per user and scope, raised by triggers on every memory write; recall caches use it to know they are out of date.
+
+---
+
+## Start-up checks
+
+### schema_layout
+One row: the highest migration this data has and the Girru version that last opened it. While `GIRRU_STORE_P3` is on, a Girru that finds migrations it does not know stops before writing anything, and a failed migration is named with an error id; the desktop start page explains both.
+
+---
+
 ## Migrations
 
 Migrations are SQL files in `packages/backend/src/db/migrations/`

@@ -17,11 +17,12 @@ import { one, sql } from '../../repositories/sql-steps.js';
 import type { DrawerRef } from '../drawers.js';
 import { loadRunPermissions } from '../../tools/agent-permissions.js';
 import { pinnedFactsForReply, scopeFactAccess } from './pinned.js';
+import { chatProjectKeyColumn } from '../project-keys.js';
 
-/** Project slug of the board card's conversation for this task, or null. */
+/** Memory key of the project of the board card's conversation for this task (its slug; P3: its id), or null. */
 async function cardProject(ownerId: string, taskId: string): Promise<string | null> {
   const row = await sql().read(one<{ slug: string }>(`
-    SELECT p.slug FROM board_cards c
+    SELECT p.${chatProjectKeyColumn()} AS slug FROM board_cards c
       JOIN boards b ON b.id = c.board_id
       JOIN chat_sessions s ON s.id = c.conversation_id
       JOIN chat_projects p ON p.id = s.project_id AND p.user_id = s.user_id

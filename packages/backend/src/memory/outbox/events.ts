@@ -10,6 +10,7 @@
 
 import { q, sql, all, one, run, num } from '../../repositories/sql-steps.js';
 import type { Project } from '../../repositories/chat-conversations.js';
+import { projectKeyOf } from '../project-keys.js';
 
 export interface ChangeEvent {
   seq: number;
@@ -23,7 +24,7 @@ export interface ChangeEvent {
 }
 
 /** The change-log scope of a project's memory drawer. */
-export const projectScope = (p: Pick<Project, 'slug'>): string => `project:${p.slug}`;
+export const projectScope = (p: Pick<Project, 'id' | 'slug'>): string => `project:${projectKeyOf(p)}`;
 
 /** Start (or resume) the change log for a project's drawer. Idempotent. */
 export async function enableScope(ownerId: string, project: Pick<Project, 'id' | 'slug'>): Promise<string> {

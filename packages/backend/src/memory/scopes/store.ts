@@ -17,6 +17,7 @@ import { randomUUID } from 'node:crypto';
 import { all, one, run, sql, type Step } from '../../repositories/sql-steps.js';
 import { isValidDrawerKey, type DrawerRef } from '../drawers.js';
 import { departmentTable, storeP3Enabled } from '../../services/store-p3.js';
+import { chatProjectKeyColumn, projectKeyOf } from '../project-keys.js';
 
 export const GENERAL_DEPARTMENT = 'general';
 export const GENERAL_NAME = 'General';
@@ -37,7 +38,7 @@ export interface ProjectScope {
   archived: boolean;
   archivedAt: string | null;
   mergedInto: string | null;
-  /** chat_projects.id of the owner's chat project with this slug, else null. */
+  /** chat_projects.id of the owner's chat project with this key (its slug; its id while P3 is on), else null. */
   chatProjectId: string | null;
   /** MEM-TRASH-01: when the project was moved to the Trash, else null. */
   trashedAt: string | null;
@@ -155,10 +156,11 @@ export function* listProjectsStep(ownerId: string): Step<ProjectScope[]> {
     bySlug.set(r.slug, p);
   }
   for (const c of chats) {
-    const p = bySlug.get(c.slug) ?? base(c.slug);
+    const key = projectKeyOf(c); // P3: the id
+    const p = bySlug.get(key) ?? base(key);
     p.chatProjectId = c.id;
     p.name = c.name || p.name;
-    bySlug.set(c.slug, p);
+    bySlug.set(key, p);
   }
   return [...bySlug.values()].sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.name.localeCompare(b.name) || a.slug.localeCompare(b.slug));
 }
@@ -170,7 +172,7 @@ export function listProjects(ownerId: string): Promise<ProjectScope[]> {
 /** One project of the owner, or null when no chat project, memory or scope row knows it. */
 export function* projectStep(ownerId: string, slug: string): Step<ProjectScope | null> {
   if (!isValidDrawerKey('project', slug)) return null;
-  const chat = yield* one<{ id: string; name: string }>('SELECT id, name FROM chat_projects WHERE user_id = ? AND slug = ?', ownerId, slug);
+  const chat = yield* one<{ id: string; name: string }>(`SELECT id, name FROM chat_projects WHERE user_id = ? AND ${chatProjectKeyColumn()} = ?`, ownerId, slug);
   const row = yield* one<ScopeRow>('SELECT slug, name, department_id, pinned, archived_at, merged_into, trashed_at FROM memory_project_scopes WHERE owner_id = ? AND slug = ?', ownerId, slug);
   const group = yield* one<{ group_id: string }>('SELECT group_id FROM memory_project_group_members WHERE owner_id = ? AND slug = ?', ownerId, slug);
   const has = yield* one("SELECT 1 AS x FROM memories WHERE user_id = ? AND drawer_kind = 'project' AND drawer_key = ? LIMIT 1", ownerId, slug);
