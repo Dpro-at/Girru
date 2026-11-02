@@ -19,6 +19,7 @@ import {allowedVerification,verificationRoute,verificationResponse} from './veri
 import {allowedReviewer,reviewerRoute,reviewerOwnerRoute,reviewerResponse} from './reviewers-contract.js';
 import {coverageRoute,allowedCoverage,coverageResponse} from './security-coverage-contract.js';
 import {schedulerRoute,allowedScheduler,schedulerResponse} from './scheduler-contract.js';
+import {runsRoute,allowedRuns,runsResponse} from './runs-contract.js';
 import {workspaceAppsRoute,allowedWorkspaceApps,workspaceAppsResponse,sourceCatalogueRoute,allowedSourceCatalogue,sourceCatalogueResponse,appsCatalogueRoute,allowedAppsCatalogue,appsCatalogueResponse,storeRoute,allowedStore,storeResponse} from './apps-contract.js';
 import {chatAddonsRoute,allowedChatAddons,chatAddonsResponse} from './chat-addons-contract.js';
 import {approvalRoute,allowedApproval,approvalResponse} from './approvals-contract.js';
@@ -119,6 +120,7 @@ export function allowedRequest(method: string, path: string, body?: unknown): bo
   if(coverageRoute(path))return allowedCoverage(method,path,body);
   if(tradingPaperRoute(path))return allowedTradingPaper(method,path,body);
   if(schedulerRoute(path))return allowedScheduler(method,path,body);
+  if(runsRoute(path))return allowedRuns(method,path,body);
   if(sourceCatalogueRoute(path))return allowedSourceCatalogue(method,path,body);
   if(workspaceAppsRoute(path))return allowedWorkspaceApps(method,path,body);
   if(appsCatalogueRoute(path))return allowedAppsCatalogue(method,path,body);
@@ -210,6 +212,7 @@ function projectResponse(path: string, response: WireResponse): WireResponse {
   if(coverageRoute(path))return {status:response.status,body:coverageResponse(response.status,response.body)};
   if(tradingPaperRoute(path))return {status:response.status,body:tradingPaperResponse(path,response.status,response.body)};
   if(schedulerRoute(path))return {status:response.status,body:schedulerResponse(path,response.status,response.body)};
+  if(runsRoute(path))return {status:response.status,body:runsResponse(path,response.status,response.body)};
   if(sourceCatalogueRoute(path))return {status:response.status,body:sourceCatalogueResponse(response.status,response.body)};
   if(workspaceAppsRoute(path))return {status:response.status,body:workspaceAppsResponse(response.status,response.body)};
   if(appsCatalogueRoute(path))return {status:response.status,body:appsCatalogueResponse(response.status,response.body)};

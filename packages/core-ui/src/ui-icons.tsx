@@ -9,6 +9,7 @@ const shapes = {
   'devices': <><rect x="2" y="4" width="15" height="11" rx="1.5"/><path d="M6 19h6M9 15v4"/><rect x="16" y="10" width="6" height="12" rx="1"/></>,
   play: <path d="M8 5l11 7-11 7z"/>,
   pause: <><path d="M8 5v14M16 5v14"/></>,
+  hourglass: <><path d="M7 3h10M7 21h10M8 3c0 5 8 5 8 9s-8 4-8 9M16 3c0 5-8 5-8 9"/></>,
   info: <><circle cx="12" cy="12" r="9"/><path d="M12 10v7M12 7v.1"/></>,
   cpu: <><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="10" y="10" width="4" height="4" rx=".5"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/></>,
   contact: <><rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="12" cy="9" r="3"/><path d="M7 18a5 5 0 0 1 10 0M2 7h3M2 12h3M2 17h3"/></>,

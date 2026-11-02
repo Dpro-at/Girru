@@ -35,6 +35,15 @@ Use these MCP tools through the owner's authenticated local session.
 - When you learn something every agent (or a department, or this project) should always do, suggest it: `suggest` here, or the `rule_suggest` tool in a chat. One clear sentence and a short reason; add `when` when it applies only in one case. It waits for the owner; never say it is a rule before the owner accepts it.
 - You never add, change, pause or delete a rule, and never use or dismiss a suggestion (not even your own); the owner does that in Agents › Rules.
 
+## Runs (tool `workspace_runs`, the Runs section)
+
+- Runs shows everything that runs: chat replies, agent tasks, small helpers, coding apps (Claude Code, Codex, Gemini), system jobs and chats that wait for an OK, in five places: Running now, Waiting, Scheduled, Finished, Failed or stopped. The owner sees everything; anyone else sees only their own runs.
+- When something did not finish, look here first: `list` (`place: failed`) and `get` (id) give the steps, the log, the result and **why it stopped** in plain words (for example "Ran out of time", "The app was offline", "Not allowed", "Waits for your OK", "A bug"). `copy` is ready to paste into a report; secrets are never in it.
+- `stop` stops a working chat reply, agent task or coding app; `retry` sends a failed or stopped chat reply again. Never retry by yourself a run that waits for an OK or was not allowed: tell the owner instead.
+- A schedule is a task that repeats: `schedule_task` (on the owner's instruction) takes the instructions (what the agent does each time), when, and who; it becomes a board card that each run continues. Put the work in the instructions; sending messages or calling services is done by the agent with its tools and the usual approvals.
+- `get` also lists a run's sub-tasks (hand-offs, coding apps, small helpers it started); when one stopped, the main run says so.
+- `schedules` lists system jobs, chat schedules, card schedules and agent check-ins with their last result; `schedule_runs` (id) the last runs of one. Pausing, resuming, editing, Run now and allowing a schedule to run are done by the owner in Runs › Scheduled.
+
 ## Task file (tool `workspace_tasks`, the Board)
 
 - A project with its files written has one task file, `.girru/tasks.md`, that every agent and app (Girru's agents, Claude Code, Codex, Gemini) reads and writes. The Board shows each task as a card on its department's board with its agent; a task with no fitting department waits in "To sort" on the company board for the owner.

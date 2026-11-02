@@ -82,8 +82,12 @@ export async function runDueSchedules(send: (userId: string, sessionId: string, 
     const next = nextRun(r.every, r.at_time, r.weekday, now).toISOString();
     const claimed = await q.run('UPDATE chat_schedules SET next_run = ?, last_run = ? WHERE session_id = ? AND next_run = ?', next, now.toISOString(), r.session_id, r.next_run);
     if (!claimed.changes) continue;
-    try { if (await send(r.user_id, r.session_id, r.message, `schedule-${r.session_id.slice(0, 36)}-${now.getTime()}`)) sent++; }
-    catch (err) { console.warn('[ChatSchedules] could not send', { sessionId: r.session_id, name: (err as Error)?.name ?? 'Error' }); }
+    // RUNS-01: each fire records its result, so Runs can say why a time was skipped and open the run it made.
+    const runKey = `schedule-${r.session_id.slice(0, 36)}-${now.getTime()}`;
+    let result: ['started' | 'skipped' | 'failed', string | null, string | null] = ['skipped', 'busy', null];
+    try { if (await send(r.user_id, r.session_id, r.message, runKey)) { sent++; result = ['started', null, runKey.slice(0, 128)]; } }
+    catch (err) { result = ['failed', 'error', null]; console.warn('[ChatSchedules] could not send', { sessionId: r.session_id, name: (err as Error)?.name ?? 'Error' }); }
+    await q.run('UPDATE chat_schedules SET last_result = ?, last_reason = ?, last_run_id = ? WHERE session_id = ?', ...result, r.session_id).catch(() => undefined);
   }
   return sent;
 }

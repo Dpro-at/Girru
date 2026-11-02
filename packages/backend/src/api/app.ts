@@ -93,6 +93,7 @@ import { registerAvatarRoutes } from './routes/avatar.js';
 import { agentsConfigRoutes } from './routes/agents-config.js';
 import { approvalsRoutes } from './routes/approvals.js';
 import { taskRunsRoutes } from './routes/task-runs.js';
+import { runsRoutes } from './routes/runs.js';
 import { smallAgentRoutes } from './routes/small-agent.js';
 import { budgetRoutes } from './routes/budget.js';
 import { mcpServersRoutes } from './routes/mcp-servers.js';
@@ -421,6 +422,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await fastify.register(agentsConfigRoutes);  // 🤖 Agent Configurations CRUD
   await fastify.register(approvalsRoutes); // S1.3: owner approvals for held agent tool calls
   await fastify.register(taskRunsRoutes); // CORE-08: durable task runs (list, view, cancel, resolve)
+  await fastify.register(runsRoutes); // RUNS-01: everything that runs, in one read model
   await fastify.register(smallAgentRoutes); // MCP-01: owner-only small local agent runs (MCP server backend)
   await fastify.register(budgetRoutes); // R2: owner-only paid model spend today and the daily cap
   await fastify.register(mcpServersRoutes); // M1: owner-only MCP client server registry, discovery, tool settings

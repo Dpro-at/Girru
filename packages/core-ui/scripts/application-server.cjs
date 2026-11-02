@@ -19,6 +19,7 @@ const {allowedVerification,verificationRoute,verificationResponse}=require('../s
 const {allowedReviewer,reviewerRoute,reviewerResponse}=require('../src/reviewers-contract.js');
 const {coverageRoute,allowedCoverage,coverageResponse}=require('../src/security-coverage-contract.js');
 const {schedulerRoute,allowedScheduler,schedulerResponse}=require('../src/scheduler-contract.js');
+const {runsRoute,allowedRuns,runsResponse}=require('../src/runs-contract.js');
 const {workspaceAppsRoute,allowedWorkspaceApps,workspaceAppsResponse,sourceCatalogueRoute,allowedSourceCatalogue,sourceCatalogueResponse,appsCatalogueRoute,allowedAppsCatalogue,appsCatalogueResponse,storeRoute,allowedStore,storeResponse}=require('../src/apps-contract.js');
 const {chatAddonsRoute,allowedChatAddons,chatAddonsResponse}=require('../src/chat-addons-contract.js');
 const {approvalRoute,allowedApproval,approvalResponse}=require('../src/approvals-contract.js');
@@ -122,6 +123,7 @@ function allowed(method, target, body) {
   if(sourceCatalogueRoute(target))return allowedSourceCatalogue(method,target,body);
   if(tradingPaperRoute(target))return allowedTradingPaper(method,target,body);
   if(schedulerRoute(target))return allowedScheduler(method,target,body);
+  if(runsRoute(target))return allowedRuns(method,target,body);
   if(coverageRoute(target))return allowedCoverage(method,target,body);
   if(workspaceAppsRoute(target))return allowedWorkspaceApps(method,target,body);
   if(appsCatalogueRoute(target))return allowedAppsCatalogue(method,target,body);
@@ -203,6 +205,7 @@ function project(target, status, body) {
   if(sourceCatalogueRoute(target))return sourceCatalogueResponse(status,body);
   if(tradingPaperRoute(target))return tradingPaperResponse(target,status,body);
   if(schedulerRoute(target))return schedulerResponse(target,status,body);
+  if(runsRoute(target))return runsResponse(target,status,body);
   if(coverageRoute(target))return coverageResponse(status,body);
   if(workspaceAppsRoute(target))return workspaceAppsResponse(status,body);
   if(appsCatalogueRoute(target))return appsCatalogueResponse(status,body);

@@ -36,6 +36,7 @@ import { all, atomic, dialect, one, run, sql, type Step } from '../repositories/
 import { forUpdate, greatest, insertOrIgnore, isParam, nowPlusText, nowText, offset } from '../db/pg/dialect.js';
 import { getEncryptionService } from '../credentials/encryption.js';
 import { orderedId } from '../repositories/ordered-id.js';
+import { currentChatRun } from './chat-run-context.js';
 import { decryptContract, encryptContract, type TaskContract, type Verdict, type VerificationStatus, contractView, type ContractView } from './task-contracts.js';
 
 export type TaskRunStatus = 'queued' | 'running' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled';
@@ -185,19 +186,21 @@ export async function createRun(input: CreateRunInput): Promise<TaskRunRow> {
   if (contract?.budget?.maxSteps) maxSteps = Math.min(maxSteps, contract.budget.maxSteps);
   if (contract?.budget?.maxDurationMs) maxDurationMs = Math.min(maxDurationMs, contract.budget.maxDurationMs);
   const enc = contract ? await encryptContract(contract) : null;
+  // RUNS-01: a run an agent starts from a chat reply (a small helper) is that reply's sub-task.
+  const parentRun = currentChatRun()?.runId;
   return sql().read((function* () {
     try {
       // Its own transaction (a SAVEPOINT inside a caller's): on PostgreSQL a
       // failed INSERT must not abort the caller's transaction.
       yield* atomic(() => run(`
         INSERT INTO task_runs (id, task_id, agent_id, user_id, status, max_steps, max_duration_ms, input_encrypted, input_iv, input_tag,
-          contract_encrypted, contract_iv, contract_tag, max_verification_retries, review_mode, max_cost_cents)
-        VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          contract_encrypted, contract_iv, contract_tag, max_verification_retries, review_mode, max_cost_cents, parent_run_id)
+        VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, id, input.taskId, input.agentId, input.userId ?? null, maxSteps, maxDurationMs,
         encrypted, iv, authTag,
         enc?.encrypted ?? null, enc?.iv ?? null, enc?.authTag ?? null,
         contract ? contract.maxVerificationRetries : 0, contract?.review ?? null,
-        contract?.budget?.maxCostCents ?? null));
+        contract?.budget?.maxCostCents ?? null, parentRun ? `chat:${parentRun}` : null));
     } catch (err: any) {
       // Another process created the task's run at the same moment (one active run per task).
       const raced = yield* activeRunStep(input.taskId);

@@ -7,6 +7,8 @@ export type ChatMode = 'auto' | 'ask' | 'accept_edits' | 'plan';
 export type ChatThinking = 'quick' | 'normal' | 'deep';
 export interface ChatRunContext {
   reviewTools: boolean;
+  /** RUNS-01: this reply's run id, so work it starts (hand-offs, coding apps, small helpers) shows as its sub-tasks. */
+  runId?: string;
   chatMode?: ChatMode;
   thinking?: ChatThinking;
   /** The project's added folders the agent may read (absolute paths). */

@@ -169,7 +169,8 @@ test('TASKPAGE-03: a task repeats every hour / day / week; a due run starts a Co
   const start = async (...a) => { runs.push(a); return 'started'; };
   assert.equal(await sch.runDueCardSchedules(start), 1);
   assert.equal(await sch.runDueCardSchedules(start), 0, 'not twice');
-  assert.deepEqual(runs[0], ['p-owner', boardId, rep.id, 'g-qa', 'subscription:codex']);
+  assert.deepEqual(runs[0].slice(0, 5), ['p-owner', boardId, rep.id, 'g-qa', 'subscription:codex']);
+  assert.match(runs[0][5], /^cardsch-[0-9a-f-]{36}$/, 'RUNS-01: a scheduled card run has its own run id');
   const after = (await ok(call('p-owner', 'GET', url))).schedule;
   assert.equal(after.lastResult, 'started');
   assert.ok(after.lastRun && new Date(after.nextRun) > new Date());

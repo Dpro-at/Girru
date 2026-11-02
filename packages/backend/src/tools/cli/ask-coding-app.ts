@@ -14,7 +14,7 @@
 import type { Tool, ToolResult } from '../types.js';
 import { chatWorkspace, runSubscription, subscriptionEnabled } from '../../services/subscription-chat.js';
 import { one, sql } from '../../repositories/sql-steps.js';
-import { startCodingRun } from '../../services/coding-runs.js';
+import { startCodingRun, type CodingRunOutcome } from '../../services/coding-runs.js';
 import { currentChatRun } from '../../services/chat-run-context.js';
 
 const APPS = { claude: 'Claude Code', codex: 'Codex', gemini: 'Google Gemini (Antigravity)' } as const;
@@ -50,21 +50,24 @@ export const askCodingAppTool: Tool = {
     let folder = context?.fileReadRoot;
     // The chat's Team shows this work as its own row with Stop (CHAT-GAPS-01).
     const run = context?.sessionId ? startCodingRun(context.sessionId, APPS[app], context.agentId, request) : null;
+    let outcome: CodingRunOutcome = 'error', errorCode: string | null = 'no_folder';
     try {
       // Without a project folder the coding app works in this chat's private folder (CORE-PICKER-03).
       folder ??= context?.sessionId ? await chatWorkspace(context.sessionId) : undefined;
       if (!folder) return fail('Choose a project folder for this chat first; the coding app works only inside it.');
       const answer = await runSubscription(`subscription:${app}`, folder, PREFIX + request, run ? AbortSignal.any([AbortSignal.timeout(240_000), run.signal]) : AbortSignal.timeout(240_000), { readOnly: app === 'codex', thinking: currentChatRun()?.thinking });
+      outcome = 'complete';
       const text = answer.length > MAX_ANSWER_CHARS ? `${answer.slice(0, MAX_ANSWER_CHARS)}\n[answer shortened]` : answer;
       return { content: [{ type: 'text', text: `${APPS[app]} answered:\n${text}` }], details: { app } };
     } catch (error) {
       const code = error instanceof Error ? error.message : 'cli_failed';
-      if (run?.signal.aborted) return fail(`The owner stopped ${APPS[app]}.`);
+      if (run?.signal.aborted) { outcome = 'stopped'; return fail(`The owner stopped ${APPS[app]}.`); }
+      errorCode = (error as Error)?.name === 'TimeoutError' ? 'timed_out' : /^[a-z_]{1,40}$/.test(code) ? code : 'cli_failed';
       const why = code === 'cli_missing' ? `${APPS[app]} is not installed on this computer.`
         : code === 'subscription_org_blocked' ? `${APPS[app]} refused this account for automated use.`
         : code === 'project_required' ? 'The project folder is not allowed (home or root folder).'
         : `${APPS[app]} did not answer (${code}).`;
       return fail(why);
-    } finally { run?.done(); }
+    } finally { run?.done(outcome, errorCode); }
   },
 };

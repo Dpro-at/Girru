@@ -33,7 +33,14 @@ const RULES_REFUSED='Adding, changing, pausing, deleting rules and using or dism
 const TASK_OPS=['list','get','activity','continue','sort','people','checklist','schedule'];
 /** TASKLOG-01: turning a project's task file on or off, and moving or editing cards, stay with the owner in the app. */
 const TASKS_REFUSED='Turning a project\u2019s task file on or off is done by the owner in Agents \u203a Rules (the files sheet); moving, editing and archiving cards is done on the Board. This tool reads tasks (list, get, activity) and, on the owner\u2019s instruction, continues one, sends one waiting in To sort to a department, puts people or agents on it, adds, ticks or gives checklist items, and sets how it repeats.';
-const FOOTER_IDS=['chat','agents','library','board','memory','approvals','store','genvr','terminal','code','skills','personalities','specialties'];
+const FOOTER_IDS=['chat','agents','library','board','runs','memory','approvals','store','genvr','terminal','code','browser','skills','personalities','specialties'];
+/** RUNS-01: read everything that runs; Stop and Retry go through the same backend gates as in the app. */
+const RUN_OPS=['list','get','schedules','schedule_runs','schedule_task','stop','retry'];
+const RUN_PLACES=['running','waiting','finished','failed'];
+const RUN_KINDS=['chat','task','helper','code','job','handoff'];
+const RUNS_REFUSED='Pausing, resuming, editing and Run now of a schedule, and allowing a schedule to run, are done by the owner in Runs \u203a Scheduled (chat and card schedules also through the chats and workspace_tasks tools). This tool reads runs and schedules, and stops or retries a run.';
+const RUNS_ITEM_ID=/^(chat|task|code|job|approval|handoff):[A-Za-z0-9_.:-]{1,160}$/;
+const RUNS_SCHEDULE_ID=/^(job|chatsch|cardsch|checkin):[A-Za-z0-9_.:-]{1,160}$/;
 
 export const TOOL_DEFINITIONS = [
   {
@@ -87,12 +94,17 @@ export const TOOL_DEFINITIONS = [
   {
     name:'workspace_tasks',title:'Project task files',
     description:'Owner-session only. The tasks of each project\u2019s task file (.girru/tasks.md): one file per project that every agent and coding app (Claude Code, Codex, Gemini) reads and writes, shown on the Board on the right department board with its agent. list (projectId?: every open and finished task with its number, title, state, department, agent, the apps that worked on it, its board and card, and a line to fix if its block breaks the format; plus lines of the file that belong to no task), get (boardId, cardId: one task\u2019s Done, Left, Next, who worked on it and its last log lines). Only on the owner\u2019s explicit instruction: continue (boardId, cardId, agentId?, model?: a new chat in the project where that agent \u2014 and app, e.g. subscription:codex \u2014 continues the task from the file), sort (boardId, cardId, department: a task waiting in To sort goes to that department\u2019s board with its lead, written back to the file), people (boardId, cardId, kind user|agent, id, role asked|does|checks|tests, or null to take them off), checklist (boardId, cardId and text to add an item; or itemId with done to tick it, or with ownerKind+ownerId to give it to a person or agent), schedule (boardId, cardId alone reads how the task repeats; with every hourly|daily|weekly|never, at HH:MM, weekday 0-6 for weekly, agentId, model, paused it sets it \u2014 each run continues the task as that agent and app). activity (boardId, cardId) reads the task page: people and agents, sub-tasks, links, release, chats, tokens spent, files changed, and the story \u2014 moves, comments, replies of its chats with the files each changed, the task file log. Work on a task by editing its block in the file (keep the format; add a Log line with your app name and your app to Worked on by). '+TASKS_REFUSED,
-    inputSchema:{type:'object',properties:{operation:{type:'string',enum:TASK_OPS},projectId:{type:'string',maxLength:64},boardId:{type:'string',maxLength:64},cardId:{type:'string',maxLength:64},agentId:{type:'string',maxLength:128},model:{type:'string',maxLength:100},department:{type:'string',maxLength:64},kind:{type:'string',enum:['user','agent']},id:{type:'string',maxLength:128},role:{type:['string','null'],enum:['asked','does','checks','tests',null]},text:{type:'string',maxLength:300},itemId:{type:'string',maxLength:64},done:{type:'boolean'},ownerKind:{type:'string',enum:['user','agent']},ownerId:{type:'string',maxLength:128},every:{type:'string',enum:['hourly','daily','weekly','never']},at:{type:'string',maxLength:5},weekday:{type:'integer',minimum:0,maximum:6},paused:{type:'boolean'}},required:['operation'],additionalProperties:false},
+    inputSchema:{type:'object',properties:{operation:{type:'string',enum:TASK_OPS},projectId:{type:'string',maxLength:64},boardId:{type:'string',maxLength:64},cardId:{type:'string',maxLength:64},agentId:{type:'string',maxLength:128},model:{type:'string',maxLength:100},department:{type:'string',maxLength:64},kind:{type:'string',enum:['user','agent']},id:{type:'string',maxLength:128},role:{type:['string','null'],enum:['asked','does','checks','tests',null]},text:{type:'string',maxLength:300},itemId:{type:'string',maxLength:64},done:{type:'boolean'},ownerKind:{type:'string',enum:['user','agent']},ownerId:{type:'string',maxLength:128},every:{type:'string',enum:['hourly','daily','weekly','never']},at:{type:'string',maxLength:5},weekday:{type:'integer',minimum:0,maximum:6},paused:{type:'boolean'},notify:{type:'string',enum:['important','all','none']},newChat:{type:'boolean'},thinking:{type:'string',enum:['quick','normal','deep']}},required:['operation'],additionalProperties:false},
+  },
+  {
+    name:'workspace_runs',title:'Runs',
+    description:'Owner-session only. Everything that runs in Girru: chat replies, agent tasks, small helpers, coding apps (Claude Code, Codex, Gemini), system jobs and chats waiting for an OK. list: one page of a place (running, waiting, finished, failed; optional kind, agentId, projectId, query, before = the next value of the previous page). get: one run with its steps, log, result and why it stopped in plain words (copy = ready-to-paste details). schedules: every schedule (system jobs, chat schedules, card schedules, agent check-ins) with its last result. schedule_runs: the last runs of one schedule. schedule_task (on the owner\u2019s instruction): a task that repeats — instructions (what the agent does), every (hourly, daily, weekly), at (09:00), optional weekday, agentId (default: the Main agent), notify (important, all, none), newChat, model, thinking (quick, normal, deep), projectId; it becomes a board card that each run continues. get also returns a run\u2019s sub-tasks (hand-offs, coding apps, small helpers it started). stop: stop a working chat reply, agent task or coding app. retry: send a failed or stopped chat reply again. Secrets are never returned. Never retry a run that waits for an OK or was not allowed by itself. '+RUNS_REFUSED,
+    inputSchema:{type:'object',properties:{operation:{type:'string',enum:RUN_OPS},place:{type:'string',enum:RUN_PLACES},kind:{type:'string',enum:RUN_KINDS},agentId:{type:'string',maxLength:120},projectId:{type:'string',maxLength:120},query:{type:'string',maxLength:200},before:{type:'integer',minimum:1},id:{type:'string',maxLength:180},instructions:{type:'string',maxLength:5000},every:{type:'string',enum:['hourly','daily','weekly']},at:{type:'string',maxLength:5},weekday:{type:'integer',minimum:0,maximum:6},notify:{type:'string',enum:['important','all','none']},newChat:{type:'boolean'},model:{type:'string',maxLength:100},thinking:{type:'string',enum:['quick','normal','deep']}},required:['operation'],additionalProperties:false},
   },
   {
     name:'workspace_footer',title:'Footer sections',
-    description:'Owner-session only. Read or change which sections the Girru window footer shows, their order, icons only, and whether Approvals comes back when something waits. Sections: chat, agents, library (Personalities, Specialties and Skills), board, memory, approvals, apps, store, genvr, terminal, code, skills, personalities, specialties. MCP connections, channels, accounts and departments are places in Settings, not footer sections. Settings always stays and cannot be hidden; hidden sections stay in the command box (⌘K). Change only when the owner asks. The open window picks the change up when it is next focused.',
-    inputSchema:{type:'object',properties:{operation:{type:'string',enum:['read','set']},order:{type:'array',maxItems:13,items:{type:'string',enum:FOOTER_IDS}},hidden:{type:'array',maxItems:13,items:{type:'string',enum:FOOTER_IDS}},iconsOnly:{type:'boolean'},approvalsWhenWaiting:{type:'boolean'}},required:['operation'],additionalProperties:false},
+    description:'Owner-session only. Read or change which sections the Girru window footer shows, their order, icons only, and whether Approvals comes back when something waits. Sections: chat, agents, library (Personalities, Specialties and Skills), board, runs (everything that runs, and the schedules), memory, approvals, apps, store, genvr, terminal, code, skills, personalities, specialties. MCP connections, channels, accounts and departments are places in Settings, not footer sections. Settings always stays and cannot be hidden; hidden sections stay in the command box (⌘K). Change only when the owner asks. The open window picks the change up when it is next focused.',
+    inputSchema:{type:'object',properties:{operation:{type:'string',enum:['read','set']},order:{type:'array',maxItems:FOOTER_IDS.length,items:{type:'string',enum:FOOTER_IDS}},hidden:{type:'array',maxItems:FOOTER_IDS.length,items:{type:'string',enum:FOOTER_IDS}},iconsOnly:{type:'boolean'},approvalsWhenWaiting:{type:'boolean'}},required:['operation'],additionalProperties:false},
   },
   {
     name:'account_settings',title:'Account security and updates',
@@ -335,6 +347,7 @@ export async function callTool(name: string, rawArgs: unknown, deps: HandlerDeps
       case 'workspace_store': return await workspaceStoreTool(args,deps);
       case 'agents': return await agentsTool(args,deps);
       case 'workspace_approvals': return await workspaceApprovalsTool(args,deps);
+      case 'workspace_runs': return await workspaceRunsTool(args,deps);
       case 'workspace_rules': return await workspaceRulesTool(args,deps);
       case 'workspace_tasks': return await workspaceTasksTool(args,deps);
       case 'chats': return await chatsTool(args,deps);
@@ -1071,13 +1084,47 @@ async function workspaceTasksTool(args:Record<string,unknown>,{backend}:HandlerD
    const item=id('itemId');const body:Record<string,unknown>={};if(args.done!==undefined){if(typeof args.done!=='boolean')throw new InputError('done is true or false');body.done=args.done;}
    if(args.ownerKind!==undefined||args.ownerId!==undefined){if((args.ownerKind!=='user'&&args.ownerKind!=='agent')||typeof args.ownerId!=='string'||!/^[A-Za-z0-9_.-]{1,128}$/.test(args.ownerId))throw new InputError('ownerKind (user|agent) and ownerId go together');body.owner={kind:args.ownerKind,id:args.ownerId};}
    if(!Object.keys(body).length)throw new InputError('Say done, or ownerKind and ownerId');const r=obj(await backend.request('PUT',`${base}/${item}`,body));return ok('Checklist updated.',{items:r.items??[]});}
-  case 'schedule':{only(args,['operation','boardId','cardId','every','at','weekday','agentId','model','paused']);const path=`/api/boards/${id('boardId')}/cards/${id('cardId')}/schedule`;
-   if(args.every===undefined){if(['at','weekday','agentId','model','paused'].some(k=>k in args))throw new InputError('Set every to change the schedule');return ok('How the task repeats (null: it does not).',{schedule:obj(await backend.request('GET',path)).schedule??null});}
-   const body:Record<string,unknown>=args.every==='never'?{every:'never'}:{every:args.every,at:args.at,...(args.weekday!==undefined?{weekday:args.weekday}:{}),...(args.agentId!==undefined?{agentId:args.agentId}:{}),...(args.model!==undefined?{model:args.model}:{}),...(args.paused!==undefined?{paused:args.paused}:{})};
+  case 'schedule':{only(args,['operation','boardId','cardId','every','at','weekday','agentId','model','paused','notify','newChat','thinking']);const path=`/api/boards/${id('boardId')}/cards/${id('cardId')}/schedule`;
+   if(args.every===undefined){if(['at','weekday','agentId','model','paused','notify','newChat','thinking'].some(k=>k in args))throw new InputError('Set every to change the schedule');return ok('How the task repeats (null: it does not).',{schedule:obj(await backend.request('GET',path)).schedule??null});}
+   const body:Record<string,unknown>=args.every==='never'?{every:'never'}:{every:args.every,at:args.at,...(args.weekday!==undefined?{weekday:args.weekday}:{}),...(args.agentId!==undefined?{agentId:args.agentId}:{}),...(args.model!==undefined?{model:args.model}:{}),...(args.paused!==undefined?{paused:args.paused}:{}),...(args.notify!==undefined?{notify:args.notify}:{}),...(args.newChat!==undefined?{newChat:args.newChat}:{}),...(args.thinking!==undefined?{thinking:args.thinking}:{})};
    if(args.every!=='never'&&(typeof args.at!=='string'||!/^([01]\d|2[0-3]):[0-5]\d$/.test(args.at)))throw new InputError('at is a time like 09:00');
    const r=obj(await backend.request('PUT',path,body));return ok(args.every==='never'?'It no longer repeats.':'Saved: it runs by itself on that schedule.',{schedule:r.schedule??null});}
   case 'sort':{only(args,['operation','boardId','cardId','department']);if(typeof args.department!=='string'||!args.department.trim()||args.department.length>64)throw new InputError('department is required');const r=obj(await backend.request('POST',`/api/boards/${id('boardId')}/cards/${id('cardId')}/task-sort`,{department:args.department}));return ok('Sent to the department\u2019s board and written in the project\u2019s task file.',{boardId:r.boardId??null});}
   default:throw new InputError(TASKS_REFUSED);
+ }
+}
+
+async function workspaceRunsTool(args:Record<string,unknown>,{backend}:HandlerDeps):Promise<ToolCallResult>{
+ const operation=args.operation;
+ if(typeof operation==='string'&&!RUN_OPS.includes(operation))throw new InputError(`operation must be one of ${RUN_OPS.join(', ')}. ${RUNS_REFUSED}`);
+ const runId=()=>{if(typeof args.id!=='string'||!RUNS_ITEM_ID.test(args.id))throw new InputError('id must be a run id from list (for example chat:… or task:…)');return encodeURIComponent(args.id);};
+ switch(operation){
+  case 'list':{
+   only(args,['operation','place','kind','agentId','projectId','query','before']);
+   const place=args.place??'running';if(!RUN_PLACES.includes(String(place)))throw new InputError(`place must be one of ${RUN_PLACES.join(', ')}`);
+   const qs=new URLSearchParams({place:String(place)});
+   if(args.kind!==undefined){if(!RUN_KINDS.includes(String(args.kind)))throw new InputError(`kind must be one of ${RUN_KINDS.join(', ')}`);qs.set('kind',String(args.kind));}
+   for(const [k,p] of [['agentId','agent'],['projectId','project']] as const)if(args[k]!==undefined){if(typeof args[k]!=='string'||!/^[A-Za-z0-9_.:-]{1,120}$/.test(args[k] as string))throw new InputError(`${k} is not valid`);qs.set(p,args[k] as string);}
+   if(args.query!==undefined){if(typeof args.query!=='string'||args.query.length>200)throw new InputError('query is up to 200 characters');qs.set('q',args.query);}
+   if(args.before!==undefined){if(!Number.isInteger(args.before)||(args.before as number)<1)throw new InputError('before is the next value of the previous page');qs.set('before',String(args.before));}
+   const r=obj(await backend.request('GET',`/api/runs?${qs}`));
+   return ok(`Runs: ${place}, newest first.${r.next?' More: call again with before = next.':''}`,{runs:scrub(r.runs??[]),next:typeof r.next==='number'?r.next:null,counts:scrub(r.counts??{})});
+  }
+  case 'get':{only(args,['operation','id']);const r=obj(await backend.request('GET',`/api/runs/item/${runId()}`));return ok(typeof r.copy==='string'?r.copy:'Run details.',scrub(r) as Record<string,unknown>);}
+  case 'schedules':{only(args,['operation']);return ok(`Every schedule you may see, with its last result. ${RUNS_REFUSED}`,{schedules:scrub(obj(await backend.request('GET','/api/runs/schedules')).schedules??[])});}
+  case 'schedule_runs':{only(args,['operation','id']);if(typeof args.id!=='string'||!RUNS_SCHEDULE_ID.test(args.id))throw new InputError('id must be a schedule id from schedules');return ok('The last runs of this schedule.',{runs:scrub(obj(await backend.request('GET',`/api/runs/schedules/${encodeURIComponent(args.id)}/runs`)).runs??[])});}
+  case 'schedule_task':{
+   only(args,['operation','instructions','agentId','every','at','weekday','notify','newChat','model','thinking','projectId']);
+   if(typeof args.instructions!=='string'||!args.instructions.trim()||args.instructions.length>5000)throw new InputError('instructions are 1-5000 characters: what the agent should do each time');
+   if(!['hourly','daily','weekly'].includes(String(args.every)))throw new InputError('every must be hourly, daily or weekly');
+   if(typeof args.at!=='string'||!/^([01]\d|2[0-3]):[0-5]\d$/.test(args.at))throw new InputError('at is a time like 09:00');
+   const body:Record<string,unknown>={instructions:args.instructions,every:args.every,at:args.at};
+   for(const k of ['weekday','agentId','notify','newChat','model','thinking','projectId'])if(args[k]!==undefined)body[k]=args[k];
+   const r=obj(await backend.request('POST','/api/runs/schedules',body));return ok('Scheduled: a task that repeats, on the company board; each run continues it.',scrub(r) as Record<string,unknown>);
+  }
+  case 'stop':{only(args,['operation','id']);return ok('Asked the run to stop.',scrub(obj(await backend.request('POST',`/api/runs/item/${runId()}/stop`,{}))) as Record<string,unknown>);}
+  case 'retry':{only(args,['operation','id']);return ok('Sent the chat reply again as a new run.',scrub(obj(await backend.request('POST',`/api/runs/item/${runId()}/retry`,{}))) as Record<string,unknown>);}
+  default:throw new InputError(`operation must be one of ${RUN_OPS.join(', ')}`);
  }
 }
 

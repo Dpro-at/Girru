@@ -87,12 +87,12 @@ export async function recoverStaleRun(runId: string): Promise<boolean> {
 
 async function recoverRun(r: JournalRun): Promise<boolean> {
   return sql().tx(function* (): Step<boolean> {
-    const claimed = yield* run("UPDATE chat_run_journal SET state = 'interrupted' WHERE run_id = ? AND state = 'running'", r.run_id);
+    const claimed = yield* run("UPDATE chat_run_journal SET state = 'interrupted', ended_at = ?, error_code = 'run_interrupted' WHERE run_id = ? AND state = 'running'", Date.now(), r.run_id);
     if (!claimed.changes) return false;
     const existing = yield* one<{ id: string; status: string; content: string }>("SELECT id, status, content FROM chat_messages WHERE run_id = ? AND role = 'assistant'", r.run_id);
     const steps = yield* all<SavedStep>('SELECT * FROM chat_run_steps WHERE run_id = ? ORDER BY id', r.run_id);
     if (existing && !steps.some(s => s.state === 'intent')) {
-      yield* run('UPDATE chat_run_journal SET state = ? WHERE run_id = ?', existing.status, r.run_id);
+      yield* run('UPDATE chat_run_journal SET state = ?, error_code = NULL WHERE run_id = ?', existing.status, r.run_id);
       return false;
     }
     const calls: ToolCallPart[] = steps.map(s => ({ id: s.id, name: s.name, input: s.input,
@@ -107,8 +107,9 @@ async function recoverRun(r: JournalRun): Promise<boolean> {
   });
 }
 
-export async function finishChatRun(runId: string, status: string): Promise<void> {
-  await q.run("UPDATE chat_run_journal SET state = ? WHERE run_id = ? AND state = 'running'", status, runId);
+/** RUNS-01: the end time and, for a run that did not complete, the run's error code (the Runs section's "why"). */
+export async function finishChatRun(runId: string, status: string, errorCode: string | null = null): Promise<void> {
+  await q.run("UPDATE chat_run_journal SET state = ?, ended_at = ?, error_code = ? WHERE run_id = ? AND state = 'running'", status, Date.now(), status === 'complete' ? null : errorCode, runId);
 }
 
 

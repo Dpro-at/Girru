@@ -134,13 +134,15 @@ export interface ExecutionRecord {
   error?: string | null;
   executedAt: Date;
   duration: number;
+  /** RUNS-01: 'manual' (Run now) or 'scheduled'. */
+  startedBy?: 'manual' | 'scheduled';
 }
 
 export async function saveExecution(h: ExecutionRecord): Promise<void> {
   await sql().read(run(`
-    INSERT INTO job_executions (job_id, success, output, error, executed_at, duration)
-    VALUES (?, ?, ?, ?, ?, ?)`,
-  h.jobId, h.success ? 1 : 0, h.output || null, h.error || null, h.executedAt.toISOString(), h.duration));
+    INSERT INTO job_executions (job_id, success, output, error, executed_at, duration, started_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  h.jobId, h.success ? 1 : 0, h.output || null, h.error || null, h.executedAt.toISOString(), h.duration, h.startedBy ?? null));
 }
 
 export interface HistoryEntry {
