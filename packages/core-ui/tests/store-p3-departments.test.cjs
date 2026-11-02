@@ -35,3 +35,22 @@ test('answers: only known fields; reading twice changes nothing', () => {
   assert.deepEqual(C.departmentsResponse(409, { code: 'name_taken', error: 'x' }, '/api/departments/d'), { code: 'conflict', reason: 'name_taken' });
   assert.throws(() => C.departmentsResponse(200, { mergeId: 'bad id!' }, '/api/departments/d/merge'), /protocol/);
 });
+
+// STORE-MAP-01 P3 (FD3): the memory page contract passes source, trust, validity, the checked route,
+// the trust / replaced filters, and the newer text of a memory changed while it was edited.
+test('memory details: validity and trust pass; the edit check carries the newer text', async () => {
+  const M = await import('../src/memory-pages-contract.js');
+  const A = await import('../src/agent-card-contract.js');
+  const detail = M.memoryPagesResponse('/api/memory/scopes/memories/m1', 200, { memory: { id: 'm1', type: 'fact', content: 'x', drawerId: 'owner', importance: 5, layer: 'working', createdAt: '2026-11-02T10:00:00',
+    usage: {}, graph: {}, readers: {}, validity: { source: 'agent', sourceRef: 'a-1', trust: 'unchecked', validFrom: '2026-11-02T10:00:00', validTo: null, supersededBy: null, replaces: ['m0', 'bad id!'], version: 3, secret: 'x' } } });
+  assert.deepEqual(detail.memory.validity, { source: 'agent', sourceRef: 'a-1', trust: 'unchecked', validFrom: '2026-11-02T10:00:00', validTo: null, supersededBy: null, replaces: ['m0'], version: 3 });
+  const gate = M.allowedMemoryPages;
+  assert.ok(gate('PUT', '/api/memory/scopes/memories/m1/checked', { checked: true }));
+  assert.ok(!gate('PUT', '/api/memory/scopes/memories/m1/checked', { checked: 'yes' }));
+  assert.ok(gate('GET', '/api/memory/scopes/memories?scope=company&trust=imported&replaced=show'));
+  assert.ok(!gate('GET', '/api/memory/scopes/memories?scope=company&trust=maybe'));
+  assert.ok(A.allowedAgentCard('PUT', '/api/memory/b61ce5c2-c2e6-4c7e-8a21-f0ac8be25dd6', { content: 'new', expectedVersion: 3 }));
+  assert.ok(!A.allowedAgentCard('PUT', '/api/memory/b61ce5c2-c2e6-4c7e-8a21-f0ac8be25dd6', { expectedVersion: 3 }), 'a version alone changes nothing');
+  assert.deepEqual(A.agentCardResponse('/api/memory/b61ce5c2-c2e6-4c7e-8a21-f0ac8be25dd6', 409, { code: 'version_conflict', error: 'x', current: { content: 'theirs', version: 4, type: 'fact', importance: 5, secret: 'x' } }),
+    { code: 'version_conflict', current: { content: 'theirs', version: 4, importance: 5 } });
+});

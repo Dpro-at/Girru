@@ -90,8 +90,9 @@ export function allowedAgentCard(method, path, body) {
     case 'drawers': return method === 'GET' && body === undefined;
     case 'search': return method === 'POST' && record(body) && onlyKeys(body, ['query', 'limit']) && line(body.query, 500) && (body.limit === undefined || (Number.isInteger(body.limit) && body.limit >= 1 && body.limit <= 50));
     case 'memory': return (method === 'DELETE' && body === undefined)
-      || (method === 'PUT' && record(body) && onlyKeys(body, ['content', 'importance', 'type']) && Object.keys(body).length > 0
-        && (body.content === undefined || text(body.content, MAX_MEMORY, true)) && (body.importance === undefined || importance(body.importance)) && (body.type === undefined || memoryTypes.includes(body.type)));
+      || (method === 'PUT' && record(body) && onlyKeys(body, ['content', 'importance', 'type', 'expectedVersion']) && Object.keys(body).filter(k => k !== 'expectedVersion').length > 0
+        && (body.content === undefined || text(body.content, MAX_MEMORY, true)) && (body.importance === undefined || importance(body.importance)) && (body.type === undefined || memoryTypes.includes(body.type))
+        && (body.expectedVersion === undefined || (Number.isSafeInteger(body.expectedVersion) && body.expectedVersion >= 0)));
     case 'memory-forget': return method === 'POST' && body === undefined;
     case 'memory-versions': return method === 'GET' && body === undefined;
   }
@@ -132,7 +133,12 @@ export function agentCardResponse(path, status, body) {
   if (!p) fail();
   if (status !== 200 && status !== 201) {
     const code = record(body) ? body.code : undefined;
-    return (ERRORS[status] ?? []).includes(code) ? { code } : null;
+    if (!(ERRORS[status] ?? []).includes(code)) return null;
+    // STORE-MAP-01 P3 (FD3e): a memory changed while it was edited; the editor shows the newer text.
+    const c = p.kind === 'memory' && code === 'version_conflict' && record(body.current) ? body.current : null;
+    return c && typeof c.content === 'string' && Number.isSafeInteger(c.version)
+      ? { code, current: { content: c.content.slice(0, MAX_MEMORY), version: c.version, importance: Number.isInteger(c.importance) ? Math.min(10, Math.max(1, c.importance)) : null } }
+      : { code };
   }
   if (!record(body)) fail();
   switch (p.kind) {
