@@ -50,7 +50,8 @@ import type { Actor } from '../../repositories/actor.js';
 import { requestMeta } from '../../repositories/audit.js';
 import { actorOrReply, requireOwner } from '../../repositories/scope.js';
 import { resolveFileAgent } from '../../memory/memory-files.js';
-import { setChecked } from '../../memory/validity.js';
+import { provenanceJobStatus, setChecked } from '../../memory/validity.js';
+import { vectorJobStatus } from '../../memory/vectors.js';
 import { storeP3Enabled } from '../../services/store-p3.js';
 import { adoptProjectMemory, currentProjectKey, deletedProjectMemory } from '../../memory/project-keys.js';
 import { createProject as createChatProject, findProject as findChatProject } from '../../repositories/chat-conversations.js';
@@ -213,6 +214,12 @@ export async function memoryScopeRoutes(fastify: FastifyInstance) {
   });
 
   // ---- project lifecycle ----
+  // STORE-MAP-01 P3 (FD4d): data jobs after the update, for Memory › Health and backup.
+  route('GET', '/api/memory/scopes/jobs', async (_owner, _request, reply) => {
+    if (!storeP3Enabled()) return reply.code(404).send({ error: 'Not found', code: 'p3_off' });
+    const [sources, vectors] = await Promise.all([provenanceJobStatus(), vectorJobStatus()]);
+    return { jobs: [{ id: 'sources', ...sources }, { id: 'vectors', ...vectors }] };
+  });
   // STORE-MAP-01 P3 (FD1): a real project made from Memory (no folder needed); the memory a deleted
   // project with the same name left behind, and "Use its memory". 404 while the switch is off.
   route('POST', '/api/memory/scopes/projects', async (owner, request, reply) => {

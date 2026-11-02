@@ -3659,3 +3659,5 @@ label.setup-kind { display:flex; align-items:center; justify-content:flex-start;
 /* STORE-MAP-01 P3 (FD3): replaced facts muted; trust words. */
 .dk-row[data-replaced] .dk-row-main{color:var(--muted);text-decoration:line-through;text-decoration-color:color-mix(in srgb,var(--muted) 50%,transparent)}
 .dk-trust{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.dk-trust[data-trust=imported]{color:var(--warning,#c8952a)}.dk-replaced p{display:flex;gap:6px;align-items:center}.dk-check{display:flex!important;align-items:center;gap:8px}
+/* STORE-MAP-01 P3 (FD4d): data jobs after an update. */
+.mem-jobs{border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:14px}.mem-jobs h4{margin:0 0 8px;font-size:12px}.mem-jobs ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}.mem-jobs li{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:8px;align-items:center;font-size:12px}

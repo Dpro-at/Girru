@@ -267,7 +267,12 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
       await syncDepartments().catch((err) => console.warn('[Store P3] departments backfill failed:', (err as Error)?.message));
       // Source and trust of existing memories: in the background, small batches, resumes after a restart.
       const { backfillProvenance } = await import('../memory/validity.js');
-      setImmediate(() => { backfillProvenance().catch((err) => console.warn('[Store P3] memory source backfill failed:', (err as Error)?.message)); });
+      // Packed vectors (faster recall): after the sources, same small batches, resumable.
+      const { backfillVectors } = await import('../memory/vectors.js');
+      setImmediate(() => {
+        backfillProvenance().catch((err) => console.warn('[Store P3] memory source backfill failed:', (err as Error)?.message))
+          .then(() => backfillVectors()).catch((err) => console.warn('[Store P3] vector backfill failed:', (err as Error)?.message));
+      });
     }
 
     // MEM-UX-02: exported memory files follow the database (untouched files only).

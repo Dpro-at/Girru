@@ -3,7 +3,7 @@
 // Sources · Projects · Access · Health and backup · Schedule. Each pane reuses
 // the controller the old Memory tabs used, so nothing is lost on the way.
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { useStoreP2 } from './store-switches';
+import { useStoreP2, useStoreP3 } from './store-switches';
 import type { SessionClient } from './session';
 import { MemoryHealthController } from './memory-health';
 import { HealthView } from './MemoryHealth';
@@ -53,7 +53,7 @@ export function MemorySettings({ client, pane, onOpenMemory }: { client: Session
     {pane === 'projects' && scopes && disc && <ProjectsPane client={client} scopes={scopes} disc={disc}/>}
     {pane === 'access' && <AccessPane client={client} tree={ss?.tree ?? null}/>}
     {pane === 'health' && health && <>{files ? <><button type="button" className="link-button" onClick={() => setFiles(false)}>Back to Health and backup</button><FilesView client={client} agents={ss?.agents ?? {}} drawers={[{ id: 'owner', name: 'About you' }, { id: 'experience', name: 'Lessons' }, ...(ss?.tree?.projects ?? []).filter(p => !p.archived && !p.mergedInto && !p.trashedAt).map(p => ({ id: `project:${p.slug}`, name: p.name }))]}/></>
-      : <HealthLoader c={health} part="health" onReview={onOpenMemory} onFiles={() => setFiles(true)}/>}</>}
+      : <><DataJobs client={client}/><HealthLoader c={health} part="health" onReview={onOpenMemory} onFiles={() => setFiles(true)}/></>}</>}
     {pane === 'schedule' && disc && health && <SchedulePane client={client} disc={disc} health={health}/>}
   </section>;
 }
@@ -249,4 +249,37 @@ function AutomaticMemoryImport({ client }: { client: SessionClient }) {
     <p className="fine-print">Skills, MCP connections and SSH identities are discovered separately. Importing memory does not enable them or copy private SSH keys.</p>
     <p className="fine-print" role="status">{saveError ?? error ?? (settings ? settings.notice || (settings.enabled ? `Automatic import: ${settings.status ?? 'idle'}.` : 'Automatic import is off.') : 'Loading automatic import settings…')}</p>
   </section>;
+}
+
+const JOB_LABEL: Readonly<Record<string, { icon: 'database' | 'history'; label: string }>> = {
+  vectors: { icon: 'database', label: 'Faster memory search (smaller stored vectors)' },
+  sources: { icon: 'history', label: 'Where each memory came from' },
+};
+/**
+ * STORE-MAP-01 P3 (FD4d): long data jobs after an update run in the background
+ * and never block Girru; one quiet part here while any is not done.
+ */
+function DataJobs({ client }: { client: SessionClient }) {
+  const p3 = useStoreP3(client);
+  const [jobs, setJobs] = useState<Array<{ id: string; done: number; total: number }> | null>(null);
+  useEffect(() => {
+    if (!p3) return;
+    let live = true, timer: ReturnType<typeof setTimeout> | undefined;
+    const read = async () => {
+      try {
+        const r = await client.request({ method: 'GET', path: '/api/memory/scopes/jobs' } as never);
+        if (!live) return;
+        const list = r.status === 200 ? (r.body as { jobs: Array<{ id: string; done: number; total: number }> }).jobs : [];
+        setJobs(list);
+        if (list.some(j => j.done < j.total)) timer = setTimeout(() => void read(), 5000);
+      } catch { /* shown as nothing */ }
+    };
+    void read();
+    return () => { live = false; if (timer) clearTimeout(timer); };
+  }, [client, p3]);
+  if (!p3 || !jobs?.length || jobs.every(j => j.done >= j.total)) return null;
+  return <section className="mem-jobs" aria-label="Data jobs after the update"><h4>Data jobs after the update</h4>
+    <ul>{jobs.map(j => <li key={j.id}><UiIcon name={JOB_LABEL[j.id]?.icon ?? 'database'} size={14}/><span>{JOB_LABEL[j.id]?.label ?? j.id}</span>
+      <span className="fine-print">{j.done >= j.total ? 'Done' : `${j.total ? Math.floor((j.done / j.total) * 100) : 0} % · resumes after a restart`}</span></li>)}</ul>
+    <p className="fine-print">Girru works normally meanwhile; a job reads the old layout until it finishes.</p></section>;
 }

@@ -20,6 +20,8 @@ import { MIN_RECALL_SCORE, WORKING_LAYER_BOOST, bm25Scores, hybridScore, vectorS
 import { onMemorySaved } from './graph/store.js';
 import { NOT_ARCHIVED_SQL } from './scopes/store.js';
 import { NOT_REPLACED_SQL } from './validity.js';
+import { unpackVector, writeVectorStep } from './vectors.js';
+import { storeP3Enabled } from '../services/store-p3.js';
 import {
   DRAWER_KEY_SQL,
   DRAWER_KIND_SQL,
@@ -95,6 +97,8 @@ const SQLITE_MEMORIES_COLUMNS: Array<[string, string]> = [
   ['valid_from', 'TEXT'],
   ['valid_to', 'TEXT'],
   ['superseded_by', 'TEXT'],
+  // STORE-MAP-01 P3 packed vectors (normally added by migration 168)
+  ['embedding_vec', 'BLOB'],
 ];
 
 const SQLITE_MEMORIES_INDEXES = [
@@ -258,6 +262,9 @@ export class MemoryStorage implements IMemoryStorage {
       memory.sourceAgentId || null,
     );
     if (res.changes !== 1) throw new Error('Memory id belongs to another user');
+    // STORE-MAP-01 P3: the packed vector beside the JSON text (or cleared, so it never goes stale).
+    if (storeP3Enabled()) yield* writeVectorStep(memory.id, memory.embedding);
+    else yield* run('UPDATE memories SET embedding_vec = NULL WHERE id = ? AND embedding_vec IS NOT NULL', memory.id);
   }
 
   /** Write the per-memory markdown copy (human-readable, not canonical). */
@@ -610,7 +617,8 @@ ${JSON.stringify(memory.metadata, null, 2)}
       userId: row.user_id,
       type: row.type as MemoryType,
       content: row.content,
-      embedding: row.embedding ? JSON.parse(row.embedding) : undefined,
+      // STORE-MAP-01 P3: the packed Float32 vector when there is one, else the JSON text.
+      embedding: (row.embedding_vec ? unpackVector(row.embedding_vec) : null) ?? (row.embedding ? JSON.parse(row.embedding) : undefined),
       embeddingModel: row.embedding ? (row.embedding_model || LEGACY_HASH_MODEL) : undefined,
       memoryLayer: row.memory_layer || 'factual',
       importanceScore: row.importance_score ?? 0.5,

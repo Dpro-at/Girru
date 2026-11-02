@@ -133,3 +133,11 @@ export async function validityOf(userId: string, id: string): Promise<Validity |
     };
   })());
 }
+
+/** How far the source backfill is (FD4d). */
+export async function provenanceJobStatus(): Promise<{ done: number; total: number }> {
+  return sql().read((function* () {
+    const r = yield* one<{ total: number; done: number }>('SELECT COUNT(*) AS total, SUM(CASE WHEN source IS NOT NULL THEN 1 ELSE 0 END) AS done FROM memories');
+    return { done: Number(r?.done ?? 0), total: Number(r?.total ?? 0) };
+  })());
+}
