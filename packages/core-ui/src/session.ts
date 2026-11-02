@@ -236,7 +236,7 @@ function projectResponse(path: string, response: WireResponse): WireResponse {
   if (storeSwitchesRoute(path)) return { status: response.status, body: storeSwitchesResponse(response.status, response.body) };
   if (backupsRoute(path)) return { status: response.status, body: backupsResponse(path, response.status, response.body) };
   if (chartPrefsRoute(path)) return { status: response.status, body: chartPrefsResponse(response.status, response.body) };
-  if (departmentsRoute(path)) return { status: response.status, body: departmentsResponse(response.status, response.body) };
+  if (departmentsRoute(path)) return { status: response.status, body: departmentsResponse(response.status, response.body, path) };
   if (meetingsRoute(path)) return { status: response.status, body: meetingsResponse(path, response.status, response.body) };
   if (firstRunRoute(path)) return { status: response.status, body: firstRunResponse(path, response.status, response.body) };
   if (agentRulesRoute(path)) return { status: response.status, body: agentRulesResponse(path, response.status, response.body) };

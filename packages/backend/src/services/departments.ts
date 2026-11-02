@@ -32,15 +32,21 @@ export interface DepartmentRow {
   version: number;
 }
 
-/** Each table that copies a department name, how to reach its rows, and whether the copy keeps case. */
-interface Copy { table: string; key: string[]; owned: string; keepCase?: boolean }
+/**
+ * Each table that copies a department name, how to reach its rows, whether the
+ * copy keeps case, and whether a name in it makes a department (`creates`).
+ * Only live users make one (agents, hire items, active board links); boards,
+ * cards, specialty templates and meeting decisions follow the list, so a
+ * deleted department never comes back from an old copy of its name.
+ */
+interface Copy { table: string; key: string[]; owned: string; keepCase?: boolean; creates?: boolean }
 const COPIES: readonly Copy[] = [
-  { table: 'agents_config', key: ['id'], owned: `id != '${RESERVED_AGENT_ID}'` },
+  { table: 'agents_config', key: ['id'], owned: `id != '${RESERVED_AGENT_ID}'`, creates: true },
   { table: 'board_departments', key: ['board_id', 'department'], owned: 'board_id IN (SELECT id FROM boards WHERE owner_id = ?)' },
   { table: 'board_card_departments', key: ['card_id', 'department'], owned: 'card_id IN (SELECT c.id FROM board_cards c JOIN boards b ON b.id = c.board_id WHERE b.owner_id = ?)' },
-  { table: 'board_department_sources', key: ['board_id'], owned: 'owner_id = ?' },
+  { table: 'board_department_sources', key: ['board_id'], owned: 'owner_id = ? AND active = 1', creates: true },
   { table: 'specialty_templates', key: ['id'], owned: '1 = 1', keepCase: true },
-  { table: 'team_hire_batch_items', key: ['batch_id', 'seq'], owned: 'batch_id IN (SELECT id FROM team_hire_batches WHERE owner_id = ?)' },
+  { table: 'team_hire_batch_items', key: ['batch_id', 'seq'], owned: 'batch_id IN (SELECT id FROM team_hire_batches WHERE owner_id = ?)', creates: true },
   { table: 'meeting_decisions', key: ['id'], owned: 'meeting_id IN (SELECT id FROM meetings WHERE owner_id = ?)' },
 ];
 const ownedArgs = (c: Copy, ownerId: string): string[] => (c.owned.includes('?') ? [ownerId] : []);
@@ -100,12 +106,18 @@ export function* syncDepartmentsStep(ownerId: string): Step<SyncReport> {
     yield* run('INSERT INTO departments (id, owner_id, name, norm_name, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)', m.id, ownerId, m.name, departmentKey(m.name), m.created_by, m.created_at);
     report.copied++;
   }
-  // 2. every name in use becomes one department (case duplicates are one, D9).
+  // 2. every name a live user has becomes one department (case duplicates are one, D9).
   const seen = new Map<string, string[]>();
-  for (const c of COPIES) {
+  for (const c of COPIES.filter((x) => x.creates)) {
     for (const r of yield* all<{ v: string }>(`SELECT DISTINCT department AS v FROM ${c.table} WHERE department IS NOT NULL AND department <> '' AND ${c.owned}`, ...ownedArgs(c, ownerId))) {
       const k = departmentKey(r.v);
       if (k) seen.set(k, [...(seen.get(k) ?? []), r.v]);
+    }
+  }
+  for (const c of COPIES.filter((x) => !x.creates && x.keepCase)) {
+    for (const r of yield* all<{ v: string }>(`SELECT DISTINCT department AS v FROM ${c.table} WHERE department IS NOT NULL AND department <> '' AND ${c.owned}`, ...ownedArgs(c, ownerId))) {
+      const k = departmentKey(r.v);
+      if (seen.has(k)) seen.get(k)!.push(r.v); // a cased spelling for the name people see
     }
   }
   const known = new Map((yield* all<{ id: string; norm_name: string }>('SELECT id, norm_name FROM departments WHERE owner_id = ?', ownerId)).map((d) => [d.norm_name, d.id]));
@@ -150,12 +162,17 @@ export async function syncDepartments(ownerId?: string): Promise<SyncReport | nu
   }, { immediate: true });
 }
 
-/** Rows whose copied name has no id, or an id of another name. Empty when the backfill is complete. */
+/**
+ * Rows whose copied name has no id, or an id of another name. Empty when the
+ * backfill is complete. A follower copy (board, card, template, decision) that
+ * names no department at all is not linked by design and not reported.
+ */
 export function* verifyDepartmentsStep(ownerId: string): Step<Array<{ table: string; department: string; department_id: string | null }>> {
   const bad: Array<{ table: string; department: string; department_id: string | null }> = [];
   const byId = new Map((yield* all<{ id: string; norm_name: string }>('SELECT id, norm_name FROM departments WHERE owner_id = ?', ownerId)).map((d) => [d.id, d.norm_name]));
   for (const c of COPIES) {
     for (const r of yield* all<{ department: string; department_id: string | null }>(`SELECT DISTINCT department, department_id FROM ${c.table} WHERE department IS NOT NULL AND department <> '' AND ${c.owned}`, ...ownedArgs(c, ownerId))) {
+      if (!c.creates && !r.department_id && ![...byId.values()].includes(departmentKey(r.department))) continue;
       if (!r.department_id || byId.get(r.department_id) !== departmentKey(r.department)) bad.push({ table: c.table, ...r });
     }
   }
@@ -300,7 +317,11 @@ export function* detachDepartmentStep(ownerId: string, id: string): Step<{ agent
   for (const c of COPIES) {
     const where = `(department_id = ? OR (department_id IS NULL AND LOWER(department) = ?)) AND ${c.owned}`;
     if (c.table === 'board_department_sources') { yield* run(`UPDATE ${c.table} SET active = 0 WHERE ${where}`, id, d.norm_name, ...ownedArgs(c, ownerId)); continue; }
-    if (c.key.includes('department') || c.table === 'specialty_templates') continue; // boards keep the old name as a past department; templates keep their family
+    if (c.key.includes('department') || c.table === 'specialty_templates') {
+      // Boards keep the old name as a past department, templates keep their family; neither points at it any more.
+      yield* run(`UPDATE ${c.table} SET department_id = NULL WHERE department_id = ? AND ${c.owned}`, id, ...ownedArgs(c, ownerId));
+      continue;
+    }
     const u = yield* run(`UPDATE ${c.table} SET department = NULL, department_id = NULL WHERE ${where}`, id, d.norm_name, ...ownedArgs(c, ownerId));
     if (c.table === 'agents_config') agents = u.changes;
   }

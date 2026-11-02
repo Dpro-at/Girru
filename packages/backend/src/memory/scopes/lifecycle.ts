@@ -344,7 +344,9 @@ function* departmentPreviewStep(ownerId: string, id: string) {
     s.rules = s.rules.filter((r) => !(r.scope_kind === 'department' && r.scope_id === id));
     return s;
   });
-  const effects = { projectsToGeneral: projects.length, pinnedFactsRemoved: pinnedFacts, accessRulesRemoved: accessRules, agentsAffected: access.agentsAffected, widened: access.widened, narrowed: access.narrowed };
+  // P3: the one list also holds agents; they keep working with no department.
+  const agentsToNone = storeP3Enabled() ? Number((yield* one<{ n: number }>('SELECT COUNT(*) AS n FROM agents_config WHERE department_id = ?', id))?.n ?? 0) : 0;
+  const effects = { projectsToGeneral: projects.length, pinnedFactsRemoved: pinnedFacts, accessRulesRemoved: accessRules, agentsAffected: access.agentsAffected, widened: access.widened, narrowed: access.narrowed, ...(storeP3Enabled() ? { agentsToNone } : {}) };
   const previewHash = createHash('sha256').update(JSON.stringify({ ownerId, id, name: d.name, projects, effects })).digest('hex');
   return { department: d, effects, previewHash };
 }

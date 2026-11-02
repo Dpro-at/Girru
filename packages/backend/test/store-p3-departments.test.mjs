@@ -147,6 +147,8 @@ test('an upgrade question is answered once', async () => {
 });
 
 test('delete: agents let go, a rule left without a department is paused', async () => {
+  // Old copies of the name stay (a template's family, a board link) and must not bring it back.
+  db.prepare(`INSERT INTO specialty_templates (id, name, department, description, revision, content_hash, config_json) VALUES ('sp-2', 'Copywriter', 'Marketing', 'd', 1, 'h', '{}')`).run();
   const preview = await lifecycle.previewDeleteDepartment(OWNER, mkt.id);
   await lifecycle.deleteDepartment(OWNER, mkt.id, preview.previewHash);
   const nora = get('SELECT department, department_id FROM agents_config WHERE id = ?', 'a-nora');
@@ -156,6 +158,9 @@ test('delete: agents let go, a rule left without a department is paused', async 
   assert.equal(rule('r-two').paused, 1, 'its only department is gone too');
   assert.equal(get('SELECT COUNT(*) AS n FROM departments WHERE id = ?', mkt.id).n, 0);
   assert.equal(get('SELECT COUNT(*) AS n FROM departments WHERE id = ?', hr.id).n, 1);
+  await deps.syncDepartments();
+  assert.equal(get("SELECT COUNT(*) AS n FROM departments WHERE norm_name = 'marketing'").n, 0, 'a deleted department does not come back from an old copy of its name');
+  assert.deepEqual(await sql().read(deps.verifyDepartmentsStep(OWNER)), []);
 });
 
 test('a new agent in a new department joins the list', async () => {

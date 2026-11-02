@@ -8,13 +8,16 @@
  *   POST   /api/departments/:id/merge              { into } -> { mergeId, into }
  *   POST   /api/departments/merges/:mergeId/undo   puts the merged department back
  *   POST   /api/departments/questions/:id          { departmentId | null } answers an upgrade question (D9)
+ *   POST   /api/departments/:id/delete-preview     -> { department, effects, previewHash }
+ *   POST   /api/departments/:id/delete             { expectedPreviewHash } -> { department, effects }
  *
- * Deleting stays on the memory route (preview, then delete with its hash);
- * while P3 is on it also lets agents, boards and rules go.
+ * Deleting is memory's delete (projects go to General, its pinned facts and
+ * scope rules go); while P3 is on it also lets agents, boards and rules go.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { authorizeActiveRole } from '../../auth/route-guards.js';
 import { ScopeInputError, createDepartment } from '../../memory/scopes/store.js';
+import { deleteDepartment, previewDeleteDepartment } from '../../memory/scopes/lifecycle.js';
 import { invalidateScopeTree } from '../../memory/scopes/tree.js';
 import { answerDepartmentQuestion, departmentsOverview, mergeDepartments, undoMerge, updateDepartment } from '../../services/departments.js';
 import { storeP3Enabled } from '../../services/store-p3.js';
@@ -43,6 +46,8 @@ export async function departmentsRoutes(fastify: FastifyInstance) {
   fastify.patch('/api/departments/:id', { config }, asOwner(async (o, r) => ({ department: await updateDepartment(o, r.params.id, bodyOf(r)) })));
   fastify.post('/api/departments/:id/merge', { config }, asOwner((o, r) => mergeDepartments(o, r.params.id, String(bodyOf(r).into ?? ''), o)));
   fastify.post('/api/departments/merges/:mergeId/undo', { config }, asOwner(async (o, r) => ({ department: await undoMerge(o, r.params.mergeId) })));
+  fastify.post('/api/departments/:id/delete-preview', { config }, asOwner((o, r) => previewDeleteDepartment(o, r.params.id)));
+  fastify.post('/api/departments/:id/delete', { config }, asOwner((o, r) => deleteDepartment(o, r.params.id, bodyOf(r).expectedPreviewHash)));
   fastify.post('/api/departments/questions/:id', { config }, asOwner(async (o, r) => {
     const v = bodyOf(r).departmentId;
     await answerDepartmentQuestion(o, r.params.id, typeof v === 'string' && v ? v : null);

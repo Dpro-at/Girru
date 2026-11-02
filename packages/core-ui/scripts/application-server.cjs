@@ -231,7 +231,7 @@ function project(target, status, body) {
   if (storeSwitchesRoute(target)) return storeSwitchesResponse(status, body);
   if (backupsRoute(target)) return backupsResponse(target, status, body);
   if (chartPrefsRoute(target)) return chartPrefsResponse(status, body);
-  if (departmentsRoute(target)) return departmentsResponse(status, body);
+  if (departmentsRoute(target)) return departmentsResponse(status, body, target);
   if (meetingsRoute(target)) return meetingsResponse(target,status,body);
   if (firstRunRoute(target)) return firstRunResponse(target, status, body);
   if (agentRulesRoute(target)) return agentRulesResponse(target, status, body);
