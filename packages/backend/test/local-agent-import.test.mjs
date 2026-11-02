@@ -70,6 +70,15 @@ const server = Fastify(); registerAuthGate(server); await server.register(memory
 console.log = quiet.log; console.warn = quiet.warn;
 test.after(async () => { await server.close(); await L.stopLocalImports(); closeDatabase(); globalThis.fetch = realFetch; process.chdir(backendDir); if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome; if (originalProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = originalProfile; const fs = await import('node:fs/promises'); await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 const call = (method, url, payload, who = 'li-owner') => server.inject({ method, url, headers: { authorization: `Bearer ${generateToken(who, 1)}` }, payload });
+// Import workers may wait on Windows filesystem checks; keep assertions on the terminal result.
+const finishImport = async job => {
+  const deadline = performance.now() + 15000;
+  while (job.status === 'running' && performance.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 20));
+    job = await L.getJob('li-owner', job.id);
+  }
+  return job;
+};
 
 test('the reader keeps only human and agent text; tool output, thinking, injected and sub-agent text stay out', async () => {
   const s = await listLocalSessions(dir);
@@ -88,7 +97,7 @@ test('import: secrets removed before the archive and the model; archive is priva
     : [{ title: 'Deploys', content: 'Deploys happen on Fridays only.', scope: 'owner', evidence: 'We deploy on Fridays only' }]; };
   const ids = (await listLocalSessions(dir)).map((x) => x.id);
   let job = await L.startImport('li-owner', ids, { extract, home: dir });
-  for (let i = 0; i < 100 && job.status === 'running'; i++) { await new Promise((r) => setTimeout(r, 20)); job = await L.getJob('li-owner', job.id); }
+  job = await finishImport(job);
   assert.equal(job.status, 'done', job.notice); assert.equal(job.errors, 0);
   assert.equal(job.proposed, 3);
   assert.ok(seen.every((t) => !t.includes(SECRET)) && seen.some((t) => t.includes('[REDACTED:')), 'the model never sees the secret');
@@ -210,7 +219,7 @@ test('Gemini CLI and Antigravity: read their plain-text logs; credential and set
 
   const seen = [];
   let job = await L.startImport('li-owner', s.map((x) => x.id), { home, extract: async (t) => { seen.push(t); return [{ title: 'Due dates', content: 'Board cards need a due date.', scope: 'project', evidence: 'Cards need a due date' }]; } });
-  for (let i = 0; i < 100 && job.status === 'running'; i++) { await new Promise((r) => setTimeout(r, 20)); job = await L.getJob('li-owner', job.id); }
+  job = await finishImport(job);
   assert.equal(job.status, 'done', job.notice); assert.equal(job.errors, 0);
   assert.equal(job.proposed, 1, 'the same memory from three conversations is proposed once');
   assert.ok(seen.every((t) => !t.includes('tool noise') && !t.includes('thinking')));

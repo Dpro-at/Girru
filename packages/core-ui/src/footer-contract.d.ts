@@ -1,4 +1,4 @@
-export type FooterSectionId = 'chat' | 'agents' | 'library' | 'board' | 'memory' | 'approvals' | 'store' | 'genvr' | 'terminal' | 'code' | 'skills' | 'personalities' | 'specialties';
+export type FooterSectionId = 'chat' | 'agents' | 'library' | 'board' | 'memory' | 'approvals' | 'store' | 'genvr' | 'terminal' | 'code' | 'browser' | 'skills' | 'personalities' | 'specialties';
 export type FooterValue = { order: FooterSectionId[]; hidden: FooterSectionId[]; iconsOnly: boolean; approvalsWhenWaiting: boolean };
 export const FOOTER_PATH: '/api/me/footer';
 export const FOOTER_SECTIONS: readonly FooterSectionId[];

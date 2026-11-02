@@ -139,6 +139,13 @@ test('source boundary: only injected session transport may network; no browser s
     // dev-session-keep.ts alone may use session storage, and only for the local test build.
     if (name === 'dev-session-keep.ts') assert.doesNotMatch(source, /\b(XMLHttpRequest|WebSocket|EventSource|localStorage|indexedDB|dangerouslySetInnerHTML)\b|document\.cookie/, name);
     else assert.doesNotMatch(source, /\b(XMLHttpRequest|WebSocket|EventSource|localStorage|sessionStorage|indexedDB|dangerouslySetInnerHTML)\b|document\.cookie/, name);
+    if (name === 'browser-app-contract.js') {
+      // Browser navigation builds owner-entered destinations; it performs no network I/O.
+      assert.doesNotMatch(source, /\bfetch\b/, name);
+      const addresses = [...new Set(source.match(/https?:\/\/[^']*/g) ?? [])].sort();
+      assert.deepEqual(addresses, ['http://', 'https://', 'https://www.google.com/search?q=']);
+      source = source.replace(/https?:\/\/[^']*/g, '');
+    }
     if (name === 'PublisherSources.tsx') {
       // Fixed publisher navigation links are user-opened anchors, never transport targets.
       const urls = source.match(/https:\/\/[^']+/g) ?? [];

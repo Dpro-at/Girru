@@ -36,6 +36,7 @@ let quitting = false;
 let stopped = false;
 let nabuEditor = null;
 let editorLog = null;
+let browserRuntime = null;
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -138,14 +139,15 @@ async function startLocal() {
     startupStatus('Preparing your workspace…');
     log = log || openLog(path.join(app.getPath('userData'), 'logs', 'backend.log'));
     const { createApplicationServer } = require(path.join(payload.coreUiDir, 'scripts', 'application-server.cjs'));
+    browserRuntime = browserRuntime || require('./browser-runtime.cjs').createBrowserRuntime({root:process.env.DPRO_BROWSER_ROOT || path.join(process.resourcesPath,'browser'),node:payload.node,profile:process.env.DPRO_BROWSER_PROFILE || path.join(settingsDir(),'browser')});
     runtime = createLocalRuntime({
       node: payload.node,
       readyTimeoutMs: 30000,
       args: backendArgs(payload.backendDir),
       cwd: path.basename(dataDir()) === '.data' ? path.dirname(dataDir()) : dataDir(),
       dataDir: dataDir(),
-      extraEnv: { AGENT_TERMINAL: 'true', DPRO_SUBSCRIPTION_CHAT: '1', ...(path.basename(dataDir()) === '.data' ? { AGENT_PLAYER_DATA_DIR: undefined } : {}) },
-      createBridge: ({ upstreamPort, launchToken }) => createApplicationServer({ packageRoot: payload.coreUiDir, channel: 'candidate', upstreamPort, launchToken }),
+      extraEnv: { DPRO_BROWSER_CONNECTION_FILE:browserRuntime.connectionFile, AGENT_TERMINAL: 'true', DPRO_SUBSCRIPTION_CHAT: '1', ...(path.basename(dataDir()) === '.data' ? { AGENT_PLAYER_DATA_DIR: undefined } : {}) },
+      createBridge: ({ upstreamPort, launchToken }) => createApplicationServer({ packageRoot: payload.coreUiDir, channel: 'candidate', upstreamPort, launchToken, browserController:browserRuntime }),
       onLog: line => log.write(line),
       onBackendExit: ({ code, signal }) => {
         // BACKUP-01: the program stops with 75 to put a backup in place; start it again.
@@ -178,6 +180,7 @@ async function stopLocal() {
   const current = runtime;
   runtime = null;
   if (current) await current.stop();
+  await browserRuntime?.close();
 }
 
 async function applyMode() {
