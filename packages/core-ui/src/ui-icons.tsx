@@ -1,5 +1,12 @@
 // Simple line icons drawn for this app (24-unit grid, 2-unit round strokes).
 const shapes = {
+  'device-phone': <><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M10 5h4M11 19h2"/></>,
+  'device-tablet': <><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M11 19h2"/></>,
+  'device-foldable': <><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></>,
+  'device-desktop': <><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></>,
+  'device-tv': <><rect x="2" y="5" width="20" height="14" rx="2"/><path d="m7 22 2-3M17 22l-2-3M9 2l3 3 3-3"/></>,
+  'device-landscape': <><rect x="2" y="7" width="20" height="10" rx="2"/><path d="M5 10v4"/></>,
+  'devices': <><rect x="2" y="4" width="15" height="11" rx="1.5"/><path d="M6 19h6M9 15v4"/><rect x="16" y="10" width="6" height="12" rx="1"/></>,
   play: <path d="M8 5l11 7-11 7z"/>,
   pause: <><path d="M8 5v14M16 5v14"/></>,
   info: <><circle cx="12" cy="12" r="9"/><path d="M12 10v7M12 7v.1"/></>,
