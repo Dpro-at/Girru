@@ -1,3 +1,4 @@
+import {syncDirectory} from '../services/sync-directory.js';
 import { readRegularFile } from '../services/read-regular-file.js';
 import { discoveryFs, isolatedReadRegularFile } from '../services/discovery-fs.js';
 /** Central Markdown skill content with a SQL index and explicit per-agent assignment. */
@@ -73,7 +74,7 @@ export class CentralSkills {
    if(existing&&existing.content_hash!==expected)throw new SkillLibraryError('version_conflict',409);
    await this.trustedRoot();const folder=path.join(this.root,'objects',b.hash);let present=false;try{present=(await fs.lstat(folder)).isDirectory();}catch{}
    if(present&&(await bundle(folder)).hash!==b.hash)throw new SkillLibraryError('storage_unavailable',503);
-   if(!present){const temporary=path.join(this.root,'objects','pending-'+randomUUID());await fs.mkdir(temporary,{mode:0o700});for(const file of b.files){const destination=path.join(temporary,file.path);await fs.mkdir(path.dirname(destination),{recursive:true,mode:0o700});const handle=await fs.open(destination,'wx',0o600);try{await handle.writeFile(file.content);await handle.sync();}finally{await handle.close();}}await fs.rename(temporary,folder);const directory=await fs.open(path.join(this.root,'objects'),'r');try{await directory.sync();}finally{await directory.close();}}
+   if(!present){const temporary=path.join(this.root,'objects','pending-'+randomUUID());await fs.mkdir(temporary,{mode:0o700});for(const file of b.files){const destination=path.join(temporary,file.path);await fs.mkdir(path.dirname(destination),{recursive:true,mode:0o700});const handle=await fs.open(destination,'wx',0o600);try{await handle.writeFile(file.content);await handle.sync();}finally{await handle.close();}}await fs.rename(temporary,folder);await syncDirectory(path.join(this.root,'objects'));}
    const id=existing?.id??randomUUID();const result=await sql().tx(function*():Step<number>{
     if(review){
      yield* review.guard();const d=yield* dialect();

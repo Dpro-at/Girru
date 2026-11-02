@@ -12,9 +12,11 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, realpathSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { randomBytes } from 'node:crypto';
 
 const backendDir = process.cwd();
+const backendModule = relative => import(pathToFileURL(join(backendDir, relative)).href);
 const dir = mkdtempSync(join(tmpdir(), 'ap-chat-runs-'));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });
 process.chdir(dir);
@@ -53,12 +55,12 @@ globalThis.fetch = async (url, init = {}) => {
 const capture = () => {};
 console.log = capture; console.info = capture; console.warn = capture;
 
-const { getDatabase } = await import(join(backendDir, 'src/db/database.ts'));
+const { getDatabase } = await backendModule('src/db/database.ts');
 const db = getDatabase();
 await db.initialize();
-const { getCredentialStorage } = await import(join(backendDir, 'src/credentials/storage.ts'));
+const { getCredentialStorage } = await backendModule('src/credentials/storage.ts');
 await getCredentialStorage().initialize();
-const { getOrchestrator } = await import(join(backendDir, 'src/multi-agent/index.ts'));
+const { getOrchestrator } = await backendModule('src/multi-agent/index.ts');
 await getOrchestrator().initialize(join(dir, '.data', 'multi-agent', 'orchestrator.db'));
 for (const [id, role] of [['r-owner', 'owner'], ['r-other', 'user'], ['r-guest', 'guest']]) {
   db.prepare(`INSERT INTO users (id, email, username, password_hash, role, status, email_verified) VALUES (?, ?, ?, 'x', ?, 'active', 1)`).run(id, `${id}@example.test`, id, role);
@@ -66,8 +68,8 @@ for (const [id, role] of [['r-owner', 'owner'], ['r-other', 'user'], ['r-guest',
 db.prepare(`INSERT INTO agents_config (id, name, provider, model, is_primary) VALUES ('r-agent', 'Run Agent', 'ollama', 'qwen-test', 1)`).run();
 db.prepare(`INSERT INTO agents_config (id, name, provider, model, is_primary) VALUES ('r-claude', 'Claude Agent', 'claude', 'claude-sonnet-test', 0)`).run();
 
-const tools = await import(join(backendDir, 'src/tools/index.ts'));
-const grants = await import(join(backendDir, 'src/tools/grants.ts'));
+const tools = await backendModule('src/tools/index.ts');
+const grants = await backendModule('src/tools/grants.ts');
 const echoed = [];
 tools.registerExtensionTool({ name: 'x_echo', description: 'echo', extensionId: 'x', requiresApproval: false,
   input_schema: { type: 'object', properties: { text: { type: 'string' } } },
@@ -75,10 +77,10 @@ tools.registerExtensionTool({ name: 'x_echo', description: 'echo', extensionId: 
 const avail = tools.createToolsRegistry({ workspaceDir: dir }).listRegistered();
 await grants.setAgentGrants('r-agent', { grants: ['x_echo', 'read'] }, 'r-owner', avail);
 
-const { generateToken } = await import(join(backendDir, 'src/auth/jwt.ts'));
-const { buildServer } = await import(join(backendDir, 'src/api/app.ts'));
-const { chatRuns } = await import(join(backendDir, 'src/services/chat-runs.ts'));
-const { historyFor } = await import(join(backendDir, 'src/api/routes/chat-conversations.ts'));
+const { generateToken } = await backendModule('src/auth/jwt.ts');
+const { buildServer } = await backendModule('src/api/app.ts');
+const { chatRuns } = await backendModule('src/services/chat-runs.ts');
+const { historyFor } = await backendModule('src/api/routes/chat-conversations.ts');
 const app = await buildServer({ logger: false });
 await app.ready();
 const as = (id) => ({ authorization: `Bearer ${generateToken(id, 1)}` });
@@ -88,9 +90,9 @@ const ended = (runId) => new Promise((r) => { const run = chatRuns.get(runId); i
 const rid = () => `run-${randomBytes(6).toString('hex')}`;
 
 
-const R=await import(join(backendDir,'src/repositories/chat-conversations.ts'));
-const G=await import(join(backendDir,'src/services/chat-reply-rounds.ts'));
-const {writePersonality}=await import(join(backendDir,'src/services/agent-files.ts'));
+const R=await backendModule('src/repositories/chat-conversations.ts');
+const G=await backendModule('src/services/chat-reply-rounds.ts');
+const {writePersonality}=await backendModule('src/services/agent-files.ts');
 for(const [id,name,department] of [['r-agent','Main Agent','management'],['r-hayden','Hayden','marketing'],['r-charlie','Charlie','development'],['r-outsider','Outsider','sales']]) {
  db.prepare('INSERT OR IGNORE INTO agents_config(id,name,provider,model) VALUES(?,?,?,?)').run(id,name,'ollama','qwen-'+id);
  db.prepare('UPDATE agents_config SET name=?,department=?,provider=?,model=?,system_prompt=? WHERE id=?').run(name,department,'ollama','qwen-'+id,'You are '+name+'. PERSONA_'+id,id);
@@ -142,7 +144,7 @@ test('Stop during preparation revokes the reserved participant before a model ca
  const pending=G.dispatchReplyRound({userId:'r-owner',role:'owner',c,runId:id,message:'كل واحد يرد'},async input=>{received=input;await new Promise(resolve=>{release=resolve;});return {code:await input.canStart()?202:409,body:{code:'group_paused'}};});
  await until(()=>received);await G.stopReplyRound('r-owner',id);assert.equal(await received.canStart(),false);release();assert.equal((await pending).code,409);assert.equal((await G.replyRoundStatus('r-owner',c.id)).state,'paused');assert.equal(bodies.length,before);
 });
-const {conversationalSelection}=await import(join(backendDir,'src/services/chat-addressing.ts'));
+const {conversationalSelection}=await backendModule('src/services/chat-addressing.ts');
 const smallRoster=[{id:'r-agent',name:'Main Agent',department:null},{id:'r-hayden',name:'Hayden',department:'marketing'},{id:'r-charlie',name:'Charlie',department:'development'}];
 test('natural addresses match participant names across Arabic spellings, not quoted reports or workspace outsiders',()=>{
  for(const text of ['هيدن كيفك ؟','كيفك هايدن','هيدن موجود ؟','Hayden how are you?','تشارلي كيفك','هلا هيدن'])assert.deepEqual(conversationalSelection(text,smallRoster).ids,[text.includes('تشارلي')?'r-charlie':'r-hayden'],text);
@@ -167,7 +169,7 @@ test('readiness addresses the current group; and the others selects only those w
  script.push(answer('Main ready'),answer('Charlie ready'),answer('Hayden ready'));const readiness=await group(c,'مستعدين للعمل؟');assert.equal(readiness.json().replyRound.total,3);await done(c);
 });
 test('meeting attendance commands through the real chat API change presence without model calls or erased history',async()=>{
- const M=await import(join(backendDir,'src/services/meetings.ts'));db.prepare("UPDATE agents_config SET is_primary=CASE WHEN id='r-agent' THEN 1 ELSE 0 END").run();db.prepare("UPDATE agents_config SET role=CASE WHEN id='r-agent' THEN 'main' ELSE 'manager' END WHERE id IN ('r-agent','r-hayden','r-charlie')").run();
+ const M=await backendModule('src/services/meetings.ts');db.prepare("UPDATE agents_config SET is_primary=CASE WHEN id='r-agent' THEN 1 ELSE 0 END").run();db.prepare("UPDATE agents_config SET role=CASE WHEN id='r-agent' THEN 'main' ELSE 'manager' END WHERE id IN ('r-agent','r-hayden','r-charlie')").run();
  const m=await M.createMeeting('r-owner',{requestId:rid(),title:'Natural attendance',objective:'Check attendance',selection:{mode:'agents',agentIds:['r-hayden','r-charlie'],departments:[],headsOnly:false}}),before=bodies.length;
  assert.equal(m.count,3);const c={id:m.conversationId};const opened=(await call('r-owner','GET',`/api/chat/conversations/${c.id}/messages`)).json();assert.deepEqual(opened.conversation.meeting,{id:m.id,state:'active'});
  for(const [text,count] of [['كل مدراء الاقسام تحضر للاجتماع',3],['يبقى بس قسم التطوير',2],['الكل تخرج يبقى بس الاساسي',1]]){
@@ -181,10 +183,10 @@ test('editor directory is owner scoped, reuses the saved project and refuses cal
  const url=`/api/chat/conversations/${c.id}/editor-directory`;
  assert.equal((await call('r-other','POST',url)).statusCode,403);
  assert.equal((await call('r-owner','POST',url,{folder:'/other/path'})).statusCode,400);
- const result=await call('r-owner','POST',url);assert.equal(result.statusCode,200);assert.equal(result.json().folder,await (await import(join(backendDir,'src/services/subscription-chat.ts'))).chatWorkspace(c.id));
+ const result=await call('r-owner','POST',url);assert.equal(result.statusCode,200);assert.equal(result.json().folder,await (await backendModule('src/services/subscription-chat.ts')).chatWorkspace(c.id));
  assert.equal((await call('r-owner','POST',`/api/chat/conversations/${(await R.createConversation('r-other',{agentId:'r-agent'})).id}/editor-directory`)).statusCode,404);
  const folder=join(dir,'editor-project');mkdirSync(folder,{recursive:true});const project=await R.createProject('r-owner',{name:'Editor fixture',folder});const linked=await R.createConversation('r-owner',{agentId:'r-agent',projectId:project.id});
- assert.equal((await call('r-owner','POST',`/api/chat/conversations/${linked.id}/editor-directory`)).json().folder,realpathSync(folder));
+ assert.equal((await call('r-owner','POST',`/api/chat/conversations/${linked.id}/editor-directory`)).json().folder,realpathSync.native(folder));
 });
 test('project edits wait before Ask approval, apply exact reviewed text and reject stale or unowned scopes',async()=>{
  const folder=join(dir,'edit-project');mkdirSync(folder,{recursive:true});const file=join(folder,'hello.txt');writeFileSync(file,'old\n');
@@ -193,7 +195,7 @@ test('project edits wait before Ask approval, apply exact reviewed text and reje
  const edit={path:'hello.txt',before:'old\n',after:'new\n'};
  const denied=await (await tools.createAgentToolsRegistry(context)).execute('edit',edit);assert.ok(denied.error,'no implicit new grant');assert.equal(readFileSync(file,'utf8'),'old\n');
  await grants.setAgentGrants('r-agent',{grants:['x_echo','read','edit']},'r-owner',tools.createToolsRegistry({workspaceDir:dir}).listRegistered());
- const {withChatRun}=await import(join(backendDir,'src/services/chat-run-context.ts'));const {getApprovalDetail,approveAndRun}=await import(join(backendDir,'src/tools/approvals.ts'));
+ const {withChatRun}=await backendModule('src/services/chat-run-context.ts');const {getApprovalDetail,approveAndRun}=await backendModule('src/tools/approvals.ts');
  const registry=await tools.createAgentToolsRegistry(context);
  const pending=await withChatRun({chatMode:'ask',reviewTools:false,beforeTool:async()=>'',afterTool:async()=>{}},()=>registry.execute('edit',edit));
  assert.equal(pending.details.status,'pending_approval');assert.equal(readFileSync(file,'utf8'),'old\n');
@@ -208,7 +210,7 @@ test('project edits wait before Ask approval, apply exact reviewed text and reje
  const pendingRevoked=await withChatRun({chatMode:'ask',reviewTools:false,beforeTool:async()=>'',afterTool:async()=>{}},()=>registry.execute('edit',{...edit,before:'manual\n',after:'revoked\n'}));
  const revokedDetail=await getApprovalDetail(pendingRevoked.details.approvalId);await grants.setAgentGrants('r-agent',{grants:['x_echo','read']},'r-owner',tools.createToolsRegistry({workspaceDir:dir}).listRegistered());
  assert.ok((await approveAndRun(revokedDetail.id,'r-owner',revokedDetail.paramsHash)).result.error);assert.equal(readFileSync(file,'utf8'),'manual\n');
- const {checkedFileEdit}=await import(join(backendDir,'src/tools/core/edit.ts'));
+ const {checkedFileEdit}=await backendModule('src/tools/core/edit.ts');
  const binary=join(folder,'binary.txt');writeFileSync(binary,Buffer.from([255]));assert.throws(()=>checkedFileEdit(folder,'binary.txt','�','text'));assert.deepEqual(readFileSync(binary),Buffer.from([255]));
  for(const path of ['../outside.txt','.env','secret.key'])assert.throws(()=>checkedFileEdit(folder,path,'','no'));
 });

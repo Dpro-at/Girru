@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import {syncDirectory} from './sync-directory.js';
 import {extendSpecialtyList,plannedSpecialty} from './specialty-catalogue.js';
 import {constants} from 'node:fs';
 import {readRegularFile} from './read-regular-file.js';
@@ -42,7 +43,7 @@ export class SpecialtyTemplates{
   const file=path.join(this.root,id+'.md'),temporary=path.join(this.root,'pending-'+randomUUID());
   const handle=await fs.open(temporary,'wx',0o600);try{await handle.writeFile(clean);await handle.sync();}finally{await handle.close();}
   try{await fs.link(temporary,file);}catch(e){if((e as NodeJS.ErrnoException).code!=='EEXIST')throw e;}finally{await fs.unlink(temporary);}
-  const directory=await fs.open(this.root,'r');try{await directory.sync();}finally{await directory.close();}
+  await syncDirectory(this.root);
   if(hash((await readRegularFile(file,120000)).data.toString('utf8'))!==id)throw new TemplateError('storage_unavailable',503);return id;
  }
  async initialize(){
