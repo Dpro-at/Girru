@@ -260,6 +260,9 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
       const { syncDepartments } = await import('../services/departments.js');
       // Small tables: done before the first request so lists never miss a department.
       await syncDepartments().catch((err) => console.warn('[Store P3] departments backfill failed:', (err as Error)?.message));
+      // Source and trust of existing memories: in the background, small batches, resumes after a restart.
+      const { backfillProvenance } = await import('../memory/validity.js');
+      setImmediate(() => { backfillProvenance().catch((err) => console.warn('[Store P3] memory source backfill failed:', (err as Error)?.message)); });
     }
 
     // MEM-UX-02: exported memory files follow the database (untouched files only).

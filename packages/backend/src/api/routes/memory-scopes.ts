@@ -10,7 +10,8 @@
  *   GET  /api/memory/scopes/memories?scope=&q=&type=&layer=&topic=&source=&agent=&importance=&from=&to=&cursor=&limit=
  *                                                   memories of one scope, newest first, cursor paging + facets;
  *                                                   scope also kind:<drawer kind>; items carry usedIn (MEM-GAPS-02)
- *   GET  /api/memory/scopes/memories/:id           one memory: text, used in N replies, linked entities, readers
+ *   GET  /api/memory/scopes/memories/:id           one memory: text, used in N replies, linked entities, readers, validity (P3)
+ *   PUT  /api/memory/scopes/memories/:id/checked   { checked } Mark as checked / undo (GIRRU_STORE_P3)
  * Review rules per scope (MEM-GAPS-02)
  *   GET  /api/memory/scopes/rules?scope=           { scope, own, effective }
  *   GET  /api/memory/scopes/rules/all              { rules: [{ scope, own }] }
@@ -49,6 +50,8 @@ import type { Actor } from '../../repositories/actor.js';
 import { requestMeta } from '../../repositories/audit.js';
 import { actorOrReply, requireOwner } from '../../repositories/scope.js';
 import { resolveFileAgent } from '../../memory/memory-files.js';
+import { setChecked } from '../../memory/validity.js';
+import { storeP3Enabled } from '../../services/store-p3.js';
 import {
   ScopeInputError, accessOverview, addPinnedFact, applyAccessChanges, applyProjectAction, createDepartment, deleteDepartment, effectiveAccess,
   exploreScope, exportProject, invalidateScopeTree, listAgentScopes, listPinnedFacts, parseActionInput, parsePinnedScope, pinnedScopeId,
@@ -112,6 +115,14 @@ export async function memoryScopeRoutes(fastify: FastifyInstance) {
   route('GET', '/api/memory/scopes/agents', async (owner, request) => listAgentScopes(owner.userId!, q(request)));
   route('GET', '/api/memory/scopes/memories', async (owner, request) => exploreScope(owner.userId!, q(request)));
   route('GET', '/api/memory/scopes/memories/:id', async (owner, request) => ({ memory: await memoryDetail(owner.userId!, (request.params as { id: string }).id) }));
+  // STORE-MAP-01 P3 (FD3): "Mark as checked" and its undo. 404 while the switch is off.
+  route('PUT', '/api/memory/scopes/memories/:id/checked', async (owner, request, reply) => {
+    if (!storeP3Enabled()) return reply.code(404).send({ error: 'Not found', code: 'p3_off' });
+    const trust = await setChecked(owner.userId!, (request.params as { id: string }).id, body(request).checked === true);
+    if (!trust) return reply.code(404).send({ error: 'Memory not found', code: 'not_found' });
+    audit(request, owner, 'memory.checked', 'memories', (request.params as { id: string }).id, { trust });
+    return { trust };
+  });
 
   // ---- review rules per scope ----
   route('GET', '/api/memory/scopes/rules', async (owner, request) => scopeRules(owner.userId!, q(request).scope ?? 'company'));

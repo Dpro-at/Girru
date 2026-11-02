@@ -68,7 +68,7 @@ export interface MemoryRepository extends MemoryRecallRepository, MemoryOwnerRep
   /** Throws like get() when the memory is out of scope; no access-count side effect. */
   assertAccess(actor: Actor | null | undefined, id: string): Promise<void>;
   create(actor: Actor | null | undefined, memory: Omit<Memory, 'userId'>, reason: string): Promise<Memory>;
-  update(actor: Actor | null | undefined, id: string, updates: Partial<Memory>, reason: string): Promise<Memory>;
+  update(actor: Actor | null | undefined, id: string, updates: Partial<Memory>, reason: string, expectedVersion?: number): Promise<Memory>;
   /**
    * CORE-MEM-TOPIC: create, or when `memory.topicKey` already names a memory
    * of the drawer, update that one as a new version (`updated: true`).
@@ -182,11 +182,11 @@ export const memoryRepository: MemoryRepository = {
     return saveVersioned({ ...memory, userId } as Memory, versionActor(a), reason);
   },
 
-  async update(actor, id, updates, reason) {
+  async update(actor, id, updates, reason, expectedVersion) {
     const { a, userId } = memoryUser(actor);
     await ownMemory(a, userId, id, true);
     if (a.kind === 'agent' && updates.drawer && !drawerWritable(a, normalizeDrawer(updates.drawer))) throw new ScopeError(403, DRAWER_CLOSED);
-    const updated = await updateVersioned(userId, id, updates, versionActor(a), reason);
+    const updated = await updateVersioned(userId, id, updates, versionActor(a), reason, expectedVersion);
     if (!updated) throw new ScopeError(404, NOT_FOUND);
     return updated;
   },

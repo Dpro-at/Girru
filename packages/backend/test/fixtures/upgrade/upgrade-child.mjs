@@ -36,6 +36,8 @@ const deps = await import(join(backendDir, 'src/services/departments.ts'));
 const { sql } = await import(join(backendDir, 'src/repositories/sql-steps.ts'));
 const sync1 = await deps.syncDepartments();
 const sync2 = await deps.syncDepartments();
+const { backfillProvenance } = await import(join(backendDir, 'src/memory/validity.ts'));
+const provenance = { filled: await backfillProvenance(2), again: await backfillProvenance(2) };
 const out = {
   before,
   after: { memories: q('SELECT COUNT(*) AS n FROM memories')[0].n, agents: q('SELECT COUNT(*) AS n FROM agents_config')[0].n, migrations: q('SELECT COUNT(*) AS n FROM migrations')[0].n },
@@ -45,7 +47,8 @@ const out = {
   agentDepartments: q('SELECT id, department, department_id FROM agents_config ORDER BY id'),
   verify: await sql().read(deps.verifyDepartmentsStep('fx-owner')),
   questions: (await deps.openDepartmentQuestions('fx-owner')).map((x) => x.name),
-  sync1, sync2,
+  sync1, sync2, provenance,
+  sources: q('SELECT id, source, trust FROM memories ORDER BY id'),
 };
 log(JSON.stringify(out));
 process.exit(0);

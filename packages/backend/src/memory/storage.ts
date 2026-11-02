@@ -19,6 +19,7 @@ import { lexicalTokens } from './text-normalize.js';
 import { MIN_RECALL_SCORE, WORKING_LAYER_BOOST, bm25Scores, hybridScore, vectorScore } from './hybrid.js';
 import { onMemorySaved } from './graph/store.js';
 import { NOT_ARCHIVED_SQL } from './scopes/store.js';
+import { NOT_REPLACED_SQL } from './validity.js';
 import {
   DRAWER_KEY_SQL,
   DRAWER_KIND_SQL,
@@ -87,13 +88,23 @@ const SQLITE_MEMORIES_COLUMNS: Array<[string, string]> = [
   ['topic_key', 'TEXT'],
   // Saving agent (normally added by migration 047)
   ['source_agent_id', 'TEXT'],
+  // STORE-MAP-01 P3 provenance and validity (normally added by migration 165)
+  ['source', 'TEXT'],
+  ['source_ref', 'TEXT'],
+  ['trust', 'TEXT'],
+  ['valid_from', 'TEXT'],
+  ['valid_to', 'TEXT'],
+  ['superseded_by', 'TEXT'],
 ];
 
 const SQLITE_MEMORIES_INDEXES = [
   'CREATE INDEX IF NOT EXISTS idx_memories_layer ON memories(memory_layer)',
   'CREATE INDEX IF NOT EXISTS idx_memories_expiry ON memories(expiry_timestamp) WHERE expiry_timestamp IS NOT NULL',
   "CREATE INDEX IF NOT EXISTS idx_memories_consolidation ON memories(consolidation_status) WHERE memory_layer = 'experiential'",
-  'CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_topic_key ON memories(user_id, drawer_kind, drawer_key, topic_key) WHERE topic_key IS NOT NULL',
+  // A replaced memory keeps its topic key; the key is unique among the others (migration 165).
+  'DROP INDEX IF EXISTS idx_memories_topic_key',
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_topic_current ON memories(user_id, drawer_kind, drawer_key, topic_key) WHERE topic_key IS NOT NULL AND COALESCE(status, 'active') <> 'replaced'",
+  'CREATE INDEX IF NOT EXISTS idx_memories_superseded_by ON memories(superseded_by) WHERE superseded_by IS NOT NULL',
 ];
 
 const UPSERT_COLUMNS = [
@@ -299,7 +310,7 @@ export class MemoryStorage implements IMemoryStorage {
     const dl = yield* dialect();
     if (lock) yield* lockName(`memory-topic:${userId}:${d.kind}:${d.key || ''}:${topicKey}`);
     const row = yield* one(
-      `SELECT * FROM memories WHERE user_id = ? AND drawer_kind = ? AND drawer_key = ? AND topic_key = ?${lock && dl === 'postgres' ? ' FOR UPDATE' : ''}`,
+      `SELECT * FROM memories WHERE user_id = ? AND drawer_kind = ? AND drawer_key = ? AND topic_key = ? AND ${NOT_REPLACED_SQL}${lock && dl === 'postgres' ? ' FOR UPDATE' : ''}`,
       userId, d.kind, d.key || '', topicKey,
     );
     return row ? this.rowToMemory(row) : null;
@@ -454,8 +465,8 @@ export class MemoryStorage implements IMemoryStorage {
       where += ` AND ${filter.sql}`;
       params.push(...filter.params);
     }
-    // MEM-SCALE-01: an archived project is kept but never recalled.
-    where += ` AND ${NOT_ARCHIVED_SQL}`;
+    // MEM-SCALE-01: an archived project is kept but never recalled; P3: nor is a replaced fact.
+    where += ` AND ${NOT_ARCHIVED_SQL} AND ${NOT_REPLACED_SQL}`;
 
     // Support both legacy minImportance (1-10) and new minImportanceScore (0-1)
     if (query.minImportanceScore !== undefined) {

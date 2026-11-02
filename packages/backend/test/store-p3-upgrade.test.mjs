@@ -29,6 +29,9 @@ for (const file of ['girru-1.3.2.sql', 'girru-1.4.1.sql']) {
     for (const a of out.agentDepartments.filter((x) => x.department)) assert.ok(a.department_id, `${a.id} has its department id`);
     assert.deepEqual(out.verify, []);
     assert.deepEqual(out.sync2, { copied: 0, created: 0, filled: 0, questions: 0 }, 'the backfill is idempotent');
+    assert.equal(out.provenance.filled, out.before.memories, 'every memory gets its source once');
+    assert.equal(out.provenance.again, 0);
+    for (const r of out.sources) assert.ok(r.source && r.trust, `${r.id} has source and trust`);
     if (file.includes('1.4')) {
       assert.equal(out.departments.find((d) => d.norm_name === 'engineering').id, 'dept-fx1', 'memory\'s department keeps its id');
       assert.deepEqual(out.questions, ['designers']);
