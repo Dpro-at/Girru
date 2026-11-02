@@ -21,7 +21,9 @@ import { knowledgeContext } from '../agent-file-library.js';
 import { rulesByPrecedence, rulesContext, sessionProject } from '../agent-rules.js';
 import { guidesIndex } from './guides.js';
 import { storeP2Enabled } from './switch.js';
-import { pinnedFactsBlock } from '../../memory/scopes/pinned.js';
+import { pinnedFactsBlock, scopeFactAccess } from '../../memory/scopes/pinned.js';
+import { loadRunPermissions } from '../../tools/agent-permissions.js';
+import { narrowProjectMemory } from '../../tools/memory/project-access.js';
 import { handoffText, projectHandoff } from '../../memory/bridge/brief.js';
 import { selectDrawers, type DrawerRef } from '../../memory/drawers.js';
 import { outsiderAgentMemoryEnabled } from '../outsider-memory.js';
@@ -49,7 +51,7 @@ export interface ResolvedAgentContext {
   };
   ownerRules: string;
   data: { pinnedFacts: string; handoff: string };
-  /** The drawers recall may read in this context (policy applied before any retrieval). */
+  /** The drawers recall may read in this context: the policy, then this agent's memory access (applied before any retrieval). */
   drawers: DrawerRef[];
   /** P2: skills and specialties are listed by name; the agent reads one with guide_read. */
   guidesByName: boolean;
@@ -92,9 +94,24 @@ export async function resolveAgentContext(input: ResolveInput): Promise<Resolved
   const p2 = storeP2Enabled();
   const behavior = (await libraryBehavior(agent.id).catch(() => null))?.promptBlock ?? '';
 
+  // What THIS agent may read here (CORE-PERMS-01, MEM-SCALE-01), applied before anything is loaded,
+  // as chat does: pinned facts by its fact access, the handoff and the drawers by its memory access.
+  const slug = project?.slug ?? null;
+  const perms = ownerId && policy.memory
+    ? await loadRunPermissions(agent.id, [], { userId: ownerId, project: slug }).catch(() => null)
+    : null;
+  const memoryRead: readonly string[] = perms?.memoryRead ?? [];
+  const openDrawers = policy.memory ? selectDrawers({ audience: 'owner', project: slug }) : [];
+  const drawers = perms && ownerId
+    ? ((await narrowProjectMemory({ agentId: agent.id, userId: ownerId, memoryDrawers: openDrawers }).catch(() => [])) ?? []).filter((d) => memoryRead.includes(d.kind))
+    : [];
+
   const data = { pinnedFacts: '', handoff: '' };
-  if (ownerId && policy.pinnedFacts) data.pinnedFacts = await pinnedFactsBlock(ownerId, project?.slug ?? null).catch(() => '');
-  if (ownerId && project && policy.handoff) {
+  if (ownerId && perms && policy.pinnedFacts) {
+    const allow = scopeFactAccess(perms, openDrawers.some((d) => d.kind === 'owner'));
+    if (allow.company || allow.project) data.pinnedFacts = await pinnedFactsBlock(ownerId, slug, allow).catch(() => '');
+  }
+  if (ownerId && perms && project && policy.handoff && drawers.some((d) => d.kind === 'project')) {
     const h = await projectHandoff(ownerId, project.id).catch(() => null);
     data.handoff = h ? handoffText(h) : '';
   }
@@ -115,7 +132,7 @@ export async function resolveAgentContext(input: ResolveInput): Promise<Resolved
     },
     ownerRules: await (p2 ? rulesByPrecedence(agent.id, projectId ?? null) : rulesContext(agent.id, { projectId: projectId ?? null })).catch(() => ''),
     data,
-    drawers: policy.memory ? selectDrawers({ audience: 'owner', project: project?.slug ?? null }) : [],
+    drawers,
     guidesByName: p2,
   };
 }

@@ -354,3 +354,47 @@ test('routes: owner only; capability issue and revoke; sync status and rebuild o
     } finally { delete process.env.GIRRU_STORE_PILOT; }
   } finally { await app.close(); }
 });
+
+// --- security review fixes ---------------------------------------------------------
+
+test('projection: a linked .girru or brief.md is refused; nothing is written through a link', async () => {
+  const { symlinkSync, lstatSync } = await import('node:fs');
+  const outsideDir = join(dir, 'elsewhere');
+  mkdirSync(outsideDir, { recursive: true });
+  // brief.md replaced by a link to a file outside the project.
+  const victim = join(outsideDir, 'victim.md');
+  writeFileSync(victim, 'do not touch\n');
+  rmSync(brief);
+  symlinkSync(victim, brief);
+  await save('Alpha uses a second region.');
+  let r = await P.runBriefProjection(scope, { force: true, overwrite: true });
+  assert.equal(r.status, 'conflict');
+  assert.equal(readFileSync(victim, 'utf8'), 'do not touch\n', 'the linked file is untouched');
+  assert.ok(lstatSync(brief).isSymbolicLink(), 'the link is left for the owner');
+  rmSync(brief);
+  // .girru itself replaced by a link to a folder outside the project.
+  const girru = join(folder, '.girru');
+  renameSync(girru, `${girru}-moved`);
+  symlinkSync(outsideDir, girru);
+  r = await P.runBriefProjection(scope, { force: true });
+  assert.equal(r.status, 'conflict');
+  assert.ok(!existsSync(join(outsideDir, 'brief.md')), 'nothing written into the linked folder');
+  rmSync(girru);
+  renameSync(`${girru}-moved`, girru);
+  assert.equal((await P.runBriefProjection(scope, { force: true })).status, 'up_to_date');
+});
+
+test('resolved context: an agent without project memory access gets no project facts and no handoff', async () => {
+  const perms = await import(join(backendDir, 'src/tools/agent-permissions.ts'));
+  const { saveBridgeHandoff } = await import(join(backendDir, 'src/memory/bridge/store.ts'));
+  await saveBridgeHandoff(OWNER, project.id, 'claude-code', { done: ['Alpha release notes drafted'], left: [], next: [], questions: [] }).catch(() => null);
+  const open = await resolveAgentContext({ agentId: 'sp-agent', entry: 'chat', ownerId: OWNER, projectId: project.id });
+  assert.match(open.data.pinnedFacts, /Al-Zawraa/, 'with access: project facts');
+  assert.ok(open.drawers.some((d) => d.kind === 'project'));
+  const view = await perms.getAgentPermissionsView('sp-agent');
+  await perms.setAgentPermissions('sp-agent', { memoryRead: ['owner', 'experience'], memoryWrite: ['experience'], sharedMemory: view.sharedMemory, modes: view.modes }, view.version, OWNER);
+  const closed = await resolveAgentContext({ agentId: 'sp-agent', entry: 'coding_app', ownerId: OWNER, projectId: project.id });
+  assert.doesNotMatch(closed.data.pinnedFacts, /Al-Zawraa/, 'no project facts without project memory access');
+  assert.equal(closed.data.handoff, '', 'no project handoff without project memory access');
+  assert.ok(!closed.drawers.some((d) => d.kind === 'project'));
+});

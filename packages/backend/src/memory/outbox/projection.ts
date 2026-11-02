@@ -16,13 +16,14 @@
  *    deleted line can never forget a memory.
  */
 
-import fs from 'node:fs';
+import fs, { constants } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { q } from '../../repositories/sql-steps.js';
 import { nowText } from '../../db/pg/dialect.js';
 import { findProject, type Project } from '../../repositories/chat-conversations.js';
 import { briefMarkdown, projectBrief } from '../bridge/brief.js';
+import { redactImportText } from '../import/redact.js';
 import { latestSeq, scopeInfo, enabledScopes } from './events.js';
 
 export const BRIEF_CONSUMER = 'brief-file';
@@ -63,11 +64,44 @@ export interface RunOptions {
 
 const sha = (text: string | Buffer): string => createHash('sha256').update(text).digest('hex');
 
-function fileHash(file: string): string | null {
-  try { return sha(fs.readFileSync(file)); } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+/** A file or folder Girru may not write through: a link, a different kind of entry, or a hard-linked file. */
+class UnsafeEntryError extends Error {}
+
+/** The bytes of a regular file, read without following a link; null when it does not exist. */
+function readNoFollow(file: string): Buffer | null {
+  let fd: number;
+  try { fd = fs.openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)); } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return null;
+    if (code === 'ELOOP' || code === 'EMLINK') throw new UnsafeEntryError(`${path.basename(file)} is a link`);
     throw err;
   }
+  try {
+    const st = fs.fstatSync(fd);
+    if (!st.isFile() || st.nlink !== 1) throw new UnsafeEntryError(`${path.basename(file)} is not a plain file`);
+    return fs.readFileSync(fd);
+  } finally { fs.closeSync(fd); }
+}
+
+function fileHash(file: string): string | null {
+  const b = readNoFollow(file);
+  return b === null ? null : sha(b);
+}
+
+/**
+ * `<folder>/.girru`, made or checked: a real folder (never a link) whose real
+ * path is inside the project folder's real path.
+ */
+function girruDir(folder: string): string {
+  const root = fs.realpathSync.native(folder);
+  const dir = path.join(root, path.dirname(BRIEF_FILE));
+  let st: fs.Stats | null = null;
+  try { st = fs.lstatSync(dir); } catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err; }
+  if (st && (st.isSymbolicLink() || !st.isDirectory())) throw new UnsafeEntryError('.girru in the project folder is a link or a file');
+  if (!st) fs.mkdirSync(dir, { mode: 0o755 });
+  const real = fs.realpathSync.native(dir);
+  if (real !== dir || path.dirname(real) !== root) throw new UnsafeEntryError('.girru is outside the project folder');
+  return dir;
 }
 
 function toState(r: any): ProjectionState {
@@ -150,8 +184,12 @@ async function runOnce(scope: string, opts: RunOptions): Promise<RunResult> {
   try { if (!fs.statSync(folder).isDirectory()) throw new Error('not a folder'); } catch {
     return result(await setStatus(s, 'unreachable', 'The project folder is not reachable', false), false);
   }
-  const target = path.join(folder, BRIEF_FILE);
-  const dir = path.dirname(target);
+  let dir: string;
+  try { dir = girruDir(folder); } catch (err) {
+    if (err instanceof UnsafeEntryError) return result(await setStatus(s, 'conflict', err.message, false), false);
+    return result(await setStatus(s, 'unreachable', 'The project folder is not reachable', false), false);
+  }
+  const target = path.join(dir, path.basename(BRIEF_FILE));
 
   try {
     const max = await latestSeq(scope);
@@ -164,11 +202,18 @@ async function runOnce(scope: string, opts: RunOptions): Promise<RunResult> {
 
     const nextVersion = s.projectionVersion + 1;
     const body = briefMarkdown(await projectBrief(ownerId, project));
+    // The brief is redacted already (brief.ts); a text that still looks like a secret is never written.
+    if (Object.values(redactImportText(body).counts).some((n) => Number(n) > 0)) {
+      return result(await setStatus(s, 'conflict', 'The brief still contains something that looks like a secret; nothing was written', false), false);
+    }
     const text = `<!-- girru:brief scope=${scope} seq=${max} projection=${nextVersion} · generated from Girru's database; edits here are not read back -->\n\n${body}\n`;
 
-    fs.mkdirSync(dir, { recursive: true });
     removeStaged(dir);
-    if (outside && opts.overwrite) fs.copyFileSync(target, path.join(dir, `brief.outside-${nextVersion}.md`));
+    if (outside && opts.overwrite) {
+      // The outside version is kept beside it, copied from the file itself (never through a link).
+      const kept = readNoFollow(target);
+      if (kept) fs.writeFileSync(path.join(dir, `brief.outside-${nextVersion}.md`), kept, { flag: 'wx', mode: 0o644 });
+    }
     const tmp = stage(dir, text);
     try {
       await opts.beforeRename?.();
@@ -194,12 +239,18 @@ async function runOnce(scope: string, opts: RunOptions): Promise<RunResult> {
     s = (await getState(BRIEF_CONSUMER, scope))!;
     return result(s, done.changes === 1, done.changes === 1 ? undefined : 'state moved on during the write');
   } catch (err) {
+    if (err instanceof UnsafeEntryError) return result(await setStatus(s, 'conflict', err.message, false), false);
     s = await setStatus(s, 'waiting', (err as Error)?.message ?? String(err), true);
     return result(s, false, s.lastError ?? undefined);
   }
 }
 
 // --- worker ----------------------------------------------------------------
+
+/** The brief file is gone (an unsafe entry is left to an explicit run, which reports it). */
+function missing(file: string): boolean {
+  try { return fileHash(file) === null; } catch { return false; }
+}
 
 let timer: NodeJS.Timeout | null = null;
 let busy = false;
@@ -211,7 +262,7 @@ export async function projectionTick(): Promise<void> {
   try {
     for (const scope of await enabledScopes()) {
       const s = await syncStatus(scope);
-      if (s.status === 'waiting' || s.status === 'unreachable' || (s.status === 'up_to_date' && s.target && fileHash(s.target) === null)) {
+      if (s.status === 'waiting' || s.status === 'unreachable' || (s.status === 'up_to_date' && s.target && missing(s.target))) {
         await runBriefProjection(scope).catch((err) => console.warn('[Store pilot] projection failed:', (err as Error)?.message));
       }
     }
