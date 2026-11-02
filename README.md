@@ -44,7 +44,7 @@ An open-source operating system for AI agents—bringing your agents, models, to
 
 **🏗️ A product of Dpro. Building since May 2025.**
 
-[🌐 Website](https://girru.dev/) · [⬇️ Download](https://github.com/Dpro-at/Girru/releases) · [📜 Changelog](https://girru.dev/changelog/) · [🤝 Contribute](CONTRIBUTING.md)
+[🌐 Website](https://girru.dev/) · [⬇️ Download](https://github.com/Dpro-at/Girru/releases) · [✅ Features](FEATURES.md) · [📜 Changelog](https://girru.dev/changelog/) · [🤝 Contribute](CONTRIBUTING.md)
 
 </div>
 
@@ -101,16 +101,20 @@ Supported local workflows can stay on your machine. External providers receive t
 
 **Explain your project once. Keep its knowledge working for your team.**
 
-We are developing a unified memory system so supported agents and providers can work from consistent context, reducing the need to repeat information and manually update separate assistants.
+Memory is the core of Girru. Every agent, chat and coding tool works from the same knowledge. You don't repeat yourself, and you don't keep separate assistants up to date by hand.
 
-- 📁 **Project knowledge** — Keep requirements, decisions, preferences, and working context together.
-- 🔄 **Continuity across agents** — Build on earlier work across conversations and providers.
-- 📥 **Knowledge imports** — Bring supported project documents and local agent memory into Girru.
-- ⚙️ **Automatic import controls** — Choose how supported sources are discovered and updated.
-- ✏️ **Memory management** — Review, correct, retain, or forget information.
-- 🔐 **Controlled sharing** — Share relevant knowledge within defined access boundaries.
+- 🗂️ **Organised by what it is about.** You, each project, lessons learned, tasks and people each have their own place. Pinned facts apply at company, department and project level.
+- 🔍 **Finds the right thing.** Search combines keywords with meaning and understands Arabic, including dialect. A knowledge graph links people, projects and topics.
+- 🧑‍⚖️ **Learns with your approval.** Routine facts are saved on their own; important ones wait for you. Contradictions are flagged, every change is versioned, and deleted memories go to a Trash you can restore from.
+- 🧾 **Shows its sources.** Each reply records which memories it used and why.
+- 🤝 **Hands work over.** When a chat or task ends, a short handoff note (done, left, next) lets the next agent continue.
+- 💻 **One memory for your coding tools.** One project brief reaches Claude Code, Codex and Antigravity together, through `AGENTS.md` and a memory server (MCP). Girru writes only inside its own marked section.
+- 📥 **Brings in what you have.** Import past coding conversations and project documents. Secrets are hidden first, and you review before anything is kept.
+- 🔐 **Private by design.** It stays on your computer. Each agent's read and write access is set by company, department and project. Background memory work uses a local model when one is available.
 
 **Unified memory does not mean unrestricted access.** Ownership, scope, and permissions remain part of the system.
+
+See [FEATURES.md](FEATURES.md#-memory) for every memory feature and its status.
 
 Cross-provider coverage is expanding. Sharing context does not transfer a provider’s underlying model or change its training.
 
@@ -362,6 +366,8 @@ Girru is actively developed. Source branches and local previews can contain capa
 | 🏠 **Local coordination and outbound filtering** | Coverage depends on workflow, integration, and release |
 | 🌍 **GenVR creative production and simulation** | In development |
 | 🤖 **Robotics transfer and integrated electronics** | Roadmap |
+
+[FEATURES.md](FEATURES.md) lists every feature, section by section, with its status: built, partly built or planned.
 
 See the [changelog](https://girru.dev/changelog/) and release notes for the capabilities and limitations of each version.
 
