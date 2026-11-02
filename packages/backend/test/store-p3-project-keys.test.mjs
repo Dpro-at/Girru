@@ -100,6 +100,15 @@ test('a new project with the name of a deleted one starts empty (D10)', async ()
   assert.equal(get('SELECT drawer_key FROM memories WHERE id = ?', m1.id).drawer_key, alpha.id, 'it stays with the deleted project');
   assert.equal(await keys.currentProjectKey(OWNER, again.slug), again.id, 'an old link opens the current project');
   assert.equal(await keys.currentProjectKey(OWNER, again.id), again.id);
+  // FD1a: Girru can offer the old memory once; taking it over moves it to the new project.
+  const offer = await keys.deletedProjectMemory(OWNER, again);
+  assert.deepEqual({ key: offer.key, memories: offer.memories }, { key: alpha.id, memories: 1 });
+  assert.equal(await keys.adoptProjectMemory(OWNER, offer.key, again.id) > 0, true);
+  const back = await storage.search({ userId: OWNER, query: 'Alpha ships', drawers: [projectDrawer(again)], limit: 5 });
+  assert.equal(back[0]?.memory.id, m1.id, '"Use its memory" brings it to the new project');
+  assert.equal(await keys.deletedProjectMemory(OWNER, again), null, 'asked only once');
+  // Put it back under the deleted project for the next test.
+  await sql().tx(() => keys.rewriteStep(OWNER, again.id, alpha.id));
 });
 
 test('turning the switch off moves the keys back to slugs', async () => {

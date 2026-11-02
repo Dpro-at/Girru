@@ -47,6 +47,8 @@ export type ConversationsState = Readonly<{
   /** Projects (owner only) and the one the list is filtered to ('' = all chats). */
   projects: readonly Project[];
   projectFilter: string;
+  /** STORE-MAP-01 P3 (FD1a): memory a deleted project with the new project's name left behind, asked once. */
+  adoptOffer?: { projectId: string; name: string; key: string; memories: number } | null;
   /** Git state of the open conversation's project folder. */
   git: WireGit | null;
   runId: string | null;
@@ -267,10 +269,26 @@ export class ConversationsController {
         this.lastCreatedProject = p.id;
         this.publish({ projects: [...this.#state.projects, p].sort((a, b) => a.name.localeCompare(b.name)), projectFilter: p.id });
         this.newChat();
+        void this.offerDeletedMemory(p);
         return null;
       }
       return r.status === 400 ? 'Check the folder: it must be a full path to an existing folder (not the whole disk or your home folder). The repo must be an https or git@ address.' : 'The project was not created.';
     } catch { return 'The project was not created (no connection).'; }
+  }
+  /** P3 (FD1a): a new project starts empty; when a deleted one with its name left memory, ask once (404 while P3 is off). */
+  private async offerDeletedMemory(p: Project) {
+    try {
+      const r = await this.call('GET', `/api/memory/scopes/projects/${encodeURIComponent(p.id)}/deleted-memory`);
+      const m = r.status === 200 ? (r.body as { memory: { key: string; memories: number } | null }).memory : null;
+      if (m) this.publish({ adoptOffer: { projectId: p.id, name: p.name, key: m.key, memories: m.memories } });
+    } catch { /* nothing to offer */ }
+  }
+  /** FD1a: "Use its memory" moves it to the new project; "Start empty" (the default) keeps it apart. */
+  async answerAdoptOffer(use: boolean): Promise<boolean> {
+    const o = this.#state.adoptOffer;
+    this.publish({ adoptOffer: null });
+    if (!o || !use) return true;
+    try { const r = await this.call('POST', `/api/memory/scopes/projects/${encodeURIComponent(o.key)}/adopt`, { projectId: o.projectId }); return r.status === 200; } catch { return false; }
   }
   /** Renames a project or changes its folder or repo (empty folder/repo clears it). */
   async editProject(id: string, input: { name: string; folder: string; repoUrl: string; folders?: { path: string; write: boolean }[] }): Promise<string | null> {

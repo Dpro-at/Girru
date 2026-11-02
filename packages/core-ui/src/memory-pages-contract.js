@@ -193,9 +193,10 @@ export function memoryPagesPath(path) {
     case '/api/memory/graph/clusters': return with_('clusters', QUERIES.clusters);
     case '/api/memory/graph/sync': return with_('graph-sync', null);
     case '/api/handoffs/coding-apps': return with_('coding-handoffs', QUERIES.codingHandoffs);
+    case '/api/memory/scopes/projects': return with_('project-create', null);
   }
   if ((m = /^\/api\/memory\/scopes\/pinned\/([^/]+)$/.exec(base)) && plainId(m[1])) return with_('pinned-fact', null, { id: m[1] });
-  if ((m = /^\/api\/memory\/scopes\/projects\/([^/]+)\/(preview|apply|export)$/.exec(base)) && slug(m[1])) return with_(`project-${m[2]}`, null, { id: m[1] });
+  if ((m = /^\/api\/memory\/scopes\/projects\/([^/]+)\/(preview|apply|export|deleted-memory|adopt)$/.exec(base)) && slug(m[1])) return with_(`project-${m[2]}`, null, { id: m[1] });
   if ((m = /^\/api\/memory\/access\/effective\/([^/]+)$/.exec(base)) && agentId(m[1])) return with_('effective', QUERIES.effective, { id: m[1] });
   if ((m = /^\/api\/memory\/graph\/entities\/([^/]+)$/.exec(base)) && plainId(m[1])) return with_('entity', null, { id: m[1] });
   if ((m = /^\/api\/memory\/graph\/links\/([^/]+)\/(approve|reject)$/.exec(base)) && plainId(m[1])) return with_(`link-${m[2]}`, null, { id: m[1] });
@@ -268,6 +269,10 @@ export function allowedMemoryPages(method, path, body) {
       if (method === 'DELETE') return body === undefined;
       return method === 'PATCH' && record(body) && onlyKeys(body, ['text', 'position']) && Object.keys(body).length > 0
         && (body.text === undefined || text(body.text, MAX_PINNED_TEXT)) && (body.position === undefined || (Number.isInteger(body.position) && body.position >= 0 && body.position <= 1000));
+    // STORE-MAP-01 P3 (FD1): a real project from Memory; the memory a deleted one left; "Use its memory".
+    case 'project-create': return method === 'POST' && record(body) && onlyKeys(body, ['name']) && text(body.name, 80) && body.name.trim().length > 0;
+    case 'project-deleted-memory': return get;
+    case 'project-adopt': return method === 'POST' && record(body) && onlyKeys(body, ['projectId']) && plainId(body.projectId);
     case 'project-preview': return method === 'POST' && projectAction(body, false);
     case 'project-apply': return method === 'POST' && projectAction(body, true);
     case 'access-preview': return method === 'POST' && record(body) && onlyKeys(body, ['changes']) && changes(body.changes);
@@ -596,6 +601,9 @@ export function memoryPagesResponse(path, status, body) {
         effects: effects(body.effects), ...(p.route === 'project-preview' ? (hash(body.previewHash) ? { previewHash: body.previewHash } : fail()) : { result: effects(body.result) }),
       };
     case 'project-export': return exported(body, p.id);
+    case 'project-create': return { project: record(body.project) && plainId(body.project.key) ? { key: body.project.key, name: clip(body.project.name, 80) } : fail() };
+    case 'project-deleted-memory': return { memory: record(body.memory) && plainId(body.memory.key) ? { key: body.memory.key, name: clip(body.memory.name, 80), memories: count(body.memory.memories) } : null };
+    case 'project-adopt': return { moved: count(body.moved) };
     case 'access': return { version: count(body.version), rules: list(body.rules, 5000).map(rule), templates: list(body.templates, 200).map(template) };
     case 'access-preview': return accessPreview(body);
     case 'access-apply': return { version: count(body.version), preview: accessPreview(record(body.preview) ? body.preview : fail()) };

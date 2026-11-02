@@ -54,7 +54,7 @@ export function* keyStateStep(ownerId: string): Step<KeyedBy> {
   return r?.keyed_by === 'id' ? 'id' : 'slug';
 }
 
-function* rewriteStep(ownerId: string, from: string, to: string): Step<number> {
+export function* rewriteStep(ownerId: string, from: string, to: string): Step<number> {
   let n = 0;
   for (const k of KEYED) {
     const a = k.prefix ? k.prefix + from : from;
@@ -137,4 +137,39 @@ export async function currentProjectKey(ownerId: string, key: string): Promise<s
   if (r) return r.id;
   const m = await sql().read(one<{ project_id: string }>('SELECT project_id FROM memory_project_keys WHERE owner_id = ? AND slug = ?', ownerId, key));
   return m?.project_id ?? key;
+}
+
+const norm = (x: string): string => x.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
+
+/**
+ * FD1a: memory a deleted project with this name left behind (P3 keeps it under
+ * the deleted project's id). Null when there is none, or while P3 is off.
+ */
+export async function deletedProjectMemory(ownerId: string, project: { id: string; name: string; slug: string }): Promise<{ key: string; name: string; memories: number } | null> {
+  if (!storeP3Enabled()) return null;
+  return sql().read((function* () {
+    const live = new Set((yield* all<{ id: string }>('SELECT id FROM chat_projects WHERE user_id = ?', ownerId)).map((c) => c.id));
+    const candidates = new Map<string, string>();
+    for (const r of yield* all<{ slug: string; name: string | null }>('SELECT slug, name FROM memory_project_scopes WHERE owner_id = ?', ownerId)) if (r.name) candidates.set(r.slug, r.name);
+    for (const r of yield* all<{ slug: string; project_id: string }>('SELECT slug, project_id FROM memory_project_keys WHERE owner_id = ?', ownerId)) if (!candidates.has(r.project_id)) candidates.set(r.project_id, r.slug);
+    for (const [key, name] of candidates) {
+      if (live.has(key) || key === project.id) continue;
+      if (norm(name) !== norm(project.name) && norm(name) !== norm(project.slug)) continue;
+      const n = Number((yield* one<{ n: number }>("SELECT COUNT(*) AS n FROM memories WHERE user_id = ? AND drawer_kind = 'project' AND drawer_key = ?", ownerId, key))?.n ?? 0);
+      if (n > 0) return { key, name, memories: n };
+    }
+    return null;
+  })());
+}
+
+/** FD1a "Use its memory": the deleted project's memory moves to the new project (one transaction). */
+export async function adoptProjectMemory(ownerId: string, fromKey: string, projectId: string): Promise<number> {
+  return sql().tx(function* () {
+    const p = yield* one<{ id: string }>('SELECT id FROM chat_projects WHERE user_id = ? AND id = ?', ownerId, projectId);
+    if (!p) throw Object.assign(new Error('Project not found'), { status: 404 });
+    if (yield* one('SELECT 1 AS x FROM chat_projects WHERE user_id = ? AND id = ?', ownerId, fromKey)) throw Object.assign(new Error('That memory belongs to a project'), { status: 409 });
+    // The new project's own scope row (if any) gives way to the old one, which keeps department and pins.
+    yield* run('DELETE FROM memory_project_scopes WHERE owner_id = ? AND slug = ?', ownerId, projectId);
+    return yield* rewriteStep(ownerId, fromKey, projectId);
+  }, { immediate: true });
 }

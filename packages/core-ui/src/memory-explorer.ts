@@ -153,6 +153,14 @@ export class MemoryExplorerController extends Store<ExplorerState> {
     } catch { this.publish({ busy: false, notice: 'The change was not saved (no connection).' }); return false; }
   }
 
+  /** STORE-MAP-01 P3 (FD1b): "Remember › New project…" makes a real project; resolves with its key. */
+  async makeProject(name: string): Promise<string | null> {
+    try {
+      const r = await this.req('POST', '/api/memory/scopes/projects', { name: name.trim().slice(0, 80) });
+      if (r.status !== 201 && r.status !== 200) { this.publish({ notice: 'The project was not made. Try again.' }); return null; }
+      return (r.body as { project: { key: string } }).project.key;
+    } catch { this.publish({ notice: 'The project was not made (no connection).' }); return null; }
+  }
   /** FD3e: drop my text and show the version saved meanwhile. */
   async keepTheirs() { const id = this.getSnapshot().open; this.publish({ editing: false, conflict: null }); if (id) await this.openMemory(id); }
   /** FD3: "Mark as checked" and its undo (P3). */

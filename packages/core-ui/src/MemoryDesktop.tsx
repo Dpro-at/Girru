@@ -604,7 +604,19 @@ function RememberSheet({ k, onClose, onSaved }: { k: K; onClose: () => void; onS
     const i = v.indexOf(':');
     x.editAdd({ drawer: i < 0 ? { kind: v as 'owner' } : { kind: v.slice(0, i) as 'project', key: v.slice(i + 1) } });
   }
-  const save = async () => { const before = x.getSnapshot().result; await x.saveAdd(); const after = x.getSnapshot(); if (!after.adding && after.result !== before) onSaved(); };
+  const p3 = useContext(P3);
+  const save = async () => {
+    const before = x.getSnapshot().result;
+    // P3 (FD1b): a new project name becomes a real project (also in Chat and Board) before the memory is saved.
+    const cur = x.getSnapshot().adding;
+    if (p3 && cur && cur.drawer.kind === 'project' && cur.drawer.key && !projects.some(p => p.slug === cur.drawer.key)) {
+      const key = await x.makeProject(cur.drawer.key);
+      if (!key) return;
+      x.editAdd({ drawer: { kind: 'project', key } });
+      void sc.load(true);
+    }
+    await x.saveAdd(); const after = x.getSnapshot(); if (!after.adding && after.result !== before) onSaved();
+  };
   return <Sheet title="Remember" onClose={onClose} actions={<><button type="button" onClick={onClose}>Cancel</button><button type="button" className="primary" disabled={s.busy || !a.content.trim()} onClick={() => void save()}>Remember</button></>}>
     <label className="dk-field">What to remember<textarea autoFocus rows={3} dir="auto" value={a.content} maxLength={50000} onChange={e => x.editAdd({ content: e.target.value })}
       onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void save(); } }}/></label>
@@ -614,7 +626,7 @@ function RememberSheet({ k, onClose, onSaved }: { k: K; onClose: () => void; onS
       {where.startsWith('project:') && !projects.some(p => `project:${p.slug}` === where) && <option value={where}>{where.slice(8) || 'New project…'}</option>}
       <option value="project:">New project…</option><option value="task:">A task…</option><option value="people:">A person…</option></select></label>
     {(where === 'project:' || where.startsWith('task:') || where.startsWith('people:') || (where.startsWith('project:') && !projects.some(p => `project:${p.slug}` === where))) &&
-      <label className="dk-field">Name<input value={a.drawer.key ?? ''} placeholder={a.drawer.kind === 'people' ? 'e.g. mona' : a.drawer.kind === 'task' ? 'e.g. logo' : 'e.g. new-shop'} maxLength={64} onChange={e => x.editAdd({ drawer: { kind: a.drawer.kind, key: e.target.value } })}/></label>}
+      <label className="dk-field">Name<input value={a.drawer.key ?? ''} placeholder={a.drawer.kind === 'people' ? 'e.g. mona' : a.drawer.kind === 'task' ? 'e.g. logo' : p3 ? 'e.g. New shop' : 'e.g. new-shop'} maxLength={p3 && a.drawer.kind === 'project' ? 80 : 64} onChange={e => x.editAdd({ drawer: { kind: a.drawer.kind, key: e.target.value } })}/></label>}
     <button type="button" className="link-button dk-disclose" aria-expanded={more} onClick={() => setMore(v => !v)}><UiIcon name="chevron" size={11}/>More (kind, importance, topic)</button>
     {more && <div className="dk-more-fields">
       <label className="dk-field">Kind<select value={a.type} onChange={e => x.editAdd({ type: e.target.value as MemoryType })}>{memoryTypes.map(t => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}</select></label>

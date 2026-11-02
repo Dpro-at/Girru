@@ -52,7 +52,8 @@ import { actorOrReply, requireOwner } from '../../repositories/scope.js';
 import { resolveFileAgent } from '../../memory/memory-files.js';
 import { setChecked } from '../../memory/validity.js';
 import { storeP3Enabled } from '../../services/store-p3.js';
-import { currentProjectKey } from '../../memory/project-keys.js';
+import { adoptProjectMemory, currentProjectKey, deletedProjectMemory } from '../../memory/project-keys.js';
+import { createProject as createChatProject, findProject as findChatProject } from '../../repositories/chat-conversations.js';
 import {
   ScopeInputError, accessOverview, addPinnedFact, applyAccessChanges, applyProjectAction, createDepartment, deleteDepartment, effectiveAccess,
   exploreScope, exportProject, invalidateScopeTree, listAgentScopes, listPinnedFacts, parseActionInput, parsePinnedScope, pinnedScopeId,
@@ -212,6 +213,34 @@ export async function memoryScopeRoutes(fastify: FastifyInstance) {
   });
 
   // ---- project lifecycle ----
+  // STORE-MAP-01 P3 (FD1): a real project made from Memory (no folder needed); the memory a deleted
+  // project with the same name left behind, and "Use its memory". 404 while the switch is off.
+  route('POST', '/api/memory/scopes/projects', async (owner, request, reply) => {
+    if (!storeP3Enabled()) return reply.code(404).send({ error: 'Not found', code: 'p3_off' });
+    const name = body(request).name;
+    if (typeof name !== 'string' || !name.trim()) throw new ScopeInputError('Give the project a name');
+    const p = await createChatProject(owner.userId!, { name });
+    invalidateScopeTree(owner.userId!);
+    return reply.code(201).send({ project: { key: p.id, name: p.name } });
+  });
+  route('GET', '/api/memory/scopes/projects/:slug/deleted-memory', async (owner, request, reply) => {
+    if (!storeP3Enabled()) return reply.code(404).send({ error: 'Not found', code: 'p3_off' });
+    const p = await findChatProject(owner.userId!, (request.params as { slug: string }).slug);
+    if (!p) throw new ScopeInputError('Project not found', 404, 'not_found');
+    return { memory: await deletedProjectMemory(owner.userId!, p) };
+  });
+  route('POST', '/api/memory/scopes/projects/:slug/adopt', async (owner, request, reply) => {
+    if (!storeP3Enabled()) return reply.code(404).send({ error: 'Not found', code: 'p3_off' });
+    const projectId = body(request).projectId;
+    if (typeof projectId !== 'string') throw new ScopeInputError('projectId is required');
+    const p = await findChatProject(owner.userId!, projectId);
+    const offer = p ? await deletedProjectMemory(owner.userId!, p) : null;
+    if (!offer || offer.key !== (request.params as { slug: string }).slug) throw new ScopeInputError('Nothing to take over', 409, 'nothing_to_adopt');
+    const moved = await adoptProjectMemory(owner.userId!, offer.key, projectId);
+    invalidateScopeTree(owner.userId!);
+    audit(request, owner, 'memory_scope.project_adopt', 'memory_project', projectId, { from: offer.key, moved });
+    return { moved };
+  });
   route('POST', '/api/memory/scopes/projects/:slug/preview', async (owner, request) =>
     previewProjectAction(owner.userId!, (request.params as { slug: string }).slug, parseActionInput(body(request))));
   route('POST', '/api/memory/scopes/projects/:slug/apply', async (owner, request) => {
