@@ -186,7 +186,7 @@ test('editor directory is owner scoped, reuses the saved project and refuses cal
  const result=await call('r-owner','POST',url);assert.equal(result.statusCode,200);assert.equal(result.json().folder,await (await backendModule('src/services/subscription-chat.ts')).chatWorkspace(c.id));
  assert.equal((await call('r-owner','POST',`/api/chat/conversations/${(await R.createConversation('r-other',{agentId:'r-agent'})).id}/editor-directory`)).statusCode,404);
  const folder=join(dir,'editor-project');mkdirSync(folder,{recursive:true});const project=await R.createProject('r-owner',{name:'Editor fixture',folder});const linked=await R.createConversation('r-owner',{agentId:'r-agent',projectId:project.id});
- assert.equal((await call('r-owner','POST',`/api/chat/conversations/${linked.id}/editor-directory`)).json().folder,realpathSync(folder));
+ assert.equal((await call('r-owner','POST',`/api/chat/conversations/${linked.id}/editor-directory`)).json().folder,realpathSync.native(folder));
 });
 test('project edits wait before Ask approval, apply exact reviewed text and reject stale or unowned scopes',async()=>{
  const folder=join(dir,'edit-project');mkdirSync(folder,{recursive:true});const file=join(folder,'hello.txt');writeFileSync(file,'old\n');
