@@ -1,0 +1,24 @@
+{
+  "name": "@agent-player/relay",
+  "version": "0.1.0",
+  "description": "Girru relay: a stateless pass-through for end-to-end encrypted messages between a computer and its paired phones",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "girru-relay": "dist/main.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/main.js",
+    "test": "node --import tsx --import ../../scripts/test-temp-root.mjs --test test/*.test.mjs"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.11.16",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
