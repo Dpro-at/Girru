@@ -1,0 +1,150 @@
+{
+  "version": "p0-1",
+  "description": "STORE-MAP-01 P0 recall set v1 (synthetic, invented facts). Context of every query: owner chat with project 'alpha' open. hit: the target must be in the top 5. no_answer: nothing relevant exists. leak: the memory sits in a drawer or account the query must never reach. stale: an old and a current fact on the same topic; the current one must rank first.",
+  "hit": [
+    { "id": "h01", "lang": "en", "drawer": "owner", "content": "Samir's accountant is Brigitte Huber; she needs the quarterly receipts by the 10th of the following month.",
+      "queries": [
+        { "lang": "en", "q": "Who does the bookkeeping and when are receipts due?" },
+        { "lang": "ar", "q": "من هي المحاسبة وما موعد تسليم الإيصالات؟" },
+        { "lang": "iq", "q": "منو المحاسبة مالتنا وشوكت لازم نسلمها الوصولات؟" } ] },
+    { "id": "h02", "lang": "en", "drawer": "project:alpha", "content": "Project alpha ships its desktop installer through the Sparrow update channel, signed with the hardware key kept in the office safe.",
+      "queries": [
+        { "lang": "en", "q": "How is the alpha installer updated and signed?" },
+        { "lang": "iq", "q": "شلون نوقّع ملف التنصيب مال ألفا؟" } ] },
+    { "id": "h03", "lang": "en", "drawer": "owner", "content": "Never schedule calls on Friday afternoons; Samir keeps that time for family.",
+      "queries": [
+        { "lang": "en", "q": "Can I book a meeting Friday at 3pm?" },
+        { "lang": "ar", "q": "هل يمكن حجز مكالمة مساء الجمعة؟" } ] },
+    { "id": "h04", "lang": "en", "drawer": "experience", "content": "Lesson: the Windows build fails when the path contains Arabic letters, so the CI checkout folder must stay ASCII only.",
+      "queries": [
+        { "lang": "en", "q": "Why did the Windows build break with a non-English folder name?" },
+        { "lang": "ar", "q": "لماذا يفشل البناء على ويندوز عندما يحتوي المسار على حروف عربية؟" } ] },
+    { "id": "h05", "lang": "en", "drawer": "project:alpha", "content": "The alpha landing page uses the colour teal 003f4d for buttons and Inter for headings.",
+      "queries": [
+        { "lang": "en", "q": "Which button colour and heading font does the alpha site use?" },
+        { "lang": "iq", "q": "شنو لون الأزرار بموقع ألفا؟" } ] },
+    { "id": "h06", "lang": "en", "drawer": "owner", "content": "The office internet contract with Magenta ends in March 2027 and must be cancelled three months before.",
+      "queries": [
+        { "lang": "en", "q": "When do we need to cancel the internet contract?" },
+        { "lang": "ar", "q": "متى ينتهي عقد الإنترنت في المكتب؟" } ] },
+    { "id": "h07", "lang": "en", "drawer": "owner", "content": "Samir is allergic to penicillin.",
+      "queries": [
+        { "lang": "en", "q": "Does Samir have any medicine allergy?" },
+        { "lang": "iq", "q": "سمير عنده حساسية من دوا؟" } ] },
+    { "id": "h08", "lang": "en", "drawer": "project:alpha", "content": "Alpha's staging database is restored every Sunday night from the Saturday snapshot.",
+      "queries": [
+        { "lang": "en", "q": "How often is the alpha staging data refreshed?" },
+        { "lang": "ar", "q": "متى تُستعاد قاعدة بيانات الاختبار لمشروع ألفا؟" } ] },
+    { "id": "h09", "lang": "ar", "drawer": "owner", "content": "يفضّل سمير أن تكون التقارير مكتوبة بالعربية البسيطة مع الأرقام في جدول.",
+      "queries": [
+        { "lang": "ar", "q": "كيف يحب سمير شكل التقارير؟" },
+        { "lang": "en", "q": "What report format does Samir like?" },
+        { "lang": "iq", "q": "سمير شلون يريد التقرير؟" } ] },
+    { "id": "h10", "lang": "ar", "drawer": "owner", "content": "مفتاح غرفة الخوادم عند الحارس سعيد في الطابق الأرضي.",
+      "queries": [
+        { "lang": "ar", "q": "أين مفتاح غرفة الخوادم؟" },
+        { "lang": "iq", "q": "وين مفتاح غرفة السيرفرات؟" } ] },
+    { "id": "h11", "lang": "ar", "drawer": "project:alpha", "content": "عميل مشروع ألفا هو شركة الزوراء للتجارة، والدفع على ثلاث دفعات.",
+      "queries": [
+        { "lang": "ar", "q": "من هو عميل مشروع ألفا وكيف يدفع؟" },
+        { "lang": "en", "q": "Who is the alpha client and how do they pay?" } ] },
+    { "id": "h12", "lang": "ar", "drawer": "experience", "content": "درس: لا نرسل عرض السعر قبل أن يوافق سمير على الهامش.",
+      "queries": [
+        { "lang": "ar", "q": "متى يجوز إرسال عرض السعر؟" },
+        { "lang": "iq", "q": "نگدر ندز عرض السعر هسه لو ننتظر؟" } ] },
+    { "id": "h13", "lang": "ar", "drawer": "owner", "content": "المولدة في البيت تحتاج صيانة كل ثلاثة أشهر عند الفني أبو حيدر.",
+      "queries": [
+        { "lang": "ar", "q": "متى صيانة المولدة ومن يقوم بها؟" },
+        { "lang": "iq", "q": "منو يصلّح المولدة وكل شگد؟" } ] },
+    { "id": "h14", "lang": "ar", "drawer": "project:alpha", "content": "اسم المستودع البرمجي لمشروع ألفا هو alpha-core وفرعه الرئيسي main.",
+      "queries": [
+        { "lang": "ar", "q": "ما اسم مستودع الكود لمشروع ألفا؟" },
+        { "lang": "en", "q": "What is the alpha repository called?" } ] },
+    { "id": "h15", "lang": "ar", "drawer": "owner", "content": "رقم حساب الضرائب للشركة محفوظ في خزنة كلمات المرور تحت اسم الضرائب النمساوية.",
+      "queries": [
+        { "lang": "ar", "q": "أين أجد رقم الحساب الضريبي؟" },
+        { "lang": "en", "q": "Where is the company tax number stored?" } ] },
+    { "id": "h16", "lang": "ar", "drawer": "owner", "content": "لا يشرب سمير القهوة بعد الساعة الرابعة عصراً.",
+      "queries": [
+        { "lang": "ar", "q": "هل أقدّم قهوة لسمير في المساء؟" },
+        { "lang": "iq", "q": "سمير يشرب گهوة بالليل؟" } ] },
+    { "id": "h17", "lang": "iq", "drawer": "owner", "content": "سمير ما يحب أحد يتصل بي بعد الساعة عشرة بالليل، إلا إذا الشغلة مستعجلة كلش.",
+      "queries": [
+        { "lang": "iq", "q": "أگدر أخابر سمير بالليل؟" },
+        { "lang": "ar", "q": "هل يمكن الاتصال بسمير ليلاً؟" },
+        { "lang": "en", "q": "Can I call Samir late at night?" } ] },
+    { "id": "h18", "lang": "iq", "drawer": "project:alpha", "content": "سيرفر ألفا الجديد ب فرانكفورت، والقديم بعده شغال لحد ما نخلص النقل.",
+      "queries": [
+        { "lang": "iq", "q": "وين صار سيرفر ألفا؟" },
+        { "lang": "en", "q": "Where is the new alpha server hosted?" } ] },
+    { "id": "h19", "lang": "iq", "drawer": "owner", "content": "البزون مال سمير اسمه زعتر، ياكل بس أكل جاف.",
+      "queries": [
+        { "lang": "iq", "q": "شنو اسم البزون مال سمير؟" },
+        { "lang": "ar", "q": "ما اسم قطة سمير وماذا تأكل؟" },
+        { "lang": "en", "q": "What is the cat called and what does it eat?" } ] },
+    { "id": "h20", "lang": "iq", "drawer": "experience", "content": "تعلمنا: لا تحدّث النظام يوم الخميس، لأن إذا صار خطأ ماكو أحد بالويكند يصلحه.",
+      "queries": [
+        { "lang": "iq", "q": "ليش ما نسوي تحديث يوم الخميس؟" },
+        { "lang": "en", "q": "Why avoid releasing updates on Thursday?" } ] },
+    { "id": "h21", "lang": "iq", "drawer": "owner", "content": "أبو علي صاحب المطبعة يريد الملفات PDF مو صور، وإلا يرجعها.",
+      "queries": [
+        { "lang": "iq", "q": "المطبعة شنو تريد نوع الملف؟" },
+        { "lang": "ar", "q": "ما صيغة الملفات التي تقبلها المطبعة؟" } ] },
+    { "id": "h22", "lang": "iq", "drawer": "project:alpha", "content": "اجتماع ألفا الأسبوعي صار يوم الثلاثاء الساعة عشرة الصبح بدل الاثنين.",
+      "queries": [
+        { "lang": "iq", "q": "شوكت اجتماع ألفا؟" },
+        { "lang": "en", "q": "When is the weekly alpha meeting now?" } ] },
+    { "id": "h23", "lang": "iq", "drawer": "owner", "content": "سمير يحب الشاي بالهيل ويه شوية سكر.",
+      "queries": [
+        { "lang": "iq", "q": "شلون سمير يحب الچاي؟" },
+        { "lang": "en", "q": "How does Samir take his tea?" } ] },
+    { "id": "h24", "lang": "iq", "drawer": "owner", "content": "لا تدز رسايل للزبائن يوم الجمعة الصبح، كلهم بالصلاة.",
+      "queries": [
+        { "lang": "iq", "q": "نگدر ندز رسالة للزبائن جمعة الصبح؟" },
+        { "lang": "ar", "q": "متى لا نرسل رسائل إلى العملاء؟" } ] }
+  ],
+  "no_answer": [
+    { "id": "n01", "lang": "en", "q": "What is the name of Samir's dentist?" },
+    { "id": "n02", "lang": "en", "q": "Which airline do we use for the Tokyo trip?" },
+    { "id": "n03", "lang": "en", "q": "What is the Wi-Fi password at the beach house?" },
+    { "id": "n04", "lang": "ar", "q": "ما اسم مدرّب كرة السلة لابن سمير؟" },
+    { "id": "n05", "lang": "ar", "q": "كم عدد الألواح الشمسية فوق السطح؟" },
+    { "id": "n06", "lang": "iq", "q": "منو جاب الكيكة بعيد ميلاد سارة؟" },
+    { "id": "n07", "lang": "iq", "q": "شنو رقم سيارة أبو حسين الجديدة؟" },
+    { "id": "n08", "lang": "en", "q": "Which violin teacher did Samir hire?" }
+  ],
+  "leak": [
+    { "id": "l01", "lang": "en", "drawer": "project:beta", "content": "Beta client secret: the Kestrel merger closes on 14 December; do not mention it to anyone outside beta.",
+      "q": "When does the merger close?" },
+    { "id": "l02", "lang": "ar", "drawer": "project:beta", "content": "ميزانية مشروع بيتا السرية مئة وعشرون ألف يورو.",
+      "q": "كم ميزانية المشروع؟" },
+    { "id": "l03", "lang": "en", "drawer": "people:p-rania", "content": "Rania told Samir in confidence that she is changing jobs in January.",
+      "q": "Is anyone on the team changing jobs?" },
+    { "id": "l04", "lang": "iq", "user": "other-user", "drawer": "owner", "content": "رمز الباب الخلفي للمخزن 4471، لا تگوله لأحد.",
+      "q": "شنو رمز باب المخزن؟" },
+    { "id": "l05", "lang": "en", "drawer": "task:t-9001", "content": "Draft salary numbers for the 2027 raise round: Omar 4,200, Sara 4,600.",
+      "q": "What salary raise numbers were drafted?" }
+  ],
+  "stale": [
+    { "id": "s01", "lang": "en", "drawer": "owner",
+      "old": { "content": "The office is at Mariahilfer Strasse 12 in Vienna.", "createdAt": "2025-02-10T09:00:00Z" },
+      "new": { "content": "The office moved to Praterstrasse 40 in Vienna.", "createdAt": "2026-09-20T09:00:00Z" },
+      "q": "Where is the office?" },
+    { "id": "s02", "lang": "ar", "drawer": "project:alpha",
+      "old": { "content": "مدير مشروع ألفا هو كريم.", "createdAt": "2025-04-01T09:00:00Z" },
+      "new": { "content": "أصبحت ليلى مديرة مشروع ألفا بدلاً من كريم.", "createdAt": "2026-08-15T09:00:00Z" },
+      "q": "من يدير مشروع ألفا؟" },
+    { "id": "s03", "lang": "iq", "drawer": "owner",
+      "old": { "content": "رقم موبايل المحاسبة الجديد 0660 111 222.", "createdAt": "2025-01-05T09:00:00Z" },
+      "new": { "content": "المحاسبة غيرت رقمها، هسه رقمها 0660 999 333.", "createdAt": "2026-10-01T09:00:00Z" },
+      "q": "شنو رقم المحاسبة؟" },
+    { "id": "s04", "lang": "en", "drawer": "project:alpha",
+      "old": { "content": "Alpha release date is 1 November 2026.", "createdAt": "2026-05-01T09:00:00Z" },
+      "new": { "content": "Alpha release was moved to 15 January 2027 after the security review.", "createdAt": "2026-10-28T09:00:00Z" },
+      "q": "When is the alpha release?" },
+    { "id": "s05", "lang": "en", "drawer": "owner",
+      "old": { "content": "Samir drives a grey Skoda Octavia.", "createdAt": "2025-06-01T09:00:00Z" },
+      "new": { "content": "Samir sold the Skoda; he now drives an electric Hyundai Ioniq.", "createdAt": "2026-07-12T09:00:00Z" },
+      "q": "What car does Samir drive?" }
+  ]
+}
