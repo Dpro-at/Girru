@@ -4,6 +4,8 @@
  * with Stop. Kept in memory only, while it runs; Stop in the chat ends all of them.
  */
 import { randomUUID } from 'node:crypto';
+import { q } from '../repositories/sql-steps.js';
+import { currentChatRun } from './chat-run-context.js';
 
 export type CodingRunView = { id: string; app: string; agentId: string | null; about: string; startedAt: string };
 type CodingRun = CodingRunView & { controller: AbortController };
@@ -17,17 +19,30 @@ const aboutOf = (request: string) => {
   return line.length > 90 ? `${line.slice(0, 89)}…` : line;
 };
 
-/** Registers one coding-app run of a chat; call done() when it ends. */
+export type CodingRunOutcome = 'complete' | 'stopped' | 'error';
+
+/** Registers one coding-app run of a chat; call done() when it ends. RUNS-01: also kept in coding_app_runs (best effort). */
 export function startCodingRun(sessionId: string, app: string, agentId: string | null | undefined, request: string) {
   const run: CodingRun = { id: randomUUID().replace(/-/g, ''), app, agentId: agentId ?? null, about: aboutOf(request), startedAt: new Date().toISOString(), controller: new AbortController() };
   let set = runs.get(sessionId);
   if (!set) runs.set(sessionId, set = new Map());
   set.set(run.id, run);
+  const parent = currentChatRun()?.runId;
+  const saved = q.run('INSERT INTO coding_app_runs (id, session_id, user_id, agent_id, app, about, started_at, parent_run_id) VALUES (?, ?, (SELECT user_id FROM chat_sessions WHERE id = ?), ?, ?, ?, ?, ?)',
+    run.id, sessionId, sessionId, run.agentId, app, run.about, Date.parse(run.startedAt), parent ? `chat:${parent}` : null).catch(() => undefined);
   return {
     id: run.id,
     signal: run.controller.signal,
-    done: () => { const s = runs.get(sessionId); s?.delete(run.id); if (s && !s.size) runs.delete(sessionId); },
+    done: (outcome: CodingRunOutcome = 'complete', errorCode: string | null = null) => {
+      const s = runs.get(sessionId); s?.delete(run.id); if (s && !s.size) runs.delete(sessionId);
+      void saved.then(() => q.run('UPDATE coding_app_runs SET state = ?, error_code = ?, ended_at = ? WHERE id = ?', outcome, outcome === 'error' ? errorCode : null, Date.now(), run.id)).catch(() => undefined);
+    },
   };
+}
+
+/** Every coding-app run working now, with its chat (for Runs). */
+export function liveCodingRuns(): Array<CodingRunView & { sessionId: string }> {
+  return [...runs.entries()].flatMap(([sessionId, set]) => [...set.values()].map(({ controller: _c, ...view }) => ({ ...view, sessionId })));
 }
 
 /** The coding apps working in this chat now (oldest first). */

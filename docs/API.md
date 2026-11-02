@@ -90,6 +90,31 @@ Delete session
 
 ---
 
+## Runs
+
+Everything that runs (chat replies, agent tasks, small helpers, coding apps, system jobs, chats waiting for an OK) in one read model. The owner sees every run; anyone else sees only their own, never system jobs or agent check-ins. Texts are secret-redacted.
+
+### GET /api/runs
+Query: `place` (`running` | `waiting` | `finished` | `failed`), optional `kind` (`chat` | `task` | `helper` | `code` | `job`), `agent`, `project`, `q`, `before` (the `next` value of the previous page), `limit` (up to 100). Returns `{ runs, next, counts: { running, waiting } }`, newest first. Each run has a plain `reason` (`code`, `title`, `text`, `bug`) when it waits, failed or stopped.
+
+### GET /api/runs/item/:id
+One run (`chat:…`, `task:…`, `code:…`, `job:…`, `approval:…`): `{ run, steps, log, result, copy }`.
+
+### POST /api/runs/item/:id/stop
+Stops a working chat reply, agent task or coding app (same gates as the chat and task-run routes). Body `{}`.
+
+### POST /api/runs/item/:id/retry
+Sends a failed or stopped chat reply again, in the same chat, as a new run. Body `{}`.
+
+### GET /api/runs/schedules
+System jobs and agent check-ins (owner), chat schedules and card schedules, each with its next and last run and the last result.
+
+### POST /api/runs/schedules
+Owner only. "Schedule a task": `{ instructions, every, at, weekday?, agentId?, notify?, newChat?, model?, thinking?, projectId? }`. Makes a board card with the instructions and its repeat; each run continues that task. Returns `{ id, boardId, cardId }`.
+
+### GET /api/runs/schedules/:id/runs
+The last runs of one schedule (`job:…`, `chatsch:…`, `cardsch:…`, `checkin:…`).
+
 ## Calendar
 
 ### GET /api/calendar/events

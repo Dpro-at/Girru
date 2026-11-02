@@ -3,7 +3,6 @@ import {FooterSettings} from './FooterSettings';
 import {ChatNoticeSettings} from './ChatNoticeSettings';
 import {PrimaryReplySettings} from './PrimaryReplySettings';
 import {WorkspacePackSettings} from './WorkspacePackSettings';
-import {ScheduledTasks} from './ScheduledTasks';
 import {PreferenceGroup,PreferenceRow} from './Preferences';
 import {AccountSettings} from './SettingsAccount';
 import {ReplyAppsSettings} from './ReplyAppsSettings';
@@ -30,7 +29,7 @@ import { McpSection } from './ToolSections';
 import type { UiIconName } from './ui-icons';
 /** Places that are sections of their own; their Settings rows open them. MCP connections stays in Settings with its places nested, like Memory. */
 type Tool='mcp'|'library';
-type Place='voice'|'general'|'account'|'replies'|'move'|'permissions'|'verification'|'approval-rules'|'keys'|'accounts'|'channels'|'memory'|'schedules'|'departments'|'apps'|Tool|'backups'|'about';
+type Place='voice'|'general'|'account'|'replies'|'move'|'permissions'|'verification'|'approval-rules'|'keys'|'accounts'|'channels'|'memory'|'departments'|'apps'|Tool|'backups'|'about';
 /** Old names ('models', 'sharing', 'connections') still open their places. */
 export type SettingsTab=Place|'models'|'sharing'|'connections';
 type Row={value:Place;label:string;icon:UiIconName;words:string;note?:string;jump?:boolean};
@@ -49,7 +48,6 @@ const ROWS:Record<Place,Row>={
  channels:{value:'channels',label:'Channels',icon:'message',words:'messaging services telegram discord whatsapp trusted senders conversations automatic replies',note:'Messaging services and trusted senders.'},
  mcp:{value:'mcp',label:'MCP connections',icon:'tool',words:'mcp connections connectors tools servers add import coding apps genvr-local',note:'Tools your agents reach through MCP servers.'},
  memory:{value:'memory',label:'Memory',icon:'database',words:MEMORY_PANES.map(p=>p.label).join(' ')+' memory rules sources access',note:'Memory rules, sources and access.'},
- schedules:{value:'schedules',label:'Scheduled tasks',icon:'clock',words:'schedules cron run now pause permission code recent runs',note:'Workspace schedules and recent outcomes.'},
  departments:{value:'departments',label:'Departments',icon:'building',words:'departments teams groups rename move agents new department',note:'The departments of your agents.'},
  apps:{value:'apps',label:'My apps',icon:'layers',words:'applications my apps store add-ons catalogue private',jump:true},
  library:{value:'library',label:'Library',icon:'book',words:'personalities specialties skills library',jump:true},
@@ -82,7 +80,7 @@ export function AppSettings({ onOpenStore, signedIn, preference, onTheme, onAcco
     {name:'Application',keys:['general','account','replies',...ownerOnly(['voice','move'])]},
     {name:'Security',keys:[...ownerOnly(['permissions']),...(user?.role!=='guest'?['verification' as const]:[]),...ownerOnly(['approval-rules']),'keys']},
     {name:'Connections',keys:ownerOnly(['accounts','channels',...(client?['mcp' as const]:[]),'memory'])},
-    {name:'Workspace',keys:[...ownerOnly(['departments','schedules']),...(onOpenApps?['apps' as const]:[]),...(onOpenTool?ownerOnly(['library']):[])]},
+    {name:'Workspace',keys:[...ownerOnly(['departments']),...(onOpenApps?['apps' as const]:[]),...(onOpenTool?ownerOnly(['library']):[])]},
     {name:'',keys:[...ownerOnly(['backups']),'about']},
   ]:[{name:'Application',keys:['general','account','replies']},{name:'',keys:['about']}];
   const allowed=groups.flatMap(g=>g.keys);
@@ -98,7 +96,7 @@ export function AppSettings({ onOpenStore, signedIn, preference, onTheme, onAcco
     {!signedIn&&<div className="settings-signin-note"><p>Sign in to see your account, keys and workspace settings.</p><button type="button" onClick={onAccount}>Sign in</button></div>}
   </nav>;
   const label=aboutOnly?'About Girru':active_==='memory'?`Memory · ${MEMORY_PANES.find(p=>p.key===pane)?.label??'Settings'}`:ROWS[active_].label;
-  const ownTitle=active_==='schedules'||active_==='memory'||active_==='mcp'||active_==='backups';
+  const ownTitle=active_==='memory'||active_==='mcp'||active_==='backups';
   const signIn=(title:string,description:string)=><PreferenceGroup title={title}><PreferenceRow title="Sign in required" description={description} icon="contact"><button type="button" onClick={onAccount}>Sign in</button></PreferenceRow></PreferenceGroup>;
   const page=<div id="settings-view-panel" aria-label={label} className="settings-content settings-st" data-pane={active_}><div className="preferences-page">
       {!ownTitle&&<header className="settings-page-head"><h2 className="settings-page-title">{label}</h2>{ROWS[active_].note&&<p className="settings-page-desc">{ROWS[active_].note}</p>}</header>}
@@ -129,7 +127,6 @@ export function AppSettings({ onOpenStore, signedIn, preference, onTheme, onAcco
       {active_==='channels'&&owner&&<AgentConnectSettings client={client!}/>}
       {active_==='memory'&&owner&&<MemorySettings client={client!} pane={pane} onOpenMemory={onOpenMemory}/>}
       {active_==='mcp'&&owner&&<McpSection client={client!} active={active} nav={mcpNav} openId={mcpOpenId} onOpenAgents={onAgents}/>}
-      {active_==='schedules'&&owner&&<ScheduledTasks client={client!} active={active} onOpenConnections={()=>setTab('channels')}/>}
       {active_==='backups'&&owner&&<SettingsBackups client={client!} active={active}/>}
       {active_==='about'&&<>
         <div className="settings-about-head"><span className="settings-about-mark" aria-hidden="true">G</span><div><strong>Girru</strong><small>Version {info?.version??'development preview'} · {info?(info.connection==='local'?'runs on this computer':'connected installation'):'local browser preview'}</small></div></div>

@@ -63,7 +63,8 @@ import { q } from '../../repositories/sql-steps.js';
 import { chatProgress, conversationCards, createChatCard, replyPlan } from '../../services/chat-board.js';
 import { BoardError } from '../../services/task-board.js';
 import { addCardChat, cardContinueMessage } from '../../services/task-page.js';
-import { runDueCardSchedules } from '../../services/card-schedules.js';
+import { runDueCardSchedules, type CardRunOptions } from '../../services/card-schedules.js';
+import { notify as notifyOwner } from '../../services/notification-service.js';
 import { ChatMemoryError, conversationMemories, rememberFromChat } from '../../services/chat-memory.js';
 import { actorOf } from '../../auth/auth-gate.js';
 import { ChatSearchError, parseSearch, searchConversations } from '../../services/chat-search.js';
@@ -274,7 +275,7 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
   const state = checkpointFolder ? await snapshotState(checkpointFolder).catch(() => 'blocked' as const) : null;
   const before = state === 'blocked' ? null : state;
   starting.delete(b.runId);
-  const runContext: ChatRunContext = { ...journalContext(journal, reviewTools, () => { const run = chatRuns.get(b.runId); if (run) { run.error = 'checkpoint_failed'; run.requestStop(); } }),
+  const runContext: ChatRunContext = { runId: b.runId, ...journalContext(journal, reviewTools, () => { const run = chatRuns.get(b.runId); if (run) { run.error = 'checkpoint_failed'; run.requestStop(); } }),
     // CHAT-BUILD-01 stage 3: the chat's Mode and Thinking, and the project's added folders the agent may read.
     chatMode: c.mode ?? 'auto', thinking: c.thinking ?? 'normal', ...(project?.folders.length ? { readRoots: project.folders.map((f) => f.path) } : {}),
     // CHAT-BUILD-01 stage 5: Steer now, and notices from tools (text that tried to give orders).
@@ -286,7 +287,7 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
     // A failed checkpoint leaves the outcome unknown: close the row as interrupted (later turns ask before every tool).
     onUnstored: async () => { await recoverStaleRun(b.runId); },
     onPersisted: async status => {
-      if (chatRuns.get(b.runId)?.error !== 'checkpoint_failed') await finishChatRun(b.runId, status);
+      if (chatRuns.get(b.runId)?.error !== 'checkpoint_failed') await finishChatRun(b.runId, status, chatRuns.get(b.runId)?.error ?? null);
       else await recoverStaleRun(b.runId);
       if (before && checkpointFolder) {
         const after = await snapshot(checkpointFolder).catch(() => null);
@@ -346,7 +347,7 @@ export async function sendScheduled(userId: string, sessionId: string, message: 
  * card), with the chosen agent (put on the card when it is not yet) and app; its first turn starts at once.
  * The Continue button and a card's schedule both start here.
  */
-export async function continueCard(userId: string, role: string, boardId: string, cardId: string, agentIdIn?: string, model?: string): Promise<{ code: number; body: Record<string, unknown>; conversationId?: string }> {
+export async function continueCard(userId: string, role: string, boardId: string, cardId: string, agentIdIn?: string, model?: string, runId?: string, options?: Partial<CardRunOptions> & { onFinished?: (status: string) => Promise<void> }): Promise<{ code: number; body: Record<string, unknown>; conversationId?: string }> {
   const m = await cardContinueMessage(userId, boardId, cardId);
   if (!m) return { code: 404, body: { code: 'not_found' } };
   const agentId = agentIdIn ?? (await q.one<{ agent_id: string }>('SELECT agent_id FROM board_card_agents WHERE card_id = ? ORDER BY agent_id LIMIT 1', cardId))?.agent_id;
@@ -355,20 +356,35 @@ export async function continueCard(userId: string, role: string, boardId: string
     await q.run("INSERT INTO board_card_agents (card_id, agent_id, role) VALUES (?, ?, 'does')", cardId, agentId);
     await q.run('UPDATE board_cards SET version = version + 1 WHERE id = ?', cardId);
   }
-  const made = await createConversation(userId, { title: m.title, agentId: agentId ?? null, projectId: m.projectId, model: model || undefined });
+  // RUNS-01 (board RN6): a repeating task may keep one chat for all its runs instead of a new chat each time.
+  if (options?.newChat === false) {
+    const last = (await q.one<{ conversation_id: string }>('SELECT conversation_id FROM board_card_chats WHERE card_id = ? ORDER BY added_at DESC, conversation_id DESC LIMIT 1', cardId).catch(() => undefined))?.conversation_id;
+    const same = last ? await findConversation(userId, last) : null;
+    if (same && !same.archived) {
+      const out = await startTurn({ userId, role, c: same, runId: runId ?? `task-${randomUUID()}`, message: m.message, model: model || undefined, onFinished: options.onFinished });
+      return { code: out.code, body: out.body, conversationId: same.id };
+    }
+  }
+  const made = await createConversation(userId, { title: m.title, agentId: agentId ?? null, projectId: options?.projectId ?? m.projectId, model: model || undefined, ...(options?.thinking ? { thinking: options.thinking } : {}) });
   // The card keeps the chat it came from; every Continue is one more of its chats (TASKPAGE-02).
   await q.run('UPDATE board_cards SET conversation_id = ? WHERE id = ? AND conversation_id IS NULL', made.id, cardId);
   await addCardChat(cardId, made.id);
   const c = await findConversation(userId, made.id);
   if (!c) return { code: 404, body: { code: 'not_found' } };
-  const out = await startTurn({ userId, role, c, runId: `task-${randomUUID()}`, message: m.message, model: model || undefined });
+  const out = await startTurn({ userId, role, c, runId: runId ?? `task-${randomUUID()}`, message: m.message, model: model || undefined, onFinished: options?.onFinished });
   return { code: out.code, body: out.body, conversationId: made.id };
 }
 /** A card's schedule is due: Continue as its agent and app (owner only, like chat schedules). */
-async function runScheduledCard(userId: string, boardId: string, cardId: string, agentId: string | null, model: string): Promise<'started' | 'busy' | 'failed'> {
+export async function runScheduledCard(userId: string, boardId: string, cardId: string, agentId: string | null, model: string, runKey: string, options?: CardRunOptions): Promise<'started' | 'busy' | 'failed'> {
   const user = await q.one<{ role: string; status: string }>('SELECT role, status FROM users WHERE id = ?', userId);
   if (!user || user.status !== 'active' || user.role !== 'owner') return 'failed';
-  const out = await continueCard(userId, user.role, boardId, cardId, agentId ?? undefined, model || undefined);
+  const title = (await q.one<{ title: string }>('SELECT title FROM board_cards WHERE id = ?', cardId))?.title ?? 'A scheduled task';
+  // RUNS-01 (board RN6): tell the owner when it ends — always, only when it did not finish, or never.
+  const onFinished = async (status: string) => {
+    const tell = options?.notify === 'all' || ((options?.notify ?? 'important') === 'important' && status !== 'complete');
+    if (tell) await notifyOwner({ userId, title: `“${title}” ${status === 'complete' ? 'finished' : status === 'stopped' ? 'was stopped' : 'did not finish'}`, body: 'Open Runs to see its steps, log and why.', type: status === 'complete' ? 'success' : 'warning', channel: 'in_app', source: 'system', meta: { runId: `chat:${runKey}` } }).catch(() => undefined);
+  };
+  const out = await continueCard(userId, user.role, boardId, cardId, agentId ?? undefined, model || undefined, runKey, { ...options, onFinished });
   return out.code < 300 ? 'started' : out.code === 409 || out.code === 429 ? 'busy' : 'failed';
 }
 

@@ -182,7 +182,7 @@ Girru brings these foundations together:
 | 🧠 **Memory** | Persistent knowledge and project context |
 | 💬 **Conversations** | Connected discussion and work |
 | 📋 **Tasks** | Assignments, ownership, and progress |
-| 🗓️ **Scheduling** | Planned and recurring workflows |
+| 🗓️ **Runs and scheduling** | Everything that runs in one place — logs, results and why a run stopped — plus planned and recurring workflows |
 | ✅ **Approvals** | Owner control over protected decisions |
 | 🔌 **Tools and MCP** | Connections to additional capabilities |
 | 🧩 **Apps and extensions** | Specialised workflows |

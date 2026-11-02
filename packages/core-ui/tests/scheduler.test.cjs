@@ -19,10 +19,13 @@ test('metadata projection strips action settings and run output on both sides of
  assert.throws(()=>schedulerResponse(paths[1],200,{job:{...job,id:'other'}}));
  assert.deepEqual(schedulerResponse(paths[1]+'/execute',200,{success:false,error:'private'}),{success:false});
 });
-test('page uses a searchable list and selected inspector; non-owner render sends no requests',()=>{
- const React=require('../node_modules/react'),{renderToStaticMarkup}=require('../node_modules/react-dom/server'),{ScheduledTasks,scheduleLabel}=require('../src/ScheduledTasks.tsx');
+test('the selected system schedule keeps every control in Runs; non-owner render sends no requests',()=>{
+ const React=require('../node_modules/react'),{renderToStaticMarkup}=require('../node_modules/react-dom/server'),{ScheduledJobInspector,scheduleLabel}=require('../src/ScheduledTasks.tsx');
  let calls=0;const snapshot={phase:'authenticated',epoch:1,user:{role:'owner'}};const client={subscribe:()=>()=>{},getSnapshot:()=>snapshot,request:()=>{calls++;throw Error('no automatic server-render calls')}};
- const html=renderToStaticMarkup(React.createElement(ScheduledTasks,{client}));assert.match(html,/aria-label="New schedule"/);assert.match(html,/Search scheduled tasks/);assert.match(html,/Filter schedules/);assert.match(html,/Selected schedule/);assert.equal(calls,0);
- const denied=renderToStaticMarkup(React.createElement(ScheduledTasks,{client:{...client,getSnapshot:()=>({user:{role:'user'}})}}));assert.match(denied,/Only the workspace owner/);assert.doesNotMatch(denied,/Run now|New schedule/);
+ const html=renderToStaticMarkup(React.createElement(ScheduledJobInspector,{client,jobId:'job-1'}));assert.match(html,/Selected schedule/);assert.match(html,/Loading schedule/);assert.equal(calls,0);
+ const denied=renderToStaticMarkup(React.createElement(ScheduledJobInspector,{client:{...client,getSnapshot:()=>({user:{role:'user'}})},jobId:'job-1'}));assert.match(denied,/Only the workspace owner/);assert.doesNotMatch(denied,/Run now|New schedule/);
  assert.equal(scheduleLabel('*/10 * * * *'),'Every 10 minutes');assert.equal(scheduleLabel('0 9 * * *'),'Daily at 09:00');assert.equal(scheduleLabel('0 9 * * 1'),'Custom schedule');
+ // Every control of the old page is still in the source of the inspector (board RN5b control map).
+ const src=require('node:fs').readFileSync(require('node:path').join(__dirname,'../src/ScheduledTasks.tsx'),'utf8');
+ for(const c of ["'Pause'","'Resume'",'Run now…','Allow to run…','Edit…','Take back the permission…','Undo','detail.cronExpression','Run {detail?scheduleTitle(detail)','<ScheduledDefinitionSheet','<ScheduleConsentSheet'])assert.ok(src.includes(c),c);
 });

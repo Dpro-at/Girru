@@ -367,6 +367,7 @@ export class CronEngine extends EventEmitter implements ICronEngine {
         output: JSON.stringify(output),
         executedAt: new Date(),
         duration,
+        startedBy: trigger,
       });
 
       return {
@@ -386,6 +387,7 @@ export class CronEngine extends EventEmitter implements ICronEngine {
         error: error.message,
         executedAt: new Date(),
         duration,
+        startedBy: trigger,
       });
 
       return {

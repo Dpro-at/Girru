@@ -8,7 +8,9 @@ test('⌘K reaches every Store, Library and Settings place; the approvals count 
  for(const s of ['Store › My apps','Store › Find more','Store › My apps › Trading','Settings › ${label}','Settings › MCP connections','Library › Personalities','Library › Specialties','Library › Skills'])assert.ok(shell.includes(s),s);
  assert.match(shell,/id:'go-store',group:'Store'/);assert.match(shell,/id:'store-updates'/);
  assert.match(shell,/id:'coding-app-plugins'/);
- for(const p of ['channels','accounts','departments','replies','keys','schedules','move','about'])assert.match(shell,new RegExp(`\\['${p}',`));
+ for(const p of ['channels','accounts','departments','replies','keys','move','about'])assert.match(shell,new RegExp(`\\['${p}',`));
+ // RUNS-01: Scheduled tasks left Settings for the Runs section; ⌘K still finds it by the old words.
+ assert.doesNotMatch(shell,/\['schedules',/);assert.match(shell,/id:'scheduled-tasks',group:'Runs',label:'Runs › Scheduled'/);
  // Channels and Accounts are Settings places now; SA6: Apps is Store › My apps, its account link opens Settings › Accounts.
  assert.doesNotMatch(shell,/openApps/);assert.match(shell,/onAccounts=\{\(\)=>openSettings\('accounts'\)\}/);assert.doesNotMatch(shell,/<AppsWorkspace/);
  assert.doesNotMatch(shell,/approvalLabel/);

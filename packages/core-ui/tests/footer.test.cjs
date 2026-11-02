@@ -10,20 +10,20 @@ test('footer route: only known sections pass, Settings can never be hidden',()=>
  assert.deepEqual(footerPrefs(null).hidden,DEFAULT_FOOTER.hidden);
  assert.equal(!!allowedFooter('PUT','/api/me/footer',{hidden:['mcp']}),false);assert.ok(!DEFAULT_FOOTER.hidden.includes('library'));
  // An older saved footer: Library comes in after Agents, shown; MCP connections (now in Settings) drop out.
- const older=footerPrefs({order:['board','chat','agents','mcp'],hidden:['mcp']});assert.deepEqual(older.order.slice(0,4),['board','chat','agents','library']);assert.deepEqual(older.hidden,[]);
+ const older=footerPrefs({order:['board','chat','agents','mcp'],hidden:['mcp']});assert.deepEqual(older.order.slice(0,5),['board','runs','chat','agents','library']);assert.ok(!DEFAULT_FOOTER.hidden.includes('runs'),'RUNS-01: Runs shows by default');assert.deepEqual(older.hidden,[]);
  assert.deepEqual(Object.keys(footerResponse(200,{footer:{hidden:[]},secret:'x'})),['footer']);
 });
-test('footer shows the usual eight sections (Library and Store included), keeps the current one and Settings',()=>{const React=require('../node_modules/react'),{renderToStaticMarkup}=require('../node_modules/react-dom/server'),{ShellFooter}=require('../src/ShellFooter.tsx'),{FooterController}=require('../src/footer-prefs.ts');
+test('footer shows the usual nine sections (Library, Runs and Store included), keeps the current one and Settings',()=>{const React=require('../node_modules/react'),{renderToStaticMarkup}=require('../node_modules/react-dom/server'),{ShellFooter}=require('../src/ShellFooter.tsx'),{FooterController}=require('../src/footer-prefs.ts');
  const c=new FooterController({request:async()=>({status:200,body:{footer:footerPrefs(null)}})}),e=(current=false,badge)=>({available:true,current,run(){},badge});
- const entries={chat:e(),agents:e(),library:e(),board:e(),memory:e(),approvals:e(false,'3'),store:e(),genvr:e(),terminal:e(),code:e(),browser:{available:false,current:false,run(){}},skills:e(true),personalities:e(),specialties:e()};
+ const entries={chat:e(),agents:e(),library:e(),board:e(),runs:e(),memory:e(),approvals:e(false,'3'),store:e(),genvr:e(),terminal:e(),code:e(),browser:{available:false,current:false,run(){}},skills:e(true),personalities:e(),specialties:e()};
  const html=renderToStaticMarkup(React.createElement(ShellFooter,{controller:c,entries,status:null,settingsCurrent:false,onSettings(){},onCustomize(){}}));
- for(const s of ['Chat','Agents','Library','Board','Memory','Approvals','Store','Skills','Settings'])assert.match(html,new RegExp('>'+s+'<'));
+ for(const s of ['Chat','Agents','Library','Board','Runs','Memory','Approvals','Store','Skills','Settings'])assert.match(html,new RegExp('>'+s+'<'));
  for(const s of ['Apps','GenVR','Terminal','Personalities','MCP connections'])assert.doesNotMatch(html,new RegExp('>'+s+'<'));
  assert.match(html,/Choose what the footer shows/);
 });
 test('a hidden place lights its section instead of joining the footer',()=>{const React=require('../node_modules/react'),{renderToStaticMarkup}=require('../node_modules/react-dom/server'),{ShellFooter}=require('../src/ShellFooter.tsx'),{FooterController}=require('../src/footer-prefs.ts');
  const c=new FooterController({request:async()=>({status:200,body:{footer:footerPrefs(null)}})}),e=(current=false,parent)=>({available:true,current,run(){},parent});
- const entries={chat:e(),agents:e(),library:e(),board:e(),memory:e(),approvals:e(),store:e(),genvr:e(false,'store'),terminal:e(false,'store'),code:e(false,'store'),browser:{available:false,current:false,run(){}},skills:e(false,'library'),personalities:e(true,'library'),specialties:e(false,'library')};
+ const entries={chat:e(),agents:e(),library:e(),board:e(),runs:e(),memory:e(),approvals:e(),store:e(),genvr:e(false,'store'),terminal:e(false,'store'),code:e(false,'store'),browser:{available:false,current:false,run(){}},skills:e(false,'library'),personalities:e(true,'library'),specialties:e(false,'library')};
  const html=renderToStaticMarkup(React.createElement(ShellFooter,{controller:c,entries,status:null,settingsCurrent:false,onSettings(){},onCustomize(){}}));
  assert.doesNotMatch(html,/>Personalities</);assert.match(html,/aria-current="page"[^>]*>(?:<svg[\s\S]*?<\/svg>)?<span>Library</);assert.doesNotMatch(html,/aria-current="page"[^>]*>(?:<svg[\s\S]*?<\/svg>)?<span>Agents</);
 });

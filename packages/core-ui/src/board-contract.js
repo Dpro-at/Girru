@@ -131,15 +131,17 @@ export const EVERY = ['hourly', 'daily', 'weekly'];
 function scheduleOk(b) {
   if (!record(b)) return false;
   if (b.every === 'never') return Object.keys(b).length === 1;
-  return onlyKeys(b, ['every', 'at', 'weekday', 'agentId', 'model', 'paused']) && EVERY.includes(b.every) && typeof b.at === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(b.at)
+  return onlyKeys(b, ['every', 'at', 'weekday', 'agentId', 'model', 'paused', 'notify', 'newChat', 'thinking']) && EVERY.includes(b.every) && typeof b.at === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(b.at)
     && (b.every !== 'weekly' ? b.weekday === undefined || b.weekday === null : Number.isInteger(b.weekday) && b.weekday >= 0 && b.weekday <= 6)
-    && (b.agentId === undefined || b.agentId === null || validAgentId(b.agentId)) && (b.model === undefined || modelOk(b.model)) && (b.paused === undefined || typeof b.paused === 'boolean');
+    && (b.agentId === undefined || b.agentId === null || validAgentId(b.agentId)) && (b.model === undefined || modelOk(b.model)) && (b.paused === undefined || typeof b.paused === 'boolean')
+    && (b.notify === undefined || ['important', 'all', 'none'].includes(b.notify)) && (b.newChat === undefined || typeof b.newChat === 'boolean') && (b.thinking === undefined || b.thinking === null || ['quick', 'normal', 'deep'].includes(b.thinking));
 }
 function repeat(r) {
   if (!record(r) || !EVERY.includes(r.every) || typeof r.at !== 'string' || !/^\d\d:\d\d$/.test(r.at)) return null;
   return { every: r.every, at: r.at, weekday: Number.isInteger(r.weekday) && r.weekday >= 0 && r.weekday <= 6 ? r.weekday : null, nextRun: typeof r.nextRun === 'string' ? r.nextRun.slice(0, 40) : '', paused: r.paused === true,
     ...(r.lastRun !== undefined ? { lastRun: typeof r.lastRun === 'string' ? r.lastRun.slice(0, 40) : null } : {}), ...(r.agentId !== undefined ? { agentId: validAgentId(r.agentId) ? r.agentId : null } : {}), ...(r.model !== undefined ? { model: modelOk(r.model) ? r.model : '' } : {}),
-    lastResult: ['started', 'busy', 'failed'].includes(r.lastResult) ? r.lastResult : null };
+    lastResult: ['started', 'busy', 'failed'].includes(r.lastResult) ? r.lastResult : null,
+    ...(['important', 'all', 'none'].includes(r.notify) ? { notify: r.notify } : {}), ...(typeof r.newChat === 'boolean' ? { newChat: r.newChat } : {}), ...(['quick', 'normal', 'deep'].includes(r.thinking) ? { thinking: r.thinking } : {}) };
 }
 const modelOk = x => typeof x === 'string' && (x === '' || /^[A-Za-z0-9][A-Za-z0-9_.:@\/-]{0,99}$/.test(x));
 export function allowedBoard(method, path, body) {
