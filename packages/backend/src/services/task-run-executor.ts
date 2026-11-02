@@ -1,5 +1,8 @@
 import { agentSkillsPrompt } from '../skills/central-store.js';
 import { HANDOFF_NOTE } from '../memory/handoff/store.js';
+import { isPilotAgent } from '../memory/outbox/pilot.js';
+import { resolveAgentContext } from './agent-context/resolve.js';
+import { renderSystemPrompt } from './agent-context/render.js';
 import { taskHandoffText, taskRunOwner } from '../memory/handoff/scope.js';
 import { taskRunPinnedFacts } from '../memory/scopes/task-facts.js';
 /**
@@ -366,7 +369,11 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
         localModel = await resolveLocalModel(wanted, DEFAULT_OLLAMA_MODEL);
         console.log('[TaskRun] No Claude key for this agent; using the local model', { agentId: agent.id, model: localModel });
       }
-      systemPrompt = (agent.system_prompt ?? `You are ${agent.name}, an AI agent.`) + await agentSkillsPrompt(agent.id);
+      // STORE-MAP-01 pilot (CX6): the pilot agent gets the one resolved context (owner rules,
+      // personality, team and knowledge too); every other agent keeps today's prompt.
+      systemPrompt = isPilotAgent(agent.id)
+        ? renderSystemPrompt(await resolveAgentContext({ agentId: agent.id, entry: 'task', ownerId: await taskRunOwner(run.user_id).catch(() => null), projectId: null }))
+        : (agent.system_prompt ?? `You are ${agent.name}, an AI agent.`) + await agentSkillsPrompt(agent.id);
       // CORE-MEM-HANDOFF: the agent's newest note for this board task, and how to leave the next one.
       // A contract that names its tools, or a delegated task, leaves the handoff tools out, so the note on using them too.
       const handoff = await taskHandoffText(run).catch(() => '');

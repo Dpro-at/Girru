@@ -25,6 +25,11 @@ import {
   activity, backflowNow, BridgeError, bridgeStatus, filesApply, filesPreview, mcpCall, openSession, registrationApply, registrationPreview,
   registrationUndo, setClient, setFolder,
 } from '../../memory/bridge/service.js';
+import { CAPABILITY_HEADER, CapabilityError, issueCapability, listCapabilities, revokeCapability } from '../../memory/bridge/capability.js';
+import { findProject } from '../../repositories/chat-conversations.js';
+import { projectScope } from '../../memory/outbox/events.js';
+import { runBriefProjection, syncStatus } from '../../memory/outbox/projection.js';
+import { isPilotProject } from '../../memory/outbox/pilot.js';
 
 const OWNER_ONLY = ['owner'] as const;
 export const BRIDGE_TOKEN_HEADER = 'x-dpro-bridge-token';
@@ -34,7 +39,7 @@ type Req = FastifyRequest<{ Params: Record<string, string>; Querystring: Record<
 const bodyOf = (r: { body?: unknown }): Record<string, any> => (r.body && typeof r.body === 'object' && !Array.isArray(r.body) ? r.body as Record<string, any> : {});
 
 function fail(reply: FastifyReply, err: unknown) {
-  if (err instanceof BridgeError) return reply.code(err.status).send({ error: err.message, code: err.code });
+  if (err instanceof BridgeError || err instanceof CapabilityError) return reply.code(err.status).send({ error: err.message, code: err.code });
   throw err;
 }
 
@@ -61,6 +66,32 @@ export async function memoryBridgeRoutes(fastify: FastifyInstance) {
     entries: await activity(o, { limit: r.query?.limit, client: r.query?.client, projectId: r.query?.projectId }),
   })));
 
+  // --- STORE-MAP-01 pilot: session capabilities and the brief projection (owner only) ---
+  const pilotProject = async (o: string, id: string) => {
+    const p = await findProject(o, id);
+    if (!p) throw new BridgeError('Not found', 404, 'not_found');
+    if (!isPilotProject(p.id)) throw new BridgeError('This project is not in the storage pilot', 409, 'not_pilot');
+    return p;
+  };
+  fastify.post('/api/memory-bridge/projects/:projectId/capabilities', { config }, asOwner(async (o, r) => {
+    const b = bodyOf(r);
+    const issued = await issueCapability({ ownerId: o, actorId: o, actorRole: 'owner', projectId: r.params.projectId,
+      scopes: Array.isArray(b.scopes) ? b.scopes : [], client: typeof b.client === 'string' ? b.client : null, ttlMs: b.ttlMs });
+    return { token: issued.token, capability: issued.capability };
+  }));
+  fastify.get('/api/memory-bridge/projects/:projectId/capabilities', { config }, asOwner(async (o, r) => ({ capabilities: await listCapabilities(o, r.params.projectId) })));
+  fastify.delete('/api/memory-bridge/capabilities/:id', { config }, asOwner(async (o, r) => {
+    if (!(await revokeCapability(o, r.params.id))) throw new BridgeError('Not found', 404, 'not_found');
+    return { revoked: true };
+  }));
+  fastify.get('/api/memory-bridge/projects/:projectId/sync', { config }, asOwner(async (o, r) => ({ sync: await syncStatus(projectScope(await pilotProject(o, r.params.projectId))) })));
+  fastify.post('/api/memory-bridge/projects/:projectId/sync', { config }, asOwner(async (o, r) => {
+    const p = await pilotProject(o, r.params.projectId);
+    const action = bodyOf(r).action;
+    if (action !== 'rebuild' && action !== 'use_girru_version') throw new BridgeError('action must be rebuild or use_girru_version', 400, 'invalid_action');
+    return { result: await runBriefProjection(projectScope(p), action === 'rebuild' ? { force: true } : { force: true, overwrite: true }) };
+  }));
+
   // --- the dpro-memory MCP server (no user token; its own proof, this machine only) ---
   const local = (request: FastifyRequest, reply: FastifyReply): boolean => {
     if (LOOPBACK.has(request.socket?.remoteAddress ?? '')) return true;
@@ -76,6 +107,6 @@ export async function memoryBridgeRoutes(fastify: FastifyInstance) {
   fastify.post('/api/memory-bridge/mcp/call', async (request: Req, reply) => {
     if (!local(request, reply)) return reply;
     const b = bodyOf(request);
-    try { return await mcpCall(b.client, request.headers[BRIDGE_TOKEN_HEADER], b.cwd, b.tool, b.args ?? {}); } catch (err) { return fail(reply, err); }
+    try { return await mcpCall(b.client, request.headers[BRIDGE_TOKEN_HEADER], b.cwd, b.tool, b.args ?? {}, request.headers[CAPABILITY_HEADER]); } catch (err) { return fail(reply, err); }
   });
 }

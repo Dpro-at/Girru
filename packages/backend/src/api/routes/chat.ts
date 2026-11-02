@@ -10,6 +10,9 @@ import { vaultChatFrames } from '../../services/chat-secrets.js';
 import { currentChatRun } from '../../services/chat-run-context.js';
 import {subscriptionModel,subscriptionEnabled,runSubscription,chatImagesSeenBy} from '../../services/subscription-chat.js';
 import {subscriptionAgentContext,subscriptionReplyPrompt} from '../../services/subscription-agent-context.js';
+import {isPilotAgent} from '../../memory/outbox/pilot.js';
+import {resolveAgentContext} from '../../services/agent-context/resolve.js';
+import {renderMemoryData} from '../../services/agent-context/render.js';
 import { agentSkillsPrompt } from '../../skills/central-store.js';
 import { safeConsole } from '../../services/safe-error-log.js';
 /**
@@ -478,6 +481,10 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
         let memoryText='';
         try{const readable=await readableDrawers(selectedAgent.id,drawers,userId);memoryText=(await contextPack({userId,agentId:selectedAgent.id,drawers:readable,persona:'',scopeFacts:null,handoff:input.handoff??null})).text.trim();}
         catch(err){safeConsole.log('[Chat] Memory context unavailable',safeErrorFields(err));}
+        // STORE-MAP-01 pilot (CX6): the pilot agent's coding-app reply also gets its pinned facts and the
+        // project's newest handoff (Girru agents and coding tools), as data, from the one resolved context.
+        if(isPilotAgent(selectedAgent.id)){try{const data=renderMemoryData(await resolveAgentContext({agentId:selectedAgent.id,entry:'coding_app',ownerId:userId,sessionId}));if(data)memoryText=memoryText?`${data}\n\n${memoryText}`:data;}
+          catch(err){safeConsole.log('[Chat] Pilot context unavailable',safeErrorFields(err));}}
         if(memoryText)history=`${capMiddle(memoryText,SUBSCRIPTION_MEMORY_CHARS)}\n\n${history}`;
         const registry=await createAgentToolsRegistry({userId,sessionId,agentId:selectedAgent.id,workspaceDir:input.fileReadRoot,fileReadRoot:input.fileReadRoot,memoryDrawers:drawers,chatPlan:true});
         let toolStep=0;

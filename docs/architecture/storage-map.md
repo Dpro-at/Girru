@@ -137,6 +137,19 @@ Today the generated copies are refreshed every 60 seconds. **Planned:** every ch
 
 Open coding-tool sessions keep the copy they loaded, so the brief asks them to call `project_brief` or `latest_handoff` when work resumes.
 
+### Pilot (one project, off by default)
+
+A first version of the change log, the session capability and the shared agent context runs for one project and one agent when these backend environment variables are set:
+
+| Variable | Effect |
+|---|---|
+| `GIRRU_STORE_PILOT=<project id>` | The project's memory drawer keeps a change log (database triggers, same transaction as each write). A worker keeps `<project folder>/.girru/brief.md` in step and records its status (up to date, waiting, conflict, not reachable, failed). Coding tools must call the `dpro-memory` server with a session capability for this project. |
+| `GIRRU_STORE_PILOT_AGENT=<agent id>` | The agent's task runs use the shared agent context (owner rules, instructions, personality, team, knowledge), and its coding-app replies also get the project's pinned facts and newest handoff as data. |
+
+- **Session capability:** the owner issues one with `POST /api/memory-bridge/projects/:projectId/capabilities` (`scopes`: `brief:read`, `memory:read`, `memory:propose`, `handoff:write`; optional `client`, `ttlMs` up to 24 hours) and revokes it with `DELETE /api/memory-bridge/capabilities/:id`. Girru's launcher passes the token to the coding tool's process as `GIRRU_SESSION_CAPABILITY`; only its hash is stored. The project comes from the capability; a folder path in a call never grants access, and a folder of another project is refused.
+- **Sync status:** `GET /api/memory-bridge/projects/:projectId/sync`; `POST` with `{"action":"rebuild"}` re-renders from the current records, `{"action":"use_girru_version"}` resolves a conflict by keeping the outside file next to the brief and writing Girru's version.
+- Lines removed from `brief.md`, or the whole file, are never read back: the file is regenerated and no memory is forgotten.
+
 ## Privacy
 
 ### What leaves this computer

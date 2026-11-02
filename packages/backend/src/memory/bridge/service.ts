@@ -25,6 +25,8 @@ import { applyFiles, ManagedFileError, previewFiles, type FilesPreview } from '.
 import { applyRegistration, previewRegistration, RegistrationError, undoRegistration } from './registration.js';
 import { runBackflow, type BackflowResult } from './backflow.js';
 import { ensureToken, revokeToken, tokenMatches, checkSessionProof } from './auth.js';
+import { CapabilityError, requireScope, verifyCapability } from './capability.js';
+import { isPilotProject } from '../outbox/pilot.js';
 import {
   allFolderSettings, audit, auditLog, bridgeOwner, clientEnabled, clientStates, folderSettings, lastCalls, listRegistrations, patchFolder,
   projectForFolder, saveBridgeHandoff, setClientEnabled,
@@ -273,14 +275,33 @@ export async function openSession(c: unknown, nonce: unknown, proof: unknown): P
 
 export interface McpAnswer { text: string; data: Record<string, unknown> }
 
-/** One MCP tool call from a CLI running in `cwd`. */
-export async function mcpCall(c: unknown, token: unknown, cwd: unknown, tool: unknown, args: Record<string, unknown> = {}): Promise<McpAnswer> {
+/**
+ * One MCP tool call from a CLI running in `cwd`. With a session capability
+ * (STORE-MAP-01 pilot) the project and the allowed tools come from the
+ * capability; the `cwd` never grants anything and a `cwd` inside another
+ * project is refused. The pilot project accepts no call without one.
+ */
+export async function mcpCall(c: unknown, token: unknown, cwd: unknown, tool: unknown, args: Record<string, unknown> = {}, capability?: unknown): Promise<McpAnswer> {
   const cl = client(c);
   const ownerId = await bridgeOwner();
   if (!ownerId || !(await tokenMatches(ownerId, cl, token))) throw new BridgeError('Not allowed', 401, 'unauthenticated');
   if (!(await clientEnabled(ownerId, cl))) throw new BridgeError(`${CLIENT_NAMES[cl]} is switched off in Girru`, 403, 'client_off');
   if (typeof tool !== 'string' || !(MCP_TOOLS as readonly string[]).includes(tool)) throw new BridgeError('Unknown tool', 400, 'unknown_tool');
-  const project = typeof cwd === 'string' ? await projectForFolder(ownerId, cwd) : null;
+  const folderProject = typeof cwd === 'string' ? await projectForFolder(ownerId, cwd) : null;
+  let project: Project | null = folderProject;
+  if (capability !== undefined && capability !== null && capability !== '') {
+    let cap;
+    try { cap = await verifyCapability(capability); requireScope(cap, tool); } catch (err) {
+      if (err instanceof CapabilityError) throw new BridgeError(err.message, err.status, err.code);
+      throw err;
+    }
+    if (cap.ownerId !== ownerId || (cap.client && cap.client !== cl)) throw new BridgeError('Not allowed', 401, 'unauthenticated');
+    project = (await findProject(ownerId, cap.projectId)) ?? null;
+    if (!project) throw new BridgeError('The project of this session no longer exists', 404, 'unknown_project');
+    if (folderProject && folderProject.id !== project.id) throw new BridgeError('This folder belongs to another project than this session', 403, 'capability_project_mismatch');
+  } else if (folderProject && isPilotProject(folderProject.id)) {
+    throw new BridgeError('This project needs a session started from Girru', 403, 'capability_required');
+  }
   if (!project) throw new BridgeError('Girru does not know this folder. Add it as a project folder in Girru first.', 404, 'unknown_folder');
   const a = args && typeof args === 'object' && !Array.isArray(args) ? args : {};
   // Reads are logged too (tool name only, never the query), so the owner sees which app used the memory and when.

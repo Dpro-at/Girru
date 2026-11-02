@@ -183,6 +183,16 @@ report.entryPoints.taskRun = { reconstructed: 'task-run-executor.ts:369-400', to
   includes: { hired: true, rules: taskSystem.includes(MARK.rules), pinned: taskSystem.includes(MARK.pinned) },
   ...(await measure({ system: taskSystem, conversation: `user: Task: ${QUESTION}`, toolSchemas: JSON.stringify(taskRegistry.getToolsForAPI()) })) };
 
+// 3b. Task run of the storage pilot agent (resolved context, CX6): same tools, the one resolved
+// context instead of the old builder, plus the executor's handoff note and narrowed pinned facts.
+const { resolveAgentContext } = await import(join(backendDir, 'src/services/agent-context/resolve.ts'));
+const { renderSystemPrompt } = await import(join(backendDir, 'src/services/agent-context/render.ts'));
+let pilotTask = renderSystemPrompt(await quietly(() => resolveAgentContext({ agentId: AGENT, entry: 'task', ownerId: OWNER, projectId: null }))) + `\n\n${HANDOFF_NOTE}`;
+if (facts) pilotTask += `\n\n${facts}`;
+report.entryPoints.taskRunPilot = { resolved: 'services/agent-context (STORE-MAP-01 pilot)', tools: taskRegistry.getToolsForAPI().length,
+  includes: { hired: pilotTask.includes(MARK.hired), rules: pilotTask.includes(MARK.rules), pinned: pilotTask.includes(MARK.pinned) },
+  ...(await measure({ system: pilotTask, conversation: `user: Task: ${QUESTION}`, toolSchemas: JSON.stringify(taskRegistry.getToolsForAPI()) })) };
+
 // 4. Coding app (subscription) reply, as the chat.ts subscription branch builds it.
 const { subscriptionAgentContext, subscriptionReplyPrompt } = await import(join(backendDir, 'src/services/subscription-agent-context.ts'));
 const { subscriptionToolLoop } = await import(join(backendDir, 'src/services/subscription-tool-loop.ts'));
