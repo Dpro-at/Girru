@@ -67,7 +67,7 @@ Girru's memory is the centre of the system. You explain something once, and ever
 
 | Feature | What it does | Status |
 |---|---|---|
-| **One brief, every tool** | Girru writes one project brief into `AGENTS.md`. `CLAUDE.md` and `GEMINI.md` point to it, so a single update reaches Claude Code, Codex and Gemini CLI together. | ✅ Built |
+| **One brief, every tool** | Girru writes one project brief into `AGENTS.md`. `CLAUDE.md` and `GEMINI.md` point to it, and Antigravity reads `AGENTS.md` directly, so a single update reaches Claude Code, Codex and Antigravity together. | ✅ Built |
 | **Memory server (MCP)** | Coding tools can read the brief, pinned facts and the latest handoff, search project memory, suggest new memories and leave handoff notes. | ✅ Built |
 | **Automatic connection** | Supported coding tools found on your computer are connected to the memory server. You can preview and undo this. | ✅ Built |
 | **Your text stays yours** | Girru writes only inside its own marked section and never changes your own text around it. | ✅ Built |
@@ -79,7 +79,7 @@ Girru's memory is the centre of the system. You explain something once, and ever
 
 | Feature | What it does | Status |
 |---|---|---|
-| **Import past coding chats** | Reads conversations saved on this computer by Claude Code, Codex, Gemini CLI and Antigravity. They are redacted and you review them first. | ✅ Built |
+| **Import past coding chats** | Reads conversations saved on this computer by Claude Code, Codex and Antigravity (and older Gemini CLI chats). They are redacted and you review them first. | ✅ Built |
 | **Project documents** | You choose project documents to learn from. The originals are never changed. | ✅ Built |
 | **Scheduled project import** | An opt-in schedule that keeps a project's facts up to date. | ✅ Built |
 | **Project databases** | Girru finds a project's local databases (names and tables only, never data or passwords). You decide how much each agent can see. | ✅ Built |

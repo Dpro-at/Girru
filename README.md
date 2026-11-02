@@ -108,7 +108,7 @@ Memory is the core of Girru. Every agent, chat and coding tool works from the sa
 - 🧑‍⚖️ **Learns with your approval.** Routine facts are saved on their own; important ones wait for you. Contradictions are flagged, every change is versioned, and deleted memories go to a Trash you can restore from.
 - 🧾 **Shows its sources.** Each reply records which memories it used and why.
 - 🤝 **Hands work over.** When a chat or task ends, a short handoff note (done, left, next) lets the next agent continue.
-- 💻 **One memory for your coding tools.** One project brief reaches Claude Code, Codex and Gemini CLI together, through `AGENTS.md` and a memory server (MCP). Girru writes only inside its own marked section.
+- 💻 **One memory for your coding tools.** One project brief reaches Claude Code, Codex and Antigravity together, through `AGENTS.md` and a memory server (MCP). Girru writes only inside its own marked section.
 - 📥 **Brings in what you have.** Import past coding conversations and project documents. Secrets are hidden first, and you review before anything is kept.
 - 🔐 **Private by design.** It stays on your computer. Each agent's read and write access is set by company, department and project. Background memory work uses a local model when one is available.
 
