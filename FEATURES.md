@@ -203,7 +203,7 @@ Girru's memory is the centre of the system. You explain something once, and ever
 | **Several reviewers** | An approval rule can require several people to agree. | ✅ Built |
 | **What agents may do** | A permissions grid per agent, plus a list of the tools that no switch covers yet. | ✅ Built |
 | **Spending cap** | A daily limit for paid calls that agents make on their own. | ✅ Built |
-| **Runs page** | Everything that runs (replies, task runs, schedules and background jobs) in one place, with live logs, stop and retry. It is in review and not yet on `main`. | 🧭 Planned |
+| **Runs** | Everything that runs (replies, task runs, schedules and background jobs) in one place, and why each one stopped. | ✅ Built |
 
 ## 💻 Code workspace
 
