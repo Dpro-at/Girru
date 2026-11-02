@@ -44,7 +44,7 @@ An open-source operating system for AI agents—bringing your agents, models, to
 
 **🏗️ A product of Dpro. Building since May 2025.**
 
-[🌐 Website](https://girru.dev/) · [⬇️ Download](https://github.com/Dpro-at/Girru/releases) · [📜 Changelog](https://girru.dev/changelog/) · [🤝 Contribute](CONTRIBUTING.md)
+[🌐 Website](https://girru.dev/) · [⬇️ Download](https://github.com/Dpro-at/Girru/releases) · [✅ Features](FEATURES.md) · [📜 Changelog](https://girru.dev/changelog/) · [🤝 Contribute](CONTRIBUTING.md)
 
 </div>
 
@@ -366,6 +366,8 @@ Girru is actively developed. Source branches and local previews can contain capa
 | 🏠 **Local coordination and outbound filtering** | Coverage depends on workflow, integration, and release |
 | 🌍 **GenVR creative production and simulation** | In development |
 | 🤖 **Robotics transfer and integrated electronics** | Roadmap |
+
+[FEATURES.md](FEATURES.md) lists every feature, section by section, with its status: built, partly built or planned.
 
 See the [changelog](https://girru.dev/changelog/) and release notes for the capabilities and limitations of each version.
 
