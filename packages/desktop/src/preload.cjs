@@ -19,6 +19,8 @@ if (window.location.protocol === 'file:') {
     connect: url => ipcRenderer.invoke('dpro:connect', String(url)),
     useLocal: () => ipcRenderer.invoke('dpro:use-local'),
     retry: () => ipcRenderer.invoke('dpro:retry'),
+    updateFromFailed: () => ipcRenderer.invoke('dpro:failed-update'),
+    otherWorkspace: () => ipcRenderer.invoke('dpro:failed-workspace'),
     openConnect: () => ipcRenderer.invoke('dpro:open-connect'),
     showLogs: () => ipcRenderer.invoke('dpro:show-log-folder'),
     onStartupStatus: callback => {

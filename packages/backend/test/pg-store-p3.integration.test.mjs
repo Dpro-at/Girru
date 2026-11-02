@@ -94,3 +94,21 @@ test('a replaced fact, trust and the edit check (PostgreSQL)', { skip }, async (
   assert.ok(await m.validity.backfillProvenance(1) >= 2);
   assert.equal(Number((await m.q.all('SELECT COUNT(*) AS n FROM memories WHERE user_id = ? AND source IS NULL', owner))[0].n), 0);
 });
+
+test('an older Girru never opens newer data (PostgreSQL)', { skip }, async () => {
+  const assert = (await import('node:assert/strict')).default;
+  const { initializeDatabase } = await import('../src/db/index.ts');
+  process.env.GIRRU_STORE_P3 = '1';
+  process.env.GIRRU_APP_VERSION = '1.6.0-pg';
+  await initializeDatabase();
+  const [row] = await m.q.all('SELECT written_by FROM schema_layout WHERE id = 1');
+  assert.equal(row.written_by, '1.6.0-pg');
+  const id = `9${tag.slice(0, 5)}`;
+  await m.q.run('INSERT INTO migrations (id, name) VALUES (?, ?)', id, `${id}_from_the_future`);
+  try {
+    await assert.rejects(initializeDatabase(), (err) => err.kind === 'layout_newer' && err.details.unknown.includes(id));
+  } finally {
+    await m.q.run('DELETE FROM migrations WHERE id = ?', id);
+  }
+  await initializeDatabase();
+});

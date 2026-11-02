@@ -16,6 +16,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { createLocalRuntime, openLog } = require('./local-runtime.cjs');
+const { startProblemOf, failedParams } = require('./start-problem.cjs');
 const { resolvePayload, backendArgs, checkPayload } = require('./payload.cjs');
 const { loadSettings, saveSettings, remoteOrigin } = require('./settings.cjs');
 const { installNabuEditor } = require('./nabu-editor.cjs');
@@ -166,7 +167,9 @@ async function startLocal() {
     runtime = null;
     log?.write(`start failed: ${error.message}`);
     for (const line of error.logTail || []) log?.write(`  ${line}`);
-    await showPage('failed.html', { reason: error.message });
+    // STORE-MAP-01 P3: an update step that failed, or data from a newer Girru, gets its own page.
+    const problem = startProblemOf(error.logTail || []);
+    await showPage('failed.html', problem ? failedParams(problem) : { reason: error.message });
   }
 }
 
@@ -360,6 +363,19 @@ ipcMain.handle('dpro:use-local', async event => {
 ipcMain.handle('dpro:retry', async event => {
   if (!(mainWindow && event.sender === mainWindow.webContents && !appOrigin)) return { ok: false };
   await applyMode();
+  return { ok: true };
+});
+
+// STORE-MAP-01 P3 (FD4b): from the start page of a workspace a newer Girru wrote.
+ipcMain.handle('dpro:failed-update', async event => {
+  if (!fromFailed(event)) return { ok: false };
+  const view = updater ? await updater.check().catch(() => null) : null;
+  await shell.openExternal(view?.update?.page || 'https://github.com/Dpro-at/Girru/releases');
+  return { ok: true };
+});
+ipcMain.handle('dpro:failed-workspace', async event => {
+  if (!fromFailed(event)) return { ok: false };
+  await chooseWorkspace();
   return { ok: true };
 });
 

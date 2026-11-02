@@ -29,11 +29,13 @@ import { startDiscoveryWatch, stopDiscoveryWatch } from '../discovery/service.js
 import { resumePendingImports, stopLocalImports } from '../memory/import/local-import.js';
 import {recoverSubscriptionProcesses,stopSubscriptionProcesses} from '../services/subscription-chat.js';
 import { getOrchestrator } from '../multi-agent/orchestrator.js';
+import { START_PROBLEM_EXIT, reportStartProblem } from '../db/layout.js';
 
 const PORT = config.port;
 const HOST = config.host;
 
-const fastify = await buildServer();
+// STORE-MAP-01 P3: the database opens inside buildServer; a start-up problem is reported for the desktop.
+const fastify = await buildServer().catch((err) => { if (reportStartProblem(err)) process.exit(START_PROBLEM_EXIT); throw err; });
 
 /** Python availability for audio features (a startup probe: skipped with background off). */
 async function probePython(): Promise<string> {
@@ -120,6 +122,8 @@ ${storageLines()}
     `);
   } catch (err) {
     fastify.log.error(err);
+    // STORE-MAP-01 P3: a start-up problem the desktop's start page can explain.
+    if (reportStartProblem(err)) process.exit(START_PROBLEM_EXIT);
     process.exit(1);
   }
 }
