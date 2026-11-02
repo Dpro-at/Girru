@@ -21,7 +21,7 @@ import { hasSecretRef, resolveSecretRefs, scrubSecretValues, vaultToolResult } f
 const KEEPS_TEXT = /^(?:memory_|board_|task_|handoff_|rule_suggest$|plan_steps$|create_reminder$)/;
 
 /** Self-only tools need no grant; an extension or MCP tool can never claim it. */
-const SELF_ONLY_TOOLS = new Set(['plan_steps', 'board_suggest_card', 'rule_suggest', 'handoff_save', 'handoff_read']);
+const SELF_ONLY_TOOLS = new Set(['plan_steps', 'board_suggest_card', 'rule_suggest', 'handoff_save', 'handoff_read', 'guide_read']);
 const isSelfOnly = (tool: Tool) => tool.selfOnly === true && SELF_ONLY_TOOLS.has(tool.name) && !tool.extensionId && !(tool as { mcp?: unknown }).mcp && !tool.execClass;
 /**
  * CORE-MEM-HANDOFF: the agent's own handoff note also lives in board task runs
@@ -30,6 +30,8 @@ const isSelfOnly = (tool: Tool) => tool.selfOnly === true && SELF_ONLY_TOOLS.has
 const HANDOFF_TOOLS = new Set(['handoff_save', 'handoff_read']);
 const selfOnlyOffered = (tool: Tool, context: ToolExecutionContext) => HANDOFF_TOOLS.has(tool.name)
   ? !context.toolPolicy && context.handoffTools !== false && (context.chatPlan === true || (!!context.taskId && !context.delegatedFrom?.length && context.agentId !== 'small-local-agent'))
+  // STORE-MAP-01 P2 (AG1): an agent reads its own guides wherever it runs (registered only while GIRRU_STORE_P2 is on).
+  : tool.name === 'guide_read' ? !!context.agentId && context.agentId !== 'small-local-agent'
   : context.chatPlan === true;
 
 /** Words in fetched or read content that try to steer the agent (prompt injection), with a short excerpt. */

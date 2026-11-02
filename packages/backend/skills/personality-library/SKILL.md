@@ -19,3 +19,4 @@ Personality changes are preferences, never permission grants, qualifications or 
 - Manual exams need actual recorded replies and owner ratings. Never fabricate replies, ratings, completed runs or a live-model preview.
 - Try (`try`) asks the local model for one reply in the personality's voice; it never falls back to a paid model. Approving an agent's suggested change (Agree) and unlocking stay with the owner in the app.
 - Never make an external model call or spend money merely to preview a personality.
+- An agent's working style (the personality settings) is always sent in full; unlike skills and specialties it is never loaded on demand. Owner rules always come before it.

@@ -18,7 +18,9 @@ import { libraryBehavior } from '../personality-library.js';
 import { agentSkillsPrompt } from '../../skills/central-store.js';
 import { teamContext } from '../agent-org.js';
 import { knowledgeContext } from '../agent-file-library.js';
-import { rulesContext, sessionProject } from '../agent-rules.js';
+import { rulesByPrecedence, rulesContext, sessionProject } from '../agent-rules.js';
+import { guidesIndex } from './guides.js';
+import { storeP2Enabled } from './switch.js';
 import { pinnedFactsBlock } from '../../memory/scopes/pinned.js';
 import { handoffText, projectHandoff } from '../../memory/bridge/brief.js';
 import { selectDrawers, type DrawerRef } from '../../memory/drawers.js';
@@ -49,6 +51,8 @@ export interface ResolvedAgentContext {
   data: { pinnedFacts: string; handoff: string };
   /** The drawers recall may read in this context (policy applied before any retrieval). */
   drawers: DrawerRef[];
+  /** P2: skills and specialties are listed by name; the agent reads one with guide_read. */
+  guidesByName: boolean;
 }
 
 export interface ResolveInput {
@@ -57,6 +61,16 @@ export interface ResolveInput {
   ownerId?: string | null;
   projectId?: string | null;
   sessionId?: string | null;
+  /** Chat only: instructions sent with the request replace the hired instructions and personality text (as before). */
+  instructionsOverride?: string | null;
+}
+
+/** Longest instructions or personality text kept (the middle is cut, like chat did). */
+export const DEFINITION_CHARS = 32_000;
+function capMiddle(text: string, max = DEFINITION_CHARS): string {
+  if (text.length <= max) return text;
+  const half = Math.floor((max - 40) / 2);
+  return `${text.slice(0, half)}\n[… shortened …]\n${text.slice(-half)}`;
 }
 
 export class AgentContextError extends Error {}
@@ -71,8 +85,11 @@ export async function resolveAgentContext(input: ResolveInput): Promise<Resolved
   const ownerId = input.ownerId ?? null;
   const project = projectId && ownerId ? await findProject(ownerId, projectId) : undefined;
 
-  const file = await readPersonality(agent.id).catch(() => '');
+  const override = input.instructionsOverride?.trim() || '';
+  const file = override ? '' : await readPersonality(agent.id).catch(() => '');
   const personality = file && file.trim() !== getDefaultPersonality().trim() ? stripPersonalityExport(file).trim() : '';
+  // P2 (AG1, AG6): guides by name with the full text on demand; owner rules in precedence order.
+  const p2 = storeP2Enabled();
   const behavior = (await libraryBehavior(agent.id).catch(() => null))?.promptBlock ?? '';
 
   const data = { pinnedFacts: '', handoff: '' };
@@ -89,15 +106,16 @@ export async function resolveAgentContext(input: ResolveInput): Promise<Resolved
     ownerId,
     project: project ? { id: project.id, slug: project.slug, name: project.name } : null,
     definition: {
-      hired: (agent.system_prompt ?? '').trim(),
-      personality,
+      hired: capMiddle(override || (agent.system_prompt ?? '').trim()),
+      personality: capMiddle(personality),
       behavior: behavior.trim(),
-      skills: (await agentSkillsPrompt(agent.id)).trim(),
+      skills: (p2 ? await guidesIndex(agent.id) : await agentSkillsPrompt(agent.id)).trim(),
       team: (await teamContext(agent.id).catch(() => '')).trim(),
       knowledge: policy.memory ? (await knowledgeContext(agent.id).catch(() => '')).trim() : '',
     },
-    ownerRules: await rulesContext(agent.id, { projectId: projectId ?? null }).catch(() => ''),
+    ownerRules: await (p2 ? rulesByPrecedence(agent.id, projectId ?? null) : rulesContext(agent.id, { projectId: projectId ?? null })).catch(() => ''),
     data,
     drawers: policy.memory ? selectDrawers({ audience: 'owner', project: project?.slug ?? null }) : [],
+    guidesByName: p2,
   };
 }

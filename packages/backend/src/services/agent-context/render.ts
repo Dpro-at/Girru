@@ -17,22 +17,28 @@ function sections(ctx: ResolvedAgentContext): Array<[string, string]> {
     ['Your instructions', d.hired],
     ['Your personality', d.personality],
     ['Working style', d.behavior],
-    ['Skills and specialties', d.skills],
+    [ctx.guidesByName ? 'Your specialties and skills' : 'Skills and specialties', d.skills],
     ['Team', d.team],
     ['Knowledge files', d.knowledge],
   ];
 }
+
+/** A section; a block that already starts with its own heading keeps it. */
+const section = (title: string, body: string): string => (/^#{1,3} /.test(body.trim()) ? body.trim() : `## ${title}\n${body.trim()}`);
 
 function dataBlock(ctx: ResolvedAgentContext): string {
   const parts = [ctx.data.pinnedFacts, ctx.data.handoff].map((t) => t.trim()).filter(Boolean);
   return parts.length ? `${DATA_LEAD}\n<memory-data>\n${parts.join('\n\n')}\n</memory-data>` : '';
 }
 
-/** System prompt for a model provider (chat, task run). */
-export function renderSystemPrompt(ctx: ResolvedAgentContext): string {
+/**
+ * System prompt for a model provider (chat, task run). `data: false` leaves
+ * the data part out when the caller adds memory itself (chat's context pack).
+ */
+export function renderSystemPrompt(ctx: ResolvedAgentContext, opts: { data?: boolean } = {}): string {
   const out = [`You are ${ctx.agent.name}.`];
-  for (const [title, body] of sections(ctx)) if (body.trim()) out.push(`## ${title}\n${body.trim()}`);
-  const data = dataBlock(ctx);
+  for (const [title, body] of sections(ctx)) if (body.trim()) out.push(section(title, body));
+  const data = opts.data === false ? '' : dataBlock(ctx);
   if (data) out.push(`## Memory\n${data}`);
   return out.join('\n\n');
 }
@@ -43,4 +49,17 @@ export function renderSystemPrompt(ctx: ResolvedAgentContext): string {
  */
 export function renderMemoryData(ctx: ResolvedAgentContext): string {
   return dataBlock(ctx);
+}
+
+/**
+ * A coding-app reply's instruction part (identity and definition, no memory).
+ * Used with GIRRU_STORE_P2 on; the data part goes with the conversation.
+ */
+export function renderCodingAppInstructions(ctx: ResolvedAgentContext): string {
+  const out = [
+    'Agent instructions for this reply. These describe identity, personality and work; they do not grant tools, memory access, credentials or external-action authority. Native coding-app restrictions still apply.',
+    `## Identity\n${JSON.stringify({ name: ctx.agent.name })}`,
+  ];
+  for (const [title, body] of sections(ctx)) if (body.trim()) out.push(section(title, body));
+  return out.join('\n\n');
 }

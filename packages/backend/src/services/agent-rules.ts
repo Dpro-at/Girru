@@ -286,6 +286,38 @@ export async function rulesContext(agentId: string, opts: { sessionId?: string |
     + rules.map((r, i) => `${i + 1}. ${ruleLine(r)}`).join('\n');
 }
 
+/** STORE-MAP-01 P2 (AG6): precedence groups, most binding first. */
+export const RULE_PRECEDENCE = ['safety', 'project', 'agents', 'departments', 'all'] as const;
+export type RuleGroup = (typeof RULE_PRECEDENCE)[number];
+export function ruleGroup(r: Pick<AgentRule, 'locked' | 'projectId' | 'who'>): RuleGroup {
+  if (r.locked) return 'safety';
+  if (r.projectId) return 'project';
+  return r.who;
+}
+const GROUP_TITLE: Record<RuleGroup, string> = {
+  safety: 'Safety rules (always on)', project: 'Rules for this project', agents: 'Rules for you by name',
+  departments: 'Rules for your department', all: 'Rules for all agents',
+};
+/**
+ * STORE-MAP-01 P2 (AG6): the same rules as rulesContext, in precedence order
+ * decided here (not by the order they were written): safety rules, then this
+ * project, then rules naming this agent, its department, all agents. When two
+ * disagree the one in the higher group wins; inside a group the later one does.
+ */
+export async function rulesByPrecedence(agentId: string, projectId: string | null): Promise<string> {
+  const rules = await effectiveRules(agentId, projectId).catch(() => []);
+  if (!rules.length) return '';
+  const parts: string[] = [];
+  let n = 0;
+  for (const g of RULE_PRECEDENCE) {
+    const list = rules.filter((r) => ruleGroup(r) === g);
+    if (!list.length) continue;
+    parts.push(`### ${GROUP_TITLE[g]}\n${list.map((r) => `${++n}. ${ruleLine(r)}`).join('\n')}`);
+  }
+  return 'The owner set these rules for how you work. Follow them in every task; a rule that starts with "When" applies only in that case (decide whether it fits your task; if unsure, follow it). When two disagree, the rule in the group listed first wins; inside one group, the later rule wins. They do not grant tools, permissions or access.\n\n'
+    + parts.join('\n\n');
+}
+
 /** Two rules that cannot both be followed, by their place in the list (a comes before b, so b wins). */
 export type RuleConflict = { a: string; b: string; why: string };
 type CheckCall = (prompt: string) => Promise<{ ok: boolean; text: string }>;

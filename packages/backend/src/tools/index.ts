@@ -102,6 +102,8 @@ import { askCodingAppTool } from './cli/ask-coding-app.js';
 import { boardSuggestCardTool } from './board/board-suggest.js';
 import { ruleSuggestTool } from './rules/rule-suggest.js';
 import { handoffReadTool, handoffSaveTool } from './handoff/handoff.js';
+import { guideReadTool } from './skills/guide-read.js';
+import { storeP2Enabled } from '../services/agent-context/switch.js';
 import { boardCheckTool, boardChecklistTool, boardCommentTool, boardMoveTool, boardMyCardsTool, boardTaskUpdateTool } from './board/board-tools.js';
 
 import {
@@ -148,7 +150,7 @@ const CORE_TOOLS: Tool[] = [
  * so an extension cannot replace a core tool or inherit its policy.
  */
 export function isReservedToolName(name: string): boolean {
-  return CORE_TOOLS.some((t) => t.name === name) || name === geminiCliTool.name || name === claudeCliTool.name;
+  return CORE_TOOLS.some((t) => t.name === name) || name === guideReadTool.name || name === geminiCliTool.name || name === claudeCliTool.name;
 }
 
 /**
@@ -249,6 +251,9 @@ function buildToolsRegistry(context: ToolExecutionContext, mcpTools: Tool[]): To
   for (const tool of CORE_TOOLS) {
     registry.register(tool);
   }
+
+  // STORE-MAP-01 P2 (AG1): skills and specialties by name, the full text on demand.
+  if (storeP2Enabled()) registry.register(guideReadTool);
 
   // Register extension-provided tools
   for (const tool of extensionTools) {

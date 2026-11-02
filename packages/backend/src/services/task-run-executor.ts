@@ -3,6 +3,7 @@ import { HANDOFF_NOTE } from '../memory/handoff/store.js';
 import { isPilotAgent } from '../memory/outbox/pilot.js';
 import { resolveAgentContext } from './agent-context/resolve.js';
 import { renderSystemPrompt } from './agent-context/render.js';
+import { storeP2Enabled } from './agent-context/switch.js';
 import { taskHandoffText, taskRunOwner } from '../memory/handoff/scope.js';
 import { taskRunPinnedFacts } from '../memory/scopes/task-facts.js';
 /**
@@ -291,6 +292,19 @@ async function gatedStepCall(driver: ModelDriver, messages: LoopMessage[], runId
  * Claim and execute (or resume) one run. Returns without doing anything
  * when another worker holds a live lease.
  */
+/**
+ * The task run's own prompt before its handoff note and pinned facts.
+ * STORE-MAP-01 (CX6): with GIRRU_STORE_P2 on, or for the pilot agent, the one
+ * resolved context (owner rules, instructions, personality, team, knowledge);
+ * otherwise today's prompt (instructions and skills only).
+ */
+export async function taskRunBasePrompt(agent: Pick<AgentRow, 'id' | 'name' | 'system_prompt'>, run: { user_id: string | null }): Promise<string> {
+  if (storeP2Enabled() || isPilotAgent(agent.id)) {
+    return renderSystemPrompt(await resolveAgentContext({ agentId: agent.id, entry: 'task', ownerId: await taskRunOwner(run.user_id).catch(() => null), projectId: null }));
+  }
+  return (agent.system_prompt ?? `You are ${agent.name}, an AI agent.`) + await agentSkillsPrompt(agent.id);
+}
+
 export async function executeTaskRun(runId: string, owner: string = WORKER_ID): Promise<AttemptResult> {
   const lease = await claimRun(runId, owner);
   if (!lease) return { status: 'not_claimed' };
@@ -369,11 +383,7 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
         localModel = await resolveLocalModel(wanted, DEFAULT_OLLAMA_MODEL);
         console.log('[TaskRun] No Claude key for this agent; using the local model', { agentId: agent.id, model: localModel });
       }
-      // STORE-MAP-01 pilot (CX6): the pilot agent gets the one resolved context (owner rules,
-      // personality, team and knowledge too); every other agent keeps today's prompt.
-      systemPrompt = isPilotAgent(agent.id)
-        ? renderSystemPrompt(await resolveAgentContext({ agentId: agent.id, entry: 'task', ownerId: await taskRunOwner(run.user_id).catch(() => null), projectId: null }))
-        : (agent.system_prompt ?? `You are ${agent.name}, an AI agent.`) + await agentSkillsPrompt(agent.id);
+      systemPrompt = await taskRunBasePrompt(agent, run);
       // CORE-MEM-HANDOFF: the agent's newest note for this board task, and how to leave the next one.
       // A contract that names its tools, or a delegated task, leaves the handoff tools out, so the note on using them too.
       const handoff = await taskHandoffText(run).catch(() => '');

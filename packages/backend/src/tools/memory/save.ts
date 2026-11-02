@@ -6,6 +6,7 @@
  */
 
 import type { Tool, ToolResult } from '../types.js';
+import { SAVE_CRITERIA, storeP2Enabled } from '../../services/agent-context/switch.js';
 import type { MemoryType } from '../../memory/types.js';
 import type { ToolExecutionContext } from '../types.js';
 import { toolMemoryUser, toolOwnerTurn } from './scope.js';
@@ -39,9 +40,7 @@ interface MemorySaveParams {
   topic_key?: string;
 }
 
-export const memorySaveTool: Tool = {
-  name: 'memory_save',
-  description: `Save important information to memory for future recall.
+const SAVE_DESCRIPTION = `Save important information to memory for future recall.
 
 Use this tool when you learn something important about:
 - User preferences (favorite color, language, etc.)
@@ -84,7 +83,12 @@ Examples:
 - "User's name is Ahmed" (type: fact, importance: 10)
 - "User prefers Arabic language" (type: preference, importance: 8)
 - "User wants to learn Python" (type: goal, importance: 7)
-- "User mentioned visiting Paris last summer" (type: conversation, importance: 4)`,
+- "User mentioned visiting Paris last summer" (type: conversation, importance: 4)`;
+
+export const memorySaveTool: Tool = {
+  name: 'memory_save',
+  // STORE-MAP-01 P2 (MD4): with GIRRU_STORE_P2 on, the clear save criteria lead the description.
+  get description() { return storeP2Enabled() ? `${SAVE_CRITERIA}\n\n${SAVE_DESCRIPTION}` : SAVE_DESCRIPTION; },
 
   input_schema: {
     type: 'object',

@@ -70,6 +70,7 @@ async function measure(parts) {
 }
 
 // --- Synthetic company -----------------------------------------------------
+const { resolveAgentContext } = await import(join(backendDir, 'src/services/agent-context/resolve.ts'));
 const { db, closeDatabase } = await openDb();
 const { getCredentialStorage } = await import(join(backendDir, 'src/credentials/storage.ts'));
 await quietly(() => getCredentialStorage().initialize());
@@ -119,6 +120,8 @@ for (const [scope, text] of [
   ['project:alpha', 'Alpha targets Windows 11 and macOS 15.'],
 ]) await quietly(() => addPinnedFact(OWNER, parsePinnedScope(scope), text, OWNER));
 
+const { createProject } = await import(join(backendDir, 'src/repositories/chat-conversations.ts'));
+const alphaProjectId = (await createProject(OWNER, { name: 'alpha' })).id;
 const { generateToken } = await import(join(backendDir, 'src/auth/jwt.ts'));
 const { buildServer } = await import(join(backendDir, 'src/api/app.ts'));
 const app = await quietly(() => buildServer({ logger: false }));
@@ -176,7 +179,9 @@ const { createAgentToolsRegistry } = await import(join(backendDir, 'src/tools/in
 const { taskRunPinnedFacts } = await import(join(backendDir, 'src/memory/scopes/task-facts.ts'));
 const { toolMemoryDrawers } = await import(join(backendDir, 'src/tools/memory/scope.ts'));
 const taskRegistry = await quietly(() => createAgentToolsRegistry({ userId: AGENT, accessOwnerId: OWNER, sessionId: 'cron-p0-task', workspaceDir: dataRoot, agentId: AGENT, taskId: 'p0-task' }));
-let taskSystem = HIRED + await agentSkillsPrompt(AGENT) + `\n\n${HANDOFF_NOTE}`;
+// The executor's own base prompt (today's builder, or the resolved context with GIRRU_STORE_P2 on).
+const { taskRunBasePrompt } = await import(join(backendDir, 'src/services/task-run-executor.ts'));
+let taskSystem = (await quietly(() => taskRunBasePrompt({ id: AGENT, name: 'Rafid', system_prompt: HIRED }, { user_id: OWNER }))) + `\n\n${HANDOFF_NOTE}`;
 const facts = await quietly(() => taskRunPinnedFacts({ ownerId: OWNER, agentId: AGENT, taskId: 'p0-task', delegatedFrom: [], drawers: toolMemoryDrawers(taskRegistry.getContext()), drawersNarrowed: false })).catch(() => '');
 if (facts) taskSystem += `\n\n${facts}`;
 report.entryPoints.taskRun = { reconstructed: 'task-run-executor.ts:369-400', tools: taskRegistry.getToolsForAPI().length,
@@ -185,7 +190,6 @@ report.entryPoints.taskRun = { reconstructed: 'task-run-executor.ts:369-400', to
 
 // 3b. Task run of the storage pilot agent (resolved context, CX6): same tools, the one resolved
 // context instead of the old builder, plus the executor's handoff note and narrowed pinned facts.
-const { resolveAgentContext } = await import(join(backendDir, 'src/services/agent-context/resolve.ts'));
 const { renderSystemPrompt } = await import(join(backendDir, 'src/services/agent-context/render.ts'));
 let pilotTask = renderSystemPrompt(await quietly(() => resolveAgentContext({ agentId: AGENT, entry: 'task', ownerId: OWNER, projectId: null }))) + `\n\n${HANDOFF_NOTE}`;
 if (facts) pilotTask += `\n\n${facts}`;
@@ -199,10 +203,16 @@ const { subscriptionToolLoop } = await import(join(backendDir, 'src/services/sub
 const { contextPack } = await import(join(backendDir, 'src/memory/context/pack.ts'));
 const D = await import(join(backendDir, 'src/memory/drawers.ts'));
 const drawers = D.selectDrawers({ audience: 'owner', project: 'alpha' });
-const context = await quietly(() => subscriptionAgentContext(AGENT, { sessionId: 'p0-session-sub' }));
-const pack = (await quietly(() => contextPack({ userId: OWNER, agentId: AGENT, drawers, persona: '', scopeFacts: null, handoff: null }))).text.trim();
+// As chat.ts builds it: GIRRU_STORE_P2 on = the resolved context, its data part and a token budget.
+const { storeP2Enabled } = await import(join(backendDir, 'src/services/agent-context/switch.ts'));
+const { renderCodingAppInstructions, renderMemoryData } = await import(join(backendDir, 'src/services/agent-context/render.ts'));
+const { capTokens, CODING_APP_MEMORY_TOKENS } = await import(join(backendDir, 'src/services/agent-context/budget.ts'));
+const p2Ctx = storeP2Enabled() ? await quietly(() => resolveAgentContext({ agentId: AGENT, entry: 'coding_app', ownerId: OWNER, projectId: alphaProjectId })) : null;
+const context = p2Ctx ? renderCodingAppInstructions(p2Ctx) : await quietly(() => subscriptionAgentContext(AGENT, { sessionId: 'p0-session-sub' }));
+let pack = (await quietly(() => contextPack({ userId: OWNER, agentId: AGENT, drawers, persona: '', scopeFacts: null, handoff: null }))).text.trim();
+if (p2Ctx) { const data = renderMemoryData(p2Ctx); if (data) pack = pack ? `${data}\n\n${pack}` : data; }
 const SUBSCRIPTION_MEMORY_CHARS = 6000; // chat.ts:363
-const memoryPart = pack.length > SUBSCRIPTION_MEMORY_CHARS ? pack.slice(0, SUBSCRIPTION_MEMORY_CHARS) : pack;
+const memoryPart = p2Ctx ? capTokens(pack, CODING_APP_MEMORY_TOKENS) : pack.length > SUBSCRIPTION_MEMORY_CHARS ? pack.slice(0, SUBSCRIPTION_MEMORY_CHARS) : pack;
 const history = turnMessages.map((m) => `${m.role}: ${m.content}`).join('\n\n');
 const replyPrompt = subscriptionReplyPrompt(context, `${memoryPart}\n\n${history}`);
 const subRegistry = await quietly(() => createAgentToolsRegistry({ userId: OWNER, sessionId: 'p0-session-sub', agentId: AGENT, workspaceDir: dataRoot, fileReadRoot: dataRoot, memoryDrawers: drawers, chatPlan: true }));

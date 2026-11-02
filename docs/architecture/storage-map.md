@@ -150,6 +150,16 @@ A first version of the change log, the session capability and the shared agent c
 - **Sync status:** `GET /api/memory-bridge/projects/:projectId/sync`; `POST` with `{"action":"rebuild"}` re-renders from the current records, `{"action":"use_girru_version"}` resolves a conflict by keeping the outside file next to the brief and writing Girru's version.
 - Lines removed from `brief.md`, or the whole file, are never read back: the file is regenerated and no memory is forgotten.
 
+### One agent context and one Girru section (off by default)
+
+`GIRRU_STORE_P2=1` turns on, for every agent:
+
+- **One resolved context** for chat, task runs and coding-app replies: owner rules first, grouped from most to least binding (safety rules, this project, rules naming the agent, its department, all agents), then the hired instructions, personality text, working style, team and knowledge files. Memory, pinned facts and handoff notes are framed as data.
+- **Guides by name:** skills and specialties are listed by name and the first line of their description; the agent loads one guide's full text with the `guide_read` tool, and only its own.
+- **Save criteria and dates:** `memory_save` and the project brief say what is worth saving; memories recalled for a message show the date they were saved and their drawer.
+- **Coding-app memory budget:** the memory sent with a coding-app reply has a token budget instead of a character cap.
+- **One Girru section:** `AGENTS.md` gets one section between `<!-- girru:start … -->` and `<!-- girru:end -->` with the memory brief (where memory files are on), the owner's rules and the task-file pointer; `CLAUDE.md` and `GEMINI.md` only point to `AGENTS.md`. The two older sections (`dpro-memory`, `girru:rules`) are replaced in place. With the switch off again, the next write restores the earlier layout.
+
 ## Privacy
 
 ### What leaves this computer

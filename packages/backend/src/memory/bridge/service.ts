@@ -21,7 +21,8 @@ import { learn } from '../learning.js';
 import { cleanHandoff, HandoffInputError } from '../handoff/store.js';
 import { BRIDGE_CLIENTS, CLIENT_NAMES, clientConfigFile, isBridgeClient, launchReady, serverLaunch, type BridgeClient, type BridgeEnv } from './clients.js';
 import { briefHash, briefMarkdown, clean, handoffText, projectBrief, projectDrawer, projectHandoff, pinnedFacts } from './brief.js';
-import { applyFiles, ManagedFileError, previewFiles, type FilesPreview } from './managed-files.js';
+import { applyFiles, ManagedFileError, previewFiles, type FilesPreview, type SectionExtras } from './managed-files.js';
+import { createHash } from 'node:crypto';
 import { applyRegistration, previewRegistration, RegistrationError, undoRegistration } from './registration.js';
 import { runBackflow, type BackflowResult } from './backflow.js';
 import { ensureToken, revokeToken, tokenMatches, checkSessionProof } from './auth.js';
@@ -99,7 +100,8 @@ export async function setClient(ownerId: string, c: unknown, enabled: unknown, a
 export async function filesPreview(ownerId: string, projectId: unknown): Promise<FilesPreview> {
   const p = await ownProject(ownerId, projectId);
   const f = await folderSettings(ownerId, p.id);
-  return wrap(async () => previewFiles(p.id, await projectBrief(ownerId, p), p.folder, f.gitExclude));
+  const extras = await extrasOf(p.id);
+  return wrap(async () => previewFiles(p.id, await projectBrief(ownerId, p), p.folder, f.gitExclude, extras));
 }
 
 /** Owner confirm per folder: writes the previewed files and keeps them in sync from now on. */
@@ -109,8 +111,9 @@ export async function filesApply(ownerId: string, projectId: unknown, input: { p
   const p = await ownProject(ownerId, projectId);
   const f = await folderSettings(ownerId, p.id);
   const brief = await projectBrief(ownerId, p);
-  const result = await wrap(() => applyFiles(p.id, brief, p.folder, f.gitExclude, input.previewHash as string));
-  await patchFolder(ownerId, p.id, { filesEnabled: true, briefHash: briefHash(brief), confirmed: true, written: true });
+  const extras = await extrasOf(p.id);
+  const result = await wrap(() => applyFiles(p.id, brief, p.folder, f.gitExclude, input.previewHash as string, extras));
+  await patchFolder(ownerId, p.id, { filesEnabled: true, briefHash: sectionHash(brief, extras), confirmed: true, written: true });
   await audit(ownerId, 'files-written', { projectId: p.id, note: `${result.changes} file(s) by ${actor}` });
   return result;
 }
@@ -184,10 +187,11 @@ export async function syncOwner(ownerId: string): Promise<{ written: number; pro
     if (!p?.folder) continue;
     if (f.filesEnabled) {
       const brief = await projectBrief(ownerId, p);
-      const h = briefHash(brief);
+      const extras = await extrasOf(p.id);
+      const h = sectionHash(brief, extras);
       if (h !== f.briefHash) {
         try {
-          const r = applyFiles(p.id, brief, p.folder, f.gitExclude, null);
+          const r = applyFiles(p.id, brief, p.folder, f.gitExclude, null, extras);
           await patchFolder(ownerId, p.id, { briefHash: h, written: true });
           if (r.changes) { out.written += r.changes; await audit(ownerId, 'files-synced', { projectId: p.id, note: `${r.changes} file(s)` }); }
         } catch (err) {
@@ -243,8 +247,9 @@ export async function autoConnect(ownerId: string, allowed: boolean): Promise<{ 
   for (const p of (await listProjects(ownerId)).filter((x) => x.folder && !known.has(x.id))) {
     try {
       const brief = await projectBrief(ownerId, p);
-      applyFiles(p.id, brief, p.folder, true, null);
-      await patchFolder(ownerId, p.id, { filesEnabled: true, briefHash: briefHash(brief), confirmed: true, written: true });
+      const extras = await extrasOf(p.id);
+      applyFiles(p.id, brief, p.folder, true, null, extras);
+      await patchFolder(ownerId, p.id, { filesEnabled: true, briefHash: sectionHash(brief, extras), confirmed: true, written: true });
       await audit(ownerId, 'files-written', { projectId: p.id, note: 'automatic' });
       out.folders.push(p.id);
     } catch (err) {
@@ -255,6 +260,44 @@ export async function autoConnect(ownerId: string, allowed: boolean): Promise<{ 
     }
   }
   return out;
+}
+
+// --- STORE-MAP-01 P2: one Girru section ---------------------------------------
+
+/** The rules and task pointer of the one section (undefined while P2 is off). */
+async function extrasOf(projectId: string): Promise<SectionExtras | undefined> {
+  const { sectionExtras } = await import('../../services/agent-rule-files.js');
+  return sectionExtras(projectId);
+}
+
+/** What the files are written from: the brief, plus (P2) the rules and the task pointer. */
+function sectionHash(brief: Parameters<typeof briefHash>[0], extras: SectionExtras | undefined): string {
+  return extras ? createHash('sha256').update(JSON.stringify([briefHash(brief), extras])).digest('hex') : briefHash(brief);
+}
+
+async function sectionInputs(projectId: string): Promise<{ ownerId: string; project: Project; brief: Awaited<ReturnType<typeof projectBrief>> | null; extras: SectionExtras; gitExclude: boolean }> {
+  const row = await q.one<{ user_id: string }>('SELECT user_id FROM chat_projects WHERE id = ?', projectId);
+  const project = row ? await findProject(row.user_id, projectId) : undefined;
+  if (!row || !project) throw new BridgeError('Not found', 404, 'not_found');
+  const extras = await extrasOf(projectId);
+  if (!extras) throw new BridgeError('The one Girru section needs GIRRU_STORE_P2', 409, 'p2_off');
+  const f = await folderSettings(row.user_id, projectId);
+  // The memory brief goes into the files only where the owner turned memory files on.
+  return { ownerId: row.user_id, project, brief: f.filesEnabled ? await projectBrief(row.user_id, project) : null, extras, gitExclude: f.gitExclude };
+}
+
+/** P2: what writing the one Girru section would do (reads only). */
+export async function unifiedPreview(projectId: string, _opts: { rulesWritten?: boolean } = {}): Promise<FilesPreview> {
+  const i = await sectionInputs(projectId);
+  return wrap(async () => previewFiles(projectId, i.brief, i.project.folder, i.gitExclude, i.extras));
+}
+
+/** P2: write the one Girru section (the rules writer calls this after a rule change or the owner's button). */
+export async function writeUnifiedSection(projectId: string): Promise<FilesPreview> {
+  const i = await sectionInputs(projectId);
+  const r = await wrap(async () => applyFiles(projectId, i.brief, i.project.folder, i.gitExclude, null, i.extras));
+  if (i.brief) await patchFolder(i.ownerId, projectId, { briefHash: sectionHash(i.brief, i.extras), written: true });
+  return r;
 }
 
 // --- MCP server ------------------------------------------------------------

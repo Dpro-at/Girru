@@ -18,3 +18,4 @@ A specialty is a job: instructions and skills. It never grants tools, connection
 - Hire a new agent with a specialty only with `confirmed=true` after the owner checked the job, its tools and what it asks before. Reuse the same requestId when retrying so only one agent is made. Consent to sensitive actions (`confirmRisky`) stays with the owner in the app.
 - Tools a job needs are requirements, not access. A tool that is "Not in Girru yet", "Blocked" or "Changed since chosen" stays that way until the owner connects or chooses it again.
 - Never invent agents, skills, tool access or completed hires.
+- Agents may see a specialty only by its name and the first line of its description, and load its full instructions with `guide_read` when their work needs it. Keep that first line one clear sentence about the job.

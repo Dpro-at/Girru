@@ -32,6 +32,16 @@ const START_RE = /<!-- dpro-memory:start\b[^\n]*?-->/g;
 const END_RE = /<!-- dpro-memory:end -->/g;
 const GIT_START = '# dpro-memory:start (managed by Dpro)';
 const GIT_END = '# dpro-memory:end';
+/**
+ * STORE-MAP-01 P2: ONE Girru section per file (memory brief, rules and the task
+ * pointer together), with Girru markers. The two older sections (this file's
+ * `dpro-memory` block and the rules writer's `girru:rules` block) are removed
+ * in place when it is written; with P2 off, the older writers remove it again.
+ */
+export const GIRRU_START = '<!-- girru:start — written by Girru: the text between these two markers is replaced on every sync; write your own notes outside them -->';
+export const GIRRU_END = '<!-- girru:end -->';
+export const RULES_START_RE = /<!-- girru:rules\b[^\n]*?-->/g;
+export const RULES_END_RE = /<!-- \/girru:rules -->/g;
 export const MAX_MANAGED_FILE_BYTES = 1024 * 1024;
 export const MANAGED_FILES = ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md'] as const;
 export type ManagedName = (typeof MANAGED_FILES)[number];
@@ -44,6 +54,46 @@ type Split = { before: string; inside: string; after: string };
 /** A pair of Girru markers: the memory section here, the design section in DESIGN.md (DESIGN-FIND-01). */
 export interface Marks { start: string; end: string; startRe: RegExp; endRe: RegExp }
 const MEMORY_MARKS: Marks = { start: MARK_START, end: MARK_END, startRe: START_RE, endRe: END_RE };
+export const GIRRU_MARKS: Marks = { start: GIRRU_START, end: GIRRU_END, startRe: /<!-- girru:start\b[^\n]*?-->/g, endRe: /<!-- girru:end -->/g };
+const RULES_MARKS: Marks = { start: '', end: '', startRe: RULES_START_RE, endRe: RULES_END_RE };
+/** What a P2 write replaces, and what an older writer removes after P2 was turned off. */
+export const P2_LEGACY: readonly Marks[] = [MEMORY_MARKS, RULES_MARKS];
+export const PRE_P2_LEGACY: readonly Marks[] = [GIRRU_MARKS];
+const ALL_GIRRU_MARKS: readonly Marks[] = [MEMORY_MARKS, GIRRU_MARKS, RULES_MARKS];
+
+/** What else goes into the one Girru section (P2): the project's rules for coding apps and the task file pointer. */
+export interface SectionExtras { rules: string; tasks: boolean }
+
+/** The one Girru section of AGENTS.md (P2): memory brief (when the owner turned memory files on), rules, task pointer. */
+export function unifiedBlock(brief: ProjectBrief | null, extras: SectionExtras): string {
+  const parts: string[] = [];
+  if (brief) parts.push(briefMarkdown(brief));
+  else parts.push('## Girru project instructions');
+  if (extras.rules.trim()) parts.push(`### Rules from the owner (Agents › Rules)\n\n${extras.rules.trim()}`);
+  if (extras.tasks) parts.push('### Tasks\n\nThe project\'s tasks are in `.girru/tasks.md`: one `## T-n · title` block per task. Keep that format when you update a task; finished tasks move to `.girru/tasks-done.md`.');
+  return parts.join('\n\n');
+}
+
+/**
+ * `text` with the given older Girru sections removed; `at` = where the first
+ * one was (the new section goes there). 'broken' when one has broken markers.
+ */
+export function withoutSections(text: string, legacy: readonly Marks[]): { text: string; at: number | null; removed: string[] } | 'broken' {
+  let out = text;
+  let at: number | null = null;
+  const removed: string[] = [];
+  for (const m of legacy) {
+    const split = splitManaged(out, m);
+    if (split === 'broken') return 'broken';
+    if (!split) continue;
+    removed.push(split.inside);
+    const pos = split.before.length;
+    const after = split.after.replace(/^\n/, '');
+    out = split.before + after;
+    at = at === null ? pos : Math.min(at, pos);
+  }
+  return { text: out, at, removed };
+}
 
 /** The text around Girru's section; null when there is none, 'broken' when the markers are not exactly one ordered pair. */
 export function splitManaged(text: string, marks: Marks = MEMORY_MARKS): Split | null | 'broken' {
@@ -66,11 +116,14 @@ export function replaceManaged(text: string, block: string, marks: Marks = MEMOR
   return `${text}${text.endsWith('\n') ? '' : '\n'}\n${section}\n`;
 }
 
-/** The owner's own text: everything outside Girru's section. */
+/**
+ * The owner's own text: everything outside Girru's sections (the memory
+ * section, the one P2 section and the rules section), so back-flow never
+ * reads Girru's own text back as a proposal.
+ */
 export function outsideManaged(text: string): string {
-  const split = splitManaged(text);
-  if (!split || split === 'broken') return text;
-  return `${split.before}${split.after}`;
+  const out = withoutSections(text, ALL_GIRRU_MARKS);
+  return out === 'broken' ? text : out.text;
 }
 
 export function adapterBlock(name: ManagedName): string {
@@ -112,17 +165,28 @@ function blockDiff(oldBlock: string | null, newBlock: string): string {
   return out.join('\n');
 }
 
-function planFile(folder: string, relative: string, block: string): Planned {
+function planFile(folder: string, relative: string, block: string, marks: Marks = MEMORY_MARKS, legacy: readonly Marks[] = PRE_P2_LEGACY): Planned {
   const abs = path.join(folder, relative);
   const cur = readExisting(abs);
   const base = { name: path.basename(relative), relative, abs, mode: cur.mode };
   if (cur.problem) return { ...base, action: 'conflict', reason: `${relative} ${cur.problem}`, beforeSha256: null, afterSha256: null, diff: '', after: null };
-  const split = cur.text === null ? null : splitManaged(cur.text);
-  if (split === 'broken') return { ...base, action: 'conflict', reason: `${relative} has broken Girru markers; fix or remove them by hand`, beforeSha256: sha(cur.text!), afterSha256: null, diff: '', after: null };
-  const after = replaceManaged(cur.text ?? '', block);
+  const broken = { ...base, action: 'conflict' as const, reason: `${relative} has broken Girru markers; fix or remove them by hand`, beforeSha256: cur.text === null ? null : sha(cur.text), afterSha256: null, diff: '', after: null };
+  const split = cur.text === null ? null : splitManaged(cur.text, marks);
+  if (split === 'broken') return broken;
+  // Older Girru sections of the other layout are removed; the new section takes the place of the first one.
+  const old = cur.text === null ? null : withoutSections(cur.text, legacy);
+  if (old === 'broken') return broken;
+  let after: string;
+  if (old && old.at !== null && !split) {
+    const section = `${marks.start}\n${block.trim()}\n${marks.end}\n`;
+    after = old.text.slice(0, old.at) + section + old.text.slice(old.at);
+  } else {
+    after = replaceManaged(old ? old.text : (cur.text ?? ''), block, marks);
+  }
   const before = cur.text;
   const action = before === null ? 'create' : before === after ? 'unchanged' : 'update';
-  return { ...base, action, beforeSha256: before === null ? null : sha(before), afterSha256: sha(after), diff: action === 'unchanged' ? '' : blockDiff(split ? split.inside : null, block), after };
+  const previous = [split ? split.inside : null, ...(old ? old.removed : [])].filter((x): x is string => x !== null).join('\n');
+  return { ...base, action, beforeSha256: before === null ? null : sha(before), afterSha256: sha(after), diff: action === 'unchanged' ? '' : blockDiff(previous || null, block), after };
 }
 
 /** `.git/info/exclude` with Girru's list of files it created (only when the folder is a git work tree). */
@@ -158,11 +222,15 @@ function assertNoSecret(block: string): void {
   if (Object.values(r.counts).some((n) => Number(n) > 0)) throw new ManagedFileError('The brief still contains something that looks like a secret; nothing was written', 422, 'secret_found');
 }
 
-function plan(brief: ProjectBrief, folderRaw: string | null, gitExclude: boolean): { folder: string; files: Planned[] } {
+function plan(brief: ProjectBrief | null, folderRaw: string | null, gitExclude: boolean, extras?: SectionExtras): { folder: string; files: Planned[] } {
   const folder = checkFolder(folderRaw);
-  const canonical = briefMarkdown(brief);
-  assertNoSecret(canonical);
-  const files: Planned[] = MANAGED_FILES.map((name) => planFile(folder, name, name === 'AGENTS.md' ? canonical : adapterBlock(name)));
+  if (!extras && !brief) throw new ManagedFileError('Nothing to write', 400, 'invalid_request');
+  // P2 (extras given): one Girru section; otherwise the memory section of the earlier layout.
+  const canonical = extras ? unifiedBlock(brief, extras) : briefMarkdown(brief!);
+  // The memory part is secret-checked (brief.ts redacted it already); the owner's rules are the owner's own words.
+  if (brief) assertNoSecret(briefMarkdown(brief));
+  const files: Planned[] = MANAGED_FILES.map((name) => planFile(folder, name, name === 'AGENTS.md' ? canonical : adapterBlock(name),
+    extras ? GIRRU_MARKS : MEMORY_MARKS, extras ? P2_LEGACY : PRE_P2_LEGACY));
   if (gitExclude) {
     const g = planGitExclude(folder, files.filter((f) => f.action === 'create').map((f) => f.relative));
     if (g) files.push(g);
@@ -174,8 +242,8 @@ const hashOf = (folder: string, files: FilePlan[]) => sha(JSON.stringify([folder
 const visible = ({ abs: _a, after: _b, mode: _m, ...f }: Planned): FilePlan => f;
 
 /** Dry run: what the folder's files would look like (nothing is written). */
-export function previewFiles(projectId: string, brief: ProjectBrief, folder: string | null, gitExclude = true): FilesPreview {
-  const p = plan(brief, folder, gitExclude);
+export function previewFiles(projectId: string, brief: ProjectBrief | null, folder: string | null, gitExclude = true, extras?: SectionExtras): FilesPreview {
+  const p = plan(brief, folder, gitExclude, extras);
   const files = p.files.map(visible);
   return { projectId, folder: p.folder, files, previewHash: hashOf(p.folder, files), conflicts: files.filter((f) => f.action === 'conflict').length, changes: files.filter((f) => f.action === 'create' || f.action === 'update').length };
 }
@@ -192,8 +260,8 @@ function writeAtomic(abs: string, text: string, mode: number | null): void {
  * null for a regeneration of an already confirmed folder (still all-or-nothing:
  * any conflict writes nothing).
  */
-export function applyFiles(projectId: string, brief: ProjectBrief, folder: string | null, gitExclude: boolean, expectedHash: string | null): FilesPreview {
-  const p = plan(brief, folder, gitExclude);
+export function applyFiles(projectId: string, brief: ProjectBrief | null, folder: string | null, gitExclude: boolean, expectedHash: string | null, extras?: SectionExtras): FilesPreview {
+  const p = plan(brief, folder, gitExclude, extras);
   const files = p.files.map(visible);
   const hash = hashOf(p.folder, files);
   if (expectedHash !== null && hash !== expectedHash) throw new ManagedFileError('The files or the memory changed since the preview; preview again', 409, 'preview_stale');

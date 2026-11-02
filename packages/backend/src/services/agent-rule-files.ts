@@ -15,7 +15,9 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { q } from '../repositories/sql-steps.js';
-import { projectFileRules, ruleLine, setTaskRule } from './agent-rules.js';
+import { projectFileRules, ruleGroup, ruleLine, setTaskRule, RULE_PRECEDENCE } from './agent-rules.js';
+import { storeP2Enabled } from './agent-context/switch.js';
+import type { SectionExtras } from '../memory/bridge/managed-files.js';
 
 const run = promisify(execFile);
 export type FileMode = 'private' | 'project';
@@ -45,6 +47,24 @@ export function withPart(current: string | null, part: string): string {
   const a = current.indexOf(START), b = current.indexOf(END, a < 0 ? 0 : a);
   if (a >= 0 && b > a) return current.slice(0, a) + part + current.slice(b + END.length);
   return `${current.replace(/\s*$/, '')}\n\n${part}\n`;
+}
+
+/**
+ * STORE-MAP-01 P2 (AG6): the project's rules for coding apps, most binding first
+ * (safety, this project, all agents); one block inside the one Girru section.
+ */
+export function rulesByPrecedenceText(rules: readonly { text: string; when: string | null; locked: boolean; projectId: string | null; who: 'all' | 'departments' | 'agents' }[]): string {
+  const ordered = RULE_PRECEDENCE.flatMap((g) => rules.filter((r) => ruleGroup(r) === g));
+  return 'Follow these rules in every task. A rule that starts with "When" applies only in that case. They are listed most binding first: when two disagree, the earlier one wins.\n\n'
+    + ordered.map((r, i) => `${i + 1}. ${ruleLine(r)}`).join('\n');
+}
+
+/** P2: what the one Girru section carries besides the memory brief; undefined while P2 is off. */
+export async function sectionExtras(projectId: string): Promise<SectionExtras | undefined> {
+  if (!storeP2Enabled()) return undefined;
+  const s = await settings(projectId);
+  const rules = s.written ? await projectFileRules(projectId) : [];
+  return { rules: rules.length ? rulesByPrecedenceText(rules) : '', tasks: s.written && s.tasks };
 }
 
 export async function folderOf(projectId: string): Promise<string> {
@@ -99,13 +119,23 @@ export async function filesState(projectId: string, modeOverride?: FileMode): Pr
   }
   const rules = rulesText(await projectFileRules(projectId));
   const files: FilePlan[] = [];
-  for (const name of [SOURCE, ...APP_FILES]) {
+  const p2 = storeP2Enabled();
+  for (const name of p2 ? [SOURCE] : [SOURCE, ...APP_FILES]) {
     const file = path.join(folder, name);
     const cur = await readPlain(file);
     if (cur === 'link') { files.push({ name, action: 'link' }); continue; }
     if (mode === 'private' && cur !== null && await tracked(folder, name)) { files.push({ name, action: 'tracked' }); continue; }
     const next = name === SOURCE ? rules : withPart(cur, appPart(name, rules));
     files.push({ name, action: cur === null ? 'create' : cur === next ? 'unchanged' : name !== SOURCE && !cur.includes(START) ? 'add' : 'update' });
+  }
+  if (p2) {
+    // P2: the app files hold one Girru section written by the memory bridge (memory brief, rules, task pointer).
+    const { unifiedPreview } = await import('../memory/bridge/service.js');
+    const pv = await unifiedPreview(projectId, { rulesWritten: true }).catch(() => null);
+    for (const name of APP_FILES) {
+      const f = pv?.files.find((x) => x.relative === name);
+      files.push({ name, action: !f ? 'link' : f.action === 'conflict' ? 'link' : f.action === 'update' ? 'update' : f.action });
+    }
   }
   return { projectId, folder, mode, written: s.written, upToDate: s.written && files.every((f) => f.action === 'unchanged' || f.action === 'tracked' || f.action === 'link'), files, rules };
 }
@@ -149,8 +179,10 @@ async function writeNow(projectId: string, mode?: FileMode): Promise<FilesState>
   if (st && (st.isSymbolicLink() || !st.isDirectory())) throw new RuleFilesError('unsafe', '.girru in the project folder is a link or a file');
   if (!st) await fs.mkdir(dir, { mode: 0o755 });
   const done: string[] = [];
+  const p2 = storeP2Enabled();
   for (const f of plan.files) {
     if (f.action === 'link' || f.action === 'tracked') continue;
+    if (p2 && f.name !== SOURCE) continue; // P2: the one writer below
     const file = path.join(folder, f.name);
     if (path.dirname(path.resolve(file)) !== (f.name === SOURCE ? dir : folder)) throw new RuleFilesError('unsafe', 'Outside the project folder');
     if (f.action !== 'unchanged') {
@@ -159,6 +191,12 @@ async function writeNow(projectId: string, mode?: FileMode): Promise<FilesState>
       await writeAtomic(file, f.name === SOURCE ? plan.rules : withPart(cur, appPart(f.name, plan.rules)));
     }
     done.push(f.name === SOURCE ? '.girru/' : f.name);
+  }
+  await q.run("INSERT INTO agent_rule_files(project_id,mode,written_at,updated_at) VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(project_id) DO UPDATE SET mode=excluded.mode, written_at=excluded.written_at, updated_at=CURRENT_TIMESTAMP", projectId, m, new Date().toISOString());
+  if (p2) {
+    const { writeUnifiedSection } = await import('../memory/bridge/service.js');
+    const r = await writeUnifiedSection(projectId);
+    for (const f of r.files) if (f.relative !== path.join('.git', 'info', 'exclude') && (f.action !== 'conflict')) done.push(f.relative);
   }
   await setExclude(folder, done, m);
   await q.run("INSERT INTO agent_rule_files(project_id,mode,written_at,updated_at) VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(project_id) DO UPDATE SET mode=excluded.mode, written_at=excluded.written_at, updated_at=CURRENT_TIMESTAMP", projectId, m, new Date().toISOString());
