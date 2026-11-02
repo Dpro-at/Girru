@@ -2,6 +2,8 @@
 /**
  * girru-relay: runs the relay with settings from the environment.
  *
+ *   GIRRU_RELAY_URL    this relay's public name, signed by devices in their hello
+ *                      (e.g. wss://relay.example.org/v1; default ws://<host>:<port>/v1)
  *   GIRRU_RELAY_HOST   interface to bind (default 127.0.0.1)
  *   GIRRU_RELAY_PORT   port to bind (default 41540, 0 = any free port)
  *   GIRRU_RELAY_MAX_ENVELOPE_BYTES, GIRRU_RELAY_MESSAGES_PER_SECOND,
@@ -11,6 +13,7 @@
  * Message contents, device ids and addresses are never printed.
  */
 
+import { RELAY_NAME_PATTERN } from './encoding.js';
 import { createRelay } from './relay.js';
 
 function numberFromEnv(name: string): number | undefined {
@@ -24,7 +27,14 @@ function numberFromEnv(name: string): number | undefined {
   return value;
 }
 
+const relayUrl = process.env.GIRRU_RELAY_URL || undefined;
+if (relayUrl !== undefined && !RELAY_NAME_PATTERN.test(relayUrl)) {
+  process.stderr.write('girru-relay: GIRRU_RELAY_URL must look like wss://relay.example.org/v1\n');
+  process.exit(2);
+}
+
 const relay = createRelay({
+  relayUrl,
   host: process.env.GIRRU_RELAY_HOST || undefined,
   port: numberFromEnv('GIRRU_RELAY_PORT'),
   maxEnvelopeBytes: numberFromEnv('GIRRU_RELAY_MAX_ENVELOPE_BYTES'),

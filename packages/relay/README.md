@@ -39,6 +39,7 @@ Settings (environment variables):
 
 | Variable | Default | Meaning |
 |---|---|---|
+| `GIRRU_RELAY_URL` | `ws://<host>:<port>/v1` | This relay's public name, as devices dial it (for example `wss://relay.example.org/v1`). Devices sign it in their hello, so it must match their configured address |
 | `GIRRU_RELAY_HOST` | `127.0.0.1` | Interface to bind |
 | `GIRRU_RELAY_PORT` | `41540` | Port (`0` = any free port) |
 | `GIRRU_RELAY_MAX_ENVELOPE_BYTES` | `1048576` | Largest envelope |
@@ -58,7 +59,8 @@ involved at all.
 - Turn off access logs in the proxy, or keep them free of request bodies (the
   relay itself logs nothing).
 - The relay holds no state, so you can run several copies behind one name.
-- Point Girru on the computer and the phone app to your relay address.
+- Set `GIRRU_RELAY_URL` to the public `wss://` address and point Girru on
+  the computer and the phone app to that same address.
 
 ## Tests
 

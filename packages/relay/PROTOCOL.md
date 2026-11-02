@@ -91,7 +91,8 @@ keys. It happens once per phone.
    with:
    - protocol version (`1`),
    - the computer's device id and identity public key,
-   - a fresh pairing id (32 random bytes) used only as a temporary mailbox on
+   - a fresh pairing id (`p_` followed by 32 random bytes in base64url; the
+     prefix keeps it apart from device ids) used only as a temporary mailbox on
      the relay,
    - the pairing secret (32 random bytes),
    - the relay address and, when known, the computer's local network
@@ -295,10 +296,11 @@ TLS (`wss://`). Every frame is one JSON text message.
 
 | Direction | Frame | Meaning |
 |---|---|---|
-| relay → device | `{t:"challenge", v:1, nonce}` | Sent on connect. `nonce` is 32 random bytes. |
-| device → relay | `{t:"hello", v:1, key, sig, allow, pairing}` | `key` = identity public key, `sig` = signature over `"girru/relay/v1/hello\n" + nonce`. `allow` = device ids that may send to this device (up to 64). `pairing` = pairing ids to open (computer only, up to 4). |
+| relay → device | `{t:"challenge", v:1, relay, nonce}` | Sent on connect. `relay` is this relay's name, the URL devices dial (for example `wss://relay.example.org/v1`). `nonce` is 32 random bytes, new for each connection. The device refuses a challenge whose `relay` is not the relay it was configured to reach. |
+| device → relay | `{t:"hello", v:1, key, sig, allow, pairing}` | `key` = identity public key, `sig` = signature over `"girru/relay/v1/hello\n" + relay + "\n" + nonce`, so a hello is good for one relay and one connection only. `allow` = device ids that may send to this device (up to 64). `pairing` = pairing ids to open (computer only, up to 4). |
 | relay → device | `{t:"ready", id}` | The hello checked out; `id` is the proven device id. |
-| device → relay | `{t:"send", to, env, ref?}` | Pass `env` to device or pairing id `to`. `ref` is an optional short tag for drop reports. |
+| device → relay | `{t:"send", to, env, ref?}` | Pass `env` to the device `to`. `ref` is an optional short tag for drop reports. |
+| device → relay | `{t:"send", pairing, env, ref?}` | Pass `env` to whoever holds the open pairing id `pairing`. A frame with both `to` and `pairing`, or neither, is refused. |
 | relay → device | `{t:"msg", from, env, via?}` | An envelope. `from` is the sender's proven id, set by the relay. `via` is the pairing id when it came through one. |
 | relay → device | `{t:"drop", reason, ref?}` | The envelope was not delivered: `offline` (receiver not connected, unknown, or not allowing the sender: these look the same so nobody can probe who is online) or `busy` (receiver too slow). |
 | device → relay | `{t:"allow", allow}` → `{t:"allowed", count}` | Replace the allow list (for example after a revoke). |
@@ -307,6 +309,10 @@ TLS (`wss://`). Every frame is one JSON text message.
 
 Rules the relay enforces:
 
+- **Two separate address spaces.** Device ids (43 characters) and pairing ids
+  (`p_` + 43 characters) have different formats and travel in different
+  fields. The relay never looks a device id up as a pairing id or the other
+  way round, so a pairing id can never catch traffic meant for a device.
 - **Proof of id.** A connection gets a device id only by signing the challenge
   with that id's key. Until then nothing is forwarded. A device that
   reconnects replaces its older connection (close code 4001).
@@ -321,7 +327,11 @@ Rules the relay enforces:
   (burst 200) and 4 MiB per second (burst 8 MiB). Refused frames count as
   strikes; 50 strikes close the connection (close code 1008). A connection
   that does not finish the hello within 10 seconds is closed. Peers that miss a
-  ping are dropped. All limits are settings.
+  ping are dropped. At the WebSocket level: a message may have at most 1024
+  fragments (close code 1009); ping, pong, close and continuation frames are
+  limited to 100 per second with a burst of 200 (close code 1008); and a
+  peer that stops reading is dropped once 8 MiB are waiting for it, even if
+  that queue holds only pongs or error frames. All limits are settings.
 - **No content handling.** The relay checks only that `env` is a string of
   plain base64url characters and dots, and of allowed size. It never decodes
   it.

@@ -14,6 +14,8 @@ import type { Duplex } from 'node:stream';
 
 const ACCEPT_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const CLOSE_GRACE_MS = 1000;
+/** Fragments one message may be split into; real clients use one or a few. */
+export const MAX_FRAGMENTS = 1024;
 
 export const CLOSE = {
   normal: 1000,
@@ -25,6 +27,15 @@ export const CLOSE = {
   tooBig: 1009,
   replaced: 4001,
 } as const;
+
+export interface WsLimits {
+  /** Largest message, all fragments together. */
+  maxMessageBytes: number;
+  /** Bytes waiting to be written to this peer before the connection is dropped. */
+  maxQueuedBytes: number;
+  /** Ping, pong, close and continuation frames allowed per second (burst is twice this). */
+  controlFramesPerSecond: number;
+}
 
 export interface WsHandlers {
   onText(text: string): void;
@@ -70,14 +81,17 @@ export class WsConnection {
   private fragmentBytes = 0;
   private fragmenting = false;
   private closed = false;
+  private controlTokens: number;
+  private controlRefilledAt = Date.now();
   private readonly socket: Duplex;
-  private readonly maxMessageBytes: number;
+  private readonly limits: WsLimits;
   private readonly handlers: WsHandlers;
 
-  constructor(socket: Duplex, maxMessageBytes: number, handlers: WsHandlers, head?: Buffer) {
+  constructor(socket: Duplex, limits: WsLimits, handlers: WsHandlers, head?: Buffer) {
     this.socket = socket;
-    this.maxMessageBytes = maxMessageBytes;
+    this.limits = limits;
     this.handlers = handlers;
+    this.controlTokens = limits.controlFramesPerSecond * 2;
     socket.on('data', (chunk: Buffer) => this.receive(chunk));
     socket.on('error', () => this.destroy());
     socket.on('close', () => this.finish(CLOSE.goingAway));
@@ -142,6 +156,20 @@ export class WsConnection {
       header.writeBigUInt64BE(BigInt(payload.length), 2);
     }
     this.socket.write(Buffer.concat([header, payload]));
+    // A peer that reads nothing (not even its pongs or error frames) is dropped
+    // before its queue can grow without bound.
+    if (this.queuedBytes > this.limits.maxQueuedBytes) this.destroy();
+  }
+
+  /** Token bucket for frames that carry no message text: control frames and continuations. */
+  private controlAllowed(): boolean {
+    const now = Date.now();
+    const rate = this.limits.controlFramesPerSecond;
+    this.controlTokens = Math.min(rate * 2, this.controlTokens + ((now - this.controlRefilledAt) / 1000) * rate);
+    this.controlRefilledAt = now;
+    if (this.controlTokens < 1) return false;
+    this.controlTokens -= 1;
+    return true;
   }
 
   private receive(chunk: Buffer): void {
@@ -173,7 +201,8 @@ export class WsConnection {
     }
     const control = (opcode & 0x08) !== 0;
     if (control && (!fin || length > 125)) return this.fail(CLOSE.protocolError);
-    if (!control && this.fragmentBytes + length > this.maxMessageBytes) return this.fail(CLOSE.tooBig);
+    if (!control && this.fragmentBytes + length > this.limits.maxMessageBytes) return this.fail(CLOSE.tooBig);
+    if ((control || opcode === 0x0) && !this.controlAllowed()) return this.fail(CLOSE.policy);
     if (buf.length < offset + 4 + length) return false;
 
     const mask = buf.subarray(offset, offset + 4);
@@ -206,6 +235,7 @@ export class WsConnection {
   }
 
   private addFragment(payload: Buffer, fin: boolean): boolean {
+    if (this.fragments.length >= MAX_FRAGMENTS) return this.fail(CLOSE.tooBig);
     this.fragments.push(payload);
     this.fragmentBytes += payload.length;
     if (!fin) return true;

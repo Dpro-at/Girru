@@ -16,7 +16,9 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomBytes, verify } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
-import { ID_PATTERN, b64url, deviceIdOf, fromB64url, p256PublicKey, relayHelloBytes } from './encoding.js';
+import {
+  ID_PATTERN, PAIRING_PATTERN, RELAY_NAME_PATTERN, b64url, deviceIdOf, fromB64url, p256PublicKey, relayHelloBytes,
+} from './encoding.js';
 import { CLOSE, WsConnection, completeUpgrade, refuseUpgrade } from './websocket.js';
 
 export interface RelayOptions {
@@ -52,6 +54,13 @@ export interface RelayOptions {
   heartbeatMs?: number;
   /** Bytes queued to a slow receiver before new envelopes to it are dropped as busy. Default 4 MiB. */
   maxQueuedBytes?: number;
+  /** Control and continuation frames allowed per connection per second (burst is twice this). Default 100. */
+  controlFramesPerSecond?: number;
+  /**
+   * This relay's name as devices are configured to reach it, e.g. `wss://relay.example.org/v1`.
+   * Sent in every challenge and signed by the device. Default: `ws://<host>:<port>/v1` after listen.
+   */
+  relayUrl?: string;
 }
 
 export interface RelayStats {
@@ -105,6 +114,8 @@ const DEFAULTS = {
   helloTimeoutMs: 10_000,
   heartbeatMs: 30_000,
   maxQueuedBytes: 4 * 1024 * 1024,
+  controlFramesPerSecond: 100,
+  relayUrl: '',
 } satisfies Required<RelayOptions>;
 
 /** Room for the JSON around `env` in one frame. */
@@ -114,6 +125,8 @@ const REF_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 export function createRelay(options: RelayOptions = {}): Relay {
   const cfg: Required<RelayOptions> = { ...DEFAULTS, ...stripUndefined(options) };
+  if (cfg.relayUrl && !RELAY_NAME_PATTERN.test(cfg.relayUrl)) throw new Error('relayUrl must look like wss://host/v1');
+  let relayName = cfg.relayUrl;
   const peers = new Set<Peer>();
   const devices = new Map<string, Peer>();
   const pairings = new Map<string, Pairing>();
@@ -146,7 +159,12 @@ export function createRelay(options: RelayOptions = {}): Relay {
       refilledAt: Date.now(),
       helloTimer: null,
     };
-    peer.ws = new WsConnection(socket, cfg.maxEnvelopeBytes + FRAME_OVERHEAD, {
+    peer.ws = new WsConnection(socket, {
+      maxMessageBytes: cfg.maxEnvelopeBytes + FRAME_OVERHEAD,
+      // Above the per-receiver "busy" level: reached only by a peer that reads nothing at all.
+      maxQueuedBytes: cfg.maxQueuedBytes * 2,
+      controlFramesPerSecond: cfg.controlFramesPerSecond,
+    }, {
       onText: (text) => onFrame(peer, text),
       onPong: () => { peer.alive = true; },
       onClose: () => forget(peer),
@@ -155,7 +173,7 @@ export function createRelay(options: RelayOptions = {}): Relay {
     peers.add(peer);
     peer.helloTimer = setTimeout(() => peer.ws.close(CLOSE.policy, 'hello timeout'), cfg.helloTimeoutMs);
     peer.helloTimer.unref();
-    send(peer, { t: 'challenge', v: 1, nonce: peer.nonce });
+    send(peer, { t: 'challenge', v: 1, relay: relayName, nonce: peer.nonce });
   }
 
   function forget(peer: Peer): void {
@@ -222,14 +240,14 @@ export function createRelay(options: RelayOptions = {}): Relay {
     let id: string;
     try {
       const key = p256PublicKey(fromB64url(frame.key));
-      if (!verify('sha256', relayHelloBytes(peer.nonce), key, fromB64url(frame.sig))) throw new Error('bad_sig');
+      if (!verify('sha256', relayHelloBytes(relayName, peer.nonce), key, fromB64url(frame.sig))) throw new Error('bad_sig');
       id = deviceIdOf(key);
     } catch {
       peer.ws.close(CLOSE.policy, 'hello refused');
       return;
     }
     const allow = readIdList(frame.allow ?? [], cfg.maxAllow);
-    const open = readIdList(frame.pairing ?? [], cfg.maxPairings);
+    const open = readIdList(frame.pairing ?? [], cfg.maxPairings, PAIRING_PATTERN);
     if (!allow || !open) {
       peer.ws.close(CLOSE.policy, 'hello refused');
       return;
@@ -249,8 +267,14 @@ export function createRelay(options: RelayOptions = {}): Relay {
   function onSend(peer: Peer, frame: Record<string, unknown>): void {
     const ref = typeof frame.ref === 'string' && REF_PATTERN.test(frame.ref) ? frame.ref : undefined;
     if (frame.ref !== undefined && !ref) return refuse(peer, 'bad_frame');
-    const { to, env } = frame;
-    if (typeof to !== 'string' || !ID_PATTERN.test(to) || typeof env !== 'string') return refuse(peer, 'bad_frame', ref);
+    const { to, pairing: pid, env } = frame;
+    // Exactly one target: `to` names a device, `pairing` names a pairing id. The two never mix.
+    const toDevice = typeof to === 'string' && ID_PATTERN.test(to);
+    const toPairing = typeof pid === 'string' && PAIRING_PATTERN.test(pid);
+    if (toDevice === toPairing || (to !== undefined && !toDevice) || (pid !== undefined && !toPairing)) {
+      return refuse(peer, 'bad_frame', ref);
+    }
+    if (typeof env !== 'string') return refuse(peer, 'bad_frame', ref);
     if (env.length === 0 || env.length > cfg.maxEnvelopeBytes) return refuse(peer, 'too_large', ref);
     if (!ENV_PATTERN.test(env)) return refuse(peer, 'bad_frame', ref);
     peer.strikes = Math.max(0, peer.strikes - 1);
@@ -258,18 +282,18 @@ export function createRelay(options: RelayOptions = {}): Relay {
     const from = peer.id as string;
     let target: Peer | undefined;
     let via: string | undefined;
-    const device = devices.get(to);
-    if (device && device.allow.has(from)) {
-      target = device;
+    if (toDevice) {
+      const device = devices.get(to as string);
+      if (device && device.allow.has(from)) target = device;
     } else {
-      const pairing = pairings.get(to);
+      const pairing = pairings.get(pid as string);
       if (pairing && pairing.expiresAt > Date.now() && pairing.left > 0) {
         pairing.left--;
         target = pairing.owner;
-        via = to;
+        via = pid as string;
       } else if (pairing) {
-        pairings.delete(to);
-        pairing.owner.pairings.delete(to);
+        pairings.delete(pid as string);
+        pairing.owner.pairings.delete(pid as string);
       }
     }
     // Unknown, offline and not-allowed look the same to the sender, so nobody can probe who is online.
@@ -290,7 +314,7 @@ export function createRelay(options: RelayOptions = {}): Relay {
   }
 
   function onPairing(peer: Peer, frame: Record<string, unknown>): void {
-    const open = readIdList(frame.open, cfg.maxPairings);
+    const open = readIdList(frame.open, cfg.maxPairings, PAIRING_PATTERN);
     if (!open) return refuse(peer, 'bad_frame');
     for (const pid of peer.pairings) if (pairings.get(pid)?.owner === peer) pairings.delete(pid);
     peer.pairings.clear();
@@ -341,6 +365,7 @@ export function createRelay(options: RelayOptions = {}): Relay {
           heartbeat = setInterval(tick, cfg.heartbeatMs);
           heartbeat.unref();
           const address = server.address() as AddressInfo;
+          if (!relayName) relayName = `ws://${address.address.includes(':') ? `[${address.address}]` : address.address}:${address.port}/v1`;
           resolve({ host: address.address, port: address.port });
         });
       });
@@ -360,9 +385,9 @@ export function createRelay(options: RelayOptions = {}): Relay {
   };
 }
 
-function readIdList(value: unknown, max: number): string[] | null {
+function readIdList(value: unknown, max: number, pattern: RegExp = ID_PATTERN): string[] | null {
   if (!Array.isArray(value) || value.length > max) return null;
-  if (!value.every((item) => typeof item === 'string' && ID_PATTERN.test(item))) return null;
+  if (!value.every((item) => typeof item === 'string' && pattern.test(item))) return null;
   return [...new Set(value as string[])];
 }
 

@@ -36,6 +36,8 @@ export class TestClient {
 
   send(to, env, ref) { this.sendFrame(ref ? { t: 'send', to, env, ref } : { t: 'send', to, env }); }
 
+  sendPairing(pairing, env, ref) { this.sendFrame(ref ? { t: 'send', pairing, env, ref } : { t: 'send', pairing, env }); }
+
   close() { this.ws.close(); return this.closed; }
 }
 
@@ -53,7 +55,7 @@ export function openClient(url, identity = createIdentity()) {
 export async function connect(url, { identity = createIdentity(), allow = [], pairing = [] } = {}) {
   const client = await openClient(url, identity);
   const challenge = await client.next((f) => f.t === 'challenge');
-  client.sendFrame(relayHello(identity, challenge.nonce, allow, pairing));
+  client.sendFrame(relayHello(identity, challenge, url, allow, pairing));
   client.ready = await client.next((f) => f.t === 'ready');
   return client;
 }

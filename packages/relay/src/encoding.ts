@@ -39,6 +39,20 @@ export function deviceIdOf(publicKey: KeyObject): string {
   return b64url(createHash('sha256').update(spki).digest());
 }
 
-export function relayHelloBytes(nonce: string): Buffer {
-  return Buffer.from(`${RELAY_HELLO_CONTEXT}\n${nonce}`, 'utf8');
+/**
+ * A pairing id: `p_` then 32 random bytes as base64url. The prefix keeps pairing
+ * ids and device ids apart, so one can never be mistaken for the other.
+ */
+export const PAIRING_PATTERN = /^p_[A-Za-z0-9_-]{43}$/;
+
+/** A relay's name: the WebSocket URL devices are configured to reach (ws:// or wss://, path /v1). */
+export const RELAY_NAME_PATTERN = /^wss?:\/\/[A-Za-z0-9.:[\]-]{1,253}\/v1$/;
+
+/**
+ * The bytes a device signs in its relay hello: the context, the relay's name and
+ * the per-connection nonce. The name binds the hello to one relay, so a hello
+ * captured by one relay cannot be replayed to another.
+ */
+export function relayHelloBytes(relay: string, nonce: string): Buffer {
+  return Buffer.from(`${RELAY_HELLO_CONTEXT}\n${relay}\n${nonce}`, 'utf8');
 }

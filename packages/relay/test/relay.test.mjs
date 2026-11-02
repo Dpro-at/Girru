@@ -8,6 +8,8 @@ import { createIdentity, relayHello, startHandshake, answerHandshake, finishHand
 import { b64url } from '../src/encoding.ts';
 import { connect, openClient } from './helpers.mjs';
 
+const newPairingId = () => `p_${b64url(randomBytes(32))}`;
+
 async function startRelay(options = {}) {
   const relay = createRelay({ port: 0, ...options });
   const { host, port } = await relay.listen();
@@ -94,17 +96,17 @@ test('an envelope to an unknown, offline or not-allowing device is dropped and r
 test('a pairing id lets a new phone reach the computer once, for a short time, without being allowed yet', async () => {
   const { relay, url } = await startRelay({ pairingMessages: 1 });
   try {
-    const pairingId = b64url(randomBytes(32)), held = b64url(randomBytes(32));
+    const pairingId = newPairingId(), held = newPairingId();
     const computer = await connect(url, { pairing: [pairingId, held] });
     const phone = await connect(url, { allow: [computer.id] });
-    phone.send(pairingId, 'g1.pair.request.x');
+    phone.sendPairing(pairingId, 'g1.pair.request.x');
     const got = await computer.next((f) => f.t === 'msg');
     assert.deepEqual(got, { t: 'msg', from: phone.id, via: pairingId, env: 'g1.pair.request.x' });
-    phone.send(pairingId, 'g1.pair.again.x', 'again');
+    phone.sendPairing(pairingId, 'g1.pair.again.x', 'again');
     assert.equal((await phone.next((f) => f.t === 'drop')).ref, 'again', 'the pairing id is used up');
 
     // Another connection cannot take an open pairing id.
-    const other = await connect(url, { pairing: [b64url(randomBytes(32))] });
+    const other = await connect(url, { pairing: [newPairingId()] });
     other.sendFrame({ t: 'pairing', open: [held] });
     const reply = await other.next((f) => f.t === 'paired');
     assert.deepEqual(reply.refused, [held]);
@@ -117,8 +119,8 @@ test('the hello must be signed by the key behind the device id', async () => {
   try {
     const client = await openClient(url);
     const challenge = await client.next((f) => f.t === 'challenge');
-    const forged = relayHello(createIdentity(), challenge.nonce);
-    forged.key = relayHello(client.identity, challenge.nonce).key; // someone else's key, wrong signature
+    const forged = relayHello(createIdentity(), challenge, url);
+    forged.key = relayHello(client.identity, challenge, url).key; // someone else's key, wrong signature
     client.sendFrame(forged);
     assert.equal(await client.closed, 1008);
 

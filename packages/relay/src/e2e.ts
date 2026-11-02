@@ -86,9 +86,21 @@ export function peerKey(text: string, expectedId?: string): KeyObject {
   return key;
 }
 
-/** The relay hello: proves to the relay that this connection owns `identity.id`. */
-export function relayHello(identity: Identity, nonce: string, allow: string[] = [], pairing: string[] = []) {
-  const sig = b64url(sign('sha256', relayHelloBytes(nonce), identity.privateKey));
+/**
+ * The relay hello: proves to the relay that this connection owns `identity.id`.
+ * `relayUrl` is the relay this device is configured to reach; a challenge that
+ * names any other relay is refused, so the signature is only good for that one.
+ */
+export function relayHello(
+  identity: Identity,
+  challenge: { relay?: unknown; nonce?: unknown },
+  relayUrl: string,
+  allow: string[] = [],
+  pairing: string[] = [],
+) {
+  if (challenge.relay !== relayUrl) throw new ProtocolError('wrong_relay');
+  if (typeof challenge.nonce !== 'string' || !ID_PATTERN.test(challenge.nonce)) throw new ProtocolError('bad_format');
+  const sig = b64url(sign('sha256', relayHelloBytes(relayUrl, challenge.nonce), identity.privateKey));
   return { t: 'hello', v: 1, key: publicKeyText(identity.publicKey), sig, allow, pairing };
 }
 
