@@ -41,7 +41,7 @@ function parseArgs(argv) {
   return options;
 }
 
-const copy = (from, to) => { fs.mkdirSync(path.dirname(to), { recursive: true }); fs.cpSync(from, to, { recursive: true, verbatimSymlinks: true, mode: fs.constants.COPYFILE_FICLONE }); };
+const copy = (from, to, extensionRoot) => { fs.mkdirSync(path.dirname(to), { recursive: true }); fs.cpSync(from, to, { recursive: true, verbatimSymlinks: true, mode: fs.constants.COPYFILE_FICLONE, ...(extensionRoot ? { filter: source => !path.relative(extensionRoot, source).split(path.sep).some(part => part === 'test' || part === 'tests') } : {}) }); };
 
 /** Top-level production packages of a package folder, as paths relative to it (node_modules/<name>). */
 function productionPackages(dir, run = execFileSync, platform = process.platform) {
@@ -119,7 +119,7 @@ function stage({ nabu, out }) {
     const from = path.join(extensionsFrom, entry.name); const to = path.join(extensionsTo, entry.name);
     if (!entry.isDirectory() || entry.name === 'node_modules') { copy(from, to); continue; }
     fs.mkdirSync(to, { recursive: true });
-    for (const item of fs.readdirSync(from)) if (item !== 'node_modules') copy(path.join(from, item), path.join(to, item));
+    for (const item of fs.readdirSync(from)) if (item !== 'node_modules') copy(path.join(from, item), path.join(to, item), from);
     if (fs.existsSync(path.join(from, 'node_modules'))) for (const rel of productionPackages(from)) copy(path.join(from, rel), path.join(to, rel));
     kept.push(entry.name);
   }
