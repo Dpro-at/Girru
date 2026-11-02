@@ -179,7 +179,7 @@ test('opening a chat project confines files, rejects escapes and reserves the ac
  if(process.platform!=='win32'){fs.symlinkSync(path.join(dir,'outside.txt'),path.join(root,'escape'));assert.equal(await open(f.event(),{...body,file:'escape'}),null);}
  assert.equal((await open(f.event(),body)).mode,'code');const v=f.views[0];assert.equal(v.bounds.width,860);
  v.webContents.mainFrame.url=v.webContents.url;const event={sender:v.webContents,senderFrame:v.webContents.mainFrame};
- const target=await f.ipc.handlers.get('girru:code-target')(event);assert.equal(target.folder,fs.realpathSync(root));assert.equal(target.file,fs.realpathSync(path.join(root,'review.txt')));
+ const target=await f.ipc.handlers.get('girru:code-target')(event);assert.equal(target.folder,fs.realpathSync.native(root));assert.equal(target.file,fs.realpathSync.native(path.join(root,'review.txt')));
  assert.equal(f.ipc.handlers.get('girru:code-target-done')(event,target.id+1),false);assert.equal(f.ipc.handlers.get('girru:code-target-done')(event,target.id),true);
  assert.equal(f.ipc.handlers.get('girru:code-target')(event),null);
  await f.controller.stop();
@@ -198,7 +198,7 @@ test('the initial editor load cannot navigate to the requested folder before the
  const fs=require('node:fs'),os=require('node:os'),path=require('node:path');const root=fs.mkdtempSync(path.join(os.tmpdir(),'girru-code-ready-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
  const seen=[];const f=fixture({onLoad:contents=>{contents.mainFrame.url=contents.url;seen.push(f.ipc.handlers.get('girru:code-target')({sender:contents,senderFrame:contents.mainFrame}));}});
  assert.equal((await f.ipc.handlers.get(CHANNELS.open)(f.event(),{folder:root,file:null,top:48,bottom:32})).mode,'code');assert.deepEqual(seen,[null]);
- const wc=f.views[0].webContents;assert.equal(f.ipc.handlers.get('girru:code-target')({sender:wc,senderFrame:wc.mainFrame}).folder,fs.realpathSync(root));await f.controller.stop();
+ const wc=f.views[0].webContents;assert.equal(f.ipc.handlers.get('girru:code-target')({sender:wc,senderFrame:wc.mainFrame}).folder,fs.realpathSync.native(root));await f.controller.stop();
 });
 
 test('native review only forwards a bounded saved proposal and a matching one-shot decision', async () => {
