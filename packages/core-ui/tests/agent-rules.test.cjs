@@ -77,7 +77,7 @@ test('wiring: Rules is the owner\'s place in the Agents sidebar with a "needs yo
   assert.match(d, /<span className="dk-place-name">Rules<\/span>\{rules>0&&<span className="dk-place-badge"/);
   const p = src('src/AgentRules.tsx');
   assert.equal((p.match(/className="primary"/g) ?? []).length, 4, 'New rule; Use this rule (only for a suggestion); Done and Write the files, each in its own sheet');
-  for (const re of [/onContextMenu=/, /e\.key === 'Delete' \|\| e\.key === 'Backspace'/, /e\.key\.toLowerCase\(\) === 'z' && s\.lastDeleted/, /<Notice toast=\{s\.toast\} onUndo=/, /What an agent sees/, /Two rules disagree/, /The later one, “\{textOf\(x\.b\)\}”, wins/, /Start with our usual rules/, /DocumentEditor/]) assert.match(p, re);
+  for (const re of [/onContextMenu=/, /e\.key === 'Delete' \|\| e\.key === 'Backspace'/, /e\.key\.toLowerCase\(\) === 'z' && s\.lastDeleted/, /<Notice toast=\{s\.toast\} onUndo=/, /What an agent sees/, /Two rules disagree/, /\{byGroup \? 'The stronger one' : 'The later one'\}, “\{textOf\(winner\(x\.a, x\.b\)\)\}”, wins/, /Start with our usual rules/, /DocumentEditor/]) assert.match(p, re);
   assert.match(src('scripts/application-server.cjs'), /if \(agentRulesRoute\(target\)\) return allowedAgentRules\(method, target, body\);/);
 });
 

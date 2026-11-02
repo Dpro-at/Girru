@@ -67,7 +67,8 @@ export function readInstance(configDir: string): Instance {
   return { id: d.id, secret: d.secret };
 }
 
-export interface HttpBackendOptions { client: string; cwd: string; backendUrl: string; configDir: string; fetchImpl?: typeof fetch; timeoutMs?: number }
+/** `capability`: the Girru session capability this process was started with (STORE-MAP-01 pilot), sent with every call. */
+export interface HttpBackendOptions { client: string; cwd: string; backendUrl: string; configDir: string; fetchImpl?: typeof fetch; timeoutMs?: number; capability?: string | null }
 
 /** The backend over loopback HTTP: identity check, session, calls (token in memory only). */
 export function httpBackend(o: HttpBackendOptions): BridgeBackend {
@@ -101,7 +102,7 @@ export function httpBackend(o: HttpBackendOptions): BridgeBackend {
       for (let attempt = 0; attempt < 2; attempt++) {
         if (!token) token = await session();
         let res: Response;
-        try { res = await post('/api/memory-bridge/mcp/call', { client: o.client, cwd: o.cwd, tool, args }, { 'x-dpro-bridge-token': token }); }
+        try { res = await post('/api/memory-bridge/mcp/call', { client: o.client, cwd: o.cwd, tool, args }, { 'x-dpro-bridge-token': token, ...(o.capability ? { 'x-girru-capability': o.capability } : {}) }); }
         catch { throw new BridgeClientError(`Cannot reach Girru at ${base}. Is it running?`); }
         const data = await res.json().catch(() => null) as { text?: unknown; error?: unknown } | null;
         if (res.status === 401 && attempt === 0) { token = null; continue; }

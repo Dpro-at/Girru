@@ -15,3 +15,4 @@ A skill is written guidance (Markdown). It never grants tools, connections, memo
 - Giving a skill to an agent, taking it back and updating an installed copy change what agents follow, so the owner does them in the app after its review; this tool refuses them.
 - Adding from Girru's catalogue needs the owner's authenticator code, so the owner does it in the app only. Removing a skill from Girru is not available.
 - Never invent skills, agents that use them or installed versions.
+- Agents may see a skill only by its name and the first line of its description, and load the full text with `guide_read` when their work needs it. When the owner writes or adds a skill, keep that first line one clear sentence about what the skill is for.

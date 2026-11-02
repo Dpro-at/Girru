@@ -256,9 +256,9 @@ export async function getAgentFiles(agentId: string): Promise<AgentFiles> {
 }
 
 /**
- * Default PERSONALITY.md template
+ * Default PERSONALITY.md template (an unedited file = no personality text of its own).
  */
-function getDefaultPersonality(): string {
+export function getDefaultPersonality(): string {
   return `# Agent Personality
 
 ## Core Identity

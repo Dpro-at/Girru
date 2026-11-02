@@ -10,6 +10,11 @@ import { vaultChatFrames } from '../../services/chat-secrets.js';
 import { currentChatRun } from '../../services/chat-run-context.js';
 import {subscriptionModel,subscriptionEnabled,runSubscription,chatImagesSeenBy} from '../../services/subscription-chat.js';
 import {subscriptionAgentContext,subscriptionReplyPrompt} from '../../services/subscription-agent-context.js';
+import {isPilotAgent} from '../../memory/outbox/pilot.js';
+import {resolveAgentContext} from '../../services/agent-context/resolve.js';
+import {renderCodingAppInstructions,renderMemoryData,renderSystemPrompt} from '../../services/agent-context/render.js';
+import {CODING_APP_MEMORY_TOKENS,capTokens} from '../../services/agent-context/budget.js';
+import {storeP2Enabled} from '../../services/agent-context/switch.js';
 import { agentSkillsPrompt } from '../../skills/central-store.js';
 import { safeConsole } from '../../services/safe-error-log.js';
 /**
@@ -465,7 +470,9 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
       try{
         const selectedAgent=savedReplyAgent;
         if(!selectedAgent)throw Error('agent_context_unavailable');
-        const context=await subscriptionAgentContext(selectedAgent.id,{sessionId});
+        // STORE-MAP-01 P2 (CX6, AG1): the one resolved context; guides by name (read with guide_read through Girru's tools).
+        const p2Context=storeP2Enabled()?await resolveAgentContext({agentId:selectedAgent.id,entry:'coding_app',ownerId:userId,sessionId}):null;
+        const context=p2Context?renderCodingAppInstructions(p2Context):await subscriptionAgentContext(selectedAgent.id,{sessionId});
         const drawers=await withoutArchivedDrawers(userId,chatTurnDrawers(true,memoryScope));
         // CHAT-BUILD-01: the coding app gets the newest turns plus summaries of older ones and a bounded
         // set of top memories, instead of the whole conversation on every turn (plan usage).
@@ -478,7 +485,12 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
         let memoryText='';
         try{const readable=await readableDrawers(selectedAgent.id,drawers,userId);memoryText=(await contextPack({userId,agentId:selectedAgent.id,drawers:readable,persona:'',scopeFacts:null,handoff:input.handoff??null})).text.trim();}
         catch(err){safeConsole.log('[Chat] Memory context unavailable',safeErrorFields(err));}
-        if(memoryText)history=`${capMiddle(memoryText,SUBSCRIPTION_MEMORY_CHARS)}\n\n${history}`;
+        // STORE-MAP-01 pilot (CX6): the pilot agent's coding-app reply also gets its pinned facts and the
+        // project's newest handoff (Girru agents and coding tools), as data, from the one resolved context.
+        if(p2Context||isPilotAgent(selectedAgent.id)){try{const data=renderMemoryData(p2Context??await resolveAgentContext({agentId:selectedAgent.id,entry:'coding_app',ownerId:userId,sessionId}));if(data)memoryText=memoryText?`${data}\n\n${memoryText}`:data;}
+          catch(err){safeConsole.log('[Chat] Pilot context unavailable',safeErrorFields(err));}}
+        // SUB3: with P2 the memory part has a token budget (counted like every other prompt part), not a character cap.
+        if(memoryText)history=`${p2Context?capTokens(memoryText,CODING_APP_MEMORY_TOKENS):capMiddle(memoryText,SUBSCRIPTION_MEMORY_CHARS)}\n\n${history}`;
         const registry=await createAgentToolsRegistry({userId,sessionId,agentId:selectedAgent.id,workspaceDir:input.fileReadRoot,fileReadRoot:input.fileReadRoot,memoryDrawers:drawers,chatPlan:true});
         let toolStep=0;
         // CHAT-GAPS-01: Codex sees the images (-i, files of the chat's own image folder), Claude Code too (image blocks in one
@@ -577,40 +589,50 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
       }
     }
 
-    // Build system prompt: PERSONALITY.md > database system_prompt > none
-    const personaText = systemPrompt || personalityContent || (agentConfig?.system_prompt?.trim() ? agentConfig.system_prompt : undefined);
-    const rawSystemPrompt = personaText === undefined ? undefined : capMiddle(personaText, PERSONA_PROMPT_CHARS);
+    // STORE-MAP-01 P2 (CX6): one resolved context. Owner rules come first, then the hired
+    // instructions, personality text, working style, guides by name, team and knowledge; the
+    // context pack below adds the memory. Off: the earlier builder, unchanged.
+    let resolvedSystemPrompt = '';
+    if (storeP2Enabled() && agentConfig?.id && agentConfig.id !== 'small-local-agent') {
+      const ctx = await resolveAgentContext({ agentId: agentConfig.id, entry: channelTurn ? 'channel' : 'chat', ownerId: userId, sessionId, instructionsOverride: systemPrompt ?? null });
+      resolvedSystemPrompt = renderSystemPrompt(ctx, { data: false });
+      if (memoryFileContent) resolvedSystemPrompt += frameUntrustedMemory(memoryFileContent,'agent');
+    } else {
+      // Build system prompt: PERSONALITY.md > database system_prompt > none
+      const personaText = systemPrompt || personalityContent || (agentConfig?.system_prompt?.trim() ? agentConfig.system_prompt : undefined);
+      const rawSystemPrompt = personaText === undefined ? undefined : capMiddle(personaText, PERSONA_PROMPT_CHARS);
 
-    // Auto-inject agent name into system prompt if it's set and not already mentioned
-    const baseSystemPrompt = agentName && rawSystemPrompt && !rawSystemPrompt.toLowerCase().includes(agentName.toLowerCase())
-      ? `Your name is ${agentName}.\n\n${rawSystemPrompt}`
-      : rawSystemPrompt;
+      // Auto-inject agent name into system prompt if it's set and not already mentioned
+      const baseSystemPrompt = agentName && rawSystemPrompt && !rawSystemPrompt.toLowerCase().includes(agentName.toLowerCase())
+        ? `Your name is ${agentName}.\n\n${rawSystemPrompt}`
+        : rawSystemPrompt;
 
-    // Build complete context: Base Prompt + Personality settings + Agent Memory File + Session Memory
-    let resolvedSystemPrompt = baseSystemPrompt || '';
-    if (agentConfig?.id && agentConfig.id !== 'small-local-agent') resolvedSystemPrompt += await agentSkillsPrompt(agentConfig.id);
-    // AGENTS-ORG-01: who it reports to, who is under it, its sub-agents (names only; grants nothing).
-    if (agentConfig?.id && agentConfig.id !== 'small-local-agent') {
-      const team = await teamContext(agentConfig.id).catch(() => '');
-      if (team) resolvedSystemPrompt += `\n\n## Team\n${team}`;
-      // RULES-01: the owner's rules for this agent in this chat's project.
-      const rules = await rulesContext(agentConfig.id, { sessionId }).catch(() => '');
-      if (rules) resolvedSystemPrompt += `\n\n## Owner rules\n${rules}`;
-    }
+      // Build complete context: Base Prompt + Personality settings + Agent Memory File + Session Memory
+      resolvedSystemPrompt = baseSystemPrompt || '';
+      if (agentConfig?.id && agentConfig.id !== 'small-local-agent') resolvedSystemPrompt += await agentSkillsPrompt(agentConfig.id);
+      // AGENTS-ORG-01: who it reports to, who is under it, its sub-agents (names only; grants nothing).
+      if (agentConfig?.id && agentConfig.id !== 'small-local-agent') {
+        const team = await teamContext(agentConfig.id).catch(() => '');
+        if (team) resolvedSystemPrompt += `\n\n## Team\n${team}`;
+        // RULES-01: the owner's rules for this agent in this chat's project.
+        const rules = await rulesContext(agentConfig.id, { sessionId }).catch(() => '');
+        if (rules) resolvedSystemPrompt += `\n\n## Owner rules\n${rules}`;
+      }
 
-    if (behavior) {
-      resolvedSystemPrompt = resolvedSystemPrompt
-        ? `${resolvedSystemPrompt}\n\n${behavior.promptBlock}`
-        : behavior.promptBlock;
-    }
+      if (behavior) {
+        resolvedSystemPrompt = resolvedSystemPrompt
+          ? `${resolvedSystemPrompt}\n\n${behavior.promptBlock}`
+          : behavior.promptBlock;
+      }
 
-    // Add MEMORY.md content if exists
-    if (memoryFileContent) {
-      resolvedSystemPrompt += frameUntrustedMemory(memoryFileContent,'agent');
-    }
-    // AGENT-FILES-01: the Knowledge files the owner marked "It reads this file" (reference data; same gate as MEMORY.md).
-    if (includeAgentMemory && agentConfig?.id && agentConfig.id !== 'small-local-agent') {
-      resolvedSystemPrompt += await knowledgeContext(agentConfig.id).catch(() => '');
+      // Add MEMORY.md content if exists
+      if (memoryFileContent) {
+        resolvedSystemPrompt += frameUntrustedMemory(memoryFileContent,'agent');
+      }
+      // AGENT-FILES-01: the Knowledge files the owner marked "It reads this file" (reference data; same gate as MEMORY.md).
+      if (includeAgentMemory && agentConfig?.id && agentConfig.id !== 'small-local-agent') {
+        resolvedSystemPrompt += await knowledgeContext(agentConfig.id).catch(() => '');
+      }
     }
 
     // MEM-CACHE-01: the context pack (this persona text + the scope's pinned facts,

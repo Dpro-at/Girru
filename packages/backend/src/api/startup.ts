@@ -250,6 +250,10 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
     const { startMemoryBridgeSync } = await import('../memory/bridge/sync.js');
     startMemoryBridgeSync();
 
+    // STORE-MAP-01 pilot: change log + brief projection for GIRRU_STORE_PILOT only.
+    const { startStorePilot } = await import('../memory/outbox/start.js');
+    await startStorePilot().catch((err) => console.warn('[Store pilot] start failed:', (err as Error)?.message));
+
     // MEM-UX-02: exported memory files follow the database (untouched files only).
     const { startMemoryFilesSync } = await import('../memory/files-sync.js');
     startMemoryFilesSync();

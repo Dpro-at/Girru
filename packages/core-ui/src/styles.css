@@ -3262,6 +3262,9 @@ button.danger-solid { background:var(--danger); color:#fff; }
 .rules-order { margin-block-start:auto; line-height:1.5; }
 .rules-sees-pick { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-block-end:12px; }
 .rules-sees { display:grid; gap:6px; margin:0 0 12px; padding-inline-start:20px; font-size:13px; }
+/* STORE-MAP-01 P2: the eye's precedence groups, strongest first. */
+.rules-sees-group { margin:0; }
+.rules-sees-head { margin:10px 0 6px; font-size:12px; font-weight:600; color:var(--text-2, var(--muted)); }
 .rules-history { list-style:none; margin:0; padding:0; display:grid; gap:10px; }
 .rules-history li { display:grid; grid-template-columns:1fr auto; gap:2px 10px; align-items:center; font-size:13px; }
 .rules-history li small { grid-column:1; }

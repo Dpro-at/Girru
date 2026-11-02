@@ -46,6 +46,7 @@ const { allowedChatExport, chatExportRoute, chatExportResponse } = require('../s
 const { allowedChatSecrets, chatSecretsRoute, chatSecretsResponse } = require('../src/chat-secrets-contract.js');
 const { allowedTerminal, terminalPath, terminalRoute, terminalResponse, TerminalEventParser, TERMINAL_STREAM_MS } = require('../src/terminal-contract.js');
 const { allowedFooter, footerRoute, footerResponse } = require('../src/footer-contract.js');
+const { allowedStoreSwitches, storeSwitchesResponse, storeSwitchesRoute } = require('../src/store-switches-contract.js');
 const { allowedBackups, backupsRoute, backupsResponse } = require('../src/backups-contract.js');
 const { allowedChartPrefs, chartPrefsRoute, chartPrefsResponse } = require('../src/chart-prefs-contract.js');
 const { allowedDepartments, departmentsRoute, departmentsResponse } = require('../src/departments-contract.js');
@@ -136,6 +137,7 @@ function allowed(method, target, body) {
   if (templatePath(target)) return allowedTemplates(method,target,body);
   if (skillLibraryPath(target)) return allowedSkillLibrary(method,target,body);
   if (footerRoute(target)) return allowedFooter(method, target, body);
+  if (storeSwitchesRoute(target)) return allowedStoreSwitches(method, target, body);
   if (backupsRoute(target)) return allowedBackups(method, target, body);
   if (chartPrefsRoute(target)) return allowedChartPrefs(method, target, body);
   if (departmentsRoute(target)) return allowedDepartments(method, target, body);
@@ -226,6 +228,7 @@ function project(target, status, body) {
   if (cardRoute(target)) return agentCardResponse(target, status, body);
   if (terminalRoute(target)) return terminalResponse(target, status, body);
   if (footerRoute(target)) return footerResponse(status, body);
+  if (storeSwitchesRoute(target)) return storeSwitchesResponse(status, body);
   if (backupsRoute(target)) return backupsResponse(target, status, body);
   if (chartPrefsRoute(target)) return chartPrefsResponse(status, body);
   if (departmentsRoute(target)) return departmentsResponse(status, body);
