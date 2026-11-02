@@ -168,6 +168,8 @@ export function redactUrlSecrets(url: string): string {
 export async function buildServer(options: BuildServerOptions = {}): Promise<FastifyInstance> {
   const paperScheduleLedger=options.paperScheduleLedger??null;
   const fastify = Fastify({
+    // Cold skill/template seeding can exceed Fastify's 10-second default on Windows.
+    pluginTimeout: 60_000,
     logger: options.logger ?? {
       level: process.env.LOG_LEVEL || 'info',
       // CHAT-BUILD-01 (K1): a session token in a URL (?token= on an extension stream) or a header never reaches the log.
