@@ -39,8 +39,10 @@ export function kindOf(p: ProposalSummary & { counts?: { add: number; update: nu
   if (p.source === 'agent' && (!p.counts || p.counts.update + p.counts.delete > 0)) return 'agent';
   return 'important';
 }
+/** STORE-MAP-01 P6: a suggestion kept from a file in a project folder (shown as a label, not a reason). */
+export const REPOSITORY_FILE = 'repository-file';
 /** Reasons in plain words (machine details such as ids are left out). */
-export const plainReasons = (reasons: readonly string[]) => reasons.filter(r => /^[a-z][a-z _-]{0,40}$/i.test(r));
+export const plainReasons = (reasons: readonly string[]) => reasons.filter(r => r !== REPOSITORY_FILE && /^[a-z][a-z _-]{0,40}$/i.test(r));
 /** The proposal's text for the list: what it adds or changes to. */
 export function proposalText(p: Proposal): string {
   const c = p.changes[0];

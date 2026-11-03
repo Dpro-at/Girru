@@ -13,7 +13,7 @@ import type { UiIconName } from './ui-icons';
 import { DocumentEditor, MarkdownDocument } from './DocumentEditor';
 import { WEEKDAYS, allCardTypes, allPriorities, cardTypeLabel, priorityLabel, repeatWords, roleLabel } from './board';
 import type { ActivityItem, BoardColor, BoardController, Card, CardType, Every, FileDiff, Repeat, Role, TaskPageData } from './board';
-import { AppLogo, TaskFileSheet, appOf } from './BoardTaskFile';
+import { AppLogo, TaskFileSheet, TaskWorkedOn, appOf } from './BoardTaskFile';
 import { ROLES } from './board-contract.js';
 
 const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map(w => w.slice(0, 1).toUpperCase()).join('') || '?';
@@ -158,6 +158,7 @@ function TaskFileCard({ controller }: { controller: BoardController }) {
     <header><UiIcon name="file" size={14}/><strong>From the task file</strong><span>{d.file} · {d.no}</span></header>
     <div className="tp-card-body tp-file">
       {d.problem && <p className="task-file-problem" role="status"><UiIcon name="alert" size={13}/>{d.problem}. Fix that line in the file.</p>}
+      <TaskWorkedOn detail={d}/>
       {d.task.left.length > 0 && <span><b>Left</b> {d.task.left.join(' · ')}</span>}
       {d.task.next.length > 0 && <span><b>Next</b> {d.task.next.join(' · ')}</span>}
       {!d.task.left.length && !d.task.next.length && <span className="fine-print">Nothing left in the file.</span>}

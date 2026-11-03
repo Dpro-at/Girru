@@ -5,17 +5,19 @@
 // A keep new, O keep old, B keep both.
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { KeyboardEvent } from 'react';
-import { FILTERS, KIND_WORD, MemoryReviewController, plainReasons } from './memory-review';
+import { FILTERS, KIND_WORD, MemoryReviewController, REPOSITORY_FILE, plainReasons } from './memory-review';
 import type { ReviewItem } from './memory-review';
 import { ago, drawerName } from './memory-store';
 import { UiIcon } from './ui-icons';
 import type { UiIconName } from './ui-icons';
 import { IconButton, Popover, WithSwatches } from './desktop-ui';
 import type { MemoryDesktopController } from './memory-desktop';
+import type { ProjectFilesController } from './project-files';
+import { TaskProblems } from './MemoryProjectFiles';
 
 const KIND_ICON: Record<ReviewItem['kind'], UiIconName> = { conflict: 'diff', important: 'alert', agent: 'sparkle', imported: 'download', file: 'file', link: 'link' };
 
-export function NeedsYou({ c, mode, onOpenChat, design }: { c: MemoryReviewController; mode: 'one' | 'list'; onOpenChat?: (id: string) => void; design?: MemoryDesktopController }) {
+export function NeedsYou({ c, mode, onOpenChat, design, files }: { c: MemoryReviewController; mode: 'one' | 'list'; onOpenChat?: (id: string) => void; design?: MemoryDesktopController; files?: ProjectFilesController }) {
   const s = useSyncExternalStore(c.subscribe, c.getSnapshot, c.getSnapshot);
   const ref = useRef<HTMLDivElement>(null);
   const visible = s.phase === 'ready' ? c.visible() : [];
@@ -24,7 +26,7 @@ export function NeedsYou({ c, mode, onOpenChat, design }: { c: MemoryReviewContr
   useEffect(() => { ref.current?.focus(); }, [mode]);
   if (s.phase === 'error') return <div className="dk-empty"><p>{s.notice}</p><button type="button" onClick={() => void c.load()}>Try again</button></div>;
   if (s.phase !== 'ready') return <p className="dk-empty" role="status">Reading what waits for you…</p>;
-  if (!s.items.length) return <>{design && <DesignQuestions d={design}/>}<div className="dk-empty"><UiIcon name="check" size={20}/><p>Nothing needs you. Girru saves routine facts on its own and asks only when something matters or disagrees.</p>{s.result && <p className="fine-print">{s.result}</p>}</div></>;
+  if (!s.items.length) return <>{design && <DesignQuestions d={design}/>}{files && <TaskProblems c={files}/>}<div className="dk-empty"><UiIcon name="check" size={20}/><p>Nothing needs you. Girru saves routine facts on its own and asks only when something matters or disagrees.</p>{s.result && <p className="fine-print">{s.result}</p>}</div></>;
   function keys(e: KeyboardEvent<HTMLElement>) {
     if ((e.target as HTMLElement).closest('input, textarea, select')) return;
     const k = e.key.toLowerCase();
@@ -44,6 +46,7 @@ export function NeedsYou({ c, mode, onOpenChat, design }: { c: MemoryReviewContr
     {s.result && <p className="dk-inline-ok" role="status">{s.result}</p>}
     {s.notice && <p className="dk-inline-notice" role="alert">{s.notice}</p>}
     {design && <DesignQuestions d={design}/>}
+    {files && <TaskProblems c={files}/>}
     <Question c={c} onOpenChat={onOpenChat}/>
     <p className="fine-print dk-needs-foot">Other questions here, one at a time: an agent wants to remember something important, a new link on the map, memories found on this computer, a change to a memory file.</p>
   </div>;
@@ -92,8 +95,10 @@ function Question({ c, onOpenChat }: { c: MemoryReviewController; onOpenChat?: (
     </article>;
   }
   const kindWord = KIND_WORD[item.kind];
+  // STORE-MAP-01 P6 (D21): text written into Girru's part of a project file by someone outside Girru.
+  const fromFile = d.reasons.includes(REPOSITORY_FILE) ? <span className="dk-chip dk-state" data-tone="warn">From a file in the project</span> : null;
   return <article className="dk-question">
-    <h3><UiIcon name={KIND_ICON[item.kind]} size={15}/>{d.changes.length === 1 ? (d.changes[0].op === 'add' ? 'Remember this?' : d.changes[0].op === 'update' ? 'Change this memory?' : 'Forget this memory?') : `${d.changes.length} changes`} <span className="fine-print">{kindWord} · {c.label(item)}</span></h3>
+    <h3><UiIcon name={KIND_ICON[item.kind]} size={15}/>{d.changes.length === 1 ? (d.changes[0].op === 'add' ? 'Remember this?' : d.changes[0].op === 'update' ? 'Change this memory?' : 'Forget this memory?') : `${d.changes.length} changes`} <span className="fine-print">{kindWord} · {c.label(item)}</span>{fromFile}</h3>
     {d.changes.length === 1 && d.changes[0].op === 'add' ? <p className="dk-big dk-quote" dir="auto"><WithSwatches text={d.changes[0].after.content}/></p> : <ol className="dk-changes">{d.changes.map((ch, i) => <li key={i}>
       {'before' in ch && <p className="dk-del" dir="auto">− <WithSwatches text={ch.before.content}/></p>}
       {'after' in ch && <p className="dk-add" dir="auto">+ <WithSwatches text={ch.after.content}/></p>}

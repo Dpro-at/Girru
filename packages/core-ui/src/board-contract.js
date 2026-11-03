@@ -201,6 +201,8 @@ function taskDetail(t) {
   const k = t.task;
   return {
     ...m, file: t.file === '.girru/tasks-done.md' ? '.girru/tasks-done.md' : '.girru/tasks.md', text: clip(t.text, 20000),
+    // STORE-MAP-01 P6: the task's number when the backend's P6 switch is on (absent otherwise).
+    ...(taskNo(t.number) ? { number: t.number } : {}),
     task: { no: m.no, title: clip(k.title, MAX_TITLE), state: clip(k.state, 40), department: clip(k.department, 120), agent: clip(k.agent, 120), priority: clip(k.priority, 40), done: lines(k.done), left: lines(k.left), next: lines(k.next) },
     workedOn: Array.isArray(t.workedOn) ? t.workedOn.filter(w => record(w) && typeof w.app === 'string').slice(0, 10).map(w => ({ app: clip(w.app, 40), agent: clip(w.agent, 120), date: /^\d{4}-\d{2}-\d{2}$/.test(w.date) ? w.date : '', at: typeof w.at === 'string' ? clip(w.at, 20) : null, what: typeof w.what === 'string' ? clip(w.what, 300) : null })) : [],
     log: Array.isArray(t.log) ? t.log.filter(l => record(l) && typeof l.app === 'string').slice(0, 5).map(l => ({ at: clip(l.at, 20), app: clip(l.app, 40), what: clip(l.what, 300) })) : [],

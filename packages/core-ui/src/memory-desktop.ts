@@ -12,8 +12,8 @@ import type { DatabaseLevel, ProjectDatabases, ProjectDesign, ProjectGroup, Tras
 /** A sidebar place: Needs you, All memories, a drawer kind, a project, a group, an agent, Archived or Trash. */
 export type Place = 'needs' | 'all' | 'owner' | 'experience' | 'tasks' | 'people' | 'agents' | 'archived' | 'trash' | `project:${string}` | `group:${string}` | `agent:${string}`;
 export type ProjectView = 'memories' | 'design' | 'databases' | 'files';
-/** Views that fill the content area from the ⋯ menu. */
-export type Extra = 'map' | 'handoffs' | 'files' | null;
+/** Views that fill the content area from the ⋯ menu (Project files: from the Coding apps group, P6). */
+export type Extra = 'map' | 'handoffs' | 'files' | 'project-files' | null;
 export type Toast = { id: number; text: string; undo: boolean; show?: Place };
 export type Missing = 'missing';
 

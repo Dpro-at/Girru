@@ -29,7 +29,9 @@ import { Avatar, ContextMenu, IconButton, Notice, Popover, Sheet, Tile, WithSwat
 import type { MenuItem } from './desktop-ui';
 import type { ProjectGroup } from './memory-desktop-contract.js';
 import { NeedsYou } from './MemoryNeeds';
-import { useStoreP3 } from './store-switches';
+import { useStoreP3, useStoreP6 } from './store-switches';
+import { ProjectFilesController, bridgeProjectFor } from './project-files';
+import { CompareSheet, ProjectFilesInspector, ProjectFilesView, ProjectSwitches, projectFilesMenu } from './MemoryProjectFiles';
 import { DatabasesView, DesignView, FilesView, GroupView, TrashView } from './MemoryPlaces';
 
 /** Where a memory came from, as a kind icon and a short word (board rule 13: show things, not codes). */
@@ -57,15 +59,17 @@ export type SettingsTarget = 'rules' | 'folders' | 'sources' | 'projects' | 'acc
 
 /** Controllers of the window, made once per client. */
 function useControllers(client: SessionClient) {
-  const [c, setC] = useState<{ d: MemoryDesktopController; x: MemoryExplorerController; sc: MemoryScopesController; rv: MemoryReviewController; mv: MemoryMoveController; map: MemoryMapController; ho: MemoryHandoffsController; disc: DiscoveryController }>();
+  const [c, setC] = useState<{ d: MemoryDesktopController; x: MemoryExplorerController; sc: MemoryScopesController; rv: MemoryReviewController; mv: MemoryMoveController; map: MemoryMapController; ho: MemoryHandoffsController; disc: DiscoveryController; pf: ProjectFilesController }>();
   useEffect(() => {
     const d = new MemoryDesktopController(client), x = new MemoryExplorerController(client), sc = new MemoryScopesController(client);
     sc.light = true;
     const rv = new MemoryReviewController(client, () => void sc.load(true));
     const mv = new MemoryMoveController(client, (id, drawer) => x.moved(id, drawer));
     const map = new MemoryMapController(client), ho = new MemoryHandoffsController(client), disc = new DiscoveryController(client);
-    setC({ d, x, sc, rv, mv, map, ho, disc });
-    return () => { d.dispose(); x.dispose(); sc.dispose(); rv.dispose(); mv.dispose(); map.dispose(); ho.dispose(); disc.dispose(); };
+    // STORE-MAP-01 P6: project files, task numbers and place switches (asks nothing until the switch is on).
+    const pf = new ProjectFilesController(client); pf.say = text => d.say(text);
+    setC({ d, x, sc, rv, mv, map, ho, disc, pf });
+    return () => { d.dispose(); x.dispose(); sc.dispose(); rv.dispose(); mv.dispose(); map.dispose(); ho.dispose(); disc.dispose(); pf.dispose(); };
   }, [client]);
   return c;
 }
@@ -83,11 +87,14 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
   const owner = useSyncExternalStore(client.subscribe, client.getSnapshot, client.getSnapshot).user?.role === 'owner';
   const k = useControllers(client);
   const p3 = useStoreP3(client);
-  const ds = useStore(k?.d), xs = useStore(k?.x), ss = useStore(k?.sc), rs = useStore(k?.rv), ms = useStore(k?.mv);
+  const p6 = useStoreP6(client);
+  const p6Ref = useRef(p6); p6Ref.current = p6;
+  const ds = useStore(k?.d), xs = useStore(k?.x), ss = useStore(k?.sc), rs = useStore(k?.rv), ms = useStore(k?.mv), fs = useStore(k?.pf);
   const menu = useMenu();
   const [sheet, setSheet] = useState<null | { kind: 'remember' } | { kind: 'history' } | { kind: 'weekly' } | { kind: 'group'; projects: string[] } | { kind: 'rename-group'; id: string } | { kind: 'project'; action: ProjectAction; slug: string } | { kind: 'forget'; ids?: string[] } | { kind: 'trash-project'; slug: string } | { kind: 'edit-pinned'; fact: PinnedFact }>(null);
   const [filters, setFilters] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const filesSearchRef = useRef<HTMLInputElement>(null);
 
   // First open: the tree, groups, what waits, the list.
   useEffect(() => {
@@ -95,6 +102,11 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
     void k.sc.load(); void k.d.loadGroups(); void k.rv.load();
     if (k.x.getSnapshot().phase === 'idle') k.x.setScope('company');
   }, [active, owner, k]);
+  // P6: which projects need you (the sidebar badge) and the task-number questions.
+  useEffect(() => {
+    if (!active || !owner || !k || !p6) return;
+    void k.pf.load(); void k.pf.loadProblems();
+  }, [active, owner, k, p6]);
   // The list follows the place.
   useEffect(() => {
     if (!k || !ds) return;
@@ -124,7 +136,10 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
       const typing = !!t.closest?.('input, textarea, select, [contenteditable="true"]');
       const cmd = e.metaKey || e.ctrlKey; const key = e.key.toLowerCase();
       if (document.querySelector('.dk-sheet-scrim, .dk-menu')) return;
-      if (cmd && key === 'n' && !e.shiftKey) { e.preventDefault(); k.x.startAdd(); setSheet({ kind: 'remember' }); }
+      const files = p6Ref.current && k.d.getSnapshot().extra === 'project-files';
+      if (files && cmd && key === 'f') { e.preventDefault(); filesSearchRef.current?.focus(); }
+      else if (files && cmd && key === 'r' && !e.shiftKey) { e.preventDefault(); const sel = k.pf.getSnapshot().selected; if (sel && !k.pf.getSnapshot().busy) void k.pf.rewrite(sel); }
+      else if (cmd && key === 'n' && !e.shiftKey) { e.preventDefault(); k.x.startAdd(); setSheet({ kind: 'remember' }); }
       else if (cmd && key === 'f') { e.preventDefault(); searchRef.current?.focus(); }
       else if (cmd && key === 'z' && !e.shiftKey && !typing) { e.preventDefault(); void k.d.undo().then(() => { void k.x.load(); void k.sc.load(true); }); }
       else if (cmd && e.shiftKey && key === 'm') { e.preventDefault(); k.d.setExtra('map'); }
@@ -145,10 +160,14 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
   }
 
   if (!owner) return <section className="dk-mem" aria-label="Memory"><div className="dk-empty"><p>Only the owner manages the memory here.</p></div></section>;
-  if (!k || !ds || !xs || !ss || !rs) return <section className="dk-mem" aria-label="Memory"><p className="dk-empty" role="status">Opening memory…</p></section>;
-  const { d, x, sc, rv, mv } = k;
+  if (!k || !ds || !xs || !ss || !rs || !fs) return <section className="dk-mem" aria-label="Memory"><p className="dk-empty" role="status">Opening memory…</p></section>;
+  const { d, x, sc, rv, mv, pf } = k;
 
-  const waiting = rs.phase === 'ready' ? rs.items.length : ss.tree?.company.pendingReviews ?? 0;
+  const waiting = (rs.phase === 'ready' ? rs.items.length : ss.tree?.company.pendingReviews ?? 0) + (p6 ? pf.problemCount() : 0);
+  const filesOpen = p6 && ds.extra === 'project-files';
+  const filesProject = filesOpen ? pf.project(fs.selected) : null;
+  const filesMenu = (e: React.MouseEvent, p: import('./project-files-contract.js').ProjectFiles) => menu.at(e, projectFilesMenu(pf, d, p));
+
   const memoryMenu = (i: ExplorerItem): MenuItem[] => [
     { label: 'Edit', icon: 'pencil', shortcut: '↩', run: () => { void x.openMemory(i.id).then(() => x.startEdit()); } },
     { label: 'Pin for every agent', icon: 'pin', run: () => void d.pin(i.preview, i.drawerId) },
@@ -211,15 +230,15 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
     try { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/markdown' })); a.download = `${e.project}-memory.md`; a.click(); URL.revokeObjectURL(a.href); d.say(`Exported ${e.files.length} files.`); } catch { d.say('The export could not be saved.'); }
   }
 
-  const sidebar = <MemorySidebar k={k} waiting={waiting} searchRef={searchRef} onRemember={() => { x.startAdd(); setSheet({ kind: 'remember' }); }} menu={menu} projectMenu={projectMenu}
+  const sidebar = <MemorySidebar k={k} p6={p6} filesNeedYou={p6 ? pf.needsCount() : 0} waiting={waiting} searchRef={searchRef} onRemember={() => { x.startAdd(); setSheet({ kind: 'remember' }); }} menu={menu} projectMenu={projectMenu}
     onNewGroup={projects => setSheet({ kind: 'group', projects })} onRenameGroup={id => setSheet({ kind: 'rename-group', id })}/>;
 
   // ---- the content of the open place ----
   const place = ds.place;
-  const title = ds.extra === 'map' ? 'Map' : ds.extra === 'handoffs' ? 'Handoff notes' : ds.extra === 'files' ? 'Open as files'
+  const title = ds.extra === 'map' ? 'Map' : ds.extra === 'handoffs' ? 'Handoff notes' : ds.extra === 'files' ? 'Open as files' : ds.extra === 'project-files' ? 'Project files'
     : project ? project.name : place.startsWith('group:') ? (Array.isArray(ds.groups) ? (ds.groups as readonly ProjectGroup[]).find(g => g.id === place.slice(6))?.name ?? 'Group' : 'Group')
     : place.startsWith('agent:') ? ss.agents[place.slice(6)] ?? 'Agent' : xs.query && !place.startsWith('project:') && placeScope(place) ? 'Search' : PLACE_NAME[place] ?? 'Memory';
-  const sub = ds.extra === 'map' ? 'people, projects and topics in memory' : ds.extra === 'handoffs' ? 'what agents left for the next session' : ds.extra === 'files' ? 'read-only view of the memory files per agent'
+  const sub = ds.extra === 'map' ? 'people, projects and topics in memory' : ds.extra === 'handoffs' ? 'what agents left for the next session' : ds.extra === 'files' ? 'read-only view of the memory files per agent' : ds.extra === 'project-files' ? 'what Girru writes into each project folder for coding apps'
     : place === 'needs' ? `${waiting} ${waiting === 1 ? 'question' : 'questions'}` : place === 'trash' ? `kept ${ds.trash && ds.trash !== 'missing' ? (ds.trash.trashDays ? `${ds.trash.trashDays} days` : 'until you empty it') : '30 days'}, then forgotten`
     : project ? `${project.memories} ${project.memories === 1 ? 'memory' : 'memories'}${project.archived ? ' · archived' : ''}` : placeScope(place) && xs.phase === 'ready' ? `${xs.total} ${xs.total === 1 ? 'memory' : 'memories'}` : '';
   const listPlace = !ds.extra && !!placeScope(place) && (!project || ds.projectView === 'memories');
@@ -227,8 +246,9 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
 
   const content = ds.extra === 'map' ? <KnowledgeMap c={k.map} agents={ss.agents} onOpenMemories={name => { d.setExtra(null); d.open('all'); x.setQuery(name); void x.load(); }}/>
     : ds.extra === 'handoffs' ? <HandoffsView c={k.ho} onOpenChat={onOpenChat}/>
+    : filesOpen ? <ProjectFilesView c={pf} onMenu={filesMenu} searchRef={filesSearchRef}/>
     : ds.extra === 'files' ? <FilesView client={client} agents={ss.agents} drawers={[{ id: 'owner', name: 'About you' }, { id: 'experience', name: 'Lessons' }, ...(ss.tree?.projects ?? []).filter(p => !p.archived && !p.mergedInto && !p.trashedAt).map(p => ({ id: `project:${p.slug}`, name: p.name }))]}/>
-    : place === 'needs' ? <NeedsYou c={rv} mode={ds.needsMode} onOpenChat={onOpenChat} design={d}/>
+    : place === 'needs' ? <NeedsYou c={rv} mode={ds.needsMode} onOpenChat={onOpenChat} design={d} files={p6 ? pf : undefined}/>
     : place === 'trash' ? <TrashView d={d} me={client.getSnapshot().user?.id} onAsk={ids => setSheet({ kind: 'forget', ids })}/>
     : place.startsWith('group:') ? <GroupView d={d} sc={sc} groupId={place.slice(6)}/>
     : place === 'agents' ? <AgentsPlace names={ss.agents} onOpen={id => d.open(`agent:${id}`)}/>
@@ -240,16 +260,17 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
       empty={project ? <><p>Nothing remembered here yet. Girru remembers on its own while you chat. You can add something yourself too.</p><button type="button" className="primary" onClick={() => { x.startAdd(); setSheet({ kind: 'remember' }); }}>Remember</button></>
         : xs.query ? <p>No memory matches. Put words in "quotes" for exact words.</p> : <p>Nothing here yet. Girru remembers on its own while you chat.</p>}/>;
 
-  const inspector = ds.extra ? null
+  const inspector = filesOpen ? (filesProject ? <ProjectFilesInspector c={pf} d={d} project={filesProject} onMenu={filesMenu}/> : null)
+    : ds.extra ? null
     : xs.open && open && listPlace ? <MemoryInspector k={k} item={open} onHistory={() => setSheet({ kind: 'history' })} onTrash={() => void trashIds([open.id])}/>
-    : project && ds.details === 'project' ? <ProjectInspector k={k} project={project} onSettings={onOpenSettings} onGroup={() => setSheet({ kind: 'group', projects: [project.slug] })}/>
+    : project && ds.details === 'project' ? <ProjectInspector k={k} p6={p6} project={project} onSettings={onOpenSettings} onGroup={() => setSheet({ kind: 'group', projects: [project.slug] })}/>
     : null;
 
   return <P3.Provider value={p3}><section className="dk-mem" aria-label="Memory" data-inspector={inspector ? 'open' : undefined} data-inline-sidebar={sidebarSlot ? undefined : 'true'}>
     {sidebarSlot ? (active ? createPortal(sidebar, sidebarSlot) : null) : sidebar}
     <div className="dk-content">
       <header className="dk-toolbar">
-        {ds.extra && <IconButton icon="arrow-left" label="Back to the list" onClick={() => d.setExtra(null)}/>}
+        {ds.extra && !filesOpen && <IconButton icon="arrow-left" label="Back to the list" onClick={() => d.setExtra(null)}/>}
         <div className="dk-title">
           {project && !ds.extra ? <button type="button" className="dk-title-button" title="Project details" onClick={() => d.showDetails(ds.details === 'project' ? null : 'project')}><Tile name={project.name}/><h2>{title}</h2></button> : <h2>{title}</h2>}
           {sub && <span className="dk-sub">{sub}</span>}
@@ -290,6 +311,7 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
     {sheet?.kind === 'forget' && <ForgetSheet k={k} ids={sheet.ids} onClose={() => setSheet(null)}/>}
     {ms?.memory && <MoveSheet k={k} several={selection.length > 1 ? [...selection] : null} onClose={() => mv.close()}/>}
     {sheet?.kind === 'edit-pinned' && <EditPinnedSheet k={k} fact={sheet.fact} onClose={() => setSheet(null)}/>}
+    {p6 && <CompareSheet c={pf} d={d}/>}
     <Notice toast={ds.toast} onUndo={() => void d.undo().then(() => { void x.load(); void sc.load(true); })} onShow={ds.toast?.show ? () => d.open(ds.toast!.show!) : undefined} onDone={id => d.dismiss(id)}/>
   </section></P3.Provider>;
 }
@@ -297,8 +319,8 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
 // ---------------------------------------------------------------- sidebar
 type K = NonNullable<ReturnType<typeof useControllers>>;
 
-function MemorySidebar({ k, waiting, searchRef, onRemember, menu, projectMenu, onNewGroup, onRenameGroup }: {
-  k: K; waiting: number; searchRef: React.RefObject<HTMLInputElement | null>; onRemember: () => void; menu: ReturnType<typeof useMenu>;
+function MemorySidebar({ k, p6, filesNeedYou, waiting, searchRef, onRemember, menu, projectMenu, onNewGroup, onRenameGroup }: {
+  k: K; p6: boolean; filesNeedYou: number; waiting: number; searchRef: React.RefObject<HTMLInputElement | null>; onRemember: () => void; menu: ReturnType<typeof useMenu>;
   projectMenu: (p: TreeProject) => MenuItem[]; onNewGroup: (projects: string[]) => void; onRenameGroup: (id: string) => void;
 }) {
   const { d, x, sc } = k;
@@ -378,6 +400,13 @@ function MemorySidebar({ k, waiting, searchRef, onRemember, menu, projectMenu, o
     {row('agents', 'sparkle', 'Agents')}
     {row('archived', 'archive', 'Archived', tree?.company.archivedProjects)}
     {row('trash', 'trash', 'Trash', trashCount)}
+    {p6 && <>
+      <p className="section-label dk-label"><span>Coding apps</span></p>
+      <button type="button" className="nav-item dk-place" aria-current={ds.extra === 'project-files' ? 'page' : undefined} onClick={() => d.setExtra('project-files')}>
+        <UiIcon name="code" size={15}/><span className="dk-place-name">Project files</span>{filesNeedYou ? <span className="dk-badge-pill" title="Projects that need you">{filesNeedYou}</span> : null}</button>
+      <button type="button" className="nav-item dk-place" aria-current={ds.extra === 'handoffs' ? 'page' : undefined} onClick={() => d.setExtra('handoffs')}>
+        <UiIcon name="handoff" size={15}/><span className="dk-place-name">Handoffs</span></button>
+    </>}
   </nav>;
 }
 
@@ -487,10 +516,13 @@ function MemoryInspector({ k, item, onHistory, onTrash, onChecked }: { k: K; ite
   </div>;
 }
 
-function ProjectInspector({ k, project, onSettings, onGroup }: { k: K; project: TreeProject; onSettings?: (t: SettingsTarget) => void; onGroup: () => void }) {
-  const { d, sc, disc } = k;
-  const ss = useStore(sc)!; const ds = useStore(d)!; const dv = useStore(disc);
+function ProjectInspector({ k, p6 = false, project, onSettings, onGroup }: { k: K; p6?: boolean; project: TreeProject; onSettings?: (t: SettingsTarget) => void; onGroup: () => void }) {
+  const { d, sc, disc, pf } = k;
+  const ss = useStore(sc)!; const ds = useStore(d)!; const dv = useStore(disc); const fs = useStore(pf)!;
   useEffect(() => { if (!dv?.view) void disc.load(); }, [disc]);
+  useEffect(() => { if (p6 && fs.phase === 'idle') void pf.load(); }, [p6, pf]);
+  // P6c1: the memory project's folder for coding apps (same id with P3, else the one with the same name).
+  const files = p6 && fs.phase === 'ready' ? bridgeProjectFor(project.slug, project.name, fs.projects) : null;
   const roots = (dv?.view?.roots ?? []).filter(r => (r.project ?? '').toLowerCase() === project.slug || r.name.toLowerCase() === project.name.toLowerCase());
   const folders = roots.flatMap(r => r.group ? r.group.members.map(m => ({ path: m.path, how: 'joined by you' })) : [{ path: r.path ?? r.name, how: r.path?.startsWith('/') ? 'this computer' : 'older computer · joined by name' }]);
   const suggestion = (dv?.view?.suggestions ?? []).find(s => roots.some(r => r.id === s.a.id || r.id === s.b.id));
@@ -513,8 +545,11 @@ function ProjectInspector({ k, project, onSettings, onGroup }: { k: K; project: 
     {ss.usage && ss.usage.length > 0 && <section className="dk-who"><h4>Who reads {project.name}</h4><ul>{(allReaders ? ss.usage : ss.usage.slice(0, 6)).map(u => <li key={u.agentId}><Avatar name={u.name}/><span>{u.name}</span><span className="fine-print">{u.write ? 'reads, saves' : 'reads'} · {u.why}</span></li>)}</ul>
       <div className="actions">{ss.usage.length > 6 && <button type="button" className="link-button" onClick={() => setAllReaders(v => !v)}>{allReaders ? 'Show fewer' : `See all ${ss.usage.length}`}</button>}<button type="button" onClick={() => onSettings?.('access')}>Add an agent…</button></div>
       <p className="fine-print">Add or take one out with an exception in Settings › Memory › Access; each change shows who reads it after.</p></section>}
+    {p6 && (fs.phase === 'ready' || fs.phase === 'loading') && <section className="dk-who"><h4>Coding apps</h4>
+      {files ? <ProjectSwitches c={pf} d={d} project={files}/> : fs.phase === 'ready' && <p className="fine-print">This project has no folder for coding apps yet.</p>}</section>}
   </div>;
 }
+
 
 // ---------------------------------------------------------------- other places
 function AgentsPlace({ names, onOpen }: { names: Readonly<Record<string, string>>; onOpen: (id: string) => void }) {
