@@ -140,6 +140,8 @@ async function shutdown(code = 0): Promise<void> {
     await stopAutomaticProjectImports();
     stopDiscoveryWatch();
     await stopLocalImports();
+    // MODELS-01-INSTALL: a download in progress stops; it goes on at the next start.
+    await import('../memory/helper.js').then((m) => m.stopMemoryHelper()).catch(() => undefined);
     await fastify.close();
     // B2.2b-2: audit rows still being written (PostgreSQL inserts are not
     // awaited by the request) get a short, bounded chance to land.

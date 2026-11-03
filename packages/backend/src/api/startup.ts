@@ -364,6 +364,14 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
       console.warn('[Server] Memory jobs not scheduled:', (err as Error).message);
     }
 
+    // MODELS-01-INSTALL: the memory helper gets ready in the background (never awaited; OPS3).
+    try {
+      const { memoryHelperEnabled } = await import('../services/memory-helper-switch.js');
+      if (memoryHelperEnabled()) (await import('../memory/helper.js')).startMemoryHelper();
+    } catch (err) {
+      console.warn('[Server] Memory helper not scheduled:', (err as Error).message);
+    }
+
     // Initialize Agent Evolution Scheduler
     const { initializeEvolutionScheduler } = await import('../services/agent-evolution-scheduler.js');
     await initializeEvolutionScheduler();
