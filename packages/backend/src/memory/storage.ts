@@ -353,7 +353,8 @@ export class MemoryStorage implements IMemoryStorage {
   *getOwnedStep(userId: string, id: string, lock = false): Step<Memory | null> {
     if (typeof id !== 'string' || !id) return null;
     const d = yield* dialect();
-    const row = yield* one(`SELECT * FROM memories WHERE id = ? AND user_id = ?${lock && d === 'postgres' ? ' FOR UPDATE' : ''}`, id, userId);
+    // STORE-MAP-01 P5: an agent's own notes are never opened by id here (only memory/agent-drawer.ts reads them).
+    const row = yield* one(`SELECT * FROM memories WHERE id = ? AND user_id = ? AND ${NOT_AGENT_NOTES_SQL}${lock && d === 'postgres' ? ' FOR UPDATE' : ''}`, id, userId);
     return row ? this.rowToMemory(row) : null;
   }
 
@@ -361,7 +362,7 @@ export class MemoryStorage implements IMemoryStorage {
    * Get a memory by ID
    */
   async get(id: string): Promise<Memory | null> {
-    const row = await sql().read(one('SELECT * FROM memories WHERE id = ?', id));
+    const row = await sql().read(one(`SELECT * FROM memories WHERE id = ? AND ${NOT_AGENT_NOTES_SQL}`, id));
 
     if (!row) return null;
 

@@ -175,3 +175,12 @@ test('switch off again: the prompt reads the file', async () => {
   delete process.env.GIRRU_STORE_P5;
   assert.equal(await drawer.agentMemoryForPrompt('p5-noor'), 'Edited by a coding app.');
 });
+
+test('security: an agent’s notes are never opened by id through the shared memory paths', async () => {
+  process.env.GIRRU_STORE_P5 = '1';
+  const id = db.prepare("SELECT id FROM memories WHERE drawer_kind = 'agent' AND drawer_key = 'p5-noor'").get().id;
+  const storage = getMemoryStorage();
+  assert.equal(await storage.get(id), null);
+  assert.equal(await storage.getOwned(O, id), null);
+  delete process.env.GIRRU_STORE_P5;
+});
