@@ -34,7 +34,7 @@ built `dist/` folder.
 cd packages/relay
 npm run build
 npm test
-tar czf girru-relay.tgz dist package.json deploy
+COPYFILE_DISABLE=1 tar czf girru-relay.tgz dist package.json deploy   # COPYFILE_DISABLE: no macOS metadata
 scp girru-relay.tgz root@relay.example.org:/tmp/
 ```
 
@@ -82,6 +82,12 @@ The relay listens only on `127.0.0.1`. Nothing reaches it except through the
 proxy in the next step.
 
 ## 4. Put TLS in front (Caddy)
+
+Already running Apache (for example under a hosting panel)? Keep it and add
+its own virtual host for the relay name: proxy WebSocket upgrades on `/v1`
+(`mod_proxy_wstunnel`, `RewriteRule ^/v1$ ws://127.0.0.1:41540/v1 [P,L]`),
+pass `/health`, answer 404 for everything else and set
+`CustomLog /dev/null common`. Get the certificate with certbot `--webroot`.
 
 Caddy gets and renews the certificate on its own. Install it from the official
 Caddy package repository (see caddyserver.com/docs/install), then:
