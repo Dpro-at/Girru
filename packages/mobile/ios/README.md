@@ -245,4 +245,4 @@ through the relay:
   screens that use them come with the connector.
 - "Type the code instead" checks the code's form only; PROTOCOL.md has no
   typed-code exchange yet.
-- No app icon yet.
+- App icon: the Girru mark on white, same as the desktop icon (`App/Assets.xcassets/AppIcon.appiconset`, one 1024 px image, no transparency).

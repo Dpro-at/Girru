@@ -45,6 +45,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(GIRRU_BUNDLE_ID)
         PRODUCT_NAME: Girru
+        # The Girru mark, same as the desktop app icon (App/Assets.xcassets).
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_FILE: App/Info.plist
         CODE_SIGN_ENTITLEMENTS: App/Girru.entitlements
         GENERATE_INFOPLIST_FILE: "NO"

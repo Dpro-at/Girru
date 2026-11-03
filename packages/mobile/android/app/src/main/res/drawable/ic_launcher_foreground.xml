@@ -1,11 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Placeholder launcher mark until the brand logo is converted to a vector. -->
+<!-- The Girru mark (same as the desktop app icon), centred in the 66dp safe zone. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M54,34a20,20 0,1 0,20 20h-20v8h11.3a12,12 0,1 1,-3.3 -14.5l5.7,-5.7A20,20 0,0 0,54 34z" />
+    <group
+        android:translateX="20.486"
+        android:translateY="20.027"
+        android:scaleX="0.13514"
+        android:scaleY="0.13514">
+        <path android:fillColor="#A286BE" android:pathData="M246.73 293.45 L176.85 365.19 L249.91 436.35 L319.79 364.61 Z" />
+        <path android:fillColor="#652D91" android:pathData="M432.85 248.54 L319.79 364.61 L246.73 293.45 L289.62 249.42 L246.99 207.9 L317.8 136.48 Z" />
+        <path android:fillColor="#F7941D" android:pathData="M204.74 252.56 L246.73 293.45 L176.86 365.19 L63.06 254.35 L175.85 138.55 L247.63 208.53 Z" />
+        <path android:fillColor="#A286BE" android:pathData="M317.8 136.48 L247.63 208.53 L175.85 138.55 L245.99 66.53 Z" />
+    </group>
 </vector>

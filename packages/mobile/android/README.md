@@ -143,7 +143,7 @@ Still open, to align with the computer side:
   calm rules on the computer.
 - **MOB-UI-01.** core-ui's phone layout and its use of the bridge; a file
   chooser for attachments.
-- Brand icons: the launcher and status icons are placeholders.
+- Launcher icon: the Girru mark on white, same as the desktop icon (adaptive icon with a themed-icon layer). The notification status-bar icon is still a placeholder.
 
 ## The page ↔ app bridge
 
