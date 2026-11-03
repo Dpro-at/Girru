@@ -126,6 +126,9 @@ test('owner-created tasks run with the agent\'s own grants', async () => {
   assert.deepEqual((await effective('d-child', owned.id)), ['memory_search', 'read', 'write']);
 });
 
+// STORE-MAP-01 P2 (AG1): an agent may read its own guides (guide_read) wherever it runs; it is prompt text on demand, not a grant.
+const P2_ON = /^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P2 ?? '');
+const noGuide = (list) => list.filter((n) => n !== 'guide_read');
 test('cron run: delegated task offers only the subset; recurring copy keeps origin and assignee', async () => {
   const parentTask = await quietly(() => orchestrator.createTask({ title: 'p', description: 'p', origin: 'owner' }));
   await quietly(() => orchestrator.assignTask(parentTask.id, 'd-parent'));
@@ -140,7 +143,7 @@ test('cron run: delegated task offers only the subset; recurring copy keeps orig
   await quietly(() => cronSvc.runAgentTask({ id: 'd-child', name: 'd-child', model: 'claude-test', provider: 'claude',
     system_prompt: null, temperature: 0.1, max_tokens: 100, cron_schedule: '', cron_enabled: 0 }, child.id, 'c'));
   assert.equal(modelRequests.length, 1);
-  assert.deepEqual((modelRequests[0].tools || []).map((t) => t.name).sort(), ['memory_search']);
+  assert.deepEqual(noGuide((modelRequests[0].tools || []).map((t) => t.name)).sort(), ['memory_search']);
 
   const copies = orchestrator.listTasks({}).filter((t) => t.id !== child.id && t.title === 'c' && t.status === 'assigned');
   assert.equal(copies.length, 1, 'recurring copy created');

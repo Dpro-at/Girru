@@ -28,6 +28,7 @@ import {
   type AgentConfigRow,
 } from '../../repositories/agents-config.js';
 import { SECRET_PLACEHOLDER } from '../../credentials/secret-mask.js';
+import { agentRenamed } from '../../services/task-file.js';
 import { AgentNameInputError, AgentNameTakenError } from '../../services/agent-names.js';
 import { etag } from '../concurrency.js';
 import { isoUtc } from '../timestamps.js';
@@ -173,7 +174,10 @@ export async function agentsConfigRoutes(fastify: FastifyInstance) {
     const actor = admin(req, reply);
     if (!actor) return reply;
     try {
+      const before = (req.body as { name?: unknown } | null)?.name !== undefined ? (await agents().getConfig(actor, req.params.id).catch(() => null))?.name : undefined;
       const updated = await agents().updateConfig(actor, req.params.id, req.body, req.headers['if-match']);
+      // STORE-MAP-01 P10: a new name reaches the task files that name the agent.
+      if (before !== undefined && before !== updated.name) await agentRenamed(req.params.id).catch(() => undefined);
       return reply.header('ETag', etag(updated.version)).send({ agent: parseAgent(updated) });
     } catch (err: any) {
       const handled = errorReply(err, reply);

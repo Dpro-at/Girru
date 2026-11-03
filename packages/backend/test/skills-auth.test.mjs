@@ -69,6 +69,10 @@ const call = (method, url, who, payload) => app.inject({
   headers: who ? { authorization: who.startsWith('Bearer') ? who : token(who) } : {},
 });
 
+// STORE-MAP-01 P4 (G1): with GIRRU_STORE_P4 on the old marketplace answers 410 retired, after sign-in is checked.
+const P4_ON = /^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P4 ?? '');
+const retired = (url) => P4_ON && url.startsWith('/api/skills/marketplace');
+
 const READ_ROUTES = [
   ['GET', '/api/skills'],
   ['GET', '/api/skills/hello-world'],
@@ -101,15 +105,15 @@ test('every skills route rejects anonymous and forged tokens with 401', async ()
 test('read-only listing is open to any active user, not to a suspended one', async () => {
   for (const [method, url] of READ_ROUTES) {
     const res = await call(method, url, 'u-user');
-    assert.equal(res.statusCode, 200, `${method} ${url}: ${res.body}`);
+    assert.equal(res.statusCode, retired(url) ? 410 : 200, `${method} ${url}: ${res.body}`);
     assert.equal((await call(method, url, 'u-suspended')).statusCode, 401, `${method} ${url}`);
   }
 });
 
 test('state-changing and code-running routes refuse members and suspended admins (403)', async () => {
   for (const [method, url, payload] of ADMIN_ROUTES) {
-    assert.equal((await call(method, url, 'u-user', payload)).statusCode, 403, `${method} ${url}`);
-    assert.equal((await call(method, url, 'u-suspended', payload)).statusCode, 403, `${method} ${url}`);
+    assert.equal((await call(method, url, 'u-user', payload)).statusCode, retired(url) ? 410 : 403, `${method} ${url}`);
+    assert.equal((await call(method, url, 'u-suspended', payload)).statusCode, retired(url) ? 401 : 403, `${method} ${url}`);
   }
   assert.equal(registry.get('hello-world').enabled, true);
   assert.equal(fetched.length, 0);
@@ -139,13 +143,13 @@ test('skill ids and marketplace paths cannot traverse out of the skills director
   ];
   for (const payload of bad) {
     const res = await call('POST', '/api/skills/marketplace/install', 'u-owner', payload);
-    assert.equal(res.statusCode, 400, JSON.stringify(payload));
+    assert.equal(res.statusCode, P4_ON ? 410 : 400, JSON.stringify(payload));
   }
   assert.equal(fetched.length, 0);
   await assert.rejects(anthropicSkillsService.installSkill('../evil', 'skills/a/b'));
 
   // A bare '..' segment is normalised away by the router (404, handler never runs).
-  const refused = (code) => code === 400 || code === 404;
+  const refused = (code) => code === 400 || code === 404 || (P4_ON && code === 410);
   for (const id of ['..%2F..%2Fetc', '..', 'skill_..%2Fx', 'not-an-id']) {
     const del = (await call('DELETE', `/api/skills/marketplace/${id}`, 'u-owner')).statusCode;
     const tog = (await call('PUT', `/api/skills/marketplace/${id}/toggle`, 'u-owner')).statusCode;
@@ -161,6 +165,7 @@ test('skill ids and marketplace paths cannot traverse out of the skills director
 
 test('legacy marketplace install refuses; uninstall never deletes outside its existing skill directory', async () => {
   const res = await call('POST', '/api/skills/marketplace/install', 'u-admin', { skillName: 'pdf', skillPath: 'skills/document/pdf' });
+  if (P4_ON) { assert.deepEqual([res.statusCode, res.json().code], [410, 'retired']); assert.deepEqual(fetched, []); return; }
   assert.equal(res.statusCode, 409, res.body);
   assert.equal(res.json().code, 'reviewed_install_required');
   assert.deepEqual(fetched, []);
@@ -187,6 +192,6 @@ test('legacy marketplace install refuses; uninstall never deletes outside its ex
 
 test('marketplace errors do not echo internal error messages', async () => {
   const res = await call('GET', '/api/skills/marketplace/available', 'u-user');
-  assert.equal(res.statusCode, 500);
+  assert.equal(res.statusCode, P4_ON ? 410 : 500);
   assert.ok(!res.body.includes('should-not-leak'), res.body);
 });

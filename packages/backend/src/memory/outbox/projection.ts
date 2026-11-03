@@ -41,6 +41,8 @@ export interface ProjectionState {
   watermark: number;
   projectionVersion: number;
   contentHash: string | null;
+  /** P10: the hash of the file Girru is writing (set before the write, cleared after it). */
+  pendingHash: string | null;
   status: ProjectionStatus;
   attempts: number;
   lastError: string | null;
@@ -112,7 +114,7 @@ function toState(r: any): ProjectionState {
   return {
     consumer: r.consumer, scope: r.scope, target: r.target ?? null,
     watermark: Number(r.watermark) || 0, projectionVersion: Number(r.projection_version) || 0,
-    contentHash: r.content_hash ?? null, status: r.status, attempts: Number(r.attempts) || 0,
+    contentHash: r.content_hash ?? null, pendingHash: r.pending_hash ?? null, status: r.status, attempts: Number(r.attempts) || 0,
     lastError: r.last_error ?? null, updatedAt: String(r.updated_at),
   };
 }
@@ -198,11 +200,14 @@ async function runOnce(scope: string, opts: RunOptions): Promise<RunResult> {
   try {
     const max = await latestSeq(scope);
     const current = fileHash(target);
-    const outside = current !== null && current !== s.contentHash;
+    // P10: a file with the hash Girru was writing when it stopped (a crash between the write and the
+    // state update) is Girru's own write, not an outside edit; it is written again from the database.
+    const interrupted = current !== null && current !== s.contentHash && current === s.pendingHash;
+    const outside = current !== null && current !== s.contentHash && !interrupted;
     if (outside && !opts.overwrite) {
       return result(await setStatus(s, 'conflict', 'The file was changed outside Girru', false), false);
     }
-    if (!opts.force && !outside && s.status === 'up_to_date' && max <= s.watermark && current !== null) return result(s, false);
+    if (!opts.force && !outside && !interrupted && s.status === 'up_to_date' && max <= s.watermark && current !== null) return result(s, false);
 
     const nextVersion = s.projectionVersion + 1;
     const brief = await projectBrief(ownerId, project);
@@ -220,6 +225,7 @@ async function runOnce(scope: string, opts: RunOptions): Promise<RunResult> {
     const text = `<!-- girru:brief scope=${scope} seq=${max} projection=${nextVersion} · generated from Girru's database; edits here are not read back -->\n\n${body}\n`;
 
     removeStaged(dir);
+    await q.run('UPDATE projection_state SET pending_hash = ? WHERE consumer = ? AND scope = ?', sha(text), BRIEF_CONSUMER, scope);
     if (storeP7Enabled()) return await writeSafely(scope, folder, target, text, current, max, nextVersion, s, !!(outside && opts.overwrite && opts.keepOutsideFile !== false), opts, result);
     if (outside && opts.overwrite && opts.keepOutsideFile !== false) {
       // The outside version is kept beside it, copied from the file itself (never through a link).
@@ -247,7 +253,7 @@ async function runOnce(scope: string, opts: RunOptions): Promise<RunResult> {
       throw err;
     }
     const done = await q.run(`UPDATE projection_state SET target = ?, watermark = ?, projection_version = ?, content_hash = ?, status = 'up_to_date',
-      attempts = 0, last_error = NULL, updated_at = ${nowText(q.dialect)} WHERE consumer = ? AND scope = ? AND projection_version = ?`,
+      attempts = 0, last_error = NULL, pending_hash = NULL, updated_at = ${nowText(q.dialect)} WHERE consumer = ? AND scope = ? AND projection_version = ?`,
       target, max, nextVersion, hash, BRIEF_CONSUMER, scope, s.projectionVersion);
     s = (await getState(BRIEF_CONSUMER, scope))!;
     return result(s, done.changes === 1, done.changes === 1 ? undefined : 'state moved on during the write');
@@ -277,7 +283,7 @@ async function writeSafely(scope: string, folder: string, target: string, text: 
     if (fresh.watermark > max || fresh.projectionVersion >= nextVersion) return result(fresh, false, 'superseded by a newer projection');
     const w = safeWriteFile(folder, rel, text, { expectSha256: current });
     const done = await q.run(`UPDATE projection_state SET target = ?, watermark = ?, projection_version = ?, content_hash = ?, status = 'up_to_date',
-      attempts = 0, last_error = NULL, updated_at = ${nowText(q.dialect)} WHERE consumer = ? AND scope = ? AND projection_version = ?`,
+      attempts = 0, last_error = NULL, pending_hash = NULL, updated_at = ${nowText(q.dialect)} WHERE consumer = ? AND scope = ? AND projection_version = ?`,
       target, max, nextVersion, w.sha256, BRIEF_CONSUMER, scope, s.projectionVersion);
     const after = (await getState(BRIEF_CONSUMER, scope))!;
     return result(after, done.changes === 1, done.changes === 1 ? undefined : 'state moved on during the write');

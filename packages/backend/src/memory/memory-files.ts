@@ -751,7 +751,8 @@ export async function approveProposal(
         if (c.op === 'add') continue;
         const now = byId.get(c.id);
         if (!now || JSON.stringify(entryOf(now)) !== JSON.stringify(c.before)) { stale = true; break; }
-        if (c.id === supersede && String(now.status ?? 'active') === 'replaced') { stale = true; break; }
+        // P3: a memory replaced since the review (a newer fact took its topic) is no longer what was reviewed.
+        if (String(now.status ?? 'active') === 'replaced') { stale = true; break; }
       }
     }
     // CORE-MEM-TOPIC: a new memory's topic key must still be free in the drawer.

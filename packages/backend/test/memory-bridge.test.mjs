@@ -11,7 +11,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, statSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 const backendDir = process.cwd();
@@ -54,7 +54,10 @@ const { createBridgeMcpServer, httpBackend } = await import(join(backendDir, 'sr
 const { sessionProof } = await import(join(backendDir, 'src/memory/bridge/proof.ts'));
 const { setBridgeEnv } = await import(join(backendDir, 'src/memory/bridge/service.ts'));
 const { syncMemoryBridge } = await import(join(backendDir, 'src/memory/bridge/sync.ts'));
-const { MARK_START, MARK_END } = await import(join(backendDir, 'src/memory/bridge/managed-files.ts'));
+const { MARK_START: OLD_START, MARK_END: OLD_END, GIRRU_START, GIRRU_END } = await import(join(backendDir, 'src/memory/bridge/managed-files.ts'));
+// P2: the one Girru section replaces the dpro-memory markers.
+const P2 = /^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P2 ?? '');
+const [MARK_START, MARK_END] = P2 ? [GIRRU_START, GIRRU_END] : [OLD_START, OLD_END];
 const { claudeProjectDir } = await import(join(backendDir, 'src/memory/bridge/clients.ts'));
 const { memoryBridgeTool, memoryBridgeApplyTool } = await import(join(backendDir, 'src/tools/memory/bridge.ts'));
 const { APPROVAL_REQUIRED_TOOLS } = await import(join(backendDir, 'src/tools/approvals.ts'));
@@ -78,9 +81,16 @@ const injectFetch = async (url, init = {}) => {
   const r = await app.inject({ method: init.method ?? 'GET', url: u.pathname + u.search, headers: init.headers, payload: init.body });
   return new Response(r.body, { status: r.statusCode, headers: { 'Content-Type': 'application/json' } });
 };
+// STORE-MAP-01 P6 (SEC2-1): with the switch on, a coding app reaches a project only with the session
+// capability Girru's launcher gives it. Here the owner allowed company facts for the project.
+const P6 = /^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P6 ?? '');
+const { launchCapability } = await import(join(backendDir, 'src/memory/bridge/capability.ts'));
+const capabilityFor = async (client, cwd) =>
+  P6 && (cwd === folder || cwd.startsWith(folder + sep)) ? (await launchCapability(OWNER, project.id, client, true)).token : null;
 /** An MCP client connected to the dpro-memory server as `client`, running in `cwd`. */
 async function mcp(client, cwd) {
-  const server = createBridgeMcpServer(httpBackend({ client, cwd, backendUrl: 'http://127.0.0.1:41522', configDir: process.env.AGENT_PLAYER_CONFIG_DIR, fetchImpl: injectFetch }));
+  const capability = await capabilityFor(client, cwd);
+  const server = createBridgeMcpServer(httpBackend({ client, cwd, backendUrl: 'http://127.0.0.1:41522', configDir: process.env.AGENT_PLAYER_CONFIG_DIR, fetchImpl: injectFetch, capability }));
   const [a, b] = InMemoryTransport.createLinkedPair();
   await server.connect(a);
   const c = new Client({ name: `test-${client}`, version: '1' });
@@ -200,7 +210,8 @@ test('MCP: switched off -> refused; on -> read tools serve the project of the fo
   const elsewhere = await mcp('claude-code', other);
   const r = await elsewhere.tool('project_brief');
   assert.ok(r.isError);
-  assert.match(r.text, /does not know this folder/);
+  // With P6 a folder that is no project gets no session, so the call is refused before the folder lookup.
+  assert.match(r.text, P6 ? /needs a session started from Girru/ : /does not know this folder/);
   await elsewhere.close();
 });
 
@@ -245,10 +256,12 @@ test('MCP auth: loopback only, install proof once per nonce, token required, kil
   const token = ok.json().token;
   assert.equal((await app.inject({ method: 'POST', url: '/api/memory-bridge/mcp/session', payload: { client: 'gemini-cli', nonce: n2, proof: sessionProof(ident.secret, ident.id, 'gemini-cli', n2) } })).statusCode, 401, 'nonce works once');
   assert.equal((await app.inject({ method: 'POST', url: '/api/memory-bridge/mcp/session', payload: { client: 'gemini-cli', nonce: randomBytes(24).toString('hex'), proof: 'ab'.repeat(32) } })).statusCode, 401);
-  const callWith = (t) => app.inject({ method: 'POST', url: '/api/memory-bridge/mcp/call', headers: { 'x-dpro-bridge-token': t }, payload: { client: 'gemini-cli', cwd: folder, tool: 'pinned_facts' } });
+  const cap = await capabilityFor('gemini-cli', folder);
+  const capHeader = cap ? { 'x-girru-capability': cap } : {};
+  const callWith = (t) => app.inject({ method: 'POST', url: '/api/memory-bridge/mcp/call', headers: { 'x-dpro-bridge-token': t, ...capHeader }, payload: { client: 'gemini-cli', cwd: folder, tool: 'pinned_facts' } });
   assert.equal((await callWith(token)).statusCode, 200);
   assert.equal((await callWith('0'.repeat(64))).statusCode, 401);
-  assert.equal((await app.inject({ method: 'POST', url: '/api/memory-bridge/mcp/call', headers: { 'x-dpro-bridge-token': token }, payload: { client: 'codex', cwd: folder, tool: 'pinned_facts' } })).statusCode, 401, 'token is per CLI');
+  assert.equal((await app.inject({ method: 'POST', url: '/api/memory-bridge/mcp/call', headers: { 'x-dpro-bridge-token': token, ...capHeader }, payload: { client: 'codex', cwd: folder, tool: 'pinned_facts' } })).statusCode, 401, 'token is per CLI');
   await call(OWNER, 'PUT', '/api/memory-bridge/clients/gemini-cli', { enabled: false });
   assert.equal((await callWith(token)).statusCode, 401, 'kill switch deleted the token');
 });
@@ -360,7 +373,9 @@ test('folder settings: files can be stopped, turning them on needs preview + con
   assert.ok(!JSON.stringify(audit).includes(SECRET));
   // M11: reads are in the activity log by tool name only (never the query text), and each app shows its last call.
   const reads = audit.filter((e) => e.action === 'mcp-read' && e.client === 'claude-code');
-  assert.ok(reads.some((e) => e.detail === 'memory_search') && reads.some((e) => e.detail === 'project_brief'));
+  // P6: the session's id goes with the tool name (ids only).
+  const read = (tool) => P6 ? new RegExp(`^${tool} session:[0-9a-f-]+$`) : new RegExp(`^${tool}$`);
+  assert.ok(reads.some((e) => read('memory_search').test(e.detail)) && reads.some((e) => read('project_brief').test(e.detail)), JSON.stringify(reads.map((e) => e.detail)));
   assert.ok(!JSON.stringify(audit).includes('release script'), 'the search text is not logged');
   const status = (await call(OWNER, 'GET', '/api/memory-bridge')).json();
   const cc = status.clients.find((c) => c.client === 'claude-code');
