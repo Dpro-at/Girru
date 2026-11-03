@@ -67,6 +67,8 @@ import { storeP9Enabled } from '../services/store-p9.js';
 import { personalDataKinds, specialCategory } from './personal-data.js';
 import { calibratedImportance, nearDuplicate, splitFacts } from './write-quality.js';
 import { ALWAYS_ASK, rulesForDrawer, type EffectiveRules } from './scopes/rules.js';
+import { storeP9bEnabled } from '../services/store-p9b.js';
+import { corroborated, sourceOfCapture, stored } from './quality/pipeline.js';
 
 export const MAX_LEARNED_CONTENT = 50_000;
 /** CHAT-BUILD-01 (M1): importance an agent may give by itself; above it the owner decides. */
@@ -125,6 +127,8 @@ export interface LearningClassification {
   reasons: LearningReason[];
   /** Existing memories the candidate may contradict. */
   conflictsWith: string[];
+  /** A duplicate: the known memory it repeats (P9b: the repeat corroborates it). */
+  duplicateOf?: string;
 }
 
 // Word lists (lower-case; Arabic and German included). Kept short and explicit.
@@ -156,8 +160,9 @@ export function classifyLearning(c: LearningCandidate, ctx: LearningContext = {}
 
   // Already known, word for word (P9, M1: an extraction with the same words in another order or form): nothing to save.
   const p9 = storeP9Enabled();
-  if (!c.replaces && (ctx.similar || []).some((s) => normText(s.content) === norm || (p9 && c.origin === 'extraction' && nearDuplicate(s.content, text)))) {
-    return { kind: 'duplicate', drawer, reasons: [], conflictsWith: [] };
+  const known = c.replaces ? undefined : (ctx.similar || []).find((s) => normText(s.content) === norm || (p9 && c.origin === 'extraction' && nearDuplicate(s.content, text)));
+  if (known) {
+    return { kind: 'duplicate', drawer, reasons: [], conflictsWith: [], ...(storeP9bEnabled() ? { duplicateOf: known.id } : {}) };
   }
 
   if (c.origin === 'outsider') reasons.add('outsider');
@@ -399,7 +404,11 @@ export async function learn(input: LearnInput): Promise<LearnOutcome> {
       return parts.length > 1 ? parts.map((content) => ({ ...c, content })) : [c];
     })
     : input.candidates;
+  // STORE-MAP-01 P9b (MD1): what each candidate stored or repeated, recorded with its source after the loop.
+  const spans: Array<{ c: LearningCandidate; saved: number; updated: number; known: string[] }> = [];
   for (const c of candidates) {
+    const span = { c, saved: out.saved.length, updated: out.updated.length, known: [] as string[] };
+    spans.push(span);
     const content = typeof c?.content === 'string' ? c.content.trim() : '';
     if (!content || content.length > MAX_LEARNED_CONTENT) { out.skipped.push({ content: preview(content), reason: 'invalid content' }); continue; }
     const type = typeof c.type === 'string' && TYPE.test(c.type) ? c.type : 'fact';
@@ -420,7 +429,7 @@ export async function learn(input: LearnInput): Promise<LearnOutcome> {
       // CORE-MEM-TOPIC: the topic is known in this drawer -> a new version of it.
       const existing = await storage.getByTopicKey(input.userId, drawer, topicKey);
       if (existing) {
-        await learnTopicUpdate(input, out, existing, entry, c, ownerReview);
+        await learnTopicUpdate(input, out, existing, entry, c, ownerReview, span.known);
         continue;
       }
     }
@@ -440,6 +449,7 @@ export async function learn(input: LearnInput): Promise<LearnOutcome> {
     else if (rules && cls.kind === 'important' && !cls.conflictsWith.length && rules.important === 'save' && cls.reasons.every((r) => !ALWAYS_ASK.has(r))) cls.kind = 'routine';
 
     if (cls.kind === 'duplicate') {
+      if (cls.duplicateOf) span.known.push(cls.duplicateOf);
       out.skipped.push({ content: preview(content), reason: 'already known' });
       out.classified.push({ kind: cls.kind, reasons: [] });
       continue;
@@ -457,7 +467,7 @@ export async function learn(input: LearnInput): Promise<LearnOutcome> {
         if (!(err instanceof TopicKeyTakenError)) throw err;
         const holder = await storage.getOwned(input.userId, err.holderId);
         if (!holder) throw err;
-        await learnTopicUpdate(input, out, holder, entry, c, ownerReview);
+        await learnTopicUpdate(input, out, holder, entry, c, ownerReview, span.known);
         continue;
       }
       out.saved.push(mem);
@@ -489,7 +499,24 @@ export async function learn(input: LearnInput): Promise<LearnOutcome> {
       out.skipped.push({ content: preview(content), reason: err.message });
     }
   }
+  if (storeP9bEnabled()) await recordCaptures(input, out, spans);
   return out;
+}
+
+/** P9b (MD1 step 7, MD3): each stored or repeated memory gets its source (quality/pipeline.ts). */
+async function recordCaptures(input: LearnInput, out: LearnOutcome, spans: ReadonlyArray<{ c: LearningCandidate; saved: number; updated: number; known: string[] }>): Promise<void> {
+  const at = new Date().toISOString();
+  const sessionId = typeof input.metadata?.sessionId === 'string' ? input.metadata.sessionId : null;
+  for (const [i, sp] of spans.entries()) {
+    const next = spans[i + 1];
+    const source = sourceOfCapture({
+      origin: sp.c.origin, actor: input.actor, agentId: input.agentId ?? null, sessionId,
+      reviewReason: input.review ? (input.reviewReason ?? 'chat') : null,
+    }, at);
+    const mems = [...out.saved.slice(sp.saved, next?.saved ?? out.saved.length), ...out.updated.slice(sp.updated, next?.updated ?? out.updated.length)];
+    await stored(mems, [source]).catch(() => undefined);
+    for (const id of sp.known) await corroborated(input.userId, id, source).catch(() => undefined);
+  }
 }
 
 /**
@@ -531,9 +558,10 @@ async function ruleDecides(userId: string, out: LearnOutcome, proposal: MemoryPr
  * applied as a new version, important ones (overwrite rules of agentChange)
  * become an update proposal.
  */
-async function learnTopicUpdate(input: LearnInput, out: LearnOutcome, existing: Memory, entry: VersionEntry, c: LearningCandidate, ownerReview: boolean): Promise<void> {
+async function learnTopicUpdate(input: LearnInput, out: LearnOutcome, existing: Memory, entry: VersionEntry, c: LearningCandidate, ownerReview: boolean, known: string[] = []): Promise<void> {
   const before = versionEntryOf(existing);
   if (normText(before.content) === normText(entry.content) && before.type === entry.type) {
+    known.push(existing.id);
     out.skipped.push({ content: preview(entry.content), reason: 'already known' });
     out.classified.push({ kind: 'duplicate', reasons: [] });
     return;

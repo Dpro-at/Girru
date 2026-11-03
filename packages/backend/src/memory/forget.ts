@@ -51,6 +51,7 @@ import { storeP9Enabled } from '../services/store-p9.js';
 import { PROJECT_SUMMARY_TOPIC } from './project-summary.js';
 import { DEFAULT_MEMORY_CONFIG, type Memory, type MemoryType } from './types.js';
 import { v4 as uuidv4 } from 'uuid';
+import { forgetTrustStep } from './quality/trust.js';
 
 export interface ForgetResult {
   memoryId: string;
@@ -265,6 +266,7 @@ export async function forgetMemory(userId: string, memoryId: string, actor: stri
     yield* forgetMemoryGraphStep(userId, memoryId); // CORE-MEM-GRAPH: attachments + orphan links
     yield* scrubSummaries(userId, memoryId, texts);
     yield* scrubQualityStep(userId, memoryId, drawer, texts);
+    yield* forgetTrustStep(userId, memoryId); // P9b: trust, sources and the question it answered
     return { drawer, types, cancelled, texts };
   });
   if (!done) return null;
@@ -313,6 +315,10 @@ export async function forgetAll(userId: string, actor: string, drawer?: DrawerRe
   for (const id of ids) {
     const r = await forgetMemory(userId, id, actor);
     if (r) results.push(r);
+  }
+  // P9b (MD8): forgetting everything also forgets the questions the agents asked.
+  if (!drawer && await sql().read(tableExists('memory_open_questions')).catch(() => false)) {
+    await sql().read(run('DELETE FROM memory_open_questions WHERE user_id = ?', userId));
   }
   return { forgotten: results.length, results };
 }

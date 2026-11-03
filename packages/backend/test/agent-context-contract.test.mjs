@@ -184,12 +184,13 @@ test('MD4 and MD9: save criteria lead memory_save and the brief; recalled memori
   const drawers = [{ kind: 'project', key: projectKeyOf(project) }];
   const pack = { key: 'contract', text: '', memoryChars: 0, items: [], hit: false, memoryIds: [] };
   const off = await messageRecall({ userId: OWNER, drawers, query: 'When is alpha staging restored?', pack });
-  assert.match(off.text, /restored every Sunday night\.\n/);
+  // P9b (MD3): the line also carries its confidence.
+  assert.match(off.text, process.env.GIRRU_STORE_P9B === '1' ? /restored every Sunday night\. \(confidence \w+\)\n/ : /restored every Sunday night\.\n/);
   await withP2(async () => {
     assert.ok(memorySaveTool.description.startsWith(SAVE_CRITERIA));
     assert.equal(standingRules()[0], SAVE_CRITERIA);
     const on = await messageRecall({ userId: OWNER, drawers, query: 'When is the alpha staging data restored on Sunday?', pack });
-    assert.match(on.text, new RegExp(`restored every Sunday night\\. \\(as of \\d{4}-\\d{2}-\\d{2} · project:${projectKeyOf(project)}\\)`));
+    assert.match(on.text, new RegExp(`restored every Sunday night\\. \\(as of \\d{4}-\\d{2}-\\d{2} · project:${projectKeyOf(project)}${process.env.GIRRU_STORE_P9B === '1' ? ' · confidence \\w+' : ''}\\)`));
   });
 });
 
