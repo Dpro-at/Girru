@@ -51,6 +51,9 @@ Settings (environment variables):
 
 ## Self-hosting
 
+Step-by-step server setup (systemd service, Caddy or nginx, updates):
+[deploy/DEPLOY.md](deploy/DEPLOY.md).
+
 Companies and advanced users can run their own relay; our servers are then not
 involved at all.
 
@@ -58,7 +61,8 @@ involved at all.
   it (so devices connect with `wss://`). Forward WebSocket upgrades for `/v1`.
 - Turn off access logs in the proxy, or keep them free of request bodies (the
   relay itself logs nothing).
-- The relay holds no state, so you can run several copies behind one name.
+- The relay holds no state, but both devices of a pair must reach the same
+  relay process, so run one relay per name for now.
 - Set `GIRRU_RELAY_URL` to the public `wss://` address and point Girru on
   the computer and the phone app to that same address.
 
@@ -79,3 +83,4 @@ npm run typecheck
 | `src/main.ts` | Command-line entry point |
 | `src/e2e.ts` | Device-side reference code: identity keys, session handshake, envelope seal/open, signed commands with replay rejection and pairing lifetime. Used by the computer; the phone apps match its bytes |
 | `PROTOCOL.md` | Protocol and threat model |
+| `deploy/` | Server deploy guide, systemd unit, Caddy and nginx examples |

@@ -1,0 +1,43 @@
+# Alternative to Caddy: nginx in front of the Girru relay.
+# Get a certificate first (for example with certbot), then put this in
+# /etc/nginx/sites-available/girru-relay and enable it.
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 off;
+    server_name relay.example.org;
+
+    ssl_certificate     /etc/letsencrypt/live/relay.example.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/relay.example.org/privkey.pem;
+
+    # The relay logs nothing; keep the proxy quiet too.
+    access_log off;
+
+    location = /v1 {
+        proxy_pass http://127.0.0.1:41540;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        # The relay pings every 30 s; allow longer than that between frames.
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+        proxy_buffering off;
+    }
+
+    location = /health {
+        proxy_pass http://127.0.0.1:41540;
+    }
+
+    location / {
+        return 404;
+    }
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name relay.example.org;
+    return 301 https://$host$request_uri;
+}

@@ -1,0 +1,36 @@
+# systemd unit for the Girru relay.
+# Install: copy to /etc/systemd/system/girru-relay.service, then
+#   systemctl daemon-reload && systemctl enable --now girru-relay
+[Unit]
+Description=Girru relay (stateless pass-through for end-to-end encrypted messages)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=girru-relay
+Group=girru-relay
+WorkingDirectory=/opt/girru-relay
+EnvironmentFile=/etc/girru-relay/relay.env
+ExecStart=/usr/bin/node /opt/girru-relay/dist/main.js
+Restart=always
+RestartSec=2
+LimitNOFILE=65536
+
+# The relay writes nothing to disk; give it no place to write.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target
