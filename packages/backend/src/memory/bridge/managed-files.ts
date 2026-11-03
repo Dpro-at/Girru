@@ -149,9 +149,9 @@ export interface FilePlan {
 export interface FilesPreview { projectId: string; folder: string; files: FilePlan[]; previewHash: string; conflicts: number; changes: number }
 type Planned = FilePlan & { abs: string; after: string | null; mode: number | null };
 
-function readExisting(abs: string): { text: string | null; mode: number | null; problem?: string } {
+function readExisting(folder: string, relative: string): { text: string | null; mode: number | null; problem?: string } {
   try {
-    const { bytes, mode } = readRegularFile(abs, MAX_MANAGED_FILE_BYTES);
+    const { bytes, mode } = readRegularFile(folder, relative, MAX_MANAGED_FILE_BYTES);
     const text = bytes.toString('utf8');
     if (text.includes('\0')) return { text: null, mode: null, problem: 'is not a text file' };
     return { text, mode };
@@ -169,7 +169,7 @@ function blockDiff(oldBlock: string | null, newBlock: string): string {
 
 function planFile(folder: string, relative: string, block: string, marks: Marks = MEMORY_MARKS, legacy: readonly Marks[] = PRE_P2_LEGACY): Planned {
   const abs = path.join(folder, relative);
-  const cur = readExisting(abs);
+  const cur = readExisting(folder, relative);
   const base = { name: path.basename(relative), relative, abs, mode: cur.mode };
   if (cur.problem) return { ...base, action: 'conflict', reason: `${relative} ${cur.problem}`, beforeSha256: null, afterSha256: null, diff: '', after: null };
   const broken = { ...base, action: 'conflict' as const, reason: `${relative} has broken Girru markers; fix or remove them by hand`, beforeSha256: cur.text === null ? null : sha(cur.text), afterSha256: null, diff: '', after: null };
@@ -197,7 +197,7 @@ function planGitExclude(folder: string, created: string[]): Planned | null {
   try { if (!fs.lstatSync(gitDir).isDirectory()) return null; } catch { return null; }
   const relative = path.join('.git', 'info', 'exclude');
   const abs = path.join(folder, relative);
-  const cur = readExisting(abs);
+  const cur = readExisting(folder, relative);
   const base = { name: 'exclude', relative, abs, mode: cur.mode };
   if (cur.problem) return { ...base, action: 'conflict', reason: `${relative} ${cur.problem}`, beforeSha256: null, afterSha256: null, diff: '', after: null };
   const text = cur.text ?? '';
@@ -268,7 +268,7 @@ export function managedPart(brief: ProjectBrief, folderRaw: string | null, name:
   const folder = checkFolder(folderRaw);
   const marks = extras ? GIRRU_MARKS : MEMORY_MARKS;
   const girru = (name === 'AGENTS.md' ? (extras ? unifiedBlock(brief, extras) : briefMarkdown(brief)) : adapterBlock(name)).trim();
-  const cur = readExisting(path.join(folder, name));
+  const cur = readExisting(folder, name);
   if (cur.problem) return { folder, marks, girru, current: null, whole: null, problem: `${name} ${cur.problem}` };
   const split = cur.text === null ? null : splitManaged(cur.text, marks);
   if (split === 'broken') return { folder, marks, girru, current: null, whole: cur.text, problem: `${name} has broken Girru markers; fix or remove them by hand` };
@@ -314,7 +314,7 @@ export function writeSection(folderRaw: string | null, relative: string, block: 
   const folder = checkFolder(folderRaw);
   assertNoSecret(block);
   const abs = path.join(folder, relative);
-  const cur = readExisting(abs);
+  const cur = readExisting(folder, relative);
   if (cur.problem) throw new ManagedFileError(`${relative} ${cur.problem}`, 409, 'conflict');
   if (cur.text !== null && splitManaged(cur.text, marks) === 'broken') throw new ManagedFileError(`${relative} has broken Girru markers; fix or remove them by hand`, 409, 'markers_broken');
   const after = replaceManaged(cur.text ?? '', block, marks);

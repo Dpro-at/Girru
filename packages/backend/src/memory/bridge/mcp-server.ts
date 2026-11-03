@@ -17,7 +17,6 @@
  * Light on purpose: no database, no credential store, no model.
  */
 import { readRegularFile } from './regular-file.js';
-import path from 'node:path';
 import { randomBytes, timingSafeEqual, createHmac } from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -59,9 +58,8 @@ export function checkLoopback(raw: string): string {
 type Instance = { id: string; secret: string };
 /** instance.json next to the CLI token (0600, written by the backend at start). */
 export function readInstance(configDir: string): Instance {
-  const file = path.join(configDir, 'instance.json');
   let contents: ReturnType<typeof readRegularFile>;
-  try { contents = readRegularFile(file, 64 * 1024); }
+  try { contents = readRegularFile(configDir, 'instance.json', 64 * 1024); }
   catch { throw new BridgeClientError('Girru instance.json is missing, unreadable or not a regular file. Restart Girru.'); }
   if (process.platform !== 'win32' && (contents.mode & 0o077) !== 0) throw new BridgeClientError('Girru instance.json is readable by other users; restart Girru to fix it.');
   const d = JSON.parse(contents.bytes.toString('utf8'));

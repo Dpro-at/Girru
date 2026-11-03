@@ -19,7 +19,8 @@
  * prompt and the owner read it.
  */
 
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { contentSha256 } from '../services/content-hash.js';
 import { all, one, run, sql, type Step } from '../repositories/sql-steps.js';
 import { readMemory, readMemoryHistory, readMemorySnapshot, writeMemoryCAS } from '../services/agent-files.js';
 import { companyOwnerStep } from '../services/departments.js';
@@ -32,7 +33,7 @@ export const AGENT_DRAWER_KIND = 'agent';
 /** The longest notes kept (the MEMORY.md limit). */
 export const MAX_AGENT_NOTES = 32_768;
 
-const sha = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
+const sha = contentSha256;
 /** The drawer of one agent's own notes (outside the shared drawer kinds; cast only for the history rows). */
 const drawerOf = (agentId: string) => ({ kind: AGENT_DRAWER_KIND, key: agentId }) as unknown as DrawerRef;
 

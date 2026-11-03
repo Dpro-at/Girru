@@ -64,7 +64,7 @@ const sha = (b: string | Buffer) => createHash('sha256').update(b).digest('hex')
 
 /** The file's bytes; null when it is not there, 'bad' when it is a link, not a plain file or too large. */
 function readBytes(root: string, relative: string): Buffer | null | 'bad' {
-  try { return readRegularFile(path.join(root, ...relative.split('/')), MAX_MANAGED_FILE_BYTES).bytes; } catch (e: any) {
+  try { return readRegularFile(root, path.join(...relative.split('/')), MAX_MANAGED_FILE_BYTES).bytes; } catch (e: any) {
     return e?.code === 'ENOENT' ? null : 'bad';
   }
 }

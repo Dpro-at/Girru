@@ -18,12 +18,11 @@
  */
 import fs from 'node:fs';
 import os from 'node:os';
-import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { exportAgentPackage, packageHashOf, AgentPackageError } from './agent-package.js';
 import { redactImportText } from '../memory/import/redact.js';
 import { safeWriteFile, SafeFileError, sha256 } from './safe-file.js';
-import { readRegularFile } from '../memory/bridge/regular-file.js';
+import { readRegularFile, confinedPath } from '../memory/bridge/regular-file.js';
 
 export const USER_EXPORT_TOOLS = ['claude-code'] as const;
 export type UserExportTool = typeof USER_EXPORT_TOOLS[number];
@@ -95,13 +94,12 @@ export async function userExportText(agentId: string): Promise<{ name: string; t
 }
 
 function current(home: string, relative: string): { sha: string | null; text: string | null; problem: string | null } {
-  const file = path.join(home, relative);
   let st: fs.Stats | null = null;
-  try { st = fs.lstatSync(file); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') return { sha: null, text: null, problem: 'The file cannot be read' }; }
+  try { st = fs.lstatSync(confinedPath(home, relative)); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') return { sha: null, text: null, problem: 'The file cannot be read' }; }
   if (!st) return { sha: null, text: null, problem: null };
   if (st.isSymbolicLink() || !st.isFile()) return { sha: null, text: null, problem: 'The file is a link or not a plain file' };
   try {
-    const { bytes } = readRegularFile(file, MAX_EXPORT_BYTES);
+    const { bytes } = readRegularFile(home, relative, MAX_EXPORT_BYTES);
     return { sha: sha256(bytes), text: bytes.toString('utf8'), problem: null };
   } catch { return { sha: null, text: null, problem: 'The file is too large or changed while it was read' }; }
 }
@@ -165,7 +163,7 @@ export function userExportRemove(agentId: string, toolInput?: unknown, home = os
     if (cur.problem) throw new UserExportError(409, 'conflict', cur.problem);
     if (cur.text === null) return { removed: false, file: `~/${relative}` };
     if (MARK.exec(cur.text)?.[1] !== agentId) throw new UserExportError(409, 'not_girru', 'The file is not Girru\'s copy of this agent; Girru leaves it as it is');
-    fs.rmSync(path.join(home, relative));
+    fs.rmSync(confinedPath(home, relative));
     return { removed: true, file: `~/${relative}` };
   });
 }

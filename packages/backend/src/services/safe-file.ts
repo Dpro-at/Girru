@@ -28,7 +28,8 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { contentSha256 } from './content-hash.js';
 
 export type SafeFileCode =
   | 'no_folder' | 'bad_path' | 'outside_folder' | 'path_too_long' | 'link' | 'not_regular'
@@ -69,7 +70,7 @@ export interface SafeFileHooks {
 let hooks: SafeFileHooks = {};
 export function setSafeFileHooksForTests(h: SafeFileHooks | null): void { hooks = h ?? {}; }
 
-export const sha256 = (data: string | Buffer): string => createHash('sha256').update(data).digest('hex');
+export const sha256 = contentSha256;
 
 /** The folder's real path; it must exist and be a folder. */
 export function safeRoot(folder: string | null | undefined): string {

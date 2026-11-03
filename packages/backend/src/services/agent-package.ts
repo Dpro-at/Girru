@@ -29,7 +29,8 @@
  * A preview answers exactly what an import would create.
  */
 
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { contentSha256 } from './content-hash.js';
 import { all, one, run, sql } from '../repositories/sql-steps.js';
 import { insertAgentConfigStep, newAgentId } from '../repositories/agents-config.js';
 import { AgentNameTakenError, resolveNamingLanguage, suggestAgentName, validateAgentName } from './agent-names.js';
@@ -56,7 +57,7 @@ export class AgentPackageError extends Error {
   constructor(readonly status: 400 | 404 | 409 | 413, readonly code: string, readonly detail?: string) { super(code); }
 }
 
-const sha = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
+const sha = contentSha256;
 /** Canonical JSON (sorted keys), so the hash names the content, not its layout. */
 function canonical(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
