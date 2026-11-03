@@ -3654,3 +3654,39 @@ label.setup-kind { display:flex; align-items:center; justify-content:flex-start;
 .setup-discovery-lane>.setup-discovery-particle small{flex:1;min-width:0;max-width:none;font-size:12px;line-height:1.5}
 @keyframes discovery-lane-rise{0%{opacity:0;transform:translate3d(0,18px,0)}17%{opacity:.85}42%{opacity:1;transform:translate3d(calc(var(--particle-drift)*-.5),-62px,0)}72%{opacity:.75;transform:translate3d(var(--particle-drift),-130px,0);filter:blur(0)}100%{opacity:0;transform:translate3d(calc(var(--particle-drift)*.3),-205px,0);filter:blur(2px)}}
 @media(prefers-reduced-motion:reduce){.setup-discovery-lane>.setup-discovery-particle{animation:none;opacity:.8;top:38px;bottom:auto;transform:none}}
+
+/* Terminal inside the Girru phone app (boards P24–P26). Only there: .phone-terminal renders only with window.girruShell. */
+.app-shell:has(.phone-terminal) { grid-template-columns:minmax(0,1fr) !important; grid-template-rows:minmax(0,1fr) !important; }
+.app-shell:has(.phone-terminal) > .page-area { grid-column:1 / -1 !important; grid-row:1 / -1 !important; }
+.app-shell:has(.phone-terminal) > .titlebar, .app-shell:has(.phone-terminal) > .sidebar, .app-shell:has(.phone-terminal) > .statusbar { display:none !important; }
+.app-shell:has(.phone-terminal) .chat-layout { grid-template-columns:minmax(0,1fr) !important; }
+.app-shell:has(.phone-terminal) .chat-layout > :not(.chat-screen) { display:none !important; }
+.app-shell .phone-terminal { display:flex; flex-direction:column; block-size:100%; background:var(--term-bg); color:var(--term-fg); }
+.app-shell .phone-terminal .term-body { flex:1 1 auto; min-block-size:0; }
+.app-shell .phone-term-head { position:relative; display:flex; align-items:center; gap:4px; padding:8px 8px; border-block-end:1px solid color-mix(in srgb, var(--term-fg) 14%, transparent); }
+.app-shell .phone-term-icon { inline-size:44px; block-size:44px; display:inline-flex; align-items:center; justify-content:center; border:0; border-radius:10px; background:transparent; color:inherit; }
+.app-shell .phone-term-title { flex:1 1 auto; min-inline-size:0; display:flex; flex-direction:column; gap:1px; }
+.app-shell .phone-term-title strong { font-size:16px; }
+.app-shell .phone-term-title small { font-size:12px; opacity:.72; display:inline-flex; align-items:center; gap:6px; }
+.app-shell .phone-term-menu { position:absolute; inset-inline-end:8px; inset-block-start:54px; z-index:10; min-inline-size:200px; display:flex; flex-direction:column; padding:6px; border-radius:14px; background:color-mix(in srgb, var(--term-bg) 82%, #fff 18%); box-shadow:0 12px 32px rgba(0,0,0,.35); }
+.app-shell .phone-term-menu button { min-block-size:44px; padding:0 12px; text-align:start; border:0; border-radius:10px; background:transparent; color:inherit; font:inherit; font-size:15px; }
+.app-shell .phone-term-menu button[aria-checked="true"] { font-weight:600; }
+.app-shell .phone-term-menu button:disabled { opacity:.45; }
+.app-shell .phone-term-keys { display:flex; gap:6px; padding:8px; overflow-x:auto; scrollbar-width:none; border-block-start:1px solid color-mix(in srgb, var(--term-fg) 14%, transparent); background:color-mix(in srgb, var(--term-bg) 88%, #fff 12%); }
+.app-shell .phone-term-keys::-webkit-scrollbar { display:none; }
+.app-shell .phone-key { flex:0 0 auto; min-inline-size:40px; block-size:38px; padding:0 10px; display:inline-flex; align-items:center; justify-content:center; gap:5px; border:1px solid color-mix(in srgb, var(--term-fg) 22%, transparent); border-radius:9px; background:color-mix(in srgb, var(--term-bg) 70%, #fff 30%); color:inherit; font:inherit; font-size:14px; touch-action:manipulation; }
+.app-shell .phone-key.mono { font-family:ui-monospace, "SF Mono", Menlo, monospace; }
+.app-shell .phone-key.strong { font-weight:700; }
+.app-shell .phone-key[aria-pressed="true"] { background:var(--accent); border-color:var(--accent); color:#fff; }
+.app-shell .phone-key.paste { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+.app-shell .phone-key.hide { margin-inline-start:auto; border-color:transparent; background:transparent; }
+.app-shell .phone-term-hint { margin:0; padding:10px 16px; text-align:center; font-size:13px; opacity:.7; border-block-start:1px solid color-mix(in srgb, var(--term-fg) 14%, transparent); }
+.app-shell .phone-term-sheet-back { position:fixed; inset:0; z-index:50; background:rgba(0,0,0,.45); display:flex; align-items:flex-end; }
+.app-shell .phone-term-sheet { inline-size:100%; display:flex; flex-direction:column; gap:14px; padding:18px 18px calc(18px + env(safe-area-inset-bottom)); border-radius:22px 22px 0 0; background:color-mix(in srgb, var(--term-bg) 85%, #fff 15%); color:var(--term-fg); }
+.app-shell .phone-term-sheet h2 { margin:0; font-size:19px; }
+.app-shell .phone-term-sheet p { margin:0; font-size:15px; line-height:1.45; opacity:.78; }
+.app-shell .phone-term-sheet pre { margin:0; max-block-size:40vh; overflow:auto; padding:12px; border-radius:12px; background:var(--term-bg); font-family:ui-monospace, "SF Mono", Menlo, monospace; font-size:13px; line-height:1.5; white-space:pre-wrap; }
+.app-shell .phone-term-sheet-actions { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; }
+.app-shell .phone-term-sheet-actions button { block-size:50px; border-radius:12px; border:1px solid color-mix(in srgb, var(--term-fg) 22%, transparent); background:transparent; color:inherit; font:inherit; font-size:16px; font-weight:600; }
+.app-shell .phone-term-sheet-actions .primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+.app-shell .phone-term-sheet small { text-align:center; font-size:13px; opacity:.7; }

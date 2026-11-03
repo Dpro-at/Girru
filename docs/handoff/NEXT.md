@@ -74,7 +74,14 @@ agent must know"), pair, then check and write down each:
    Chat opens the computer's terminal full size; type `echo hi; date` and see
    the real output. Without the check nothing opens. After locking and
    unlocking the app, the next terminal use asks again. The computer needs
-   `AGENT_TERMINAL=true`.
+   `AGENT_TERMINAL=true`. Boards P24–P26: the keyboard stays hidden until you
+   tap the terminal; a tap while it shows hides it (and so does ⌄ at the end of
+   the key row). With the keyboard: the key row (Paste, ^C, ^D, Esc, Tab, Ctrl,
+   arrows, | ~ / -) sits above it; `sleep 30` then ^C stops it; Ctrl then `l`
+   clears the screen; `ls` is not changed by autocorrect or a capital letter.
+   Pasting several lines (Paste key or the long-press Paste) asks "Paste N
+   lines?" first; one line pastes at once. Back returns to the chat; ⋯ has new
+   terminal, clear, settings, close.
 6. Dark mode on each screen; locking the app hides everything and nothing
    loads until the unlock.
 
