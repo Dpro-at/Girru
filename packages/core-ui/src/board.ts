@@ -19,6 +19,10 @@ export type Card = Readonly<{
   taskFile?: TaskMark | null;
   /** TASKPAGE-03: how the task repeats (null = it does not). */
   repeat?: Repeat | null;
+  /** STORE-MAP-01 P8 (D29): how many handoffs the task has (only when there is one, P8 on). */
+  handoffCount?: number;
+  /** STORE-MAP-01 P8 (D29): the newest handoff lists blockers (only then, P8 on). */
+  blocked?: true;
 }>;
 export type Every = 'hourly' | 'daily' | 'weekly';
 export type Repeat = Readonly<{ every: Every; at: string; weekday: number | null; nextRun: string; paused: boolean; lastResult: 'started' | 'busy' | 'failed' | null; lastRun?: string | null; agentId?: string | null; model?: string }>;

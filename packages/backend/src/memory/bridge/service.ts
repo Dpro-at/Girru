@@ -30,11 +30,13 @@ import { ensureToken, revokeToken, tokenMatches, checkSessionProof } from './aut
 import { CapabilityError, launchCapability, requireScope, revokeCapability, verifyCapability, type Capability } from './capability.js';
 import { isPilotProject } from '../outbox/pilot.js';
 import { storeP6Enabled } from '../../services/store-p6.js';
+import { storeP8Enabled } from '../../services/store-p8.js';
 import { ContractError, validateVerb, verbOfTool, type MemoryVerb } from '../contract.js';
 import {
   allFolderSettings, audit, auditLog, bridgeOwner, setCompanyFacts, clientEnabled, clientStates, folderSettings, lastCalls, listRegistrations, patchFolder,
-  projectForFolder, saveBridgeHandoff, setClientEnabled,
+  projectForFolder, saveBridgeHandoff, setClientEnabled, copyAppHandoffStep,
 } from './store.js';
+import { sql } from '../../repositories/sql-steps.js';
 
 export class BridgeError extends Error {
   constructor(message: string, readonly status = 400, readonly code = 'invalid_request') { super(message); }
@@ -391,6 +393,9 @@ export async function mcpCall(c: unknown, token: unknown, cwd: unknown, tool: un
   switch (tool as McpTool) {
     case 'project_brief': {
       const b = await projectBrief(ownerId, project, company);
+      // P8 (D28): with a task number, that task's section (its newest handoff and links) after the brief.
+      const task = storeP8Enabled() ? await taskSection(ownerId, project.id, a.task) : null;
+      if (task) return { text: `${briefMarkdown(b)}\n\n${task.text}`, data: { project: { id: project.id, name: b.name }, facts: b.facts.length, memories: b.memories.length, handoff: !!b.handoff, task: { cardId: task.cardId, handoff: task.handoff?.id ?? null } } };
       return { text: briefMarkdown(b), data: { project: { id: project.id, name: b.name }, facts: b.facts.length, memories: b.memories.length, handoff: !!b.handoff } };
     }
     case 'pinned_facts': {
@@ -398,6 +403,12 @@ export async function mcpCall(c: unknown, token: unknown, cwd: unknown, tool: un
       return { text: facts.length ? facts.map((f) => `- ${f.content}`).join('\n') : 'The owner has not pinned facts for this project yet.', data: { facts } };
     }
     case 'latest_handoff': {
+      // P8 (D28): with a task number, that task's newest handoff.
+      const task = storeP8Enabled() ? await taskSection(ownerId, project.id, a.task) : null;
+      if (task) {
+        const { wireHandoffNote } = await import('../handoff/links.js');
+        return { text: task.handoff ? wireHandoffNote(task.handoff) : `No handoff for ${a.task} yet.`, data: { handoff: task.handoff } };
+      }
       const h = await projectHandoff(ownerId, project.id);
       return { text: h ? handoffText(h) : 'No handoff note in this project yet.', data: { handoff: h } };
     }
@@ -429,11 +440,14 @@ export async function mcpCall(c: unknown, token: unknown, cwd: unknown, tool: un
     }
     case 'handoff_write': {
       let body;
-      try { body = cleanHandoff(a); } catch (err) {
+      // P8 (D28): blockers and files touched too while the switch is on.
+      try { body = cleanHandoff(a, storeP8Enabled()); } catch (err) {
         if (err instanceof HandoffInputError) throw new BridgeError(err.message);
         throw err;
       }
+      const card = storeP8Enabled() ? await taskCard(ownerId, project.id, a.task) : null;
       const h = await saveBridgeHandoff(ownerId, project.id, cl, body, p6 ? cap!.agentId ?? null : null);
+      if (storeP8Enabled()) await linkAppHandoff(ownerId, project.id, cl, h, body, card);
       await audit(ownerId, 'mcp-handoff', { client: cl, projectId: project.id, ...(p6 ? { note: `session:${cap!.id}${cap!.agentId ? ` agent:${cap!.agentId}` : ''}` } : {}) });
       return { text: 'Handoff saved. The next agent in this project, of any brand, starts from it.', data: { handoffId: h.id } };
     }
@@ -562,11 +576,14 @@ async function contractCall(ownerId: string, cl: BridgeClient, project: Project,
   if (verb === 'handoff') {
     return once(ownerId, a.requestId, verb, () => saveOrSay(ownerId, cl, project.id, note('memory_handoff'), async () => {
       let body;
-      try { body = cleanHandoff({ done: a.done ?? [], left: a.left ?? [], next: a.next ?? [], questions: a.questions ?? [] }); } catch (err) {
+      const p8 = storeP8Enabled();
+      try { body = cleanHandoff({ done: a.done ?? [], left: a.left ?? [], next: a.next ?? [], questions: a.questions ?? [], ...(p8 ? { blockers: a.blockers ?? [], files: a.files ?? [] } : {}) }, p8); } catch (err) {
         if (err instanceof HandoffInputError) throw new BridgeError(err.message, 400, 'invalid_argument');
         throw err;
       }
+      const card = p8 ? await taskCard(ownerId, project.id, a.task) : null;
       const h = await saveBridgeHandoff(ownerId, project.id, cl, body, cap.agentId ?? null);
+      if (p8) await linkAppHandoff(ownerId, project.id, cl, h, body, card);
       await audit(ownerId, 'mcp-handoff', { client: cl, projectId: project.id, note: note('memory_handoff') });
       return { text: 'Handoff saved. The next agent in this project, of any brand, starts from it.', data: { handoffId: h.id } };
     }));
@@ -588,4 +605,39 @@ async function contractCall(ownerId: string, cl: BridgeClient, project: Project,
     if (!proposal) return { text: `Not proposed: ${r.skipped[0]?.reason ?? 'nothing to add'}.`, data: { proposalId: null, reason: r.skipped[0]?.reason ?? null } };
     return { text: 'Proposed. The owner reviews it in Girru; it becomes memory only after approval.', data: { proposalId: proposal.id } };
   }));
+}
+
+// --- STORE-MAP-01 P8: task links for coding apps (D28) ----------------------------------
+
+/** The task section of T-n in this project, null without a task, or a 404 for a number that is no task here. */
+async function taskSection(ownerId: string, projectId: string, task: unknown) {
+  if (task === undefined || task === null || task === '') return null;
+  const { TASK_NO, taskBriefSection } = await import('../handoff/links.js');
+  if (typeof task !== 'string' || !TASK_NO.test(task.trim())) throw new BridgeError('task must be a task number like T-12', 400, 'invalid_argument');
+  const s = await taskBriefSection(ownerId, projectId, task.trim());
+  if (!s) throw new BridgeError(`${task.trim()} is not a task of this project`, 404, 'unknown_task');
+  return s;
+}
+
+/** The card of T-n in this project for a coding app's handoff, null without a task. */
+async function taskCard(ownerId: string, projectId: string, task: unknown): Promise<{ id: string; taskNo: string } | null> {
+  if (task === undefined || task === null || task === '') return null;
+  const { TASK_NO, cardOfTaskNo } = await import('../handoff/links.js');
+  if (typeof task !== 'string' || !TASK_NO.test(task.trim())) throw new BridgeError('task must be a task number like T-12', 400, 'invalid_argument');
+  const card = await cardOfTaskNo(ownerId, projectId, task.trim());
+  if (!card) throw new BridgeError(`${task.trim()} is not a task of this project`, 404, 'unknown_task');
+  return { id: card.id, taskNo: task.trim() };
+}
+
+/**
+ * P8: a coding app's note in the one handoff table too (same id; copyAppHandoffStep is
+ * idempotent, as P4 does it), with its blockers, files and task, so the task page shows it.
+ */
+async function linkAppHandoff(ownerId: string, projectId: string, cl: BridgeClient, saved: { id: string; createdAt: string }, body: { done: string[]; left: string[]; next: string[]; questions: string[]; blockers?: string[]; files?: string[] }, card: { id: string; taskNo: string } | null): Promise<void> {
+  const id = saved.id;
+  await sql().tx(function* () {
+    yield* copyAppHandoffStep(ownerId, { id, project_id: projectId, client: cl, done: JSON.stringify(body.done), remaining: JSON.stringify(body.left), next_steps: JSON.stringify(body.next), open_questions: JSON.stringify(body.questions), created_at: saved.createdAt });
+  }, { immediate: true });
+  await q.run('UPDATE agent_handoffs SET blockers = ?, files_touched = ?, card_id = ?, task_no = ? WHERE id = ? AND owner_id = ?',
+    JSON.stringify(body.blockers ?? []), JSON.stringify(body.files ?? []), card?.id ?? null, card?.taskNo ?? null, id, ownerId);
 }

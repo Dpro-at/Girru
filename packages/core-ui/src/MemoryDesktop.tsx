@@ -29,7 +29,7 @@ import { Avatar, ContextMenu, IconButton, Notice, Popover, Sheet, Tile, WithSwat
 import type { MenuItem } from './desktop-ui';
 import type { ProjectGroup } from './memory-desktop-contract.js';
 import { NeedsYou } from './MemoryNeeds';
-import { useStoreP3, useStoreP6 } from './store-switches';
+import { useStoreP3, useStoreP6, useStoreP8 } from './store-switches';
 import { ProjectFilesController, bridgeProjectFor } from './project-files';
 import { CompareSheet, ProjectFilesInspector, ProjectFilesView, ProjectSwitches, projectFilesMenu } from './MemoryProjectFiles';
 import { DatabasesView, DesignView, FilesView, GroupView, TrashView } from './MemoryPlaces';
@@ -54,7 +54,7 @@ const SOURCE_LABEL: Record<string, string> = { owner: 'You', agent: 'An agent', 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent ?? '');
 const mod = isMac ? '⌘' : 'Ctrl+';
 
-export type MemoryFocus = { drawerId: string; memoryId: string; n: number } | { scope: string; n: number };
+export type MemoryFocus = { drawerId: string; memoryId: string; n: number } | { scope: string; n: number } | { handoffs: true; n: number };
 export type SettingsTarget = 'rules' | 'folders' | 'sources' | 'projects' | 'access' | 'health' | 'schedule';
 
 /** Controllers of the window, made once per client. */
@@ -80,15 +80,18 @@ function useStore<S>(store: { subscribe: (fn: () => void) => () => void; getSnap
   return useSyncExternalStore(store?.subscribe ?? noop, store?.getSnapshot ?? (() => undefined), store?.getSnapshot ?? (() => undefined)) as S | undefined;
 }
 
-export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpenChat, onOpenSettings }: {
+export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpenChat, onOpenCard, onOpenSettings }: {
   client: SessionClient; active?: boolean; focus?: MemoryFocus | null; sidebarSlot?: HTMLElement | null;
-  onOpenChat?: (conversationId: string) => void; onOpenSettings?: (target: SettingsTarget) => void;
+  onOpenChat?: (conversationId: string) => void; onOpenCard?: (boardId: string, cardId: string) => void; onOpenSettings?: (target: SettingsTarget) => void;
 }) {
   const owner = useSyncExternalStore(client.subscribe, client.getSnapshot, client.getSnapshot).user?.role === 'owner';
   const k = useControllers(client);
   const p3 = useStoreP3(client);
   const p6 = useStoreP6(client);
   const p6Ref = useRef(p6); p6Ref.current = p6;
+  const p8 = useStoreP8(client);
+  // STORE-MAP-01 P8: a task's notes opened from its page (Memory › Tasks › T-n) keep that task's place as the list.
+  const taskScope = useRef<string | null>(null);
   const ds = useStore(k?.d), xs = useStore(k?.x), ss = useStore(k?.sc), rs = useStore(k?.rv), ms = useStore(k?.mv), fs = useStore(k?.pf);
   const menu = useMenu();
   const [sheet, setSheet] = useState<null | { kind: 'remember' } | { kind: 'history' } | { kind: 'weekly' } | { kind: 'group'; projects: string[] } | { kind: 'rename-group'; id: string } | { kind: 'project'; action: ProjectAction; slug: string } | { kind: 'forget'; ids?: string[] } | { kind: 'trash-project'; slug: string } | { kind: 'edit-pinned'; fact: PinnedFact }>(null);
@@ -110,7 +113,8 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
   // The list follows the place.
   useEffect(() => {
     if (!k || !ds) return;
-    const scope = placeScope(ds.place);
+    if (ds.place !== 'tasks') taskScope.current = null;
+    const scope = ds.place === 'tasks' && taskScope.current ? taskScope.current : placeScope(ds.place);
     if (scope && k.x.getSnapshot().scope !== scope) k.x.setScope(scope);
     if (ds.place.startsWith('project:')) k.sc.select(ds.place);
     if (ds.place === 'needs' && k.rv.getSnapshot().phase !== 'ready') void k.rv.load();
@@ -119,6 +123,12 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
   // "Open in Memory" from a chat or an agent.
   useEffect(() => {
     if (!focus || !k) return;
+    if ('handoffs' in focus) { k.d.setExtra('handoffs'); return; }
+    if ('scope' in focus && focus.scope.startsWith('task:')) {
+      taskScope.current = focus.scope; k.d.setExtra(null);
+      if (k.d.getSnapshot().place === 'tasks') k.x.setScope(focus.scope); else k.d.open('tasks');
+      return;
+    }
     if ('scope' in focus) { k.d.open(focus.scope.startsWith('agent:') || focus.scope.startsWith('project:') ? focus.scope as Place : 'all'); return; }
     const place: Place = focus.drawerId === 'owner' || focus.drawerId === 'experience' ? focus.drawerId : focus.drawerId.startsWith('project:') ? focus.drawerId as Place : focus.drawerId.startsWith('people:') ? 'people' : focus.drawerId.startsWith('task:') ? 'tasks' : 'all';
     k.d.open(place); void k.x.openMemory(focus.memoryId);
@@ -245,7 +255,7 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
   const filterCount = [xs.type, xs.topic, xs.source, xs.agent, xs.importance, xs.since].filter(Boolean).length;
 
   const content = ds.extra === 'map' ? <KnowledgeMap c={k.map} agents={ss.agents} onOpenMemories={name => { d.setExtra(null); d.open('all'); x.setQuery(name); void x.load(); }}/>
-    : ds.extra === 'handoffs' ? <HandoffsView c={k.ho} onOpenChat={onOpenChat}/>
+    : ds.extra === 'handoffs' ? <HandoffsView c={k.ho} onOpenChat={onOpenChat} onOpenCard={p8 ? onOpenCard : undefined}/>
     : filesOpen ? <ProjectFilesView c={pf} onMenu={filesMenu} searchRef={filesSearchRef}/>
     : ds.extra === 'files' ? <FilesView client={client} agents={ss.agents} drawers={[{ id: 'owner', name: 'About you' }, { id: 'experience', name: 'Lessons' }, ...(ss.tree?.projects ?? []).filter(p => !p.archived && !p.mergedInto && !p.trashedAt).map(p => ({ id: `project:${p.slug}`, name: p.name }))]}/>
     : place === 'needs' ? <NeedsYou c={rv} mode={ds.needsMode} onOpenChat={onOpenChat} design={d} files={p6 ? pf : undefined}/>

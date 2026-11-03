@@ -28,6 +28,15 @@ export function TaskFileMark({ mark }: { mark: TaskMark }) {
   </span>;
 }
 
+/** STORE-MAP-01 P8 (board P8b1, D29): the handoff mark with its count and an amber "Blocked", only when they say something. */
+export function TaskHandoffMark({ count, blocked }: { count?: number; blocked?: boolean }) {
+  if (!count && !blocked) return null;
+  return <>
+    {!!count && <span className="task-handoff-mark" title={`${count} ${count === 1 ? 'handoff' : 'handoffs'}`} aria-label={`${count} ${count === 1 ? 'handoff' : 'handoffs'}`}><UiIcon name="handoff" size={11}/>{count}</span>}
+    {blocked && <span className="task-handoff-mark blocked" title="Blocked: the newest handoff lists blockers"><i aria-hidden="true"/>Blocked</span>}
+  </>;
+}
+
 /** "today 14:05", "yesterday", "3 Nov": when an app last worked on the task. */
 export function workedWhen(date: string, at: string | null, now = new Date()): string {
   const day = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

@@ -7,14 +7,15 @@
  * grant. Never offered in a channel (outside) turn.
  */
 import type { Tool, ToolResult } from '../types.js';
-import { cleanHandoff, handoffBlock, HandoffInputError, latestHandoff, saveHandoff, MAX_ITEMS, MAX_ITEM_CHARS } from '../../memory/handoff/store.js';
+import { cleanHandoff, handoffBlock, HandoffInputError, latestHandoff, saveHandoff, MAX_FILES, MAX_ITEMS, MAX_ITEM_CHARS } from '../../memory/handoff/store.js';
 import { toolHandoffScope } from '../../memory/handoff/scope.js';
+import { storeP8Enabled } from '../../services/store-p8.js';
 
 const fail = (text: string): ToolResult => ({ content: [{ type: 'text', text }], error: text });
 
-const list = (what: string) => ({
+const list = (what: string, max = MAX_ITEMS) => ({
   type: 'array',
-  description: `${what} (up to ${MAX_ITEMS} short lines of at most ${MAX_ITEM_CHARS} characters)`,
+  description: `${what} (up to ${max} short lines of at most ${MAX_ITEM_CHARS} characters)`,
   items: { type: 'string' },
 });
 
@@ -36,11 +37,12 @@ export const handoffSaveTool: Tool = {
     const where = await toolHandoffScope(context);
     if (typeof where === 'string') return fail(`Handoff not saved: ${where}.`);
     let body;
-    try { body = cleanHandoff(params); } catch (err) {
+    // P8 (D28): blockers and files touched too while the switch is on.
+    try { body = cleanHandoff(params, storeP8Enabled()); } catch (err) {
       if (err instanceof HandoffInputError) return fail(`Handoff not saved: ${err.message}.`);
       throw err;
     }
-    const h = await saveHandoff(where.scope, body, 'agent', where.runId);
+    const h = await saveHandoff(where.scope, body, 'agent', where.runId, where.links);
     return { content: [{ type: 'text', text: `Handoff saved (version ${h.version}); your next session here starts from it.` }], details: { handoff: h } };
   },
 };
@@ -57,5 +59,23 @@ export const handoffReadTool: Tool = {
     const h = await latestHandoff(where.scope);
     if (!h) return { content: [{ type: 'text', text: 'No handoff note yet for this chat or task.' }] };
     return { content: [{ type: 'text', text: handoffBlock(h) }], details: { handoff: h } };
+  },
+};
+
+/**
+ * STORE-MAP-01 P8: handoff_save with blockers and files touched (D28). Offered
+ * in place of handoff_save only to models that are not on this computer, so a
+ * local model's tool list stays as it was (LOCAL-ONLY-01).
+ */
+export const handoffSaveToolP8: Tool = {
+  ...handoffSaveTool,
+  description: `${handoffSaveTool.description} Name what blocks the work in blockers and the files you changed in files.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      ...handoffSaveTool.input_schema.properties,
+      blockers: list('What blocks the work now (leave out when nothing does)'),
+      files: list('Files you changed, as paths in the project', MAX_FILES),
+    },
   },
 };

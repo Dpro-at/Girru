@@ -3,6 +3,7 @@
 // projection of every response to the reviewed fields (never error text).
 import { validAgentId } from './agent-id.js';
 import { department } from './hire-contract.js';
+import { taskLinksResponse } from './task-links-contract.js';
 
 export const BOARDS_PATH = '/api/boards';
 export const priorities = ['low', 'normal', 'high', 'urgent'];
@@ -169,7 +170,8 @@ export function allowedBoard(method, path, body) {
   if (p.kind === 'tp-people') return method === 'PUT' && record(body) && onlyKeys(body, ['kind', 'id', 'role']) && Object.keys(body).length === 3 && ['user', 'agent'].includes(body.kind) && personId(body.id) && (body.role === null || ROLES.includes(body.role));
   if (p.kind === 'tp-release') return method === 'PUT' && record(body) && Object.keys(body).length === 1 && (body.name === null || lineOk(body.name, 60));
   if (p.kind === 'tp-subtasks') return method === 'POST' && record(body) && Object.keys(body).length === 1 && lineOk(body.title, MAX_TITLE);
-  if (p.kind === 'tp-links') return method === 'PUT' && record(body) && Object.keys(body).length === 2 && id(body.waitsFor) && typeof body.on === 'boolean';
+  // STORE-MAP-01 P8: GET on the same path reads the task's links (task notes, handoffs, chats, task file).
+  if (p.kind === 'tp-links') return (method === 'GET' && body === undefined) || (method === 'PUT' && record(body) && Object.keys(body).length === 2 && id(body.waitsFor) && typeof body.on === 'boolean');
   if (p.kind === 'tp-follow') return method === 'PUT' && record(body) && Object.keys(body).length === 1 && typeof body.on === 'boolean';
   if (p.kind === 'tp-schedule') return (method === 'GET' && body === undefined) || (method === 'PUT' && scheduleOk(body));
   if (p.kind === 'task') return method === 'GET' && body === undefined;
@@ -224,6 +226,9 @@ function card(c) {
     conversationId: typeof c.conversationId === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$/.test(c.conversationId) ? c.conversationId : null,
     taskFile: taskMark(c.taskFile),
     repeat: repeat(c.repeat),
+    // STORE-MAP-01 P8 (D29): sent only while the backend's P8 switch is on, and only when they say something.
+    ...(Number.isSafeInteger(c.handoffCount) && c.handoffCount > 0 ? { handoffCount: Math.min(c.handoffCount, 999) } : {}),
+    ...(c.blocked === true ? { blocked: true } : {}),
   };
 }
 
@@ -345,7 +350,7 @@ function taskPageResponse(kind, body) {
   if (kind === 'tp-people') return { people: people(body.people) };
   if (kind === 'tp-release') return { release: typeof body.release === 'string' ? clip(body.release, 60) : null };
   if (kind === 'tp-subtasks') return card(body);
-  if (kind === 'tp-links') return { ok: body.ok === true };
+  if (kind === 'tp-links') return Array.isArray(body.handoffs) ? taskLinksResponse(body) : { ok: body.ok === true };
   if (kind === 'tp-follow') return { following: body.following === true };
   if (kind === 'tp-schedule') return { schedule: repeat(body.schedule) };
   fail();

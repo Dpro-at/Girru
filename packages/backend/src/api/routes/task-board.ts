@@ -35,6 +35,8 @@ import {syncDepartmentBoards,relatedBoardTasks} from '../../services/task-board.
  *   GET   /api/boards/tasks?projectId=  -> { tasks, problems } (TASKLOG-01: the tasks of the projects' task files, read now)
  *   POST  /api/boards/:id/cards/:cardId/task-sort { department } -> { boardId } (TASKLOG-01: a task waiting in To sort goes to that department's board)
  *   GET   /api/boards/:id/cards/:cardId/task -> { task } (TASKLOG-01: the card's task in the project's task file, or null)
+ *   STORE-MAP-01 P8 (switch on): a board's cards carry handoffCount (> 0) and blocked (true) when they have them;
+ *   GET /api/boards/:id/cards/:cardId/links is in store-p8.ts.
  *   TASKLOG-01: a card from a task file has taskFile { no, projectId, projectName, problem, apps, finished }; a board
  *   summary has toSort (cards waiting in "To sort"). Reading the boards first reads the projects' task files.
  *   Cards also take type (task|idea|bug|milestone|request), startDate, cover (colour or null) and labels (label ids).
@@ -54,6 +56,8 @@ import { chatRuns } from '../../services/chat-runs.js';
 import { TO_SORT, cardChanged, projectTasks, sortTask, syncAllTasks, taskDetail, taskMarks } from '../../services/task-file.js';
 import { q } from '../../repositories/sql-steps.js';
 import { storeP6Enabled } from '../../services/store-p6.js';
+import { storeP8Enabled } from '../../services/store-p8.js';
+import { cardBadges } from '../../memory/handoff/links.js';
 import { boardSchedules, deleteCardSchedule, getCardSchedule, setCardSchedule } from '../../services/card-schedules.js';
 import { addSubtask, replyDiff, setFollow, setLink, setPerson, setRelease, taskActivity, taskPage } from '../../services/task-page.js';
 
@@ -128,7 +132,10 @@ export async function taskBoardRoutes(fastify: FastifyInstance) {
       const board = await getBoard(owner, request.params.id, request.query?.archived === '1');
       const marks = await taskMarks(board.id), repeats = await boardSchedules(board.id);
       const repeat = (id: string) => { const r = repeats.get(id); return r ? { every: r.every, at: r.at, weekday: r.weekday, nextRun: r.nextRun, paused: r.paused, lastResult: r.lastResult } : null; };
-      return { ...board, cards: board.cards.map((c) => ({ ...c, taskFile: marks.get(c.id) ?? null, repeat: repeat(c.id) })) };
+      // STORE-MAP-01 P8 (D29): a card names its handoffs and "blocked" only when it has them (P8 on).
+      const badges = storeP8Enabled() ? await cardBadges(owner, board.id) : null;
+      const badge = (id: string) => { const b = badges?.get(id); return b ? { handoffCount: b.handoffCount, ...(b.blocked ? { blocked: true } : {}) } : {}; };
+      return { ...board, cards: board.cards.map((c) => ({ ...c, taskFile: marks.get(c.id) ?? null, repeat: repeat(c.id), ...badge(c.id) })) };
     } catch (err) { return fail(err, reply); }
   });
 

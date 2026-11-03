@@ -12,6 +12,7 @@
  * The sweep runs on a timer only when background jobs are on (startup.ts).
  */
 
+import { storeP8Enabled } from '../../services/store-p8.js';
 import { all, one, run, sql } from '../../repositories/sql-steps.js';
 import { modelCall } from '../../llm/model-call.js';
 import { redactImportText } from '../import/redact.js';
@@ -181,6 +182,8 @@ export async function sweepHandoffs(opts: { now?: number; idleMs?: number; limit
   const summarize = opts.summarize ?? localModelSummarizer;
   const conversations = await sweepConversations(now, opts.idleMs ?? idleMs(), limit, summarize);
   const tasks = await sweepTaskRuns(now, limit, summarize);
+  // STORE-MAP-01 P8 (D27): a run's working notes are cleared 14 days after its last note.
+  if (storeP8Enabled()) await (await import('./run-notes.js')).clearOldRunNotes(now).catch(() => 0);
   return { conversations, tasks };
 }
 

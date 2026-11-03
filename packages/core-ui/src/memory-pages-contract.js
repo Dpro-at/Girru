@@ -470,6 +470,13 @@ function handoff(h) {
     version: count(h.version), source: ['agent', 'model', 'fallback', 'owner'].includes(h.source) ? h.source : 'agent', createdAt: when(h.createdAt),
     done: items(h.done), left: items(h.left), next: items(h.next), questions: items(h.questions),
     ...('title' in h ? { title: typeof h.title === 'string' && h.title.trim() ? clip(h.title, 200) : null } : {}),
+    // STORE-MAP-01 P8: the board task a handoff belongs to, its blockers and the files the agent touched
+    // (sent only while the backend's P8 switch is on; absent otherwise, so the answer is unchanged).
+    ...(plainId(h.cardId) ? { cardId: h.cardId } : {}),
+    ...(typeof h.taskNo === 'string' && /^T-\d{1,6}$/.test(h.taskNo) ? { taskNo: h.taskNo } : {}),
+    ...(plainId(h.boardId) ? { boardId: h.boardId } : {}),
+    ...(Array.isArray(h.blockers) ? { blockers: items(h.blockers) } : {}),
+    ...(Array.isArray(h.files) ? { files: list(h.files, 40).filter(i => typeof i === 'string').map(i => clip(i, MAX_HANDOFF_ITEM)) } : {}),
   };
 }
 function exported(b, id) {

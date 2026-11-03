@@ -158,6 +158,18 @@ carries `approval: { needed: true, projectId }`. A scheduled run of it does not 
 the owner gets a notification. The task's text always reaches the model as data, never as
 a rule.
 
+### Task links, handoffs between agents and run notes (owner only, `GIRRU_STORE_P8`)
+| Route | Body / answer |
+|---|---|
+| `GET /api/store-switches` | also `p8: true` while the switch is on |
+| `GET /api/boards/:id/cards/:cardId/links` | `{ taskNo, notesPlace: { place, count } \| null, handoffs, chats: [{ id, title, at }], taskFile: { path, line } \| null, blocked }`; `handoffs` newest first |
+| `PATCH /api/handoffs/:id` | `{ blockers: string[] }` → `{ handoff }`; only blockers change (in place); files touched stay as written |
+| `GET /api/runs/:runId/notes?kind=chat\|task\|delegation` | `{ notes: [{ seq, text, at }], clearsAt }`, read only; `runId` may also be the Runs id (`chat:…`, `task:…`, `handoff:…`) |
+
+A handoff in these answers is `{ id, agentId, agentName, app, fromAgentId, fromAgentName, at, done, left, next, blockers, files, questions, cardId, taskNo, conversationId, conversationTitle }`; `fromAgentName` is the lead who handed the work over ("Sara handed this to Omar"). With the switch on, a board's cards carry `handoffCount` (only when > 0) and `blocked: true` (only when the newest handoff names a blocker), and `GET /api/handoffs` items carry `blockers`, `files`, `cardId`, `taskNo`, `conversationId`, `fromAgentId` and `boardId`. Errors are `{ error, code }` with `invalid_request` or `not_found`.
+
+The dpro-memory tools `project_brief` and `latest_handoff` take an optional `task` (`T-12`); `handoff_write` and `memory_handoff` take `blockers`, `files` and `task` (`404 unknown_task` for a number that is no task of the project). These arguments are listed only in a dpro-memory process started with the switch on. Agents on a model that is not on this computer (the Claude API, coding apps) also get `run_note`, `handoff_save` with `blockers` and `files`, and `team_delegate` with `task` and `handoff`; local models keep the tools they had.
+
 ### Agent packages (owner only, `GIRRU_STORE_P5`)
 | Route | Body / answer |
 |---|---|

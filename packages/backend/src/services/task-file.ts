@@ -90,6 +90,10 @@ async function readFile(folder: string, name: string): Promise<string | null> {
   if (cur !== null && Buffer.byteLength(cur) > MAX_FILE) throw new RuleFilesError('unsafe', `${name} is larger than ${MAX_FILE / 1024} KB`);
   return cur;
 }
+/** STORE-MAP-01 P8: the task file (or the finished tasks' file) as text, read only; null when there is none. */
+export function readTaskFileText(folder: string, done = false): Promise<string | null> {
+  return readFile(folder, done ? DONE_FILE : TASKS_FILE);
+}
 async function writeFile(folder: string, name: string, text: string): Promise<void> {
   if (Buffer.byteLength(text) > MAX_FILE) throw new RuleFilesError('unsafe', `${name} would be larger than ${MAX_FILE / 1024} KB`);
   const dir = await girruDir(folder, true);

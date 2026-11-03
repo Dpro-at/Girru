@@ -116,6 +116,19 @@ export interface ToolExecutionContext {
   /** CORE-MEM-HANDOFF: false = the handoff tools are not offered (a task contract that names its tools). */
   handoffTools?: boolean;
   /**
+   * STORE-MAP-01 P8: the run's model is not on this computer (the Claude API or a
+   * coding app). Only then are the P8 tool variants offered (run_note; blockers and
+   * files on handoff_save; a handoff on team_delegate): a local model's tool list
+   * never grows (LOCAL-ONLY-01). Set by trusted server code only.
+   */
+  remoteModel?: boolean;
+  /**
+   * STORE-MAP-01 P8 (D26): this run is a part a lead handed to this agent. Its
+   * handoff names the lead (from_agent_id) and the task; its notes are kept under
+   * the hand-off's run id. Set by team_delegate only.
+   */
+  delegation?: { leadAgentId: string; runId: string; cardId: string | null; taskNo: string | null; conversationId: string | null };
+  /**
    * B1-core: the actor of this tool call, attached by the tools registry
    * (repositories/actor.ts actorFromToolContext). Repositories take it first.
    */

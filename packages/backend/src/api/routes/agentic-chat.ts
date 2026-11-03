@@ -14,7 +14,7 @@ import * as os from 'node:os';
 import type { FastifyReply } from 'fastify';
 import { ClaudeClient, claudeThinkingFor } from '../../llm/claude-client.js';
 import { recordInteractiveUsage } from '../../llm/model-call.js';
-import { createAgentToolsRegistry } from '../../tools/index.js';
+import { createAgentToolsRegistry, useRemoteModelTools } from '../../tools/index.js';
 import type { ChannelToolPolicy } from '../../tools/channel-policy.js';
 import { loadClaudeProjectMemory } from './claude-local.js';
 import { buildAiToolsContext } from './ai-tools.js';
@@ -124,6 +124,8 @@ export async function streamChatClaude(
     // Build tools registry for execution
     // Same tool policy and agent grants as the offered list: a turn cannot run a tool it was not offered.
     const toolsRegistry = await createAgentToolsRegistry({ userId, sessionId, workspaceDir: process.cwd(), toolPolicy, agentId, memoryDrawers, chatPlan: !toolPolicy, ...(fileReadRoot ? { fileReadRoot } : {}) });
+    // STORE-MAP-01 P8: the Claude API is not a local model; it runs the P8 tool variants it was offered (nothing with P8 off).
+    if (!toolPolicy) useRemoteModelTools(toolsRegistry);
 
     // Convert messages to Claude format (filter out system role)
     let loopMessages: Array<{ role: 'user' | 'assistant'; content: string | any[] }> = messages

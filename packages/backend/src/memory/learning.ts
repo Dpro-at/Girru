@@ -80,7 +80,9 @@ export type LearningReason =
   /** MEM-GAPS-02: the scope's review rules ask for routine facts too. */
   | 'scope-rule'
   /** STORE-MAP-01 P6 (SEC2-5): text read from a file inside a project folder (attacker-controlled in a cloned repo). */
-  | 'repository-file';
+  | 'repository-file'
+  /** STORE-MAP-01 P8 (D27): a lesson an agent marked in its run's working notes. */
+  | 'run-notes';
 
 export interface LearningCandidate {
   content: string;
@@ -404,6 +406,8 @@ export async function learn(input: LearnInput): Promise<LearnOutcome> {
     if (input.review && cls.kind === 'routine') { cls.kind = 'important'; cls.reasons.push(input.reviewReason ?? 'chat'); }
     // SEC2-5: text from a repository file always carries its label, whatever else it is about.
     else if (input.review && input.reviewReason === 'repository-file' && !cls.reasons.includes('repository-file')) cls.reasons.push('repository-file');
+    // P8 (D27): a lesson from a run's working notes keeps its label too (Needs you: "From a run's working notes").
+    else if (input.review && input.reviewReason === 'run-notes' && !cls.reasons.includes('run-notes')) cls.reasons.push('run-notes');
     // MEM-GAPS-02: the scope's review rules (owner accounts; a chat the owner reviews always asks).
     const rules = ownerReview && !input.review ? await rulesForDrawer(input.userId, drawer) : null;
     if (rules && cls.kind === 'routine' && rules.routine === 'ask') { cls.kind = 'important'; cls.reasons.push('scope-rule'); }

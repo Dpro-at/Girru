@@ -42,7 +42,9 @@ export function kindOf(p: ProposalSummary & { counts?: { add: number; update: nu
 /** STORE-MAP-01 P6: a suggestion kept from a file in a project folder (shown as a label, not a reason). */
 export const REPOSITORY_FILE = 'repository-file';
 /** Reasons in plain words (machine details such as ids are left out). */
-export const plainReasons = (reasons: readonly string[]) => reasons.filter(r => r !== REPOSITORY_FILE && /^[a-z][a-z _-]{0,40}$/i.test(r));
+/** STORE-MAP-01 P8 (D27): a lesson suggested from a run's working notes (shown as a label, not a reason). */
+export const RUN_NOTES = 'run-notes';
+export const plainReasons = (reasons: readonly string[]) => reasons.filter(r => r !== REPOSITORY_FILE && r !== RUN_NOTES && /^[a-z][a-z _-]{0,40}$/i.test(r));
 /** The proposal's text for the list: what it adds or changes to. */
 export function proposalText(p: Proposal): string {
   const c = p.changes[0];
