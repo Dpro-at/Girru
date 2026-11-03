@@ -1200,7 +1200,9 @@ button.status-item:hover { background:var(--row-hover); color:var(--text); }
 .app-shell .term-settings-foot { display:flex; justify-content:space-between; align-items:center; margin-block-start:10px; font-size:11px; }
 /* maximized: the terminal takes the whole chat area */
 .app-shell .chat-layout[data-max] { grid-template-columns:0 minmax(0,1fr); }
-.app-shell .chat-layout[data-max] > .chat-screen { visibility:hidden; overflow:hidden; }
+.app-shell .chat-layout[data-max] > .chat-screen { visibility:hidden; overflow:hidden; position:relative; }
+/* The terminal sits inside the chat area: it stays shown and fills it. */
+.app-shell .chat-layout[data-max] > .chat-screen > .chat-terminal { visibility:visible; position:absolute; inset:0; z-index:5; block-size:auto; max-block-size:none; }
 /* Microphone (dictation) */
 .app-shell .composer-mic { display:inline-flex; align-items:center; gap:4px; margin-inline-start:auto; }
 .app-shell .composer-mic + .composer-keys { margin-inline-start:8px; }

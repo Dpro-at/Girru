@@ -192,4 +192,6 @@ export function terminalRoutesWith(manager: TerminalManager) {
 }
 
 /** The server's single terminal manager. */
-export const terminalRoutes = terminalRoutesWith(new TerminalManager());
+/** The one manager; the phone link streams a session through it too (phone/ui-bridge.ts). */
+export const terminalManager = new TerminalManager();
+export const terminalRoutes = terminalRoutesWith(terminalManager);

@@ -609,8 +609,10 @@ through the session, never from the network. Three signed commands carry them:
   desktop gate refuses is `{status:400, body:null}`. Request bodies are at
   most 256 KiB, answers at most 700 KiB (`too_large`).
 - **`api.stream {path}`**: a run's live events
-  (`/api/chat/runs/<runId>/events?after=N`, the only stream the phone gets).
-  The reply is `{ok:true}`; then `{type:"stream", ref, data}` for each event,
+  (`/api/chat/runs/<runId>/events?after=N`) or a terminal's output
+  (`/api/terminal/sessions/<id>/stream?after=N`), the only streams the phone gets.
+  The reply is `{ok:true}`; then `{type:"stream", ref, data}` for each event
+  (a terminal's also carry `event`: `output` or `exit`, the stream's `event:` line),
   where `data` is the event as the page reads it (`seq` and the run frame,
   projected as on the desktop; live previews have no `seq`), and one
   `{type:"stream.end", ref, status}` with `status` `"complete"` or
@@ -622,10 +624,15 @@ through the session, never from the network. Three signed commands carry them:
 the agents (read); conversations (list, open, create, rename, one page of
 messages, the side panel's usage, team and schedule, stop); sending a turn and
 steering or stopping a run; the chat sidebar, panel and settings (read, and
-the sidebar and panel layout). Tasks, approvals and the team are the phone's
-own screens and use their own commands above. **Never** on the phone, whatever
-the desktop gate allows: phones and the relay (`/api/phone/*`), the terminal,
-files and folders of projects, project variables, credentials, keys and
+the sidebar and panel layout); and, by the owner's decision, the terminal
+(open, type, resize, close, its settings; its output through `api.stream`).
+**The phone opens or joins a terminal only after its own biometric check**
+(Face ID, Touch ID, fingerprint or the phone's passcode), every time after a
+lock; opening and closing are audited by the terminal itself, and keystrokes
+from a phone get one audit row per terminal a minute. Tasks, approvals and the
+team are the phone's own screens and use their own commands above. **Never**
+on the phone, whatever the desktop gate allows: phones and the relay
+(`/api/phone/*`), files and folders of projects, project variables, credentials, keys and
 secrets, sign-in, users, roles, two-step sign-in and security settings,
 backups, exports and audit logs, extensions, plugins, skills and MCP servers,
 deleting conversations, and uploads (microphone clips and images wait for

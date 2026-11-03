@@ -43,6 +43,7 @@ await app.ready();
 B.bindPhoneApi(app);
 test.after(async () => { B.bindPhoneApi(null); await app.close(); });
 
+const TID = '0b8a1c4e-0000-4000-8000-000000000001';
 let n = 0;
 const ctx = (frames = []) => ({ deviceId: `dev-${++n}`, ownerId: 'ui-owner', now: () => Date.now(), push: (f) => { frames.push(f); return true; } });
 const code = async (p) => { try { await p; return null; } catch (e) { return e.code; } };
@@ -59,11 +60,14 @@ test('the phone list is exactly the chat page (pinned)', async () => {
     ['GET', '/api/chat/conversations/abcdefgh1/schedule'], ['POST', '/api/chat/conversations/abcdefgh1/stop'],
     ['GET', '/api/chat/sidebar'], ['PUT', '/api/chat/sidebar'], ['GET', '/api/chat/panel'], ['PUT', '/api/chat/panel'],
     ['GET', '/api/chat/last'], ['GET', '/api/chat/settings'],
+    // The owner's decision: the terminal too (the app asks for its biometric check first).
+    ['GET', '/api/terminal'], ['GET', '/api/terminal/prefs'], ['PUT', '/api/terminal/prefs'], ['POST', '/api/terminal/sessions'],
+    ['POST', `/api/terminal/sessions/${TID}/input`], ['POST', `/api/terminal/sessions/${TID}/resize`], ['DELETE', `/api/terminal/sessions/${TID}`],
   ];
   for (const [m, p] of yes) assert.equal(await B.phoneMayCall(m, p), true, `${m} ${p}`);
   const no = [
     ['GET', '/api/phone/devices'], ['POST', '/api/phone/pairing'], ['DELETE', '/api/phone/devices'], ['PUT', '/api/phone/settings'],
-    ['GET', '/api/terminal/sessions'], ['GET', '/api/terminal/sessions/x/stream'],
+    ['GET', '/api/terminal/sessions'], ['GET', `/api/terminal/sessions/${TID}/stream`], ['POST', '/api/terminal/sessions/not-an-id/input'], ['DELETE', '/api/terminal/sessions'],
     ['GET', '/api/chat/projects/abcdefgh1/file?path=a.txt'], ['GET', '/api/chat/projects/abcdefgh1/tree'], ['GET', '/api/chat/projects/abcdefgh1/diff?path=a'],
     ['GET', '/api/chat/projects/abcdefgh1/variables'], ['PUT', '/api/chat/projects/abcdefgh1/variables/API_KEY'], ['GET', '/api/chat/project-folders'],
     ['DELETE', '/api/chat/conversations/abcdefgh1'], ['POST', '/api/chat/transcribe'], ['POST', '/api/chat/conversations/abcdefgh1/images'],
@@ -80,7 +84,7 @@ test('api.call refuses outside the list before anything runs', async () => {
   const real = app.inject.bind(app);
   app.inject = (...a) => { injected++; return real(...a); };
   try {
-    for (const path of ['/api/phone/devices', '/api/terminal/sessions', '/api/auth/me/../../phone/devices']) {
+    for (const path of ['/api/phone/devices', `/api/terminal/sessions/${TID}/stream`, '/api/auth/me/../../phone/devices']) {
       assert.equal(await code(runCommand(ctx(), { type: 'api.call', method: 'GET', path })), 'not_allowed', path);
     }
     assert.equal(await code(runCommand(ctx(), { type: 'api.call', method: 'GET', path: '/api/auth/me', extra: 1 })), 'bad_format');
@@ -222,4 +226,47 @@ test('api.stream ends dropped on a backed-up link, and open streams are limited'
   for (let i = 0; i < B.LIMITS.streams; i++) await B.apiStream(busy, { type: 'api.stream', path: '/api/chat/runs/run-phone-stream-3/events' });
   assert.equal(await code(B.apiStream(busy, { type: 'api.stream', path: '/api/chat/runs/run-phone-stream-3/events' })), 'rate_limited');
   run.finish('complete', Date.now());
+});
+
+test('the terminal from a phone: open, stream its output, type, exit; keystrokes audited once a minute', async () => {
+  const { terminalManager } = await import(join(backendDir, 'src/api/routes/terminal.ts'));
+  let emit = null, exit = null;
+  const typed = [];
+  terminalManager.spawnFn = () => ({ onData(f) { emit = f; }, onExit(f) { exit = f; }, write(d) { typed.push(d); }, resize() {}, kill() {} });
+  terminalManager.env = { AGENT_TERMINAL: 'true', PATH: '/usr/bin:/bin' };
+  const prev = process.env.AGENT_TERMINAL;
+  process.env.AGENT_TERMINAL = 'true';
+  try {
+    const c = ctx();
+    const opened = await B.apiCall(c, { type: 'api.call', method: 'POST', path: '/api/terminal/sessions', body: { cols: 80, rows: 24 } });
+    assert.equal(opened.status, 201, JSON.stringify(opened));
+    const id = opened.body.id;
+    assert.match(id, /^[0-9a-f-]{36}$/);
+
+    // The terminal's stream never goes through api.call.
+    assert.equal(await code(B.apiCall(c, { type: 'api.call', method: 'GET', path: `/api/terminal/sessions/${id}/stream` })), 'not_allowed');
+    const frames = [];
+    const s = await B.apiStream({ ...c, push: (f) => { frames.push(f); return true; } }, { type: 'api.stream', path: `/api/terminal/sessions/${id}/stream?after=0` });
+    const done = s.follow();
+    emit('hello\r\n');
+    for (let i = 0; i < 3; i++) assert.equal((await B.apiCall(c, { type: 'api.call', method: 'POST', path: `/api/terminal/sessions/${id}/input`, body: { data: 'l' } })).status, 204);
+    assert.deepEqual(typed, ['l', 'l', 'l']);
+    exit({ exitCode: 0 });
+    await done;
+    const out = frames.filter((f) => f.type === 'stream');
+    assert.equal(out[0].event, 'output');
+    assert.equal(out[0].data.data, 'hello\r\n');
+    assert.ok(out[0].data.seq >= 1);
+    assert.deepEqual(out.at(-1), { type: 'stream', event: 'exit', data: { exitCode: 0 } });
+    assert.deepEqual(frames.at(-1), { type: 'stream.end', status: 'complete' });
+
+    await new Promise((r) => setTimeout(r, 50));
+    const rows = db.prepare("SELECT action, metadata FROM audit_logs WHERE resource_id = ? ORDER BY id").all(c.deviceId);
+    assert.deepEqual(rows.map((r) => r.action), ['phone.api.call', 'phone.api.stream', 'phone.terminal.input']);
+    // Another owner's terminal is not found.
+    assert.equal(await code(B.apiStream(ctx(), { type: 'api.stream', path: `/api/terminal/sessions/${TID}/stream` })), 'not_found');
+  } finally {
+    if (prev === undefined) delete process.env.AGENT_TERMINAL; else process.env.AGENT_TERMINAL = prev;
+    terminalManager.closeAll();
+  }
 });

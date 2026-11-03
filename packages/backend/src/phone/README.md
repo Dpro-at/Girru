@@ -52,7 +52,8 @@ tool: `phone_devices` (read only). No tool pairs, allows or forgets a phone.
   are ignored.
 - Audit rows carry the phone's device id.
 - The chat page on the phone passes two gates: the phone's short list in
-  `ui-bridge.ts` (chat only; never phones, terminal, project files or
+  `ui-bridge.ts` (chat and, by the owner's decision, the terminal behind the
+  phone's biometric check; never phones, project files or
   variables, credentials, sign-in, users, backups, extensions, MCP, deletes
   or uploads) and the desktop bridge's own allow list and answer projection
   (`core-ui/scripts/application-server.cjs`). `test/phone-ui-bridge.test.mjs`
