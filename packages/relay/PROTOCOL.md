@@ -108,9 +108,10 @@ keys. It happens once per phone.
    over the local network if it can, else through the relay. The request
    carries the phone's public key, a name for the phone ("Work iPhone"), its
    platform, its push token when notifications are allowed, and optionally
-   the lifetime the owner would like (see Pairing lifetime). It is encrypted
-   and authenticated under the pairing key, so only someone who saw the QR code
-   can produce or read it.
+   the lifetime the owner would like (see Pairing lifetime). It is signed by
+   the phone's identity key, which proves the phone holds the key it sends, and
+   it is encrypted and authenticated under the pairing key, so only someone who
+   saw the QR code can produce or read it.
 4. **Both screens show the same 6-digit check code** (formula below). The owner
    checks the codes match.
 5. **The owner confirms or changes the pairing lifetime and clicks Approve on
@@ -198,9 +199,31 @@ The JSON request:
 | `platform` | e.g. `ios` or `android` |
 | `push` | optional: the push token (APNs device token as hex on iPhone; the FCM registration token on Android). Left out until the owner allows notifications |
 | `lifetimeDays` | optional: the lifetime the owner would like, 30, 60, 90 or 120. Left out = no wish; the computer offers its default |
+| `sig` | the phone's signature, below. Required |
 
 The request is sent with `{t:"send", pairing, env}` on the relay, so it arrives
 with the phone's proven device id in `from`.
+
+**Request signature.** `sig` proves the phone holds the private key of the
+`key` it sends:
+
+```
+signed text = "girru/v1/preq-sig\n" + pairing id + "\n" + phone device id + "\n" + nonce
+sig         = base64url(ECDSA-P256-SHA256, DER, by the phone's identity key over the signed text)
+```
+
+- The pairing id is exactly as in the QR code, `p_` included.
+- The phone device id is base64url(SHA-256(phone SPKI DER)): the 43-character
+  id of the `key` in the same request.
+- `nonce` is the base64url text of this request's nonce, exactly as it appears
+  in the `g1.preq` envelope.
+- Every part is UTF-8, `\n` is the single byte 0x0A, and there is no newline
+  at the end.
+
+The computer opens the box, then verifies `sig` against `key`, and refuses the
+request when `sig` is missing or does not verify. Binding the nonce stops a
+signature being lifted into another request; binding the pairing id stops it
+being used for another QR code.
 
 ### Check code
 
@@ -398,6 +421,48 @@ otherwise:
 After the check, the normal Girru permission rules still apply: a paired phone
 can only do what the owner can do on the computer, and each agent's off / ask /
 allow permissions stay in force.
+
+### Approvals from the phone
+
+An approval or denial is the signed command
+
+```
+body = {"approve": true | false, "id": "<approval id>", "type": "approval.decide"}
+```
+
+(the iPhone app writes the keys in sorted order; the computer reads the body as
+JSON and must not depend on key order, since the signature covers the exact
+text either way). `id` is the approval id from the approval notice or the
+Approvals list.
+
+The computer acts on it only when, besides every check above:
+
+1. an approval with this id exists and is still **pending** (not decided, not
+   expired, not withdrawn);
+2. that approval was **sent to this phone** (the computer records which paired
+   phones it notified or showed it to); a phone cannot decide an approval it
+   was never given;
+3. for a sensitive approval, the computer's own record says it is sensitive;
+   whatever the phone claims about the kind does not lower the bar.
+
+The first decision wins: once decided, the approval is no longer pending and any
+later `approval.decide` for it is refused.
+
+**"Is this approval still pending?"** Before it asks for the owner's
+biometrics and signs, the phone asks the computer:
+
+```
+query  = {"type": "approval.pending", "id": "<approval id>"}
+answer = {"type": "approval.pending", "id": "<approval id>", "pending": true | false}
+```
+
+Both travel as envelopes inside the phone's session, so only the paired
+computer can answer and only the paired phone can ask. The query changes
+nothing and needs no command signature. The computer answers `pending: true`
+only under rules 1 and 2 above, so the answer tells a phone nothing about
+approvals it was not given. The answer is a hint for the phone's screen, not a
+permission: the computer checks again when the signed `approval.decide`
+arrives.
 
 ## Relay wire protocol
 
