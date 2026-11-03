@@ -187,6 +187,9 @@ A first version of the change log, the session capability and the shared agent c
 - **Who did it:** a coding-app session records the agent it works for, so proposals, handoffs and the task file name the app and the agent.
 - **Debounced sync from the change log:** every project with its memory files on keeps a change log. The brief file is rewritten by the outbox worker once the project has been quiet for a moment, so a burst of changes gives one write. The file carries the change-log position and its version.
 - **One memory contract:** coding apps get five verbs (recall, save, supersede, handoff, propose) from the same definition as the native tools. The server checks every argument, a write with a request id happens once, and a failed write says "not saved, try again".
+- **Project files screen:** Memory › Coding apps › Project files lists each project's files with one state each (up to date, waiting, changed in both, folder not found, could not write). Girru never writes over a file changed in the folder until the owner picks. "Use Girru's version" keeps the folder's text as a review item marked as coming from a repository file; Undo puts the text back and withdraws it while the file is unchanged.
+- **Task-number problems in Needs you:** a number used twice or a hidden id Girru does not know waits for the owner (new task, add as a task, or leave). Left items are remembered per owner (`task_number_dismissals`).
+- **Places that stay on this computer:** the owner marks Memory places (owner, people, experience, tasks, company, each project) as staying on this computer (`memory_place_settings`; People by default). The switch is stored and shown; replies do not yet read it.
 
 ### One safe file writer (off by default)
 

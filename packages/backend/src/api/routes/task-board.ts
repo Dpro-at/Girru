@@ -53,6 +53,7 @@ import { cardConversation, chatProgress } from '../../services/chat-board.js';
 import { chatRuns } from '../../services/chat-runs.js';
 import { TO_SORT, cardChanged, projectTasks, sortTask, syncAllTasks, taskDetail, taskMarks } from '../../services/task-file.js';
 import { q } from '../../repositories/sql-steps.js';
+import { storeP6Enabled } from '../../services/store-p6.js';
 import { boardSchedules, deleteCardSchedule, getCardSchedule, setCardSchedule } from '../../services/card-schedules.js';
 import { addSubtask, replyDiff, setFollow, setLink, setPerson, setRelease, taskActivity, taskPage } from '../../services/task-page.js';
 
@@ -227,7 +228,9 @@ export async function taskBoardRoutes(fastify: FastifyInstance) {
   fastify.get<{ Params: P }>('/api/boards/:id/cards/:cardId/task', { config }, async (request, reply) => {
     const owner = ownerOf(request, reply); if (owner === null) return reply;
     if (!ids(request.params)) return reply.code(404).send({ error: 'Card not found', code: 'not_found' });
-    return { task: await taskDetail(owner, request.params.id, request.params.cardId!) };
+    const task = await taskDetail(owner, request.params.id, request.params.cardId!);
+    // STORE-MAP-01 P6 screens: the task's number ("T-12") for the task page.
+    return { task: task && storeP6Enabled() ? { ...task, number: task.no } : task };
   });
 
   fastify.get<{ Params: P }>('/api/boards/:id/cards/:cardId/comments', { config }, async (request, reply) => {

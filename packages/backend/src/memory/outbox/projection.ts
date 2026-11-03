@@ -60,6 +60,8 @@ export interface RunOptions {
   force?: boolean;
   /** The owner chose Girru's version in a conflict: the outside file is kept beside it, then replaced. */
   overwrite?: boolean;
+  /** P6 screens: false = the caller kept the outside text itself (a memory proposal); no copy beside the file. */
+  keepOutsideFile?: boolean;
   /** Test hook: runs after the new file is staged and before the destination is re-checked. */
   beforeRename?: () => Promise<void> | void;
 }
@@ -218,8 +220,8 @@ async function runOnce(scope: string, opts: RunOptions): Promise<RunResult> {
     const text = `<!-- girru:brief scope=${scope} seq=${max} projection=${nextVersion} · generated from Girru's database; edits here are not read back -->\n\n${body}\n`;
 
     removeStaged(dir);
-    if (storeP7Enabled()) return await writeSafely(scope, folder, target, text, current, max, nextVersion, s, !!(outside && opts.overwrite), opts, result);
-    if (outside && opts.overwrite) {
+    if (storeP7Enabled()) return await writeSafely(scope, folder, target, text, current, max, nextVersion, s, !!(outside && opts.overwrite && opts.keepOutsideFile !== false), opts, result);
+    if (outside && opts.overwrite && opts.keepOutsideFile !== false) {
       // The outside version is kept beside it, copied from the file itself (never through a link).
       const kept = readNoFollow(target);
       if (kept) fs.writeFileSync(path.join(dir, `brief.outside-${nextVersion}.md`), kept, { flag: 'wx', mode: 0o644 });

@@ -1,4 +1,4 @@
-// STORE-MAP-01 P6 on PostgreSQL: migrations 172-174 (company facts switch, the agent on a session
+// STORE-MAP-01 P6 on PostgreSQL: migrations 172-174 and 177 (company facts switch, place settings, the agent on a session
 // and a coding-app handoff, request ids) and the queries that use them: a session for an agent
 // verifies with its agent, a request id is recorded once (ON CONFLICT DO NOTHING), the company
 // facts switch reads back, and the debounced projection writes the brief from PostgreSQL.
@@ -43,6 +43,7 @@ if (URL_) {
     projection: await import('../src/memory/outbox/projection.ts'),
     cap: await import('../src/memory/bridge/capability.ts'),
     store: await import('../src/memory/bridge/store.ts'),
+    places: await import('../src/memory/place-settings.ts'),
   };
 }
 
@@ -66,7 +67,7 @@ test.after(async () => {
   delete process.env.GIRRU_STORE_P6;
   m.projection.setProjectionDebounce(false);
   for (const t of ['change_events', 'projection_state']) await m.pool.pgRun(`DELETE FROM ${t} WHERE scope LIKE ?`, `%${tag}%`).catch(() => {});
-  for (const [t, c] of [['change_scopes', 'owner_id'], ['session_capabilities', 'owner_id'], ['write_requests', 'owner_id'], ['memory_bridge_folders', 'owner_id'], ['memory_bridge_handoffs', 'owner_id'], ['memory_versions', 'user_id'], ['memories', 'user_id'], ['chat_projects', 'user_id']]) {
+  for (const [t, c] of [['change_scopes', 'owner_id'], ['session_capabilities', 'owner_id'], ['write_requests', 'owner_id'], ['memory_place_settings', 'owner_id'], ['task_number_dismissals', 'owner_id'], ['memory_bridge_folders', 'owner_id'], ['memory_bridge_handoffs', 'owner_id'], ['memory_versions', 'user_id'], ['memories', 'user_id'], ['chat_projects', 'user_id']]) {
     await m.pool.pgRun(`DELETE FROM ${t} WHERE ${c} = ?`, S.owner).catch(() => {});
   }
   await m.pool.pgRun('DELETE FROM agents_config WHERE id = ?', S.agent).catch(() => {});
@@ -109,4 +110,17 @@ test('the debounced projection writes the brief once from PostgreSQL', { skip },
   assert.equal(st.status, 'up_to_date');
   assert.equal(st.projectionVersion, 1);
   assert.match(readFileSync(join(S.folder, '.girru', 'brief.md'), 'utf8'), new RegExp(`PG burst fact 3 ${tag}`));
+});
+
+test('place settings (177): People stays local by default; a change reads back; a left task problem is kept once', { skip }, async () => {
+  const before = (await m.places.placeSettings(S.owner)).places;
+  assert.equal(before.people.staysLocal, true);
+  assert.equal(before.owner.staysLocal, false);
+  assert.deepEqual(await m.places.setPlaceSetting(S.owner, 'owner', true), { place: 'owner', staysLocal: true });
+  await m.places.setPlaceSetting(S.owner, 'owner', true);
+  await m.places.setPlaceSetting(S.owner, 'people', false);
+  assert.deepEqual([...await m.places.localOnlyPlaces(S.owner)], ['owner']);
+  for (let i = 0; i < 2; i++) await m.pool.pgRun('INSERT INTO task_number_dismissals (owner_id, item_id, project_id) VALUES (?, ?, ?) ON CONFLICT DO NOTHING', S.owner, `item-${tag}`, S.project.id);
+  const n = await m.pool.pgOne('SELECT COUNT(*) AS n FROM task_number_dismissals WHERE owner_id = ?', S.owner);
+  assert.equal(Number(n.n), 1);
 });

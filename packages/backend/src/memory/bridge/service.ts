@@ -290,13 +290,13 @@ export async function autoConnect(ownerId: string, allowed: boolean): Promise<{ 
 // --- STORE-MAP-01 P2: one Girru section ---------------------------------------
 
 /** The rules and task pointer of the one section (undefined while P2 is off). */
-async function extrasOf(projectId: string): Promise<SectionExtras | undefined> {
+export async function extrasOf(projectId: string): Promise<SectionExtras | undefined> {
   const { sectionExtras } = await import('../../services/agent-rule-files.js');
   return sectionExtras(projectId);
 }
 
 /** What the files are written from: the brief, plus (P2) the rules and the task pointer. */
-function sectionHash(brief: Parameters<typeof briefHash>[0], extras: SectionExtras | undefined): string {
+export function sectionHash(brief: Parameters<typeof briefHash>[0], extras: SectionExtras | undefined): string {
   return extras ? createHash('sha256').update(JSON.stringify([briefHash(brief), extras])).digest('hex') : briefHash(brief);
 }
 

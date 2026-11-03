@@ -257,6 +257,24 @@ export function previewFiles(projectId: string, brief: ProjectBrief | null, fold
   return { projectId, folder: p.folder, files, previewHash: hashOf(p.folder, files), conflicts: files.filter((f) => f.action === 'conflict').length, changes: files.filter((f) => f.action === 'create' || f.action === 'update').length };
 }
 
+/**
+ * STORE-MAP-01 P6 screens: Girru's part of one managed file, what Girru would
+ * write between its markers and what the file holds there now (`current` null:
+ * no file, or no Girru part in it). `problem` when the file cannot be read or
+ * its markers are broken. Reads only.
+ */
+export interface ManagedPart { folder: string; marks: Marks; girru: string; current: string | null; whole: string | null; problem: string | null }
+export function managedPart(brief: ProjectBrief, folderRaw: string | null, name: ManagedName, extras?: SectionExtras): ManagedPart {
+  const folder = checkFolder(folderRaw);
+  const marks = extras ? GIRRU_MARKS : MEMORY_MARKS;
+  const girru = (name === 'AGENTS.md' ? (extras ? unifiedBlock(brief, extras) : briefMarkdown(brief)) : adapterBlock(name)).trim();
+  const cur = readExisting(path.join(folder, name));
+  if (cur.problem) return { folder, marks, girru, current: null, whole: null, problem: `${name} ${cur.problem}` };
+  const split = cur.text === null ? null : splitManaged(cur.text, marks);
+  if (split === 'broken') return { folder, marks, girru, current: null, whole: cur.text, problem: `${name} has broken Girru markers; fix or remove them by hand` };
+  return { folder, marks, girru, current: split ? split.inside.trim() : null, whole: cur.text, problem: null };
+}
+
 function writeAtomic(folder: string, relative: string, abs: string, text: string, mode: number | null): void {
   // STORE-MAP-01 P7 (SEC2-6): the one safe file writer.
   if (storeP7Enabled()) {

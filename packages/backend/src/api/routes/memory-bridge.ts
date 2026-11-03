@@ -13,6 +13,18 @@
  *   POST  /api/memory-bridge/projects/:projectId/backflow       imports the CLIs' own memory files as review proposals now
  *   GET   /api/memory-bridge/audit?limit=&client=&projectId=    what the bridge did (activity log), newest first
  *
+ * STORE-MAP-01 P6 screens (only while GIRRU_STORE_P6 is on; otherwise not registered):
+ *   GET   /api/memory/project-files                             every project's files and their states, needs-you first
+ *   GET   /api/memory/project-files/:projectId/compare?path=    Girru's version beside the folder's
+ *   POST  /api/memory/project-files/:projectId/rewrite          writes the files again (never over a file changed in both)
+ *   POST  /api/memory/project-files/:projectId/use-girru        { path } Girru's version; the folder text becomes a proposal -> { project, undo }
+ *   POST  /api/memory/project-files/:projectId/undo             { undo } puts the folder text back, withdraws the proposal
+ *   PATCH /api/memory/project-files/:projectId                  { writeFiles?, companyFacts? }
+ *   GET   /api/memory/project-files/needs-you                   task-number problems in the projects' task files
+ *   POST  /api/memory/project-files/needs-you/:id               { action: new_task | add_task | leave }
+ *   GET   /api/memory/place-settings                            which Memory places stay on this computer
+ *   PUT   /api/memory/place-settings/:place                     { staysLocal }
+ *
  * The dpro-memory MCP server (public in the gate; loopback only, own proof):
  *   POST  /api/memory-bridge/mcp/session   { client, nonce, proof } -> { token }   (install proof, CLI switched on)
  *   POST  /api/memory-bridge/mcp/call      header x-dpro-bridge-token; { client, cwd, tool, args } -> { text, data }
@@ -37,6 +49,10 @@ import { storeP7Enabled } from '../../services/store-p7.js';
 import { layoutApply, layoutPreview } from '../../memory/bridge/layout.js';
 import { approveTaskFile, revokeTaskFile, taskTrust, TaskTrustError } from '../../services/task-file-trust.js';
 import { storeP3Enabled } from '../../services/store-p3.js';
+import { compareFile, listProjectFiles, patchProjectFiles, rewriteFiles, undoUseGirru, useGirruVersion } from '../../memory/bridge/project-files.js';
+import { numberProblems, resolveNumberProblem } from '../../services/task-file.js';
+import { BoardError } from '../../services/task-board.js';
+import { PlaceSettingsError, placeSettings, setPlaceSetting } from '../../memory/place-settings.js';
 
 const OWNER_ONLY = ['owner'] as const;
 export const BRIDGE_TOKEN_HEADER = 'x-dpro-bridge-token';
@@ -46,7 +62,7 @@ type Req = FastifyRequest<{ Params: Record<string, string>; Querystring: Record<
 const bodyOf = (r: { body?: unknown }): Record<string, any> => (r.body && typeof r.body === 'object' && !Array.isArray(r.body) ? r.body as Record<string, any> : {});
 
 function fail(reply: FastifyReply, err: unknown) {
-  if (err instanceof BridgeError || err instanceof CapabilityError || err instanceof TaskTrustError) return reply.code(err.status).send({ error: err.message, code: err.code });
+  if (err instanceof BridgeError || err instanceof CapabilityError || err instanceof TaskTrustError || err instanceof PlaceSettingsError || err instanceof BoardError) return reply.code(err.status).send({ error: err.message, code: err.code });
   throw err;
 }
 
@@ -84,8 +100,22 @@ export async function memoryBridgeRoutes(fastify: FastifyInstance) {
     entries: await activity(o, { limit: r.query?.limit, client: r.query?.client, projectId: r.query?.projectId }),
   })));
 
-  // STORE-MAP-01 P2: which storage switches are on (the app shows the matching words).
-  fastify.get('/api/store-switches', { config }, asOwner(async () => ({ p2: storeP2Enabled(), p3: storeP3Enabled(), p4: storeP4Enabled() })));
+  // STORE-MAP-01 P2: which storage switches are on (the app shows the matching words). P6 is named only while it is on.
+  fastify.get('/api/store-switches', { config }, asOwner(async () => ({ p2: storeP2Enabled(), p3: storeP3Enabled(), p4: storeP4Enabled(), ...(storeP6Enabled() ? { p6: true } : {}) })));
+
+  // --- STORE-MAP-01 P6 screens: project files, task-number problems, place settings (owner only) ---
+  if (storeP6Enabled()) {
+    fastify.get('/api/memory/project-files', { config }, asOwner((o) => listProjectFiles(o)));
+    fastify.get('/api/memory/project-files/needs-you', { config }, asOwner(async (o) => ({ items: await numberProblems(o) })));
+    fastify.post('/api/memory/project-files/needs-you/:id', { config }, asOwner((o, r) => resolveNumberProblem(o, r.params.id, bodyOf(r).action)));
+    fastify.get('/api/memory/project-files/:projectId/compare', { config }, asOwner((o, r) => compareFile(o, r.params.projectId, r.query?.path)));
+    fastify.post('/api/memory/project-files/:projectId/rewrite', { config }, asOwner((o, r) => rewriteFiles(o, r.params.projectId)));
+    fastify.post('/api/memory/project-files/:projectId/use-girru', { config }, asOwner((o, r) => useGirruVersion(o, r.params.projectId, bodyOf(r).path)));
+    fastify.post('/api/memory/project-files/:projectId/undo', { config }, asOwner((o, r) => undoUseGirru(o, r.params.projectId, bodyOf(r).undo)));
+    fastify.patch('/api/memory/project-files/:projectId', { config }, asOwner((o, r) => patchProjectFiles(o, r.params.projectId, bodyOf(r))));
+    fastify.get('/api/memory/place-settings', { config }, asOwner((o) => placeSettings(o)));
+    fastify.put('/api/memory/place-settings/:place', { config }, asOwner((o, r) => setPlaceSetting(o, r.params.place, bodyOf(r).staysLocal)));
+  }
 
   // --- STORE-MAP-01 pilot: session capabilities and the brief projection (owner only) ---
   const pilotProject = async (o: string, id: string) => {

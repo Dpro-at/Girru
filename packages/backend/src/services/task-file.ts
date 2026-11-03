@@ -21,6 +21,7 @@
  */
 import { promises as fs, watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { q } from '../repositories/sql-steps.js';
 import { folderOf, readPlain, writeAtomic, RuleFilesError } from './agent-rule-files.js';
 import { createCard, updateCard, BoardError } from './task-board.js';
@@ -533,6 +534,97 @@ export async function projectTasks(ownerId: string, projectId?: string): Promise
 }
 export async function openTasks(projectId: string): Promise<number> {
   return Number((await q.one<{ n: number }>('SELECT COUNT(*) AS n FROM task_file_cards WHERE project_id = ? AND finished = 0', projectId))?.n ?? 0);
+}
+
+// ---------------------------------------------------------------------------
+// STORE-MAP-01 P6 screens (P6b): task-number problems in Needs you
+// ---------------------------------------------------------------------------
+
+export type NumberProblemKind = 'duplicate_number' | 'unknown_number';
+export interface NumberProblem { id: string; kind: NumberProblemKind; projectId: string; projectName: string; file: string; number: string; titles: string[]; line: number }
+export type NumberAction = 'new_task' | 'add_task' | 'leave';
+/** Which choices each kind offers: a second block with a used number becomes a new task; an unknown id is added or left. */
+const ACTIONS: Record<NumberProblemKind, readonly NumberAction[]> = { duplicate_number: ['new_task'], unknown_number: ['add_task', 'leave'] };
+
+const problemId = (projectId: string, key: string) => createHash('sha256').update(`${projectId}\0${key}`).digest('hex').slice(0, 24);
+
+/**
+ * Reads only: each block whose number an earlier block already has (or, with
+ * P6, whose hidden id an earlier block carries), and each block whose hidden
+ * id is not a task of this project. `at` = the block's index in the file.
+ */
+async function numberProblemsIn(projectId: string, projectName: string, text: string): Promise<Array<NumberProblem & { at: number }>> {
+  const { tasks } = readTasks(text);
+  const p6 = storeP6Enabled();
+  const out: Array<NumberProblem & { at: number }> = [];
+  const nos = new Map<string, number>(), ids = new Map<string, number>(), idUses = new Map<string, number>();
+  for (const t of tasks) if (t.id) idUses.set(t.id, (idUses.get(t.id) ?? 0) + 1);
+  const item = (kind: NumberProblemKind, key: string, at: number, titles: string[]) =>
+    out.push({ id: problemId(projectId, key), kind, projectId, projectName, file: TASKS_FILE, number: tasks[at].task.no, titles, line: tasks[at].line, at });
+  for (const [at, t] of tasks.entries()) {
+    const n = nos.get(t.task.no) ?? 0;
+    nos.set(t.task.no, n + 1);
+    const m = t.id ? ids.get(t.id) ?? 0 : 0;
+    if (t.id) ids.set(t.id, m + 1);
+    if (n > 0) { item('duplicate_number', `duplicate:${t.task.no}:${n}`, at, tasks.filter((x) => x.task.no === t.task.no).map((x) => x.task.title)); continue; }
+    if (!p6 || !t.id) continue;
+    if (m > 0) item('duplicate_number', `duplicate-id:${t.id}:${m}`, at, tasks.filter((x) => x.id === t.id).map((x) => x.task.title));
+    else if ((idUses.get(t.id) ?? 0) === 1 && await idProblem(projectId, t.id, false)) item('unknown_number', `unknown:${t.id}:${t.task.no}`, at, [t.task.title]);
+  }
+  return out;
+}
+
+/** The owner's open task-number problems, over every project with the task file on (left ones are not shown again). */
+export async function numberProblems(ownerId: string): Promise<NumberProblem[]> {
+  const mine = await q.all<{ id: string; name: string }>('SELECT id, name FROM chat_projects WHERE user_id = ?', ownerId);
+  const on = new Set(await onProjects());
+  const left = new Set((await q.all<{ item_id: string }>('SELECT item_id FROM task_number_dismissals WHERE owner_id = ?', ownerId)).map((r) => r.item_id));
+  const out: NumberProblem[] = [];
+  for (const p of mine.filter((x) => on.has(x.id))) {
+    let text: string | null;
+    try { text = await readFile(await folderOf(p.id), TASKS_FILE); } catch { continue; }
+    if (text === null) continue;
+    for (const { at: _at, ...x } of await numberProblemsIn(p.id, p.name, text)) if (!left.has(x.id)) out.push(x);
+  }
+  return out;
+}
+
+/**
+ * The owner's choice for one problem. new_task / add_task: the block loses its
+ * hidden id line and (for a number in use) gets the next free number, then the
+ * board picks it up as a new task. leave: hidden from Needs you; the file and
+ * the board stay as they are.
+ */
+export async function resolveNumberProblem(ownerId: string, id: unknown, action: unknown): Promise<{ ok: true }> {
+  if (action !== 'new_task' && action !== 'add_task' && action !== 'leave') throw new BoardError(400, 'invalid_board', 'action must be new_task, add_task or leave');
+  const found = typeof id === 'string' ? (await numberProblems(ownerId)).find((x) => x.id === id) : undefined;
+  if (!found) throw new BoardError(404, 'not_found', 'Problem not found');
+  if (!ACTIONS[found.kind].includes(action)) throw new BoardError(400, 'invalid_board', `${found.kind} takes ${ACTIONS[found.kind].join(' or ')}`);
+  if (action === 'leave') {
+    await q.run('INSERT INTO task_number_dismissals (owner_id, item_id, project_id) VALUES (?, ?, ?) ON CONFLICT DO NOTHING', ownerId, found.id, found.projectId);
+    return { ok: true };
+  }
+  await serial(found.projectId, async () => {
+    const folder = await folderOf(found.projectId);
+    const text = (await readFile(folder, TASKS_FILE)) ?? '';
+    const now = (await numberProblemsIn(found.projectId, found.projectName, text)).find((x) => x.id === found.id);
+    if (!now) return; // fixed in the file meanwhile
+    const tasks = readTasks(text).tasks;
+    const t = tasks[now.at];
+    const done = readTasks((await readFile(folder, DONE_FILE)) ?? '').tasks.map((x) => x.task.no);
+    const linked = (await q.all<{ task_no: string }>('SELECT task_no FROM task_file_cards WHERE project_id = ?', found.projectId)).map((r) => r.task_no);
+    const used = tasks.some((x, i) => i !== now.at && x.task.no === t.task.no) || done.includes(t.task.no) || linked.includes(t.task.no);
+    let out = text;
+    if (t.idAt) out = out.slice(0, t.idAt.start) + out.slice(t.idAt.end);
+    if (action === 'new_task' || used) {
+      const no = nextNumber(tasks.map((x) => x.task.no), done, linked);
+      const eol = out.indexOf('\n', t.start), end = eol < 0 ? out.length : eol;
+      out = out.slice(0, t.start) + out.slice(t.start, end).replace(/T-\d+/, no) + out.slice(end);
+    }
+    if (out !== text) await writeFile(folder, TASKS_FILE, out);
+  });
+  await syncTasks(found.projectId);
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------
