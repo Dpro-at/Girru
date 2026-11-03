@@ -1,7 +1,7 @@
 # Next: the phone app, from 3 November 2026 on
 
-Tasks for the agent that builds the phone app. Work on the branch below, do
-the tasks in order, and report back as described at the end. Background,
+Tasks for the computer that builds and tests the phone app. Work on the
+branch below and report back as described at the end. Background,
 decisions and the build guide: [`packages/mobile/BUILDING.md`](../../packages/mobile/BUILDING.md).
 What the build Mac found and built so far: [`RESULT.md`](RESULT.md). The
 owner's feature list and the typed-code proposal: [`PHONE_FEATURES.md`](PHONE_FEATURES.md).
@@ -15,6 +15,64 @@ canvas (ask the owner for the link).
   desktop, so a chat change is written once, on the computer, and the phone
   shows it without an app update. Only native parts (lock, pairing, push,
   widget, share, permissions) live in the apps.
+
+## Now: test only (owner's decision, 3 November 2026)
+
+**All the code is written on the main computer. This computer builds, runs and
+reports; it does not write features.** Fix only what stops a build, with the
+smallest change, one commit per fix, and say so in `RESULT.md`.
+
+What was added for you to test (pull `phone/app` first):
+
+| Commit | What |
+|---|---|
+| `d6ed4aaf`, `79949bf9` | Computer side: `ui.get`, `api.call`, `api.stream` (the chat page through the session), with audit rows. |
+| `ca0dacde` | iPhone: the four places (Chat, Tasks, Approvals, Team) after pairing; Chat loads the computer's chat page through the session; Tasks, Approvals, Team are the app's own screens (boards Tasks, Approvals, ApprovalsDark, Team, Empty). Commands are signed in counter order. |
+| `97d0bf1a` | Computer's chat page: on `girru-app://computer` with the app's shell object it starts signed in and sends no token. |
+| `e46fd990` | Android: the relay session (`RelaySessionClient`), the same four places, the chat page through the session; requests with a body go through the bridge (`api.call`). |
+
+**Never compiled:** the new iPhone screens were type-checked against macOS
+SwiftUI only (no iOS SDK on the main computer), and the Android code was not
+compiled at all (no JDK there). Expect small build fixes.
+
+### Test 1: shared checks
+
+```bash
+cd packages/relay && node --import tsx --test test/*.test.mjs                 # 29
+cd ../backend && node --import tsx --test test/phone-*.test.mjs                # 42
+cd ../core-ui && node --test tests/phone-shell.test.cjs                        # 3
+cd ../mobile/ios && swift run CoreChecks                                       # 359
+```
+
+### Test 2: builds
+
+```bash
+cd packages/mobile/ios && xcodegen generate && xcodebuild -scheme Girru -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' build
+cd packages/mobile/android && ./gradlew :app:testDebugUnitTest :app:assembleDebug   # new: PageBridgeTest, PhoneScreensTest
+```
+
+### Test 3: the simulator (and an Android phone or emulator), paired through the real relay
+
+Start the test computer with `pair-harness.mjs --manual` (see "Things the next
+agent must know"), pair, then check and write down each:
+
+1. **Chat**: the computer's chat page opens inside the app (no sign-in screen),
+   the chat list shows, a chat opens, a message sends and the reply streams in
+   word by word. Note every part of the page that shows an error or stays empty:
+   the computer answers only the chat page's requests (`ui-bridge.ts` list), so
+   a missing request is a finding, not a fix for you.
+2. **Tasks**: Now / Scheduled / Done; "Waiting for you" opens Approvals; the
+   plus button opens Chat. There is no terminal button on purpose.
+3. **Approvals**: the first request is open with Deny and Approve; Approve asks
+   Face ID (Android: the confirm screen); a cut-short request opens the full
+   view first; the badge on the tab shows the count; the empty state appears
+   when nothing waits.
+4. **Team**: main agent first, then who needs you, who works, who is free;
+   search and the chips filter; tapping an agent opens Chat.
+5. Dark mode on each screen; locking the app hides everything and nothing
+   loads until the unlock.
+
+Report as before in `RESULT.md`, with screenshots of each place.
 
 ## Where things stand
 
@@ -61,7 +119,7 @@ canvas (ask the owner for the link).
   account cannot sign push notifications (`aps-environment`): for a test build
   on a free account, leave push out of a local, uncommitted build.
 
-## Task 5: the desktop chat page in the phone app (Part 1 done; do Part 3 next)
+## Task 5: the desktop chat page in the phone app (written on the main computer; test it with the list above)
 
 The phone's web host already exists (`ios/Web/WebHostView.swift`,
 `CoreUISchemeHandler.swift`: `girru-app://computer/…` requests go to a
