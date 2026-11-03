@@ -68,7 +68,7 @@ import {
   memoryReviewTool,
   memoryReviewDecideTool,
   memoryReviewRoutineTool,
-  memoryPersonExportTool, memoryPersonForgetTool, memoryPrivacyReviewTool, memoryPrivacyDecideTool,
+  memoryPersonExportTool, memoryPersonForgetTool, memoryPrivacyReviewTool, memoryPrivacyDecideTool, memoryTrustReviewTool, memoryCorrectedCheckedTool, memoryQuestionAnswerTool, memoryQuestionForgetTool,
   memoryGraphReviewTool,
   memoryGraphTopicTool,
   memoryGraphSyncTool,
@@ -76,7 +76,7 @@ import {
 } from './memory/index.js';
 
 import {
-  desktopControlTool,
+  desktopControlTool, openInCodeTool,
 } from './desktop/index.js';
 
 import {
@@ -136,6 +136,8 @@ const CORE_TOOLS: Tool[] = [
   discoveryTool, discoveryApplyTool, // DISCOVER-01: what coding agents left on this computer; owner-only; apply needs owner approval
   memoryReviewTool, memoryReviewDecideTool, memoryReviewRoutineTool, memoryGraphReviewTool, memoryGraphTopicTool, memoryGraphSyncTool, memoryRecallTool, // owner's review inbox, topics + reply trace; decisions need owner approval
   memoryPersonExportTool, memoryPersonForgetTool, memoryPrivacyReviewTool, memoryPrivacyDecideTool, // STORE-MAP-01 P9: one person, personal-data review (P9 only); export / forget / decide need owner approval
+  memoryTrustReviewTool, memoryCorrectedCheckedTool, memoryQuestionAnswerTool, memoryQuestionForgetTool, // STORE-MAP-01 P9b screens (P9b only): corrected after use, open questions; changes need owner approval
+  openInCodeTool, // CODE-OPEN-01: a file in a project or the data folder, at a line; needs owner approval
   desktopControlTool,
   storageSaveTool, storageSearchTool, storageDeleteTool,
   createReminderTool,

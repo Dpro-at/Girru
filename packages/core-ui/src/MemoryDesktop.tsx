@@ -29,7 +29,10 @@ import { Avatar, ContextMenu, IconButton, Notice, Popover, Sheet, Tile, WithSwat
 import type { MenuItem } from './desktop-ui';
 import type { ProjectGroup } from './memory-desktop-contract.js';
 import { NeedsYou } from './MemoryNeeds';
-import { useStoreP3, useStoreP6, useStoreP8, useStoreP9 } from './store-switches';
+import { useStoreP3, useStoreP6, useStoreP8, useStoreP9, useStoreP9b } from './store-switches';
+import { MemoryTrustController } from './memory-trust';
+import { fileMenu } from './CodeOpen';
+import { CorrectedInspector, CorrectedView, HowSureRows, NeedsViews, QuestionInspector, QuestionsView, TrustChip, VERIFY_SHORTCUT } from './MemoryTrust';
 import { MemoryPeopleController, personName } from './memory-people';
 import { ExportPersonSheet, ForgetPersonSheet, PersonInspector, personMenu } from './MemoryPeople';
 import type { PersonSheet } from './MemoryPeople';
@@ -63,7 +66,7 @@ export type SettingsTarget = 'rules' | 'folders' | 'sources' | 'projects' | 'acc
 
 /** Controllers of the window, made once per client. */
 function useControllers(client: SessionClient) {
-  const [c, setC] = useState<{ d: MemoryDesktopController; x: MemoryExplorerController; sc: MemoryScopesController; rv: MemoryReviewController; mv: MemoryMoveController; map: MemoryMapController; ho: MemoryHandoffsController; disc: DiscoveryController; pf: ProjectFilesController; pp: MemoryPeopleController }>();
+  const [c, setC] = useState<{ d: MemoryDesktopController; x: MemoryExplorerController; sc: MemoryScopesController; rv: MemoryReviewController; mv: MemoryMoveController; map: MemoryMapController; ho: MemoryHandoffsController; disc: DiscoveryController; pf: ProjectFilesController; pp: MemoryPeopleController; tr: MemoryTrustController }>();
   useEffect(() => {
     const d = new MemoryDesktopController(client), x = new MemoryExplorerController(client), sc = new MemoryScopesController(client);
     sc.light = true;
@@ -74,8 +77,10 @@ function useControllers(client: SessionClient) {
     const pf = new ProjectFilesController(client); pf.say = text => d.say(text); pf.onSuggestions = () => void rv.load();
     // STORE-MAP-01 P9: one person's export and forget (asks nothing until a person is opened).
     const pp = new MemoryPeopleController(client);
-    setC({ d, x, sc, rv, mv, map, ho, disc, pf, pp });
-    return () => { d.dispose(); x.dispose(); sc.dispose(); rv.dispose(); mv.dispose(); map.dispose(); ho.dispose(); disc.dispose(); pf.dispose(); pp.dispose(); };
+    // STORE-MAP-01 P9b: how sure, corrected after use, open questions (asks nothing until the switch is on).
+    const tr = new MemoryTrustController(client, d);
+    setC({ d, x, sc, rv, mv, map, ho, disc, pf, pp, tr });
+    return () => { d.dispose(); x.dispose(); sc.dispose(); rv.dispose(); mv.dispose(); map.dispose(); ho.dispose(); disc.dispose(); pf.dispose(); pp.dispose(); tr.dispose(); };
   }, [client]);
   return c;
 }
@@ -98,9 +103,11 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
   const p8 = useStoreP8(client);
   const p9 = useStoreP9(client);
   const p9Ref = useRef(p9); p9Ref.current = p9;
+  const p9b = useStoreP9b(client);
+  const p9bRef = useRef(p9b); p9bRef.current = p9b;
   // STORE-MAP-01 P8: a task's notes opened from its page (Memory › Tasks › T-n) keep that task's place as the list.
   const taskScope = useRef<string | null>(null);
-  const ds = useStore(k?.d), xs = useStore(k?.x), ss = useStore(k?.sc), rs = useStore(k?.rv), ms = useStore(k?.mv), fs = useStore(k?.pf);
+  const ds = useStore(k?.d), xs = useStore(k?.x), ss = useStore(k?.sc), rs = useStore(k?.rv), ms = useStore(k?.mv), fs = useStore(k?.pf), ts = useStore(k?.tr);
   const menu = useMenu();
   const [sheet, setSheet] = useState<null | { kind: 'remember' } | { kind: 'history' } | { kind: 'weekly' } | { kind: 'group'; projects: string[] } | { kind: 'rename-group'; id: string } | { kind: 'project'; action: ProjectAction; slug: string } | { kind: 'forget'; ids?: string[] } | { kind: 'trash-project'; slug: string } | { kind: 'edit-pinned'; fact: PinnedFact } | PersonSheet>(null);
   const [filters, setFilters] = useState(false);
@@ -118,6 +125,19 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
     if (!active || !owner || !k || !p6) return;
     void k.pf.load(); void k.pf.loadProblems();
   }, [active, owner, k, p6]);
+  // P9b: what waits (the badge) and how sure the shown memories are.
+  useEffect(() => { if (active && owner && k && p9b) void k.tr.loadWaiting(); }, [active, owner, k, p9b, ds?.place]);
+  useEffect(() => { if (k && p9b && xs?.phase === 'ready' && xs.items.length) void k.tr.loadTrust(xs.items.slice(0, 200).map(i => i.id)); }, [k, p9b, xs?.items]);
+  // P9b: entering Needs you with nothing to decide opens the first view that has something.
+  const needsEntered = useRef(false);
+  useEffect(() => {
+    if (!k || !p9b || ds?.place !== 'needs') { needsEntered.current = false; return; }
+    if (needsEntered.current || rs?.phase !== 'ready') return;
+    const w = k.tr.getSnapshot().waiting;
+    if (rs.items.length || (!w.corrected && !w.questions)) { needsEntered.current = rs.items.length > 0; return; }
+    needsEntered.current = true;
+    if (k.tr.getSnapshot().view === 'decide') k.tr.setView(w.corrected ? 'corrected' : 'questions');
+  }, [k, p9b, ds?.place, rs?.phase, ts?.waiting]);
   // The list follows the place.
   useEffect(() => {
     if (!k || !ds) return;
@@ -162,6 +182,7 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
       else if (cmd && key === 'f') { e.preventDefault(); searchRef.current?.focus(); }
       else if (cmd && key === 'z' && !e.shiftKey && !typing) { e.preventDefault(); void k.d.undo().then(() => { void k.x.load(); void k.sc.load(true); }); }
       else if (cmd && e.shiftKey && key === 'm') { e.preventDefault(); k.d.setExtra('map'); }
+      else if (cmd && e.shiftKey && key === 'v' && !typing && p9bRef.current) { const id = k.x.getSnapshot().open; if (id && k.tr.getSnapshot().trust[id]?.level !== 'verified') { e.preventDefault(); void k.tr.verify(id); } }
       else if (cmd && key === 'm' && !typing) { const i = k.x.item(k.x.getSnapshot().open); if (i) { e.preventDefault(); void k.mv.open({ id: i.id, text: i.preview, drawerId: i.drawerId, topicKey: i.topicKey }); } }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && !typing) {
         const xs2 = k.x.getSnapshot(); const ids = xs2.checked.length ? [...xs2.checked] : xs2.open ? [xs2.open] : [];
@@ -179,19 +200,22 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
   }
 
   if (!owner) return <section className="dk-mem" aria-label="Memory"><div className="dk-empty"><p>Only the owner manages the memory here.</p></div></section>;
-  if (!k || !ds || !xs || !ss || !rs || !fs) return <section className="dk-mem" aria-label="Memory"><p className="dk-empty" role="status">Opening memory…</p></section>;
-  const { d, x, sc, rv, mv, pf, pp } = k;
+  if (!k || !ds || !xs || !ss || !rs || !fs || !ts) return <section className="dk-mem" aria-label="Memory"><p className="dk-empty" role="status">Opening memory…</p></section>;
+  const { d, x, sc, rv, mv, pf, pp, tr } = k;
   // STORE-MAP-01 P9 (board P9c): the open person (Memory › People › X).
   const person = p9 && ds.place.startsWith('people:') ? ds.place.slice(7) : null;
   const peopleLocal = p6 && fs.phase === 'ready' ? pf.staysLocal('people') : staysLocalDefault('people');
   const openPerson = (s: PersonSheet) => setSheet(s);
 
-  const waiting = (rs.phase === 'ready' ? rs.items.length : ss.tree?.company.pendingReviews ?? 0) + (p6 ? pf.problemCount() : 0);
+  const decide = (rs.phase === 'ready' ? rs.items.length : ss.tree?.company.pendingReviews ?? 0) + (p6 ? pf.problemCount() : 0);
+  const waiting = decide + (p9b ? ts.waiting.corrected + ts.waiting.questions : 0);
+  const needsView = p9b ? ts.view : 'decide';
   const filesOpen = p6 && ds.extra === 'project-files';
   const filesProject = filesOpen ? pf.project(fs.selected) : null;
   const filesMenu = (e: React.MouseEvent, p: import('./project-files-contract.js').ProjectFiles) => menu.at(e, projectFilesMenu(pf, d, p));
 
   const memoryMenu = (i: ExplorerItem): MenuItem[] => [
+    ...(p9b && ts.trust[i.id] && ts.trust[i.id].level !== 'verified' ? [{ label: 'Mark as verified', icon: 'check' as const, shortcut: VERIFY_SHORTCUT, run: () => void tr.verify(i.id) }] : []),
     { label: 'Edit', icon: 'pencil', shortcut: '↩', run: () => { void x.openMemory(i.id).then(() => x.startEdit()); } },
     { label: 'Pin for every agent', icon: 'pin', run: () => void d.pin(i.preview, i.drawerId) },
     { label: 'Move…', icon: 'move', shortcut: `${mod}M`, run: () => void mv.open({ id: i.id, text: i.preview, drawerId: i.drawerId, topicKey: i.topicKey }) },
@@ -263,7 +287,7 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
     : project ? project.name : place.startsWith('group:') ? (Array.isArray(ds.groups) ? (ds.groups as readonly ProjectGroup[]).find(g => g.id === place.slice(6))?.name ?? 'Group' : 'Group')
     : place.startsWith('agent:') ? ss.agents[place.slice(6)] ?? 'Agent' : person ? personName(person) : xs.query && !place.startsWith('project:') && placeScope(place) ? 'Search' : PLACE_NAME[place] ?? 'Memory';
   const sub = ds.extra === 'map' ? 'people, projects and topics in memory' : ds.extra === 'handoffs' ? 'what agents left for the next session' : ds.extra === 'files' ? 'read-only view of the memory files per agent' : ds.extra === 'project-files' ? 'what Girru writes into each project folder for coding apps'
-    : place === 'needs' ? `${waiting} ${waiting === 1 ? 'question' : 'questions'}` : place === 'trash' ? `kept ${ds.trash && ds.trash !== 'missing' ? (ds.trash.trashDays ? `${ds.trash.trashDays} days` : 'until you empty it') : '30 days'}, then forgotten`
+    : place === 'needs' && needsView !== 'decide' ? '' : place === 'needs' ? `${decide} ${decide === 1 ? 'question' : 'questions'}` : place === 'trash' ? `kept ${ds.trash && ds.trash !== 'missing' ? (ds.trash.trashDays ? `${ds.trash.trashDays} days` : 'until you empty it') : '30 days'}, then forgotten`
     : project ? `${project.memories} ${project.memories === 1 ? 'memory' : 'memories'}${project.archived ? ' · archived' : ''}` : placeScope(place) && xs.phase === 'ready' ? `${xs.total} ${xs.total === 1 ? 'memory' : 'memories'}` : '';
   const listPlace = !ds.extra && !!placeScope(place) && (!project || ds.projectView === 'memories');
   const filterCount = [xs.type, xs.topic, xs.source, xs.agent, xs.importance, xs.since].filter(Boolean).length;
@@ -272,7 +296,9 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
     : ds.extra === 'handoffs' ? <HandoffsView c={k.ho} onOpenChat={onOpenChat} onOpenCard={p8 ? onOpenCard : undefined}/>
     : filesOpen ? <ProjectFilesView c={pf} onMenu={filesMenu} searchRef={filesSearchRef}/>
     : ds.extra === 'files' ? <FilesView client={client} agents={ss.agents} drawers={[{ id: 'owner', name: 'About you' }, { id: 'experience', name: 'Lessons' }, ...(ss.tree?.projects ?? []).filter(p => !p.archived && !p.mergedInto && !p.trashedAt).map(p => ({ id: `project:${p.slug}`, name: p.name }))]}/>
-    : place === 'needs' ? <NeedsYou c={rv} mode={ds.needsMode} onOpenChat={onOpenChat} design={d} files={p6 ? pf : undefined}/>
+    : place === 'needs' && needsView === 'corrected' ? <CorrectedView c={tr} names={ss.agents}/>
+    : place === 'needs' && needsView === 'questions' ? <QuestionsView c={tr} names={ss.agents}/>
+    : place === 'needs' ? <NeedsYou c={rv} mode={ds.needsMode} onOpenChat={onOpenChat} design={d} files={p6 ? pf : undefined} client={client}/>
     : place === 'trash' ? <TrashView d={d} me={client.getSnapshot().user?.id} onAsk={ids => setSheet({ kind: 'forget', ids })}/>
     : place.startsWith('group:') ? <GroupView d={d} sc={sc} groupId={place.slice(6)}/>
     : place === 'agents' ? <AgentsPlace names={ss.agents} onOpen={id => d.open(`agent:${id}`)}/>
@@ -280,13 +306,15 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
     : project && ds.projectView === 'design' ? <DesignView d={d} slug={project.slug} client={client}/>
     : project && ds.projectView === 'databases' ? <DatabasesView d={d} slug={project.slug} agents={ss.agents}/>
     : project && ds.projectView === 'files' ? <FilesView client={client} agents={ss.agents} drawers={[{ id: `project:${project.slug}`, name: project.name }]}/>
-    : <MemoryList k={k} pinned={ds.pinned} showPinned={place === 'all' || !!project} onMenu={(e, i) => menu.at(e, memoryMenu(i))} onPinnedMenu={(e, f) => menu.at(e, [{ label: 'Edit…', icon: 'pencil', run: () => setSheet({ kind: 'edit-pinned', fact: f }) }, { label: 'Unpin', icon: 'pin', run: () => void d.unpin(f) }])}
+    : <MemoryList k={k} p9b={p9b} pinned={ds.pinned} showPinned={place === 'all' || !!project} onMenu={(e, i) => menu.at(e, memoryMenu(i))} onPinnedMenu={(e, f) => menu.at(e, [{ label: 'Edit…', icon: 'pencil', run: () => setSheet({ kind: 'edit-pinned', fact: f }) }, { label: 'Unpin', icon: 'pin', run: () => void d.unpin(f) }])}
       empty={project ? <><p>Nothing remembered here yet. Girru remembers on its own while you chat. You can add something yourself too.</p><button type="button" className="primary" onClick={() => { x.startAdd(); setSheet({ kind: 'remember' }); }}>Remember</button></>
         : xs.query ? <p>No memory matches. Put words in "quotes" for exact words.</p> : <p>Nothing here yet. Girru remembers on its own while you chat.</p>}/>;
 
-  const inspector = filesOpen ? (filesProject ? <ProjectFilesInspector c={pf} d={d} project={filesProject} onMenu={filesMenu}/> : null)
+  const inspector = filesOpen ? (filesProject ? <ProjectFilesInspector c={pf} d={d} project={filesProject} onMenu={filesMenu} client={client} onFileMenu={(e, path) => menu.at(e, fileMenu(client, path, null, t => d.say(t)))}/> : null)
     : ds.extra ? null
-    : xs.open && open && listPlace ? <MemoryInspector k={k} item={open} onHistory={() => setSheet({ kind: 'history' })} onTrash={() => void trashIds([open.id])}/>
+    : place === 'needs' && needsView === 'corrected' ? <CorrectedInspector c={tr} names={ss.agents} onOpenChat={onOpenChat}/>
+    : place === 'needs' && needsView === 'questions' ? <QuestionInspector c={tr} names={ss.agents} drawers={[{ id: 'owner', name: 'About you' }, ...(ss.tree?.projects ?? []).filter(p => !p.archived && !p.mergedInto && !p.trashedAt).map(p => ({ id: `project:${p.slug}`, name: p.name }))]}/>
+    : xs.open && open && listPlace ? <MemoryInspector k={k} item={open} p9b={p9b} onHistory={() => setSheet({ kind: 'history' })} onTrash={() => void trashIds([open.id])}/>
     : person ? <PersonInspector c={pp} personKey={person} staysLocal={peopleLocal}/>
     : project && ds.details === 'project' ? <ProjectInspector k={k} p6={p6} project={project} onSettings={onOpenSettings} onGroup={() => setSheet({ kind: 'group', projects: [project.slug] })}/>
     : null;
@@ -307,7 +335,8 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
         <span className="dk-toolbar-gap"/>
         {listPlace && <span className="dk-anchor" data-popover-anchor><IconButton icon="filter" label="Filter" pressed={filters || filterCount > 0} badge={filterCount || undefined} onClick={() => setFilters(v => !v)}/>
           <Popover open={filters} onClose={() => setFilters(false)} label="Filter"><FilterPopover k={k} tree={ss.tree} agents={ss.agents}/></Popover></span>}
-        {place === 'needs' && <IconButton icon={ds.needsMode === 'one' ? 'list' : 'inbox'} label={ds.needsMode === 'one' ? 'Show as a list' : 'One at a time'} onClick={() => d.setNeedsMode(ds.needsMode === 'one' ? 'list' : 'one')}/>}
+        {place === 'needs' && p9b && !ds.extra && <NeedsViews c={tr} waiting={decide}/>}
+        {place === 'needs' && needsView === 'decide' && <IconButton icon={ds.needsMode === 'one' ? 'list' : 'inbox'} label={ds.needsMode === 'one' ? 'Show as a list' : 'One at a time'} onClick={() => d.setNeedsMode(ds.needsMode === 'one' ? 'list' : 'one')}/>}
         {ds.undoDepth > 0 && <IconButton icon="undo" label="Undo" shortcut={`${mod}Z`} disabled={ds.busy} onClick={() => void d.undo().then(() => { void x.load(); void sc.load(true); })}/>}
         <IconButton icon="more" label="More" onClick={e => menu.at(e, moreMenu)}/>
       </header>
@@ -443,9 +472,10 @@ function MemorySidebar({ k, p6, p9, peopleLocal, onPersonMenu, filesNeedYou, wai
 }
 
 // ---------------------------------------------------------------- list
-function MemoryList({ k, pinned, showPinned, onMenu, onPinnedMenu, empty }: { k: K; pinned: readonly PinnedFact[]; showPinned: boolean; onMenu: (e: React.MouseEvent, i: ExplorerItem) => void; onPinnedMenu: (e: React.MouseEvent, f: PinnedFact) => void; empty: ReactNode }) {
+function MemoryList({ k, p9b = false, pinned, showPinned, onMenu, onPinnedMenu, empty }: { k: K; p9b?: boolean; pinned: readonly PinnedFact[]; showPinned: boolean; onMenu: (e: React.MouseEvent, i: ExplorerItem) => void; onPinnedMenu: (e: React.MouseEvent, f: PinnedFact) => void; empty: ReactNode }) {
   const { x } = k;
   const s = useStore(x)!;
+  const trust = useStore(k.tr)?.trust;
   const bodyRef = useRef<HTMLDivElement>(null);
   const [anchor, setAnchor] = useState<string | null>(null);
   const groups = useMemo(() => {
@@ -498,6 +528,7 @@ function MemoryList({ k, pinned, showPinned, onMenu, onPinnedMenu, empty }: { k:
         <span className="dk-row-icon" title={kind.word}><UiIcon name={kind.icon} size={14}/></span>
         <span className="dk-row-text"><span className="dk-row-main" dir="auto"><WithSwatches text={oneLine(i.preview)}/></span>
           <span className="dk-row-sub">{i.supersededBy ? 'Not true any more · ' : ''}{kind.word} · {ago(i.createdAt)}{!i.drawerId.startsWith('project:') || placeScope(k.d.getSnapshot().place) === 'company' ? ` · ${drawerName(i.drawerId)}` : ''}</span></span>
+        {p9b && <TrustChip t={trust?.[i.id]}/>}
       </div>; })}
     </section>)}
     {count === 0 && <div className="dk-empty">{empty}</div>}
@@ -506,14 +537,17 @@ function MemoryList({ k, pinned, showPinned, onMenu, onPinnedMenu, empty }: { k:
 }
 
 // ---------------------------------------------------------------- inspector
-function MemoryInspector({ k, item, onHistory, onTrash, onChecked }: { k: K; item: ExplorerItem; onHistory: () => void; onTrash: () => void; onChecked?: (id: string) => void }) {
-  const { x, d, mv, sc } = k;
-  const s = useStore(x)!; const ss = useStore(sc)!;
+function MemoryInspector({ k, item, p9b = false, onHistory, onTrash, onChecked }: { k: K; item: ExplorerItem; p9b?: boolean; onHistory: () => void; onTrash: () => void; onChecked?: (id: string) => void }) {
+  const { x, d, mv, sc, tr } = k;
+  const s = useStore(x)!; const ss = useStore(sc)!; const ts = useStore(tr)!;
+  const t = p9b ? ts.trust[item.id] : undefined;
+  const insMenu = useMenu();
+  useEffect(() => { if (p9b) void tr.loadTrust([item.id]); }, [p9b, item.id, s.full]);
   const det = s.detail; const kind = kindOf(item); const p3 = useContext(P3); const v = det?.id === item.id ? det.validity ?? null : null;
   const by = item.sourceAgentId ? ss.agents[item.sourceAgentId] ?? 'An agent' : SOURCE_LABEL[item.source ?? ''] ?? kind.word;
   const before = { content: s.full ?? item.preview, importance: item.importance };
   return <div className="dk-insp">
-    {s.editing ? <form className="dk-edit" onSubmit={e => { e.preventDefault(); void x.saveEdit().then(ok => { if (ok) d.edited(item.id, before); }); }}>
+    {s.editing ? <form className="dk-edit" onSubmit={e => { e.preventDefault(); void x.saveEdit().then(ok => { if (ok) { d.edited(item.id, before); tr.forgetTrust(item.id); } }); }}>
       <textarea aria-label="Memory text" dir="auto" rows={6} value={s.draft} maxLength={50000} autoFocus onChange={e => x.editDraft(e.target.value)}
         onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void x.saveEdit().then(ok => { if (ok) d.edited(item.id, before); }); } if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); x.cancelEdit(); } }}/>
       <label className="dk-field-inline">Importance<input type="range" min={1} max={10} value={s.draftImportance} onChange={e => x.editImportance(Number(e.target.value))}/><span>{s.draftImportance}</span></label>
@@ -525,7 +559,12 @@ function MemoryInspector({ k, item, onHistory, onTrash, onChecked }: { k: K; ite
       <IconButton icon="pin" label="Pin for every agent" onClick={() => void d.pin(s.full ?? item.preview, item.drawerId)}/>
       <IconButton icon="move" label="Move…" shortcut={`${mod}M`} onClick={() => void mv.open({ id: item.id, text: item.preview, drawerId: item.drawerId, topicKey: item.topicKey })}/>
       <IconButton icon="trash" label="Move to Trash" shortcut="⌫" onClick={onTrash}/>
+      {p9b && <IconButton icon="more" label="More" onClick={e => insMenu.at(e, [
+        { label: 'Mark as verified', icon: 'check', shortcut: VERIFY_SHORTCUT, disabled: !t || t.level === 'verified', run: () => void tr.verify(item.id) },
+        { label: 'History', icon: 'history', run: onHistory },
+      ])}/>}
     </div>}
+    {p9b && <ContextMenu menu={insMenu.menu} onClose={insMenu.close}/>}
     {s.conflict && <div className="dk-ask" role="alert"><p><b>This memory changed while you were editing.</b> Nothing was overwritten. Saved meanwhile:</p><p className="dk-insp-text" dir="auto">{s.conflict.content}</p>
       <div className="actions"><button type="button" className="primary" disabled={s.busy} onClick={() => void x.saveEdit(true).then(ok => { if (ok) d.edited(item.id, before); })}>Save mine as the newest</button><button type="button" disabled={s.busy} onClick={() => void x.keepTheirs()}>Keep theirs</button></div>
       <p className="fine-print">Saving yours makes a new version; theirs stays in History.</p></div>}
@@ -538,6 +577,7 @@ function MemoryInspector({ k, item, onHistory, onTrash, onChecked }: { k: K; ite
       {p3 && v && v.replaces.length > 0 && <><dt>Valid</dt><dd>since {v.validFrom ? new Date(v.validFrom).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : 'it was saved'} · replaces an older fact <button type="button" className="link-button" onClick={() => { const older = v.replaces[0]; void (s.replaced ? x.openMemory(older) : x.showReplaced(true).then(() => x.openMemory(older))); }}>open</button></dd></>}
       <dt>Where</dt><dd>{drawerName(item.drawerId)}</dd>
       <dt>Kind</dt><dd><UiIcon name={kind.icon} size={13}/>{TYPE_LABEL[item.type] ?? item.type} · importance {item.importance}</dd>
+      {p9b && <HowSureRows t={t} names={ss.agents}/>}
       <dt>Used</dt><dd>{det ? (det.usage.usedIn ? `in ${det.usage.usedIn} ${det.usage.usedIn === 1 ? 'reply' : 'replies'}${det.usage.lastUsedAt ? `, last ${ago(det.usage.lastUsedAt)}` : ''}` : 'not used in a reply yet') : '…'}</dd>
       <dt>Read by</dt><dd>{det ? (det.readers.all ? 'every agent' : `${det.readers.count} of ${det.readers.total} agents`) : '…'}</dd>
       {det && det.graph.entities.length > 0 && <><dt>On the map</dt><dd className="dk-chips">{det.graph.entities.slice(0, 6).map(e => <span key={e.id} className="dk-chip">{e.name}</span>)}</dd></>}

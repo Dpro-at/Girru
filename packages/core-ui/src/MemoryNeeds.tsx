@@ -22,7 +22,9 @@ const noSnapshot = () => null;
 
 const KIND_ICON: Record<ReviewItem['kind'], UiIconName> = { conflict: 'diff', important: 'alert', agent: 'sparkle', imported: 'download', file: 'file', link: 'link' };
 
-export function NeedsYou({ c, mode, onOpenChat, design, files }: { c: MemoryReviewController; mode: 'one' | 'list'; onOpenChat?: (id: string) => void; design?: MemoryDesktopController; files?: ProjectFilesController }) {
+export function NeedsYou({ c, mode, onOpenChat, design, files, client }: { c: MemoryReviewController; mode: 'one' | 'list'; onOpenChat?: (id: string) => void; design?: MemoryDesktopController; files?: ProjectFilesController;
+  /** CODE-OPEN-01: a task-number question opens tasks.md at its line. */ client?: Parameters<typeof TaskProblems>[0]['client'] }) {
+  const say = design ? (t: string) => design.say(t) : undefined;
   const s = useSyncExternalStore(c.subscribe, c.getSnapshot, c.getSnapshot);
   // P6: a task-number question waits too, so the "Nothing needs you" line would be wrong beside it.
   const fp = useSyncExternalStore(files ? files.subscribe : noSubscribe, files ? files.getSnapshot : noSnapshot, files ? files.getSnapshot : noSnapshot);
@@ -34,8 +36,8 @@ export function NeedsYou({ c, mode, onOpenChat, design, files }: { c: MemoryRevi
   useEffect(() => { ref.current?.focus(); }, [mode]);
   if (s.phase === 'error') return <div className="dk-empty"><p>{s.notice}</p><button type="button" onClick={() => void c.load()}>Try again</button></div>;
   if (s.phase !== 'ready') return <p className="dk-empty" role="status">Reading what waits for you…</p>;
-  if (!s.items.length && taskQuestions && files) return <div className="dk-needs">{design && <DesignQuestions d={design}/>}<TaskProblems c={files}/></div>;
-  if (!s.items.length) return <>{design && <DesignQuestions d={design}/>}{files && <TaskProblems c={files}/>}<div className="dk-empty"><UiIcon name="check" size={20}/><p>Nothing needs you. Girru saves routine facts on its own and asks only when something matters or disagrees.</p>{s.result && <p className="fine-print">{s.result}</p>}</div></>;
+  if (!s.items.length && taskQuestions && files) return <div className="dk-needs">{design && <DesignQuestions d={design}/>}<TaskProblems c={files} client={client} say={say}/></div>;
+  if (!s.items.length) return <>{design && <DesignQuestions d={design}/>}{files && <TaskProblems c={files} client={client} say={say}/>}<div className="dk-empty"><UiIcon name="check" size={20}/><p>Nothing needs you. Girru saves routine facts on its own and asks only when something matters or disagrees.</p>{s.result && <p className="fine-print">{s.result}</p>}</div></>;
   function keys(e: KeyboardEvent<HTMLElement>) {
     if ((e.target as HTMLElement).closest('input, textarea, select')) return;
     const k = e.key.toLowerCase();
@@ -55,7 +57,7 @@ export function NeedsYou({ c, mode, onOpenChat, design, files }: { c: MemoryRevi
     {s.result && <p className="dk-inline-ok" role="status">{s.result}</p>}
     {s.notice && <p className="dk-inline-notice" role="alert">{s.notice}</p>}
     {design && <DesignQuestions d={design}/>}
-    {files && <TaskProblems c={files}/>}
+    {files && <TaskProblems c={files} client={client} say={say}/>}
     <Question c={c} onOpenChat={onOpenChat}/>
     <p className="fine-print dk-needs-foot">Other questions here, one at a time: an agent wants to remember something important, a new link on the map, memories found on this computer, a change to a memory file.</p>
   </div>;
