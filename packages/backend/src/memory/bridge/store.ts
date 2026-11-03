@@ -152,11 +152,13 @@ const list = (s: string): string[] => { try { const v = JSON.parse(s); return Ar
 /** Notes kept per project (older ones are dropped). */
 const MAX_BRIDGE_HANDOFFS = 20;
 
-export async function saveBridgeHandoff(ownerId: string, projectId: string, client: BridgeClient, body: HandoffBody): Promise<BridgeHandoff> {
+export async function saveBridgeHandoff(ownerId: string, projectId: string, client: BridgeClient, body: HandoffBody, agentId: string | null = null): Promise<BridgeHandoff> {
   const id = randomUUID();
   const at = now();
   await q.run('INSERT INTO memory_bridge_handoffs (id, owner_id, project_id, client, done, remaining, next_steps, open_questions, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     id, ownerId, projectId, client, JSON.stringify(body.done), JSON.stringify(body.left), JSON.stringify(body.next), JSON.stringify(body.questions), at);
+  // STORE-MAP-01 P6 (AG5): the agent the coding app worked for, next to the app.
+  if (agentId) await q.run('UPDATE memory_bridge_handoffs SET agent_id = ? WHERE id = ?', agentId, id);
   // STORE-MAP-01 P4 (D7): the one handoff table too (same id), so the switch can go off again.
   if (storeP4Enabled()) await sql().tx(() => copyAppHandoffStep(ownerId, { id, project_id: projectId, client, done: JSON.stringify(body.done), remaining: JSON.stringify(body.left), next_steps: JSON.stringify(body.next), open_questions: JSON.stringify(body.questions), created_at: at }), { immediate: true });
   await q.run(`DELETE FROM memory_bridge_handoffs WHERE owner_id = ? AND project_id = ? AND id NOT IN

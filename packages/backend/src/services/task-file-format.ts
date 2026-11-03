@@ -19,6 +19,7 @@
  * left as it is. Writing replaces one block and keeps the rest byte for byte.
  * Pure functions, no file access (services/task-file.ts reads and writes).
  */
+import { storeP6Enabled } from './store-p6.js';
 
 export const TASK_HEADER = '# Tasks\n\n<!-- girru:tasks · one file for every agent and app working in this project. Keep this format: one "## T-<number> · <title>" block per task. Finished tasks move to tasks-done.md. -->\n';
 export const DONE_HEADER = '# Finished tasks\n\n<!-- girru:tasks-done · tasks moved here from tasks.md when they were done. Nobody needs to read this file unless asked. -->\n';
@@ -30,7 +31,8 @@ export const MAX_ITEMS = 30;
 export const SHOW_LOG = 5;
 
 export type Part = 'done' | 'left' | 'next' | 'log';
-export interface WorkedOn { app: string; date: string }
+/** P6 (AG5): `agent` = the Girru agent the app worked for ("Codex (Sara) 2026-10-29"). */
+export interface WorkedOn { app: string; date: string; agent?: string }
 export interface TaskBlock {
   no: string; title: string; state: string; department: string; agent: string; priority: string;
   workedOn: WorkedOn[]; done: string[]; left: string[]; next: string[]; log: string[];
@@ -57,17 +59,21 @@ const oneLine = (s: string, max: number) => s.replace(/[\u0000-\u001F\u007F]/g, 
 export const emptyTask = (no: string, title: string): TaskBlock => ({ no, title, state: '', department: '', agent: '', priority: '', workedOn: [], done: [], left: [], next: [], log: [] });
 export const taskNumber = (no: string) => Number(no.slice(2));
 
-/** "Claude Code 2026-10-29, Codex 2026-10-29" (a date is optional). */
-export function readWorkedOn(v: string): WorkedOn[] {
+/** "Claude Code 2026-10-29, Codex 2026-10-29" (a date is optional); with P6, "Codex (Sara) 2026-10-29" names the agent too. */
+export function readWorkedOn(v: string, withAgent = storeP6Enabled()): WorkedOn[] {
   const out: WorkedOn[] = [];
   for (const part of v.split(',')) {
     const m = part.trim().match(/^(.*?)(?:\s+(\d{4}-\d{2}-\d{2}))?$/);
-    const app = oneLine(m?.[1] ?? '', 40);
-    if (app && !out.some((w) => w.app.toLowerCase() === app.toLowerCase())) out.push({ app, date: m?.[2] ?? '' });
+    let app = oneLine(m?.[1] ?? '', 40), agent = '';
+    const who = withAgent ? app.match(/^(.*?)\s*\(([^()]{1,60})\)$/) : null;
+    if (who && who[1].trim()) { app = who[1].trim(); agent = oneLine(who[2], 60); }
+    const same = (w: WorkedOn) => w.app.toLowerCase() === app.toLowerCase() && (w.agent ?? '').toLowerCase() === agent.toLowerCase();
+    if (app && !out.some(same)) out.push(agent ? { app, date: m?.[2] ?? '', agent } : { app, date: m?.[2] ?? '' });
     if (out.length >= 10) break;
   }
   return out;
 }
+export const workedOnText = (w: WorkedOn) => `${w.app}${w.agent ? ` (${w.agent})` : ''}${w.date ? ` ${w.date}` : ''}`;
 
 /** Every block in the file, with where it starts and ends (offsets into the text) and what is wrong with it. */
 export function readTasks(text: string): ReadFile {
@@ -143,7 +149,7 @@ export function stampTasks(text: string, stamps: ReadonlyMap<string, Stamp>): st
 /** One block as Girru writes it (sections always present, so every app knows where to write). */
 export function writeTask(t: TaskBlock): string {
   const items = (list: string[]) => list.map((x) => `- ${oneLine(x, MAX_ITEM)}`).filter((x) => x !== '- ').join('\n');
-  const worked = t.workedOn.map((w) => (w.date ? `${w.app} ${w.date}` : w.app)).join(', ');
+  const worked = t.workedOn.map(workedOnText).join(', ');
   return [
     `## ${t.no} · ${oneLine(t.title, MAX_TITLE)}`,
     `- State: ${oneLine(t.state, 40)}`,

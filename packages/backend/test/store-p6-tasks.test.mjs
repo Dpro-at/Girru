@@ -155,3 +155,17 @@ test('P6 on: an unknown or foreign id is refused as a review item; no card is ma
   assert.equal(db.prepare("SELECT title FROM board_cards WHERE id = ?").get(foreign).title, 'Their task', 'the other project is untouched');
   off();
 });
+
+test('AG5: "Worked on by" names the app and the agent; a Girru agent update records both', async () => {
+  on();
+  assert.deepEqual(fmt.readWorkedOn('Codex (Sara) 2026-11-03, Claude Code 2026-11-02'), [{ app: 'Codex', date: '2026-11-03', agent: 'Sara' }, { app: 'Claude Code', date: '2026-11-02' }]);
+  assert.deepEqual(fmt.readWorkedOn('Codex (Sara) 2026-11-03', false), [{ app: 'Codex (Sara)', date: '2026-11-03' }], 'switch off: read as before');
+  db.prepare("INSERT OR IGNORE INTO board_card_agents (card_id, agent_id) VALUES (?, 'a-dev')").run(cardId);
+  const t = await tf.agentTaskUpdate('t-owner', 'a-dev', cardId, { log: 'checked the timeout' });
+  assert.deepEqual(t.workedOn.find((w) => w.app === 'Girru'), { app: 'Girru', date: new Date().toISOString().slice(0, 10), agent: 'Dev' });
+  assert.match(tasks(), /- Worked on by: .*Girru \(Dev\) \d{4}-\d{2}-\d{2}/);
+  const board = db.prepare('SELECT board_id FROM board_cards WHERE id = ?').get(cardId).board_id;
+  const d = await tf.taskDetail('t-owner', board, cardId);
+  assert.equal(d.workedOn.find((w) => w.app === 'Girru').agent, 'Dev');
+  off();
+});

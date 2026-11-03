@@ -171,3 +171,27 @@ test('SEC2-5: text from a repository file only becomes a labelled proposal, neve
     assert.ok(JSON.parse(p.reasons).includes('repository-file'), `labelled: ${p.reasons}`);
   }
 });
+
+// --- AG5: who did it ------------------------------------------------------------------------
+
+test('AG5: a write through a session records the app and the agent it works for', async () => {
+  db.prepare(`INSERT INTO agents_config (id, name, provider, model, is_primary) VALUES ('p6-sara', 'Sara', 'ollama', 'qwen-test', 0)`).run();
+  await B.setClient(OWNER, 'codex', true);
+  const codexTok = await ensureToken(OWNER, 'codex');
+  on();
+  B.resetReadVolume();
+  const s = await B.launchSession(folder, 'codex', 'p6-sara');
+  const cap = await C.verifyCapability(s.env.GIRRU_SESSION_CAPABILITY);
+  assert.equal(cap.agentId, 'p6-sara');
+  assert.equal(cap.client, 'codex');
+  const p = await B.mcpCall('codex', codexTok, folder, 'memory_propose', { content: 'Alpha uses feature flags for every risky change.' }, s.env.GIRRU_SESSION_CAPABILITY);
+  const row = db.prepare('SELECT agent_id, created_by FROM memory_file_proposals WHERE id = ?').get(p.data.proposalId);
+  assert.deepEqual(row, { agent_id: 'p6-sara', created_by: 'bridge:codex' });
+  const h = await B.mcpCall('codex', codexTok, folder, 'handoff_write', { done: ['flags added'], left: [], next: ['review'], questions: [] }, s.env.GIRRU_SESSION_CAPABILITY);
+  assert.deepEqual(db.prepare('SELECT client, agent_id FROM memory_bridge_handoffs WHERE id = ?').get(h.data.handoffId), { client: 'codex', agent_id: 'p6-sara' });
+  // An unknown agent id never blocks the run; it just records no agent.
+  const t = await B.launchSession(folder, 'codex', 'no-such-agent');
+  assert.equal((await C.verifyCapability(t.env.GIRRU_SESSION_CAPABILITY)).agentId, undefined);
+  await s.end(); await t.end();
+  off();
+});

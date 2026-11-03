@@ -397,10 +397,11 @@ export async function mcpCall(c: unknown, token: unknown, cwd: unknown, tool: un
     case 'memory_propose': {
       const content = typeof a.content === 'string' ? a.content.trim() : '';
       if (!content || content.length > 4000) throw new BridgeError('content is required (at most 4000 characters)');
-      const r = await learn({ userId: ownerId, actor: `bridge:${cl}`, review: true,
+      // AG5: with a P6 session the proposal records the app (actor) AND the agent it works for.
+      const r = await learn({ userId: ownerId, actor: `bridge:${cl}`, review: true, ...(p6 && cap!.agentId ? { agentId: cap!.agentId } : {}),
         candidates: [{ content, type: 'fact', importance: 5, drawer: projectDrawer(project), origin: 'agent' }] });
       const proposal = r.proposed[0];
-      await audit(ownerId, 'mcp-propose', { client: cl, projectId: project.id, note: proposal ? `proposal ${proposal.id}` : (r.skipped[0]?.reason ?? 'nothing') });
+      await audit(ownerId, 'mcp-propose', { client: cl, projectId: project.id, note: (proposal ? `proposal ${proposal.id}` : (r.skipped[0]?.reason ?? 'nothing')) + (p6 && cap!.agentId ? ` agent:${cap!.agentId}` : '') });
       if (!proposal) return { text: `Not proposed: ${r.skipped[0]?.reason ?? 'nothing to add'}.`, data: { proposalId: null, reason: r.skipped[0]?.reason ?? null } };
       return { text: 'Proposed. The owner reviews it in Girru; it becomes shared memory only after approval.', data: { proposalId: proposal.id } };
     }
@@ -410,8 +411,8 @@ export async function mcpCall(c: unknown, token: unknown, cwd: unknown, tool: un
         if (err instanceof HandoffInputError) throw new BridgeError(err.message);
         throw err;
       }
-      const h = await saveBridgeHandoff(ownerId, project.id, cl, body);
-      await audit(ownerId, 'mcp-handoff', { client: cl, projectId: project.id });
+      const h = await saveBridgeHandoff(ownerId, project.id, cl, body, p6 ? cap!.agentId ?? null : null);
+      await audit(ownerId, 'mcp-handoff', { client: cl, projectId: project.id, ...(p6 ? { note: `session:${cap!.id}${cap!.agentId ? ` agent:${cap!.agentId}` : ''}` } : {}) });
       return { text: 'Handoff saved. The next agent in this project, of any brand, starts from it.', data: { handoffId: h.id } };
     }
   }
@@ -465,14 +466,16 @@ const SUBSCRIPTION_CLIENT: Record<string, BridgeClient> = { claude: 'claude-code
  * from Girru's own project list (real paths); a folder that is no project gets
  * nothing. The capability is revoked when the run ends. Null while P6 is off.
  */
-export async function launchSession(folder: string, kind: string): Promise<{ env: Record<string, string>; end: () => Promise<void> } | null> {
+export async function launchSession(folder: string, kind: string, agentId: string | null = null): Promise<{ env: Record<string, string>; end: () => Promise<void> } | null> {
   if (!storeP6Enabled()) return null;
   const ownerId = await bridgeOwner();
   if (!ownerId) return null;
   const project = await projectForFolder(ownerId, folder);
   if (!project) return null;
   const f = await folderSettings(ownerId, project.id);
-  const { token, capability } = await launchCapability(ownerId, project.id, SUBSCRIPTION_CLIENT[kind] ?? null, !!f.companyFacts);
-  await audit(ownerId, 'session-start', { client: SUBSCRIPTION_CLIENT[kind] ?? null, projectId: project.id, note: `session:${capability.id}` });
+  // AG5: the agent the run works for goes with the session (an unknown agent id is dropped, the run still gets its session).
+  const agent = agentId ? await q.one<{ id: string }>('SELECT id FROM agents_config WHERE id = ?', agentId) : undefined;
+  const { token, capability } = await launchCapability(ownerId, project.id, SUBSCRIPTION_CLIENT[kind] ?? null, !!f.companyFacts, agent?.id ?? null);
+  await audit(ownerId, 'session-start', { client: SUBSCRIPTION_CLIENT[kind] ?? null, projectId: project.id, note: `session:${capability.id}${agent ? ` agent:${agent.id}` : ''}` });
   return { env: { GIRRU_SESSION_CAPABILITY: token }, end: async () => { await revokeCapability(ownerId, capability.id).catch(() => false); } };
 }

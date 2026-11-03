@@ -436,7 +436,7 @@ export interface TaskMark { no: string; projectId: string; projectName: string; 
 /** The file marks of a board's cards (number, project, apps that worked on it). */
 export async function taskMarks(boardId: string): Promise<Map<string, TaskMark>> {
   const rows = await q.all<Link & { name: string }>('SELECT l.*, p.name FROM task_file_cards l JOIN board_cards c ON c.id = l.card_id JOIN chat_projects p ON p.id = l.project_id WHERE c.board_id = ?', boardId).catch(() => []);
-  return new Map(rows.map((r) => [r.card_id, { no: r.task_no, projectId: r.project_id, projectName: r.name, problem: r.problem, apps: (parse(r.block)?.workedOn ?? []).map((w) => w.app), finished: !!r.finished }]));
+  return new Map(rows.map((r) => [r.card_id, { no: r.task_no, projectId: r.project_id, projectName: r.name, problem: r.problem, apps: [...new Set((parse(r.block)?.workedOn ?? []).map((w) => w.app))], finished: !!r.finished }]));
 }
 
 export interface TaskDetail extends TaskMark {
@@ -450,9 +450,9 @@ export async function taskDetail(ownerId: string, boardId: string, cardId: strin
   const task = parse(r.block) ?? emptyTask(r.task_no, '');
   const lines = task.log.map(readLog).filter((x): x is NonNullable<typeof x> => !!x).sort((a, b) => b.at.localeCompare(a.at));
   return {
-    no: r.task_no, projectId: r.project_id, projectName: r.name, problem: r.problem, apps: task.workedOn.map((w) => w.app), finished: !!r.finished,
+    no: r.task_no, projectId: r.project_id, projectName: r.name, problem: r.problem, apps: [...new Set(task.workedOn.map((w) => w.app))], finished: !!r.finished,
     file: r.finished ? DONE_FILE : TASKS_FILE, task, text: writeTask(task),
-    workedOn: task.workedOn.map((w) => { const last = lines.find((l) => l.app.toLowerCase() === w.app.toLowerCase()); return { app: w.app, agent: task.agent, date: w.date, at: last?.at ?? null, what: last?.what ?? null }; }),
+    workedOn: task.workedOn.map((w) => { const last = lines.find((l) => l.app.toLowerCase() === w.app.toLowerCase()); return { app: w.app, agent: w.agent ?? task.agent, date: w.date, at: last?.at ?? null, what: last?.what ?? null }; }),
     log: lines.slice(0, SHOW_LOG),
   };
 }
@@ -496,7 +496,10 @@ export async function agentTaskUpdate(ownerId: string, agentId: string, cardId: 
       ...t, done: done ?? t.done, left: left ?? t.left, next: next ?? t.next,
       // An agent that writes its own "time · name ·" in front gets it once, from Girru.
       log: [logLine(now, GIRRU_APP, `${agent?.name ? `${agent.name}: ` : ''}${(input.log as string).replace(/^\s*\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2})?\s*·\s*(?:[^·]{1,60}·\s*)?/, '')}`), ...t.log],
-      workedOn: [...t.workedOn.filter((w) => w.app.toLowerCase() !== GIRRU_APP.toLowerCase()), { app: GIRRU_APP, date: today }],
+      // P6 (AG5): Girru's line names the agent too ("Girru (Rafid)"); without P6 one "Girru" line as before.
+      workedOn: storeP6Enabled() && agent?.name
+        ? [...t.workedOn.filter((w) => !(w.app.toLowerCase() === GIRRU_APP.toLowerCase() && (w.agent ?? '').toLowerCase() === agent.name.toLowerCase())), { app: GIRRU_APP, date: today, agent: agent.name.slice(0, 60) }]
+        : [...t.workedOn.filter((w) => w.app.toLowerCase() !== GIRRU_APP.toLowerCase()), { app: GIRRU_APP, date: today }],
     };
     await writeFile(folder, TASKS_FILE, await stamped(link.project_id, withTask(text, task)));
     await q.run('UPDATE task_file_cards SET block = ?, problem = NULL, updated_at = CURRENT_TIMESTAMP WHERE card_id = ?', JSON.stringify(task), cardId);
@@ -517,7 +520,7 @@ export async function projectTasks(ownerId: string, projectId?: string): Promise
   for (const id of ids) await syncTasks(id).catch(() => undefined);
   const rows = ids.length ? await q.all<Link & { name: string; board_id: string }>(
     `SELECT l.*, p.name, c.board_id FROM task_file_cards l JOIN chat_projects p ON p.id = l.project_id JOIN board_cards c ON c.id = l.card_id WHERE p.user_id = ? AND c.archived = 0 AND l.project_id IN (${ids.map(() => '?').join(',')}) ORDER BY l.finished, l.project_id, l.task_no`, ownerId, ...ids) : [];
-  const tasks = rows.map((r) => { const t = parse(r.block) ?? emptyTask(r.task_no, ''); return { no: r.task_no, title: t.title, state: t.state, department: t.department, agent: t.agent, apps: t.workedOn.map((w) => w.app), projectId: r.project_id, projectName: r.name, boardId: r.board_id, cardId: r.card_id, problem: r.problem, finished: !!r.finished }; });
+  const tasks = rows.map((r) => { const t = parse(r.block) ?? emptyTask(r.task_no, ''); return { no: r.task_no, title: t.title, state: t.state, department: t.department, agent: t.agent, apps: [...new Set(t.workedOn.map((w) => w.app))], projectId: r.project_id, projectName: r.name, boardId: r.board_id, cardId: r.card_id, problem: r.problem, finished: !!r.finished }; });
   const problems = [];
   for (const id of ids) for (const p of await fileProblems(id)) problems.push({ projectId: id, ...p });
   return { tasks, problems };

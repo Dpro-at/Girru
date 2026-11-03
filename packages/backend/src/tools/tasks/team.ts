@@ -138,7 +138,7 @@ export const teamDelegateTool: Tool = {
       const thinking = currentChatRun()?.thinking;
       const reply = async (prompt: string): Promise<string> => {
         if (signal.aborted) throw Error('cancelled');
-        if (subscriptionModel(target.model)) return runSubscription(target.model, folder, prompt, signal, { appToolsOnly: true, thinking });
+        if (subscriptionModel(target.model)) return runSubscription(target.model, folder, prompt, signal, { appToolsOnly: true, thinking, agentId: target.id });
         if (target.provider === 'ollama' || target.provider === 'local') {
           const { ollamaToolChat } = await import('../../llm/ollama-tool-chat.js');
           const result = await ollamaToolChat({ model: target.model, messages: [{ role: 'user', content: prompt }], tools: [], temperature: target.temperature, maxTokens: Math.min(target.max_tokens || 2048, 8192), timeoutMs: CHILD_CALL_MS, signal });

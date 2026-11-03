@@ -126,7 +126,7 @@ export function subscriptionAnswer(kind:SubscriptionKind,stdout:string,streamed=
  const rows=stdout.split('\n').filter(Boolean).map(line=>JSON.parse(line));const answers=rows.filter(r=>r.type==='item.completed'&&r.item?.type==='agent_message'&&typeof r.item.text==='string');
  if(!answers.length||rows.some(r=>r.type==='error'||r.type==='turn.failed'))throw Error('cli_failed');return answers.map(r=>r.item.text).join('\n\n');
 }
-export async function runSubscription(model:string,folder:string,prompt:string,signal:AbortSignal,options:{appToolsOnly?:boolean;readOnly?:boolean;editsOnly?:boolean;addDirs?:readonly string[];images?:readonly string[];thinking?:unknown}={}):Promise<string>{
+export async function runSubscription(model:string,folder:string,prompt:string,signal:AbortSignal,options:{appToolsOnly?:boolean;readOnly?:boolean;editsOnly?:boolean;addDirs?:readonly string[];images?:readonly string[];thinking?:unknown;agentId?:string|null}={}):Promise<string>{
  if(!subscriptionEnabled()||!subscriptionModel(model))throw Error('cli_disabled');
  const cwd=await fs.realpath(safeChildCwd(folder));if(!(await fs.stat(cwd)).isDirectory()||cwd===os.homedir()||cwd===await fs.realpath(os.homedir()).catch(()=>os.homedir())||cwd===path.parse(cwd).root)throw Error('project_required');
  const kind=model.startsWith('subscription:claude')?'claude':model.startsWith('subscription:gemini')?'gemini':'codex',bin=await subscriptionBinary(kind);
@@ -141,7 +141,7 @@ export async function runSubscription(model:string,folder:string,prompt:string,s
  const args=subscriptionArgs(kind,nativeId,subscriptionVariant(model),options.appToolsOnly,options.readOnly,options.editsOnly,options.addDirs,kind==='claude'?imageBlocks.map(b=>b.file):options.images,options.thinking);
  const env=minimalChildEnv({NO_COLOR:'1',TERM:'dumb'});env.PATH=[path.dirname(bin),env.PATH].filter(Boolean).join(path.delimiter);
  // STORE-MAP-01 P6: Girru is the trusted launcher; the coding app's dpro-memory gets this run's session capability (never a folder path).
- const session=storeP6Enabled()?await import('../memory/bridge/service.js').then(m=>m.launchSession(cwd,kind)).catch(()=>null):null;if(session)Object.assign(env,session.env);
+ const session=storeP6Enabled()?await import('../memory/bridge/service.js').then(m=>m.launchSession(cwd,kind,options.agentId??null)).catch(()=>null):null;if(session)Object.assign(env,session.env);
  const geminiConfig=kind==='gemini'?await geminiReplyConfig():undefined;
  if(geminiConfig){env.AGY_CLI_DISABLE_AUTO_UPDATE='1';env.AGY_CLI_NONINTERACTIVE_HEADLESS='1';}
  let launched;try{launched=await launchTrackedSubscription(subscriptionProcesses(),bin,args,{cwd:geminiConfig?.dir??cwd,env,...(streamed?{maxInputBytes:CLAUDE_IMAGE_STDIN_BYTES}:{})});}catch(error){await geminiConfig?.cleanup();await session?.end();throw error;}
