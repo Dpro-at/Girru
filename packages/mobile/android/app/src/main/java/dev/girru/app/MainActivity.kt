@@ -35,6 +35,7 @@ import dev.girru.app.pairing.PairingPayloadParser
 import dev.girru.app.pairing.PairingRepository
 import dev.girru.app.push.Notifier
 import dev.girru.app.push.PushSetup
+import dev.girru.app.screens.PhoneTabs
 import dev.girru.app.web.NativeBridge
 import dev.girru.app.web.WebHost
 import dev.girru.app.web.WebOrigin
@@ -51,6 +52,7 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
     private val app get() = application as GirruApplication
     private lateinit var auth: Authenticator
     private var webHost: WebHost? = null
+    private var tabs: PhoneTabs? = null
     private var promptedThisForeground = false
 
     // A read code before it is sent; after that the waiting record (encrypted store) holds the pairing.
@@ -415,11 +417,14 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
 
     // ---------- web host ----------
 
+    /** After pairing: the four places; Chat is the computer's chat page in the web host. */
     private fun ensureWeb() {
         if (webHost != null) return
         val origin = WebOrigin.COMPUTER
         val view = WebView(this)
-        webContainer.addView(view, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        tabs = PhoneTabs(this, view, app.session, ::decideFromList).also {
+            webContainer.addView(it, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        }
         webHost = WebHost(view, origin, app.content, ::openExternal, ::onRendererGone)
             .also { it.start(NativeBridge(origin, this)) }
     }
@@ -427,6 +432,18 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
     private fun destroyWeb() {
         webHost?.destroy()
         webHost = null
+        tabs?.let { webContainer.removeView(it) }
+        tabs = null
+    }
+
+    /** Approve or Deny on the Approvals screen: the confirm screen walks the full view and unlock steps. */
+    private fun decideFromList(approvalId: String, approve: Boolean) {
+        startActivity(
+            Intent(this, ConfirmActionActivity::class.java)
+                .putExtra(ConfirmActionActivity.EXTRA_APPROVAL_ID, approvalId)
+                .putExtra(ConfirmActionActivity.EXTRA_APPROVE, approve)
+                .putExtra(ConfirmActionActivity.EXTRA_FROM_LIST, true),
+        )
     }
 
     private fun onRendererGone() {
@@ -445,6 +462,13 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
     // ---------- bridge handler ----------
 
     override fun isLocked(): Boolean = app.lock.isLocked(app.now())
+
+    override fun apiCall(method: String, path: String, body: String, done: (Int, String, String) -> Unit) {
+        app.content.apiCall(method, path, body.ifEmpty { null }) { a ->
+            // The bridge answers on the main thread.
+            runOnUiThread { done(a.status, a.mimeType, String(a.body, Charsets.UTF_8)) }
+        }
+    }
 
     override fun relockSeconds(): Int = (app.lock.relockAfterMs / 1000).toInt()
 

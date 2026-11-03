@@ -5,17 +5,21 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import dev.girru.app.crypto.KeystorePairingCrypto
+import dev.girru.app.crypto.SignedCommand
+import dev.girru.app.link.CommandReply
 import dev.girru.app.link.CommandSender
-import dev.girru.app.link.ContentSource
-import dev.girru.app.link.NotConnectedYet
+import dev.girru.app.link.PhoneFrame
 import dev.girru.app.link.PairingClient
 import dev.girru.app.link.RelayPairingClient
+import dev.girru.app.link.RelaySessionClient
 import dev.girru.app.lock.LockPolicy
 import dev.girru.app.pairing.NoQrScanner
+import dev.girru.app.pairing.PairedComputer
 import dev.girru.app.pairing.PairingRepository
 import dev.girru.app.pairing.QrScanner
 import dev.girru.app.push.Notifier
 import dev.girru.app.storage.SecureStore
+import dev.girru.app.web.SessionContentSource
 
 /**
  * Process-wide state. The lock lives in memory only, so a new process always
@@ -40,9 +44,29 @@ class GirruApplication : Application() {
         )
     }
 
-    // Replaced by the session connector in MOB-LINK-01.
-    val commands: CommandSender = NotConnectedYet
-    val content: ContentSource = NotConnectedYet
+    /** The end-to-end session with the paired computer over the relay. */
+    val session: RelaySessionClient by lazy {
+        RelaySessionClient(
+            computer = { pairing.load()?.takeIf { it.state == PairedComputer.State.PAIRED } },
+            identity = { crypto.identityPublicKey()?.let { it to crypto.signer } },
+            counter = { crypto.nextCounter() },
+        )
+    }
+    private val mainThread by lazy { Handler(Looper.getMainLooper()) }
+
+    /** For screens: the same session, with every answer given on the main thread. */
+    val commands: CommandSender by lazy {
+        object : CommandSender {
+            override fun request(command: SignedCommand, done: (CommandReply) -> Unit, frames: ((PhoneFrame) -> Unit)?) =
+                session.request(command, { r -> mainThread.post { done(r) } }, frames?.let { f -> { fr: PhoneFrame -> mainThread.post { f(fr) } } })
+
+            override fun isApprovalPending(approvalId: String, done: (Boolean?) -> Unit) =
+                session.isApprovalPending(approvalId) { v -> mainThread.post { done(v) } }
+        }
+    }
+
+    /** The computer's chat page, through the session. */
+    val content: SessionContentSource by lazy { SessionContentSource(session) }
     val qrScanner: QrScanner = NoQrScanner
 
     override fun onCreate() {

@@ -51,7 +51,9 @@ class ConfirmActionActivity : AppCompatActivity() {
         val kind = id?.let { app.pairing.verifiedApproval(it) }
         val approve = intent.getBooleanExtra(EXTRA_APPROVE, false)
         notificationId = intent.getIntExtra(EXTRA_NOTIFICATION_ID, 0)
-        if (id == null || kind == null) {
+        // From the Approvals screen the id came from the computer over the session, not from a notice.
+        val fromList = intent.getBooleanExtra(EXTRA_FROM_LIST, false)
+        if (id == null || (kind == null && !fromList)) {
             finish()
             return
         }
@@ -201,5 +203,7 @@ class ConfirmActionActivity : AppCompatActivity() {
         const val EXTRA_APPROVAL_ID = "dev.girru.app.extra.APPROVAL_ID"
         const val EXTRA_APPROVE = "dev.girru.app.extra.APPROVE"
         const val EXTRA_NOTIFICATION_ID = "dev.girru.app.extra.NOTIFICATION_ID"
+        /** Set only by the app's own Approvals screen (the activity is not exported). */
+        const val EXTRA_FROM_LIST = "dev.girru.app.extra.FROM_LIST"
     }
 }

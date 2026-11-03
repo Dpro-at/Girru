@@ -80,6 +80,17 @@ object PhoneCommands {
 
     fun teamList(): String = body("team.list")
 
+    /** One file of the computer's chat page (PROTOCOL.md "The computer's pages on the phone"). */
+    fun uiGet(path: String, part: Int, ref: String): String =
+        Json.compact(sortedMapOf<String, Any?>("type" to "ui.get", "path" to path, "ref" to ref).apply { if (part > 0) put("part", part.toLong()) })
+
+    /** One request of the chat page; [jsonBody] is its parsed JSON, null for none. */
+    fun apiCall(method: String, path: String, jsonBody: Any?, ref: String): String =
+        Json.compact(sortedMapOf<String, Any?>("type" to "api.call", "method" to method, "path" to path, "ref" to ref).apply { if (jsonBody != null) put("body", jsonBody) })
+
+    fun apiStream(path: String, ref: String): String =
+        Json.compact(sortedMapOf<String, Any?>("type" to "api.stream", "path" to path, "ref" to ref))
+
     /** A body with its `type`; fields with a null value are left out; keys sorted. */
     private fun body(type: String, vararg fields: Pair<String, Any?>): String {
         val present = fields.mapNotNull { (k, v) -> v?.let { k to it } } + ("type" to type)
@@ -106,6 +117,12 @@ sealed class PhoneFrame {
 
     /** `{type:"approval.pending", id, pending}`: the answer to the unsigned query. */
     class PendingAnswer(val id: String, val pending: Boolean) : PhoneFrame()
+
+    /** `{type:"stream", ref, data}`: one event of an `api.stream`, as the chat page reads it. */
+    class Stream(val ref: String?, val data: Map<String, Any?>) : PhoneFrame()
+
+    /** `{type:"stream.end", ref, status}`: `complete`, or `dropped` (the page re-attaches with `after`). */
+    class StreamEnd(val ref: String?, val complete: Boolean) : PhoneFrame()
 
     companion object {
         private val CODE = Regex("^[a-z][a-z0-9_]{0,63}$")
@@ -138,6 +155,12 @@ sealed class PhoneFrame {
                     val status = (m["status"] as? String)?.takeIf { CODE.matches(it) } ?: return null
                     RunEnd(ref, runId, status, (m["code"] as? String)?.takeIf { CODE.matches(it) })
                 }
+                "stream" -> {
+                    @Suppress("UNCHECKED_CAST")
+                    val data = m["data"] as? Map<String, Any?> ?: return null
+                    Stream(ref, data)
+                }
+                "stream.end" -> StreamEnd(ref, (m["status"] as? String ?: return null) == "complete")
                 "approval.pending" -> {
                     val id = (m["id"] as? String)?.takeIf { PhoneCommands.APPROVAL_ID.matches(it) } ?: return null
                     val pending = m["pending"] as? Boolean ?: return null

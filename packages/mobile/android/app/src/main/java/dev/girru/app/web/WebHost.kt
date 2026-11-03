@@ -18,6 +18,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.webkit.ServiceWorkerClientCompat
 import androidx.webkit.ServiceWorkerControllerCompat
+import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import dev.girru.app.BuildConfig
 import dev.girru.app.link.ContentSource
@@ -70,6 +71,10 @@ class WebHost(
         webView.webChromeClient = Chrome()
         // Installed before the first load so the page never runs without the origin rule in place.
         this.bridge = bridge.takeIf { it.install(webView) }
+        // The page's requests with a body go to the session through the bridge; only on our origin.
+        if (this.bridge != null && WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            WebViewCompat.addDocumentStartJavaScript(webView, FETCH_SHIM, setOf(origin.rule()))
+        }
         webView.loadUrl(origin.startUrl)
     }
 
@@ -115,13 +120,15 @@ class WebHost(
         val scheme = request.url.scheme?.lowercase()
         if (origin.matches(request.url.toString())) {
             // Never falls through to the network: no answer from the session means an error page.
-            val answer = (if (request.method == "GET") content.load(request.url.encodedPath ?: "/") else null)
+            // Requests with a body come through the bridge (interception carries no body).
+            val path = (request.url.encodedPath ?: "/") + (request.url.encodedQuery?.let { "?$it" } ?: "")
+            val answer = (if (request.method == "GET") content.load(path) else null)
                 ?: return blocked(503, "Unavailable")
             // WebResourceResponse refuses redirects and out-of-range codes.
             if (answer.status !in 100..599 || answer.status in 300..399) return blocked(502, "Bad answer")
             return WebResourceResponse(
                 answer.mimeType, "utf-8", answer.status, answer.reason.ifBlank { "OK" }, NO_STORE,
-                ByteArrayInputStream(answer.body),
+                answer.stream ?: ByteArrayInputStream(answer.body),
             )
         }
         if (scheme == "http" || scheme == "https" || scheme == "ws" || scheme == "wss") return blocked(403, "Blocked")
@@ -148,5 +155,35 @@ class WebHost(
 
     private companion object {
         val NO_STORE = mapOf("Cache-Control" to "no-store")
+
+        /**
+         * Same-origin `/api/` requests other than GET become a bridge call
+         * (`api.call`); the answer comes back as a normal Response. Also sets
+         * `window.girruShell` so the page knows it runs in the app.
+         */
+        val FETCH_SHIM = """
+            (() => {
+              window.girruShell = Object.freeze({ platform: 'android', bridge: 1 });
+              const bridge = window.girruNative, plain = window.fetch.bind(window), waiting = new Map();
+              if (!bridge) return;
+              bridge.addEventListener('message', e => {
+                let m; try { m = JSON.parse(e.data); } catch { return; }
+                const w = m && waiting.get(m.id); if (!w) return; waiting.delete(m.id);
+                if (!m.ok) return w.reject(new TypeError('Failed to fetch'));
+                const r = m.result || {};
+                w.resolve(new Response(r.status === 204 ? null : r.body, { status: r.status, headers: { 'Content-Type': r.type || 'application/json' } }));
+              });
+              window.fetch = (input, init = {}) => {
+                const req = new Request(input, init), url = new URL(req.url);
+                if (url.origin !== location.origin || !url.pathname.startsWith('/api/') || req.method === 'GET') return plain(input, init);
+                return req.text().then(body => new Promise((resolve, reject) => {
+                  const id = 'f' + crypto.getRandomValues(new Uint32Array(2)).join('');
+                  waiting.set(id, { resolve, reject });
+                  init.signal?.addEventListener('abort', () => { if (waiting.delete(id)) reject(new DOMException('Aborted', 'AbortError')); });
+                  bridge.postMessage(JSON.stringify({ id, method: 'api.call', args: { method: req.method, path: url.pathname + url.search, body } }));
+                }));
+              };
+            })();
+        """.trimIndent()
     }
 }

@@ -52,12 +52,14 @@ interface CommandSender {
  * page and its bridge are never loaded over plain http. Called on a WebView
  * background thread; may block. Returns null for "not available".
  *
- * Interception carries no request bodies, so API calls of the page go through
- * the bridge to the session (MOB-LINK-01), not through this.
+ * Interception carries no request bodies, so the page's API calls other than
+ * GET go through the bridge (`api.call`, NativeBridge) to the session.
  */
 interface ContentSource {
-    class Content(val mimeType: String, val status: Int, val reason: String, val body: ByteArray)
+    /** [stream], when set, is read instead of [body] (a run's live events). */
+    class Content(val mimeType: String, val status: Int, val reason: String, val body: ByteArray, val stream: java.io.InputStream? = null)
 
+    /** [path] includes the query. */
     fun load(path: String): Content?
 }
 
