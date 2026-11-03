@@ -35,7 +35,7 @@ const selfOnlyOffered = (tool: Tool, context: ToolExecutionContext) => HANDOFF_T
   // STORE-MAP-01 P2 (AG1): an agent reads its own guides wherever it runs (registered only while GIRRU_STORE_P2 is on).
   : tool.name === 'guide_read' ? !!context.agentId && context.agentId !== 'small-local-agent'
   // STORE-MAP-01 P8 (D27): working notes inside any run (registered only while P8 is on, for models not on this computer).
-  : tool.name === 'run_note' ? !context.toolPolicy && context.agentId !== 'small-local-agent' && (context.chatPlan === true || !!context.taskId || !!context.delegation)
+  : tool.name === 'run_note' ? !context.toolPolicy && context.handoffTools !== false && context.agentId !== 'small-local-agent' && (context.chatPlan === true || (!!context.taskId && !context.delegatedFrom?.length) || !!context.delegation)
   : context.chatPlan === true;
 
 /** Words in fetched or read content that try to steer the agent (prompt injection), with a short excerpt. */
