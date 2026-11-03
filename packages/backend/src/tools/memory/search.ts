@@ -193,6 +193,15 @@ Returns:
         });
       }
 
+      // STORE-MAP-01 P10 live (XP3): a model often adds a guessed filter (type "fact" for a memory saved as
+      // "conversation"); when the filters hide every match, the words are searched again without them, and the
+      // answer says so.
+      let widened = false;
+      if (filtered.length === 0 && storeP9bEnabled() && (params.type || params.layer || params.minImportance || params.tags?.length)) {
+        filtered = (await repositories.memory.search(actor, { query: params.query, limit: params.limit || 5 })).map((r) => r.memory);
+        widened = filtered.length > 0;
+      }
+
       if (filtered.length === 0) {
         return {
           content: [
@@ -220,7 +229,8 @@ Returns:
       const confidence = (m: (typeof filtered)[number]) => (trust ? confidenceOf(m, trust) : null);
 
       // Format response text
-      let responseText = `Found ${filtered.length} relevant ${filtered.length === 1 ? 'memory' : 'memories'} for: "${params.query}"\n\n`;
+      let responseText = widened ? 'No memory matched the filters; these match the words without them.\n' : '';
+      responseText += `Found ${filtered.length} relevant ${filtered.length === 1 ? 'memory' : 'memories'} for: "${params.query}"\n\n`;
 
       filtered.forEach((memory, index) => {
         const savedDate = new Date(memory.createdAt).toLocaleDateString();
@@ -272,7 +282,7 @@ Returns:
       });
 
       // Include helpful tips if filters were applied
-      if (params.type || params.layer || params.minImportance || params.tags || params.visibility || params.teamCriticalOnly || params.sourceAgentId) {
+      if (!widened && (params.type || params.layer || params.minImportance || params.tags || params.visibility || params.teamCriticalOnly || params.sourceAgentId)) {
         responseText += '---\n';
         responseText += 'Filters applied:\n';
         if (params.type) responseText += `- Type: ${params.type}\n`;
@@ -296,6 +306,7 @@ Returns:
           success: true,
           count: filtered.length,
           query: params.query,
+          ...(widened ? { widened: true } : {}),
           memories: filtered.map((m: any) => ({
             id: m.id,
             content: m.content,
