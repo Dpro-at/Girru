@@ -22,7 +22,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { q } from '../../repositories/sql-steps.js';
 import { nowText } from '../../db/pg/dialect.js';
 import { findProject, type Project } from '../../repositories/chat-conversations.js';
-import { briefMarkdown, projectBrief } from '../bridge/brief.js';
+import { assertProjectFilesOnly, briefMarkdown, projectBrief } from '../bridge/brief.js';
 import { redactImportText } from '../import/redact.js';
 import { latestSeq, scopeInfo, enabledScopes } from './events.js';
 import { safeWriteFile, SafeFileError } from '../../services/safe-file.js';
@@ -203,7 +203,14 @@ async function runOnce(scope: string, opts: RunOptions): Promise<RunResult> {
     if (!opts.force && !outside && s.status === 'up_to_date' && max <= s.watermark && current !== null) return result(s, false);
 
     const nextVersion = s.projectionVersion + 1;
-    const body = briefMarkdown(await projectBrief(ownerId, project));
+    const brief = await projectBrief(ownerId, project);
+    // S4 (P7): owner, people and personal drawers never reach a project file.
+    if (storeP7Enabled()) {
+      try { assertProjectFilesOnly(brief); } catch (err) {
+        return result(await setStatus(s, 'conflict', `${(err as Error).message}; nothing was written`, false), false);
+      }
+    }
+    const body = briefMarkdown(brief);
     // The brief is redacted already (brief.ts); a text that still looks like a secret is never written.
     if (Object.values(redactImportText(body).counts).some((n) => Number(n) > 0)) {
       return result(await setStatus(s, 'conflict', 'The brief still contains something that looks like a secret; nothing was written', false), false);

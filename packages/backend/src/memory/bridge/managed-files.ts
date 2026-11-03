@@ -23,7 +23,7 @@ import { readRegularFile } from './regular-file.js';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { redactImportText } from '../import/redact.js';
-import { briefMarkdown, type ProjectBrief } from './brief.js';
+import { assertProjectFilesOnly, briefMarkdown, ProjectFilesScopeError, type ProjectBrief } from './brief.js';
 import { SERVER_NAME } from './clients.js';
 import { safeWriteFile, SafeFileError } from '../../services/safe-file.js';
 import { storeP7Enabled } from '../../services/store-p7.js';
@@ -231,6 +231,13 @@ function plan(brief: ProjectBrief | null, folderRaw: string | null, gitExclude: 
   const canonical = extras ? unifiedBlock(brief, extras) : briefMarkdown(brief!);
   // The memory part is secret-checked (brief.ts redacted it already); the owner's rules are the owner's own words.
   if (brief) assertNoSecret(briefMarkdown(brief));
+  // S4 (P7): owner, people and personal drawers never reach a project file.
+  if (brief && storeP7Enabled()) {
+    try { assertProjectFilesOnly(brief); } catch (err) {
+      if (err instanceof ProjectFilesScopeError) throw new ManagedFileError(`${err.message}; nothing was written`, 422, err.code);
+      throw err;
+    }
+  }
   const files: Planned[] = MANAGED_FILES.map((name) => planFile(folder, name, name === 'AGENTS.md' ? canonical : adapterBlock(name),
     extras ? GIRRU_MARKS : MEMORY_MARKS, extras ? P2_LEGACY : PRE_P2_LEGACY));
   if (gitExclude) {

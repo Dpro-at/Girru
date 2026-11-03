@@ -138,10 +138,11 @@ export async function layoutApply(ownerId: string, projectId: unknown, input: { 
     await patchFolder(ownerId, p.project.id, { filesEnabled: true, confirmed: true });
     await q.run("INSERT INTO agent_rule_files(project_id,mode,tasks,written_at,updated_at) VALUES(?,?,1,?,CURRENT_TIMESTAMP) ON CONFLICT(project_id) DO UPDATE SET tasks=1, written_at=excluded.written_at, updated_at=CURRENT_TIMESTAMP",
       p.project.id, ruleRow?.mode === 'project' ? 'project' : 'private', new Date().toISOString());
+    // Cursor's pointer first, so the rules writer below keeps it out of Git with Girru's other files.
+    if (p.files.some((f) => f.by === 'cursor' && f.action !== 'unchanged')) safeWriteFile(p.folder, CURSOR_RULE, CURSOR_RULE_TEXT);
     // Rules file, the one Girru section, the task rule and the Git exclude list, as the rules writer keeps them.
     await rf.writeFiles(p.project.id);
     await ensureTaskFile(p.project.id);
-    if (p.files.some((f) => f.by === 'cursor' && f.action !== 'unchanged')) safeWriteFile(p.folder, CURSOR_RULE, CURSOR_RULE_TEXT);
   } catch (err) {
     // Put the switches back as they were; files already written stay valid and are rewritten on the next sync.
     await patchFolder(ownerId, p.project.id, { filesEnabled: was.filesEnabled });

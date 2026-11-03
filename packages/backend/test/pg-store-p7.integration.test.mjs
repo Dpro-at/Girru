@@ -43,6 +43,9 @@ if (URL_) {
     taskFile: await import('../src/services/task-file.ts'),
     trust: await import('../src/services/task-file-trust.ts'),
     boards: await import('../src/services/task-board.ts'),
+    brief: await import('../src/memory/bridge/brief.ts'),
+    learning: await import('../src/memory/learning.ts'),
+    keys: await import('../src/memory/project-keys.ts'),
   };
 }
 
@@ -72,6 +75,7 @@ test.after(async () => {
   for (const [t, c] of [['memory_bridge_audit', 'owner_id'], ['memory_bridge_folders', 'owner_id'], ['chat_projects', 'user_id']]) {
     await m.pool.pgRun(`DELETE FROM ${t} WHERE ${c} = ?`, S.owner).catch(() => {});
   }
+  await m.pool.pgRun('DELETE FROM memories WHERE user_id = ?', S.owner).catch(() => {});
   await m.pool.pgRun('DELETE FROM users WHERE id = ?', S.owner).catch(() => {});
   await m.closeDatabase?.();
   rmSync(dir, { recursive: true, force: true });
@@ -108,4 +112,19 @@ test('SEC2-3 on PostgreSQL: a task from the file waits for the owner\'s approval
   assert.equal(await m.trust.approvalNeeded(link.card_id), null);
   assert.equal((await m.trust.revokeTaskFile(S.owner, S.project.id)).approved, false);
   m.taskFile.setRouteCall(null);
+});
+
+test('brief on PostgreSQL: work guide, topic index from the project drawer only (A3, M6, S4)', { skip }, async () => {
+  const drawer = { kind: 'project', key: m.keys.projectKeyOf(S.project) };
+  await m.learning.learn({ userId: S.owner, actor: `owner:${S.owner}`, candidates: [
+    { content: `Alpha ${tag} deploys with scripts/ship.sh`, type: 'fact', drawer, origin: 'owner', topicKey: 'deploy-flow' },
+    { content: `The owner of ${tag} likes tea`, type: 'preference', drawer: { kind: 'owner' }, origin: 'owner', topicKey: 'drinks' },
+  ] });
+  const b = await m.brief.projectBrief(S.owner, S.project);
+  assert.deepEqual(b.topics.filter((t) => t.kind === 'topic').map((t) => t.key), ['deploy-flow']);
+  for (const x of b.memories) assert.equal(x.drawer, `project:${drawer.key}`);
+  assert.doesNotThrow(() => m.brief.assertProjectFilesOnly(b));
+  const md = m.brief.briefMarkdown(b);
+  assert.match(md, /### Working with tasks and handoffs/);
+  assert.ok(md.includes('- deploy-flow') && !md.includes('drinks') && !md.includes('likes tea'));
 });

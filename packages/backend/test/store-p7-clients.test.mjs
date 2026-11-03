@@ -8,6 +8,7 @@
 // Run: node --import tsx --test test/store-p7-clients.test.mjs
 // Throwaway HOME/DB, random test-only secrets, no network.
 import test from 'node:test';
+import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -132,7 +133,8 @@ test('a linked tool config is refused by the safe file writer', async () => {
 
 test('layout: .cursor/rules/girru.mdc while Cursor is on', async () => {
   const folder = join(dir, 'proj');
-  mkdirSync(join(folder, '.git', 'info'), { recursive: true });
+  mkdirSync(folder, { recursive: true });
+  execFileSync('git', ['init', '-q', folder]);
   const project = await createProject(OWNER, { name: 'Proj', folder });
   await on(async () => {
     await svc.setClient(OWNER, 'cursor', false);
@@ -143,6 +145,8 @@ test('layout: .cursor/rules/girru.mdc while Cursor is on', async () => {
     await layoutApply(OWNER, project.id, { previewHash: p.previewHash, confirm: true });
     assert.equal(readFileSync(join(folder, CURSOR_RULE), 'utf8'), CURSOR_RULE_TEXT);
     assert.match(CURSOR_RULE_TEXT, /alwaysApply: true/);
+    // S4: Girru's pointer is kept out of Git with Girru's other files.
+    assert.match(readFileSync(join(folder, '.git', 'info', 'exclude'), 'utf8'), /^\/\.cursor\/rules\/girru\.mdc$/m);
     assert.equal((await layoutPreview(OWNER, project.id)).files.find((f) => f.relative === CURSOR_RULE).action, 'unchanged');
   }, { GIRRU_STORE_P2: '1' });
   assert.ok(existsSync(join(folder, 'AGENTS.md')));

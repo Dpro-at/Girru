@@ -205,6 +205,12 @@ async function writeNow(projectId: string, mode?: FileMode): Promise<FilesState>
     const r = await writeUnifiedSection(projectId);
     for (const f of r.files) if (f.relative !== path.join('.git', 'info', 'exclude') && (f.action !== 'conflict')) done.push(f.relative);
   }
+  // P7 (S4): Cursor's pointer rule is Girru's file too, kept out of Git with the others.
+  if (storeP7Enabled()) {
+    const { CURSOR_RULE } = await import('../memory/bridge/layout.js');
+    const st = await fs.lstat(path.join(folder, CURSOR_RULE)).catch(() => null);
+    if (st?.isFile()) done.push(CURSOR_RULE);
+  }
   await setExclude(folder, done, m);
   await q.run("INSERT INTO agent_rule_files(project_id,mode,written_at,updated_at) VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(project_id) DO UPDATE SET mode=excluded.mode, written_at=excluded.written_at, updated_at=CURRENT_TIMESTAMP", projectId, m, new Date().toISOString());
   return filesState(projectId, m);
