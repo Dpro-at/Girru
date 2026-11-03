@@ -4,8 +4,12 @@
  * by a real restore and the forget ledger is re-applied after a restore;
  * forget reaches history, files and backups; "Stays on this computer" is
  * enforced end to end; personal data is flagged on import and channel
- * messages; failures are counted for the local health view. Off (the
- * default), nothing changes.
+ * messages; failures are counted for the local health view; memory quality
+ * (M1–M4, M7): one fact per extracted memory, near-duplicates caught, no
+ * self-pinned extraction, recall ranked by the agent's specialty and team, a
+ * kept-new contradiction supersedes the old fact, repeated lessons become
+ * rule or skill proposals and projects get a weekly versioned summary. Off
+ * (the default), nothing changes.
  *
  *   GIRRU_STORE_P9=1
  */

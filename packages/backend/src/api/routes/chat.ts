@@ -667,7 +667,7 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
       loadedDrawers = drawers;
       pack = await contextPack({ userId, agentId: agentConfig?.id ?? null, drawers, persona: resolvedSystemPrompt, scopeFacts: pinnedFacts, handoff: includeAgentMemory && !channelTurn ? input.handoff ?? null : null });
       resolvedSystemPrompt = pack.text;
-      recall = await messageRecall({ userId, drawers, query: messageText(lastUser?.content), pack });
+      recall = await messageRecall({ userId, drawers, query: messageText(lastUser?.content), pack, agentId: agentConfig?.id ?? null });
     } catch (err) {
       safeConsole.log('[Chat] Memory context unavailable', safeErrorFields(err));
       // STORE-MAP-01 P9 (FAIL4, AG8): the reply goes on without memory, says so when it matters, never invents it.
