@@ -60,6 +60,8 @@ dependencies {
     implementation(libs.androidx.biometric)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
+    // WebSocket to the relay (MOB-LINK-01); Android has no WebSocket client of its own.
+    implementation(libs.okhttp)
 
     testImplementation(libs.junit)
 }

@@ -4,15 +4,17 @@
 // wss:// only), runs the backend's phone link on a throwaway database, opens a pairing
 // QR code, then runs the phone command with the QR text as its last argument. The phone
 // command prints `id=<device id>` and `code=<6 digits>` once it holds the challenge, and
-// `paired` once it checked the welcome. The harness compares the code with the one the
-// computer shows, chooses Allow, and checks the computer lists the phone.
+// `paired` once it checked the welcome (on stdout, or as lines in the file GIRRU_PAIR_OUT).
+// The harness compares the code with the one the computer shows, chooses Allow, and checks
+// the computer lists the phone.
 //
 // Run from packages/backend (exit code 0 = paired end to end):
 //   node --import tsx ../mobile/tools/pair-harness.mjs <phone command> [args…]
-// The phone command gets `GIRRU_TEST_CA=<certificate path>` to trust the test relay.
+// The phone command gets `GIRRU_TEST_CA=<certificate path>` to trust the test relay and
+// `GIRRU_PAIR_OUT=<file>` for commands whose stdout is not passed through (Gradle tests).
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync } from 'node:fs';
 import { createServer as createTlsServer } from 'node:tls';
 import { connect as netConnect } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -113,14 +115,26 @@ async function main() {
     await until(() => relay.stats().pairings >= 1, 'pairing id open on the relay');
     log(`relay ${relayUrl}, QR open`);
 
-    phone = spawn(phoneCommand[0], [...phoneCommand.slice(1), p.qr], { stdio: ['ignore', 'pipe', 'inherit'] });
+    const outFile = join(dir, 'phone-out.txt');
+    phone = spawn(phoneCommand[0], [...phoneCommand.slice(1), p.qr], { stdio: ['ignore', 'pipe', 'inherit'], env: { ...process.env, GIRRU_PAIR_OUT: outFile } });
     const said = { id: null, code: null, paired: false, exit: null };
-    createInterface({ input: phone.stdout }).on('line', (line) => {
+    const heard = (line) => {
       process.stderr.write(`phone: ${line}\n`);
       if (line.startsWith('id=')) said.id = line.slice(3);
       else if (line.startsWith('code=')) said.code = line.slice(5);
       else if (line === 'paired') said.paired = true;
-    });
+    };
+    createInterface({ input: phone.stdout }).on('line', heard);
+    let fileLines = 0;
+    const readOut = () => {
+      if (!existsSync(outFile)) return;
+      const lines = readFileSync(outFile, 'utf8').split('\n').filter(Boolean);
+      for (const line of lines.slice(fileLines)) heard(line);
+      fileLines = lines.length;
+    };
+    const poll = setInterval(readOut, 50);
+    // Read the last lines before the exit is seen.
+    phone.on('exit', () => { clearInterval(poll); readOut(); });
     phone.on('exit', (c) => { said.exit = c ?? 1; });
     phone.on('error', (e) => { log(`phone command: ${e.message}`); said.exit = 1; });
 

@@ -1,12 +1,15 @@
 package dev.girru.app
 
 import android.app.Application
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import dev.girru.app.crypto.KeystorePairingCrypto
 import dev.girru.app.link.CommandSender
 import dev.girru.app.link.ContentSource
 import dev.girru.app.link.NotConnectedYet
 import dev.girru.app.link.PairingClient
+import dev.girru.app.link.RelayPairingClient
 import dev.girru.app.lock.LockPolicy
 import dev.girru.app.pairing.NoQrScanner
 import dev.girru.app.pairing.PairingRepository
@@ -28,8 +31,16 @@ class GirruApplication : Application() {
     lateinit var lock: LockPolicy
         private set
 
-    // Replaced by the real connector in MOB-LINK-01.
-    val pairingClient: PairingClient = NotConnectedYet
+    /** Pairing over the relay (MOB-LINK-01); the hello is signed by the identity key. */
+    val pairingClient: PairingClient by lazy {
+        val main = Handler(Looper.getMainLooper())
+        RelayPairingClient(
+            identity = { crypto.identityPublicKey()?.let { it to crypto.signer } },
+            post = { main.post(it) },
+        )
+    }
+
+    // Replaced by the session connector in MOB-LINK-01.
     val commands: CommandSender = NotConnectedYet
     val content: ContentSource = NotConnectedYet
     val qrScanner: QrScanner = NoQrScanner
