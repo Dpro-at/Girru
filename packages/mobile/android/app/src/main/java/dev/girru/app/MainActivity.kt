@@ -26,6 +26,7 @@ import androidx.core.view.isVisible
 import dev.girru.app.lock.Authenticator
 import dev.girru.app.lock.LockPolicy
 import dev.girru.app.lock.SecureWindow
+import dev.girru.app.link.PairingClient
 import dev.girru.app.pairing.PairedComputer
 import dev.girru.app.pairing.PairingMessages
 import dev.girru.app.pairing.PairingLifetime
@@ -52,10 +53,10 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
     private var webHost: WebHost? = null
     private var promptedThisForeground = false
 
-    // Pairing in progress; the secret lives only in memory until the request is sealed.
+    // A read code before it is sent; after that the waiting record (encrypted store) holds the pairing.
     private var payload: PairingPayload? = null
-    private var checkCode: String? = null
     private var requestReached = false
+    private val codeExpiry = Runnable { render() }
 
     private var pendingPermission: ((Boolean) -> Unit)? = null
     private val notificationPermission =
@@ -64,6 +65,7 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
             pendingPermission = null
         }
 
+    private lateinit var root: View
     private lateinit var webContainer: FrameLayout
     private lateinit var lockScreen: View
     private lateinit var lockComputer: TextView
@@ -79,11 +81,14 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
     private lateinit var codeError: TextView
     private lateinit var confirmGroup: View
     private lateinit var confirmComputer: TextView
-    private lateinit var confirmCheckCode: TextView
     private lateinit var lifetimeGroup: RadioGroup
     private lateinit var neverWarning: TextView
     private lateinit var waitingScreen: View
     private lateinit var waitingCheckCode: TextView
+    private lateinit var waitingCheckCodeHint: TextView
+    private lateinit var waitingForCode: TextView
+    private lateinit var waitingBody: TextView
+    private lateinit var finishPairingButton: Button
     private lateinit var waitingNotReached: TextView
     private lateinit var debugContinue: Button
 
@@ -91,7 +96,7 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
         super.onCreate(savedInstanceState)
         SecureWindow.apply(this)
         setContentView(R.layout.activity_main)
-        val root = findViewById<View>(R.id.root)
+        root = findViewById(R.id.root)
         // Edge to edge is the default on Android 15; keep content clear of bars and keyboard.
         ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime())
@@ -135,6 +140,7 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
     }
 
     override fun onDestroy() {
+        root.removeCallbacks(codeExpiry)
         destroyWeb()
         super.onDestroy()
     }
@@ -220,14 +226,30 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
         scannerNote.isVisible = !scanner
         // Without a scanner, typing the code is the way in.
         if (!scanner) codeGroup.isVisible = true
+        // A shown code renews on the computer every 2 minutes: an old one asks for the new code.
+        if (payload?.let { it.expiresAtSec <= System.currentTimeMillis() / 1000 } == true) {
+            payload = null
+            codeError.text = getString(R.string.pair_error_expired)
+            codeError.isVisible = true
+        }
         confirmGroup.isVisible = payload != null
         neverWarning.isVisible = lifetimeGroup.checkedRadioButtonId == R.id.life_never
     }
 
     private fun renderWaiting() {
-        waitingCheckCode.isVisible = checkCode != null
-        waitingCheckCode.text = checkCode?.let { getString(R.string.check_code, formatCode(it)) }
-        waitingNotReached.isVisible = !requestReached
+        val now = System.currentTimeMillis()
+        val computer = (app.pairing.status(now) as? PairingRepository.Status.Waiting)?.computer
+        val phoneKey = app.crypto.identityPublicKey()
+        // No code before a verified challenge from the computer (PROTOCOL.md "Check challenge").
+        val code = if (computer != null && phoneKey != null) computer.checkCode(phoneKey) else null
+        val heldWelcome = computer?.pending?.welcome != null
+        waitingCheckCode.isVisible = code != null
+        waitingCheckCode.text = code?.let { getString(R.string.check_code, formatCode(it)) }
+        waitingCheckCodeHint.isVisible = code != null && !heldWelcome
+        waitingForCode.isVisible = code == null
+        waitingBody.text = getString(if (heldWelcome) R.string.waiting_finish_body else R.string.waiting_body)
+        finishPairingButton.isVisible = heldWelcome
+        waitingNotReached.isVisible = !requestReached && code == null
         debugContinue.isVisible = BuildConfig.DEBUG
     }
 
@@ -236,7 +258,9 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
     private fun readCode() {
         codeError.isVisible = false
         payload = null
-        checkCode = null
+        root.removeCallbacks(codeExpiry)
+        // The welcome's key is unwrapped with ECDH by the identity key, which needs Keystore ECDH (Android 12+).
+        if (!app.crypto.supportsKeyAgreement()) return showCodeError(R.string.pair_error_android_version)
         val result = PairingPayloadParser.parse(codeInput.text.toString(), System.currentTimeMillis() / 1000)
         when (result) {
             is PairingPayloadParser.Result.Error -> {
@@ -252,9 +276,9 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
                 }
                 app.pairing.clearNotice()
                 payload = result.payload
-                checkCode = PairingMessages.checkCode(result.payload.secret, result.payload.computerKey, phoneKey)
                 confirmComputer.text = getString(R.string.pair_confirm_computer, result.payload.computerName)
-                confirmCheckCode.text = getString(R.string.check_code, formatCode(checkCode!!))
+                val left = result.payload.expiresAtSec * 1000 - System.currentTimeMillis()
+                root.postDelayed(codeExpiry, left.coerceAtLeast(0) + 500)
             }
         }
         render()
@@ -307,14 +331,41 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
         }
         app.pairing.save(waiting)
         requestReached = false
-        // The one-time secret is not kept: only the derived pairing key, until the welcome arrives.
         payload = null
+        root.removeCallbacks(codeExpiry)
         codeInput.text.clear()
-        app.pairingClient.sendRequest(p, request) { reached ->
-            requestReached = reached
+        app.pairingClient.sendRequest(p, request, object : PairingClient.Events {
+            override fun delivered(reached: Boolean) {
+                requestReached = reached
+                render()
+            }
+
+            override fun challenge(envelope: String) {
+                app.pairing.onChallenge(envelope, phoneKey, System.currentTimeMillis())
+                render()
+            }
+
+            override fun welcome(envelope: String) = onWelcome(envelope)
+        })
+        render()
+    }
+
+    private fun onWelcome(envelope: String) {
+        val phoneId = app.crypto.deviceId() ?: return
+        val result = app.pairing.onWelcome(envelope, phoneId, app.crypto.agreer, System.currentTimeMillis())
+        if (result == PairingRepository.WelcomeResult.ACCEPTED) PushSetup.enable(this, app.store)
+        render()
+    }
+
+    /** The welcome checked out but the identity key needs a fresh unlock to unwrap its key. */
+    private fun finishPairing() {
+        val phoneId = app.crypto.deviceId() ?: return
+        ask(LockPolicy.Prompt.CONFIRM, getString(R.string.waiting_finish), null) { ok ->
+            if (!ok) return@ask
+            val result = app.pairing.finishWelcome(phoneId, app.crypto.agreer, System.currentTimeMillis())
+            if (result == PairingRepository.WelcomeResult.ACCEPTED) PushSetup.enable(this, app.store)
             render()
         }
-        render()
     }
 
     private fun codeExpired() {
@@ -350,7 +401,6 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
         app.crypto.deleteIdentity()
         PushSetup.disable(this, app.store)
         payload = null
-        checkCode = null
         render()
     }
 
@@ -449,11 +499,14 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
         codeError = findViewById(R.id.code_error)
         confirmGroup = findViewById(R.id.confirm_group)
         confirmComputer = findViewById(R.id.confirm_computer)
-        confirmCheckCode = findViewById(R.id.confirm_check_code)
         lifetimeGroup = findViewById(R.id.lifetime_group)
         neverWarning = findViewById(R.id.never_warning)
         waitingScreen = findViewById(R.id.waiting_screen)
         waitingCheckCode = findViewById(R.id.waiting_check_code)
+        waitingCheckCodeHint = findViewById(R.id.waiting_check_code_hint)
+        waitingForCode = findViewById(R.id.waiting_for_code)
+        waitingBody = findViewById(R.id.waiting_body)
+        finishPairingButton = findViewById(R.id.finish_pairing_button)
         waitingNotReached = findViewById(R.id.waiting_not_reached)
         debugContinue = findViewById(R.id.debug_continue)
 
@@ -475,6 +528,7 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
         lifetimeGroup.setOnCheckedChangeListener { _, checkedId -> neverWarning.isVisible = checkedId == R.id.life_never }
         findViewById<Button>(R.id.send_pairing_button).setOnClickListener { sendPairing() }
         findViewById<Button>(R.id.cancel_pairing_button).setOnClickListener { removePairing() }
+        finishPairingButton.setOnClickListener { finishPairing() }
         debugContinue.setOnClickListener { debugApprove() }
     }
 

@@ -1,15 +1,19 @@
 package dev.girru.app.pairing
 
 import dev.girru.app.crypto.G1
+import dev.girru.app.crypto.G1Exception
+import dev.girru.app.crypto.KeyAgreer
 import dev.girru.app.crypto.utf8
 
 /**
  * The one computer this phone is paired with (or is pairing with). Kept only
  * in the encrypted store.
  *
- * While WAITING_FOR_APPROVAL it also holds the one-time pairing id, the
- * pairing key and the QR expiry, needed to open the computer's welcome; they
- * are dropped as soon as the welcome is accepted or the QR code expires.
+ * While WAITING_FOR_APPROVAL it also holds the one-time pairing id and
+ * secret (the check code needs the secret itself, PROTOCOL.md "Check code"),
+ * the computer's check challenge once it arrived, and a verified welcome
+ * that still waits for an unlock to unwrap its key. All of it is dropped as
+ * soon as the welcome is accepted, the pairing is cancelled or it runs out.
  */
 class PairedComputer(
     val computerId: String,
@@ -27,13 +31,77 @@ class PairedComputer(
 ) {
     enum class State { WAITING_FOR_APPROVAL, PAIRED }
 
-    class Pending(val pairingId: String, val pairingKey: ByteArray, val expiresAtSec: Long)
+    class Pending(
+        val pairingId: String,
+        val secret: ByteArray,
+        /** The QR code's `exp`; the request was sent before it. */
+        val expiresAtSec: Long,
+        /** When the request was sent; the wait for the computer counts from here. */
+        val sentAtMs: Long,
+        /** The 32 bytes from a verified `g1.pchal`; null until it arrived (no check code before). */
+        val challenge: ByteArray? = null,
+        /** A verified `g1.pwel` whose key could not be unwrapped yet because the identity key needs an unlock. */
+        val welcome: String? = null,
+    ) {
+        val pairingKey: ByteArray get() = PairingMessages.pairingKey(secret, pairingId)
+    }
 
     fun isExpired(nowMs: Long): Boolean = state == State.PAIRED && PairingExpiry.isExpired(lifetime, lastUsedMs, nowMs)
 
-    /** A request whose QR code has run out can no longer be welcomed. */
+    /**
+     * The computer keeps a pairing screen open for at most 10 minutes and
+     * finishes a pairing whose request it took even after the code on screen
+     * renewed (every 2 minutes). So the wait counts from the send, not from
+     * the QR code's `exp`.
+     */
     fun isRequestStale(nowMs: Long): Boolean =
-        state == State.WAITING_FOR_APPROVAL && (pending == null || nowMs / 1000 > pending.expiresAtSec + REQUEST_GRACE_SEC)
+        state == State.WAITING_FOR_APPROVAL && (pending == null || nowMs > pending.sentAtMs + MAX_WAIT_MS + REQUEST_GRACE_MS)
+
+    /** The 6-digit check code, only once a verified challenge is held. */
+    fun checkCode(phoneSpki: ByteArray): String? {
+        val p = pending ?: return null
+        val challenge = p.challenge ?: return null
+        return PairingMessages.checkCode(p.secret, computerKey, phoneSpki, challenge)
+    }
+
+    /**
+     * Takes the computer's `g1.pchal`. The same challenge again changes
+     * nothing; a different one after the first is refused, so the code on
+     * screen never changes under the owner's eyes.
+     */
+    fun withChallenge(envelope: String, phoneSpki: ByteArray): PairedComputer {
+        val p = pending
+        if (state != State.WAITING_FOR_APPROVAL || p == null) throw G1Exception("not_pairing")
+        val challenge = PairingMessages.openChallenge(
+            envelope, computerKey, computerId, G1.deviceIdOf(phoneSpki), p.pairingId, p.pairingKey,
+        )
+        p.challenge?.let { held ->
+            if (held.contentEquals(challenge)) return this
+            throw G1Exception("second_challenge")
+        }
+        return copy(pending = Pending(p.pairingId, p.secret, p.expiresAtSec, p.sentAtMs, challenge, p.welcome))
+    }
+
+    /**
+     * Takes the computer's `g1.pwel` (only after a challenge: the owner saw the
+     * code on this phone first). Throws G1Exception when it is refused. A
+     * GeneralSecurityException means it checked out but the identity key needs
+     * an unlock to unwrap the notification key: keep it with [holdingWelcome]
+     * and call this again after the unlock.
+     */
+    fun withWelcome(envelope: String, phoneId: String, agreer: KeyAgreer, nowMs: Long): PairedComputer {
+        val p = pending
+        if (state != State.WAITING_FOR_APPROVAL || p == null) throw G1Exception("not_pairing")
+        if (p.challenge == null) throw G1Exception("no_challenge")
+        val welcome = PairingMessages.openWelcome(envelope, computerKey, computerId, phoneId, p.pairingId, p.pairingKey, agreer)
+        return welcomed(welcome, nowMs)
+    }
+
+    /** Keeps a welcome that checked out but still needs the unlock (see [withWelcome]). */
+    fun holdingWelcome(envelope: String): PairedComputer {
+        val p = pending ?: throw G1Exception("not_pairing")
+        return copy(pending = Pending(p.pairingId, p.secret, p.expiresAtSec, p.sentAtMs, p.challenge, envelope))
+    }
 
     fun used(nowMs: Long): PairedComputer = copy(lastUsedMs = PairingExpiry.renew(lastUsedMs, nowMs))
 
@@ -67,14 +135,20 @@ class PairedComputer(
         notificationKey?.let { put("nk", G1.b64url(it)) }
         pending?.let {
             put("pid", it.pairingId)
-            put("pk", G1.b64url(it.pairingKey))
+            put("ps", G1.b64url(it.secret))
             put("exp", it.expiresAtSec.toString())
+            put("sent", it.sentAtMs.toString())
+            it.challenge?.let { c -> put("ch", G1.b64url(c)) }
+            it.welcome?.let { w -> put("wel", w) }
         }
     }
 
     companion object {
-        /** The relay keeps a pairing id open for 10 minutes; a little more covers clock difference. */
-        const val REQUEST_GRACE_SEC = 60L
+        /** A pairing screen on the computer lasts at most 10 minutes in all. */
+        const val MAX_WAIT_MS = 10 * 60 * 1000L
+
+        /** A little more covers clock difference and a slow link. */
+        const val REQUEST_GRACE_MS = 60 * 1000L
 
         fun fromFields(f: Map<String, String>): PairedComputer? {
             val id = f["c"]?.takeIf { G1.isDeviceId(it) } ?: return null
@@ -85,8 +159,18 @@ class PairedComputer(
                 null
             } else {
                 if (!PairingPayloadParser.PAIRING_ID.matches(pid)) return null
-                val pk = f["pk"]?.let { G1.fromB64url(it) }?.takeIf { it.size == 32 } ?: return null
-                Pending(pid, pk, f["exp"]?.toLongOrNull() ?: return null)
+                val secret = f["ps"]?.let { G1.fromB64url(it) }?.takeIf { it.size == 32 } ?: return null
+                val challenge = f["ch"]?.let {
+                    G1.fromB64url(it)?.takeIf { c -> c.size == PairingMessages.CHALLENGE_BYTES } ?: return null
+                }
+                Pending(
+                    pid,
+                    secret,
+                    f["exp"]?.toLongOrNull() ?: return null,
+                    f["sent"]?.toLongOrNull() ?: return null,
+                    challenge,
+                    f["wel"]?.takeIf { it.startsWith("${G1.SUITE}.pwel.") },
+                )
             }
             return PairedComputer(
                 computerId = id,
@@ -103,7 +187,7 @@ class PairedComputer(
             )
         }
 
-        /** [wish] is what the owner picked on the phone; the welcome brings the final value. */
+        /** Made when the request is sent. [wish] is what the owner picked on the phone; the welcome brings the final value. */
         fun waiting(payload: PairingPayload, wish: PairingLifetime, nowMs: Long) = PairedComputer(
             computerId = payload.computerId,
             computerKey = payload.computerKey,
@@ -115,11 +199,7 @@ class PairedComputer(
             lastUsedMs = nowMs,
             state = State.WAITING_FOR_APPROVAL,
             notificationKey = null,
-            pending = Pending(
-                payload.pairingId,
-                PairingMessages.pairingKey(payload.secret, payload.pairingId),
-                payload.expiresAtSec,
-            ),
+            pending = Pending(payload.pairingId, payload.secret.copyOf(), payload.expiresAtSec, nowMs),
         )
     }
 }

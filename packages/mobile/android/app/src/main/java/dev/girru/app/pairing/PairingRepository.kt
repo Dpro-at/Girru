@@ -1,9 +1,12 @@
 package dev.girru.app.pairing
 
 import dev.girru.app.crypto.G1Exception
+import dev.girru.app.crypto.KeyAgreer
 import dev.girru.app.push.PushNotice
 import dev.girru.app.push.VerifiedApprovals
 import dev.girru.app.storage.SecureStore
+import java.security.GeneralSecurityException
+import java.security.ProviderException
 
 /**
  * The phone's pairing, read and written only through the encrypted store.
@@ -50,23 +53,57 @@ class PairingRepository(private val store: SecureStore) {
     }
 
     /**
-     * The computer's signed welcome (`g1.pwel`), delivered by the connector.
-     * Returns false and changes nothing when it does not check out.
+     * The computer's check challenge (`g1.pchal`), delivered by the connector.
+     * Only after it does the phone show a check code. Returns false and
+     * changes nothing when it does not check out.
      */
-    fun onWelcome(envelope: String, phoneId: String, nowMs: Long): Boolean {
-        val computer = load() ?: return false
-        val pending = computer.pending ?: return false
-        if (computer.state != PairedComputer.State.WAITING_FOR_APPROVAL || computer.isRequestStale(nowMs)) return false
-        val welcome = try {
-            PairingMessages.openWelcome(
-                envelope, computer.computerKey, computer.computerId, phoneId, pending.pairingId, pending.pairingKey,
-            )
+    fun onChallenge(envelope: String, phoneSpki: ByteArray, nowMs: Long): Boolean {
+        val computer = waiting(nowMs) ?: return false
+        val next = try {
+            computer.withChallenge(envelope, phoneSpki)
         } catch (e: G1Exception) {
             return false
         }
-        save(computer.welcomed(welcome, nowMs))
+        if (next !== computer) save(next)
         return true
     }
+
+    enum class WelcomeResult { ACCEPTED, NEEDS_UNLOCK, REFUSED }
+
+    /**
+     * The computer's signed welcome (`g1.pwel`), delivered by the connector.
+     * REFUSED changes nothing. NEEDS_UNLOCK: it checked out, but the identity
+     * key needs a fresh unlock to unwrap the notification key; it is kept, and
+     * [finishWelcome] completes it after the unlock.
+     */
+    fun onWelcome(envelope: String, phoneId: String, agreer: KeyAgreer, nowMs: Long): WelcomeResult {
+        val computer = waiting(nowMs) ?: return WelcomeResult.REFUSED
+        return try {
+            save(computer.withWelcome(envelope, phoneId, agreer, nowMs))
+            WelcomeResult.ACCEPTED
+        } catch (e: G1Exception) {
+            WelcomeResult.REFUSED
+        } catch (e: GeneralSecurityException) {
+            save(computer.holdingWelcome(envelope))
+            WelcomeResult.NEEDS_UNLOCK
+        } catch (e: ProviderException) {
+            // Keystore reports some key failures this way; the welcome is kept for another try.
+            save(computer.holdingWelcome(envelope))
+            WelcomeResult.NEEDS_UNLOCK
+        }
+    }
+
+    /** True while a verified welcome waits for the unlock. */
+    fun hasHeldWelcome(nowMs: Long): Boolean = waiting(nowMs)?.pending?.welcome != null
+
+    /** Call right after a successful unlock prompt. */
+    fun finishWelcome(phoneId: String, agreer: KeyAgreer, nowMs: Long): WelcomeResult {
+        val envelope = waiting(nowMs)?.pending?.welcome ?: return WelcomeResult.REFUSED
+        return onWelcome(envelope, phoneId, agreer, nowMs)
+    }
+
+    private fun waiting(nowMs: Long): PairedComputer? =
+        load()?.takeIf { it.state == PairedComputer.State.WAITING_FOR_APPROVAL && !it.isRequestStale(nowMs) }
 
     /** Call after each authenticated use (accepted command or finished handshake); renews the lifetime. */
     fun markUsed(nowMs: Long) {

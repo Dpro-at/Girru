@@ -27,13 +27,18 @@ Protocol: [`packages/relay/PROTOCOL.md`](../../relay/PROTOCOL.md), suite **g1**
   a fingerprint this means unlocking again afterwards); a prompt that vanishes
   without an answer locks too.
 - **Scan once, stay paired.** You pair once with the code from Settings ›
-  Phone on your computer. You choose how long the pairing lasts without use:
+  Phone on your computer. The code there renews every 2 minutes; a code that
+  ran out before you sent it asks you to scan the new one. After sending, the
+  phone shows the 6-digit check code only once the computer's signed check
+  challenge arrived, and waits up to 10 minutes for Approve. You choose how long the pairing lasts without use:
   30, 60, 90 or 120 days, or never expires (with a warning). Every use renews
   it. Your computer has the final say and can remove the phone at any time;
   the app then shows the pairing screen with a short reason.
 - **Keys stay on the phone.** The identity key is an Android Keystore key
   (StrongBox when the phone has it), never exportable, usable only for 30 s
-  after you unlock. The pairing record, counters and notification key are kept
+  after you unlock. It signs and, once per pairing, does ECDH to unwrap the
+  notification key from the welcome; Keystore ECDH needs Android 12 (API 31),
+  so on Android 10 and 11 the pairing screen says pairing needs Android 12. The pairing record, counters and notification key are kept
   in a file encrypted with a second Keystore key, in no-backup storage; app
   backup and device transfer are off.
 - **Your computer's screens, safely.** The web view only shows pages from one
@@ -82,9 +87,30 @@ ps, exp, relay, lan, name`; `pid` is `p_` + 43 base64url; `relay` exactly
 `wss://<host>/v1`, kept as written for comparison with the relay's
 challenge), the pairing key (HKDF salt = the full `pid` text), `g1.preq`
 (including the phone's `sig` over `"girru/v1/preq-sig\n" + pid + "\n" +
-deviceId + "\n" + nonce`), the check code, `g1.pwel`, the session handshake
-(`hs1`/`hs2`) and `g1.msg` envelopes, signed commands, `g1.ntf` notices with
-the 64-wide replay window, and the pairing lifetime rules.
+deviceId + "\n" + nonce`), the check challenge `g1.pchal` and the check code
+that mixes it in (no code before a verified challenge), `g1.pwel` with the
+wrapped 60-byte notification key (ECDH of the identity keys, HKDF with the
+pairing key as salt, AES-256-GCM), the session handshake (`hs1`/`hs2`: a
+fresh hello for every attempt, each pending handshake used once) and
+`g1.msg` envelopes, signed commands, `g1.ntf` notices with the 64-wide replay
+window, and the pairing lifetime rules.
+
+Inside a session (`link/PhoneProtocol.kt`, `link/ApprovalReview.kt`): the
+v1 command bodies (keys sorted), the computer's `reply`, `run`, `run.end` and
+`approval.pending` frames, and what each refusal means for the owner. Approve
+never signs blind: the phone fetches the approval from `approval.pending`,
+fetches `approval.detail` when the preview was cut short, shows the
+parameters, asks for a fresh unlock and signs `approval.decide` with the
+`paramsHash` of what it showed. `full_view_required`, `full_view_unavailable`,
+`too_large` and `verification_required` send the owner to the computer. A run
+that ends `dropped` / `slow_link` (or `unknown`, or with a frame too large to
+send) is read again with `chat.messages`; `internal_error` asks to try again.
+
+The JVM tests check all of this against byte-exact vectors made by the
+computer's reference code (`app/src/test/.../crypto/ReferenceVectors.kt`):
+pairing key, `g1.pchal`, the check code, the wrapped notification key,
+`g1.pwel`, a full handshake with envelopes both ways, a notice and a signed
+`approval.decide`.
 
 Still open, to align with the computer side:
 
@@ -93,11 +119,12 @@ Still open, to align with the computer side:
 - **"Never expires" as a wish.** `g1.preq` can only ask for 30/60/90/120 days;
   when the owner picks "Never" on the phone, no wish is sent and the owner
   picks it on the computer at Approve. The welcome's lifetime is final.
-- **Approval command body.** `{"type":"approval.decide","approval":…,"decision":"approve"|"deny"}`
-  is a draft until the computer's command list is fixed (MOB-PUSH-01).
-- **Test vectors.** The g1 code has JVM tests against itself and the RFC 5869
-  HKDF vector; it must also be checked against vectors made by
-  `packages/relay/src/e2e.ts` before the first device test.
+- **Android 10 and 11.** Keystore has no ECDH before API 31 and the identity
+  key never leaves it, so these phones cannot finish pairing. Owner decision:
+  raise `minSdk` to 31, or keep 29 with the "needs Android 12" message
+  (current state).
+- **Approval ids.** Approve / Deny buttons appear only for approval ids the
+  computer accepts in commands (UUIDs); other notices show without buttons.
 
 ## Not built yet (TODOs, by task)
 
@@ -106,8 +133,10 @@ Still open, to align with the computer side:
   The pairing screen says so, the web host shows a static "cannot reach your
   computer yet" page, and Approve/Deny say "Not sent". When it lands: local →
   direct → relay, the relay hello, the handshake, `markUsed` after each
-  authenticated use, `onWelcome` for the welcome, `onRefusedByComputer` for
-  `expired`/`unknown_device`. Web-request interception carries no request
+  authenticated use, `PairingClient.Events` for `g1.pchal` and `g1.pwel`
+  (route them through the application, not one activity),
+  `CommandSender.request` matching replies by the command nonce, run frames
+  to `RunStream`, `onRefusedByComputer` for `expired`/`unknown_device`. Web-request interception carries no request
   bodies, so core-ui's API calls must go through the bridge to the session.
 - **QR scanner.** Android has no built-in QR decoder. No decoder library was
   added (decision below); "Type the code instead" is the working path, and
@@ -193,7 +222,13 @@ Lock
 Pairing (after MOB-LINK-01, or with the test-build "Continue" button)
 - [ ] A typed code with a wrong `ck`, a repeated field, `ws://` relay, an
       expired `exp`, or no route is refused with a short message.
-- [ ] A valid code shows the same 6-digit check code as the computer.
+- [ ] A valid code shows no check code until the computer's challenge
+      arrives; then the same 6-digit code as the computer.
+- [ ] A code left open past its 2 minutes asks to scan the new code.
+- [ ] Approve on the computer more than 30 s after the phone's unlock: the
+      phone shows "Finish pairing", asks for the unlock, then is paired.
+- [ ] Android 12+: the identity key has the agree-key purpose (StrongBox or
+      TEE); Android 10/11 shows "Pairing needs Android 12 or newer".
 - [ ] Lifetime choice: 30/60/90/120/Never; "Never" shows the warning.
 - [ ] Pairing asks for the unlock, then waits for Approve on the computer.
 - [ ] After approval the computer's lifetime is used; restarting the app does
@@ -206,8 +241,11 @@ Pairing (after MOB-LINK-01, or with the test-build "Continue" button)
 Notifications (with a Firebase project)
 - [ ] A valid `g1.ntf` approval shows its real text with Deny / Approve.
 - [ ] A forged, misaddressed, stale or replayed notice shows no content.
-- [ ] Approve asks for the unlock, then sends a signed command; the computer
-      accepts it once and refuses a replay.
+- [ ] Approve asks for the unlock, shows the parameters (the full view for a
+      cut-short preview), asks again, then sends `approval.decide` with that
+      hash; the computer accepts it once and refuses a replay.
+- [ ] A too-large or unavailable full view, or an owner with a second factor,
+      says "Decide this one on your computer".
 - [ ] An Approve intent for an id never seen in a verified notice does nothing.
 
 Web host
@@ -224,5 +262,6 @@ Web host
 - **Firebase project** for FCM, under the owner's account.
 - **Android 10 support.** On Android 10 the prompt cannot ask for "strong
   biometric or passcode" together, so it allows weak biometrics; a weak face
-  unlock may then not unlock the identity key and signing would fail. Option:
-  raise `minSdk` to 30 (Android 11).
+  unlock may then not unlock the identity key and signing would fail. Pairing
+  now also needs Keystore ECDH (Android 12, API 31). Recommended: raise
+  `minSdk` to 31.

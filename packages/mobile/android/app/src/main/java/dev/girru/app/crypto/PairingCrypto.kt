@@ -7,7 +7,10 @@ package dev.girru.app.crypto
  * code in this package, so JVM tests can drive it with a software key.
  */
 interface PairingCrypto {
-    /** Creates the identity key if missing and returns its SPKI DER public key. */
+    /**
+     * Creates the identity key if missing and returns its SPKI DER public key.
+     * Call only while not paired: an older key that cannot do ECDH is replaced.
+     */
     fun ensureIdentity(): ByteArray
 
     /** The identity public key (SPKI DER), or null before the first pairing. */
@@ -22,6 +25,18 @@ interface PairingCrypto {
      * android.security.keystore.UserNotAuthenticatedException (a GeneralSecurityException).
      */
     val signer: Signer
+
+    /**
+     * ECDH with the identity key, used once per pairing to unwrap the
+     * notification key from the welcome. Bound to a recent unlock like [signer].
+     */
+    val agreer: KeyAgreer
+
+    /**
+     * True when this phone can make (or holds) an identity key that does both
+     * signatures and ECDH inside the key store. Pairing cannot finish without it.
+     */
+    fun supportsKeyAgreement(): Boolean
 
     /** Next command counter; saved before it is returned. */
     fun nextCounter(): Long

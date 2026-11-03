@@ -9,28 +9,42 @@ import dev.girru.app.pairing.PairingPayload
  * screens and the lock do not change when it lands.
  */
 interface PairingClient {
+    /** What comes back for one pairing request; called on the main thread. */
+    interface Events {
+        /** True when the request was delivered (relay or local network). */
+        fun delivered(reached: Boolean)
+
+        /** A `g1.pchal` addressed to this phone: give it to PairingRepository.onChallenge. */
+        fun challenge(envelope: String)
+
+        /** A `g1.pwel` addressed to this phone: give it to PairingRepository.onWelcome. */
+        fun welcome(envelope: String)
+    }
+
     /**
      * Sends a sealed `g1.preq` to the pairing id over the local network or the
      * relay (the relay name must equal [PairingPayload.relayUrl] exactly, as
-     * sent in its challenge). The connector later hands the computer's
-     * `g1.pwel` to PairingRepository.onWelcome. [done] gets true when the
-     * request was delivered.
+     * sent in its challenge), with the computer's id (`cid`) on the allow
+     * list. The computer answers to this phone's device id by the same path:
+     * first `g1.pchal`, then, once the owner allowed it, `g1.pwel`.
      */
-    fun sendRequest(payload: PairingPayload, request: String, done: (Boolean) -> Unit)
+    fun sendRequest(payload: PairingPayload, request: String, events: Events)
 }
 
+/**
+ * Commands inside the end-to-end session. Every handshake starts with a fresh
+ * hs1 (G1Handshake.start); a hello is never sent twice.
+ */
 interface CommandSender {
-    sealed class Result {
-        object Accepted : Result()
+    /**
+     * Sends one signed command and calls [done] once with its reply (matched
+     * by `ref` = the command's nonce). Run frames that follow a `chat.send`
+     * go to [frames] (see [RunStream]) until `run.end`.
+     */
+    fun request(command: SignedCommand, done: (CommandReply) -> Unit, frames: ((PhoneFrame) -> Unit)? = null)
 
-        /** The computer refused the phone itself (`expired`, `unknown_device`): the pairing ends. */
-        class Refused(val reason: String) : Result()
-
-        /** Not delivered, or refused for a reason that does not end the pairing (e.g. `stale`). */
-        object NotDelivered : Result()
-    }
-
-    fun send(command: SignedCommand, done: (Result) -> Unit)
+    /** The unsigned `approval.pending {id}` query; null when not answered. A hint, not a permission. */
+    fun isApprovalPending(approvalId: String, done: (Boolean?) -> Unit)
 }
 
 /**
@@ -49,10 +63,13 @@ interface ContentSource {
 
 /** Until MOB-LINK-01: nothing leaves the phone, and the screens say so. */
 object NotConnectedYet : PairingClient, CommandSender, ContentSource {
-    override fun sendRequest(payload: PairingPayload, request: String, done: (Boolean) -> Unit) = done(false)
+    override fun sendRequest(payload: PairingPayload, request: String, events: PairingClient.Events) =
+        events.delivered(false)
 
-    override fun send(command: SignedCommand, done: (CommandSender.Result) -> Unit) =
-        done(CommandSender.Result.NotDelivered)
+    override fun request(command: SignedCommand, done: (CommandReply) -> Unit, frames: ((PhoneFrame) -> Unit)?) =
+        done(CommandReply.NotDelivered)
+
+    override fun isApprovalPending(approvalId: String, done: (Boolean?) -> Unit) = done(null)
 
     // A static page without scripts, served under the paired origin.
     private val waitingPage = """

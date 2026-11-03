@@ -31,7 +31,8 @@
     <string name="pair_prompt_title">Pair this phone</string>
     <string name="pair_notice_removed">This phone was removed on your computer. Pair it again to use it.</string>
     <string name="pair_error_code">This is not a Girru pairing code. Check it and try again.</string>
-    <string name="pair_error_expired">This code has expired. Show a new one on your computer.</string>
+    <string name="pair_error_expired">This code has renewed on your computer. Scan the new code.</string>
+    <string name="pair_error_android_version">Pairing needs Android 12 or newer on this phone.</string>
     <string name="pair_error_version">This code is from a newer Girru. Update the app.</string>
     <string name="pair_error_route">This code has no way to reach your computer.</string>
     <string name="pair_error_key">This phone could not create its key. Check that a screen lock is set.</string>
@@ -46,6 +47,9 @@
 
     <string name="waiting_title">Approve this phone on your computer</string>
     <string name="waiting_body">Girru on your computer asks you to approve this phone.</string>
+    <string name="waiting_for_code">Waiting for your computer. The check code appears here once it has your request.</string>
+    <string name="waiting_finish_body">Your computer allowed this phone. Unlock to finish.</string>
+    <string name="waiting_finish">Finish pairing</string>
     <string name="waiting_not_reached">This version of the app cannot reach your computer yet.</string>
     <string name="waiting_cancel">Cancel pairing</string>
     <string name="debug_continue">Continue without the computer (test build)</string>
@@ -57,6 +61,11 @@
     <string name="confirm_approve">Approve</string>
     <string name="confirm_deny">Deny</string>
     <string name="confirm_subtitle">An approval from your computer</string>
+    <string name="confirm_review">See what you approve</string>
+    <string name="approval_masked">Hidden secrets: %1$s</string>
+    <string name="approval_not_pending">This approval was already decided.</string>
+    <string name="decide_on_computer">Decide this one on your computer.</string>
+    <string name="computer_try_again">Something went wrong on your computer. Try again.</string>
     <string name="confirm_failed">Not sent. Open Girru and try again.</string>
     <string name="not_paired">This phone is not paired.</string>
     <string name="not_sent_yet">Not sent: this version of the app cannot reach your computer yet.</string>

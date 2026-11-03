@@ -159,3 +159,14 @@ class G1Exception(val reason: String) : Exception(reason)
 fun interface Signer {
     fun sign(data: ByteArray): ByteArray
 }
+
+/**
+ * ECDH with the device identity key: returns the 32-byte x coordinate shared
+ * with [peerSpki] (same bytes as Node's `diffieHellman`). The Keystore key is
+ * unlock-bound, so this throws a GeneralSecurityException (for example
+ * android.security.keystore.UserNotAuthenticatedException) when the last
+ * unlock is too old; it throws G1Exception("bad_key") for a key that is not P-256.
+ */
+fun interface KeyAgreer {
+    fun agree(peerSpki: ByteArray): ByteArray
+}

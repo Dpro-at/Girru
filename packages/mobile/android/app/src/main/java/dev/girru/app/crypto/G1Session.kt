@@ -51,17 +51,34 @@ class G1Session internal constructor(
     }
 }
 
-/** The side that opened a handshake and waits for hs2. The ephemeral key lives only in memory. */
+/**
+ * The side that opened a handshake and waits for hs2. The ephemeral key lives
+ * only in memory and serves one session only: [G1Handshake.finish] uses it
+ * up, and a second finish is refused. Never send [hello] again on a reconnect
+ * or a retry; the computer answers each hs1 once and ignores a copy, so every
+ * attempt starts with a fresh [G1Handshake.start].
+ */
 class PendingHandshake internal constructor(
     val selfId: String,
     val peerId: String,
-    internal val ephemeral: KeyPair,
+    ephemeral: KeyPair,
     val hello: String,
-)
+) {
+    private var ephemeral: KeyPair? = ephemeral
+
+    val isUsed: Boolean @Synchronized get() = ephemeral == null
+
+    @Synchronized
+    internal fun take(): KeyPair {
+        val key = ephemeral ?: throw G1Exception("used")
+        ephemeral = null
+        return key
+    }
+}
 
 /** PROTOCOL.md "Session handshake" (hs1 → hs2), both roles. */
 object G1Handshake {
-    /** Step 1: a signed hello with a fresh ephemeral key. */
+    /** Step 1: a signed hello with a fresh ephemeral key and nonce, new for every handshake. */
     fun start(selfId: String, signer: Signer, peerId: String, nowMs: Long): PendingHandshake {
         if (!G1.isDeviceId(peerId)) throw G1Exception("bad_format")
         val eph = G1.newEphemeral()
@@ -119,6 +136,7 @@ object G1Handshake {
         nowMs: Long,
         windowMs: Long = G1.WINDOW_MS,
     ): G1Session {
+        if (pending.isUsed) throw G1Exception("used")
         val (payload, sig) = split(envelope, "hs2")
         checkSigned("hs2", payload, sig, peerSpki)
         if (G1.deviceIdOf(peerSpki) != pending.peerId) throw G1Exception("wrong_key")
@@ -130,7 +148,8 @@ object G1Handshake {
         if (reply["h1"] != G1.b64url(G1.sha256(pending.hello.utf8))) throw G1Exception("bad_format")
         checkTime(reply["ts"], nowMs, windowMs)
         val peerEphBytes = G1.fromB64url(peerEph) ?: throw G1Exception("bad_format")
-        val shared = G1.ecdh(pending.ephemeral.private, peerEphBytes) ?: throw G1Exception("bad_format")
+        // Only a valid hs2 uses up the ephemeral key; a forged one leaves the wait open.
+        val shared = G1.ecdh(pending.take().private, peerEphBytes) ?: throw G1Exception("bad_format")
         return derive(pending.selfId, pending.peerId, initiator = true, shared, transcript(pending.hello, payload))
     }
 

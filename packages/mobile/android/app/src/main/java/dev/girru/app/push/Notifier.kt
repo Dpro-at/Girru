@@ -70,7 +70,7 @@ object Notifier {
                     .build(),
             )
         val approvalId = notice.approvalId
-        if (notice.kind.isApproval && approvalId != null) {
+        if (notice.kind.isApproval && approvalId != null && ApprovalDecision.isValidId(approvalId)) {
             builder.setCategory(NotificationCompat.CATEGORY_REMINDER)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .addAction(0, context.getString(R.string.action_deny), decision(context, id, approvalId, approve = false))

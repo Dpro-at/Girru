@@ -3,6 +3,7 @@ package dev.girru.app.pairing
 import dev.girru.app.crypto.FlatJson
 import dev.girru.app.crypto.G1
 import dev.girru.app.crypto.G1Exception
+import dev.girru.app.crypto.KeyAgreer
 import dev.girru.app.crypto.TestIdentity
 import dev.girru.app.crypto.utf8
 import org.junit.Assert.assertArrayEquals
@@ -27,11 +28,13 @@ class PairingMessagesTest {
     }
 
     @Test
-    fun checkCodeIsSixDigitsAndDependsOnBothKeys() {
-        val code = PairingMessages.checkCode(secret, computer.spki, phone.spki)
+    fun checkCodeIsSixDigitsAndDependsOnBothKeysAndTheChallenge() {
+        val challenge = ByteArray(32) { 11 }
+        val code = PairingMessages.checkCode(secret, computer.spki, phone.spki, challenge)
         assertTrue(Regex("^[0-9]{6}$").matches(code))
-        assertEquals(code, PairingMessages.checkCode(secret, computer.spki, phone.spki))
-        assertNotEquals(code, PairingMessages.checkCode(secret, computer.spki, TestIdentity().spki))
+        assertEquals(code, PairingMessages.checkCode(secret, computer.spki, phone.spki, challenge))
+        assertNotEquals(code, PairingMessages.checkCode(secret, computer.spki, TestIdentity().spki, challenge))
+        assertNotEquals(code, PairingMessages.checkCode(secret, computer.spki, phone.spki, ByteArray(32) { 12 }))
     }
 
     @Test
@@ -54,15 +57,27 @@ class PairingMessagesTest {
         )
     }
 
-    private fun welcome(fields: String, signer: TestIdentity = computer, aadPid: String = pid): String {
+    private val phoneAgreer = KeyAgreer { peer -> G1.ecdh(phone.keyPair.private, peer)!! }
+
+    /** The computer's side of the wrapped notification key (PROTOCOL.md "Wrapped notification key"). */
+    private fun wrap(raw: ByteArray, phoneId: String = phone.id): String {
+        val shared = G1.ecdh(computer.keyPair.private, phone.spki)!!
         val nonce = G1.randomBytes(12)
-        val box = G1.aesGcmSeal(key, nonce, "girru/v1/pwel\n$aadPid".utf8, fields.utf8)
-        val payload = G1.b64url(nonce + box)
-        val sig = G1.b64url(signer.signer.sign("girru/v1/pwel\n$payload".utf8))
-        return "g1.pwel.$payload.$sig"
+        val box = G1.aesGcmSeal(PairingMessages.notifyWrapKey(shared, key), nonce, PairingMessages.notifyKeyAad(computer.id, phoneId), raw)
+        return G1.b64url(nonce + box)
     }
 
-    private fun open(env: String) = PairingMessages.openWelcome(env, computer.spki, computer.id, phone.id, pid, key)
+    private fun sealed(kind: String, fields: String, signer: TestIdentity = computer, aadPid: String = pid): String {
+        val nonce = G1.randomBytes(12)
+        val box = G1.aesGcmSeal(key, nonce, "girru/v1/$kind\n$aadPid".utf8, fields.utf8)
+        val payload = G1.b64url(nonce + box)
+        val sig = G1.b64url(signer.signer.sign("girru/v1/$kind\n$payload".utf8))
+        return "g1.$kind.$payload.$sig"
+    }
+
+    private fun welcome(fields: String, signer: TestIdentity = computer, aadPid: String = pid) = sealed("pwel", fields, signer, aadPid)
+
+    private fun open(env: String) = PairingMessages.openWelcome(env, computer.spki, computer.id, phone.id, pid, key, phoneAgreer)
 
     private fun refused(env: String) {
         try {
@@ -75,10 +90,11 @@ class PairingMessagesTest {
 
     @Test
     fun welcomeGivesTheFinalLifetimeAndNotifyKey() {
-        val nk = G1.b64url(ByteArray(32) { 1 })
+        val raw = ByteArray(32) { 1 }
+        val nk = wrap(raw)
         val w = open(welcome("""{"computer":"${computer.id}","phone":"${phone.id}","notifyKey":"$nk","lifetimeDays":120,"name":"Desk"}"""))
         assertEquals(PairingLifetime.DAYS_120, w.lifetime)
-        assertEquals(32, w.notifyKey.size)
+        assertArrayEquals(raw, w.notifyKey)
         assertEquals("Desk", w.computerName)
         val never = open(welcome("""{"computer":"${computer.id}","phone":"${phone.id}","notifyKey":"$nk","lifetimeDays":null}"""))
         assertEquals(PairingLifetime.NEVER, never.lifetime)
@@ -86,13 +102,38 @@ class PairingMessagesTest {
 
     @Test
     fun welcomeIsRefusedWhenAnythingIsWrong() {
-        val nk = G1.b64url(ByteArray(32) { 1 })
+        val nk = wrap(ByteArray(32) { 1 })
         val good = """{"computer":"${computer.id}","phone":"${phone.id}","notifyKey":"$nk","lifetimeDays":90}"""
         refused(welcome(good, signer = TestIdentity()))
         refused(welcome(good, aadPid = "p_" + G1.b64url(ByteArray(32))))
         refused(welcome(good.replace(phone.id, TestIdentity().id)))
         refused(welcome(good.replace("\"lifetimeDays\":90", "\"lifetimeDays\":45")))
-        refused(welcome(good.replace(nk, G1.b64url(ByteArray(16)))))
+        // The old, unwrapped 32-byte key is no longer accepted.
+        refused(welcome(good.replace(nk, G1.b64url(ByteArray(32)))))
+        // Wrapped for another phone id: the AAD does not match.
+        refused(welcome(good.replace(nk, wrap(ByteArray(32) { 1 }, phoneId = TestIdentity().id))))
         refused("g1.pwel.x")
+    }
+
+    @Test
+    fun challengeIsCheckedBeforeAnyCode() {
+        val c = G1.b64url(ByteArray(32) { 4 })
+        val good = """{"computer":"${computer.id}","phone":"${phone.id}","challenge":"$c"}"""
+        val challenge = PairingMessages.openChallenge(sealed("pchal", good), computer.spki, computer.id, phone.id, pid, key)
+        assertArrayEquals(ByteArray(32) { 4 }, challenge)
+        for (env in listOf(
+            sealed("pchal", good, signer = TestIdentity()),
+            sealed("pchal", good, aadPid = "p_" + G1.b64url(ByteArray(32))),
+            sealed("pchal", good.replace(phone.id, TestIdentity().id)),
+            sealed("pchal", good.replace(c, G1.b64url(ByteArray(16)))),
+            sealed("pwel", good),
+        )) {
+            try {
+                PairingMessages.openChallenge(env, computer.spki, computer.id, phone.id, pid, key)
+                fail("expected refusal")
+            } catch (e: G1Exception) {
+                // expected
+            }
+        }
     }
 }

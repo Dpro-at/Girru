@@ -15,13 +15,21 @@ import java.security.PrivateKey
 import java.security.ProviderException
 import java.security.Signature
 import java.security.spec.ECGenParameterSpec
+import javax.crypto.KeyAgreement
 
 /**
- * Identity key in Android Keystore: ECDSA P-256 (suite g1), StrongBox when the
- * phone has it, never exportable, usable only for [AUTH_VALIDITY_SECONDS]
- * after the owner unlocks with a strong biometric or the phone's passcode.
- * Creating a key like this needs a secure lock screen; the app refuses to run
- * without one.
+ * Identity key in Android Keystore: P-256 (suite g1) for ECDSA signatures and,
+ * on Android 12+ (API 31, PURPOSE_AGREE_KEY), for ECDH. StrongBox when the
+ * phone has it and the key can be made there, never exportable, usable only
+ * for [AUTH_VALIDITY_SECONDS] after the owner unlocks with a strong biometric
+ * or the phone's passcode. Creating a key like this needs a secure lock
+ * screen; the app refuses to run without one.
+ *
+ * ECDH is needed once per pairing: the welcome's notification key is wrapped
+ * under ECDH(identity keys) (PROTOCOL.md "Wrapped notification key").
+ * Android 10 and 11 have no ECDH in the Keystore, and the private key must
+ * never leave it, so those phones cannot finish pairing
+ * ([supportsKeyAgreement] is false and the pairing screen says so).
  */
 class KeystorePairingCrypto(
     private val context: Context,
@@ -46,8 +54,24 @@ class KeystorePairingCrypto(
         }
     }
 
+    override val agreer = KeyAgreer { peerSpki ->
+        val key = keyStore.getKey(ALIAS, null) as? PrivateKey ?: throw G1Exception("no_key")
+        val peer = G1.p256PublicKey(peerSpki) ?: throw G1Exception("bad_key")
+        KeyAgreement.getInstance("ECDH", ANDROID_KEYSTORE).run {
+            init(key)
+            doPhase(peer, true)
+            generateSecret()
+        }
+    }
+
+    override fun supportsKeyAgreement(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+
     override fun ensureIdentity(): ByteArray {
-        identityPublicKey()?.let { return it }
+        identityPublicKey()?.let { existing ->
+            if (!supportsKeyAgreement() || keyCanAgree()) return existing
+            // Made before ECDH was needed; only called while not paired, so it is safe to replace.
+            deleteIdentity()
+        }
         val strongBox = context.packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE)
         try {
             generate(strongBox)
@@ -99,8 +123,25 @@ class KeystorePairingCrypto(
         }
     }
 
+    private fun keyCanAgree(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
+        val key = keyStore.getKey(ALIAS, null) as? PrivateKey ?: return false
+        val info = KeyFactory.getInstance(key.algorithm, ANDROID_KEYSTORE).getKeySpec(key, KeyInfo::class.java)
+        return (info.purposes and KeyProperties.PURPOSE_AGREE_KEY) != 0
+    }
+
+    private fun purposes(): Int {
+        val sign = KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) sign or KeyProperties.PURPOSE_AGREE_KEY else sign
+    }
+
+    /**
+     * One key for signatures and ECDH. A StrongBox that refuses the combination
+     * falls back to the TEE (see [ensureIdentity]); the agreement purpose is
+     * never dropped silently, because pairing cannot finish without it.
+     */
     private fun generate(strongBox: Boolean) {
-        val builder = KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY)
+        val builder = KeyGenParameterSpec.Builder(ALIAS, purposes())
             .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
             .setDigests(KeyProperties.DIGEST_SHA256)
             .setUserAuthenticationRequired(true)

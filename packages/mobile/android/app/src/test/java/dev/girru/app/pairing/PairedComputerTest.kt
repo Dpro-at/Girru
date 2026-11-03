@@ -33,6 +33,9 @@ class PairedComputerTest {
         assertEquals(PairingLifetime.DAYS_60, back.lifetime)
         assertEquals(waiting.pending!!.pairingId, back.pending!!.pairingId)
         assertArrayEquals(waiting.pending!!.pairingKey, back.pending!!.pairingKey)
+        assertEquals(nowMs, back.pending!!.sentAtMs)
+        assertNull(back.pending!!.challenge)
+        assertNull(back.checkCode(TestIdentity().spki))
         assertEquals(listOf("10.0.0.2:41521"), back.localAddresses)
     }
 
@@ -43,7 +46,7 @@ class PairedComputerTest {
         assertEquals(PairedComputer.State.PAIRED, paired.state)
         assertEquals(PairingLifetime.NEVER, paired.lifetime)
         assertNull(paired.pending)
-        assertFalse(paired.toFields().containsKey("pk"))
+        assertFalse(paired.toFields().containsKey("ps"))
         assertFalse(paired.isExpired(nowMs + 10_000L * PairingExpiry.DAY_MS))
     }
 

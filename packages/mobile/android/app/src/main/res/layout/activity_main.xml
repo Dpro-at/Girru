@@ -163,15 +163,6 @@
                     tools:text="Pair with My Mac" />
 
                 <TextView
-                    android:id="@+id/confirm_check_code"
-                    style="@style/Girru.Code"
-                    tools:text="Check code 123 456" />
-
-                <TextView
-                    style="@style/Girru.Muted"
-                    android:text="@string/check_code_hint" />
-
-                <TextView
                     style="@style/Girru.Subtitle"
                     android:text="@string/lifetime_title" />
 
@@ -242,9 +233,28 @@
             tools:text="Check code 123 456" />
 
         <TextView
+            android:id="@+id/waiting_check_code_hint"
+            style="@style/Girru.Muted"
+            android:gravity="center"
+            android:text="@string/check_code_hint" />
+
+        <TextView
+            android:id="@+id/waiting_for_code"
+            style="@style/Girru.Muted"
+            android:gravity="center"
+            android:text="@string/waiting_for_code" />
+
+        <TextView
+            android:id="@+id/waiting_body"
             style="@style/Girru.Body"
             android:gravity="center"
             android:text="@string/waiting_body" />
+
+        <Button
+            android:id="@+id/finish_pairing_button"
+            style="@style/Girru.PrimaryButton"
+            android:text="@string/waiting_finish"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/waiting_not_reached"
