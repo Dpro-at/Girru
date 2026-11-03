@@ -67,8 +67,7 @@ struct RootView: View {
     @ViewBuilder private var content: some View {
         switch model.pairing {
         case .paired(let computer):
-            WebHostView(computer: computer, bridge: bridge)
-                .ignoresSafeArea(.container, edges: .bottom)
+            MainTabs(computer: computer, model: model)
         case .notPaired:
             PairingView(endReason: nil)
         case .ended(let reason):

@@ -732,12 +732,109 @@ func checkRelayHello() throws {
     check(RelayFrames.message(["t": "drop", "reason": "offline"]) == nil, "only msg frames carry envelopes")
 }
 
+// MARK: - chat page bridge + native screens
+
+func checkPageBridge() throws {
+    check(PageBridge.classify(method: "GET", path: "/") == .file(path: "/"), "the page itself")
+    check(PageBridge.classify(method: "GET", path: "/assets/app-1.js?v=2") == .file(path: "/assets/app-1.js"), "a query never names a file")
+    check(PageBridge.classify(method: "POST", path: "/chat") == .refuse(status: 405), "files are GET only")
+    check(PageBridge.classify(method: "GET", path: "/api/chat/conversations") == .api(method: "GET", path: "/api/chat/conversations"), "an API request")
+    check(PageBridge.classify(method: "post", path: "/api/chat/conversations/a1/runs") == .api(method: "POST", path: "/api/chat/conversations/a1/runs"), "methods are upper-cased")
+    check(PageBridge.classify(method: "GET", path: "/api/chat/runs/run-abcdefgh/events?after=4") == .stream(path: "/api/chat/runs/run-abcdefgh/events?after=4"), "run events stream")
+    check(PageBridge.classify(method: "POST", path: "/api/chat/runs/run-abcdefgh/events") == .api(method: "POST", path: "/api/chat/runs/run-abcdefgh/events"), "only GET streams")
+    check(PageBridge.classify(method: "TRACE", path: "/api/auth/me") == .refuse(status: 400), "unknown methods refused")
+    check(PageBridge.classify(method: "GET", path: "relative") == .refuse(status: 400), "paths start with /")
+
+    check(try PageBridge.jsonBody(nil) == nil && PageBridge.jsonBody(Data()) == nil, "no body")
+    check((try PageBridge.jsonBody(Data(#"{"title":"x"}"#.utf8)) as? [String: Any])?["title"] as? String == "x", "JSON body")
+    fails(PageError.badBody, "a body that is not JSON") { _ = try PageBridge.jsonBody(Data("a=b".utf8)) }
+    fails(PageError.tooLarge, "a body over 256 KiB") { _ = try PageBridge.jsonBody(Data(repeating: 0x20, count: PageBridge.maxBody + 1)) }
+
+    let ok = PageBridge.apiResponse(ok: true, data: ["status": 201, "body": ["id": "c1"]], error: nil)
+    check(ok.status == 201 && ok.headers["Content-Type"]?.hasPrefix("application/json") == true, "api answer status and type")
+    check((try JSONSerialization.jsonObject(with: ok.body) as? [String: Any])?["id"] as? String == "c1", "api answer body")
+    check(PageBridge.apiResponse(ok: true, data: ["status": 400, "body": NSNull()], error: nil).body == Data("null".utf8), "null body")
+    check(PageBridge.apiResponse(ok: false, data: nil, error: "not_allowed").status == 403, "not_allowed is 403")
+    check(PageBridge.apiResponse(ok: false, data: nil, error: "rate_limited").status == 429, "rate_limited is 429")
+    check(PageBridge.apiResponse(ok: false, data: nil, error: "internal_error").status == 503, "anything else is 503")
+    check(PageBridge.apiResponse(ok: true, data: ["status": 9000], error: nil).status == 502, "a strange status fails closed")
+
+    let a = Data("hello ".utf8), b = Data("world".utf8)
+    let p0 = try PageBridge.filePart(["status": 200, "type": "text/javascript", "parts": 2, "part": 0, "size": 11, "build": "build-1", "body": a.base64EncodedString()])
+    let p1 = try PageBridge.filePart(["status": 200, "type": "text/javascript", "parts": 2, "part": 1, "size": 11, "build": "build-1", "body": b.base64EncodedString()])
+    let whole = try PageBridge.assemble([p0, p1])
+    check(whole.status == 200 && whole.body == Data("hello world".utf8) && whole.headers["Content-Type"] == "text/javascript", "parts put together")
+    var other = p1; other.build = "build-2"
+    fails(PageError.badAnswer, "parts of two builds") { _ = try PageBridge.assemble([p0, other]) }
+    fails(PageError.badAnswer, "a missing part") { _ = try PageBridge.assemble([p0]) }
+    fails(PageError.badAnswer, "parts out of order") { _ = try PageBridge.assemble([p1, p0]) }
+    check(try PageBridge.assemble([PageBridge.filePart(["status": 404, "build": "build-1"])]).status == 404, "not found passes through")
+    fails(PageError.badAnswer, "too many parts") { _ = try PageBridge.filePart(["status": 200, "type": "x", "parts": 500, "part": 0, "size": 1, "build": "b", "body": ""]) }
+
+    check(String(decoding: PageBridge.sse(["seq": 3, "type": "text", "content": "Hi"]), as: UTF8.self) == "id: 3\ndata: {\"content\":\"Hi\",\"seq\":3,\"type\":\"text\"}\n\n", "a numbered event")
+    check(!String(decoding: PageBridge.sse(["seq": 0, "type": "preview", "content": "H"]), as: UTF8.self).contains("id:"), "a preview has no id")
+
+    // Stream messages from the computer.
+    if case let .stream(ref, data) = try ComputerMessage.parse(Data(#"{"type":"stream","ref":"s1","data":{"seq":1,"type":"text"}}"#.utf8)) {
+        check(ref == "s1" && data["type"] as? String == "text", "stream frame read")
+    } else { check(false, "stream frame read") }
+    if case let .streamEnd(_, complete) = try ComputerMessage.parse(Data(#"{"type":"stream.end","ref":"s1","status":"dropped"}"#.utf8)) {
+        check(!complete, "a dropped stream is not complete")
+    } else { check(false, "stream.end read") }
+    fails(ProtocolError.badFormat, "a stream frame without data") { _ = try ComputerMessage.parse(Data(#"{"type":"stream","ref":"s1"}"#.utf8)) }
+
+    let call = try CommandBody.apiCall(method: "POST", path: "/api/chat/conversations", body: ["title": "x"], ref: "p1")
+    check(call == #"{"body":{"title":"x"},"method":"POST","path":"/api/chat/conversations","ref":"p1","type":"api.call"}"#, "api.call body")
+    check(try CommandBody.uiGet(path: "/", part: 0, ref: "f1") == #"{"path":"/","ref":"f1","type":"ui.get"}"#, "ui.get first part")
+    check(try CommandBody.uiGet(path: "/a.js", part: 2, ref: "f1") == #"{"part":2,"path":"/a.js","ref":"f1","type":"ui.get"}"#, "ui.get later part")
+}
+
+func checkPhoneScreens() throws {
+    let team = try TeamMember.list(from: ["agents": [
+        ["id": "main", "name": "Girru", "primary": true, "department": NSNull()],
+        ["id": "sara", "name": "Sara", "primary": false, "department": "marketing"],
+        ["id": "karim", "name": "Karim", "primary": false, "role": "specialist", "department": "writing"],
+        ["id": "lina", "name": "Lina", "primary": false, "department": "support"],
+        ["name": "no id"],
+    ]])
+    check(team.count == 4, "agents without an id are skipped")
+    let running = try TaskItem.list(from: ["runs": [
+        ["id": "chat:1", "title": "Landing page copy", "agentId": "karim", "agentName": "Karim", "needsYou": false, "link": [:], "startedAt": "2026-11-03T10:00:00.000Z"],
+        ["id": "task:2", "title": "Clean the inbox", "agentId": "main", "agentName": "Girru", "needsYou": false, "link": ["sessionId": "s2"]],
+    ]])
+    check(running.count == 2 && running[0].startedAt != nil && running[1].sessionId == "s2", "tasks read")
+    let approvals = try ApprovalCard.list(from: ["approvals": [
+        ["id": "a1", "toolName": "send_email", "agentId": "sara", "paramsPreview": ["to": "sales@girru.dev", "subject": "Sales this week", "attachment": ["name": "x"]], "requestedAt": "2026-11-03T10:00:00Z"],
+    ]])
+    check(approvals.first?.title(agentName: "Sara") == "Sara wants to send an email", "approval title in plain words")
+    check(approvals.first?.lines.map(\.0) == ["Attachment", "Subject", "To"] && approvals.first?.lines.first?.1 == "…", "preview lines; nested values are not shown")
+    let board = TeamBoard.members(team, running: running, approvals: approvals)
+    check(board.map(\.id) == ["main", "sara", "karim", "lina"], "main first, then needs you, working, free")
+    check(board[0].status == .working && board[0].subtitle == "Main agent · Clean the inbox", "main agent working")
+    check(board[1].status == .needsYou && board[1].subtitle == "Marketing · waiting for your OK", "needs you")
+    check(board[3].status == .free && board[3].subtitle == "Support", "free")
+    check(TeamBoard.chips(board) == ["All", "Needs you", "Marketing", "Writing", "Support"], "chips")
+    check(TeamBoard.filter(board, chip: "Writing", query: "").map(\.id) == ["karim"], "department chip")
+    check(TeamBoard.filter(board, chip: "All", query: "spec").map(\.id) == ["karim"], "search by job")
+    check(TeamBoard.filter(board, chip: "Needs you", query: "").map(\.id) == ["sara"], "needs you chip")
+
+    let schedules = try ScheduleItem.list(from: ["schedules": [
+        ["id": "job:1", "title": "Weekly", "when": "Every Monday at 9:00", "enabled": true, "nextRun": "2026-11-09T09:00:00Z"],
+        ["id": "job:2", "title": "Paused", "when": "Every day", "enabled": false, "nextRun": NSNull()],
+        ["id": "job:3", "title": "Daily backup", "when": "Every day at 2:00", "enabled": true, "nextRun": "2026-11-04T02:00:00Z"],
+    ]])
+    check(schedules.map(\.id) == ["job:3", "job:1", "job:2"], "soonest first, paused last")
+    check(PhoneText.action("web.publish_page") == "publish a page" && PhoneText.action("delete_files") == "delete files" && PhoneText.action("run") == "use run", "tool names as actions")
+    check(PhoneText.title("sales_ops") == "Sales ops", "department names")
+    check(try CommandBody.tasksList(place: "running") == #"{"place":"running","type":"tasks.list"}"#, "tasks.list body")
+}
+
 let groups: [(String, () throws -> Void)] = [
     ("base64url", checkBase64), ("crypto", checkCrypto), ("session", checkSession), ("commands", checkCommands),
     ("replay window", checkReplayWindow), ("QR payload", checkPayload), ("pairing messages", checkPairingMessages),
     ("reference vectors", checkReferenceVectors), ("pairing progress", checkPairingProgress), ("session messages + approvals", checkSessionMessages),
     ("pairing lifetime", checkLifetime), ("lock policy", checkLock), ("bridge + navigation", checkBridge), ("notices", checkNotices),
-    ("verified approvals", checkVerifiedApprovals), ("relay hello", checkRelayHello),
+    ("verified approvals", checkVerifiedApprovals), ("relay hello", checkRelayHello), ("chat page bridge", checkPageBridge), ("phone screens", checkPhoneScreens),
 ]
 for (name, run) in groups {
     do { try run() } catch {

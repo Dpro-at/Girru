@@ -6,9 +6,9 @@ import Foundation
 actor SessionComputerLink: ComputerLink {
     private var links: [String: SessionLink] = [:]
 
-    func call(_ command: SignedCommand, to computer: PairedComputer, signer: IdentitySigner) async throws -> CommandReply {
+    func call(signing sign: @escaping @Sendable () throws -> SignedCommand, to computer: PairedComputer, signer: IdentitySigner, stream: (@Sendable (StreamEvent) -> Void)?) async throws -> CommandReply {
         let link = try await connected(computer, signer: signer)
-        let r = try await link.call(command)
+        let r = try await link.call(signing: sign, stream: stream)
         return CommandReply(ok: r.ok, data: r.data, error: r.error)
     }
 

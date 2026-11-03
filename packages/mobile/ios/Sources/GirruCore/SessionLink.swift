@@ -9,6 +9,12 @@ public struct LinkReply: @unchecked Sendable {
     public var error: String?
 }
 
+/// One event of an `api.stream`, or its end.
+public enum StreamEvent: @unchecked Sendable {
+    case data([String: Any])
+    case end(complete: Bool)
+}
+
 /// A `run` frame or the `run.end` that follows a started chat turn.
 public enum RunEvent: @unchecked Sendable {
     case frame(runId: String, seq: UInt64, frame: [String: Any])
@@ -39,6 +45,7 @@ public actor SessionLink {
     private var replies: [String: CheckedContinuation<LinkReply, Error>] = [:]
     private var pendingQueries: [String: CheckedContinuation<Bool, Error>] = [:]
     private var runs: [String: @Sendable (RunEvent) -> Void] = [:]
+    private var streams: [String: @Sendable (StreamEvent) -> Void] = [:]
     /// Envelopes go out in the order they were sealed: the computer refuses a
     /// `seq` that is not above the last one it took.
     private var sendChain: Task<Void, Never>?
@@ -82,22 +89,34 @@ public actor SessionLink {
 
     /// Sends one signed command and returns its reply. `runs` gets the `run`
     /// frames and the `run.end` of a started chat turn.
-    public func call(_ command: SignedCommand, runs handler: (@Sendable (RunEvent) -> Void)? = nil) async throws -> LinkReply {
+    public func call(_ command: SignedCommand, runs handler: (@Sendable (RunEvent) -> Void)? = nil, stream: (@Sendable (StreamEvent) -> Void)? = nil) async throws -> LinkReply {
         let ref = Self.ref(of: command)
         let plaintext = try JSONEncoder().encode(command)
         return try await withCheckedThrowingContinuation { c in
             replies[ref] = c
             if let handler { runs[ref] = handler }
+            if let stream { streams[ref] = stream }
             do {
                 try sealAndSend(plaintext)
             } catch {
                 replies[ref] = nil
                 runs[ref] = nil
+                streams[ref] = nil
                 c.resume(throwing: error)
                 return
             }
             expire(ref)
         }
+    }
+
+    /// Signs and sends in one step on this actor, so commands leave in the order
+    /// their counters were taken (the computer refuses a counter that is not
+    /// above the last one it accepted). Use this when several commands may be
+    /// in flight, as the chat page's requests are.
+    public func call(signing sign: @Sendable () throws -> SignedCommand, runs handler: (@Sendable (RunEvent) -> Void)? = nil, stream: (@Sendable (StreamEvent) -> Void)? = nil) async throws -> LinkReply {
+        guard session != nil else { throw RelayError.closed }
+        let command = try sign()
+        return try await call(command, runs: handler, stream: stream)
     }
 
     /// The unsigned `approval.pending {id}` query: a hint for the screen, the
@@ -189,7 +208,7 @@ public actor SessionLink {
         case let .reply(ref, ok, data, error):
             guard let ref, let c = replies.removeValue(forKey: ref) else { return }
             // A turn that did not start sends no run frames.
-            if !ok { runs[ref] = nil }
+            if !ok { runs[ref] = nil; streams[ref] = nil }
             c.resume(returning: LinkReply(ok: ok, data: data, error: error))
         case let .run(ref, runId, seq, frame):
             if let ref { runs[ref]?(.frame(runId: runId, seq: seq, frame: frame)) }
@@ -197,6 +216,10 @@ public actor SessionLink {
             if let ref { runs.removeValue(forKey: ref)?(.end(runId: runId, end: end, code: code)) }
         case let .approvalPending(id, pending):
             pendingQueries.removeValue(forKey: id)?.resume(returning: pending)
+        case let .stream(ref, data):
+            if let ref { streams[ref]?(.data(data)) }
+        case let .streamEnd(ref, complete):
+            if let ref { streams.removeValue(forKey: ref)?(.end(complete: complete)) }
         }
     }
 
@@ -205,6 +228,10 @@ public actor SessionLink {
         replies.removeAll()
         pendingQueries.removeAll()
         runs.removeAll()
+        let open = streams
+        streams.removeAll()
+        // A page reading a stream re-attaches with `after` once the link is back.
+        for s in open.values { s(.end(complete: false)) }
         for c in r.values { c.resume(throwing: error) }
         for c in q.values { c.resume(throwing: error) }
     }
