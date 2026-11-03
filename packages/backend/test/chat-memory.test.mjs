@@ -188,7 +188,8 @@ test('a conflict proposed in the chat and kept new shows as saved with the new t
   assert.equal(d.statusCode, 200, d.body);
   const after = (await call('cm-owner', 'GET', url)).json().memories.find((x) => x.id === p.id);
   assert.equal(after.status, 'saved');
-  assert.equal(after.memoryId, full.conflictWith);
+  // STORE-MAP-01 P9 (M4): keep new supersedes; the link shows the new current memory.
+  assert.equal(after.memoryId, process.env.GIRRU_STORE_P9 === '1' ? db.prepare('SELECT superseded_by FROM memories WHERE id = ?').get(full.conflictWith).superseded_by : full.conflictWith);
   assert.equal(after.text, 'The team does not meet every Monday at 9');
 });
 

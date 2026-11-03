@@ -18,7 +18,11 @@
  *
  * Each lesson is proposed once: its key (`lesson:<hash of the group's oldest
  * memory>`) is kept in the proposal's reasons, so a dismissed or rejected
- * proposal is not made again. Rule-based: no model, no network.
+ * proposal is not made again. Its source memory ids go with it: forgetting
+ * one of them cancels a waiting proposal and removes a suggested or dismissed
+ * rule (memory/forget.ts); a rule the owner accepted is the owner's own.
+ * Rules are install-wide (one owner per install, like agent_rules itself).
+ * Rule-based: no model, no network.
  */
 
 import { createHash } from 'node:crypto';
@@ -37,11 +41,14 @@ const MAX_SCAN = 2000;
 /** Proposals made per run at most (the owner's queue stays short). */
 export const MAX_PROPOSALS_PER_RUN = 5;
 const MIN_WORDS = 3;
+/** Source ids kept on a proposal (the text's own source is always the first). */
+const MAX_SOURCE_IDS = 10;
 const ACTOR = 'system:lessons';
 const EXPERIENCE: DrawerRef = { kind: 'experience' };
 
 const INSTRUCTION = /^\s*(always|never|do not|don't|dont|avoid|make sure|must|should|prefer|use|run|check|keep)\b|\b(must|should|always|never)\b|^\s*(دائما|دائماً|ابدا|أبداً|أبدا|لا ت|يجب|تأكد|استخدم)|^\s*(immer|nie|niemals|nicht|vermeide|stelle sicher|muss|soll)\b/iu;
 
+/** `memoryIds`: the memory the text was taken from first, then the rest of the group. */
 export interface Lesson { key: string; kind: 'rule' | 'skill'; text: string; memoryIds: string[] }
 
 interface Row { id: string; content: string; created_at: string }
@@ -74,12 +81,13 @@ export function findLessons(rows: readonly Row[]): Lesson[] {
     .filter((g) => g.length >= LESSON_REPEATS)
     .map((g) => {
       // The shortest wording says it most plainly.
-      const text = [...g].sort((a, b) => a.content.length - b.content.length || a.id.localeCompare(b.id))[0].content.replace(/\s+/g, ' ').trim();
+      const source = [...g].sort((a, b) => a.content.length - b.content.length || a.id.localeCompare(b.id))[0];
+      const text = source.content.replace(/\s+/g, ' ').trim();
       return {
         key: `lesson:${createHash('sha256').update(g[0].id).digest('hex').slice(0, 16)}`,
         kind: INSTRUCTION.test(text) ? 'rule' as const : 'skill' as const,
         text: [...text].slice(0, RULE_CHARS).join(''),
-        memoryIds: g.map((x) => x.id),
+        memoryIds: [source.id, ...g.filter((x) => x !== source).map((x) => x.id)],
       };
     });
 }
@@ -105,7 +113,8 @@ export async function promoteLessons(userId: string): Promise<LessonProposal[]> 
   for (const l of findLessons(rows)) {
     if (out.length >= MAX_PROPOSALS_PER_RUN) break;
     if (await proposedBefore(userId, l.key)) continue;
-    const why = `Repeated lesson: ${l.memoryIds.length} similar memories in the experience drawer (${l.key})`;
+    // The source ids go with the proposal, so forgetting one of them removes it too (forget.ts).
+    const why = `Repeated lesson: ${l.memoryIds.length} similar memories in the experience drawer (${l.key}; from ${l.memoryIds.slice(0, MAX_SOURCE_IDS).join(' ')})`;
     try {
       if (l.kind === 'rule') {
         const rule = await suggestRule({ text: l.text, when: null, projectId: null, who: 'all', targets: [], paused: false }, null, why);
@@ -115,7 +124,7 @@ export async function promoteLessons(userId: string): Promise<LessonProposal[]> 
         const p = await createChangeProposal({
           userId, agentId, drawer: EXPERIENCE, source: 'learning', createdBy: ACTOR, note: why,
           changes: [{ op: 'add', after: { type: 'skill', importance: 6, content: l.text } }],
-          reasons: ['lesson-promotion', l.key, ...l.memoryIds.slice(0, 10).map((id) => `lesson-from:${id}`)],
+          reasons: ['lesson-promotion', l.key, ...l.memoryIds.slice(0, MAX_SOURCE_IDS).map((id) => `lesson-from:${id}`)],
         });
         out.push({ key: l.key, kind: 'skill', id: p.id, repeats: l.memoryIds.length });
       }

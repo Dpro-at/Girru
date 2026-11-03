@@ -334,8 +334,8 @@ test('weekly summary: deterministic digest per drawer, stubbed model, owner only
 
 test('weekly summary job: in-process, owner-scoped, created once per owner', async () => {
   const created = await J.ensureMemoryJobs();
-  // STORE-MAP-01 P9: with GIRRU_STORE_P9 on, the nightly read-only memory doctor is scheduled too.
-  assert.deepEqual(created.map((j) => j.name), ['memory-weekly-summary-ml-owner', 'memory-retention-ml-owner', 'memory-trash-ml-owner', ...(process.env.GIRRU_STORE_P9 === '1' ? ['memory-doctor-ml-owner'] : [])]);
+  // STORE-MAP-01 P9: with GIRRU_STORE_P9 on, the nightly read-only memory doctor and the weekly quality job are scheduled too.
+  assert.deepEqual(created.map((j) => j.name), ['memory-weekly-summary-ml-owner', 'memory-retention-ml-owner', 'memory-trash-ml-owner', ...(process.env.GIRRU_STORE_P9 === '1' ? ['memory-doctor-ml-owner', 'memory-quality-ml-owner'] : [])]);
   assert.deepEqual(await J.ensureMemoryJobs(), [], 'idempotent');
   const row = db.prepare(`SELECT action_type, action_data, cron_expression FROM cron_jobs WHERE name = 'memory-weekly-summary-ml-owner'`).get();
   assert.equal(row.action_type, 'memory-job');

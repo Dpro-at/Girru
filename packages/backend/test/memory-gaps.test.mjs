@@ -252,7 +252,9 @@ test('4. agent tools: decide a conflict, review a pending link, read its own rep
   assert.ok((await T.memoryReviewDecideTool.execute({ proposal_id: c.id, decision: 'maybe', review_hash: c.reviewHash }, ctx)).error);
   const decided = await T.memoryReviewDecideTool.execute({ proposal_id: c.id, decision: 'keep_new', review_hash: c.reviewHash }, ctx);
   assert.ok(decided.data?.success, decided.error);
-  assert.equal(db.prepare('SELECT content FROM memories WHERE id = ?').get(a.data.memoryId).content, 'The staging server is not online');
+  // STORE-MAP-01 P9 (M4): keep new supersedes the old row; the current fact holds the new text.
+  const cur = (id) => { let r = db.prepare('SELECT content, superseded_by FROM memories WHERE id = ?').get(id); while (r?.superseded_by) r = db.prepare('SELECT content, superseded_by FROM memories WHERE id = ?').get(r.superseded_by); return r; };
+  assert.equal(cur(a.data.memoryId).content, 'The staging server is not online');
   assert.equal(db.prepare('SELECT decision FROM memory_file_proposals WHERE id = ?').get(c.id).decision, 'keep_new');
   assert.ok((await T.memoryReviewDecideTool.execute({ proposal_id: c.id, decision: 'keep_old', review_hash: c.reviewHash }, ctx)).error, 'decided once');
 

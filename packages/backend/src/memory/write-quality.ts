@@ -20,7 +20,8 @@
  *                        every prompt. The owner can still raise it.
  */
 
-import { lexicalTokens } from './text-normalize.js';
+import { lexicalTokens, normalizeArabicLetters } from './text-normalize.js';
+import { detectContradiction } from './contradiction.js';
 
 /** Highest importance a routine save from extraction keeps (8+ would be pinned or factual-forever). */
 export const EXTRACTED_MAX_IMPORTANCE = 7;
@@ -68,8 +69,23 @@ export function splitFacts(text: string): string[] {
 /** A stem with a doubled last consonant ("preferr" from "preferred") compares as the single one. */
 const words = (s: string) => new Set(lexicalTokens(s).map((t) => t.replace(/([b-df-hj-np-tv-z])\1$/, '$1')));
 
-/** True when both texts say the same with the same content words (any order, any form). */
+/** Negation and must/should words: the stop-word list drops them, so they are compared on their own. */
+const POLARITY = new Set([
+  'not', 'no', 'never', 'none', 'nothing', 'nobody', 'dont', 'doesnt', 'didnt', 'isnt', 'arent', 'wasnt', 'werent', 'wont', 'cant', 'cannot', 'without',
+  'must', 'should', 'may', 'might', 'always',
+  'nicht', 'kein', 'keine', 'keinen', 'keiner', 'nie', 'niemals', 'ohne', 'muss', 'soll', 'immer',
+  'لا', 'لم', 'لن', 'ليس', 'ليست', 'مو', 'مش', 'ما', 'ماكو', 'بدون', 'يجب', 'دائما',
+]);
+const polarity = (s: string) => normalizeArabicLetters(String(s ?? '')).toLowerCase().replace(/['’]/g, '')
+  .split(/[^\p{L}\p{N}]+/u).filter((w) => POLARITY.has(w)).sort().join(' ');
+
+/**
+ * True when both texts say the same with the same content words (any order,
+ * any form) AND the same negation and must/should words: "User likes tea"
+ * and "User does not like tea" are never duplicates.
+ */
 export function nearDuplicate(a: string, b: string): boolean {
+  if (polarity(a) !== polarity(b) || detectContradiction(a, b)) return false;
   const ta = words(a);
   const tb = words(b);
   if (ta.size < MIN_DUPLICATE_WORDS || ta.size !== tb.size) return false;

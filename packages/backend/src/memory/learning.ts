@@ -154,9 +154,9 @@ export function classifyLearning(c: LearningCandidate, ctx: LearningContext = {}
   const conflictsWith: string[] = [];
   const norm = normText(text);
 
-  // Already known, word for word (P9, M1: or the same words in another order or form): nothing to save.
+  // Already known, word for word (P9, M1: an extraction with the same words in another order or form): nothing to save.
   const p9 = storeP9Enabled();
-  if (!c.replaces && (ctx.similar || []).some((s) => normText(s.content) === norm || (p9 && nearDuplicate(s.content, text)))) {
+  if (!c.replaces && (ctx.similar || []).some((s) => normText(s.content) === norm || (p9 && c.origin === 'extraction' && nearDuplicate(s.content, text)))) {
     return { kind: 'duplicate', drawer, reasons: [], conflictsWith: [] };
   }
 

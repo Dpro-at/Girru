@@ -88,6 +88,10 @@ const DUPLICATE_CASES = [
   ['User likes tea', 'User likes coffee', false],
   ['User likes tea', 'User does not like tea', false],
   ['Tea', 'tea!', false], // too short for a near-duplicate (word-for-word still catches it)
+  ['Deploys run on Friday evenings', 'Deploys never run on Friday evenings', false],
+  ['The team should merge on Fridays', 'The team merges on Fridays', false],
+  ['Am Freitag wird deployed', 'Am Freitag wird nicht deployed', false],
+  ['المستخدم يشرب القهوة صباحا', 'المستخدم لا يشرب القهوة صباحا', false],
 ];
 
 test('M1 test set: one fact per memory and near-duplicates (pure)', () => {
@@ -273,5 +277,46 @@ test('M7: a versioned project summary; unchanged = no new version; never in ever
   const tiny = { kind: 'project', key: 'tiny' };
   insert(tiny, 'Only one tiny memory here');
   assert.equal(await S.buildProjectSummary(OWNER, tiny), null);
+  off();
+});
+
+test('forget reaches what quality built: lesson rules and proposals, project summaries', async () => {
+  on();
+  const F2 = await load('src/memory/forget.ts');
+  const exp = { kind: 'experience' };
+  const ids = [
+    insert(exp, 'Never deploy the forgetme service on a public holiday', { type: 'insight' }),
+    insert(exp, 'Never deploy the forgetme service on public holidays', { type: 'insight' }),
+    insert(exp, 'Do not deploy the forgetme service on a public holiday ever', { type: 'insight' }),
+    insert(exp, 'The forgetme cache warms up in about ninety seconds', { type: 'insight' }),
+    insert(exp, 'The forgetme cache warms up within ninety seconds', { type: 'insight' }),
+    insert(exp, 'Warming the forgetme cache takes about ninety seconds', { type: 'insight' }),
+  ];
+  const props = await (await load('src/memory/lessons.ts')).promoteLessons(OWNER);
+  const rule = props.find((x) => x.kind === 'rule');
+  const skill = props.find((x) => x.kind === 'skill');
+  assert.ok(rule && skill);
+  const why = db.prepare('SELECT reason FROM agent_rules WHERE id = ?').get(rule.id).reason;
+  assert.ok(ids.slice(0, 3).every((id) => why.includes(id)), 'the rule keeps its source ids');
+  await F2.forgetMemory(OWNER, ids[2], OWNER);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM agent_rules WHERE id = ?').get(rule.id).n, 0, 'the suggested rule goes with a source');
+  await F2.forgetMemory(OWNER, ids[5], OWNER);
+  const p = db.prepare('SELECT status, changes FROM memory_file_proposals WHERE id = ?').get(skill.id);
+  assert.equal(p.status, 'cancelled');
+  assert.doesNotMatch(p.changes, /forgetme/, 'no text kept in the cancelled proposal');
+  // A project summary (current and replaced) goes when a memory it quotes is forgotten.
+  const drawer = { kind: 'project', key: 'forg' };
+  const mids = [];
+  for (let i = 1; i <= 5; i++) mids.push(insert(drawer, `Forg project secret fact number ${i}`, { importance: 0.9 - i / 20 }));
+  await S.runProjectSummaries(OWNER);
+  insert(drawer, 'Forg project fact number six');
+  await S.runProjectSummaries(OWNER);
+  assert.equal((await S.projectSummaryVersions(OWNER, drawer)).length, 2);
+  await F2.forgetMemory(OWNER, mids[0], OWNER);
+  assert.equal((await S.projectSummaryVersions(OWNER, drawer)).length, 0, 'every summary version is gone');
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM memory_versions WHERE user_id = ? AND content LIKE '%secret fact number 1%'").get(OWNER).n, 0);
+  const again = (await S.runProjectSummaries(OWNER)).find((x) => x.drawer === 'project:forg');
+  assert.equal(again.version, 1, 'rebuilt from what is left');
+  assert.doesNotMatch(row(again.memoryId).content, /number 1\b/);
   off();
 });
