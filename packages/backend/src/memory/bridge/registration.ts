@@ -55,7 +55,7 @@ export interface RegistrationPreview {
 }
 
 function readConfig(file: string): { bytes: Buffer | null; mode: number | null; problem?: string } {
-  try { return readRegularFile(file, MAX_CONFIG_BYTES); }
+  try { return readRegularFile(path.dirname(file), path.basename(file), MAX_CONFIG_BYTES); }
   catch (e: any) {
     return e.code === 'ENOENT' ? { bytes: null, mode: null } : { bytes: null, mode: null, problem: 'is unreadable, changed, oversized or not a regular file' };
   }

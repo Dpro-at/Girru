@@ -66,6 +66,8 @@ const off = () => { delete process.env.GIRRU_STORE_P6; };
 const HID = /<!-- girru:id=([A-Za-z0-9_-]+) v=(\d+) -->/g;
 const ids = (text = tasks()) => [...text.matchAll(HID)].map((m) => m[1]);
 const block1 = (no, title, dept = 'Development') => `## ${no} · ${title}\n- State: To do\n- Department: ${dept}\n- Agent:\n- Priority:\n- Worked on by:\n### Done\n### Left\n### Next\n### Log\n`;
+/** The block with a Girru id line right under its heading (the first line). */
+const withIdLine = (block, id) => { const end = block.indexOf('\n') + 1; return `${block.slice(0, end)}<!-- girru:id=${id} v=1 -->\n${block.slice(end)}`; };
 const cardCount = () => db.prepare('SELECT COUNT(*) AS n FROM task_file_cards WHERE project_id = ?').get('p-tf').n;
 const problemsOf = () => JSON.parse(db.prepare('SELECT task_problems FROM agent_rule_files WHERE project_id = ?').get('p-tf').task_problems);
 
@@ -144,7 +146,7 @@ test('P6 on: an unknown or foreign id is refused as a review item; no card is ma
   await tf.syncTasks('p-two');
   const foreign = db.prepare("SELECT card_id FROM task_file_cards WHERE project_id = 'p-two'").get().card_id;
   const base = tasks();
-  writeFileSync(join(folder, '.girru/tasks.md'), `${base}\n${block1('T-8', 'Copied from elsewhere').replace('\n', `\n<!-- girru:id=${foreign} v=1 -->\n`)}\n${block1('T-9', 'Made up').replace('\n', '\n<!-- girru:id=nosuchcard v=1 -->\n')}`);
+  writeFileSync(join(folder, '.girru/tasks.md'), `${base}\n${withIdLine(block1('T-8', 'Copied from elsewhere'), foreign)}\n${withIdLine(block1('T-9', 'Made up'), 'nosuchcard')}`);
   const r = await tf.syncTasks('p-tf');
   assert.equal(r.created, 0);
   assert.equal(cardCount(), 1);
