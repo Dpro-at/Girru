@@ -24,6 +24,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
 import dev.girru.app.lock.Authenticator
+import dev.girru.app.lock.LockPolicy
 import dev.girru.app.lock.SecureWindow
 import dev.girru.app.pairing.PairedComputer
 import dev.girru.app.pairing.PairingMessages
@@ -115,7 +116,7 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
 
     override fun onStart() {
         super.onStart()
-        if (app.lock.onForeground(app.now())) promptedThisForeground = false
+        if (app.lock.onForeground(app.now(), promptStillOpen = auth.isBusy)) promptedThisForeground = false
         render()
     }
 
@@ -129,8 +130,8 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
 
     override fun onStop() {
         super.onStop()
-        // Our own passcode prompt also stops this activity; that is not leaving the app.
-        if (!isChangingConfigurations && !auth.isBusy) app.lock.onBackground(app.now())
+        // Always recorded, also during our own prompt; LockPolicy decides when the prompt ends (fails closed).
+        app.lock.onBackground(app.now())
     }
 
     override fun onDestroy() {
@@ -181,9 +182,25 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
             render()
             return
         }
-        auth.authenticate(getString(R.string.unlock_prompt_title), null) { ok ->
-            if (ok) app.lock.onUnlocked()
+        ask(LockPolicy.Prompt.UNLOCK, getString(R.string.unlock_prompt_title), null) { }
+    }
+
+    /**
+     * Every system prompt goes through here so the lock policy knows one is
+     * open and decides the outcome: an unlock unlocks only on success; a
+     * confirm that is cancelled, fails, or during which the app was stopped
+     * locks the app.
+     */
+    private fun ask(kind: LockPolicy.Prompt, title: String, subtitle: CharSequence?, done: (Boolean) -> Unit) {
+        if (auth.isBusy) {
+            done(false)
+            return
+        }
+        app.lock.onPromptStarted(kind)
+        auth.authenticate(title, subtitle) { ok ->
+            app.lock.onPromptFinished(kind, ok, app.now())
             render()
+            done(ok)
         }
     }
 
@@ -260,7 +277,7 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
         val phoneKey = app.crypto.identityPublicKey() ?: return
         val wish = selectedLifetime()
         // The request carries a signature by the unlock-bound identity key: ask for the unlock now.
-        auth.authenticate(getString(R.string.pair_prompt_title), p.computerName) { ok ->
+        ask(LockPolicy.Prompt.CONFIRM, getString(R.string.pair_prompt_title), p.computerName) { ok ->
             if (ok) sealAndSend(p, phoneKey, wish)
         }
     }
@@ -384,7 +401,7 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
     override fun setRelockSeconds(seconds: Int): Int = (app.setRelock(seconds * 1000L) / 1000).toInt()
 
     override fun confirmSensitive(reason: String, done: (Boolean) -> Unit) {
-        auth.authenticate(getString(R.string.confirm_title), reason, done)
+        ask(LockPolicy.Prompt.CONFIRM, getString(R.string.confirm_title), reason, done)
     }
 
     override fun openScanner(): Boolean {
@@ -408,7 +425,7 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
     }
 
     override fun removePairing(done: (Boolean) -> Unit) {
-        auth.authenticate(getString(R.string.remove_pairing_prompt), null) { ok ->
+        ask(LockPolicy.Prompt.CONFIRM, getString(R.string.remove_pairing_prompt), null) { ok ->
             if (ok) removePairing()
             done(ok)
         }

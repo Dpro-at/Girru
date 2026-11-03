@@ -20,7 +20,12 @@ Protocol: [`packages/relay/PROTOCOL.md`](../../relay/PROTOCOL.md), suite **g1**
   (`BiometricPrompt`). The owner can shorten the re-lock time (immediately,
   15 s, 30 s, 60 s) but can never turn the lock off. App content is hidden in
   recent apps and from screenshots (`FLAG_SECURE`). A phone with no screen
-  lock cannot use Girru: the app asks you to set one.
+  lock cannot use Girru: the app asks you to set one. The lock fails closed:
+  leaving the app always starts the re-lock timer, even while a prompt is
+  open; a fresh check before a sensitive action that is cancelled, fails, or
+  during which the app was stopped locks the app (with the passcode instead of
+  a fingerprint this means unlocking again afterwards); a prompt that vanishes
+  without an answer locks too.
 - **Scan once, stay paired.** You pair once with the code from Settings ›
   Phone on your computer. You choose how long the pairing lasts without use:
   30, 60, 90 or 120 days, or never expires (with a warning). Every use renews
@@ -180,7 +185,10 @@ Lock
 - [ ] Background for longer than the re-lock time → locked; shorter → not.
 - [ ] Recent apps show a blank preview; screenshots are blocked.
 - [ ] A phone without a screen lock gets "Set a screen lock first".
-- [ ] The passcode fallback works; using it does not re-lock the app.
+- [ ] The passcode fallback unlocks the app.
+- [ ] Leave the app (Home) while the unlock prompt is open: it stays locked.
+- [ ] Cancel an `auth.confirm` prompt: the app locks. Confirm with the
+      passcode: the action goes ahead and the app locks afterwards.
 
 Pairing (after MOB-LINK-01, or with the test-build "Continue" button)
 - [ ] A typed code with a wrong `ck`, a repeated field, `ws://` relay, an
