@@ -707,12 +707,37 @@ if CommandLine.arguments.dropFirst().first == "interop" {
     exit(0)
 }
 
+// MARK: - relay hello
+
+func checkRelayHello() throws {
+    let signer = SoftwareIdentitySigner()
+    let relay = "wss://relay.girru.net/v1"
+    let nonce = id32()
+    let challenge: [String: Any] = ["t": "challenge", "v": 1, "relay": relay, "nonce": nonce]
+    let hello = try RelayFrames.hello(challenge: challenge, configured: relay, signer: signer, allow: ["a"])
+    check(hello["t"] as? String == "hello" && hello["v"] as? Int == 1, "hello frame")
+    check(hello["key"] as? String == Base64URL.encode(signer.publicKeySPKI), "hello carries the identity key")
+    check(hello["allow"] as? [String] == ["a"] && (hello["pairing"] as? [String])?.isEmpty == true, "allow list; a phone opens no pairing ids")
+    let sig = Base64URL.decode(hello["sig"] as? String ?? "") ?? Data()
+    check(crypto.verify(signature: sig, message: Data("girru/relay/v1/hello\n\(relay)\n\(nonce)".utf8), publicKeySPKI: signer.publicKeySPKI),
+          "hello signs the relay name and the nonce")
+    var other = challenge
+    other["relay"] = "wss://evil.example/v1"
+    fails(RelayError.wrongRelay, "a challenge from another relay") { _ = try RelayFrames.hello(challenge: other, configured: relay, signer: signer, allow: []) }
+    var short = challenge
+    short["nonce"] = "abc"
+    fails(ProtocolError.badFormat, "a nonce that is not 32 bytes") { _ = try RelayFrames.hello(challenge: short, configured: relay, signer: signer, allow: []) }
+    let msg = RelayFrames.message(["t": "msg", "from": "x", "env": "g1.pchal.a.b"])
+    check(msg?.from == "x" && msg?.env == "g1.pchal.a.b", "msg frame read")
+    check(RelayFrames.message(["t": "drop", "reason": "offline"]) == nil, "only msg frames carry envelopes")
+}
+
 let groups: [(String, () throws -> Void)] = [
     ("base64url", checkBase64), ("crypto", checkCrypto), ("session", checkSession), ("commands", checkCommands),
     ("replay window", checkReplayWindow), ("QR payload", checkPayload), ("pairing messages", checkPairingMessages),
     ("reference vectors", checkReferenceVectors), ("pairing progress", checkPairingProgress), ("session messages + approvals", checkSessionMessages),
     ("pairing lifetime", checkLifetime), ("lock policy", checkLock), ("bridge + navigation", checkBridge), ("notices", checkNotices),
-    ("verified approvals", checkVerifiedApprovals),
+    ("verified approvals", checkVerifiedApprovals), ("relay hello", checkRelayHello),
 ]
 for (name, run) in groups {
     do { try run() } catch {

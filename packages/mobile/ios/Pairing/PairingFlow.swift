@@ -2,12 +2,13 @@ import Foundation
 import LocalAuthentication
 
 /// Carries the pairing messages between the phone and the computer, over the
-/// local network or the relay. Built with the computer connector
-/// (MOB-LINK-01); until then `UnavailablePairingTransport` is used.
+/// local network or the relay (MOB-LINK-01). The relay path is
+/// `RelayPairingLink`; the local network path is not built yet.
 protocol PairingTransport: Sendable {
     /// Sends the sealed `g1.preq`. A retry sends the same text again; the
-    /// computer answers it with the same challenge.
-    func send(request: String, to payload: PairingPayload) async throws
+    /// computer answers it with the same challenge. `signer` proves this
+    /// phone's id to the relay (its hello).
+    func send(request: String, to payload: PairingPayload, signer: IdentitySigner) async throws
     /// The computer's `g1.pchal` for this phone, or nil when none came by
     /// `deadline` (the QR code's `exp`).
     func awaitChallenge(for payload: PairingPayload, until deadline: Date) async throws -> String?
@@ -21,10 +22,12 @@ struct UnavailablePairingTransport: PairingTransport {
     struct NotBuilt: LocalizedError {
         var errorDescription: String? { "This version of Girru cannot reach your computer yet." }
     }
-    func send(request: String, to payload: PairingPayload) async throws { throw NotBuilt() }
+    func send(request: String, to payload: PairingPayload, signer: IdentitySigner) async throws { throw NotBuilt() }
     func awaitChallenge(for payload: PairingPayload, until deadline: Date) async throws -> String? { throw NotBuilt() }
     func awaitWelcome(for payload: PairingPayload) async throws -> String { throw NotBuilt() }
 }
+
+extension RelayPairingLink: PairingTransport {}
 
 /// Pairing steps 2–7 of PROTOCOL.md on the phone side. Runs only while the app
 /// is unlocked, because creating and using the identity key needs the unlock.
@@ -54,7 +57,7 @@ final class PairingFlow: ObservableObject {
     private var signer: IdentitySigner?
     private var task: Task<Void, Never>?
 
-    init(transport: PairingTransport = UnavailablePairingTransport(), store: PairingStore = PairingStore()) {
+    init(transport: PairingTransport = RelayPairingLink(), store: PairingStore = PairingStore()) {
         self.transport = transport
         self.store = store
     }
@@ -104,7 +107,7 @@ final class PairingFlow: ObservableObject {
                 // Signing needs the unlocked identity key, so it happens here, after the unlock.
                 let sealed = try progress.requestText(request, signer: s, crypto: crypto)
                 let p = progress.payload
-                try await transport.send(request: sealed, to: p)
+                try await transport.send(request: sealed, to: p, signer: s)
                 guard let challengeText = try await transport.awaitChallenge(for: p, until: p.expiresAt) else { throw ProtocolError.expired }
                 let code = try progress.receiveChallenge(challengeText, crypto: crypto)
                 self.progress = progress

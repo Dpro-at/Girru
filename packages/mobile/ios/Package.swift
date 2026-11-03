@@ -15,5 +15,7 @@ let package = Package(
     targets: [
         .target(name: "GirruCore", path: "Sources/GirruCore"),
         .executableTarget(name: "CoreChecks", dependencies: ["GirruCore"], path: "Tests/CoreChecks"),
+        // Pairs with a real computer and relay: packages/mobile/tools/pair-harness.mjs.
+        .executableTarget(name: "PairCheck", dependencies: ["GirruCore"], path: "Tests/PairCheck"),
     ]
 )
