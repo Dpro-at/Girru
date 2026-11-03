@@ -2,7 +2,6 @@ package dev.girru.app.crypto
 
 import android.content.Context
 import android.content.pm.PackageManager
-import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
@@ -19,7 +18,7 @@ import javax.crypto.KeyAgreement
 
 /**
  * Identity key in Android Keystore: P-256 (suite g1) for ECDSA signatures and,
- * on Android 12+ (API 31, PURPOSE_AGREE_KEY), for ECDH. StrongBox when the
+ * for ECDH (PURPOSE_AGREE_KEY, API 31; minSdk is 31). StrongBox when the
  * phone has it and the key can be made there, never exportable, usable only
  * for [AUTH_VALIDITY_SECONDS] after the owner unlocks with a strong biometric
  * or the phone's passcode. Creating a key like this needs a secure lock
@@ -27,9 +26,8 @@ import javax.crypto.KeyAgreement
  *
  * ECDH is needed once per pairing: the welcome's notification key is wrapped
  * under ECDH(identity keys) (PROTOCOL.md "Wrapped notification key").
- * Android 10 and 11 have no ECDH in the Keystore, and the private key must
- * never leave it, so those phones cannot finish pairing
- * ([supportsKeyAgreement] is false and the pairing screen says so).
+ * The app needs Android 12 (minSdk 31) because older Keystores have no ECDH
+ * and the private key must never leave the Keystore.
  */
 class KeystorePairingCrypto(
     private val context: Context,
@@ -64,7 +62,7 @@ class KeystorePairingCrypto(
         }
     }
 
-    override fun supportsKeyAgreement(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    override fun supportsKeyAgreement(): Boolean = true
 
     override fun ensureIdentity(): ByteArray {
         identityPublicKey()?.let { existing ->
@@ -116,23 +114,17 @@ class KeystorePairingCrypto(
     fun isHardwareBacked(): Boolean? {
         val key = keyStore.getKey(ALIAS, null) as? PrivateKey ?: return null
         val info = KeyFactory.getInstance(key.algorithm, ANDROID_KEYSTORE).getKeySpec(key, KeyInfo::class.java)
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            info.securityLevel != KeyProperties.SECURITY_LEVEL_SOFTWARE
-        } else {
-            legacyInsideSecureHardware(info)
-        }
+        return info.securityLevel != KeyProperties.SECURITY_LEVEL_SOFTWARE
     }
 
     private fun keyCanAgree(): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
         val key = keyStore.getKey(ALIAS, null) as? PrivateKey ?: return false
         val info = KeyFactory.getInstance(key.algorithm, ANDROID_KEYSTORE).getKeySpec(key, KeyInfo::class.java)
         return (info.purposes and KeyProperties.PURPOSE_AGREE_KEY) != 0
     }
 
     private fun purposes(): Int {
-        val sign = KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) sign or KeyProperties.PURPOSE_AGREE_KEY else sign
+        return KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY or KeyProperties.PURPOSE_AGREE_KEY
     }
 
     /**
@@ -145,28 +137,16 @@ class KeystorePairingCrypto(
             .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
             .setDigests(KeyProperties.DIGEST_SHA256)
             .setUserAuthenticationRequired(true)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            builder.setUserAuthenticationParameters(
-                AUTH_VALIDITY_SECONDS,
-                KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL,
-            )
-        } else {
-            legacyValidity(builder)
-        }
+        builder.setUserAuthenticationParameters(
+            AUTH_VALIDITY_SECONDS,
+            KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL,
+        )
         if (strongBox) builder.setIsStrongBoxBacked(true)
         KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, ANDROID_KEYSTORE).run {
             initialize(builder.build())
             generateKeyPair()
         }
     }
-
-    @Suppress("DEPRECATION")
-    private fun legacyValidity(builder: KeyGenParameterSpec.Builder) {
-        builder.setUserAuthenticationValidityDurationSeconds(AUTH_VALIDITY_SECONDS)
-    }
-
-    @Suppress("DEPRECATION")
-    private fun legacyInsideSecureHardware(info: KeyInfo): Boolean = info.isInsideSecureHardware
 
     companion object {
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"

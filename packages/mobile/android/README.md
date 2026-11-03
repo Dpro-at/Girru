@@ -37,8 +37,8 @@ Protocol: [`packages/relay/PROTOCOL.md`](../../relay/PROTOCOL.md), suite **g1**
 - **Keys stay on the phone.** The identity key is an Android Keystore key
   (StrongBox when the phone has it), never exportable, usable only for 30 s
   after you unlock. It signs and, once per pairing, does ECDH to unwrap the
-  notification key from the welcome; Keystore ECDH needs Android 12 (API 31),
-  so on Android 10 and 11 the pairing screen says pairing needs Android 12. The pairing record, counters and notification key are kept
+  notification key from the welcome. Keystore ECDH needs Android 12 (API 31),
+  so the app needs Android 12 or newer (`minSdk` 31). The pairing record, counters and notification key are kept
   in a file encrypted with a second Keystore key, in no-backup storage; app
   backup and device transfer are off.
 - **Your computer's screens, safely.** The web view only shows pages from one
@@ -119,10 +119,8 @@ Still open, to align with the computer side:
 - **"Never expires" as a wish.** `g1.preq` can only ask for 30/60/90/120 days;
   when the owner picks "Never" on the phone, no wish is sent and the owner
   picks it on the computer at Approve. The welcome's lifetime is final.
-- **Android 10 and 11.** Keystore has no ECDH before API 31 and the identity
-  key never leaves it, so these phones cannot finish pairing. Owner decision:
-  raise `minSdk` to 31, or keep 29 with the "needs Android 12" message
-  (current state).
+- **Android 12 or newer.** Keystore has no ECDH before API 31 and the identity
+  key never leaves it, so `minSdk` is 31 (owner decision, 2026-11-03).
 - **Approval ids.** Approve / Deny buttons appear only for approval ids the
   computer accepts in commands (UUIDs); other notices show without buttons.
 
@@ -201,7 +199,7 @@ advertising-id permission.
    Without it the app builds and runs without push.
 3. `./gradlew :app:testDebugUnitTest` — the JVM tests. They have not been run
    yet.
-4. `./gradlew :app:assembleDebug` and install on a test phone (Android 10+,
+4. `./gradlew :app:assembleDebug` and install on a test phone (Android 12+,
    with a screen lock).
 
 Release signing keys live only on the build machine, never in the repo.
@@ -227,8 +225,7 @@ Pairing (after MOB-LINK-01, or with the test-build "Continue" button)
 - [ ] A code left open past its 2 minutes asks to scan the new code.
 - [ ] Approve on the computer more than 30 s after the phone's unlock: the
       phone shows "Finish pairing", asks for the unlock, then is paired.
-- [ ] Android 12+: the identity key has the agree-key purpose (StrongBox or
-      TEE); Android 10/11 shows "Pairing needs Android 12 or newer".
+- [ ] The identity key has the agree-key purpose (StrongBox or TEE).
 - [ ] Lifetime choice: 30/60/90/120/Never; "Never" shows the warning.
 - [ ] Pairing asks for the unlock, then waits for Approve on the computer.
 - [ ] After approval the computer's lifetime is used; restarting the app does
@@ -260,8 +257,3 @@ Web host
   new code from others), or an approved library. Until then, typing the code
   is the only way in.
 - **Firebase project** for FCM, under the owner's account.
-- **Android 10 support.** On Android 10 the prompt cannot ask for "strong
-  biometric or passcode" together, so it allows weak biometrics; a weak face
-  unlock may then not unlock the identity key and signing would fail. Pairing
-  now also needs Keystore ECDH (Android 12, API 31). Recommended: raise
-  `minSdk` to 31.

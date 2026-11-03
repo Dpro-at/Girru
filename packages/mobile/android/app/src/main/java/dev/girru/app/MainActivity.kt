@@ -533,12 +533,8 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
     }
 
     private fun openScreenLockSettings() {
-        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Intent(Settings.ACTION_BIOMETRIC_ENROLL)
-                .putExtra(Settings.EXTRA_BIOMETRIC_AUTHENTICATORS_ALLOWED, Authenticator.ALLOWED)
-        } else {
-            Intent(Settings.ACTION_SECURITY_SETTINGS)
-        }
+        val intent = Intent(Settings.ACTION_BIOMETRIC_ENROLL)
+            .putExtra(Settings.EXTRA_BIOMETRIC_AUTHENTICATORS_ALLOWED, Authenticator.ALLOWED)
         try {
             startActivity(intent)
         } catch (e: ActivityNotFoundException) {

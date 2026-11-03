@@ -5,7 +5,6 @@ import android.os.Build
 import android.view.WindowManager
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
-import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
 import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
@@ -65,18 +64,8 @@ class Authenticator(private val activity: FragmentActivity) {
     }
 
     companion object {
-        /**
-         * Android 11+: strong biometrics or the passcode, matching the identity key.
-         * Android 10 cannot combine STRONG with DEVICE_CREDENTIAL in the prompt, so
-         * it uses WEAK; on Android 10 a weak face unlock may then not unlock the key
-         * and signing asks again (see README, "Open decisions").
-         */
-        val ALLOWED: Int
-            get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                BIOMETRIC_STRONG or DEVICE_CREDENTIAL
-            } else {
-                BIOMETRIC_WEAK or DEVICE_CREDENTIAL
-            }
+        /** Strong biometrics or the passcode, matching the identity key. */
+        const val ALLOWED: Int = BIOMETRIC_STRONG or DEVICE_CREDENTIAL
     }
 }
 
