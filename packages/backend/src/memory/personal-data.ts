@@ -41,13 +41,30 @@ function luhn(digits: string): boolean {
   return digits.length >= 13 && sum % 10 === 0;
 }
 
-/** Longest text scanned (bounded work on untrusted text). */
+/**
+ * The text is scanned in windows of this size that overlap by WINDOW_OVERLAP
+ * (longer than any single match), so every part of a long text is checked
+ * while each regex run stays bounded on untrusted text.
+ */
 export const MAX_SCAN_CHARS = 16_000;
+const WINDOW_OVERLAP = 400;
+
+function windows(text: string): string[] {
+  if (text.length <= MAX_SCAN_CHARS) return [text];
+  const out: string[] = [];
+  for (let i = 0; i < text.length; i += MAX_SCAN_CHARS - WINDOW_OVERLAP) out.push(text.slice(i, i + MAX_SCAN_CHARS));
+  return out;
+}
 
 /** Which kinds of personal data the text holds (never the values). */
 export function personalDataKinds(text: string): PersonalDataKind[] {
   if (!text) return [];
-  const t = westernDigits(text.slice(0, MAX_SCAN_CHARS));
+  const out = new Set<PersonalDataKind>();
+  for (const w of windows(westernDigits(text))) for (const k of kindsIn(w)) out.add(k);
+  return [...out];
+}
+
+function kindsIn(t: string): PersonalDataKind[] {
   const out = new Set<PersonalDataKind>();
   if (EMAIL.test(t)) out.add('email');
   const iban = IBAN.exec(t);
@@ -70,5 +87,5 @@ const SPECIAL = /\b(health|doctor|diagnos\w*|disease|illness|hospital|therapy|th
 
 /** True when the text is about a special category of personal data (GDPR Art. 9). */
 export function specialCategory(text: string): boolean {
-  return !!text && SPECIAL.test(text.slice(0, MAX_SCAN_CHARS));
+  return !!text && windows(text).some((w) => SPECIAL.test(w));
 }

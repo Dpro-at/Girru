@@ -123,6 +123,11 @@ test('PRIV3: personal data kinds, never values', () => {
   const t0 = performance.now();
   for (const evil of ['1'.repeat(50_000) + 'x', '1 '.repeat(40_000), ('9 Aa '.repeat(20_000)) + '!', 'a@'.repeat(30_000)]) { PD.personalDataKinds(evil); PD.specialCategory(evil); }
   assert.ok(performance.now() - t0 < 1500, `took ${Math.round(performance.now() - t0)} ms`);
+  // A long text is checked to its end (no truncation gap).
+  const pad = 'Notes about the release plan. '.repeat(2_000);
+  assert.deepEqual(PD.personalDataKinds(`${pad} Write to late@example.com`), ['email']);
+  assert.equal(PD.specialCategory(`${pad} He prays every evening.`), true);
+  assert.equal(PD.specialCategory(pad), false);
 });
 
 test('PRIV3/PRIV7: the classifier flags them with P9 on only', () => {
