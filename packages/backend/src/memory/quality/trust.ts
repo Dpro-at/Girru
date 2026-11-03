@@ -14,11 +14,13 @@
  *               (the same source twice counts once). Owner approval lifts it
  *               to at least OWNER_APPROVED. Never above MAX_UNOWNED without
  *               the owner.
- *   verified    owner-stated or owner-approved, or stated by at least two
- *               distinct TRUSTED sources (chat or agent). Tools, imports
+ *   verified    owner-stated or owner-approved, or stated by both TRUSTED
+ *               kinds (a chat extraction AND an agent's save). Repeating one
+ *               kind (more chats, more agents) never verifies; tools, imports
  *               that were not approved and channels never verify a fact on
  *               their own, however often they repeat it (CX11: a poisoned
- *               fact must not gain trust by repetition).
+ *               fact must not gain trust by repetition). Unverified, it stays
+ *               below UNVERIFIED_MAX (never "high").
  *
  * The record is bound to the text by content_hash: after an edit it no longer
  * counts until the new text is captured again (legacyConfidence meanwhile).
@@ -47,6 +49,8 @@ const WEIGHT: Readonly<Record<TrustKind, number>> = {
 export const CORROBORATION_GAIN = 0.5;
 export const OWNER_APPROVED = 0.85;
 export const MAX_UNOWNED = 0.9;
+/** An unverified fact never reaches the "high" band, however many sources repeat it. */
+export const UNVERIFIED_MAX = 0.7;
 /** Kinds that count toward "verified" without the owner. */
 const TRUSTED: ReadonlySet<TrustKind> = new Set(['chat', 'agent']);
 /** Confidence bands shown in recall output. */
@@ -72,8 +76,11 @@ export function trustOf(sources: readonly TrustSource[]): Trust {
   if (approved) c = Math.max(c, OWNER_APPROVED);
   if (!owner && !approved) c = Math.min(c, MAX_UNOWNED);
   c = Math.min(0.99, c);
-  const trusted = [...seen.values()].filter((k) => TRUSTED.has(k)).length;
-  return { confidence: Math.round(c * 1000) / 1000, verified: owner || approved || trusted >= 2, sources: seen.size };
+  // Distinct trusted KINDS, not keys: the same kind repeated is one witness.
+  const trustedKinds = new Set(kinds.filter((k) => TRUSTED.has(k))).size;
+  const verified = owner || approved || trustedKinds >= 2;
+  if (!verified) c = Math.min(c, UNVERIFIED_MAX);
+  return { confidence: Math.round(c * 1000) / 1000, verified, sources: seen.size };
 }
 
 /** A memory written before P9b (no trust record for its text): judged by what it says about itself. */
