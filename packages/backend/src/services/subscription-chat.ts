@@ -1,4 +1,5 @@
 import {launchTrackedSubscription} from './subscription-launcher.js';
+import {launchWindowsSubscription,stopWindowsSubscriptions} from './subscription-launcher-win.js';
 import {findSession,readSession} from '../memory/import/local-agents.js';
 /** Explicit owner-selected CLI sessions; never an agent tool or a channel provider. */
 import fs from 'node:fs/promises';
@@ -8,6 +9,7 @@ import {dataPath} from '../config/data-root.js';
 import {SubscriptionProcesses} from './subscription-processes.js';
 import {minimalChildEnv,safeChildCwd} from '../tools/exec-policy.js';
 import {storeP6Enabled} from './store-p6.js';
+import {storeP7Enabled} from './store-p7.js';
 import {MAX_IMAGE_BYTES,sniffImage} from './chat-images.js';
 export type SubscriptionKind='claude'|'codex'|'gemini';
 export const subscriptionModel=(value:unknown):value is string=>typeof value==='string'&&/^subscription:(?:(?:claude|codex)(?::[a-f0-9]{32})?|gemini)(?:\/[a-z0-9][a-z0-9.-]{0,40})?$/.test(value);
@@ -34,14 +36,19 @@ export function subscriptionProcesses():SubscriptionProcesses{
  return processTracker;
 }
 export async function recoverSubscriptionProcesses():Promise<void>{
+ // SUB2 (P7): on Windows each reply runs in a job that ends with its leader, so there is no journal to recover.
+ if(windowsJobs())return;
  try{await fs.access(dataPath('subscription-processes'));}catch{if(!subscriptionEnabled())return;}
  const result=await subscriptionProcesses().sweepOrphans();
  if(result.skipped)console.warn('[Subscription] Some saved process records could not be safely recovered.');
 }
 export async function stopSubscriptionProcesses():Promise<void>{
  processesStopping=true;
+ if(windowsJobs()){stopWindowsSubscriptions();return;}
  if(processTracker){const result=await processTracker.shutdown();if(result.skipped)console.warn('[Subscription] Some process records need later recovery.');}
 }
+/** SUB2 (P7): Windows replies run through Job Objects (subscription-launcher-win.ts). */
+const windowsJobs=()=>process.platform==='win32'&&storeP7Enabled();
 export const subscriptionEnabled=()=>process.env.DPRO_SUBSCRIPTION_CHAT==='1'&&process.env.AGENT_PLAYER_ISOLATED!=='1'&&!processesStopping;
 /** Where the CLIs are installed. An app opened from the Dock gets a short PATH, so the usual install folders are searched too (CORE-PICKER-01): Homebrew, npm under fnm/nvm/volta. */
 export async function subscriptionSearchDirs(home=os.homedir(),pathEnv=process.env.PATH??''):Promise<string[]>{
@@ -61,7 +68,9 @@ export async function removeChatWorkspace(conversationId:string):Promise<void>{
  if(!CONVERSATION_ID.test(conversationId))return;await fs.rm(path.join(chatWorkspacesRoot(),conversationId.replace(/:/g,'_')),{recursive:true,force:true});
 }
 export async function subscriptionBinary(kind:SubscriptionKind){
- for(const dir of await subscriptionSearchDirs()){const file=path.join(dir,kind==='gemini'?'agy':kind);try{if((await fs.stat(file)).isFile()){await fs.access(file,fs.constants.X_OK);return file;}}catch{}}
+ // SUB2 (P7): on Windows only the program itself (.exe) is started, never a .cmd shim.
+ const name=(kind==='gemini'?'agy':kind)+(windowsJobs()?'.exe':'');
+ for(const dir of await subscriptionSearchDirs()){const file=path.join(dir,name);try{if((await fs.stat(file)).isFile()){if(!windowsJobs())await fs.access(file,fs.constants.X_OK);return file;}}catch{}}
  return null;
 }
 /** CHAT-GAPS-01: images a coding app may see — only files of Girru's own chat-images folder, at most 4 (Codex takes them with -i). */
@@ -96,6 +105,9 @@ export const CLAUDE_IMAGE_STDIN_BYTES=6*200000+4*Math.ceil(MAX_IMAGE_BYTES/3)*4+
  * Only these two fixed strings can ever reach a CLI argument (codex exec -c model_reasoning_effort, claude --effort, agy --effort). */
 const EFFORT:Readonly<Record<string,'low'|'high'>>=Object.freeze({quick:'low',deep:'high'});
 export const subscriptionEffort=(thinking:unknown):'low'|'high'|undefined=>typeof thinking==='string'&&Object.hasOwn(EFFORT,thinking)?EFFORT[thinking]:undefined;
+/** STORE-MAP-01 P7 (G8): Claude Code's own auto memory is untrusted input; in Girru's runs it stays out of the prompt
+ * (it still reaches Girru through the back-flow, as review proposals only). */
+export const untrustedMemoryEnv=(kind:SubscriptionKind):Record<string,string>=>kind==='claude'&&storeP7Enabled()?{CLAUDE_CODE_DISABLE_AUTO_MEMORY:'1'}:{};
 export function subscriptionArgs(kind:SubscriptionKind,nativeId?:string,variant?:string,appToolsOnly=false,readOnly=false,editsOnly=false,addDirs:readonly string[]=[],images:readonly string[]=[],thinking?:unknown){
  const effort=subscriptionEffort(thinking);
  if(kind==='gemini'){if(nativeId)throw Error('session_missing');return ['--input-format','stream-json','--output-format','stream-json','--mode','plan','--sandbox','--disable-slash-commands','--print-timeout','180s',...(variant&&GEMINI_VARIANTS.some(v=>v.id===variant)?['--model',variant]:[]),...(effort?['--effort',effort]:[])];}
@@ -139,12 +151,12 @@ export async function runSubscription(model:string,folder:string,prompt:string,s
  const streamed=imageBlocks.length>0,input=streamed?claudeStreamMessage(prompt,imageBlocks):undefined;
  if(input&&Buffer.byteLength(input,'utf8')>CLAUDE_IMAGE_STDIN_BYTES)throw Error('cli_input_invalid');
  const args=subscriptionArgs(kind,nativeId,subscriptionVariant(model),options.appToolsOnly,options.readOnly,options.editsOnly,options.addDirs,kind==='claude'?imageBlocks.map(b=>b.file):options.images,options.thinking);
- const env=minimalChildEnv({NO_COLOR:'1',TERM:'dumb'});env.PATH=[path.dirname(bin),env.PATH].filter(Boolean).join(path.delimiter);
+ const env=minimalChildEnv({NO_COLOR:'1',TERM:'dumb',...untrustedMemoryEnv(kind)});env.PATH=[path.dirname(bin),env.PATH].filter(Boolean).join(path.delimiter);
  // STORE-MAP-01 P6: Girru is the trusted launcher; the coding app's dpro-memory gets this run's session capability (never a folder path).
  const session=storeP6Enabled()?await import('../memory/bridge/service.js').then(m=>m.launchSession(cwd,kind,options.agentId??null)).catch(()=>null):null;if(session)Object.assign(env,session.env);
  const geminiConfig=kind==='gemini'?await geminiReplyConfig():undefined;
  if(geminiConfig){env.AGY_CLI_DISABLE_AUTO_UPDATE='1';env.AGY_CLI_NONINTERACTIVE_HEADLESS='1';}
- let launched;try{launched=await launchTrackedSubscription(subscriptionProcesses(),bin,args,{cwd:geminiConfig?.dir??cwd,env,...(streamed?{maxInputBytes:CLAUDE_IMAGE_STDIN_BYTES}:{})});}catch(error){await geminiConfig?.cleanup();await session?.end();throw error;}
+ let launched;try{const o={cwd:geminiConfig?.dir??cwd,env,...(streamed?{maxInputBytes:CLAUDE_IMAGE_STDIN_BYTES}:{})};launched=windowsJobs()?await launchWindowsSubscription(bin,args,o):await launchTrackedSubscription(subscriptionProcesses(),bin,args,o);}catch(error){await geminiConfig?.cleanup();await session?.end();throw error;}
  const child=launched.child;
  return new Promise((resolve,reject)=>{
   let output='',bytes=0,failed=false;

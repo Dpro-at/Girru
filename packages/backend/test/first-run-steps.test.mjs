@@ -93,12 +93,38 @@ test('AI tools: installed and signed-in states come from the tools\' own files, 
   mkdirSync(bin, { recursive: true });
   for (const name of ['claude', 'codex', 'npm']) { writeFileSync(join(bin, name), '#!/bin/sh\n'); chmodSync(join(bin, name), 0o755); }
   writeFileSync(join(home, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'x@example.test' } }));
-  const tools = await aiTools({ home, platform: 'darwin', dirs: [bin] });
+  // The Gemini CLI entry as it is with GIRRU_STORE_P7 off (SUB1 below covers it on).
+  const p7 = process.env.GIRRU_STORE_P7; delete process.env.GIRRU_STORE_P7;
+  const tools = await aiTools({ home, platform: 'darwin', dirs: [bin] }).finally(() => { if (p7 !== undefined) process.env.GIRRU_STORE_P7 = p7; });
   const byId = Object.fromEntries(tools.map(t => [t.id, t]));
   assert.deepEqual([byId.claude.installed, byId.claude.signedIn, byId.claude.install], [true, true, null]);
   assert.deepEqual([byId.codex.installed, byId.codex.signedIn, byId.codex.signIn], [true, false, 'codex login']);
   assert.deepEqual([byId.gemini.installed, byId.gemini.install], [false, 'npm install -g @google/gemini-cli']);
   assert.ok(!JSON.stringify(tools).includes('x@example.test'), 'no account detail is returned');
+});
+
+test('SUB1 (GIRRU_STORE_P7): the Google app is Antigravity (agy), signed in by its cached account', async () => {
+  const home = mkdtempSync(join(dir, 'home-agy-')), bin = join(home, 'bin');
+  mkdirSync(join(home, '.gemini'), { recursive: true }); mkdirSync(bin);
+  for (const name of ['gemini', 'npm']) { writeFileSync(join(bin, name), '#!/bin/sh\n'); chmodSync(join(bin, name), 0o755); }
+  writeFileSync(join(home, '.gemini', 'oauth_creds.json'), '{}');
+  const p7Before = process.env.GIRRU_STORE_P7;
+  process.env.GIRRU_STORE_P7 = '1';
+  try {
+    let g = (await aiTools({ home, platform: 'darwin', dirs: [bin] })).find(t => t.id === 'gemini');
+    assert.deepEqual([g.name, g.installed, g.signedIn, g.signIn], ['Antigravity', false, false, 'agy'], 'the old gemini binary no longer counts');
+    writeFileSync(join(bin, 'agy'), '#!/bin/sh\n'); chmodSync(join(bin, 'agy'), 0o755);
+    rmSync(join(home, '.gemini', 'oauth_creds.json'));
+    g = (await aiTools({ home, platform: 'darwin', dirs: [bin] })).find(t => t.id === 'gemini');
+    assert.deepEqual([g.installed, g.signedIn], [true, false]);
+    writeFileSync(join(home, '.gemini', 'google_accounts.json'), JSON.stringify({ active: 'x@example.test', old: [] }));
+    const tools = await aiTools({ home, platform: 'darwin', dirs: [bin] });
+    g = tools.find(t => t.id === 'gemini');
+    assert.deepEqual([g.installed, g.signedIn, g.install], [true, true, null]);
+    assert.ok(!JSON.stringify(tools).includes('x@example.test'), 'no account detail is returned');
+  } finally { delete process.env.GIRRU_STORE_P7; }
+  assert.equal((await aiTools({ home, platform: 'darwin', dirs: [bin] })).find(t => t.id === 'gemini').name, 'Gemini CLI', 'P7 off: unchanged');
+  process.env.GIRRU_STORE_P7 = p7Before ?? ''; if (p7Before === undefined) delete process.env.GIRRU_STORE_P7;
 });
 
 test('local model: recommendation by memory; command installs Ollama first only when missing', async () => {
