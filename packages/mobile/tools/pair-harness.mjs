@@ -10,11 +10,18 @@
 //
 // Run from packages/backend (exit code 0 = paired end to end):
 //   node --import tsx ../mobile/tools/pair-harness.mjs <phone command> [args…]
+//
+// Manual mode, for the simulator or a phone: `--manual` instead of a phone command.
+// The QR text goes to the file GIRRU_QR_OUT (default: printed), the computer's check
+// code is printed, and Allow is chosen only once the file GIRRU_QR_OUT + ".allow"
+// exists (after the owner compared the codes). The computer then stays up for the
+// phone's session until stopped. With GIRRU_RELAY_URL (a wss:// relay such as
+// wss://relay.girru.net/v1) the computer uses that relay instead of a local one.
 // The phone command gets `GIRRU_TEST_CA=<certificate path>` to trust the test relay and
 // `GIRRU_PAIR_OUT=<file>` for commands whose stdout is not passed through (Gradle tests).
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer as createTlsServer } from 'node:tls';
 import { connect as netConnect } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -24,15 +31,17 @@ import { pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
 
 // A path to the phone command is kept from where the harness started; it changes folder below.
-const phoneCommand = process.argv.slice(2).map((a, i) => (i === 0 && a.includes('/') ? resolve(a) : a));
-if (phoneCommand.length === 0) {
+const manual = process.argv[2] === '--manual';
+const phoneCommand = manual ? [] : process.argv.slice(2).map((a, i) => (i === 0 && a.includes('/') ? resolve(a) : a));
+const outsideRelay = process.env.GIRRU_RELAY_URL;
+if (!manual && phoneCommand.length === 0) {
   process.stderr.write('usage: node --import tsx ../mobile/tools/pair-harness.mjs <phone command> [args…]\n');
   process.exit(2);
 }
 
 // The backend dials the relay with Node's own WebSocket, which trusts extra roots only
 // from NODE_EXTRA_CA_CERTS at start: make the certificate, then run again with it.
-if (!process.env.GIRRU_TEST_CA) {
+if (!process.env.GIRRU_TEST_CA && !outsideRelay) {
   const certDir = mkdtempSync(join(tmpdir(), 'girru-pair-ca-'));
   execFileSync('openssl', ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-days', '1',
     '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost', '-addext', 'extendedKeyUsage=serverAuth',
@@ -90,12 +99,17 @@ async function main() {
   const { createRelay } = await import(pathToFileURL(join(relayDir, 'src/relay.ts')).href);
 
   // TLS in front of the relay, as in production; the relay itself listens on 127.0.0.1 only.
-  const tls = createTlsServer({ key: readFileSync(process.env.GIRRU_TEST_KEY), cert: readFileSync(process.env.GIRRU_TEST_CA) });
-  await new Promise((r) => tls.listen(0, '127.0.0.1', r));
-  const relayUrl = `wss://localhost:${tls.address().port}/v1`;
-  const relay = createRelay({ port: 0, relayUrl });
-  const { port } = await relay.listen();
-  tls.on('secureConnection', (s) => { const up = netConnect(port, '127.0.0.1'); s.pipe(up).pipe(s); s.on('error', () => up.destroy()); up.on('error', () => s.destroy()); });
+  let relay = null;
+  let tls = null;
+  let relayUrl = outsideRelay;
+  if (!relayUrl) {
+    tls = createTlsServer({ key: readFileSync(process.env.GIRRU_TEST_KEY), cert: readFileSync(process.env.GIRRU_TEST_CA) });
+    await new Promise((r) => tls.listen(0, '127.0.0.1', r));
+    relayUrl = `wss://localhost:${tls.address().port}/v1`;
+    relay = createRelay({ port: 0, relayUrl });
+    const { port } = await relay.listen();
+    tls.on('secureConnection', (s) => { const up = netConnect(port, '127.0.0.1'); s.pipe(up).pipe(s); s.on('error', () => up.destroy()); up.on('error', () => s.destroy()); });
+  }
 
   const app = await buildServer({ logger: false });
   await app.ready();
@@ -108,12 +122,12 @@ async function main() {
     log(message);
     phone?.kill();
     await phoneLink().stop().catch(() => undefined);
-    await relay.close().catch(() => undefined);
-    tls.close();
+    await relay?.close().catch(() => undefined);
+    tls?.close();
     await app.close().catch(() => undefined);
     process.exit(code);
   };
-  const timer = setTimeout(() => done(1, 'FAIL: timed out'), 120_000);
+  const timer = setTimeout(() => done(1, 'FAIL: timed out'), manual ? 15 * 60_000 : 120_000);
 
   const until = async (fn, what, ms = 20_000) => {
     const end = Date.now() + ms;
@@ -127,8 +141,10 @@ async function main() {
 
   try {
     const p = (await call('POST', '/api/phone/pairing', { path: 'anywhere' })).json();
-    await until(() => relay.stats().pairings >= 1, 'pairing id open on the relay');
+    if (relay) await until(() => relay.stats().pairings >= 1, 'pairing id open on the relay');
+    else await new Promise((r) => setTimeout(r, 2000));
     log(`relay ${relayUrl}, QR open`);
+    if (manual) return await manualPairing(p);
 
     const outFile = join(dir, 'phone-out.txt');
     phone = spawn(phoneCommand[0], [...phoneCommand.slice(1), p.qr], { stdio: ['ignore', 'pipe', 'inherit'], env: { ...process.env, GIRRU_PAIR_OUT: outFile } });
@@ -172,5 +188,22 @@ async function main() {
   } catch (err) {
     clearTimeout(timer);
     await done(1, `FAIL: ${err.message}`);
+  }
+
+  async function manualPairing(p) {
+    const qrOut = process.env.GIRRU_QR_OUT;
+    if (qrOut) writeFileSync(qrOut, p.qr);
+    log(qrOut ? `QR text written to ${qrOut}` : `QR text: ${p.qr}`);
+    const view = await until(async () => { const v = (await call('GET', `/api/phone/pairing/${p.id}`)).json(); return v.state === 'request' && v; }, 'pairing request', 10 * 60_000);
+    log(`a phone asked to pair: "${view.request.name}". Check code on the computer: ${view.request.checkCode}`);
+    const allowFile = `${qrOut ?? join(dir, 'qr.txt')}.allow`;
+    log(`compare it with the phone, then create ${allowFile} to choose Allow`);
+    await until(() => existsSync(allowFile), 'the owner choosing Allow', 10 * 60_000);
+    assert.equal((await call('POST', `/api/phone/pairing/${p.id}/allow`, { lifetimeDays: 30, path: 'anywhere' })).statusCode, 200);
+    const listed = await until(async () => { const d = (await call('GET', '/api/phone')).json().devices ?? []; return d.length > 0 && d; }, 'the phone in the list');
+    clearTimeout(timer);
+    log(`PASS: paired "${listed[0].name}". The computer stays up for the phone's session; stop it with Ctrl+C.`);
+    process.on('SIGINT', () => done(0, 'stopped'));
+    process.on('SIGTERM', () => done(0, 'stopped'));
   }
 }

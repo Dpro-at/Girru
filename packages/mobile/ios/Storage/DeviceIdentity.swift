@@ -54,7 +54,14 @@ enum DeviceIdentity {
     /// Loads the identity, creating it on first use. `context` must already be
     /// evaluated (the app lock does that); otherwise iOS prompts.
     static func loadOrCreate(context: LAContext, store: KeychainStore = .shared) throws -> IdentitySigner {
-        if SecureEnclave.isAvailable {
+        // The simulator can report a Secure Enclave but cannot make a key bound to
+        // user presence in it, so it always takes the software path below.
+        #if targetEnvironment(simulator)
+        let useSecureEnclave = false
+        #else
+        let useSecureEnclave = SecureEnclave.isAvailable
+        #endif
+        if useSecureEnclave {
             // The stored blob is the key wrapped by this phone's Secure Enclave:
             // useless anywhere else, so it needs no extra access control.
             if let blob = try store.get(account: account) {
@@ -70,12 +77,23 @@ enum DeviceIdentity {
             try store.set(key.dataRepresentation, account: account, protection: .whenUnlocked)
             return signer
         }
-        // Simulator only: a software key, readable only with user presence.
-        if let raw = try store.get(account: softwareAccount, context: context) {
+        // No Secure Enclave: a software key, readable only with user presence.
+        // The iOS Simulator cannot make user-presence items (LocalAuthentication
+        // -1020, "not supported on iOS Simulator"), so there, and only there, the
+        // key is readable while the simulator is unlocked. The app lock still
+        // runs; a real iPhone always takes the Secure Enclave path above.
+        #if targetEnvironment(simulator)
+        let protection: KeychainStore.Protection = .whenUnlocked
+        let readContext: LAContext? = nil
+        #else
+        let protection: KeychainStore.Protection = .userPresence
+        let readContext: LAContext? = context
+        #endif
+        if let raw = try store.get(account: softwareAccount, context: readContext) {
             return try SoftwareIdentitySigner(rawPrivateKey: raw)
         }
         let key = SoftwareIdentitySigner()
-        try store.set(key.rawPrivateKey, account: softwareAccount, protection: .userPresence)
+        try store.set(key.rawPrivateKey, account: softwareAccount, protection: protection)
         return key
     }
 

@@ -86,6 +86,9 @@ final class PairingFlow: ObservableObject {
         } catch let e as LocalizedError where e.errorDescription != nil {
             step = .failed(e.errorDescription!)
         } catch {
+            #if DEBUG
+            NSLog("Girru pairing: identity key failed: %@", String(describing: error))
+            #endif
             step = .failed("This iPhone could not create its key. Try again.")
         }
     }

@@ -12,6 +12,9 @@ struct PairingView: View {
     @State private var typing = false
 
     let endReason: PairingEndReason?
+    #if DEBUG
+    @MainActor private static var usedLaunchLink = false
+    #endif
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -31,7 +34,21 @@ struct PairingView: View {
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Theme.background.ignoresSafeArea())
-        .sheet(isPresented: $typing) { CodeEntryView() }
+        #if DEBUG
+        // Development builds only: `-GirruPairLink <girru://pair?…>` at launch is
+        // taken like a scan, so the simulator (no camera) can pair. Used once.
+        .onAppear {
+            guard case .idle = flow.step, let link = UserDefaults.standard.string(forKey: "GirruPairLink"), !Self.usedLaunchLink else { return }
+            Self.usedLaunchLink = true
+            flow.scanned(link, context: lock.context)
+        }
+        #endif
+        .sheet(isPresented: $typing) {
+            CodeEntryView(onPairingLink: { text in
+                typing = false
+                flow.scanned(text, context: lock.context)
+            })
+        }
     }
 
     private var scanStep: some View {
@@ -170,6 +187,10 @@ struct CodeEntryView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var text = ""
     @State private var message: String?
+    /// Development builds only: the full `girru://pair?…` text pasted here is
+    /// taken like a scan, so the simulator (no camera) can pair. Release
+    /// builds never use it.
+    var onPairingLink: (String) -> Void = { _ in }
 
     var body: some View {
         NavigationStack {
@@ -189,6 +210,10 @@ struct CodeEntryView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Continue") {
+                        #if DEBUG
+                        let pasted = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if pasted.hasPrefix("girru://pair?") { return onPairingLink(pasted) }
+                        #endif
                         if PairingCode.normalize(text) == nil {
                             message = "This code has 12 letters and numbers. Check it and try again."
                         } else {
