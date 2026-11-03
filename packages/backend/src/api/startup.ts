@@ -79,6 +79,11 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
     const { syncDepartments } = await import('../services/departments.js');
     await syncDepartments().catch((err) => console.warn('[Store P3] departments backfill failed:', (err as Error)?.message));
   }
+  // STORE-MAP-01 P4 (D7): older coding-app notes into the one handoff table (idempotent; readers use it).
+  if ((await import('../services/store-p4.js')).storeP4Enabled()) {
+    const { copyAppHandoffs } = await import('../memory/bridge/store.js');
+    await copyAppHandoffs().catch((err) => console.warn('[Store P4] handoff notes not copied:', (err as Error)?.message));
+  }
 
   // APPS-06: apps moved to the Girru Store keep their data under their Store table names (once, after a backup).
   try { await (await import('../services/legacy-app-tables.js')).moveLegacyAppTables(); }

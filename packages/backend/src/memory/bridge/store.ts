@@ -6,7 +6,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { q } from '../../repositories/sql-steps.js';
+import { all, one, q, run, sql, type Step } from '../../repositories/sql-steps.js';
+import { storeP4Enabled } from '../../services/store-p4.js';
 import { listProjects, type Project } from '../../repositories/chat-conversations.js';
 import type { HandoffBody } from '../handoff/store.js';
 import { BRIDGE_CLIENTS, type BridgeClient } from './clients.js';
@@ -143,8 +144,11 @@ const MAX_BRIDGE_HANDOFFS = 20;
 
 export async function saveBridgeHandoff(ownerId: string, projectId: string, client: BridgeClient, body: HandoffBody): Promise<BridgeHandoff> {
   const id = randomUUID();
+  const at = now();
   await q.run('INSERT INTO memory_bridge_handoffs (id, owner_id, project_id, client, done, remaining, next_steps, open_questions, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    id, ownerId, projectId, client, JSON.stringify(body.done), JSON.stringify(body.left), JSON.stringify(body.next), JSON.stringify(body.questions), now());
+    id, ownerId, projectId, client, JSON.stringify(body.done), JSON.stringify(body.left), JSON.stringify(body.next), JSON.stringify(body.questions), at);
+  // STORE-MAP-01 P4 (D7): the one handoff table too (same id), so the switch can go off again.
+  if (storeP4Enabled()) await sql().tx(() => copyAppHandoffStep(ownerId, { id, project_id: projectId, client, done: JSON.stringify(body.done), remaining: JSON.stringify(body.left), next_steps: JSON.stringify(body.next), open_questions: JSON.stringify(body.questions), created_at: at }), { immediate: true });
   await q.run(`DELETE FROM memory_bridge_handoffs WHERE owner_id = ? AND project_id = ? AND id NOT IN
     (SELECT id FROM memory_bridge_handoffs WHERE owner_id = ? AND project_id = ? ORDER BY created_at DESC, id DESC LIMIT ${MAX_BRIDGE_HANDOFFS})`, ownerId, projectId, ownerId, projectId);
   return (await latestBridgeHandoff(ownerId, projectId))!;
@@ -154,8 +158,33 @@ const toBridgeHandoff = (r: HandoffRow): BridgeHandoff => ({
   id: r.id, projectId: r.project_id, client: r.client, done: list(r.done), left: list(r.remaining), next: list(r.next_steps), questions: list(r.open_questions), createdAt: r.created_at,
 });
 
+/** P4 (D7): coding-app notes read from the one handoff table, in the old row shape. */
+const APP_ROWS = "SELECT id, owner_id, project_id, client, done, remaining, next_steps, open_questions, created_at FROM agent_handoffs WHERE scope_kind = 'project'";
+const appTable = () => (storeP4Enabled() ? `(${APP_ROWS}) AS h` : 'memory_bridge_handoffs');
+
+/** Inside a transaction: one coding-app note into agent_handoffs (once per id; the next version of its app and project). */
+export function* copyAppHandoffStep(ownerId: string, r: HandoffRow): Step<boolean> {
+  if (yield* one('SELECT 1 AS x FROM agent_handoffs WHERE id = ?', r.id)) return false;
+  const agent = `app:${r.client}`;
+  const v = Number((yield* one<{ v: number | null }>("SELECT MAX(version) AS v FROM agent_handoffs WHERE owner_id = ? AND agent_id = ? AND scope_kind = 'project' AND scope_id = ?", ownerId, agent, r.project_id))?.v ?? 0) + 1;
+  yield* run(`INSERT INTO agent_handoffs (id, owner_id, agent_id, scope_kind, scope_id, project_id, version, done, remaining, next_steps, open_questions, source, client, created_at)
+    VALUES (?, ?, ?, 'project', ?, ?, ?, ?, ?, ?, ?, 'coding_app', ?, ?)`, r.id, ownerId, agent, r.project_id, r.project_id, v, r.done, r.remaining, r.next_steps, r.open_questions, r.client, r.created_at);
+  return true;
+}
+
+/** P4 (D7) backfill: older coding-app notes into the one table, oldest first. Idempotent; returns how many it copied. */
+export async function copyAppHandoffs(): Promise<number> {
+  return sql().tx(function* () {
+    let n = 0;
+    for (const r of yield* all<HandoffRow & { owner_id: string }>('SELECT * FROM memory_bridge_handoffs ORDER BY created_at, id')) {
+      if (yield* copyAppHandoffStep(r.owner_id, r)) n++;
+    }
+    return n;
+  }, { immediate: true });
+}
+
 export async function latestBridgeHandoff(ownerId: string, projectId: string): Promise<BridgeHandoff | undefined> {
-  const r = await q.one<HandoffRow>('SELECT * FROM memory_bridge_handoffs WHERE owner_id = ? AND project_id = ? ORDER BY created_at DESC, id DESC LIMIT 1', ownerId, projectId);
+  const r = await q.one<HandoffRow>(`SELECT * FROM ${appTable()} WHERE owner_id = ? AND project_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`, ownerId, projectId);
   return r ? toBridgeHandoff(r) : undefined;
 }
 
@@ -165,7 +194,7 @@ export async function listBridgeHandoffs(ownerId: string, filter: { projectId?: 
   const params: string[] = [ownerId];
   if (filter.projectId) { where.push('project_id = ?'); params.push(filter.projectId); }
   if (filter.client) { where.push('client = ?'); params.push(filter.client); }
-  const rows = await q.all<HandoffRow>(`SELECT * FROM memory_bridge_handoffs WHERE ${where.join(' AND ')} ORDER BY created_at DESC, id DESC LIMIT ${Math.min(Math.max(1, filter.limit ?? 50), 200)}`, ...params);
+  const rows = await q.all<HandoffRow>(`SELECT * FROM ${appTable()} WHERE ${where.join(' AND ')} ORDER BY created_at DESC, id DESC LIMIT ${Math.min(Math.max(1, filter.limit ?? 50), 200)}`, ...params);
   return rows.map(toBridgeHandoff);
 }
 

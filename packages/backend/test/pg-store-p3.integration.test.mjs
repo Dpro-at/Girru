@@ -134,3 +134,23 @@ test('project keys move to ids and back (PostgreSQL)', { skip }, async () => {
   await m.q.run('DELETE FROM memory_key_state WHERE owner_id = ?', owner);
   await m.q.run('DELETE FROM chat_projects WHERE user_id = ?', owner);
 });
+
+test('P4 (D7): coding-app notes in the one handoff table (PostgreSQL)', { skip }, async () => {
+  const assert = (await import('node:assert/strict')).default;
+  const projects = await import('../src/repositories/chat-conversations.ts');
+  const bridge = await import('../src/memory/bridge/store.ts');
+  const p = await projects.createProject(owner, { name: `Delta ${tag}` });
+  process.env.GIRRU_STORE_P4 = '1';
+  try {
+    const h = await bridge.saveBridgeHandoff(owner, p.id, 'codex', { done: ['x'], left: [], next: [], questions: [] });
+    const [row] = await m.q.all("SELECT scope_kind, source, client, agent_id FROM agent_handoffs WHERE id = ?", h.id);
+    assert.deepEqual({ ...row }, { scope_kind: 'project', source: 'coding_app', client: 'codex', agent_id: 'app:codex' });
+    assert.equal((await bridge.latestBridgeHandoff(owner, p.id)).id, h.id);
+    assert.equal(await bridge.copyAppHandoffs() >= 0, true);
+  } finally {
+    delete process.env.GIRRU_STORE_P4;
+    await m.q.run('DELETE FROM agent_handoffs WHERE owner_id = ?', owner);
+    await m.q.run('DELETE FROM memory_bridge_handoffs WHERE owner_id = ?', owner);
+    await m.q.run('DELETE FROM chat_projects WHERE id = ?', p.id);
+  }
+});
