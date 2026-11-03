@@ -52,7 +52,8 @@
 .phone-side { position:relative; display:flex; flex:none; }
 .phone-side-button { inline-size:30px; block-size:30px; border-radius:7px; display:grid; place-items:center; }
 .phone-side-button[aria-expanded="true"] { color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, transparent); }
-.phone-side .dk-popover { inset-block-start:auto; inset-block-end:calc(100% + 8px); inset-inline-start:0; inset-inline-end:auto; inline-size:300px; padding:16px; border-radius:14px; }
+/* Fixed, not absolute: the sidebar scrolls (overflow:auto) and would cut the popover off. */
+.phone-side .dk-popover { position:fixed; z-index:200; inset-block-start:auto; inset-block-end:80px; inset-inline-start:12px; inset-inline-end:auto; inline-size:300px; padding:16px; border-radius:14px; }
 .phone-connect { display:flex; flex-direction:column; align-items:center; gap:10px; }
 .phone-connect > b { align-self:flex-start; font-size:14px; }
 .phone-connect-text { align-self:flex-start; font-size:12px; color:var(--text-2); line-height:1.5; }
