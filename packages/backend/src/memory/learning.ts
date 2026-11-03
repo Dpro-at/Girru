@@ -78,7 +78,9 @@ export type LearningReason =
   | 'money' | 'credentials' | 'health' | 'legal' | 'permissions' | 'decision'
   | 'conflict' | 'overwrite' | 'low-confidence' | 'outsider' | 'chat' | 'high-importance'
   /** MEM-GAPS-02: the scope's review rules ask for routine facts too. */
-  | 'scope-rule';
+  | 'scope-rule'
+  /** STORE-MAP-01 P6 (SEC2-5): text read from a file inside a project folder (attacker-controlled in a cloned repo). */
+  | 'repository-file';
 
 export interface LearningCandidate {
   content: string;
@@ -400,6 +402,8 @@ export async function learn(input: LearnInput): Promise<LearnOutcome> {
       .map((r) => ({ id: r.memory.id, content: r.memory.content, similarity: textSimilarity(content, r.memory.content) }));
     const cls = classifyLearning({ ...c, content, type, drawer }, { similar });
     if (input.review && cls.kind === 'routine') { cls.kind = 'important'; cls.reasons.push(input.reviewReason ?? 'chat'); }
+    // SEC2-5: text from a repository file always carries its label, whatever else it is about.
+    else if (input.review && input.reviewReason === 'repository-file' && !cls.reasons.includes('repository-file')) cls.reasons.push('repository-file');
     // MEM-GAPS-02: the scope's review rules (owner accounts; a chat the owner reviews always asks).
     const rules = ownerReview && !input.review ? await rulesForDrawer(input.userId, drawer) : null;
     if (rules && cls.kind === 'routine' && rules.routine === 'ask') { cls.kind = 'important'; cls.reasons.push('scope-rule'); }

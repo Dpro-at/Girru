@@ -15,7 +15,10 @@ import { nowText } from '../../db/pg/dialect.js';
 
 export const CAPABILITY_HEADER = 'x-girru-capability';
 export const CAPABILITY_ENV = 'GIRRU_SESSION_CAPABILITY';
-export const CAPABILITY_SCOPES = ['brief:read', 'memory:read', 'memory:propose', 'handoff:write'] as const;
+export const CAPABILITY_SCOPES = ['brief:read', 'memory:read', 'memory:propose', 'handoff:write', 'company:read'] as const;
+/** What a session Girru starts for a coding app may do (P6); `company:read` only where the owner allowed it. */
+export const LAUNCH_SCOPES: readonly CapabilityScope[] = ['brief:read', 'memory:read', 'memory:propose', 'handoff:write'];
+export const LAUNCH_TTL_MS = 4 * 60 * 60 * 1000;
 export type CapabilityScope = (typeof CAPABILITY_SCOPES)[number];
 
 /** The scope each dpro-memory tool needs. */
@@ -119,4 +122,15 @@ export async function listCapabilities(ownerId: string, projectId?: string): Pro
     return { id: r.id, ownerId: r.owner_id, actorId: r.actor_id, actorRole: r.actor_role, projectId: r.project_id, scopes,
       client: r.client ?? null, expiresAt: r.expires_at, revokedAt: r.revoked_at ?? null, createdAt: String(r.created_at) };
   });
+}
+
+/**
+ * STORE-MAP-01 P6: the trusted launcher's capability for one coding-app run
+ * in one of the owner's projects (the caller resolves the project from
+ * Girru's own records, never from the coding app). The company's pinned facts
+ * are added only where the owner allowed them.
+ */
+export async function launchCapability(ownerId: string, projectId: string, client: string | null, companyFacts: boolean): Promise<{ token: string; capability: Capability }> {
+  return issueCapability({ ownerId, actorId: ownerId, actorRole: 'owner', projectId, client,
+    scopes: companyFacts ? [...LAUNCH_SCOPES, 'company:read'] : LAUNCH_SCOPES, ttlMs: LAUNCH_TTL_MS });
 }

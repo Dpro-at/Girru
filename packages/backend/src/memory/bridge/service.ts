@@ -26,10 +26,11 @@ import { createHash } from 'node:crypto';
 import { applyRegistration, previewRegistration, RegistrationError, undoRegistration } from './registration.js';
 import { runBackflow, type BackflowResult } from './backflow.js';
 import { ensureToken, revokeToken, tokenMatches, checkSessionProof } from './auth.js';
-import { CapabilityError, requireScope, verifyCapability, type Capability } from './capability.js';
+import { CapabilityError, launchCapability, requireScope, revokeCapability, verifyCapability, type Capability } from './capability.js';
 import { isPilotProject } from '../outbox/pilot.js';
+import { storeP6Enabled } from '../../services/store-p6.js';
 import {
-  allFolderSettings, audit, auditLog, bridgeOwner, clientEnabled, clientStates, folderSettings, lastCalls, listRegistrations, patchFolder,
+  allFolderSettings, audit, auditLog, bridgeOwner, setCompanyFacts, clientEnabled, clientStates, folderSettings, lastCalls, listRegistrations, patchFolder,
   projectForFolder, saveBridgeHandoff, setClientEnabled,
 } from './store.js';
 
@@ -118,8 +119,14 @@ export async function filesApply(ownerId: string, projectId: unknown, input: { p
   return result;
 }
 
-export async function setFolder(ownerId: string, projectId: unknown, patch: { filesEnabled?: unknown; backflowEnabled?: unknown; gitExclude?: unknown }, actor = 'owner') {
+export async function setFolder(ownerId: string, projectId: unknown, patch: { filesEnabled?: unknown; backflowEnabled?: unknown; gitExclude?: unknown; companyFacts?: unknown }, actor = 'owner') {
   const p = await ownProject(ownerId, projectId);
+  // P6 (SEC2-1): the owner decides per project whether company facts reach coding tools.
+  if (storeP6Enabled() && patch?.companyFacts !== undefined) {
+    if (typeof patch.companyFacts !== 'boolean') throw new BridgeError('companyFacts must be true or false');
+    await setCompanyFacts(ownerId, p.id, patch.companyFacts);
+    await audit(ownerId, 'folder-settings', { projectId: p.id, note: `${JSON.stringify({ companyFacts: patch.companyFacts })} by ${actor}` });
+  }
   const next: { filesEnabled?: boolean; backflowEnabled?: boolean; gitExclude?: boolean } = {};
   for (const k of ['filesEnabled', 'backflowEnabled', 'gitExclude'] as const) {
     if (patch?.[k] === undefined) continue;
@@ -343,21 +350,29 @@ export async function mcpCall(c: unknown, token: unknown, cwd: unknown, tool: un
     project = (await findProject(ownerId, cap.projectId)) ?? null;
     if (!project) throw new BridgeError('The project of this session no longer exists', 404, 'unknown_project');
     if (folderProject && folderProject.id !== project.id) throw new BridgeError('This folder belongs to another project than this session', 403, 'capability_project_mismatch');
-  } else if (folderProject && isPilotProject(folderProject.id)) {
+  } else if (storeP6Enabled() || (folderProject && isPilotProject(folderProject.id))) {
+    // P6 (SEC2-1): no project is opened by a folder path alone, known or not.
     throw new BridgeError('This project needs a session started from Girru', 403, 'capability_required');
   }
   if (!project) throw new BridgeError('Girru does not know this folder. Add it as a project folder in Girru first.', 404, 'unknown_folder');
   const a = args && typeof args === 'object' && !Array.isArray(args) ? args : {};
+  const p6 = storeP6Enabled() && !!cap;
+  // P6: company facts only where the owner allowed them (the capability carries it).
+  const company = !p6 || cap!.scopes.includes('company:read');
   // Reads are logged too (tool name only, never the query), so the owner sees which app used the memory and when.
-  if (tool !== 'memory_propose' && tool !== 'handoff_write') await audit(ownerId, 'mcp-read', { client: cl, projectId: project.id, note: tool });
+  // P6 read log (ENC-01 with CX5): the session's id goes with it, ids only.
+  if (tool !== 'memory_propose' && tool !== 'handoff_write') {
+    if (p6) await readVolumeCheck(ownerId, cl, project.id, cap!.id);
+    await audit(ownerId, 'mcp-read', { client: cl, projectId: project.id, note: p6 ? `${tool} session:${cap!.id}` : tool });
+  }
 
   switch (tool as McpTool) {
     case 'project_brief': {
-      const b = await projectBrief(ownerId, project);
+      const b = await projectBrief(ownerId, project, company);
       return { text: briefMarkdown(b), data: { project: { id: project.id, name: b.name }, facts: b.facts.length, memories: b.memories.length, handoff: !!b.handoff } };
     }
     case 'pinned_facts': {
-      const facts = await pinnedFacts(ownerId, project);
+      const facts = await pinnedFacts(ownerId, project, company);
       return { text: facts.length ? facts.map((f) => `- ${f.content}`).join('\n') : 'The owner has not pinned facts for this project yet.', data: { facts } };
     }
     case 'latest_handoff': {
@@ -369,7 +384,8 @@ export async function mcpCall(c: unknown, token: unknown, cwd: unknown, tool: un
       if (!query) throw new BridgeError('query is required');
       const limit = Math.min(Math.max(1, Number.isInteger(a.limit) ? (a.limit as number) : 8), 20);
       const hits = await getMemoryStorage().search({ userId: ownerId, query, drawers: [projectDrawer(project)], limit } as any);
-      const results = hits.slice(0, limit).map((h) => ({ id: h.memory.id, content: clean(h.memory.content), score: Number(h.similarity.toFixed(3)) }));
+      let results = hits.slice(0, limit).map((h) => ({ id: h.memory.id, content: clean(h.memory.content), score: Number(h.similarity.toFixed(3)) }));
+      if (p6) results = capAnswer(results);
       return { text: results.length ? results.map((r) => `- ${r.content}`).join('\n') : 'Nothing found in this project.', data: { results } };
     }
     case 'project_design': {
@@ -399,4 +415,64 @@ export async function mcpCall(c: unknown, token: unknown, cwd: unknown, tool: un
       return { text: 'Handoff saved. The next agent in this project, of any brand, starts from it.', data: { handoffId: h.id } };
     }
   }
+}
+
+// --- STORE-MAP-01 P6: session capability for every project (CX5, SEC2-1, SEC2-2) ---
+
+/** SEC2-2: a search answer never exceeds this many characters, however many hits there are. */
+export const MAX_SEARCH_ANSWER_CHARS = 6000;
+/** SEC2-2: more reads than this in one minute from one session are refused and raise one notice. */
+export const MAX_READS_PER_MINUTE = 30;
+
+/** Keep whole results, best first, until the answer cap. */
+export function capAnswer<T extends { content: string }>(results: T[], max = MAX_SEARCH_ANSWER_CHARS): T[] {
+  const out: T[] = [];
+  let used = 0;
+  for (const r of results) {
+    if (used + r.content.length > max) break;
+    used += r.content.length;
+    out.push(r);
+  }
+  return out;
+}
+
+const readWindows = new Map<string, number[]>();
+/** Unusual volume (SEC2-2): count a session's reads per minute; over the limit = refused + one audit notice. */
+async function readVolumeCheck(ownerId: string, cl: BridgeClient, projectId: string, sessionId: string): Promise<void> {
+  const now = Date.now();
+  const recent = (readWindows.get(sessionId) ?? []).filter((t) => now - t < 60_000);
+  if (recent.length >= MAX_READS_PER_MINUTE) {
+    // One notice per window: only the first refused read writes it.
+    if (recent.length === MAX_READS_PER_MINUTE) await audit(ownerId, 'mcp-volume', { client: cl, projectId, note: `session:${sessionId} over ${MAX_READS_PER_MINUTE} reads a minute` });
+    recent.push(now);
+    readWindows.set(sessionId, recent);
+    throw new BridgeError('Too many memory reads from this session; wait a minute', 429, 'too_many_reads');
+  }
+  recent.push(now);
+  readWindows.set(sessionId, recent);
+  if (readWindows.size > 500) for (const [k, v] of readWindows) if (!v.some((t) => now - t < 60_000)) readWindows.delete(k);
+}
+
+/** Test seam: forget the per-session read counts. */
+export function resetReadVolume(): void { readWindows.clear(); }
+
+const SUBSCRIPTION_CLIENT: Record<string, BridgeClient> = { claude: 'claude-code', codex: 'codex', gemini: 'antigravity' };
+
+/**
+ * The trusted launcher (P6): before Girru starts a coding app in `folder`, it
+ * issues a session capability for the owner's project of that folder and
+ * hands it to the process as GIRRU_SESSION_CAPABILITY. The project is found
+ * from Girru's own project list (real paths); a folder that is no project gets
+ * nothing. The capability is revoked when the run ends. Null while P6 is off.
+ */
+export async function launchSession(folder: string, kind: string): Promise<{ env: Record<string, string>; end: () => Promise<void> } | null> {
+  if (!storeP6Enabled()) return null;
+  const ownerId = await bridgeOwner();
+  if (!ownerId) return null;
+  const project = await projectForFolder(ownerId, folder);
+  if (!project) return null;
+  const f = await folderSettings(ownerId, project.id);
+  const { token, capability } = await launchCapability(ownerId, project.id, SUBSCRIPTION_CLIENT[kind] ?? null, !!f.companyFacts);
+  await audit(ownerId, 'session-start', { client: SUBSCRIPTION_CLIENT[kind] ?? null, projectId: project.id, note: `session:${capability.id}` });
+  return { env: { GIRRU_SESSION_CAPABILITY: token }, end: async () => { await revokeCapability(ownerId, capability.id).catch(() => false); } };
 }

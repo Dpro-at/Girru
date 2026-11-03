@@ -24,6 +24,7 @@ import type { Project } from '../../repositories/chat-conversations.js';
 import { redactImportText } from '../import/redact.js';
 import { chunkMarkdown } from '../import/pipeline.js';
 import { learn } from '../learning.js';
+import { storeP6Enabled } from '../../services/store-p6.js';
 import { projectDrawer } from './brief.js';
 import { claudeProjectDir, type BridgeClient } from './clients.js';
 import { outsideManaged, MAX_MANAGED_FILE_BYTES } from './managed-files.js';
@@ -84,7 +85,8 @@ export async function runBackflow(ownerId: string, project: Project, opts: { hom
       const h = sha(norm(content));
       if (seen.has(h)) continue;
       if (out.proposed >= MAX_BACKFLOW_PROPOSALS) return out;
-      const r = await learn({ userId: ownerId, actor: `bridge:${src.client}`, review: true,
+      // P6 (SEC2-5): labelled "from a repository file", never routine and never decided by a rule.
+      const r = await learn({ userId: ownerId, actor: `bridge:${src.client}`, review: true, ...(storeP6Enabled() ? { reviewReason: 'repository-file' as const } : {}),
         candidates: [{ content, type: 'fact', importance: 5, drawer: projectDrawer(project), origin: 'extraction' }] });
       const proposal = r.proposed[0];
       if (proposal) {

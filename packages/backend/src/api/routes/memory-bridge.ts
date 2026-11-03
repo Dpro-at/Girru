@@ -31,6 +31,7 @@ import { findProject } from '../../repositories/chat-conversations.js';
 import { projectScope } from '../../memory/outbox/events.js';
 import { runBriefProjection, syncStatus } from '../../memory/outbox/projection.js';
 import { isPilotProject } from '../../memory/outbox/pilot.js';
+import { storeP6Enabled } from '../../services/store-p6.js';
 import { storeP2Enabled } from '../../services/agent-context/switch.js';
 import { storeP3Enabled } from '../../services/store-p3.js';
 
@@ -76,7 +77,8 @@ export async function memoryBridgeRoutes(fastify: FastifyInstance) {
   const pilotProject = async (o: string, id: string) => {
     const p = await findProject(o, id);
     if (!p) throw new BridgeError('Not found', 404, 'not_found');
-    if (!isPilotProject(p.id)) throw new BridgeError('This project is not in the storage pilot', 409, 'not_pilot');
+    // P6 rolls the change log and the brief projection out to every project.
+    if (!isPilotProject(p.id) && !storeP6Enabled()) throw new BridgeError('This project is not in the storage pilot', 409, 'not_pilot');
     return p;
   };
   fastify.post('/api/memory-bridge/projects/:projectId/capabilities', { config }, asOwner(async (o, r) => {

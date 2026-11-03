@@ -42,8 +42,8 @@ export const projectDrawer = (p: Pick<Project, 'id' | 'slug'>): DrawerRef => ({ 
  * project (an archived project: company only). Company facts are the owner's
  * rules for all work, so a coding agent in this folder gets them too.
  */
-export async function pinnedFacts(ownerId: string, project: Pick<Project, 'id' | 'slug'>): Promise<PinnedFact[]> {
-  const r = await pinnedFactsForReply(ownerId, projectKeyOf(project));
+export async function pinnedFacts(ownerId: string, project: Pick<Project, 'id' | 'slug'>, company = true): Promise<PinnedFact[]> {
+  const r = await pinnedFactsForReply(ownerId, projectKeyOf(project), { company, project: true });
   return r.facts.map((f) => ({ id: f.id, scope: f.scope, content: clean(f.text) })).filter((f) => f.content);
 }
 
@@ -75,10 +75,10 @@ export async function projectHandoff(ownerId: string, projectId: string): Promis
   return ts(b.createdAt) >= ts(a.createdAt) ? b : a;
 }
 
-export async function projectBrief(ownerId: string, project: Project): Promise<ProjectBrief> {
+export async function projectBrief(ownerId: string, project: Project, company = true): Promise<ProjectBrief> {
   return {
     projectId: project.id, name: clean(project.name, 80), slug: project.slug,
-    facts: await pinnedFacts(ownerId, project), memories: await approvedMemories(ownerId, project), handoff: await projectHandoff(ownerId, project.id),
+    facts: await pinnedFacts(ownerId, project, company), memories: await approvedMemories(ownerId, project), handoff: await projectHandoff(ownerId, project.id),
   };
 }
 
