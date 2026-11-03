@@ -146,6 +146,13 @@ Rules on the computer while a QR code is open:
 - The phone's device id as seen on the way in (the `from` the relay stamps, or
   the local session's peer) must equal SHA-256 of the `key` in the request.
 - An expired QR code (`exp` passed) accepts nothing.
+- **A shown QR code renews itself every 2 minutes.** While the pairing screen
+  is open, the computer makes a new pairing id, secret and `exp` (2 minutes
+  ahead) every 2 minutes and closes the old pairing id on the relay at once;
+  the screen shows how long the current code has left. A photo of an older
+  code is then useless. A phone that has already sent its pairing request
+  keeps going: the computer finishes that pairing even if the code on screen
+  renewed meanwhile. Closing the screen closes the current pairing id.
 
 ### QR code
 
