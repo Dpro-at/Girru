@@ -117,6 +117,16 @@ before Girru is removed → `{ undone: [{ id, client, mode }], failed }`; only G
 leaves each file. Tool configs are written through the safe file writer, so a linked
 config is refused.
 
+### Agent file for Claude Code (owner only, `GIRRU_STORE_P7`)
+| Route | Body / answer |
+|---|---|
+| `GET /api/agents/:id/user-export?tool=claude-code` | `{ agentId, tool, file, action: create\|update\|unchanged\|conflict, reason, text, previewHash }`; writes nothing |
+| `POST /api/agents/:id/user-export` | `{ tool?, previewHash, confirm: true }` → the same answer after the write. `409 preview_stale` or `conflict`, `400 confirm_required` |
+| `DELETE /api/agents/:id/user-export?tool=claude-code` | `{ removed, file }`; `409 not_girru` when the file is not Girru's copy of this agent |
+
+The file is `~/.claude/agents/girru-<name>.md` in the user's home, never in a project. A
+file without Girru's marker line (or with another agent's) is never changed or removed.
+
 ### Tasks from the project's task file (owner only, `GIRRU_STORE_P7`)
 | Route | Body / answer |
 |---|---|

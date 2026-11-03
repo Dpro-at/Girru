@@ -205,6 +205,14 @@ The same switch adds **the project folder layout in one step**: a dry run lists 
 
 Tasks that arrive from `.girru/tasks.md` are treated as untrusted. An agent may plan such a task, but until the owner approves the project once, every tool that changes something asks first, and a scheduled run of the task does not start. Rules never come from the file: the task's text reaches the agent as data only.
 
+With the same switch:
+
+- **The brief explains the work:** the task file's format and ids, when to read `project_brief` and `latest_handoff` again (a new session, after a break, taking over), and when to call `handoff_write`. It also lists the project's topics (its topic keys and the topics the memory graph finds) by title only, in a stable order and with a size limit; agents get the details with `memory_search`. This text is in the brief file and the MCP answer, never in a chat prompt.
+- **Private memory stays out of files:** the brief is built only from pinned facts of the company, a department or this project, and from this project's memories. Anything from the owner's own drawer, People or another project stops the write.
+- **Agent file for Claude Code (optional):** an agent can be copied to `~/.claude/agents/girru-<name>.md` in the user's home, never into a project. The owner sees a preview first. The file holds the agent's name, description, personality and instructions, never permissions, memory or keys. Girru replaces or removes only files that carry its own marker line. Routes: `GET`, `POST` and `DELETE /api/agents/:id/user-export`.
+- **Antigravity:** first-run setup looks for the Antigravity CLI (`agy`) instead of the Gemini CLI.
+- **Claude Code's own auto memory** is untrusted input: runs that Girru starts switch it off, and what Claude Code writes there reaches Girru only as review proposals.
+
 ### One agent context and one Girru section (off by default)
 
 `GIRRU_STORE_P2=1` turns on, for every agent:
