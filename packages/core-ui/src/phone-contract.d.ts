@@ -1,0 +1,10 @@
+export const PHONE_PATH: '/api/phone';
+export const PHONE_APP_LINK: string;
+export const PHONE_PATHS: readonly ['anywhere', 'wifi'];
+export const PHONE_LIFETIMES: readonly [30, 60, 90, 120, null];
+export const PAIRING_ID: RegExp;
+export function phoneName(x: unknown): x is string;
+export function relayUrl(x: unknown): x is string;
+export function phoneRoute(path: string): boolean;
+export function allowedPhone(method: string, path: string, body: unknown): boolean;
+export function phoneResponse(path: string, status: number, body: unknown): Record<string, unknown>;

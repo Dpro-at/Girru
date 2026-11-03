@@ -51,6 +51,7 @@ import { allowedBackups, backupsRoute, backupsResponse } from './backups-contrac
 import { allowedChartPrefs, chartPrefsRoute, chartPrefsResponse } from './chart-prefs-contract.js';
 import { allowedDepartments, departmentsRoute, departmentsResponse } from './departments-contract.js';
 import { allowedFirstRun, firstRunRoute, firstRunResponse } from './first-run-contract.js';
+import { allowedPhone, phoneRoute, phoneResponse } from './phone-contract.js';
 import { allowedAgentRules, agentRulesRoute, agentRulesResponse } from './agent-rules-contract.js';
 import { allowedOrg, orgRoute, orgResponse } from './org-contract.js';
 import { allowedLibrary as allowedAgentLibrary, libraryRoute as agentLibraryRoute, libraryResponse as agentLibraryResponse } from './agent-library-contract.js';
@@ -140,6 +141,7 @@ export function allowedRequest(method: string, path: string, body?: unknown): bo
   if (departmentsRoute(path)) return allowedDepartments(method, path, body);
   if (meetingsRoute(path)) return allowedMeetings(method, path, body);
   if (firstRunRoute(path)) return allowedFirstRun(method, path, body);
+  if (phoneRoute(path)) return allowedPhone(method, path, body);
   if (agentRulesRoute(path)) return allowedAgentRules(method, path, body);
   if (orgRoute(path)) return allowedOrg(method, path, body);
   if (agentLibraryRoute(path)) return allowedAgentLibrary(method, path, body);
@@ -239,6 +241,7 @@ function projectResponse(path: string, response: WireResponse): WireResponse {
   if (departmentsRoute(path)) return { status: response.status, body: departmentsResponse(response.status, response.body) };
   if (meetingsRoute(path)) return { status: response.status, body: meetingsResponse(path, response.status, response.body) };
   if (firstRunRoute(path)) return { status: response.status, body: firstRunResponse(path, response.status, response.body) };
+  if (phoneRoute(path)) return { status: response.status, body: phoneResponse(path, response.status, response.body) };
   if (agentRulesRoute(path)) return { status: response.status, body: agentRulesResponse(path, response.status, response.body) };
   if (orgRoute(path)) return { status: response.status, body: orgResponse(path, response.status, response.body) };
   if (agentLibraryRoute(path)) return { status: response.status, body: agentLibraryResponse(path, response.status, response.body) };
@@ -558,6 +561,7 @@ export class SessionClient {
     if (request.method === 'POST' && request.path.startsWith('/api/memory/') && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if ((personalityRoute(request.path) || cardRoute(request.path) || (request.method === 'DELETE' && !conversationRoute(request.path) && !chatSecretsRoute(request.path))) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if (orgRoute(request.path) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
+    if (phoneRoute(request.path) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if (agentLibraryRoute(request.path) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if (((request.method === 'POST' && request.path === '/api/agents') || grantsAgentId(request.path) || request.path === CATALOGUE_PATH || request.path === PLAN_PATH || request.path === DISTRIBUTION_PATH || request.path === BATCHES_PATH || batchPath(request.path) || permissionsAgentId(request.path) || request.path === BOARDS_PATH || request.path.startsWith(`${BOARDS_PATH}/`)) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     const epoch = this.#state.epoch;

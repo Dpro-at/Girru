@@ -166,6 +166,11 @@ test('source boundary: only injected session transport may network; no browser s
       assert.deepEqual(source.match(/https:\/\/[^']+/g), ['https://ollama.com/download']);
       source = source.replace(/https:\/\/[^']+/g, 'download-page');
     }
+    if (name === 'phone-contract.js') {
+      // MOB-PAIR-01: the page where the owner gets the phone app (a user-opened link, never a transport target).
+      assert.deepEqual(source.match(/https:\/\/[^']+/g), ['https://girru.dev/app']);
+      source = source.replace(/https:\/\/[^']+/g, 'app-page');
+    }
     if (name === 'entry-client.ts') assertEntryBinding(source);
     else if (name !== 'session.ts') assert.doesNotMatch(source, /\bfetch\b|https?:\/\//, name);
     else { assert.match(source, /fetcher: typeof fetch/); assert.doesNotMatch(source, /\bfetch\s*\(/); }
