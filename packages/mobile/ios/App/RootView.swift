@@ -39,7 +39,8 @@ struct RootView: View {
             hasUnlocked = true
             Task { await model.sendPendingDecision() }
         }
-        .sheet(isPresented: Binding(get: { bridge.scannerOpen }, set: { if !$0 { bridge.finishScan(nil) } })) {
+        // Never shown over the lock; locking also ends the scan (WebBridge).
+        .sheet(isPresented: Binding(get: { bridge.scannerOpen && lock.isUnlocked }, set: { if !$0 { bridge.finishScan(nil) } })) {
             ScannerSheet { bridge.finishScan($0) }
         }
         .overlay(alignment: .bottom) {

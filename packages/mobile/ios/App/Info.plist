@@ -43,13 +43,6 @@
 	<string>Girru uses Face ID to unlock the app and to confirm sensitive actions.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Girru connects straight to your computer when both are on the same network.</string>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<!-- Only the owner's own network is allowed without TLS; content there
-		     is protected by the end-to-end layer, not by the transport. -->
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-	</dict>
 	<key>GirruKeychainGroup</key>
 	<string>$(AppIdentifierPrefix)$(GIRRU_KEYCHAIN_GROUP)</string>
 </dict>

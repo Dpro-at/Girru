@@ -1,12 +1,11 @@
 import Foundation
 
 /// What the computer's QR code carries (Settings › Phone), PROTOCOL.md
-/// "Pairing" step 1. PROTOCOL.md lists the contents but not the text form;
-/// the URI below is this app's proposal for it (see README):
+/// "QR code":
 ///
 ///     girru://pair?v=1&cid=<computer device id>&ck=<computer SPKI>
-///                 &pid=<pairing id>&ps=<pairing secret>&exp=<unix seconds>
-///                 &relay=<wss or https url>&lan=<host:port>[,<host:port>…]&name=<name>
+///                 &pid=<p_ + pairing id>&ps=<pairing secret>&exp=<unix seconds>
+///                 &relay=<wss://host/v1>&lan=<host:port>[,<host:port>…]&name=<name>
 public struct PairingPayload: Equatable, Sendable {
     public static let supportedVersion = 1
 
@@ -16,12 +15,14 @@ public struct PairingPayload: Equatable, Sendable {
     /// The computer's identity public key, SPKI DER. Learned from the screen,
     /// a channel the relay cannot touch.
     public var computerKey: Data
-    /// 32 random bytes, base64url: a temporary mailbox on the relay.
+    /// "p_" + 32 random bytes as base64url: a temporary mailbox on the relay.
+    /// The full text, prefix included, is the pairing key's HKDF salt.
     public var pairingId: String
     /// 32 random bytes; the pairing key is derived from it.
     public var pairingSecret: Data
     public var expiresAt: Date
-    public var relayURL: URL?
+    /// Exactly as in the QR code; compared byte for byte with the relay's challenge.
+    public var relay: String?
     public var localAddresses: [String]
     public var computerName: String?
 }
@@ -68,7 +69,7 @@ public enum PairingPayloadParser {
             throw PairingPayloadError.invalidField("ck")
         }
         let pid = try required("pid")
-        guard Base64URL.isId(pid) else { throw PairingPayloadError.invalidField("pid") }
+        guard PairingId.isValid(pid) else { throw PairingPayloadError.invalidField("pid") }
         guard let ps = Base64URL.decode(try required("ps")), ps.count == 32 else { throw PairingPayloadError.invalidField("ps") }
 
         guard let expSeconds = TimeInterval(try required("exp")), expSeconds.isFinite else { throw PairingPayloadError.invalidField("exp") }
@@ -76,13 +77,10 @@ public enum PairingPayloadParser {
         guard exp > now else { throw PairingPayloadError.expired }
         guard exp.timeIntervalSince(now) <= maxLifetime else { throw PairingPayloadError.invalidField("exp") }
 
-        var relay: URL?
+        var relay: String?
         if let r = fields["relay"], !r.isEmpty {
-            guard let url = URL(string: r), let scheme = url.scheme?.lowercased(),
-                  scheme == "wss" || scheme == "https", url.host != nil, url.user == nil, url.password == nil else {
-                throw PairingPayloadError.invalidField("relay")
-            }
-            relay = url
+            guard RelayName.isValid(r) else { throw PairingPayloadError.invalidField("relay") }
+            relay = r
         }
 
         var lan: [String] = []
@@ -103,7 +101,35 @@ public enum PairingPayloadParser {
         }
 
         return PairingPayload(version: version, computerId: cid, computerKey: ck, pairingId: pid, pairingSecret: ps,
-                              expiresAt: exp, relayURL: relay, localAddresses: lan, computerName: name)
+                              expiresAt: exp, relay: relay, localAddresses: lan, computerName: name)
+    }
+}
+
+/// A pairing id: "p_" + 43 base64url characters (32 bytes). The prefix keeps
+/// it apart from device ids; the relay refuses any other form.
+public enum PairingId {
+    public static func isValid(_ text: String) -> Bool {
+        text.hasPrefix("p_") && Base64URL.isId(String(text.dropFirst(2)))
+    }
+}
+
+/// A relay name: exactly `wss://<host>/v1`, as the relay states it in its
+/// challenge. Kept as text and compared byte for byte, because the relay hello
+/// is bound to it.
+public enum RelayName {
+    /// Same character rule as the relay's own name pattern, but TLS only: the
+    /// phone never accepts a plain `ws://` relay. The host part may carry a
+    /// port or a bracketed IPv6 address; no user info, path, query or fragment.
+    public static func isValid(_ text: String) -> Bool {
+        guard text.hasPrefix("wss://"), text.hasSuffix("/v1") else { return false }
+        let host = text.dropFirst(6).dropLast(3)
+        let allowed = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.:[]-")
+        return (1...253).contains(host.count) && host.allSatisfy { allowed.contains($0) }
+    }
+
+    /// The device refuses a challenge from any relay but the one it was given.
+    public static func challengeMatches(_ challengeRelay: String, configured: String) -> Bool {
+        challengeRelay == configured
     }
 }
 

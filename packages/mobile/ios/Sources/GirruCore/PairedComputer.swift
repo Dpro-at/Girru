@@ -67,10 +67,9 @@ public struct PairedComputer: Codable, Equatable, Sendable {
     public var computerName: String?
     /// The computer's identity public key, SPKI DER.
     public var computerKey: Data
-    public var relayURL: URL?
+    /// Relay name exactly as in the QR code (`wss://<host>/v1`).
+    public var relay: String?
     public var localAddresses: [String]
-    /// The computer's core-ui address, until the E2E link serves the pages.
-    public var webURL: URL?
     /// This phone's device id at the time of pairing.
     public var phoneId: String
     /// Per-phone key that opens push notices.
@@ -80,13 +79,12 @@ public struct PairedComputer: Codable, Equatable, Sendable {
     /// Sliding expiry counts from here; every authenticated use moves it on.
     public var lastUsedAt: Date
 
-    public init(computerId: String, computerName: String?, computerKey: Data, relayURL: URL?, localAddresses: [String], webURL: URL?, phoneId: String, notifyKey: Data, pairedAt: Date, lifetime: PairingLifetime) {
+    public init(computerId: String, computerName: String?, computerKey: Data, relay: String?, localAddresses: [String], phoneId: String, notifyKey: Data, pairedAt: Date, lifetime: PairingLifetime) {
         self.computerId = computerId
         self.computerName = computerName
         self.computerKey = computerKey
-        self.relayURL = relayURL
+        self.relay = relay
         self.localAddresses = localAddresses
-        self.webURL = webURL
         self.phoneId = phoneId
         self.notifyKey = notifyKey
         self.pairedAt = pairedAt

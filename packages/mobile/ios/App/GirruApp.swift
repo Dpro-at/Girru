@@ -52,12 +52,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                             withCompletionHandler completionHandler: @escaping () -> Void) {
         let action = response.actionIdentifier
-        let category = response.notification.request.content.categoryIdentifier
+        // Only a lookup key: queueDecision acts on it only if the extension
+        // recorded it from a verified notice. Category and kind are ignored.
         let approvalId = response.notification.request.content.userInfo[NoticeCategory.approvalIdKey] as? String
         Task { @MainActor in
             if let approvalId, action == NoticeCategory.approveAction || action == NoticeCategory.denyAction {
-                self.model.queueDecision(approvalId: approvalId, approve: action == NoticeCategory.approveAction,
-                                         sensitive: category == NoticeCategory.approvalSensitive)
+                self.model.queueDecision(approvalId: approvalId, approve: action == NoticeCategory.approveAction)
             }
             completionHandler()
         }

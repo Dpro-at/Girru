@@ -65,3 +65,18 @@ public enum BridgeMessageParser {
         }
     }
 }
+
+/// Who may use the bridge, and when. Kept here so the rules are checked
+/// without UIKit.
+public enum BridgeGate {
+    /// Only core-ui served by the app's own scheme handler, main frame only.
+    public static func allowsOrigin(scheme: String, host: String, isMainFrame: Bool) -> Bool {
+        isMainFrame && scheme.lowercased() == CoreUIOrigin.scheme && host.lowercased() == CoreUIOrigin.host
+    }
+
+    /// While locked, a page may only ask whether the app is locked.
+    public static func allows(_ request: BridgeRequest, unlocked: Bool) -> Bool {
+        if case .lockState = request { return true }
+        return unlocked
+    }
+}

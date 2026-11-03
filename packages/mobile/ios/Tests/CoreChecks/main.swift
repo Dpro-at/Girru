@@ -180,16 +180,27 @@ func checkReplayWindow() throws {
 
 func makeQR(computer: SoftwareIdentitySigner = SoftwareIdentitySigner(), exp: TimeInterval = 300,
             extra: String = "&relay=wss://relay.example.org/v1&lan=192.168.1.20:41521,office-mac.local:41521") -> String {
-    "girru://pair?v=1&cid=\(computer.deviceId)&ck=\(Base64URL.encode(computer.publicKeySPKI))&pid=\(id32())&ps=\(id32())&exp=\(Int(now.timeIntervalSince1970 + exp))&name=Office%20Mac" + extra
+    "girru://pair?v=1&cid=\(computer.deviceId)&ck=\(Base64URL.encode(computer.publicKeySPKI))&pid=p_\(id32())&ps=\(id32())&exp=\(Int(now.timeIntervalSince1970 + exp))&name=Office%20Mac" + extra
 }
 
 func checkPayload() throws {
     let computer = SoftwareIdentitySigner()
     let p = try PairingPayloadParser.parse(makeQR(computer: computer), crypto: crypto, now: now)
     check(p.computerId == computer.deviceId && p.computerKey == computer.publicKeySPKI, "computer key and id")
-    check(p.pairingSecret.count == 32 && Base64URL.isId(p.pairingId), "pairing secret and id")
+    check(p.pairingSecret.count == 32 && p.pairingId.hasPrefix("p_") && p.pairingId.count == 45, "pairing secret and p_ id")
     check(p.localAddresses == ["192.168.1.20:41521", "office-mac.local:41521"], "local addresses")
-    check(p.relayURL?.scheme == "wss" && p.computerName == "Office Mac", "relay and name")
+    check(p.relay == "wss://relay.example.org/v1" && p.computerName == "Office Mac", "relay kept unchanged, name")
+
+    let bare = makeQR(computer: computer).replacingOccurrences(of: "pid=p_", with: "pid=")
+    fails(PairingPayloadError.invalidField("pid"), "pid without p_") { _ = try PairingPayloadParser.parse(bare, crypto: crypto, now: now) }
+    for bad in ["https://relay.example.org/v1", "wss://relay.example.org", "wss://relay.example.org/v2", "wss://relay.example.org/v1/",
+                "wss://user@relay.example.org/v1", "wss://relay.example.org/x/v1", "wss://relay.example.org/v1?x=1", "wss:///v1"] {
+        check(!RelayName.isValid(bad), "relay name refused: \(bad)")
+    }
+    check(RelayName.isValid("wss://relay.example.org:8443/v1") && RelayName.isValid("wss://[fd00::1]:8443/v1"), "relay with port / IPv6")
+    check(RelayName.challengeMatches("wss://relay.example.org/v1", configured: p.relay!), "challenge relay matches exactly")
+    check(!RelayName.challengeMatches("wss://Relay.example.org/v1", configured: p.relay!), "challenge compare is exact")
+    check(!RelayName.challengeMatches("wss://evil.example.org/v1", configured: p.relay!), "other relay refused")
 
     let other = SoftwareIdentitySigner()
     let mismatched = makeQR(computer: computer).replacingOccurrences(of: "cid=\(computer.deviceId)", with: "cid=\(other.deviceId)")
@@ -197,14 +208,14 @@ func checkPayload() throws {
     fails(PairingPayloadError.expired, "expired") { _ = try PairingPayloadParser.parse(makeQR(exp: -1), crypto: crypto, now: now) }
     fails(PairingPayloadError.invalidField("exp"), "over 10 minutes") { _ = try PairingPayloadParser.parse(makeQR(exp: 601), crypto: crypto, now: now) }
     fails(PairingPayloadError.invalidField("relay"), "plain ws relay") {
-        _ = try PairingPayloadParser.parse(makeQR(extra: "&relay=ws://relay.example.org"), crypto: crypto, now: now)
+        _ = try PairingPayloadParser.parse(makeQR(extra: "&relay=ws://relay.example.org/v1"), crypto: crypto, now: now)
     }
     fails(PairingPayloadError.invalidField("lan"), "public lan address") {
         _ = try PairingPayloadParser.parse(makeQR(extra: "&lan=8.8.8.8:80"), crypto: crypto, now: now)
     }
     fails(PairingPayloadError.noRoute, "no route") { _ = try PairingPayloadParser.parse(makeQR(extra: ""), crypto: crypto, now: now) }
     fails(PairingPayloadError.duplicateField("pid"), "duplicate field") {
-        _ = try PairingPayloadParser.parse(makeQR(extra: "&lan=10.0.0.2:1&pid=\(id32())"), crypto: crypto, now: now)
+        _ = try PairingPayloadParser.parse(makeQR(extra: "&lan=10.0.0.2:1&pid=p_\(id32())"), crypto: crypto, now: now)
     }
     fails(PairingPayloadError.notAGirruCode, "other scheme") { _ = try PairingPayloadParser.parse("https://example.org/pair", crypto: crypto, now: now) }
 
@@ -225,8 +236,35 @@ func checkPairingMessages() throws {
     let computer = SoftwareIdentitySigner(), phone = SoftwareIdentitySigner()
     let payload = try PairingPayloadParser.parse(makeQR(computer: computer), crypto: crypto, now: now)
     let req = PairingRequest(key: Base64URL.encode(phone.publicKeySPKI), name: "Work iPhone", platform: "ios", push: nil, lifetimeDays: 60)
-    let sealed = try PairingMessages.sealRequest(req, payload: payload, crypto: crypto)
-    check(try PairingMessages.openRequest(sealed, payload: payload, crypto: crypto) == req, "request round trip")
+    let sealed = try PairingMessages.sealRequest(req, signer: phone, payload: payload, crypto: crypto)
+    let opened = try PairingMessages.openRequest(sealed, payload: payload, crypto: crypto)
+    check(opened.key == req.key && opened.name == "Work iPhone" && opened.lifetimeDays == 60 && opened.sig != nil, "request round trip with sig")
+
+    // The salt is the full pid text, p_ included.
+    var noPrefix = payload
+    noPrefix.pairingId = String(payload.pairingId.dropFirst(2))
+    check(PairingMessages.pairingKey(noPrefix, crypto: crypto) != PairingMessages.pairingKey(payload, crypto: crypto), "salt includes p_")
+    check(PairingMessages.pairingKey(payload, crypto: crypto) == crypto.hkdf(payload.pairingSecret, salt: Data(payload.pairingId.utf8), info: Data("girru/v1/pair".utf8), count: 32), "pairing key formula")
+
+    // The signature covers pid, the phone's id and the nonce, with the key it carries.
+    let nonceText = String(sealed.split(separator: ".")[2])
+    check(crypto.verify(signature: Base64URL.decode(opened.sig!)!, message: Data("girru/v1/preq-sig\n\(payload.pairingId)\n\(phone.deviceId)\n\(nonceText)".utf8), publicKeySPKI: phone.publicKeySPKI), "preq sig byte layout")
+    fails(ProtocolError.badSignature, "request carrying a key it cannot sign for") {
+        // Someone who saw the QR code sends the real phone's key, signed by another key.
+        let impostor = SoftwareIdentitySigner()
+        let key = PairingMessages.pairingKey(payload, crypto: crypto)
+        let nonce = crypto.randomBytes(12)
+        var forged = req
+        forged.sig = Base64URL.encode(try impostor.sign(PairingRequest.signedText(pairingId: payload.pairingId, phoneId: phone.deviceId, nonce: Base64URL.encode(nonce))))
+        let box = try crypto.seal(try JSONEncoder().encode(forged), key: key, nonce: nonce, aad: Data("girru/v1/preq\n\(payload.pairingId)".utf8))
+        _ = try PairingMessages.openRequest("g1.preq.\(Base64URL.encode(nonce)).\(Base64URL.encode(box))", payload: payload, crypto: crypto)
+    }
+    fails(ProtocolError.badSignature, "request without sig") {
+        let key = PairingMessages.pairingKey(payload, crypto: crypto)
+        let nonce = crypto.randomBytes(12)
+        let box = try crypto.seal(try JSONEncoder().encode(req), key: key, nonce: nonce, aad: Data("girru/v1/preq\n\(payload.pairingId)".utf8))
+        _ = try PairingMessages.openRequest("g1.preq.\(Base64URL.encode(nonce)).\(Base64URL.encode(box))", payload: payload, crypto: crypto)
+    }
 
     var wrongSecret = payload
     wrongSecret.pairingSecret = crypto.randomBytes(32)
@@ -257,8 +295,8 @@ func checkPairingMessages() throws {
 // MARK: - pairing lifetime
 
 func computerRecord(_ lifetime: PairingLifetime, computer: SoftwareIdentitySigner = SoftwareIdentitySigner(), phoneId: String = id32(), notifyKey: Data = crypto.randomBytes(32)) -> PairedComputer {
-    PairedComputer(computerId: computer.deviceId, computerName: nil, computerKey: computer.publicKeySPKI, relayURL: nil,
-                   localAddresses: ["10.0.0.2:41521"], webURL: nil, phoneId: phoneId, notifyKey: notifyKey, pairedAt: now, lifetime: lifetime)
+    PairedComputer(computerId: computer.deviceId, computerName: nil, computerKey: computer.publicKeySPKI, relay: nil,
+                   localAddresses: ["10.0.0.2:41521"], phoneId: phoneId, notifyKey: notifyKey, pairedAt: now, lifetime: lifetime)
 }
 
 func checkLifetime() throws {
@@ -323,11 +361,29 @@ func checkBridge() throws {
         _ = try BridgeMessageParser.parse(["type": "push.permission", "request": NSNumber(value: 1)])
     }
 
-    let policy = NavigationPolicy(pairedOrigin: WebOrigin(url: URL(string: "http://192.168.1.20:41522/")!), fallbackPage: URL(fileURLWithPath: "/app/NotPaired.html"))
+    // Bridge gate: origin and lock state.
+    check(BridgeGate.allowsOrigin(scheme: "girru-app", host: "computer", isMainFrame: true), "core-ui origin")
+    check(!BridgeGate.allowsOrigin(scheme: "girru-app", host: "computer", isMainFrame: false), "core-ui subframe refused")
+    check(!BridgeGate.allowsOrigin(scheme: "http", host: "192.168.1.20", isMainFrame: true), "LAN http page refused")
+    check(!BridgeGate.allowsOrigin(scheme: "https", host: "computer", isMainFrame: true), "https refused")
+    check(!BridgeGate.allowsOrigin(scheme: "girru-app", host: "other", isMainFrame: true), "other host refused")
+    check(!BridgeGate.allowsOrigin(scheme: "file", host: "", isMainFrame: true), "fallback file has no bridge")
+    let all: [BridgeRequest] = [.lockState, .authenticate(reason: "x"), .scanQR, .pushPermission(request: true), .pushPermission(request: false)]
+    check(all.allSatisfy { BridgeGate.allows($0, unlocked: true) }, "everything while unlocked")
+    check(BridgeGate.allows(.lockState, unlocked: false), "lock.state while locked")
+    check(all.dropFirst().allSatisfy { !BridgeGate.allows($0, unlocked: false) }, "nothing else while locked")
+
+    let policy = NavigationPolicy(paired: true, fallbackPage: URL(fileURLWithPath: "/app/NotPaired.html"))
     func d(_ s: String, main: Bool = true, user: Bool = false) -> NavigationDecision { policy.decide(URL(string: s)!, isMainFrame: main, userInitiated: user) }
-    check(d("http://192.168.1.20:41522/chat") == .allow, "paired origin")
-    check(d("HTTP://192.168.1.20:41522/x", main: false) == .allow, "case-insensitive origin")
-    check(d("http://192.168.1.20:9999/") == .deny, "other port")
+    check(d("girru-app://computer/chat") == .allow, "core-ui through the scheme handler")
+    check(d("GIRRU-APP://Computer/x", main: false) == .allow, "case-insensitive core-ui origin")
+    check(d("girru-app://other/") == .deny, "other host on our scheme")
+    check(d("girru-app://computer:8080/") == .deny, "port on our scheme")
+    check(d("http://192.168.1.20:41522/chat") == .deny, "plain http never loads in the app")
+    check(d("http://192.168.1.20:41522/chat", user: true) == .openExternally, "tapped http link goes to Safari")
+    check(d("https://computer.local/", main: false, user: true) == .deny, "https frame refused")
+    let unpaired = NavigationPolicy(paired: false, fallbackPage: nil)
+    check(unpaired.decide(URL(string: "girru-app://computer/")!, isMainFrame: true, userInitiated: false) == .deny, "no core-ui before pairing")
     check(d("https://example.org/", user: true) == .openExternally, "tapped link goes to Safari")
     check(d("https://example.org/") == .deny, "scripted redirect dropped")
     check(d("https://example.org/", main: false, user: true) == .deny, "foreign frame")
@@ -363,6 +419,32 @@ func checkNotices() throws {
     fails(ProtocolError.stale, "older than an hour") { _ = try Notice.open(userInfo: ["g": g], computer: record, replay: &fresh, crypto: crypto, now: now.addingTimeInterval(3601)) }
     fails(ProtocolError.badFormat, "no payload") { _ = try Notice.open(userInfo: [:], computer: record, replay: &fresh, crypto: crypto, now: now) }
     check(!Notice.isValid(NoticeContent(kind: .approval, title: "t", body: "b")), "approval needs an id")
+}
+
+// MARK: - verified approvals (notification buttons)
+
+func checkVerifiedApprovals() throws {
+    var v = VerifiedApprovals()
+    v.record(NoticeContent(kind: .approval, title: "t", body: "b", approvalId: "a-1"), now: now)
+    v.record(NoticeContent(kind: .approvalSensitive, title: "t", body: "b", approvalId: "a-2"), now: now)
+    v.record(NoticeContent(kind: .summary, title: "3 tasks finished", body: "b"), now: now)
+    check(v.entries.count == 2, "only approvals are recorded")
+    check(v.take("forged-id", now: now) == nil, "unknown id (forged push) is not acted on")
+    check(v.take("a-1", now: now)?.sensitive == false, "normal approval")
+    check(v.take("a-1", now: now) == nil, "one button press acts once")
+    check(v.take("a-2", now: now)?.sensitive == true, "sensitive comes from the verified kind")
+
+    var old = VerifiedApprovals()
+    old.record(NoticeContent(kind: .approval, title: "t", body: "b", approvalId: "a-3"), now: now)
+    check(old.take("a-3", now: now.addingTimeInterval(VerifiedApprovals.lifetime + 1)) == nil, "too old is ignored")
+
+    var many = VerifiedApprovals()
+    for i in 0..<40 {
+        many.record(NoticeContent(kind: .approval, title: "t", body: "b", approvalId: "id-\(i)"), now: now.addingTimeInterval(TimeInterval(i)))
+    }
+    check(many.entries.count == VerifiedApprovals.maxEntries, "bounded size")
+    check(many.take("id-0", now: now.addingTimeInterval(40)) == nil && many.take("id-39", now: now.addingTimeInterval(40)) != nil, "oldest dropped first")
+    check(try JSONDecoder().decode(VerifiedApprovals.self, from: try JSONEncoder().encode(v)) == v, "persists")
 }
 
 // MARK: - interop line protocol
@@ -412,6 +494,7 @@ let groups: [(String, () throws -> Void)] = [
     ("base64url", checkBase64), ("crypto", checkCrypto), ("session", checkSession), ("commands", checkCommands),
     ("replay window", checkReplayWindow), ("QR payload", checkPayload), ("pairing messages", checkPairingMessages),
     ("pairing lifetime", checkLifetime), ("lock policy", checkLock), ("bridge + navigation", checkBridge), ("notices", checkNotices),
+    ("verified approvals", checkVerifiedApprovals),
 ]
 for (name, run) in groups {
     do { try run() } catch {

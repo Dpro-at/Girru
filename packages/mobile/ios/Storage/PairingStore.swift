@@ -7,6 +7,7 @@ import Foundation
 struct PairingStore {
     private static let computerAccount = "paired-computer"
     private static let noticeWindowAccount = "notice-replay-window"
+    private static let approvalsAccount = "verified-approvals"
     static let counterAccount = "command-counter"
 
     let keychain: KeychainStore
@@ -26,6 +27,7 @@ struct PairingStore {
     func clear() {
         keychain.delete(account: Self.computerAccount)
         keychain.delete(account: Self.noticeWindowAccount)
+        keychain.delete(account: Self.approvalsAccount)
         keychain.delete(account: Self.counterAccount)
     }
 
@@ -37,6 +39,17 @@ struct PairingStore {
 
     func saveNoticeWindow(_ window: ReplayWindow) throws {
         try keychain.set(try JSONEncoder().encode(window), account: Self.noticeWindowAccount, protection: .afterFirstUnlock)
+    }
+
+    /// Written only by the notification extension, after a notice verified.
+    func loadVerifiedApprovals() -> VerifiedApprovals {
+        guard let data = try? keychain.get(account: Self.approvalsAccount),
+              let v = try? JSONDecoder().decode(VerifiedApprovals.self, from: data) else { return VerifiedApprovals() }
+        return v
+    }
+
+    func saveVerifiedApprovals(_ approvals: VerifiedApprovals) throws {
+        try keychain.set(try JSONEncoder().encode(approvals), account: Self.approvalsAccount, protection: .afterFirstUnlock)
     }
 }
 

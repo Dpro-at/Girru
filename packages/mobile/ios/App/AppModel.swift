@@ -1,10 +1,13 @@
 import Foundation
 import LocalAuthentication
 
-/// Sends signed commands to the computer. Built with MOB-LINK-01; until then
-/// commands wait in the outbox and the app says so.
+/// Talks to the computer over the authenticated g1 session. Built with
+/// MOB-LINK-01; until then every call says plainly that it cannot.
 protocol ComputerLink: Sendable {
     func send(_ command: SignedCommand, to computer: PairedComputer) async throws
+    /// Asks the computer whether this approval is still waiting for this phone.
+    /// The answer comes over the session, so a forged push cannot fake it.
+    func isPending(approvalId: String, on computer: PairedComputer) async throws -> Bool
 }
 
 struct NotConnectedLink: ComputerLink {
@@ -12,6 +15,7 @@ struct NotConnectedLink: ComputerLink {
         var errorDescription: String? { "Not sent: this version of Girru cannot reach your computer yet." }
     }
     func send(_ command: SignedCommand, to computer: PairedComputer) async throws { throw NotBuilt() }
+    func isPending(approvalId: String, on computer: PairedComputer) async throws -> Bool { throw NotBuilt() }
 }
 
 /// What the computer can answer that ends a pairing.
@@ -102,10 +106,19 @@ final class AppModel: ObservableObject {
 
     // MARK: Approvals from notification buttons
 
-    /// The notification button opened the app; the decision is signed after the
-    /// app lock (and, for sensitive approvals, a second check).
-    func queueDecision(approvalId: String, approve: Bool, sensitive: Bool) {
-        pendingDecision = (approvalId, approve, sensitive)
+    /// The notification button opened the app. The button's own data is not
+    /// trusted: only an id the extension recorded from a verified notice is
+    /// acted on, and "sensitive" comes from that record. The decision is
+    /// signed after the app lock (and a second check when sensitive).
+    func queueDecision(approvalId: String, approve: Bool) {
+        var verified = store.loadVerifiedApprovals()
+        let entry = verified.take(approvalId)
+        try? store.saveVerifiedApprovals(verified)
+        guard let entry else {
+            notice = "This request could not be checked. Open Approvals to answer it."
+            return
+        }
+        pendingDecision = (approvalId, approve, entry.sensitive)
         if lock.isUnlocked { Task { await sendPendingDecision() } }
     }
 
@@ -119,7 +132,14 @@ final class AppModel: ObservableObject {
         }
         guard let context else { return }
         do {
+            // Re-check with the computer before signing anything.
+            guard try await link.isPending(approvalId: d.approvalId, on: computer) else {
+                notice = "This request is no longer waiting."
+                return
+            }
             let signer = try DeviceIdentity.loadOrCreate(context: context)
+            // The id is inside the signed body; the computer's gate must check
+            // it is pending and was sent to this phone before acting.
             let body = try String(decoding: JSONSerialization.data(withJSONObject: [
                 "type": "approval.decide", "id": d.approvalId, "approve": d.approve,
             ], options: [.sortedKeys]), as: UTF8.self)

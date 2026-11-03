@@ -1,8 +1,7 @@
 import Foundation
 
 // Push notices, PROTOCOL.md "Notifications": sealed with the per-phone
-// notification key and signed by the computer. The text form is this app's
-// proposal (not yet in PROTOCOL.md):
+// notification key and signed by the computer. PROTOCOL.md "Notice format":
 //
 //   g1.ntf.<payload>.<sig>
 //   payload = base64url(JSON {from, to, ctr, ts, box})

@@ -22,6 +22,12 @@ final class NotificationService: UNNotificationServiceExtension {
         do {
             let notice = try Notice.open(userInfo: request.content.userInfo, computer: computer, replay: &window, crypto: CryptoKitPairingCrypto())
             try store.saveNoticeWindow(window)
+            if notice.isApproval {
+                // Only ids recorded here can be acted on from the buttons.
+                var approvals = store.loadVerifiedApprovals()
+                approvals.record(notice)
+                try store.saveVerifiedApprovals(approvals)
+            }
             contentHandler(Self.content(for: notice))
         } catch {
             contentHandler(neutral)

@@ -1,25 +1,29 @@
+import Combine
 import SwiftUI
 import UIKit
 import WebKit
 
-/// Hosts the computer's core-ui screens. Only the paired computer's pages load
-/// here; other links open in Safari, scripted jumps elsewhere are dropped.
+/// Hosts the computer's core-ui screens. They load only from
+/// `girru-app://computer/`, which the app answers itself through the g1
+/// session; http and https never load inside the app, and the bridge answers
+/// only that origin.
 struct WebHostView: UIViewRepresentable {
     let computer: PairedComputer?
     let bridge: WebBridge
+    var source: CoreUISource = UnavailableCoreUISource()
 
     static var fallbackPage: URL? { Bundle.main.url(forResource: "NotPaired", withExtension: "html") }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(policy: NavigationPolicy(pairedOrigin: computer?.webURL.flatMap(WebOrigin.init(url:)), fallbackPage: Self.fallbackPage), bridge: bridge)
+        Coordinator(policy: NavigationPolicy(paired: computer != nil, fallbackPage: Self.fallbackPage), bridge: bridge)
     }
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         // Nothing from the chats is cached on the phone; it stays on the computer.
         config.websiteDataStore = .nonPersistent()
-        config.limitsNavigationsToAppBoundDomains = false
         config.preferences.javaScriptCanOpenWindowsAutomatically = false
+        config.setURLSchemeHandler(CoreUISchemeHandler(source: source), forURLScheme: CoreUIOrigin.scheme)
 
         let content = WKUserContentController()
         content.addScriptMessageHandler(WeakReplyHandler(context.coordinator), contentWorld: .page, name: "girru")
@@ -36,15 +40,15 @@ struct WebHostView: UIViewRepresentable {
         #if DEBUG
         web.isInspectable = true
         #endif
-        context.coordinator.load(computer: computer, in: web)
+        context.coordinator.load(in: web)
         return web
     }
 
     func updateUIView(_ web: WKWebView, context: Context) {
-        let origin = computer?.webURL.flatMap(WebOrigin.init(url:))
-        if origin != context.coordinator.policy.pairedOrigin {
-            context.coordinator.policy = NavigationPolicy(pairedOrigin: origin, fallbackPage: Self.fallbackPage)
-            context.coordinator.load(computer: computer, in: web)
+        let paired = computer != nil
+        if paired != context.coordinator.policy.paired {
+            context.coordinator.policy = NavigationPolicy(paired: paired, fallbackPage: Self.fallbackPage)
+            context.coordinator.load(in: web)
         }
     }
 
@@ -57,9 +61,9 @@ struct WebHostView: UIViewRepresentable {
             self.bridge = bridge
         }
 
-        func load(computer: PairedComputer?, in web: WKWebView) {
-            if let url = computer?.webURL, policy.pairedOrigin != nil {
-                web.load(URLRequest(url: url))
+        func load(in web: WKWebView) {
+            if policy.paired {
+                web.load(URLRequest(url: CoreUIOrigin.startURL))
             } else if let page = WebHostView.fallbackPage {
                 web.loadFileURL(page, allowingReadAccessTo: page)
             }
@@ -88,18 +92,18 @@ struct WebHostView: UIViewRepresentable {
         }
 
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage, replyHandler: @escaping (Any?, String?) -> Void) {
-            // Only the paired computer's main frame may talk to the shell.
             let origin = message.frameInfo.securityOrigin
-            guard message.frameInfo.isMainFrame, let paired = policy.pairedOrigin,
-                  origin.protocol.lowercased() == paired.scheme, origin.host.lowercased() == paired.host,
-                  (origin.port == 0 ? (paired.scheme == "https" ? 443 : 80) : origin.port) == paired.port else {
+            guard policy.paired, BridgeGate.allowsOrigin(scheme: origin.protocol, host: origin.host, isMainFrame: message.frameInfo.isMainFrame) else {
                 return replyHandler(nil, "not allowed")
             }
             let request: BridgeRequest
             do { request = try BridgeMessageParser.parse(message.body) } catch { return replyHandler(nil, "bad request") }
             Task { @MainActor in
-                let reply = await bridge.handle(request)
-                replyHandler(reply, nil)
+                if let reply = await bridge.handle(request) {
+                    replyHandler(reply, nil)
+                } else {
+                    replyHandler(nil, "locked")
+                }
             }
         }
     }
@@ -115,20 +119,27 @@ private final class WeakReplyHandler: NSObject, WKScriptMessageHandlerWithReply 
     }
 }
 
-/// Native answers to the four bridge requests.
+/// Native answers to the four bridge requests. While the app is locked only
+/// `lock.state` is answered; locking closes the scanner.
 @MainActor
 final class WebBridge: ObservableObject {
-    @Published var scannerOpen = false
+    @Published private(set) var scannerOpen = false
     private var scanContinuation: CheckedContinuation<String?, Never>?
     private let lock: AppLock
     private let push: PushRegistrar
+    private var lockWatch: AnyCancellable?
 
     init(lock: AppLock, push: PushRegistrar) {
         self.lock = lock
         self.push = push
+        lockWatch = lock.$state.sink { [weak self] state in
+            if state != .unlocked { self?.finishScan(nil) }
+        }
     }
 
-    func handle(_ request: BridgeRequest) async -> [String: Any] {
+    /// nil = refused because the app is locked.
+    func handle(_ request: BridgeRequest) async -> [String: Any]? {
+        guard BridgeGate.allows(request, unlocked: lock.isUnlocked) else { return nil }
         switch request {
         case .lockState:
             return ["locked": !lock.isUnlocked, "relockDelay": lock.policy.relockDelay]
@@ -140,6 +151,8 @@ final class WebBridge: ObservableObject {
                 scanContinuation = c
                 scannerOpen = true
             }
+            // A lock while scanning ends the scan with nothing.
+            guard lock.isUnlocked else { return nil }
             return text.map { ["text": $0] } ?? ["cancelled": true]
         case .pushPermission(let ask):
             return ["status": await push.refresh(ask: ask)]

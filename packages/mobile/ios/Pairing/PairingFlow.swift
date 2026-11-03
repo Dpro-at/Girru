@@ -80,7 +80,8 @@ final class PairingFlow: ObservableObject {
         let store = self.store
         Task {
             do {
-                let sealed = try PairingMessages.sealRequest(request, payload: p, crypto: crypto)
+                // Signing needs the unlocked identity key, so it happens here, after the unlock.
+                let sealed = try PairingMessages.sealRequest(request, signer: s, payload: p, crypto: crypto)
                 try await transport.send(request: sealed, to: p)
                 let welcomeText = try await transport.awaitWelcome(for: p)
                 let w = try PairingMessages.openWelcome(welcomeText, payload: p, phoneId: s.deviceId, crypto: crypto)
@@ -89,7 +90,7 @@ final class PairingFlow: ObservableObject {
                 }
                 // The computer's approval decides the lifetime, whatever was asked.
                 let computer = PairedComputer(computerId: p.computerId, computerName: w.name ?? p.computerName, computerKey: p.computerKey,
-                                              relayURL: p.relayURL, localAddresses: p.localAddresses, webURL: Self.webURL(for: p),
+                                              relay: p.relay, localAddresses: p.localAddresses,
                                               phoneId: s.deviceId, notifyKey: notifyKey, pairedAt: Date(), lifetime: granted)
                 store.clear()
                 try store.save(computer)
@@ -102,12 +103,5 @@ final class PairingFlow: ObservableObject {
                 self.step = .failed("Pairing did not finish. Show a new code on your computer and try again.")
             }
         }
-    }
-
-    /// Until the E2E link serves core-ui inside the app, the web host loads it
-    /// from the computer's first local address.
-    static func webURL(for p: PairingPayload) -> URL? {
-        guard let lan = p.localAddresses.first else { return nil }
-        return URL(string: "http://\(lan)/")
     }
 }
