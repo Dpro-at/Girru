@@ -1,4 +1,6 @@
 import { SessionFailure } from './session-failure';
+import { privacyOf } from './memory-people-contract.js';
+import type { PrivacyFlags } from './memory-people-contract.js';
 export const proposalStatuses = ['pending', 'approved', 'rejected', 'stale', 'cancelled'] as const;
 export type ProposalStatus = typeof proposalStatuses[number];
 export type MemoryPhase = 'idle' | 'loading' | 'ready' | 'pending' | 'accepted' | 'rejected' | 'stale' | 'expired' | 'denied' | 'error' | 'unavailable' | 'deciding' | 'unknown';
@@ -12,6 +14,8 @@ export interface ProposalSummary {
   appliedRevision: number | null; reasons: string[]; importBatchId: string | null;
   /** CORE-MEM-CONFLICT: the memory a conflict proposal contradicts, and how it was decided. */
   conflictWith?: string; decision?: 'keep_new' | 'keep_old' | 'keep_both';
+  /** STORE-MAP-01 P9 (board P9d): personal-data kinds and sensitive topics of a flagged memory. */
+  privacy?: PrivacyFlags;
 }
 export interface Proposal extends ProposalSummary { changes: Change[] }
 export interface DrawerView { drawerId: string; agentId: string; revision: number; hash: string; count: number; path?: string; content: string }
@@ -77,6 +81,7 @@ function summary(value: unknown): ProposalSummary {
     reasons: p.reasons.map(x => text(x)), importBatchId: nullableText(p.importBatchId),
     ...(p.conflictWith ? { conflictWith: identifier(p.conflictWith) } : {}),
     ...(p.decision ? { decision: ['keep_new', 'keep_old', 'keep_both'].includes(p.decision as string) ? p.decision as 'keep_new' | 'keep_old' | 'keep_both' : bad() } : {}),
+    ...(privacyOf(p.privacy) ? { privacy: privacyOf(p.privacy) } : {}),
   };
 }
 function exactKeys(value: Record<string, unknown>, keys: string[]) {

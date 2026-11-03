@@ -15,6 +15,7 @@ export { memoryScopesTool, memoryScopeApplyTool, memoryAccessApplyTool, memorySc
 export { memoryMoveTool } from './move.js';
 export { memoryBridgeTool, memoryBridgeApplyTool } from './bridge.js';
 export { memoryReviewTool, memoryReviewDecideTool, memoryReviewRoutineTool, memoryGraphReviewTool } from './review.js';
+export { memoryPersonExportTool, memoryPersonForgetTool, memoryPrivacyReviewTool, memoryPrivacyDecideTool } from './person.js'; // STORE-MAP-01 P9
 export { memoryRecallTool } from './recall.js';
 export { memoryTrashTool, memoryRestoreTool, memoryTrashEmptyTool, memoryProjectTrashTool, memoryGroupsTool, memoryGroupApplyTool } from './desktop.js';
 export { projectDesignTool, projectDesignApplyTool, projectDatabasesTool, projectDatabasesApplyTool } from './project-tech.js';

@@ -1,4 +1,5 @@
 // Wire projection for the bounded memory review routes. Text is never sanitized.
+const { privacyOf } = require('../src/memory-people-contract.js');
 const record = x => x !== null && typeof x === 'object' && !Array.isArray(x);
 const bad = () => { throw Error('Invalid memory response'); };
 const obj = x => record(x) ? x : bad();
@@ -46,6 +47,8 @@ function summary(x) {
     // CORE-MEM-CONFLICT: only on a conflict proposal.
     ...(x.conflictWith ? { conflictWith: id(x.conflictWith) } : {}),
     ...(x.decision ? { decision: ['keep_new', 'keep_old', 'keep_both'].includes(x.decision) ? x.decision : bad() } : {}),
+    // STORE-MAP-01 P9: personal-data kinds and sensitive topics (never the values).
+    ...(privacyOf(x.privacy) ? { privacy: privacyOf(x.privacy) } : {}),
   };
 }
 function proposal(x) {

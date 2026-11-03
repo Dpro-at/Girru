@@ -83,6 +83,10 @@ export const DEFAULT_AGENT_TOOLS: readonly string[] = [
   'memory_graph_topic', // MEM-GRAPH-CLUSTER: cluster -> topic or dismiss; every call needs one-time owner approval
   'memory_graph_sync', // MEM-FINISH-01: rebuild the map (M14); every call needs one-time owner approval
   'memory_recall', // MEM-CACHE-01: read-only trace of the agent's own replies, summaries, cache metrics
+  'memory_person_export', // STORE-MAP-01 P9: everything about one person (person's drawer open for the run); every call needs one-time owner approval
+  'memory_person_forget', // STORE-MAP-01 P9: forget one person in one action; every call needs one-time owner approval
+  'memory_privacy_review', // STORE-MAP-01 P9: read-only list of waiting personal-data / sensitive memories, owner's own turns, open drawers only
+  'memory_privacy_decide', // STORE-MAP-01 P9: keep or forget one of them; every call needs one-time owner approval
   'storage_search',
   // BOARD-02: the agent's own board cards only (list, comment, move)
   'board_my_cards',

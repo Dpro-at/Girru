@@ -83,9 +83,39 @@ function kindsIn(t: string): PersonalDataKind[] {
   return [...out];
 }
 
-const SPECIAL = /\b(health|doctor|diagnos\w*|disease|illness|hospital|therapy|therapist|medication|pregnan\w*|disabilit\w*|mental health|depress\w*|religio\w*|church|mosque|synagogue|pray(?:s|ed|ing)?|faith|atheis\w*|muslim|christian|jewish|hindu|buddhis\w*|politic\w*|votes? for|voted for|party member|left-wing|right-wing|sexual\w*|gay|lesbian|bisexual|transgender|ethnic\w*|racial|trade union|union member|genetic|dna|biometric|fingerprint)\b|صحة|طبيب|مرض|مستشفى|علاج|دواء|حامل|إعاقة|اكتئاب|دين|ديانة|مسلم|مسيحي|يهودي|مسجد|كنيسة|يصلي|سياس|حزب|ينتخب|جنسي|مثلي|عرق|قومية|نقابة|وراثي|بصمة|\b(gesundheit|arzt|krankheit|krankenhaus|therapie|schwanger|behinderung|religion|kirche|moschee|glaube|partei|wählt|sexuell|schwul|ethnisch|gewerkschaft|genetisch|biometrisch)\b/i;
+/** The special categories (GDPR Art. 9), each with its words in English, Arabic and German. */
+export type SpecialTopic = 'health' | 'religion' | 'politics' | 'sexuality' | 'origin' | 'union' | 'genetic';
+const topic = (en: string, ar: string, de: string) => new RegExp(`\\b(?:${en})\\b|${ar}|\\b(?:${de})\\b`, 'i');
+const SPECIAL: ReadonlyArray<[SpecialTopic, RegExp]> = [
+  ['health', topic('health|doctor|diagnos\\w*|disease|illness|hospital|therapy|therapist|medication|pregnan\\w*|disabilit\\w*|mental health|depress\\w*', 'صحة|طبيب|مرض|مستشفى|علاج|دواء|حامل|إعاقة|اكتئاب', 'gesundheit|arzt|krankheit|krankenhaus|therapie|schwanger|behinderung')],
+  ['religion', topic('religio\\w*|church|mosque|synagogue|pray(?:s|ed|ing)?|faith|atheis\\w*|muslim|christian|jewish|hindu|buddhis\\w*', 'دين|ديانة|مسلم|مسيحي|يهودي|مسجد|كنيسة|يصلي', 'religion|kirche|moschee|glaube')],
+  ['politics', topic('politic\\w*|votes? for|voted for|party member|left-wing|right-wing', 'سياس|حزب|ينتخب', 'partei|wählt')],
+  ['sexuality', topic('sexual\\w*|gay|lesbian|bisexual|transgender', 'جنسي|مثلي', 'sexuell|schwul')],
+  ['origin', topic('ethnic\\w*|racial', 'عرق|قومية', 'ethnisch')],
+  ['union', topic('trade union|union member', 'نقابة', 'gewerkschaft')],
+  ['genetic', topic('genetic|dna|biometric|fingerprint', 'وراثي|بصمة', 'genetisch|biometrisch')],
+];
+
+/** Which special categories the text is about (empty when none). */
+export function specialCategoryTopics(text: string): SpecialTopic[] {
+  if (!text) return [];
+  const ws = windows(text);
+  return SPECIAL.filter(([, re]) => ws.some((w) => re.test(w))).map(([t]) => t);
+}
 
 /** True when the text is about a special category of personal data (GDPR Art. 9). */
 export function specialCategory(text: string): boolean {
-  return !!text && windows(text).some((w) => SPECIAL.test(w));
+  return !!text && windows(text).some((w) => SPECIAL.some(([, re]) => re.test(w)));
+}
+
+/**
+ * What the review shows for a waiting memory (P9d): the kinds of personal data
+ * and the special categories in its new text, only when its reasons flagged
+ * them. Kinds and topics only, never the values.
+ */
+export function privacyFlags(reasons: readonly string[], texts: readonly string[]): { personalData: PersonalDataKind[]; sensitive: SpecialTopic[] } | null {
+  const pd = reasons.includes('personal-data'), sc = reasons.includes('special-category');
+  if (!pd && !sc) return null;
+  const text = texts.join('\n');
+  return { personalData: pd ? personalDataKinds(text) : [], sensitive: sc ? specialCategoryTopics(text) : [] };
 }

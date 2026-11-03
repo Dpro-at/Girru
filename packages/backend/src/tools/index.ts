@@ -68,6 +68,7 @@ import {
   memoryReviewTool,
   memoryReviewDecideTool,
   memoryReviewRoutineTool,
+  memoryPersonExportTool, memoryPersonForgetTool, memoryPrivacyReviewTool, memoryPrivacyDecideTool,
   memoryGraphReviewTool,
   memoryGraphTopicTool,
   memoryGraphSyncTool,
@@ -134,6 +135,7 @@ const CORE_TOOLS: Tool[] = [
   memoryBridgeTool, memoryBridgeApplyTool, // MEM-BRIDGE-01: owner-only; apply needs owner approval
   discoveryTool, discoveryApplyTool, // DISCOVER-01: what coding agents left on this computer; owner-only; apply needs owner approval
   memoryReviewTool, memoryReviewDecideTool, memoryReviewRoutineTool, memoryGraphReviewTool, memoryGraphTopicTool, memoryGraphSyncTool, memoryRecallTool, // owner's review inbox, topics + reply trace; decisions need owner approval
+  memoryPersonExportTool, memoryPersonForgetTool, memoryPrivacyReviewTool, memoryPrivacyDecideTool, // STORE-MAP-01 P9: one person, personal-data review (P9 only); export / forget / decide need owner approval
   desktopControlTool,
   storageSaveTool, storageSearchTool, storageDeleteTool,
   createReminderTool,
