@@ -76,3 +76,5 @@ icon), and the pairing and approval screens on the device.
 ## Open questions (new ones only; the four in NEXT.md still stand)
 
 - The iPhone device build warns that all interface orientations must be supported unless the app requires full screen. Should the app set `UIRequiresFullScreen`, or support all orientations?
+- **Pairing with a typed code (owner's request).** The owner wants pairing to work by typing the code, not only by scanning. Today "Type the code instead" only checks the code's form. `PROTOCOL.md` has no typed-code exchange, and a 12-character code cannot carry the computer's key. This needs a protocol addition (for example, the code finds the computer's offer on the relay and the 6-digit check binds it) before both apps and the computer can build it. It should be designed with Task 4.
+- **Store review access.** Apple App Review and Google Play review must be able to sign in and use the app, but the app only works paired to a computer the owner approves. What do the reviewers get: a review computer kept online with a typed code in the review notes, a demo mode, or a video plus notes? Decide before the store listing (BUILDING.md › Next tasks 5).
