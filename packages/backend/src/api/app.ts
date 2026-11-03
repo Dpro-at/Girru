@@ -113,6 +113,7 @@ import { cameraRoutes } from './routes/camera.js';
 import { profileRoutes } from './routes/profile.js';
 import { notificationsRoutes } from './routes/notifications.js';
 import { registerTeamRoutes } from './routes/team.js';
+import { phoneRoutes } from './routes/phone.js';
 // Email routes moved to email-client extension
 // import { registerEmailRoutes } from './routes/email.js';
 // import emailAccountsRoutes from './routes/email-accounts.js';
@@ -346,6 +347,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await fastify.register(authRoutes); // 🔐 Authentication
   await fastify.register(verificationRoutes);
   await fastify.register(deviceSessionRoutes); // Settings › Account › Signed in
+  await fastify.register(phoneRoutes); // Settings › Phone: pair, rename, forget phones (MOB-PAIR-01, owner only)
   await fastify.register(reviewerPolicyRoutes);
   await fastify.register(reviewerRequestRoutes);
   await fastify.register(reviewerVoteRoutes);
