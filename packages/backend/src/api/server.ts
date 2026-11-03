@@ -27,6 +27,7 @@ import { flushAuditWritesWithin, SHUTDOWN_AUDIT_FLUSH_MS } from '../services/aud
 import { startAutomaticProjectImports, stopAutomaticProjectImports } from '../memory/import/automatic-project-import.js';
 import { startDiscoveryWatch, stopDiscoveryWatch } from '../discovery/service.js';
 import { startPhoneLink, stopPhoneLink } from '../phone/service.js';
+import { bindPhoneApi } from '../phone/ui-bridge.js';
 import { resumePendingImports, stopLocalImports } from '../memory/import/local-import.js';
 import {recoverSubscriptionProcesses,stopSubscriptionProcesses} from '../services/subscription-chat.js';
 import { getOrchestrator } from '../multi-agent/orchestrator.js';
@@ -88,6 +89,7 @@ async function start() {
       // TASKLOG-01: read the projects' task files and watch them for changes from the coding apps.
       void import('../services/task-file.js').then((m) => m.syncAllTasks(true)).catch(() => undefined);
       // MOB-LINK-01: the phone link dials the relay only while a phone or an open pairing needs it.
+      bindPhoneApi(fastify);
       void startPhoneLink().catch(() => console.warn('[Phone] Phone link unavailable; paired phones cannot reach this computer.'));
     }
 

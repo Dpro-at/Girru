@@ -17,6 +17,7 @@
  *   tasks.list {place?}                        runs ('running' by default)
  *   schedules.list
  *   team.list                                  the owner's agents
+ *   ui.get / api.call / api.stream             the desktop chat page on the phone (ui-bridge.ts)
  */
 
 import { randomUUID } from 'node:crypto';
@@ -109,6 +110,9 @@ export async function runCommand(ctx: CommandContext, body: Body): Promise<unkno
     case 'tasks.list': return tasksList(ctx, body);
     case 'schedules.list': return schedulesList(ctx, body);
     case 'team.list': return teamList(ctx, body);
+    case 'ui.get': return (await import('./ui-bridge.js')).uiGet(ctx, body);
+    case 'api.call': return (await import('./ui-bridge.js')).apiCall(ctx, body);
+    case 'api.stream': return (await import('./ui-bridge.js')).apiStream(ctx, body);
     default: throw new CommandError('unknown_command');
   }
 }

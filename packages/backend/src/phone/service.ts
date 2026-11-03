@@ -541,8 +541,8 @@ export class PhoneLink {
     if (!live) return false;
     let text = JSON.stringify(obj);
     if (Buffer.byteLength(text) > MAX_ENVELOPE - 4096) text = JSON.stringify({ type: obj.type === 'run' ? 'run' : 'reply', ref: obj.ref ?? null, ok: false, error: 'too_large', ...(obj.runId ? { runId: obj.runId } : {}) });
-    // Run frames are bulk: on a backed-up link they are refused first (the run then ends with a notice).
-    return this.deliver(deviceId, seal(live.session, text), live.transport, false, obj.type === 'run');
+    // Run and stream frames are bulk: on a backed-up link they are refused first (the stream then ends with a notice).
+    return this.deliver(deviceId, seal(live.session, text), live.transport, false, obj.type === 'run' || obj.type === 'stream');
   }
 
   private deliver(deviceId: string, env: string, transport: Transport, pairing = false, bulk = false): boolean {

@@ -12,6 +12,7 @@ the computer's half of it. No UI here.
 | `service.ts` | `phoneLink()`: pairing sessions, relay connection, sessions, the command gate. |
 | `relay-connector.ts` | Outbound WebSocket to the relay: signed hello, allow list, open pairing ids, backoff with jitter. |
 | `commands.ts` | What a phone may ask, run as the owner through the same code as the computer's pages. |
+| `ui-bridge.ts` | The desktop chat page on the phone: `ui.get` (files of the verified core-ui build), `api.call` (one page request run as the owner), `api.stream` (a run's live events). |
 | `lan-listener.ts` | Wi-Fi path. **Off by default** (see below). |
 
 Owner API: `src/api/routes/phone.ts` (`/api/phone/*`, owner only). Agent
@@ -50,6 +51,15 @@ tool: `phone_devices` (read only). No tool pairs, allows or forgets a phone.
 - A `wifi` phone is never on the relay allow list, and relay frames from it
   are ignored.
 - Audit rows carry the phone's device id.
+- The chat page on the phone passes two gates: the phone's short list in
+  `ui-bridge.ts` (chat only; never phones, terminal, project files or
+  variables, credentials, sign-in, users, backups, extensions, MCP, deletes
+  or uploads) and the desktop bridge's own allow list and answer projection
+  (`core-ui/scripts/application-server.cjs`). `test/phone-ui-bridge.test.mjs`
+  pins the short list. The request runs through Fastify inject with a
+  60-second owner token made for that one request; it never reaches the
+  phone. `ui.get` serves only files named in the verified build's manifest.
+  Limits per phone: 120 `api.call` and 600 `ui.get` a minute, 4 open streams.
 
 ## Wi-Fi listener (needs the owner's decision)
 

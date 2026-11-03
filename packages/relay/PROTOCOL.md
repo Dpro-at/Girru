@@ -583,6 +583,60 @@ this phone), `approval.pending {id}`, `approval.detail {id}`, `approval.decide`,
 `verification_required` for an approval: the phone sends the owner to the
 computer and nothing runs.
 
+### The computer's pages on the phone (`ui.get`, `api.call`, `api.stream`)
+
+The phone shows the computer's own chat page (the same built core-ui the
+desktop loads), so a chat change is made once, on the computer. Every other
+phone screen is the app's own. The app's web
+view loads them from `girru-app://computer/…`; the app answers those requests
+through the session, never from the network. Three signed commands carry them:
+
+- **`ui.get {path, part?}`**: one file of the built pages. `path` is `/`, a
+  page route (`/chat`, `/agents`, `/memory`, `/tasks`, `/settings`,
+  `/channels`: these answer `index.html`), `/assets/<name>.js|css|gif` or
+  `/THIRD_PARTY_NOTICES.txt`; anything else is `{status:404}`. Only files of
+  the verified build are served (its manifest and hashes are checked; no
+  source maps, no paths outside it). The answer is
+  `{status:200, type, size, parts, part, build, body}`: `body` is base64, at most
+  600 KiB of the file per answer; a bigger file is fetched part by part
+  (`part` 0 … `parts`−1). `build` names the build, so a phone never mixes two.
+- **`api.call {method, path, body?}`**: one request of the pages, run inside
+  the computer **as the owner** without any token reaching the phone. `path`
+  includes the query. It must pass two gates: the phone's own short list
+  (below) and the same allow list and answer projection as the desktop's
+  pages. The answer is `{status, body}` (projected JSON, or `null`); a request
+  outside the phone's list is refused with the error `not_allowed`, one the
+  desktop gate refuses is `{status:400, body:null}`. Request bodies are at
+  most 256 KiB, answers at most 700 KiB (`too_large`).
+- **`api.stream {path}`**: a run's live events
+  (`/api/chat/runs/<runId>/events?after=N`, the only stream the phone gets).
+  The reply is `{ok:true}`; then `{type:"stream", ref, data}` for each event,
+  where `data` is the event as the page reads it (`seq` and the run frame,
+  projected as on the desktop; live previews have no `seq`), and one
+  `{type:"stream.end", ref, status}` with `status` `"complete"` or
+  `"dropped"` (the link backed up or the run is unknown: the page re-attaches
+  with `after` = the last `seq` it got). The app turns the frames into the
+  page's event stream (`id: <seq>` / `data: <json>`).
+
+**The phone's short list.** Only the chat page's requests: who is signed in;
+the agents (read); conversations (list, open, create, rename, one page of
+messages, the side panel's usage, team and schedule, stop); sending a turn and
+steering or stopping a run; the chat sidebar, panel and settings (read, and
+the sidebar and panel layout). Tasks, approvals and the team are the phone's
+own screens and use their own commands above. **Never** on the phone, whatever
+the desktop gate allows: phones and the relay (`/api/phone/*`), the terminal,
+files and folders of projects, project variables, credentials, keys and
+secrets, sign-in, users, roles, two-step sign-in and security settings,
+backups, exports and audit logs, extensions, plugins, skills and MCP servers,
+deleting conversations, and uploads (microphone clips and images wait for
+files on the link). Approvals keep their own commands above (with their full
+view and second-factor rules). The list lives in one file on the computer with
+a test that fails when anything outside it is answered.
+
+Each of the three counts as authenticated use, is refused for an expired or
+forgotten phone, and is limited per phone (120 `api.call` and 600 `ui.get` a
+minute, 4 open streams).
+
 ## Relay wire protocol
 
 The relay speaks WebSocket at the path `/v1`. In production it sits behind

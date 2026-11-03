@@ -206,6 +206,30 @@ test('chat.send starts a turn as the owner and streams the run back, then run.en
   assert.equal(JSON.parse(audit.metadata).device, first.identity.id, 'the audit row names the phone');
 });
 
+test('the desktop chat page through the session: api.call and api.stream', async () => {
+  const { bindPhoneApi } = await import(join(backendDir, 'src/phone/ui-bridge.ts'));
+  bindPhoneApi(app);
+  try {
+    first.command({ type: 'api.call', ref: 'u1', method: 'GET', path: '/api/auth/me' });
+    const me = await first.reply('u1');
+    assert.equal(me.ok, true, JSON.stringify(me));
+    assert.equal(me.data.status, 200);
+    assert.equal(me.data.body.user.role, 'owner');
+    first.command({ type: 'api.call', ref: 'u2', method: 'GET', path: '/api/phone/devices' });
+    assert.equal((await first.reply('u2')).error, 'not_allowed');
+    first.command({ type: 'chat.send', ref: 'u3', message: 'Stream this to the page' });
+    const sent = await first.reply('u3', 5000);
+    assert.equal(sent.ok, true, JSON.stringify(sent));
+    first.command({ type: 'api.stream', ref: 'u4', path: `/api/chat/runs/${sent.data.runId}/events?after=0` });
+    assert.equal((await first.reply('u4')).ok, true);
+    const data = [];
+    const end = await first.read((m) => { if (m.type === 'stream' && m.ref === 'u4') data.push(m.data); return m.type === 'stream.end' && m.ref === 'u4'; }, 8000);
+    assert.equal(end.status, 'complete');
+    assert.equal(data.filter((d) => d.seq > 0).at(-1).type, 'end');
+    assert.ok(data.some((d) => d.type === 'text'), JSON.stringify(data.map((d) => d.type)));
+  } finally { bindPhoneApi(null); }
+});
+
 test('approvals: pending only once shown to this phone; deny; approve needs paramsHash; 2FA is never skipped', async () => {
   const tool = { name: 'phone_test_tool' };
   const ask = async () => (await approvals.requestApproval(tool, { value: 'x' }, { userId: 'pe-owner', agentId: 'pe-main', sessionId: 's1' }, 'other')).details.approvalId;

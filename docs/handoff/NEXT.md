@@ -8,7 +8,7 @@ owner's feature list and the typed-code proposal: [`PHONE_FEATURES.md`](PHONE_FE
 Phone design boards (P1–P23, D1–D8): the owner's "Girru phone app" design
 canvas (ask the owner for the link).
 
-- **Branch:** `phone/app` (tip when this was written: `ae8b3c62`).
+- **Branch:** `phone/app`. Pull before you start: Part 1 below was added on the main computer.
 - **Do not** push to `main`, merge, tag or release. Commit on `phone/app` only.
 - **Never commit** signing teams, `google-services.json`, keys, tokens or `.env` files.
 - **The owner's rule:** the phone shows the **same core-ui chat screens** as the
@@ -28,6 +28,7 @@ canvas (ask the owner for the link).
 | Task 4, session (iPhone) | **Done**: `GirruCore/SessionLink.swift`, a fresh signed hs1 per session, sealed commands in order, replies by `ref`/nonce, run frames until `run.end`. The app's `ComputerLink` is `App/SessionComputerLink.swift`. Tested end to end: `chat.list`, `team.list`, a streamed `chat.send`, a refused replay. |
 | Task 4, session (Android) | **Not started.** `CommandSender` in `link/Link.kt` is still `NotConnectedYet`. |
 | Simulator pairing over the real relay | **Done**: the iOS Simulator paired with the backend through `wss://relay.girru.net/v1`, the same check code (964 901) on both screens. |
+| Task 5 Part 1, the computer serves the chat page | **Done** (3 November 2026): `ui.get`, `api.call`, `api.stream` in `packages/backend/src/phone/ui-bridge.ts`, written in `PROTOCOL.md` › "The computer's pages on the phone". Backend phone tests 42 pass (new: `test/phone-ui-bridge.test.mjs` 8, one more in `phone-link-e2e`). |
 | Chat screens in the app | **Not started.** After pairing the app shows "Cannot reach your computer yet" (`UnavailableCoreUISource`). |
 
 ### Things the next agent must know
@@ -60,7 +61,7 @@ canvas (ask the owner for the link).
   account cannot sign push notifications (`aps-environment`): for a test build
   on a free account, leave push out of a local, uncommitted build.
 
-## Task 5: core-ui chat screens in the phone app (do this next)
+## Task 5: the desktop chat page in the phone app (Part 1 done; do Part 3 next)
 
 The phone's web host already exists (`ios/Web/WebHostView.swift`,
 `CoreUISchemeHandler.swift`: `girru-app://computer/…` requests go to a
@@ -164,15 +165,41 @@ tests next to `test/phone-link-e2e.test.mjs`.
 - The owner reviews the protocol text before release (PROTOCOL.md says an
   external security review happens before any public release).
 
-### Part 2: core-ui phone layout
+### Part 1 result (done; read before Part 3)
 
-core-ui has no phone layout yet: nothing reads `window.girruShell`
-(`{platform: "ios"|"android", bridge: 1}`, set by the app before the page
-loads). Build the boards P3–P18 in core-ui itself, as a layout for narrow
-screens inside the shell: bottom bar with 4 places, chat, chat list, side
-panel, new chat (agent and model), composer add menu, long-press menu, tools,
-⋯ menu, tasks, approvals, team, empty states, dark mode. Follow the canvas's
-notes. A change to a chat screen must then show on both desktop and phone.
+- `ui.get {path, part?}` → `{status, type, size, parts, part, build, body}`
+  (base64, 600 KiB of the file per answer; fetch every part, and never mix
+  two `build` values). Unknown paths answer `{status:404}`.
+- `api.call {method, path, body?}` → `{status, body}`; outside the phone's
+  list the error is `not_allowed`. The page must never send a token: the
+  computer runs the request as the owner.
+- `api.stream {path}` for `/api/chat/runs/<runId>/events?after=N` → reply
+  `{ok:true}`, then `{type:"stream", ref, data}` frames and one
+  `{type:"stream.end", ref, status}`. Give the page an event stream of
+  `id: <seq>` / `data: <json of data>` lines; on `dropped` the page
+  re-attaches with `after`.
+- Errors the app must handle: `not_allowed`, `rate_limited`, `too_large`,
+  `ui_unavailable` (no verified build on the computer), `owner_changed`.
+
+### Part 2: the chat page on the phone (owner's decision, 3 November 2026)
+
+- **Only the chat is the desktop page itself**, made to fit a narrow screen.
+  The owner makes the desktop pages responsive himself; do not build a
+  separate phone layout in core-ui.
+- **Every other phone screen is the app's own** and follows its design board:
+  unlock, pairing (waiting, check code), lock notice, tasks, approvals (full
+  view, too large), team. They use the existing signed commands
+  (`tasks.list`, `approval.*`, `team.list`), not `api.call`. Proposed split
+  of the boards, to confirm with the owner: chat page (web) = Chat, Chats,
+  Details, NewChat, AddMenu, LongPress, Tools, ChatMenu; app's own =
+  Main (bottom bar), Unlock, Tasks, Approvals, Team, LockNotice,
+  PairWaiting, PairCheck, ApprovalFull, ApprovalTooLarge.
+- Still needed in core-ui for the shell (small, not layout):
+  `createSameOriginTransport` and `isAppOrigin` (`core-ui/src/session.ts`,
+  `entry-client.ts`) must accept `girru-app://computer` when
+  `window.girruShell` is set, and the page must start signed in as the owner
+  without a login (a placeholder session from the shell). This is done on the
+  main computer next; pull `phone/app` before Part 3.
 
 ### Part 3: the apps load core-ui through the session
 
