@@ -23,6 +23,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { sessionProof } from './proof.js';
 import { mcpContractTools } from '../contract.js';
+import { storeP8Enabled } from '../../services/store-p8.js';
 
 export const MCP_SERVER_NAME = 'dpro-memory';
 const VERSION = '0.1.0';
@@ -122,10 +123,29 @@ export function httpBackend(o: HttpBackendOptions): BridgeBackend {
  * tools they replace (still callable by name).
  */
 export function bridgeTools(verbs: boolean): Array<{ name: string; description: string; inputSchema: unknown }> {
-  if (!verbs) return BRIDGE_TOOL_DEFINITIONS.map((t) => ({ ...t }));
+  const defs = storeP8Enabled() ? p8Definitions() : BRIDGE_TOOL_DEFINITIONS.map((t) => ({ ...t }));
+  if (!verbs) return defs;
   // The verbs replace memory_search, handoff_write and memory_propose in the list (the old names still work).
   const replaced = new Set(['memory_search', 'handoff_write', 'memory_propose']);
-  return [...BRIDGE_TOOL_DEFINITIONS.filter((t) => !replaced.has(t.name)).map((t) => ({ ...t })), ...mcpContractTools()];
+  return [...defs.filter((t) => !replaced.has(t.name)), ...mcpContractTools()];
+}
+
+/**
+ * STORE-MAP-01 P8 (D28): with GIRRU_STORE_P8 on (in this process's environment)
+ * project_brief and latest_handoff take an optional task number, and
+ * handoff_write also takes blockers, files touched and the task.
+ */
+const TASK_ARG = { type: 'string', description: 'Optional task number in the project\'s task file, like T-12: that task\'s newest handoff and links.' };
+function p8Definitions(): Array<{ name: string; description: string; inputSchema: unknown }> {
+  return BRIDGE_TOOL_DEFINITIONS.map((t) => {
+    if (t.name === 'project_brief' || t.name === 'latest_handoff') return { ...t, inputSchema: { type: 'object', properties: { task: TASK_ARG } } };
+    if (t.name === 'handoff_write') {
+      return { ...t, description: `${t.description} Name what blocks the work in blockers, the files you changed in files, and the task (T-12) when you worked on one.`,
+        inputSchema: { type: 'object', properties: { ...t.inputSchema.properties, blockers: list('What blocks the work now'), files: { type: 'array', items: { type: 'string' }, description: 'Files you changed, as paths in the project (up to 30)' },
+          task: { type: 'string', description: 'Optional task number you worked on, like T-12' } } } };
+    }
+    return { ...t };
+  });
 }
 
 export function createBridgeMcpServer(backend: BridgeBackend, opts: { verbs?: boolean } = {}): Server {

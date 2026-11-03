@@ -63,6 +63,8 @@ Girru's own servers store none of this. Updates and the Store index come from th
 |---|---|---|---|---|
 | Notes from Girru's agents | `agent_handoffs` | chat and task prompts | New version per note; newest wins on read | Today |
 | Notes from coding tools | `memory_bridge_handoffs` | project brief, `latest_handoff`, `AGENTS.md` | Same | Today; with `GIRRU_STORE_P4` on they live in `agent_handoffs` too (kind `project`, source `coding_app`) and every entry point reads that one table; the old table is dropped one release later |
+| Blockers, files touched, task (`T-n`), chat, card, the lead of a mid-task handoff | `agent_handoffs` columns (migration 178) | the task page's "Linked to T-n", the card's handoff count and "Blocked", `latest_handoff` / `project_brief` with a task | The owner edits blockers in place; files touched are read only | With `GIRRU_STORE_P8`. The card, task number and chat come from trusted rows when the note is saved, never from the model; a coding tool's note is copied into `agent_handoffs` to carry them |
+| A run's working notes | `run_notes` | the run (read only) | Append only; at the run's end marked lines become its handoff (when it wrote none) and lesson suggestions the owner reviews, without a model | With `GIRRU_STORE_P8`. Never memory by themselves |
 
 ### Agents
 
@@ -95,7 +97,7 @@ The task file `.girru/tasks.md` is the one place where a file owns text:
 | Title and body (done, left, next, log) | the task file, read as a revision | A file edit and a board edit made against the same exported version produce a **conflict** the owner resolves, not a silent overwrite | Today: two-way sync — **Planned:** checked against the last exported version |
 | Card id (`T-n`), column, department, agent | the board in the database | The file shows the name and carries the id; a renamed agent or department is rewritten from the id | Today by name — with `GIRRU_STORE_P3` a department rename or merge follows into boards and cards; agents **Planned** |
 | Run status and steps | the task runner | Read-only everywhere else | Today |
-| Link to memory and handoffs | the database | — | Planned |
+| Link to memory and handoffs | the database | — | With `GIRRU_STORE_P8`: the task number links the task's notes, its handoffs, its chats and its line in the task file |
 
 ## Project folder
 
@@ -216,6 +218,15 @@ With the same switch:
 - **Antigravity:** first-run setup looks for the Antigravity CLI (`agy`) instead of the Gemini CLI.
 - **Claude Code's own auto memory** is untrusted input: runs that Girru starts switch it off, and what Claude Code writes there reaches Girru only as review proposals.
 
+### Task links and run notes (off by default)
+
+`GIRRU_STORE_P8=1` turns on:
+
+- **The task number links a task:** its task notes, its handoffs (newest first, with blockers, files touched, who wrote it with which app and from which chat), its chats and its line in `.girru/tasks.md` read in one call; a card shows how many handoffs it has and "Blocked" when the newest names a blocker. The owner edits blockers; files touched stay as written.
+- **Handoffs between agents:** a lead can hand part of a task to a specialist with a structured note; it is stored as the specialist's handoff naming the lead, and the specialist's own note names the lead too.
+- **Run notes:** a run's short working notes stay with the run, read only, and are cleared 14 days after its last note. At the run's end lines starting `Done:`, `Left:`, `Next:`, `Blocked:` and `File:` become its handoff when it wrote none, and `Lesson:` lines go to the owner as suggestions. No model is called for this.
+- **Local models unchanged:** the new tool arguments and `run_note` are offered only to models that are not on this computer, so a local model's prompt and tool list stay the same size.
+
 ### One agent context and one Girru section (off by default)
 
 `GIRRU_STORE_P2=1` turns on, for every agent:
@@ -246,6 +257,7 @@ With the same switch:
 | Deleted memory | In the Trash, with its history, for the company's Trash period (7, 30 or 90 days, or never; 30 by default), then forgotten |
 | Memory history | Until the memory is forgotten |
 | Handoff notes | The newest 20 versions of each agent's note, and the newest 20 notes per project from coding tools |
+| A run's working notes (`GIRRU_STORE_P8`) | 14 days after the run's last note, then cleared |
 
 ### Export and forget
 

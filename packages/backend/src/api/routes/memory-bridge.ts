@@ -31,6 +31,7 @@
  *
  * Errors: { error, code } with 400 / 401 / 403 / 404 / 409 / 422.
  */
+import { storeP8Enabled } from '../../services/store-p8.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { storeP4Enabled } from '../../services/store-p4.js';
 import { authorizeActiveRole } from '../../auth/route-guards.js';
@@ -101,7 +102,7 @@ export async function memoryBridgeRoutes(fastify: FastifyInstance) {
   })));
 
   // STORE-MAP-01 P2: which storage switches are on (the app shows the matching words). P6 is named only while it is on.
-  fastify.get('/api/store-switches', { config }, asOwner(async () => ({ p2: storeP2Enabled(), p3: storeP3Enabled(), p4: storeP4Enabled(), ...(storeP6Enabled() ? { p6: true } : {}) })));
+  fastify.get('/api/store-switches', { config }, asOwner(async () => ({ p2: storeP2Enabled(), p3: storeP3Enabled(), p4: storeP4Enabled(), ...(storeP6Enabled() ? { p6: true } : {}), ...(storeP8Enabled() ? { p8: true } : {}) })));
 
   // --- STORE-MAP-01 P6 screens: project files, task-number problems, place settings (owner only) ---
   if (storeP6Enabled()) {

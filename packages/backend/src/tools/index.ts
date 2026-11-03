@@ -1,5 +1,5 @@
 import {specialtyLibraryTool,specialtyApplyTool} from './specialties.js';
-import { teamListTool, teamDelegateTool, teamResultsTool } from './tasks/team.js';
+import { teamListTool, teamDelegateTool, teamDelegateToolP8, teamResultsTool } from './tasks/team.js';
 import { quickHelperTool, quickHelperResultTool } from './tasks/quick-helper.js';
 import {narrowProjectMemory,narrowProjectMemorySync} from './memory/project-access.js';
 /**
@@ -101,7 +101,9 @@ import { planStepsTool } from './plan/plan-steps.js';
 import { askCodingAppTool } from './cli/ask-coding-app.js';
 import { boardSuggestCardTool } from './board/board-suggest.js';
 import { ruleSuggestTool } from './rules/rule-suggest.js';
-import { handoffReadTool, handoffSaveTool } from './handoff/handoff.js';
+import { handoffReadTool, handoffSaveTool, handoffSaveToolP8 } from './handoff/handoff.js';
+import { runNoteTool } from './handoff/run-note.js';
+import { storeP8Enabled } from '../services/store-p8.js';
 import { guideReadTool } from './skills/guide-read.js';
 import { storeP2Enabled } from '../services/agent-context/switch.js';
 import { boardCheckTool, boardChecklistTool, boardCommentTool, boardMoveTool, boardMyCardsTool, boardTaskUpdateTool } from './board/board-tools.js';
@@ -244,6 +246,18 @@ export async function createAgentToolsRegistry(context: ToolExecutionContext): P
   return registry;
 }
 
+/**
+ * STORE-MAP-01 P8: the run's model is not on this computer (the Claude API, a
+ * coding app). While P8 is on it also gets run_note, handoff_save with blockers
+ * and files, and team_delegate with a structured handoff; a local model keeps
+ * today's tools byte for byte (LOCAL-ONLY-01). Nothing happens with P8 off.
+ */
+export function useRemoteModelTools(registry: ToolsRegistry): void {
+  if (!storeP8Enabled()) return;
+  registry.updateContext({ remoteModel: true });
+  for (const tool of [handoffSaveToolP8, runNoteTool, teamDelegateToolP8]) registry.register(tool);
+}
+
 function buildToolsRegistry(context: ToolExecutionContext, mcpTools: Tool[]): ToolsRegistry {
   const registry = new ToolsRegistry(context);
 
@@ -254,6 +268,9 @@ function buildToolsRegistry(context: ToolExecutionContext, mcpTools: Tool[]): To
 
   // STORE-MAP-01 P2 (AG1): skills and specialties by name, the full text on demand.
   if (storeP2Enabled()) registry.register(guideReadTool);
+
+  // STORE-MAP-01 P8: the P8 tool variants, only for a model that is not on this computer (LOCAL-ONLY-01).
+  if (context.remoteModel) useRemoteModelTools(registry);
 
   // Register extension-provided tools
   for (const tool of extensionTools) {

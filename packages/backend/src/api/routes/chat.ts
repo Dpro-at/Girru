@@ -31,7 +31,7 @@ import { AgentRuntime, type Message, type Skill } from '../../agent/index.js';
 import { getSettingsManager } from '../../settings/index.js';
 import { one, sql } from '../../repositories/sql-steps.js';
 import { streamChatClaude } from './agentic-chat.js';
-import { createAgentToolsRegistry } from '../../tools/index.js';
+import { createAgentToolsRegistry, useRemoteModelTools } from '../../tools/index.js';
 import { channelTurnFromHeaders, type ChannelToolPolicy } from '../../tools/channel-policy.js';
 import { authenticateActiveUser } from '../../auth/route-guards.js';
 import { geminiCliTool } from '../../tools/cli/gemini-cli.js';
@@ -494,6 +494,7 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
         // SUB3: with P2 the memory part has a token budget (counted like every other prompt part), not a character cap.
         if(memoryText)history=`${p2Context?capTokens(memoryText,CODING_APP_MEMORY_TOKENS):capMiddle(memoryText,SUBSCRIPTION_MEMORY_CHARS)}\n\n${history}`;
         const registry=await createAgentToolsRegistry({userId,sessionId,agentId:selectedAgent.id,workspaceDir:input.fileReadRoot,fileReadRoot:input.fileReadRoot,memoryDrawers:drawers,chatPlan:true});
+        useRemoteModelTools(registry); // STORE-MAP-01 P8: a coding app is not a local model (nothing changes with P8 off)
         let toolStep=0;
         // CHAT-GAPS-01: Codex sees the images (-i, files of the chat's own image folder), Claude Code too (image blocks in one
         // stream-json message); Gemini cannot take images on its stream-json input, so it is told the names and the chat says so.
@@ -941,6 +942,8 @@ async function streamChat(
 
   // Get real tools from the tools registry (11 tools: exec, read, write, browser×4, memory×2, desktop)
   const toolsRegistry = await createAgentToolsRegistry({ userId, sessionId, workspaceDir: process.cwd(), toolPolicy, agentId, memoryDrawers, chatPlan: !toolPolicy, ...(fileReadRoot ? { fileReadRoot } : {}), ...(currentChatRun()?.readRoots?.length ? { extraReadRoots: currentChatRun()!.readRoots } : {}) });
+  // STORE-MAP-01 P8: only a turn on the Claude API gets the P8 tool variants; a local model's list never grows (LOCAL-ONLY-01).
+  if (provider === 'claude' && apiKey && !toolPolicy) useRemoteModelTools(toolsRegistry);
   const tools = localModelOnly() && !localModelTools() ? [] : toolsRegistry.getToolsForAPI();
 
   console.log('[Chat] 🔧 Available tools:', tools.length);

@@ -35,6 +35,7 @@ import { fileURLToPath } from 'url';
 import { sessionsRoutes } from './routes/sessions.js';
 import { chatConversationRoutes } from './routes/chat-conversations.js';
 import { agentHandoffRoutes } from './routes/agent-handoffs.js'; // CORE-MEM-HANDOFF: owner-only done/left/next notes
+import { storeP8Routes } from './routes/store-p8.js'; // STORE-MAP-01 P8: task links, handoff blockers, run notes (switch on only)
 import { memoryBridgeRoutes } from './routes/memory-bridge.js'; // MEM-BRIDGE-01: one memory for Claude Code, Codex, Gemini CLI, Antigravity
 import { departmentsRoutes } from './routes/departments.js'; // STORE-MAP-01 P3: one list of departments (GIRRU_STORE_P3)
 import { modelsRoutes } from './routes/models.js';
@@ -363,6 +364,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await fastify.register(meetingRoutes);
   await fastify.register(chatConversationRoutes); // saved conversations + resumable runs (CHAT-REBUILD-01)
   await fastify.register(agentHandoffRoutes); // CORE-MEM-HANDOFF: the agents' handoff notes (owner only)
+  await fastify.register(storeP8Routes); // STORE-MAP-01 P8: registers nothing while GIRRU_STORE_P8 is off
   await fastify.register(memoryBridgeRoutes); // MEM-BRIDGE-01: owner API + the dpro-memory MCP server's two loopback routes
   await fastify.register(departmentsRoutes); // STORE-MAP-01 P3: one list of departments, 404 while the switch is off
   await fastify.register(smartChatRoutes); // 🧠 Smart Agent System

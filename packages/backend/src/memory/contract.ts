@@ -20,6 +20,7 @@
  */
 
 import { normalizeTopicKey, TopicKeyError } from './topic-key.js';
+import { storeP8Enabled } from '../services/store-p8.js';
 
 export const MEMORY_VERBS = ['recall', 'save', 'supersede', 'handoff', 'propose'] as const;
 export type MemoryVerb = (typeof MEMORY_VERBS)[number];
@@ -36,7 +37,7 @@ type Prop = { type: 'string'; maxLength?: number; description: string } | { type
 interface VerbDefinition { verb: MemoryVerb; description: string; properties: Record<string, Prop>; required: string[] }
 
 const requestId: Prop = { type: 'string', maxLength: 64, description: 'Optional id you choose for this write (8-64 letters, digits, - or _). Send the same id again when you retry after a timeout: it is never saved twice.' };
-const lines = (what: string): Prop => ({ type: 'array', maxItems: MAX_LIST_ITEMS, items: { type: 'string', maxLength: MAX_LIST_ITEM_CHARS }, description: `${what} (up to ${MAX_LIST_ITEMS} short lines)` });
+const lines = (what: string, max = MAX_LIST_ITEMS): Prop => ({ type: 'array', maxItems: max, items: { type: 'string', maxLength: MAX_LIST_ITEM_CHARS }, description: `${what} (up to ${max} short lines)` });
 
 export const MEMORY_CONTRACT: readonly VerbDefinition[] = [
   { verb: 'recall', description: 'Search the memory you may read for this work. Returns the best matches with their ids; says so when nothing is found. Never guess a memory that is not returned.',
@@ -51,16 +52,30 @@ export const MEMORY_CONTRACT: readonly VerbDefinition[] = [
     properties: { content: { type: 'string', maxLength: MAX_FACT_CHARS, description: 'The proposal' }, request_id: requestId }, required: ['content'] },
 ];
 
+/** STORE-MAP-01 P8 (D28): the handoff verb also takes blockers, files touched and the task (T-n). */
+export const MAX_FILES = 30;
+const P8_HANDOFF: Record<string, Prop> = {
+  blockers: lines('What blocks the work now'),
+  files: lines('Files you changed, as paths in the project', MAX_FILES),
+  task: { type: 'string', maxLength: 12, description: 'Optional task number in the project\'s task file, like T-12' },
+};
+
+/** The verbs as they are now: with P8 on the handoff verb has its P8 arguments (one place for both doors and the checks). */
+export function contractDefinitions(): readonly VerbDefinition[] {
+  if (!storeP8Enabled()) return MEMORY_CONTRACT;
+  return MEMORY_CONTRACT.map((d) => (d.verb === 'handoff' ? { ...d, properties: { ...d.properties, ...P8_HANDOFF } } : d));
+}
+
 const schemaOf = (d: VerbDefinition) => ({ type: 'object', properties: d.properties, required: d.required, additionalProperties: false });
 
 /** XP1, door 1: the MCP tools (dpro-memory), named memory_<verb>. */
 export function mcpContractTools(): Array<{ name: string; description: string; inputSchema: ReturnType<typeof schemaOf> }> {
-  return MEMORY_CONTRACT.map((d) => ({ name: `memory_${d.verb}`, description: d.description, inputSchema: schemaOf(d) }));
+  return contractDefinitions().map((d) => ({ name: `memory_${d.verb}`, description: d.description, inputSchema: schemaOf(d) }));
 }
 
 /** XP1, door 2: the same verbs as native tool definitions (loaded on demand, never in every turn). */
 export function nativeContractTools(): Array<{ name: string; description: string; input_schema: ReturnType<typeof schemaOf> }> {
-  return MEMORY_CONTRACT.map((d) => ({ name: `memory_${d.verb}`, description: d.description, input_schema: schemaOf(d) }));
+  return contractDefinitions().map((d) => ({ name: `memory_${d.verb}`, description: d.description, input_schema: schemaOf(d) }));
 }
 
 export const verbOfTool = (name: string): MemoryVerb | null => {
@@ -75,6 +90,8 @@ export class ContractError extends Error {
 export interface ValidArgs {
   query?: string; limit?: number; content?: string; topicKey?: string | null; id?: string; requestId?: string | null;
   done?: string[]; left?: string[]; next?: string[]; questions?: string[];
+  /** P8 only. */
+  blockers?: string[]; files?: string[]; task?: string;
 }
 
 /**
@@ -82,7 +99,7 @@ export interface ValidArgs {
  * ContractError whose message tells the model exactly what to fix.
  */
 export function validateVerb(verb: MemoryVerb, raw: unknown): ValidArgs {
-  const d = MEMORY_CONTRACT.find((x) => x.verb === verb);
+  const d = contractDefinitions().find((x) => x.verb === verb);
   if (!d) throw new ContractError(`Unknown memory verb ${String(verb)}`);
   if (raw !== undefined && (raw === null || typeof raw !== 'object' || Array.isArray(raw))) throw new ContractError('Arguments must be an object');
   const args = (raw ?? {}) as Record<string, unknown>;
@@ -101,6 +118,7 @@ export function validateVerb(verb: MemoryVerb, raw: unknown): ValidArgs {
         try { out.topicKey = normalizeTopicKey(t); } catch (err) { throw new ContractError(err instanceof TopicKeyError ? `topic_key: ${err.message}` : 'topic_key is not valid'); }
       } else if (k === 'id') { if (!ID.test(t)) throw new ContractError('id is not a memory id (use an id that recall returned)'); out.id = t; }
       else if (k === 'request_id') { if (!REQUEST_ID.test(t)) throw new ContractError('request_id must be 8-64 letters, digits, - or _'); out.requestId = t; }
+      else if (k === 'task') { if (!/^T-\d{1,6}$/.test(t)) throw new ContractError('task must be a task number like T-12'); out.task = t; }
     } else if (p.type === 'integer') {
       if (!Number.isInteger(v) || (v as number) < p.minimum || (v as number) > p.maximum) throw new ContractError(`${k} must be a whole number from ${p.minimum} to ${p.maximum}`);
       out.limit = v as number;

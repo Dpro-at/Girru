@@ -31,7 +31,8 @@ import { one, sql } from '../repositories/sql-steps.js';
 import { outsidePgTransaction } from '../db/pg/pool.js';
 import { getOrchestrator } from '../multi-agent/index.js';
 import { ClaudeClient } from '../llm/claude-client.js';
-import { createAgentToolsRegistry } from '../tools/index.js';
+import { createAgentToolsRegistry, useRemoteModelTools } from '../tools/index.js';
+import { storeP8Enabled } from './store-p8.js';
 import { approvalCategory } from '../tools/approvals.js';
 import type { ToolResult } from '../tools/types.js';
 import { UNKNOWN_PRINCIPAL } from '../tools/grants.js';
@@ -305,6 +306,18 @@ export async function taskRunBasePrompt(agent: Pick<AgentRow, 'id' | 'name' | 's
   return (agent.system_prompt ?? `You are ${agent.name}, an AI agent.`) + await agentSkillsPrompt(agent.id);
 }
 
+/** STORE-MAP-01 P8 (D27): distill a finished task run's working notes (no model call). Never fails the run. */
+async function distillTaskRun(runId: string): Promise<void> {
+  try {
+    const row = await sql().read(one<{ task_id: string; agent_id: string; user_id: string | null }>('SELECT task_id, agent_id, user_id FROM task_runs WHERE id = ?', runId));
+    const ownerId = row ? await taskRunOwner(row.user_id) : undefined;
+    if (!row || !ownerId) return;
+    const { distillRun } = await import('../memory/handoff/run-notes.js');
+    const { taskRunScope } = await import('../memory/handoff/scope.js');
+    await distillRun({ ownerId, runKind: 'task', runId }, { scope: await taskRunScope(row), agentId: row.agent_id });
+  } catch (err) { console.warn('[TaskRun] working notes not distilled', { runId, error: (err as Error)?.message }); }
+}
+
 export async function executeTaskRun(runId: string, owner: string = WORKER_ID): Promise<AttemptResult> {
   const lease = await claimRun(runId, owner);
   if (!lease) return { status: 'not_claimed' };
@@ -323,6 +336,7 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
 
   const fail = async (reason: string, agentId: string, noRetry = false): Promise<AttemptResult> => {
     if (!(await finishAttempt(lease, 'failed', reason))) return { status: 'lease_lost' };
+    if (storeP8Enabled()) await distillTaskRun(runId);
     // A cost refusal would only be refused again: never auto-retry it.
     orchestrator.failTask(taskId, reason, { noRetry: noRetry || (await hasToolSteps(runId)) });
     await logActivity({ agentId, taskId, actionType: 'task_failed', summary: reason.slice(0, 200) });
@@ -394,6 +408,8 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
       if (localModel) driver = ollamaDriver({ ...agent, model: localModel }, systemPrompt, registry.getToolsForAPI());
       else {
         claudeClient = new ClaudeClient(apiKey, agent.model);
+        // STORE-MAP-01 P8: the Claude API is not a local model (run_note, handoff_save with blockers; nothing with P8 off).
+        useRemoteModelTools(registry);
         driver = claudeDriver(claudeClient, agent, systemPrompt, registry.getToolsForAPI());
       }
     }
@@ -505,6 +521,8 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
     // The run is recorded completed first (fenced): a crash after this point
     // never runs the task again.
     if (!(await finishAttempt(lease, 'completed', null, finalContent.slice(0, 500)))) return { status: 'lease_lost' };
+    // STORE-MAP-01 P8 (D27): the run's working notes become its handoff (when it wrote none) and lesson suggestions.
+    if (storeP8Enabled()) await distillTaskRun(runId);
     if (verdict?.status === 'failed_verification') {
       const reason = `verification failed: ${verdict.reasons.join('; ')}`.slice(0, 500);
       orchestrator.failTask(taskId, reason, { noRetry: true });

@@ -17,6 +17,7 @@
 import { randomUUID } from 'node:crypto';
 import { all, one, run, sql } from '../../repositories/sql-steps.js';
 import { redactImportText } from '../import/redact.js';
+import { storeP8Enabled } from '../../services/store-p8.js';
 
 /** Agent id used when no agent row exists (no primary agent configured). */
 export const MAIN_AGENT = '_main';
@@ -46,7 +47,13 @@ export interface HandoffBody {
   left: string[];
   next: string[];
   questions: string[];
+  /** STORE-MAP-01 P8 (D28): what blocks the work, and the files it changed. Only while P8 is on. */
+  blockers?: string[];
+  files?: string[];
 }
+
+/** P8: the links a handoff is saved with (from trusted context, never model input). */
+export interface HandoffLinks { cardId?: string | null; taskNo?: string | null; conversationId?: string | null; fromAgentId?: string | null }
 
 export interface Handoff extends HandoffBody {
   id: string;
@@ -58,6 +65,14 @@ export interface Handoff extends HandoffBody {
   source: HandoffSource;
   runId: string | null;
   createdAt: string;
+  /** P8 only (absent while the switch is off). */
+  blockers?: string[];
+  files?: string[];
+  cardId?: string | null;
+  taskNo?: string | null;
+  conversationId?: string | null;
+  fromAgentId?: string | null;
+  client?: string | null;
 }
 
 export class HandoffInputError extends Error {}
@@ -65,16 +80,19 @@ export class HandoffInputError extends Error {}
 interface Row {
   id: string; owner_id: string; agent_id: string; scope_kind: HandoffKind; scope_id: string; project_id: string | null; version: number;
   done: string; remaining: string; next_steps: string; open_questions: string; source: HandoffSource; run_id: string | null; created_at: string;
+  blockers?: string; files_touched?: string; card_id?: string | null; task_no?: string | null; conversation_id?: string | null; from_agent_id?: string | null; client?: string | null;
 }
 
 const FIELDS = ['done', 'left', 'next', 'questions'] as const;
+/** P8: files touched may be a longer list than the other parts. */
+export const MAX_FILES = 30;
 
 /** One list, cleaned: short single-line items, secrets redacted, empty ones dropped. */
-function cleanList(raw: unknown, name: string): string[] {
+export function cleanList(raw: unknown, name: string, max = MAX_ITEMS): string[] {
   if (raw === undefined || raw === null) return [];
   const list = typeof raw === 'string' ? [raw] : raw;
   if (!Array.isArray(list)) throw new HandoffInputError(`${name} must be a list of short texts`);
-  if (list.length > MAX_ITEMS) throw new HandoffInputError(`${name} has more than ${MAX_ITEMS} items`);
+  if (list.length > max) throw new HandoffInputError(`${name} has more than ${max} items`);
   const out: string[] = [];
   for (const item of list) {
     if (typeof item !== 'string') throw new HandoffInputError(`${name} must be a list of short texts`);
@@ -84,12 +102,18 @@ function cleanList(raw: unknown, name: string): string[] {
   return out;
 }
 
-/** A handoff body from untrusted input (model, agent tool, HTTP). Throws HandoffInputError. */
-export function cleanHandoff(raw: unknown): HandoffBody {
+/**
+ * A handoff body from untrusted input (model, agent tool, HTTP). Throws HandoffInputError.
+ * With `extras` (P8 on) it also takes blockers and files touched.
+ */
+export function cleanHandoff(raw: unknown, extras = false): HandoffBody {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new HandoffInputError('handoff must be an object');
   const r = raw as Record<string, unknown>;
   const body: HandoffBody = { done: cleanList(r.done, 'done'), left: cleanList(r.left, 'left'), next: cleanList(r.next, 'next'), questions: cleanList(r.questions, 'questions') };
-  if (FIELDS.every((f) => body[f].length === 0)) throw new HandoffInputError('handoff is empty: give at least one of done, left, next or questions');
+  if (extras) { body.blockers = cleanList(r.blockers, 'blockers'); body.files = cleanList(r.files, 'files', MAX_FILES); }
+  if (FIELDS.every((f) => body[f].length === 0) && !body.blockers?.length) {
+    throw new HandoffInputError(extras ? 'handoff is empty: give at least one of done, left, next, questions or blockers' : 'handoff is empty: give at least one of done, left, next or questions');
+  }
   return body;
 }
 
@@ -97,17 +121,29 @@ const parseList = (text: string): string[] => {
   try { const v = JSON.parse(text); return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []; } catch { return []; }
 };
 
-function toHandoff(r: Row): Handoff {
-  return {
+export function toHandoff(r: Row): Handoff {
+  const h: Handoff = {
     id: r.id, agentId: r.agent_id, kind: r.scope_kind, scopeId: r.scope_id, projectId: r.project_id, version: Number(r.version),
     done: parseList(r.done), left: parseList(r.remaining), next: parseList(r.next_steps), questions: parseList(r.open_questions),
     source: r.source, runId: r.run_id, createdAt: r.created_at,
   };
+  // P8: the new fields only while the switch is on, so every answer stays as it was with it off.
+  if (storeP8Enabled()) {
+    Object.assign(h, { blockers: parseList(r.blockers ?? '[]'), files: parseList(r.files_touched ?? '[]'), cardId: r.card_id ?? null, taskNo: r.task_no ?? null,
+      conversationId: r.conversation_id ?? null, fromAgentId: r.from_agent_id ?? null, client: r.client ?? null });
+  }
+  return h;
 }
 
-/** Save a new version for the scope; returns it. The body must come from cleanHandoff. */
-export async function saveHandoff(scope: HandoffScope, body: HandoffBody, source: HandoffSource, runId: string | null = null): Promise<Handoff> {
+/**
+ * Save a new version for the scope; returns it. The body must come from cleanHandoff.
+ * P8 on: blockers, files and the task / chat / card links are stored with it
+ * (`links` from trusted context; what is not given is found from the scope).
+ */
+export async function saveHandoff(scope: HandoffScope, body: HandoffBody, source: HandoffSource, runId: string | null = null, links: HandoffLinks = {}): Promise<Handoff> {
   const id = randomUUID();
+  const p8 = storeP8Enabled();
+  const linked = p8 ? await (await import('./links.js')).linksForScope(scope, links) : null;
   await sql().tx(function* () {
     const top = yield* one<{ v: number | null }>(
       'SELECT MAX(version) AS v FROM agent_handoffs WHERE owner_id = ? AND agent_id = ? AND scope_kind = ? AND scope_id = ?',
@@ -117,6 +153,10 @@ export async function saveHandoff(scope: HandoffScope, body: HandoffBody, source
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id, scope.ownerId, scope.agentId, scope.kind, scope.scopeId, scope.projectId ?? null, version,
       JSON.stringify(body.done), JSON.stringify(body.left), JSON.stringify(body.next), JSON.stringify(body.questions), source, runId);
+    if (linked) {
+      yield* run('UPDATE agent_handoffs SET blockers = ?, files_touched = ?, card_id = ?, task_no = ?, conversation_id = ?, from_agent_id = ? WHERE id = ?',
+        JSON.stringify(body.blockers ?? []), JSON.stringify(body.files ?? []), linked.cardId, linked.taskNo, linked.conversationId, linked.fromAgentId, id);
+    }
     yield* run('DELETE FROM agent_handoffs WHERE owner_id = ? AND agent_id = ? AND scope_kind = ? AND scope_id = ? AND version <= ?',
       scope.ownerId, scope.agentId, scope.kind, scope.scopeId, version - MAX_VERSIONS);
   }, { immediate: true });
@@ -208,6 +248,8 @@ export function handoffBlock(h: Handoff, scope?: Pick<HandoffScope, 'kind' | 'sc
   section('Left', h.left);
   section('Next', h.next);
   section('Open questions', h.questions);
+  // P8 (D28): what blocks the work, inside the same size cap.
+  if (storeP8Enabled() && Array.isArray(h.blockers) && h.blockers.length) section('Blockers', h.blockers);
   let out = lines.join('\n');
   if (out.length > MAX_BLOCK_CHARS) out = `${out.slice(0, MAX_BLOCK_CHARS - 15).trimEnd()}\n[…shortened]`;
   return out;
