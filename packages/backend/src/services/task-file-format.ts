@@ -35,7 +35,17 @@ export interface TaskBlock {
   no: string; title: string; state: string; department: string; agent: string; priority: string;
   workedOn: WorkedOn[]; done: string[]; left: string[]; next: string[]; log: string[];
 }
-export interface ReadTask { task: TaskBlock; start: number; end: number; line: number; problem: string | null }
+/**
+ * STORE-MAP-01 P6: Girru's hidden line under a task heading,
+ *   <!-- girru:id=<card id> v=<card version> -->
+ * names the board card (T5: a renamed or renumbered task keeps its card) and
+ * the version the block was written from (version stamp). Kept outside
+ * TaskBlock, so the stored copy of a task is the same with or without it.
+ */
+export interface ReadTask { task: TaskBlock; start: number; end: number; line: number; problem: string | null; id?: string | null; v?: number | null; idAt?: { start: number; end: number } | null }
+export interface Stamp { id: string; v: number }
+const HIDDEN = /^<!--\s*girru:id=([A-Za-z0-9_-]{1,64})(?:\s+v=(\d{1,9}))?\s*-->$/;
+export const stampLine = (s: Stamp) => `<!-- girru:id=${s.id} v=${s.v} -->`;
 export interface FileProblem { no: string | null; line: number; message: string }
 export interface ReadFile { tasks: ReadTask[]; problems: FileProblem[] }
 
@@ -83,6 +93,12 @@ export function readTasks(text: string): ReadFile {
     if (!cur) continue; // the file's own text before the first task
     const c: ReadTask = cur;
     if (!l.trim()) continue;
+    const hidden = l.trim().match(HIDDEN);
+    if (hidden) {
+      if (c.idAt) flag(n, 'a task has one hidden Girru id line, not two');
+      else { c.id = hidden[1]; c.v = hidden[2] ? Number(hidden[2]) : null; c.idAt = { start, end: start + raw.length + 1 }; }
+      continue;
+    }
     const sub = l.match(/^###\s+(.+?)\s*$/);
     if (sub) {
       const p = PARTS[sub[1].toLowerCase()];
@@ -105,6 +121,23 @@ export function readTasks(text: string): ReadFile {
   }
   close(text.length);
   return { tasks, problems };
+}
+
+/**
+ * P6: the file with Girru's hidden line set on every task that has a stamp
+ * (added under the heading, or replaced in place); nothing else changes.
+ */
+export function stampTasks(text: string, stamps: ReadonlyMap<string, Stamp>): string {
+  const tasks = readTasks(text).tasks.filter((t) => stamps.has(t.task.no)).sort((a, b) => b.start - a.start);
+  let out = text;
+  for (const t of tasks) {
+    const line = `${stampLine(stamps.get(t.task.no)!)}\n`;
+    if (t.idAt) { if (out.slice(t.idAt.start, t.idAt.end) !== line) out = out.slice(0, t.idAt.start) + line + out.slice(t.idAt.end); continue; }
+    const eol = out.indexOf('\n', t.start);
+    const at = eol < 0 ? out.length : eol + 1;
+    out = out.slice(0, at) + (eol < 0 ? '\n' : '') + line + out.slice(at);
+  }
+  return out;
 }
 
 /** One block as Girru writes it (sections always present, so every app knows where to write). */
