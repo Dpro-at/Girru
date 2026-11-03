@@ -30,7 +30,7 @@ open Girru.xcodeproj
 ```
 
 1. Target `Girru` › Signing & Capabilities › choose your own team (do not commit it).
-2. Build for an iPhone with iOS 17+ and a passcode. The SwiftUI screens were never compiled against the iOS SDK: fix compile errors with the smallest change, one commit per fix.
+2. Xcode 16+ (iOS 17 SDK). Build for an iPhone with iOS 17+ and a passcode. The SwiftUI screens were never compiled against the iOS SDK: fix compile errors with the smallest change, one commit per fix.
 3. On the device, check and write down the result of each:
    - Face ID / passcode is asked on every open; the app switcher shows no content.
    - **Secure Enclave key:** first launch creates the identity key; it opens both for signing and for key agreement with the same public key. If pairing shows "This iPhone cannot finish pairing with its secure key", report it — do not weaken the key.
@@ -40,7 +40,7 @@ open Girru.xcodeproj
 
 ## Task 3 — Android build and tests
 
-1. Android Studio › Open › `packages/mobile/android` (JDK 17, SDK 35).
+1. Android Studio (Ladybug 2024.2 or newer) › Open › `packages/mobile/android` (JDK 17, Android SDK Platform 35). Make the Gradle wrapper once (it is not committed): `brew install gradle` then, in `packages/mobile/android`, `gradle wrapper --gradle-version 8.9`. Do not commit the wrapper files. Exact versions of every tool and library: `packages/mobile/BUILDING.md` › "Tools to install".
 2. Run the unit tests (they were written but never run):
 
    ```bash

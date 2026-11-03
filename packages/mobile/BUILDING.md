@@ -33,13 +33,31 @@ connector is the next task (see "Next tasks").
 - Relay address: `wss://relay.girru.net/v1` (changeable in Settings › Phone › ⋯ › Use your own relay).
 - Notifications never flood; push needs Firebase (Android) and an APNs key (iPhone). Keys go on the relay server only, never in the repository or in chat.
 
-## Tools to install
+## Tools to install (exact versions)
 
-- macOS with **Xcode 16** or newer (iOS 17 SDK) and an Apple ID signed in under Xcode › Settings › Accounts.
-- **XcodeGen** (`brew install xcodegen`): the Xcode project is generated from `packages/mobile/ios/project.yml` and never committed.
-- **Android Studio** (current stable) with JDK 17 and Android SDK 35.
-- **Node.js 24** and npm, for the computer side and the tests.
-- An iPhone (iOS 17+) and an Android phone (Android 12+), each with a screen lock.
+| Tool | Version | Why |
+|---|---|---|
+| macOS | 14 (Sonoma) or newer | Xcode 16 needs it |
+| Xcode | 16 or newer, with the iOS 17+ SDK | builds the iPhone app (deployment target iOS 17.0, Swift 5) |
+| XcodeGen | current (`brew install xcodegen`) | generates `Girru.xcodeproj` from `ios/project.yml` (the project is not committed) |
+| Android Studio | Ladybug (2024.2) or newer | supports Android Gradle Plugin 8.7 |
+| JDK | 17 (the one bundled with Android Studio is fine) | `sourceCompatibility` / `jvmTarget` 17 |
+| Android SDK | Platform 35 (compile and target SDK 35), Build-Tools 35 | `compileSdk = 35`, `targetSdk = 35`, `minSdk = 31` |
+| Gradle | 8.9 or newer (wrapper made once, see below) | Android Gradle Plugin 8.7.3 needs it |
+| Node.js | 24, with npm | the computer side, the relay and the tests |
+| Homebrew | current | to install XcodeGen (and Gradle if you make the wrapper from the command line) |
+
+Android libraries are pinned in `android/gradle/libs.versions.toml` and come
+from Google Maven / Maven Central when Gradle syncs (nothing to install by
+hand): Android Gradle Plugin 8.7.3, Kotlin 2.0.21, AndroidX core-ktx 1.13.1,
+appcompat 1.7.0, activity-ktx 1.9.3, webkit 1.12.1, biometric 1.1.0,
+Firebase BoM 33.7.0 (messaging), Google Services plugin 4.4.2, JUnit 4.13.2.
+The iPhone app uses Apple frameworks only (no CocoaPods, no outside Swift
+packages).
+
+Test phones: an **iPhone with iOS 17 or newer** and an **Android phone with
+Android 12 (API 31) or newer**, each with a screen lock (passcode / PIN) and,
+ideally, Face ID / Touch ID or a fingerprint.
 
 ## Get the code
 
@@ -82,7 +100,13 @@ open Girru.xcodeproj
 
 ## 3. Android
 
-1. Android Studio › Open › `packages/mobile/android`.
+1. Android Studio › Open › `packages/mobile/android`. The Gradle wrapper is not committed (it holds a binary jar): make it once with Gradle 8.9+ installed (`brew install gradle`), from `packages/mobile/android`:
+
+   ```bash
+   gradle wrapper --gradle-version 8.9
+   ```
+
+   (or let Android Studio offer to create it). Do not commit `gradlew`, `gradlew.bat` or `gradle/wrapper/`.
 2. Without `app/google-services.json` the app builds and runs without push (the file is git-ignored; it comes from the Firebase project later).
 3. Run the unit tests: `./gradlew :app:testDebugUnitTest` (byte-exact vectors from the computer's reference code). They have never run: fix what fails.
 4. `./gradlew :app:assembleDebug` and install on an Android 12+ phone with a screen lock.
