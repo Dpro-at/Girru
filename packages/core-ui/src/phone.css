@@ -1,0 +1,103 @@
+/* MOB-PAIR-01 / MOB-ONBOARD-01 (boards D1–D8): pairing a phone and Settings › Phone. */
+.phone-qr-frame { display:grid; place-items:center; flex:none; box-sizing:border-box; padding:8px; border-radius:10px; background:#FFFFFF; }
+.phone-qr { display:block; }
+.phone-qr-empty { color:#9AA3B5; }
+.phone-status { display:flex; align-items:center; flex-wrap:wrap; gap:6px; font-size:12px; color:var(--text-2); }
+.phone-status-dot { inline-size:7px; block-size:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent); }
+.phone-status:is([data-state="expired"],[data-state="cancelled"],[data-state="error"]) .phone-status-dot { background:var(--text-3); box-shadow:none; }
+.phone-status[data-state="paired"] .phone-status-dot { background:var(--success, #3fb27f); }
+@media (prefers-reduced-motion: no-preference) { .phone-status[data-state="waiting"] .phone-status-dot { animation:phone-pulse 1.6s ease-in-out infinite; } }
+@keyframes phone-pulse { 50% { box-shadow:0 0 0 6px color-mix(in srgb, var(--accent) 8%, transparent); } }
+
+/* D1 / D3: the setup step. */
+.setup-pane.phone-setup { inline-size:min(964px,100%); }
+.phone-setup h2, .phone-setup > p, .phone-center { text-align:center; }
+.phone-setup > p { max-inline-size:620px; margin-inline:auto; }
+.phone-cards { display:flex; gap:14px; }
+.phone-card { flex:1; display:flex; flex-direction:column; gap:10px; padding:18px; border-radius:12px; background:var(--surface); box-shadow:inset 0 0 0 1px var(--border); min-inline-size:0; }
+.phone-card b, .phone-subtitle { font-size:13px; font-weight:600; }
+.phone-card small { font-size:12px; color:var(--text-2); line-height:1.5; }
+.phone-card-foot { margin-block-start:auto; font-size:11px !important; }
+.phone-card-qr { flex-direction:row; align-items:center; gap:18px; }
+.phone-card-text { display:flex; flex-direction:column; gap:8px; }
+.phone-stores { display:flex; flex-wrap:wrap; gap:10px; margin-block-start:6px; }
+.phone-store { display:flex; align-items:center; gap:10px; block-size:44px; padding-inline:16px; border-radius:10px; white-space:nowrap; background:#F4F6FA; color:#111318; text-decoration:none; }
+.phone-store > span { display:flex; flex-direction:column; line-height:1.15; }
+.phone-store small { font-size:10px; opacity:.75; }
+.phone-store b { font-size:14px; font-weight:600; }
+.phone-paths { display:flex; flex-direction:column; gap:10px; }
+.phone-path { display:flex; align-items:center; gap:14px; padding:15px 18px; border-radius:12px; background:var(--surface); box-shadow:inset 0 0 0 1px var(--border); cursor:pointer; }
+.phone-path[data-on] { box-shadow:inset 0 0 0 1px var(--accent); background:color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+.phone-path input { accent-color:var(--accent); inline-size:14px; block-size:14px; margin:0; flex:none; }
+.phone-path-icon { color:var(--accent); display:flex; }
+.phone-later { flex:1; text-align:end; font-size:12px; color:var(--text-2); }
+.phone-setup .setup-actions { position:sticky; inset-block-end:0; padding-block:18px; background:var(--canvas); border-block-start:1px solid var(--border); }
+@media (max-width:760px) { .phone-cards { flex-direction:column; } }
+
+/* D2: Allow this phone? */
+.phone-allow-scrim { position:fixed; inset:0; z-index:200; display:grid; place-items:start center; padding-block-start:170px; background:#0006; }
+.phone-allow { inline-size:min(430px, calc(100vw - 32px)); box-sizing:border-box; padding:22px; border-radius:14px; background:var(--surface); color:var(--text); box-shadow:0 0 0 1px var(--border), 0 24px 60px #0008; display:flex; flex-direction:column; gap:14px; text-align:start; }
+.phone-allow p { margin:0; color:var(--text-2); line-height:1.55; }
+.phone-allow-head { display:flex; align-items:center; gap:12px; }
+.phone-allow-head > span:last-child { display:flex; flex-direction:column; gap:2px; min-inline-size:0; }
+.phone-allow-head b { font-size:16px; font-weight:600; }
+.phone-allow-head small { font-size:12px; color:var(--text-2); }
+.phone-check-code { align-self:center; font-size:30px; font-weight:700; letter-spacing:6px; font-variant-numeric:tabular-nums; }
+.phone-allow-actions { display:flex; justify-content:flex-end; gap:10px; margin-block-start:4px; }
+.phone-allow-actions button { min-inline-size:120px; min-block-size:34px; }
+.phone-tile { position:relative; flex:none; inline-size:34px; block-size:34px; border-radius:9px; display:grid; place-items:center; color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, transparent); }
+.phone-tile-big { inline-size:44px; block-size:44px; border-radius:12px; }
+
+/* D4: the sidebar button and popover. */
+.phone-side { position:relative; display:flex; flex:none; }
+.phone-side-button { inline-size:30px; block-size:30px; border-radius:7px; display:grid; place-items:center; }
+.phone-side-button[aria-expanded="true"] { color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, transparent); }
+.phone-side .dk-popover { inset-block-start:auto; inset-block-end:calc(100% + 8px); inset-inline-start:0; inset-inline-end:auto; inline-size:300px; padding:16px; border-radius:14px; }
+.phone-connect { display:flex; flex-direction:column; align-items:center; gap:10px; }
+.phone-connect > b { align-self:flex-start; font-size:14px; }
+.phone-connect-text { align-self:flex-start; font-size:12px; color:var(--text-2); line-height:1.5; }
+.phone-connect .phone-qr-frame { box-shadow:inset 0 0 0 1px var(--border); }
+.phone-connect-path { align-self:stretch; display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-2); padding-block-start:8px; border-block-start:1px solid var(--border); }
+.phone-connect-path > span { flex:1; }
+.phone-connect-links { align-self:stretch; display:flex; justify-content:space-between; font-size:12px; }
+
+/* D5: the notice after pairing. */
+.phone-notice { position:fixed; z-index:120; inset-inline-end:20px; inset-block-end:32px; inline-size:340px; box-sizing:border-box; padding:14px; border-radius:12px; background:var(--surface); box-shadow:0 0 0 1px var(--border), 0 14px 40px #0003; display:flex; align-items:flex-start; gap:12px; }
+.phone-notice-text { display:flex; flex-direction:column; gap:4px; flex:1; min-inline-size:0; }
+.phone-notice-text b { font-size:13px; }
+.phone-notice-text small { font-size:12px; color:var(--text-2); line-height:1.45; }
+.phone-notice-links { display:flex; gap:12px; margin-block-start:2px; font-size:12px; }
+.phone-danger { color:var(--danger) !important; }
+
+/* D6–D8: Settings › Phone. */
+.phone-settings { display:flex; min-block-size:0; flex:1; }
+.phone-main { flex:1; min-inline-size:0; padding-inline-end:20px; }
+.phone-head { display:flex; align-items:flex-start; gap:12px; margin-block-end:18px; }
+.phone-head > div { flex:1; }
+.phone-head .primary { display:flex; align-items:center; gap:6px; min-block-size:32px; }
+.phone-list { border-radius:12px; background:var(--surface); box-shadow:inset 0 0 0 1px var(--border); overflow:hidden; }
+.phone-row { display:flex; align-items:center; gap:12px; inline-size:100%; padding:10px 12px; border:0; border-block-end:1px solid var(--border); border-radius:0; background:transparent; color:var(--text); text-align:start; font:inherit; cursor:default; }
+.phone-row:last-child { border-block-end:0; }
+.phone-row[aria-selected="true"] { background:var(--row-active); }
+.phone-row .phone-tile { color:var(--text-2); background:var(--secondary); }
+.phone-row-text { display:flex; flex-direction:column; gap:2px; min-inline-size:0; flex:1; }
+.phone-row-text b { font-size:13px; font-weight:600; }
+.phone-row-text small { font-size:12px; color:var(--text-2); }
+.phone-dot { display:inline-block; inline-size:8px; block-size:8px; border-radius:50%; background:var(--text-3); }
+.phone-dot[data-on] { background:var(--success, #0E7A43); }
+.phone-tile .phone-dot { position:absolute; inset-inline-end:-1px; inset-block-end:-1px; box-shadow:0 0 0 2px var(--surface); }
+.phone-lock-note { display:flex; gap:6px; margin:12px 2px 0; line-height:1.5; }
+.phone-inspector { inline-size:320px; flex:none; box-sizing:border-box; border-inline-start:1px solid var(--border); padding:20px; display:flex; flex-direction:column; gap:16px; }
+.phone-inspector .phone-tile { color:var(--accent); }
+.phone-field { display:flex; flex-direction:column; gap:6px; font-size:12px; color:var(--text-2); }
+.phone-field input { block-size:30px; padding-inline:10px; border-radius:7px; font-size:13px; color:var(--text); }
+.phone-segmented { display:inline-flex; flex-wrap:wrap; align-self:flex-start; padding:2px; border-radius:8px; background:var(--secondary); }
+.phone-segmented button { block-size:26px; min-block-size:0; padding-inline:10px; border:0; border-radius:6px; background:transparent; box-shadow:none; font-size:12px; color:var(--text); }
+.phone-segmented button[aria-checked="true"] { background:var(--surface); box-shadow:0 1px 2px #0002; }
+.phone-state { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--text-2); }
+.phone-state > span:first-child { display:flex; align-items:center; gap:6px; }
+.phone-grow { flex:1; }
+.phone-forget { min-block-size:32px; color:var(--danger); border-color:color-mix(in srgb, var(--danger) 35%, transparent); }
+.phone-empty { display:flex; flex-direction:column; align-items:center; gap:8px; padding:48px 16px; text-align:center; }
+.phone-empty p { margin:0; color:var(--text-2); }
+@media (max-width:960px) { .phone-settings { flex-direction:column; } .phone-main { padding-inline-end:0; } .phone-inspector { inline-size:auto; border-inline-start:0; border-block-start:1px solid var(--border); } }

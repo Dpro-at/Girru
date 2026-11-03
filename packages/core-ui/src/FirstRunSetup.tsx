@@ -12,10 +12,11 @@ import { DepartmentTile } from './StaffDirectory';
 import { AgentsController } from './agents';
 import { WorkspaceTypeStep, type WorkspaceType } from './WorkspaceTypeStep';
 import { useAppTheme } from './app-navigation';
+import { PhoneSetupStep } from './PhonePairing';
 
 /** FIRSTRUN-01 (boards FR2–FR3): the steps after the owner account, in the one setup window. */
-export type FirstRunStep = 'discovery' | 'tools' | 'model' | 'team';
-const STEPS = ['Account', 'Your files', 'AI tools', 'Local model', 'Team'] as const;
+export type FirstRunStep = 'discovery' | 'tools' | 'model' | 'team' | 'phone';
+const STEPS = ['Account', 'Your files', 'AI tools', 'Local model', 'Team', 'Phone'] as const;
 type AiTool = { id: 'claude' | 'codex' | 'gemini'; name: string; installed: boolean; signedIn: boolean; install: string | null; signIn: string; needs?: 'node' };
 type LocalChoice = { id: string; label: string; sizeGb: number; note: string; minMemoryGb: number; installed?: boolean };
 type LocalStep = { memoryGb: number; recommended: string; choices: LocalChoice[]; ollama: boolean; installed: string[]; download: string | null; commands: Record<string, string | null> };
@@ -99,16 +100,19 @@ export function FirstRunSetup({ client, initialStep, workspaceType: initialType,
     void window.dproApp?.setSetupWindow?.(false).catch(() => {});
     onDone(chatId);
   };
+  // Team → Phone stays on this page: the backend does not store the phone step yet, so it is not saved.
+  const [teamReady, setTeamReady] = useState(false);
   const appearance = useAppTheme();
   return <div className="shell app-shell first-run-shell" data-theme={appearance.theme} lang="en" dir="ltr"><main className="first-run-setup" aria-label="Set up Girru">
     {!workspaceType || (workspaceType === 'company' && !companyName) ? <WorkspaceTypeStep value={workspaceType} companyName={companyName} busy={savingType} notice={typeNotice} onNext={(type, name) => void chooseType(type, name)}/> : <>
     {step !== 'discovery' && <SetupOrb/>}
-    <SetupSteps current={step === 'discovery' ? 'Your files' : step === 'tools' ? 'AI tools' : step === 'model' ? 'Local model' : 'Team'}/>
+    <SetupSteps current={step === 'discovery' ? 'Your files' : step === 'tools' ? 'AI tools' : step === 'model' ? 'Local model' : step === 'phone' ? 'Phone' : 'Team'}/>
     {stepNotice && <p className="setup-note" role="alert">{stepNotice}</p>}
     {step === 'discovery' && <DiscoveryStep client={client} onNext={() => go('tools')}/>}
     {step === 'tools' && <ToolsStep client={client} terminal={terminal} onSignedIn={setSignedIn} onNext={() => go('model')}/>}
     {step === 'model' && <ModelStep client={client} terminal={terminal} canSkip={signedIn} onBack={() => go('tools')} onNext={() => go('team')}/>}
-    {step === 'team' && <TeamStep client={client} workspaceType={workspaceType} onBack={() => go('model')} onDone={finish}/>}
+    {step === 'team' && <TeamStep client={client} workspaceType={workspaceType} ready={teamReady} onReady={() => setTeamReady(true)} onBack={() => go('model')} onDone={() => setStep('phone')}/>}
+    {step === 'phone' && <PhoneSetupStep client={client} onBack={() => { setTeamReady(true); setStep('team'); }} onDone={finish}/>}
     </>}
   </main></div>;
 }
@@ -220,22 +224,20 @@ function ModelStep({ client, terminal, canSkip, onBack, onNext }: { client: Sess
   </section>;
 }
 
-function TeamStep({ client, workspaceType, onBack, onDone }: { client: SessionClient; workspaceType: WorkspaceType; onBack: () => void; onDone: () => void }) {
+function TeamStep({ client, workspaceType, ready, onReady, onBack, onDone }: { client: SessionClient; workspaceType: WorkspaceType; ready: boolean; onReady: () => void; onBack: () => void; onDone: () => void }) {
   const controller = useMemo(() => new CompanyController(client), [client]);
   useEffect(() => () => controller.dispose(), [controller]);
-  const [ready, setReady] = useState(false);
-  return ready ? <TeamReady client={client} onStart={onDone}/> : <TeamFlow controller={controller} workspaceType={workspaceType} mode="setup" onBack={onBack} onHired={() => setReady(true)}/>;
+  return ready ? <TeamReady client={client} onStart={onDone}/> : <TeamFlow controller={controller} workspaceType={workspaceType} mode="setup" onBack={onBack} onHired={onReady}/>;
 }
 
 /** A steady colour per name, so each person is told apart at a glance. */
 function faceColor(name: string) { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360; return `hsl(${h} 45% 42%)`; }
 
-/** After hiring: the people just hired, by department, then straight to Chat (Mohamed 2026-10-30). */
+/** After hiring: the people just hired, by department, then the phone step (board D1). */
 function TeamReady({ client, onStart }: { client: SessionClient; onStart: () => void }) {
   const agents = useMemo(() => new AgentsController(client), [client]);
   useEffect(() => { void agents.list(); return () => agents.dispose(); }, [agents]);
   const a = useSyncExternalStore(agents.subscribe, agents.getSnapshot, agents.getSnapshot);
-  const [starting, setStarting] = useState(false);
   const main = a.agents.find(x => x.isPrimary);
   const groups = new Map<string, typeof a.agents[number][]>();
   for (const x of a.agents) if (!x.isPrimary) { const k = x.department || 'Team'; groups.set(k, [...(groups.get(k) ?? []), x]); }
@@ -247,6 +249,6 @@ function TeamReady({ client, onStart }: { client: SessionClient; onStart: () => 
         <span className="setup-faces">{people.slice(0, 12).map(p => <span key={p.id} className="setup-face" title={p.name ?? ''}><span className="setup-face-dot" aria-hidden="true" style={{ background: faceColor(p.name ?? p.id) }}>{(p.name ?? '?').trim().slice(0, 1).toUpperCase()}</span><small>{p.name}</small></span>)}
           {people.length > 12 && <small className="setup-more">+{people.length - 12}</small>}</span></li>)}
     </ul>}
-    <div className="setup-actions"><button type="button" className="primary" disabled={starting} onClick={() => { setStarting(true); onStart(); }}>Start chatting</button></div>
+    <div className="setup-actions"><button type="button" className="primary" onClick={onStart}>Continue</button></div>
   </section>;
 }

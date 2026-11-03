@@ -37,6 +37,7 @@ import { Icon } from './icons';
 import type { IconName } from './icons';
 import { UiIcon } from './ui-icons';
 import { CommandPalette } from './CommandPalette';
+import { NewPhoneNotice, SidebarPhoneButton } from './PhonePairing';
 import { ShellFooter } from './ShellFooter';
 import type { FooterEntry } from './ShellFooter';
 import { footerFor } from './footer-prefs';
@@ -231,6 +232,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
           <span className="avatar" aria-hidden="true">{(displayName(user) || '?').slice(0, 1).toUpperCase()}</span>
           <span className="user-name"><bdi>{displayName(user)}</bdi>{accountRoleLabel(user.role)&&<small>{accountRoleLabel(user.role)}</small>}</span>
         </summary><div><button onClick={() => openSettings('account')}>Account</button><button onClick={() => client.cancel()}>Sign out on this device</button></div></details>
+        {owner && mode === 'live' && <SidebarPhoneButton client={client} onSettings={() => openSettings('phone')}/>}
       </div>
     </aside>
     <main id="content" className="page-area">
@@ -265,6 +267,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
         : <span className="status-item status-dot-only" title="Connected · this installation" aria-label="Connected · this installation" role="img"><span className={`status-dot ${mode}`} aria-hidden="true"/></span>}
       extra={isDeveloperBuild(client) && <button className="status-item statusbar-button" onClick={() => client.selectMode('fixture')} title="Clears this local session; the server sign-in stays until you sign out">Leave to fixture</button>}
       entries={footerEntries}/>
+    {owner && mode === 'live' && <NewPhoneNotice client={client} onSettings={() => openSettings('phone')}/>}
     <CommandPalette open={palette} commands={commands} onClose={() => setPalette(false)}
       search={chat && search && user.role !== 'guest' ? { controller: search.palette, onOpen: (id, messageId) => { void chat.openAt(id, messageId); setPage('chat'); } } : undefined}/>
   </div>;

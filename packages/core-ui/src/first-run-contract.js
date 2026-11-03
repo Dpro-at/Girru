@@ -5,7 +5,8 @@
 import { validCompanyName } from './owner-setup-contract.js';
 
 export const FIRST_RUN_PATH = '/api/first-run';
-const STEPS = ['discovery', 'tools', 'model', 'team'];
+// 'phone' is the last step; until the backend stores it, the page keeps it to itself (MOB-ONBOARD-01).
+const STEPS = ['discovery', 'tools', 'model', 'team', 'phone'];
 const TOOLS = ['claude', 'codex', 'gemini'];
 const record = x => typeof x === 'object' && x !== null && !Array.isArray(x);
 const text = (x, max) => typeof x === 'string' && x.length <= max;

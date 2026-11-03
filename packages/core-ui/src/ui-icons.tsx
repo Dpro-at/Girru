@@ -1,6 +1,8 @@
 // Simple line icons drawn for this app (24-unit grid, 2-unit round strokes).
 const shapes = {
   'device-phone': <><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M10 5h4M11 19h2"/></>,
+  // The phone app (pairing, Settings › Phone); 'phone' is a call handset.
+  mobile: <><rect x="7" y="2.5" width="10" height="19" rx="2.2"/><path d="M11 18.5h2"/></>,
   'device-tablet': <><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M11 19h2"/></>,
   'device-foldable': <><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></>,
   'device-desktop': <><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></>,
