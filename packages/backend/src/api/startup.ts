@@ -53,6 +53,7 @@ export const BACKGROUND_JOBS: ReadonlyArray<{ id: string; off: string }> = [
   { id: 'extensions', off: 'extensionRunner.initialize and hot reload skipped' },
   { id: 'instance-identity-publish', off: 'publishInstanceIdentity not called' },
   { id: 'python-probe', off: 'python --version probes not run (server.ts)' },
+  { id: 'phone-link', off: 'startPhoneLink not called (server.ts): no relay connection, no Wi-Fi listener; pairing opens no connection' },
 ];
 
 export async function initializeBackend(fastify: FastifyInstance): Promise<StartupSummary> {
