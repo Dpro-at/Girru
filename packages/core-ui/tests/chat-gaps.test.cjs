@@ -146,7 +146,7 @@ test('changed files row shows +N −N; the summary notice can be read and starte
 test('small gaps: Esc closes the panel in a narrow window, a rail icon opens its part, the edge dot, Running now via Edit, waits in Tasks', () => {
   const v = src('ChatView.tsx'), d = src('ChatDetails.tsx'), l = src('ConversationList.tsx'), m = src('ChatMoments.tsx');
   assert.match(v, /e\.key === 'Escape' && !e\.defaultPrevented && window\.innerWidth <= 1100 && !document\.querySelector\('\[role="dialog"\], \.dk-menu'\)\) setPane/);
-  assert.match(v, /<DetailsRail controller=\{controller\} onOpen=\{openPart\}\/>/);
+  assert.match(v, /<DetailsRail controller=\{controller\} client=\{client\} onOpen=\{openPart\}\/>/);
   assert.match(v, /const openPart = \(id: PanelPart\) => \{ setPane\('details'\); setFocusPart\(f => \(\{ id, n: \(f\?\.n \?\? 0\) \+ 1 \}\)\); \};/);
   assert.match(d, /className="details-part" data-part=\{id\}/);
   assert.match(d, /onClick=\{\(\) => onOpen\(i\.id\)\}/);
