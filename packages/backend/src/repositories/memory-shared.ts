@@ -67,7 +67,7 @@ export interface MemorySharedRepository {
 async function ownRow(userId: string, id: unknown): Promise<{ content: string; metadata: string | null; visibility?: string | null }> {
   if (typeof id !== 'string' || !id) throw new ScopeError(404, NOT_FOUND);
   const row = await sql().read(one<{ user_id: string; content: string; metadata: string | null; visibility?: string | null }>(
-    'SELECT user_id, content, metadata, visibility FROM memories WHERE id = ?', id));
+    "SELECT user_id, content, metadata, visibility FROM memories WHERE id = ? AND COALESCE(drawer_kind, '') <> 'agent'", id));
   if (!row || row.user_id !== userId) throw new ScopeError(404, NOT_FOUND);
   return row;
 }

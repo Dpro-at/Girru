@@ -22,7 +22,7 @@ import { ScopeError } from '../../repositories/scope.js';
  */
 async function boardRunRefusal(context: ToolExecutionContext | undefined, memoryId: string): Promise<string | null> {
   if (toolOwnerTurn(context)) return null;
-  const row = await sql().read(one<{ source_agent_id: string | null }>('SELECT source_agent_id FROM memories WHERE id = ? AND user_id = ?', memoryId, toolMemoryUser(context)));
+  const row = await sql().read(one<{ source_agent_id: string | null }>("SELECT source_agent_id FROM memories WHERE id = ? AND user_id = ? AND COALESCE(drawer_kind, '') <> 'agent'", memoryId, toolMemoryUser(context)));
   return row && row.source_agent_id && row.source_agent_id === context?.agentId ? null
     : "in a board task run only memories this agent saved can be changed; ask the owner";
 }

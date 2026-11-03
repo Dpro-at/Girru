@@ -81,6 +81,9 @@ Delete agent
 | `GET /api/agents/:id/memory` | `{ content, hash, truncated, redacted }` — with `GIRRU_STORE_P5`, from the agent's own drawer after the import |
 | `PUT /api/agents/:id/memory` | `{ content, expectedHash }`; a write with an old hash is refused (`409`) |
 | `GET /api/agents/:id/memory/status` | `{ imported, versions, outsideChange }` (`GIRRU_STORE_P5`) |
+| `GET /api/agents/:id/memory/history` | `{ versions: [{ version, change, createdAt, by, reason, content }] }`, newest first; `by` is `owner` for the owner's own changes (`GIRRU_STORE_P5`, else `404`) |
+| `GET /api/agents/:id/memory/outside` | `{ outside: { file, fileHash, notes, notesHash } }` while MEMORY.md differs from what Girru last wrote, else `{ outside: null }` |
+| `POST /api/agents/:id/memory/outside` | `{ pick: "use" \| "keep", fileHash }` → `{ hash, previousHash }`. `use` saves the file text as the next version of the notes; `keep` writes the file again from the notes. `409 changed` when the file moved on since `fileHash` |
 
 Agents cannot write their own notes; only the owner saves them.
 
@@ -96,6 +99,7 @@ With the switch on, every dpro-memory call needs a session (`x-girru-capability`
 ### Agent packages (owner only, `GIRRU_STORE_P5`)
 | Route | Body / answer |
 |---|---|
+| `GET /api/agent-packages/status` | `{ on: true }` while the switch is on (`404` otherwise); the pages show Export and Import only then |
 | `GET /api/agents/:id/package` | one JSON package: `format: "girru.agent"`, `schemaVersion`, `packageHash`, agent, instructions, personality, specialties and skills (by content hash), knowledge files |
 | `POST /api/agent-packages/preview` | `{ package }` → what an import creates, what it leaves out (`refused`) and what this computer lacks (`missing`) |
 | `POST /api/agent-packages/import` | `{ package, expectedPackageHash, again? }` → `{ agentId, refused, missing }` |

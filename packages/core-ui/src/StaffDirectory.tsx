@@ -12,6 +12,7 @@ import {permissionLine,useAgentFacts,useFaces,forgetFacts,retryFacts} from './ag
 import {PersonalityMark} from './PersonalityLibrary';
 import {useLibraryEntries,type Profile} from './personality-library';
 import {OrgChart} from './OrgChart';
+import {ExportAgentSheet,ImportAgentSheet,useAgentPackages} from './AgentNotes';
 import {AddSubAgentSheet} from './AgentSubAgents';
 import {canMoveUnder,underOf} from './org-chart';
 import {CHART_PREFS_PATH,type ChartPrefs} from './chart-prefs-contract.js';
@@ -43,6 +44,9 @@ export function AgentFace({agent,face,profile,size=30}:{agent:Pick<PublicAgent,'
 export function StaffDirectory({controller,department,query='',notice,hired,onOpen,onMemory,onHire,onCompany,onChat}:{controller:AgentsController;department:string;query?:string;notice?:{id:number;text:string}|null;hired?:{id:number;agentId:string;name:string}|null;onDepartment?:(d:string)=>void;onOpen:(id:string,section?:CardTab)=>void;onMemory?:(id:string)=>void;onHire?:()=>void;onCompany?:()=>void;onChat?:(id:string)=>void}){
  const s=useSyncExternalStore(controller.subscribe,controller.getSnapshot,controller.getSnapshot);
  const owner=!!onHire;
+ // STORE-MAP-01 P5c: Export agent… / Import agent… (⇧⌘I) only while agent packages are on.
+ const packages=useAgentPackages(controller.client as never,owner),[importing,setImporting]=useState(false),[exporting,setExporting]=useState<{id:string;name:string}|null>(null);
+ useEffect(()=>{if(!packages)return;const on=(e:KeyboardEvent)=>{if((e.metaKey||e.ctrlKey)&&e.shiftKey&&e.key.toLowerCase()==='i'&&!document.querySelector('dialog[open]')){e.preventDefault();setImporting(true);}};window.addEventListener('keydown',on);return()=>window.removeEventListener('keydown',on);},[packages]);
  const [role,setRole]=useState('all'),[sort,setSort]=useState('name'),[selected,setSelected]=useState<string|null>(null),[showing,setShowing]=useState(false),[removing,setRemoving]=useState<PublicAgent|null>(null),[toast,setToast]=useState<Toast>(null),[busy,setBusy]=useState(false);
  const [view,setViewState]=useState<View>(kept.view),[folded,setFolded]=useState<Set<string>>(()=>new Set(kept.folded)),[picking,setPicking]=useState(false),[addingTo,setAddingTo]=useState<PublicAgent|null>(null);
  const undo=useRef<(()=>void|Promise<void>)|null>(null);
@@ -93,6 +97,7 @@ export function StaffDirectory({controller,department,query='',notice,hired,onOp
   ...(view==='chart'&&kids(a)?[{label:folded.has(a.id)?'Show the agents under it':'Hide the agents under it',icon:'chevron' as UiIconName,shortcut:'Space',run:()=>fold(a.id)}]:[]),
   ...(owner?['sep' as const,{label:'Make main agent',icon:'sparkle' as UiIconName,disabled:!!a.isPrimary||busy,run:()=>void act('main',a)},{label:'Duplicate',icon:'copy' as UiIconName,disabled:busy,run:()=>void act('copy',a)}]:[]),
   ...(onMemory?[{label:'Saved memories',icon:'brain' as UiIconName,run:()=>onMemory(a.id)}]:[]),
+  ...(owner&&packages&&controller.client?[{label:'Export agent…',icon:'download' as UiIconName,run:()=>setExporting({id:a.id,name:a.name??'agent'})}]:[]),
   ...(owner?['sep' as const,{label:'Remove agent…',icon:'trash' as UiIconName,danger:true,shortcut:'⌫',disabled:busy,run:()=>setRemoving(a)}]:[])];
  function select(id:string){setSelected(id);}
  // ⌘F and ⌘N work anywhere on the staff page while it is shown and no sheet is open (not only inside the list).
@@ -118,7 +123,9 @@ export function StaffDirectory({controller,department,query='',notice,hired,onOp
    <span className="oc-switch" role="group" aria-label="View"><button type="button" aria-pressed={view==='list'} title="List" onClick={()=>setView('list')}><UiIcon name="list" size={13}/>List</button><button type="button" aria-pressed={view==='chart'} title="Chart: who reports to whom" onClick={()=>setView('chart')}><UiIcon name="org" size={13}/>Chart</button></span>
    <span className="ag-anchor" data-popover-anchor><IconButton icon="filter" label="Show" pressed={showing||role!=='all'||sort!=='name'} onClick={()=>setShowing(v=>!v)}/>
     <Popover open={showing} onClose={()=>setShowing(false)} label="Show"><div className="ag-show"><label>Role<select aria-label="Staff role" value={role} onChange={e=>setRole(e.target.value)}><option value="all">Every role</option>{ROLE_CARDS.map(r=><option key={r.key} value={r.key}>{r.label}</option>)}</select></label><label>Sort by<select aria-label="Sort staff" value={sort} onChange={e=>setSort(e.target.value)}><option value="name">Name</option><option value="department">Department</option><option value="role">Role</option></select></label><button type="button" className="ghost" disabled={s.phase==='listing'} onClick={()=>{if(controller.client)forgetFacts(controller.client);void controller.list();}}><UiIcon name="refresh" size={14}/>Read the team again</button></div></Popover></span>
-   {onCompany&&<span className="ag-anchor" data-popover-anchor><IconButton icon="more" label="More team actions" onClick={e=>toolsMenu.at(e,[{label:'Plan a bigger company…',icon:'building',run:onCompany}])}/><ContextMenu menu={toolsMenu.menu} onClose={toolsMenu.close}/></span>}
+   {(onCompany||owner&&packages)&&<span className="ag-anchor" data-popover-anchor><IconButton icon="more" label="More team actions" onClick={e=>toolsMenu.at(e,[...(onCompany?[{label:'Plan a bigger company…',icon:'building' as UiIconName,run:onCompany}]:[]),...(owner&&packages?[{label:'Import agent…',icon:'download' as UiIconName,shortcut:'⇧⌘I',run:()=>setImporting(true)}]:[])])}/><ContextMenu menu={toolsMenu.menu} onClose={toolsMenu.close}/></span>}
+   {exporting&&controller.client&&<ExportAgentSheet client={controller.client as never} agentId={exporting.id} name={exporting.name} onClose={()=>setExporting(null)} onDone={say}/>}
+   {importing&&controller.client&&<ImportAgentSheet client={controller.client as never} onClose={()=>setImporting(false)} onImported={(id,_name,note)=>{setImporting(false);void controller.list().then(()=>setSelected(id));say(note);}}/>}
    {onHire&&<button type="button" className="primary ag-main-button" title="Hire an agent (⌘N)" onClick={onHire}><UiIcon name="plus" size={14}/>Hire agent</button>}
   </header>
   {view==='chart'&&s.agents.length>0?<OrgChart agents={s.agents.filter(a=>department==='all'||department==='main'||(department==='none'?!a.department:a.department===department)||a.placed==='main')} selected={selected} query={query} owner={owner} folded={folded} onFold={fold}

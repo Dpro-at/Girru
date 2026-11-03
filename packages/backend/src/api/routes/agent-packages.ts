@@ -4,6 +4,7 @@
  *
  *   GET  /api/agents/:id/package          the package (JSON; nothing written on disk)
  *   POST /api/agent-packages/preview      { package } -> what an import would create, leave out and miss
+ *   GET  /api/agent-packages/status       { on: true } (lets the pages show Export/Import only with the switch on)
  *   POST /api/agent-packages/import       { package, expectedPackageHash, again? } -> { agentId }
  *
  * Errors: { code } — 400 invalid_package | not_an_agent_package | schema_version | newer_package |
@@ -30,6 +31,11 @@ export async function agentPackagesRoutes(fastify: FastifyInstance) {
   const fail = (reply: FastifyReply, route: string, err: unknown) =>
     err instanceof AgentPackageError ? reply.code(err.status).send({ code: err.code, ...(err.detail ? { detail: err.detail } : {}) }) : sendInternalError(reply, `[AgentPackages] ${route}`, err);
   const body = (request: FastifyRequest) => (request.body && typeof request.body === 'object' && !Array.isArray(request.body) ? request.body as Record<string, unknown> : {});
+
+  fastify.get('/api/agent-packages/status', { config }, async (request, reply) => {
+    if (owner(request, reply) === null) return reply;
+    return { on: true };
+  });
 
   fastify.get<{ Params: { id: string } }>('/api/agents/:id/package', { config }, async (request, reply) => {
     if (owner(request, reply) === null) return reply;

@@ -46,7 +46,7 @@ export async function memoryDetail(ownerId: string, memoryId: string): Promise<M
   if (!MEMORY_ID.test(memoryId)) throw new ScopeInputError('Memory not found', 404, 'not_found');
   const r = await sql().read(one<Row>(`
     SELECT id, type, content, drawer_kind, drawer_key, topic_key, importance_score, memory_layer, created_at, source_agent_id, metadata
-      FROM memories WHERE id = ? AND user_id = ?`, memoryId, ownerId));
+      FROM memories WHERE id = ? AND user_id = ? AND COALESCE(drawer_kind, '') <> 'agent'`, memoryId, ownerId));
   if (!r) throw new ScopeInputError('Memory not found', 404, 'not_found');
   const kind = (r.drawer_kind || 'owner') as DrawerKind;
   const key = r.drawer_key || '';

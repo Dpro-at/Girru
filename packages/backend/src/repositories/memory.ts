@@ -124,7 +124,7 @@ function doctorScope(actor: Actor | null | undefined): { userId: string; drawers
 
 async function memoryRowOwner(id: string): Promise<string | null> {
   if (typeof id !== 'string' || !id) return null;
-  const row = await sql().read(one<{ user_id: string }>('SELECT user_id FROM memories WHERE id = ?', id));
+  const row = await sql().read(one<{ user_id: string }>("SELECT user_id FROM memories WHERE id = ? AND COALESCE(drawer_kind, '') <> 'agent'", id));
   return row?.user_id ?? null;
 }
 

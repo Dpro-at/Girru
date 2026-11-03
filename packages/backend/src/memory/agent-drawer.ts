@@ -171,3 +171,44 @@ export async function agentMemoryStatus(agentId: string): Promise<{ imported: bo
   const versions = await sql().read(one<{ n: number }>('SELECT COUNT(*) AS n FROM memory_versions WHERE memory_id = ?', ledger.memory_id));
   return { imported: true, versions: Number(versions?.n ?? 0), outsideChange: !!file && file.hash !== ledger.written_hash };
 }
+
+/** P5a: the notes' history for the owner, newest first (who: the owner, an agent id, or an import word). */
+export async function agentNotesHistory(agentId: string): Promise<Array<{ version: number; change: string; createdAt: string; by: string; reason: string | null; content: string | null }> | null> {
+  if (!storeP5Enabled()) return null;
+  const ledger = await sql().read(ledgerStep(agentId));
+  if (!ledger) return [];
+  const rows = await sql().read(all<{ version: number; change: string; created_at: string; created_by: string; user_id: string; reason: string | null; content: string | null }>(
+    'SELECT version, change, created_at, created_by, user_id, reason, content FROM memory_versions WHERE memory_id = ? ORDER BY version DESC LIMIT 40', ledger.memory_id));
+  // The owner's id is never shown: their own changes say "owner".
+  return rows.map((r) => ({ version: Number(r.version), change: r.change, createdAt: String(r.created_at), by: r.created_by === r.user_id ? 'owner' : r.created_by, reason: r.reason, content: r.content }));
+}
+
+/** P5b: MEMORY.md as it is now next to the notes Girru keeps, only while the file was changed outside Girru. */
+export async function agentNotesOutside(agentId: string): Promise<{ file: string; fileHash: string; notes: string; notesHash: string } | null> {
+  if (!storeP5Enabled()) return null;
+  const state = await sql().read((function* () { return { ledger: yield* ledgerStep(agentId), notes: yield* notesStep(agentId) }; })());
+  if (!state.ledger || !state.notes) return null;
+  const file = await readMemorySnapshot(agentId);
+  if (!file.hash || file.hash === state.ledger.written_hash) return null;
+  return { file: file.content, fileHash: file.hash, notes: state.notes.content, notesHash: sha(state.notes.content) };
+}
+
+/**
+ * P5b (D19): the owner settles a MEMORY.md changed outside Girru. Nothing
+ * happens until they pick, and the pick is made over the file version they
+ * saw (`fileHash`, 409 when it moved on).
+ *  - 'use':  the file text becomes the next version of the notes (Undo = the version before).
+ *  - 'keep': Girru's notes stay and the file is written back from them.
+ */
+export async function settleAgentNotesOutside(agentId: string, pick: unknown, fileHash: unknown, actor: string): Promise<{ hash: string; previousHash: string }> {
+  if ((pick !== 'use' && pick !== 'keep') || typeof fileHash !== 'string' || !/^[a-f0-9]{64}$/.test(fileHash)) throw new AgentMemoryInputError('invalid');
+  const now = await agentNotesOutside(agentId);
+  if (!now) throw new AgentMemoryConflict('no_outside_change');
+  if (now.fileHash !== fileHash) throw new AgentMemoryConflict('changed');
+  let hash = now.notesHash;
+  if (pick === 'use') hash = (await saveAgentNotes(agentId, now.file, now.notesHash, actor)).hash;
+  // Either way the file on disk is now the version Girru knows; then the view is written from the notes.
+  await sql().read(run('UPDATE agent_memory_imports SET written_hash = ? WHERE agent_id = ?', fileHash, agentId));
+  await writeAgentNotesView(agentId);
+  return { hash, previousHash: now.notesHash };
+}

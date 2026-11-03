@@ -175,3 +175,55 @@ test('switch off again: the prompt reads the file', async () => {
   delete process.env.GIRRU_STORE_P5;
   assert.equal(await drawer.agentMemoryForPrompt('p5-noor'), 'Edited by a coding app.');
 });
+
+test('security: an agent’s notes are never opened by id through the shared memory paths', async () => {
+  process.env.GIRRU_STORE_P5 = '1';
+  const id = db.prepare("SELECT id FROM memories WHERE drawer_kind = 'agent' AND drawer_key = 'p5-noor'").get().id;
+  const storage = getMemoryStorage();
+  assert.equal(await storage.get(id), null);
+  assert.equal(await storage.getOwned(O, id), null);
+  delete process.env.GIRRU_STORE_P5;
+});
+
+test('P5a/P5b screens: history of the notes; MEMORY.md changed outside Girru waits for the owner (Use it / Keep Girru’s)', async () => {
+  delete process.env.GIRRU_STORE_P5;
+  assert.equal(await drawer.agentNotesHistory('p5-noor'), null, 'off: no history route');
+  assert.equal(await drawer.agentNotesOutside('p5-noor'), null);
+  process.env.GIRRU_STORE_P5 = '1';
+  const history = await drawer.agentNotesHistory('p5-noor');
+  assert.ok(history.length >= 2 && history[0].version > history[1].version, 'newest first');
+  // 'Edited by a coding app.' is on disk and differs from what Girru wrote.
+  let out = await drawer.agentNotesOutside('p5-noor');
+  assert.ok(out && out.file === 'Edited by a coding app.' && out.notes !== out.file);
+  await assert.rejects(drawer.settleAgentNotesOutside('p5-noor', 'use', 'a'.repeat(64), O), /changed/);
+  await assert.rejects(drawer.settleAgentNotesOutside('p5-noor', 'merge', out.fileHash, O), drawer.AgentMemoryInputError);
+  const kept = out.notes;
+  const r = await drawer.settleAgentNotesOutside('p5-noor', 'keep', out.fileHash, O);
+  assert.equal(r.hash, r.previousHash);
+  assert.equal(memFile('p5-noor'), kept, 'Keep Girru’s writes the file back');
+  assert.equal(await drawer.agentNotesOutside('p5-noor'), null);
+  assert.equal((await drawer.agentMemoryStatus('p5-noor')).outsideChange, false);
+  writeFileSync(join(dir, '.data', 'agents', 'p5-noor', 'MEMORY.md'), 'Written by hand. token=sk-live-abcdefghijklmnopqrstuvwx');
+  out = await drawer.agentNotesOutside('p5-noor');
+  const before = (await drawer.agentNotesHistory('p5-noor')).length;
+  const used = await drawer.settleAgentNotesOutside('p5-noor', 'use', out.fileHash, O);
+  const now = await drawer.agentNotes('p5-noor');
+  assert.equal(now.hash, used.hash);
+  assert.match(now.content, /^Written by hand\./);
+  assert.doesNotMatch(now.content, /sk-live-abcdefghijklmnopqrstuvwx/, 'secrets hidden');
+  assert.equal((await drawer.agentNotesHistory('p5-noor')).length, before + 1, 'one new version (Undo = the one before)');
+  assert.equal((await drawer.agentMemoryStatus('p5-noor')).outsideChange, false);
+  delete process.env.GIRRU_STORE_P5;
+});
+
+test('the Memory window scope lists never show an agent’s own notes (they have their own row on the agent page)', async () => {
+  process.env.GIRRU_STORE_P5 = '1';
+  const { exploreScope, scopeTree } = await import(join(backendDir, 'src/memory/scopes/tree.ts'));
+  for (const scope of ['company', 'agent:p5-noor']) {
+    const page = await exploreScope(O, { scope });
+    assert.ok(!page.items.some((i) => String(i.drawerId).startsWith('agent')), `${scope}: no agent drawer rows`);
+  }
+  const tree = await scopeTree(O, { fresh: true });
+  assert.doesNotMatch(JSON.stringify(tree), /"agent:p5-noor"/);
+  delete process.env.GIRRU_STORE_P5;
+});
