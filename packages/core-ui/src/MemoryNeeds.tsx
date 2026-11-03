@@ -5,7 +5,7 @@
 // A keep new, O keep old, B keep both.
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { KeyboardEvent } from 'react';
-import { FILTERS, KIND_WORD, MemoryReviewController, REPOSITORY_FILE, plainReasons } from './memory-review';
+import { FILTERS, KIND_WORD, MemoryReviewController, REPOSITORY_FILE, RUN_NOTES, plainReasons } from './memory-review';
 import type { ReviewItem } from './memory-review';
 import { ago, drawerName } from './memory-store';
 import { UiIcon } from './ui-icons';
@@ -103,7 +103,9 @@ function Question({ c, onOpenChat }: { c: MemoryReviewController; onOpenChat?: (
   }
   const kindWord = KIND_WORD[item.kind];
   // STORE-MAP-01 P6 (D21): text written into Girru's part of a project file by someone outside Girru.
-  const fromFile = d.reasons.includes(REPOSITORY_FILE) ? <span className="dk-chip dk-state" data-tone="warn">From a file in the project</span> : null;
+  const fromFile = d.reasons.includes(REPOSITORY_FILE) ? <span className="dk-chip dk-state" data-tone="warn">From a file in the project</span>
+    // STORE-MAP-01 P8 (D27): a lesson the agent noted while a run worked; never added by itself.
+    : d.reasons.includes(RUN_NOTES) ? <span className="dk-chip dk-state" data-tone="warn">From a run’s working notes</span> : null;
   return <article className="dk-question">
     <h3><UiIcon name={KIND_ICON[item.kind]} size={15}/>{d.changes.length === 1 ? (d.changes[0].op === 'add' ? 'Remember this?' : d.changes[0].op === 'update' ? 'Change this memory?' : 'Forget this memory?') : `${d.changes.length} changes`} <span className="fine-print">{kindWord} · {c.label(item)}</span>{fromFile}</h3>
     {d.changes.length === 1 && d.changes[0].op === 'add' ? <p className="dk-big dk-quote" dir="auto"><WithSwatches text={d.changes[0].after.content}/></p> : <ol className="dk-changes">{d.changes.map((ch, i) => <li key={i}>

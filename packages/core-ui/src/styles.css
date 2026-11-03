@@ -3670,3 +3670,36 @@ label.setup-kind { display:flex; align-items:center; justify-content:flex-start;
 .dk-pf-insp-head,.dk-pf-head{min-inline-size:0}.dk-pf-head{flex:1}.dk-pf-head .fine-print{display:grid;min-inline-size:0}
 .dk-pf-text{margin:0;max-block-size:280px;overflow:auto;white-space:pre-wrap;font:12px/1.5 ui-monospace,Menlo,monospace}
 .task-worked{display:grid;gap:4px;font-size:12px;color:var(--muted)}.task-worked>span{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.task-worked b{color:var(--text)}.task-number{font:12px ui-monospace,Menlo,monospace;color:var(--text-3)}
+/* STORE-MAP-01 P8 (boards P8a–P8c): T-n as the link hub, the latest handoff, the card's handoff mark, run working notes. */
+.tp-hub-wrap{position:relative;display:inline-flex}
+.tp-hub{border:0;background:var(--secondary);border-radius:5px;padding:0 6px;font:11.5px/18px ui-monospace,Menlo,monospace;color:var(--text);cursor:pointer;box-shadow:inset 0 0 0 1px var(--border)}
+.tp-hub:hover,.tp-hub[aria-expanded=true]{box-shadow:inset 0 0 0 1px var(--mem-link)}
+.tp-meta .tp-hub{color:var(--muted)}
+.tp-linked-list{position:absolute;inset-block-start:26px;inset-inline-start:0;z-index:6;width:min(420px,80vw);display:grid;gap:2px;padding:8px;border-radius:10px;background:var(--surface);border:1px solid var(--border);box-shadow:0 14px 34px #0005}
+.tp-linked-list>.fine-print{margin:0;padding:2px 8px 6px}
+.tp-linked-list [role=menuitem]{display:flex;align-items:center;gap:9px;min-height:30px;padding:0 8px;border:0;border-radius:6px;background:transparent;color:var(--text);font-size:12.5px;text-align:start}
+.tp-linked-list [role=menuitem]>svg{color:var(--muted);flex:none}.tp-linked-list [role=menuitem]>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tp-linked-list [role=menuitem] small{margin-inline-start:auto;color:var(--muted);font-size:11.5px;white-space:nowrap}
+.tp-linked-list [role=menuitem]:hover,.tp-linked-list [role=menuitem]:focus-visible{background:var(--row-hover);outline:none}
+.tp-link-button{border:0;background:transparent;padding:0;width:100%;text-align:start;cursor:pointer}.tp-link-button:disabled{cursor:default}
+.tp-linked .tp-link-end .tool{padding:2px}.tp-linked .task-number{font-size:11px;text-transform:none;letter-spacing:0}
+.tp-linked-chat{padding-inline-start:22px;min-width:0}.tp-linked-chat>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tp-linked-chat small{margin-inline-start:auto;color:var(--muted);font-size:11px;white-space:nowrap}
+.tp-linked-more{justify-self:start;padding-inline-start:22px;font-size:12px}
+.tp-handoff{display:grid;gap:6px}
+.tp-handoff-meta{display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:12px;color:var(--muted)}.tp-handoff-meta i{font-style:normal;opacity:.5}.tp-handoff-meta b{color:var(--text);font-weight:600}
+.tp-handoff-who{display:inline-flex;align-items:center;gap:5px}.tp-handoff-who b{color:var(--text);font-weight:600}
+.tp-handoff-field{display:grid;grid-template-columns:96px minmax(0,1fr);gap:8px;font-size:12.5px;line-height:1.5}
+.tp-handoff-field>span:first-child{font-size:11.5px;font-weight:600;color:var(--muted)}.tp-handoff-field>span:first-child[data-tone=ok]{color:var(--mem-ok)}.tp-handoff-field>span:first-child[data-tone=warn]{color:var(--mem-warn)}.tp-handoff-field>span:first-child[data-tone=bad]{color:var(--mem-bad)}
+.tp-handoff-field>span:last-child,.tp-handoff-field>form{display:grid;gap:2px;min-width:0;overflow-wrap:anywhere}
+.tp-handoff-files{font:11.5px/1.5 ui-monospace,Menlo,monospace;color:var(--muted)}
+.tp-handoff-blockers{display:flex!important;flex-wrap:wrap;align-items:flex-start;gap:4px 8px}.tp-handoff-blockers>span{flex-basis:100%}.tp-handoff-blockers>.tool{margin-inline-start:auto;opacity:.6}.tp-handoff-blockers>.tool:hover{opacity:1}
+.tp-handoff-edit textarea{width:100%;resize:vertical;font:inherit;font-size:12.5px}.tp-handoff-edit-end{display:flex;justify-content:flex-end;gap:6px}
+.tp-handoff-fold[aria-expanded=true] svg{transform:rotate(180deg)}
+.tp-handoff-older{list-style:none;margin:0;padding:0;display:grid}
+.tp-handoff-older li>button,.tp-handoff-older-file{display:flex;align-items:center;gap:8px;width:100%;min-height:30px;border:0;border-top:1px solid var(--border);background:transparent;padding:0;font-size:12px;color:var(--text);text-align:start}
+.tp-handoff-older li>button>svg,.tp-handoff-older-file>svg{color:var(--muted);flex:none}.tp-handoff-older span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tp-handoff-older time{margin-inline-start:auto;color:var(--muted);font-size:11.5px;white-space:nowrap}
+.task-handoff-mark{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:var(--muted)}
+.task-handoff-mark.blocked{gap:4px;color:var(--mem-warn)}.task-handoff-mark.blocked i{inline-size:6px;block-size:6px;border-radius:999px;background:currentColor}
+.mem-handoff-files{font:12px/1.5 ui-monospace,Menlo,monospace!important}
+.run-notes-line>summary{display:flex;align-items:center;gap:6px}.run-notes-line>summary small{margin-inline-start:auto}

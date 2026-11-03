@@ -8,7 +8,7 @@ import type { CodingHandoff, Handoff } from './memory-pages-contract.js';
 
 const APP: Record<string, { mark: string; name: string }> = { 'claude-code': { mark: 'CC', name: 'Claude Code' }, codex: { mark: 'CX', name: 'Codex' }, 'gemini-cli': { mark: 'GE', name: 'Gemini CLI' }, antigravity: { mark: 'AG', name: 'Antigravity' } };
 const KINDS: Array<{ value: HandoffFilter; label: string }> = [{ value: 'all', label: 'All' }, { value: 'conversation', label: 'Chats' }, { value: 'task', label: 'Board tasks' }, { value: 'coding', label: 'Coding apps' }];
-const FIELDS: Array<{ key: keyof HandoffDraft; label: string; tone: string }> = [
+const FIELDS: Array<{ key: Exclude<keyof HandoffDraft, 'blockers'>; label: string; tone: string }> = [
   { key: 'done', label: 'Done', tone: 'ok' }, { key: 'left', label: 'Left', tone: 'warn' }, { key: 'next', label: 'Next', tone: 'link' }, { key: 'questions', label: 'Questions for you', tone: 'bad' },
 ];
 const SOURCE: Record<Handoff['source'], string> = { agent: 'session end', model: 'summarised', fallback: 'kept automatically', owner: 'you' };
@@ -22,7 +22,7 @@ function lineOf(h: Pick<Handoff, 'done' | 'left' | 'next' | 'questions'>): strin
 }
 const initial = (name: string) => (name.trim()[0] ?? '?').toUpperCase();
 
-export function HandoffsView({ c, onOpenChat }: { c: MemoryHandoffsController; onOpenChat?: (conversationId: string) => void }) {
+export function HandoffsView({ c, onOpenChat, onOpenCard }: { c: MemoryHandoffsController; onOpenChat?: (conversationId: string) => void; /** STORE-MAP-01 P8: "Open the task T-12". */ onOpenCard?: (boardId: string, cardId: string) => void }) {
   const s = useSyncExternalStore(c.subscribe, c.getSnapshot, c.getSnapshot);
   if (s.phase === 'error') return <p className="empty-note">{s.notice} <button type="button" className="link-button" onClick={() => void c.load()}>Try again</button></p>;
   if (s.phase !== 'ready') return <p className="empty-note" role="status">Loading handoff notes…</p>;
@@ -49,7 +49,7 @@ export function HandoffsView({ c, onOpenChat }: { c: MemoryHandoffsController; o
         return <button key={'coding' in it.ref ? it.ref.coding : `${it.ref.kind}:${it.ref.scopeId}:${it.ref.agentId}`} type="button" className="mem-handoff-row" aria-current={c.isOpen(it.ref) || undefined} onClick={() => void c.openNote(it)}>
           <span className="mem-handoff-mark">{n ? initial(name(n.agentId)) : APP[a!.client].mark}</span>
           <span className="mem-handoff-main">
-            <span className="mem-handoff-title"><span dir="auto">{title}</span><span className="mem-handoff-kind" data-kind={n ? n.kind : 'coding'}>{kind}</span></span>
+            <span className="mem-handoff-title"><span dir="auto">{title}</span><span className="mem-handoff-kind" data-kind={n ? n.kind : 'coding'}>{kind}</span>{n?.taskNo && <span className="task-number">{n.taskNo}</span>}</span>
             <span className="mem-handoff-line" dir="auto">{lineOf(n ?? a!)}</span>
             <span className="fine-print">{meta}</span>
           </span>
@@ -70,15 +70,21 @@ export function HandoffsView({ c, onOpenChat }: { c: MemoryHandoffsController; o
                 <h3 dir="auto">{listed?.title || (o.kind === 'task' ? 'Board task' : 'Chat')}</h3>
                 {h && <span className="fine-print">Version {h.version} · written by {h.source === 'owner' ? 'you' : name(h.agentId)} · {ago(h.createdAt)}</span>}
               </div>
+              {listed?.cardId && listed.boardId && onOpenCard && <button type="button" className="link-button" onClick={() => onOpenCard(listed.boardId!, listed.cardId!)}>Open the task{listed.taskNo ? ` ${listed.taskNo}` : ''}</button>}
               {o.kind === 'conversation' && onOpenChat && <button type="button" className="link-button" onClick={() => onOpenChat(o.scopeId)}>Open the chat</button>}
             </div>;
           })()}
           <div className="mem-handoff-fields">{FIELDS.map(f => <label key={f.key} className="mem-handoff-field">
             <span data-tone={f.tone === 'link' ? undefined : f.tone} className={f.tone === 'link' ? 'mem-link-text' : undefined}>{f.label}</span>
             <textarea rows={4} dir="auto" value={s.draft![f.key]} placeholder="One item per line" onChange={e => c.edit({ [f.key]: e.target.value })}/>
-          </label>)}</div>
+          </label>)}
+            {s.draft.blockers !== undefined && <label className="mem-handoff-field"><span data-tone="bad">Blockers</span>
+              <textarea rows={3} dir="auto" value={s.draft.blockers} placeholder="One blocker per line. Leave empty when nothing blocks it." onChange={e => c.edit({ blockers: e.target.value })}/></label>}
+            {s.current?.files && <div className="mem-handoff-field"><span>Files touched <small className="fine-print">(listed by the agent, read only)</small></span>
+              <p dir="ltr" className="mem-handoff-files">{s.current.files.length ? s.current.files.join('\n') : '—'}</p></div>}
+          </div>
           <div className="actions">
-            <button type="button" className="primary" disabled={s.busy || !c.changed()} onClick={() => void c.save()}>Save as version {(s.current?.version ?? 0) + 1}</button>
+            <button type="button" className="primary" disabled={s.busy || !c.changed()} onClick={() => void c.save()}>{c.changed() && !c.textChanged() && s.current ? 'Save' : `Save as version ${(s.current?.version ?? 0) + 1}`}</button>
             <button type="button" disabled={s.busy || !c.changed()} onClick={() => c.discard()}>Discard changes</button>
             <span className="fine-print">Keys, passwords and tokens are removed before saving.</span>
           </div>

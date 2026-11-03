@@ -6,7 +6,9 @@
 // comment box. Side: Continue, people and agents with what they do, status, release,
 // relationships, development, labels, files changed, spent, chats, task file, followers.
 // Every change saves by itself; Esc goes back to the board.
-import { useEffect, useRef, useState } from 'react';
+// STORE-MAP-01 P8 (switch on): T-n is the link hub — "Linked to T-n" in the side (Chats and
+// Task file move there from Work), "Latest handoff" in place of "From the task file".
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { DragEvent, ReactNode } from 'react';
 import { UiIcon } from './ui-icons';
 import type { UiIconName } from './ui-icons';
@@ -15,6 +17,12 @@ import { WEEKDAYS, allCardTypes, allPriorities, cardTypeLabel, priorityLabel, re
 import type { ActivityItem, BoardColor, BoardController, Card, CardType, Every, FileDiff, Repeat, Role, TaskPageData } from './board';
 import { AppLogo, TaskFileSheet, TaskWorkedOn, appOf } from './BoardTaskFile';
 import { ROLES } from './board-contract.js';
+import { useStoreP8 } from './store-switches';
+import { TaskLinksController } from './task-links';
+import type { LinksState } from './task-links';
+import { LatestHandoffCard, LinkedGroup, LinkedList, handoffEvents } from './BoardTaskLinks';
+import type { MemoryTarget } from './BoardTaskLinks';
+import type { TaskLinks } from './task-links-contract.js';
 
 const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map(w => w.slice(0, 1).toUpperCase()).join('') || '?';
 const when = (iso: string) => { const d = new Date(iso); if (Number.isNaN(d.getTime())) return iso; const today = new Date().toDateString() === d.toDateString(); return today ? `Today ${d.toTimeString().slice(0, 5)}` : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); };
@@ -35,8 +43,20 @@ function Tool({ icon, label, onClick, disabled }: { icon: UiIconName; label: str
   return <button type="button" className="tool" aria-label={label} title={label} disabled={disabled} onClick={onClick}><UiIcon name={icon} size={15}/></button>;
 }
 
-export function TaskPage({ card, controller, busy, onOpenChat, onBack, draftCache }: { card: Card; controller: BoardController; busy: boolean; onOpenChat?: (id: string) => void; onBack: () => void; draftCache: Map<string, string> }) {
+const IDLE: LinksState = { phase: 'idle', links: null, busy: false };
+const noop = () => () => {};
+
+export function TaskPage({ card, controller, busy, onOpenChat, onOpenMemory, onBack, draftCache }: { card: Card; controller: BoardController; busy: boolean; onOpenChat?: (id: string) => void; onOpenMemory?: (to: MemoryTarget) => void; onBack: () => void; draftCache: Map<string, string> }) {
   const s = controller.getSnapshot(), d = s.draft!, page = s.page?.data ?? null;
+  // STORE-MAP-01 P8: the task's links (asks nothing while the switch is off).
+  const p8 = useStoreP8(controller.client);
+  const [lc, setLc] = useState<TaskLinksController | null>(null);
+  useEffect(() => { const x = new TaskLinksController(controller.client); setLc(x); return () => x.dispose(); }, [controller.client]);
+  const ls = useSyncExternalStore(lc?.subscribe ?? noop, lc?.getSnapshot ?? (() => IDLE), lc?.getSnapshot ?? (() => IDLE));
+  useEffect(() => { if (p8 && lc && s.boardId) void lc.load(s.boardId, card.id); }, [p8, lc, s.boardId, card.id]);
+  const linked: TaskLinks | null = p8 && ls.phase === 'ready' ? ls.links : null;
+  const [hub, setHub] = useState(false), [handoffFocus, setHandoffFocus] = useState(0);
+  const hubNo = linked ? linked.taskNo ?? card.taskFile?.no ?? null : null;
   const [title, setTitle] = useState(card.title);
   useEffect(() => setTitle(card.title), [card.title]);
   const [editing, setEditing] = useState<'description' | 'comment' | null>(null);
@@ -50,17 +70,20 @@ export function TaskPage({ card, controller, busy, onOpenChat, onBack, draftCach
   const send = () => { if (comment.trim()) void controller.addComment(comment).then(ok => { if (ok) setComment(''); }); };
   const people = page?.people ?? [];
   return <div className="tp" ref={root} aria-label={`Task: ${card.title}`} onKeyDown={e => {
+    if (linked && (e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'l') { e.preventDefault(); setHub(!hub); return; }
     if (e.key === 'Escape' && !editing && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement)) { e.stopPropagation(); onBack(); }
   }}>
     <div className="tp-main">
       <header className="tp-bar">
         <span className="tp-back"><Tool icon="chevron" label="Back to the board (Esc)" onClick={onBack}/></span>
-        <span className="tp-crumb">{s.name}</span><span className="tp-crumb-sep" aria-hidden="true">›</span><span className="tp-crumb now">{card.taskFile?.no ?? 'Task'}</span>
+        <span className="tp-crumb">{s.name}</span><span className="tp-crumb-sep" aria-hidden="true">›</span>{linked ? <span className="tp-hub-wrap"><button type="button" className="tp-crumb now tp-hub" aria-expanded={hub} title={`Linked to ${hubNo ?? 'this task'}: task notes, handoffs, chats, task file (⌘⇧L)`} onClick={() => setHub(!hub)}>{hubNo ?? 'Task'}</button>
+          {hub && <LinkedList links={linked} onClose={() => setHub(false)} onOpenMemory={onOpenMemory} onOpenChat={onOpenChat} onShowFile={card.taskFile && fileDetail ? () => setShowFile(true) : undefined} onShowHandoff={() => setHandoffFocus(n => n + 1)}/>}</span>
+          : <span className="tp-crumb now">{card.taskFile?.no ?? 'Task'}</span>}
         <span className="tp-bar-tools">
           {card.taskFile && <Tool icon="file" label="Show it in the task file" disabled={!fileDetail} onClick={() => setShowFile(true)}/>}
           {page && page.chats[0] && onOpenChat && <Tool icon="message" label="Open its chat" onClick={() => onOpenChat(page.chats[0].id)}/>}
           <Tool icon="copy" label="Copy the task’s name and number" onClick={() => void navigator.clipboard?.writeText(`${card.taskFile?.no ? `${card.taskFile.no} · ` : ''}${card.title}`)}/>
-          <Tool icon="refresh" label="Read the task again" onClick={() => controller.refreshPage()}/>
+          <Tool icon="refresh" label="Read the task again" onClick={() => { controller.refreshPage(); if (p8) lc?.refresh(); }}/>
         </span>
       </header>
       <div className="tp-body">
@@ -68,7 +91,8 @@ export function TaskPage({ card, controller, busy, onOpenChat, onBack, draftCach
           <input className="tp-title" aria-label="Title" value={title} maxLength={200} disabled={busy} onChange={e => setTitle(e.target.value)} onBlur={saveTitle}
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); } if (e.key === 'Escape') { e.stopPropagation(); setTitle(card.title); } }}/>
           <span className="tp-meta"><span className="tp-pill">{column?.name ?? 'Task'}</span>
-            <span>{[card.taskFile && `${card.taskFile.no} · project ${card.taskFile.projectName}`, page && `opened by ${page.openedBy.name} ${when(page.openedAt)}`,
+            {linked && hubNo && <button type="button" className="task-number tp-hub" title={`Linked to ${hubNo}: task notes, handoffs, chats, task file (⌘⇧L)`} aria-expanded={hub} onClick={() => setHub(!hub)}>{hubNo}</button>}
+            <span>{[card.taskFile && (linked && hubNo ? `project ${card.taskFile.projectName}` : `${card.taskFile.no} · project ${card.taskFile.projectName}`), page && `opened by ${page.openedBy.name} ${when(page.openedAt)}`,
               page && people.length > 0 && `${onIt(people)} on it`].filter(Boolean).join(' · ')}</span></span>
         </div>
         <section className="tp-card" aria-label="Description">
@@ -78,11 +102,12 @@ export function TaskPage({ card, controller, busy, onOpenChat, onBack, draftCach
             <SubtaskAdd controller={controller} busy={busy}/></div>
         </section>
         <ChecklistCard controller={controller} busy={busy} page={page}/>
-        {card.taskFile && <TaskFileCard controller={controller}/>}
+        {linked && lc ? <LatestHandoffCard c={lc} links={linked} detail={fileDetail} onOpenChat={onOpenChat} onOpenMemory={onOpenMemory} focus={handoffFocus}/>
+          : card.taskFile && <TaskFileCard controller={controller}/>}
         <div className="tp-activity-head"><h3>Activity</h3>
           <span className="dk-segmented" role="group" aria-label="Show in Activity">{(['all', 'comments', 'replies', 'changes'] as const).map(f =>
             <button key={f} type="button" aria-pressed={filter === f} onClick={() => setFilter(f)}>{f[0].toUpperCase() + f.slice(1)}</button>)}</span></div>
-        <Activity controller={controller} filter={filter} onOpenChat={onOpenChat}/>
+        <Activity controller={controller} filter={filter} onOpenChat={onOpenChat} links={linked}/>
         <div className="tp-composer">
           <textarea aria-label="Write a comment" placeholder="Write a comment… Markdown, @ to bring in an agent" maxLength={4000} value={comment} disabled={busy}
             onChange={e => setComment(e.target.value)} onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); send(); } }}/>
@@ -91,7 +116,8 @@ export function TaskPage({ card, controller, busy, onOpenChat, onBack, draftCach
         </div>
       </div>
     </div>
-    <TaskSide card={card} controller={controller} busy={busy} page={page} onOpenChat={onOpenChat}/>
+    <TaskSide card={card} controller={controller} busy={busy} page={page} onOpenChat={onOpenChat} linked={linked} linksMissing={p8 && ls.phase === 'missing'}
+      linksPart={linked && <LinkedGroup links={linked} mark={card.taskFile} title={card.title} onOpenMemory={onOpenMemory} onOpenChat={onOpenChat} onShowFile={card.taskFile && fileDetail ? () => setShowFile(true) : undefined} onShowHandoff={() => setHandoffFocus(n => n + 1)}/>}/>
     {showFile && fileDetail && <TaskFileSheet text={fileDetail.text} title={`${fileDetail.no} in ${fileDetail.file}`} onClose={() => setShowFile(false)}/>}
     {editing && <DocumentEditor key={editing} title={editing === 'description' ? 'Task description' : 'Comment draft'} files={[{ id: editing, name: editing === 'description' ? 'Description.md' : 'Comment.md', content: editing === 'description' ? d.description : comment }]}
       maxLength={editing === 'description' ? 5000 : 4000} onChange={(_, text) => editing === 'description' ? controller.editDraft({ description: text }) : setComment(text)}
@@ -166,7 +192,7 @@ function TaskFileCard({ controller }: { controller: BoardController }) {
   </section>;
 }
 
-function Activity({ controller, filter, onOpenChat }: { controller: BoardController; filter: Filter; onOpenChat?: (id: string) => void }) {
+function Activity({ controller, filter, onOpenChat, links }: { controller: BoardController; filter: Filter; onOpenChat?: (id: string) => void; links?: TaskLinks | null }) {
   const s = controller.getSnapshot(), a = s.activity;
   if (!a || a.phase === 'loading' && !a.items.length) return <p className="fine-print" role="status">Reading what happened…</p>;
   const shown = a.items.filter(x => filter === 'all' || (filter === 'comments' && x.kind === 'comment') || (filter === 'replies' && x.kind === 'reply') || (filter === 'changes' && x.kind === 'reply' && x.change));
@@ -174,8 +200,15 @@ function Activity({ controller, filter, onOpenChat }: { controller: BoardControl
     {a.more && <button type="button" className="tp-soft" onClick={() => controller.loadOlder()}>Show older</button>}
     {a.phase === 'error' && <p className="fine-print" role="status">Activity could not be read. Try the refresh button.</p>}
     {!shown.length && a.phase === 'ready' && <p className="fine-print">{filter === 'all' ? 'Nothing yet. Comment, or press Continue.' : `No ${filter} yet.`}</p>}
-    {shown.map(x => <ActivityRow key={x.id} x={x} controller={controller} filter={filter} onOpenChat={onOpenChat}/>)}
+    {withHandoffs<{ id: string; at: string; node: ReactNode }>(shown.map(x => ({ id: x.id, at: x.at, node: <ActivityRow key={x.id} x={x} controller={controller} filter={filter} onOpenChat={onOpenChat}/> })), filter === 'all' && a.phase === 'ready' ? handoffEvents(links ?? null) : []).map(x => x.node)}
   </div>;
+}
+/** P8: handoff events join Activity › All in time order (the list's own order, oldest or newest first). */
+function withHandoffs<T extends { at: string; node: ReactNode }>(items: T[], extra: T[]): T[] {
+  if (!extra.length) return items;
+  const newestFirst = items.length > 1 && items[0].at > items[items.length - 1].at;
+  const t = (x: T) => Date.parse(x.at) || 0;
+  return [...items, ...extra].sort((x, y) => (newestFirst ? t(y) - t(x) : t(x) - t(y)));
 }
 const eventWords = (x: Extract<ActivityItem, { kind: 'event' }>, name: (kind: string, id: string) => string) => {
   if (x.event === 'created') return <>made it{x.detail ? <> in <b>{x.detail}</b></> : ''}</>;
@@ -262,7 +295,7 @@ function RepeatEditor({ controller, busy, current, onDone }: { controller: Board
   </div>;
 }
 
-function TaskSide({ card, controller, busy, page, onOpenChat }: { card: Card; controller: BoardController; busy: boolean; page: TaskPageData | null; onOpenChat?: (id: string) => void }) {
+function TaskSide({ card, controller, busy, page, onOpenChat, linked, linksMissing, linksPart }: { card: Card; controller: BoardController; busy: boolean; page: TaskPageData | null; onOpenChat?: (id: string) => void; linked?: TaskLinks | null; linksMissing?: boolean; linksPart?: ReactNode }) {
   const s = controller.getSnapshot(), d = s.draft!;
   const t = s.task?.phase === 'ready' ? s.task.detail : null;
   const lastApp = t?.log[0]?.app ?? t?.workedOn.at(-1)?.app ?? '';
@@ -289,7 +322,10 @@ function TaskSide({ card, controller, busy, page, onOpenChat }: { card: Card; co
       {more ? <span className="tp-runs"><select aria-label="Agent who continues" value={agent} disabled={busy} onChange={e => setAgent(e.target.value)}>{!agent && <option value="">Main agent</option>}{s.agents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
         <select aria-label="App it uses" value={model} disabled={busy} onChange={e => { setPicked(true); setModel(e.target.value); }}>{APPS.map(a => <option key={a.model} value={a.model}>{a.name}</option>)}</select></span>
         : <span className="tp-who"><Face name={agentName} agent size={16}/>{agentName}<i aria-hidden="true">·</i>{appOf(appName) ? <AppLogo name={appName} size={12}/> : null}{appName}{lastApp && <small>last used</small>}</span>}
+      {linked && <small className="fine-print">Starts from the latest handoff and the task notes.</small>}
     </div>}
+    {linksPart}
+    {linksMissing && <Group title="Linked"><small className="fine-print">Not available yet.</small></Group>}
     <Group title="Details">
       <Prop icon="pin" label="Status" value={<><i className="tp-dot"/>{column?.name ?? '—'}</>} open={open === 'status'} onToggle={() => toggle('status')}>
         <select autoFocus aria-label="Column" value={card.columnId} disabled={busy} onChange={e => { setOpen(null); void controller.move(card.id, e.target.value, null); }}>{s.columns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Prop>
@@ -339,14 +375,14 @@ function TaskSide({ card, controller, busy, page, onOpenChat }: { card: Card; co
         ? <a href={page.development.pr.url} target="_blank" rel="noreferrer" data-checks={page.development.pr.checks ?? undefined}>PR #{page.development.pr.number}{page.development.pr.checks === 'passing' ? ' ✓' : page.development.pr.checks === 'failing' ? ' ✗' : ''}</a> : 'no PR yet'}</span></span>}
       {page && !page.parent && !page.waitsFor.length && !page.blocks.length && !page.subtasks.length && !page.development && <small className="fine-print">No links yet.</small>}
     </Group>
-    <Group title="Work" side={page && (page.files.count > 0 || page.spent.length > 0 || page.chats.length > 0) && <button type="button" className="link-button" aria-expanded={work} onClick={() => setWork(!work)}>{work ? 'Less' : 'Details'}</button>}>
+    <Group title="Work" side={page && (page.files.count > 0 || page.spent.length > 0 || (!linked && page.chats.length > 0)) && <button type="button" className="link-button" aria-expanded={work} onClick={() => setWork(!work)}>{work ? 'Less' : 'Details'}</button>}>
       <span className="tp-link"><UiIcon name="file" size={13}/>Files changed<span className="tp-link-end">{page?.files.count ? <>{page.files.count} · <i className="tp-add">+{page.files.added}</i> <i className="tp-del">−{page.files.removed}</i></> : 'none'}</span></span>
       {work && page && page.files.paths.length > 0 && <small className="fine-print tp-paths">{page.files.paths.join(' · ')}</small>}
       <span className="tp-link"><UiIcon name="coin" size={13}/>Tokens<span className="tp-link-end">{tokensAll ? `${tokens(tokensAll)} · ${page?.spent.some(x => x.paid) ? 'some paid' : 'on your subscription'}` : 'none'}</span></span>
       {work && page?.spent.map(x => <span key={x.model} className="tp-link sub">{appOf(x.app) ? <AppLogo name={x.app} size={12}/> : <UiIcon name="cpu" size={12}/>}{x.app}<span className="tp-link-end">{tokens(x.tokens)}</span></span>)}
-      <span className="tp-link"><UiIcon name="message" size={13}/>Chats<span className="tp-link-end">{page?.chats.length ?? 0}</span></span>
-      {work && page?.chats.map(c => <button key={c.id} type="button" className="tp-chat" disabled={!onOpenChat} onClick={() => onOpenChat?.(c.id)}><UiIcon name="message" size={12}/>{c.title || 'Untitled chat'}</button>)}
-      {card.taskFile && <span className="tp-link"><UiIcon name={card.taskFile.problem ? 'alert' : 'file'} size={13}/>Task file<span className="tp-link-end">{card.taskFile.no} · {card.taskFile.problem ? 'a line to fix' : 'up to date'}</span></span>}
+      {!linked && <span className="tp-link"><UiIcon name="message" size={13}/>Chats<span className="tp-link-end">{page?.chats.length ?? 0}</span></span>}
+      {!linked && work && page?.chats.map(c => <button key={c.id} type="button" className="tp-chat" disabled={!onOpenChat} onClick={() => onOpenChat?.(c.id)}><UiIcon name="message" size={12}/>{c.title || 'Untitled chat'}</button>)}
+      {!linked && card.taskFile && <span className="tp-link"><UiIcon name={card.taskFile.problem ? 'alert' : 'file'} size={13}/>Task file<span className="tp-link-end">{card.taskFile.no} · {card.taskFile.problem ? 'a line to fix' : 'up to date'}</span></span>}
     </Group>
     <div className="tp-follow"><span className="tp-faces">{people.slice(0, 6).map(p => <Face key={`${p.kind}:${p.id}`} name={p.name} agent={p.kind === 'agent'} size={22}/>)}</span>
       <button type="button" aria-pressed={!!page?.following} disabled={busy || !page} onClick={() => void controller.setFollow(!page?.following)}><UiIcon name="eye" size={13}/>{page?.following ? 'Following' : 'Follow'}</button>
