@@ -41,6 +41,9 @@ import { graphRecall } from '../graph/recall.js';
 import { registerCache, PACK_CACHE_SIZE, RECALL_CACHE_SIZE } from './cache.js';
 import { scopeRevisions, turnScopes } from './revisions.js';
 import { countCache, recordPackSize } from './metrics.js';
+import { storeP9Enabled } from '../../services/store-p9.js';
+import { agentProfile, rankedScore } from '../agent-relevance.js';
+import { PROJECT_SUMMARY_TOPIC } from '../project-summary.js';
 
 export type RecallReason = 'pinned' | 'topic' | 'graph' | 'meaning' | 'keyword' | 'handoff';
 
@@ -156,6 +159,8 @@ export async function contextPack(input: PackInput): Promise<ContextPack> {
   let used = 0;
   let validUntil: number | null = null;
   for (const r of rows) {
+    // P9 (M7): the periodic project summary is read on demand (search, brief topics), not sent every turn.
+    if (r.topic_key === PROJECT_SUMMARY_TOPIC && storeP9Enabled()) continue;
     const isPinned = (r.importance_score ?? 0) >= PINNED_IMPORTANCE || pinnedMeta(r.metadata);
     const list = isPinned ? pinned : topic;
     if ((isPinned && pinned.length >= MAX_PINNED) || (!isPinned && topic.length >= MAX_TOPIC)) continue;
@@ -203,18 +208,21 @@ function asOf(m: { createdAt?: Date | string; drawer?: { kind: string; key?: str
   return parts.length ? ` (${parts.join(' · ')})` : '';
 }
 
-export async function messageRecall(input: { userId: string; drawers: readonly DrawerRef[]; query: string; pack: ContextPack }): Promise<MessageRecall> {
+export async function messageRecall(input: { userId: string; drawers: readonly DrawerRef[]; query: string; pack: ContextPack; agentId?: string | null }): Promise<MessageRecall> {
   const query = input.query.trim().slice(0, 2000);
   if (!query || input.drawers.length === 0) return { text: '', items: [], hit: false };
-  const key = sha(JSON.stringify([input.pack.key, sha(query)]));
+  // P9 (M3): the agent is part of the key (its relevance orders the result).
+  const p9 = storeP9Enabled();
+  const key = sha(JSON.stringify([input.pack.key, sha(query), ...(p9 ? [input.agentId ?? ''] : [])]));
   const cached = recalls.get(key);
   if (cached) { countCache('recall', true); return { ...cached, hit: true }; }
   countCache('recall', false);
   const drawers = [...input.drawers];
   const skip = new Set(input.pack.ids);
-  const [found, graph] = await Promise.all([
+  const [found, graph, profile] = await Promise.all([
     getMemoryStorage().search({ userId: input.userId, query, drawers, limit: MAX_RECALL + skip.size, mode: 'hybrid' }),
     graphRecall({ userId: input.userId, drawers }, query, { limit: MAX_RECALL }),
+    p9 ? agentProfile(input.agentId).catch(() => null) : Promise.resolve(null),
   ]);
   const now = Date.now();
   const byId = new Map<string, { m: (typeof found)[number]['memory']; score: number; why: RecallReason }>();
@@ -228,6 +236,7 @@ export async function messageRecall(input: { userId: string; drawers: readonly D
   }
   const picked = [...byId.values()]
     .filter((x) => !skip.has(x.m.id) && (x.m.status ?? 'active') === 'active' && !(x.m.expiryTimestamp && x.m.expiryTimestamp <= now))
+    .map((x) => (profile ? { ...x, score: rankedScore(x.score, profile, x.m) } : x))
     .sort((a, b) => b.score - a.score)
     .slice(0, MAX_RECALL);
   const items: TraceItem[] = picked.map((x) => ({

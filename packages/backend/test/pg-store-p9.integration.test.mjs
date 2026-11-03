@@ -52,6 +52,11 @@ if (URL_) {
     places: await import('../src/memory/place-settings.ts'),
     stays: await import('../src/memory/stays-local.ts'),
     health: await import('../src/memory/health.ts'),
+    learning: await import('../src/memory/learning.ts'),
+    files: await import('../src/memory/memory-files.ts'),
+    summary: await import('../src/memory/project-summary.ts'),
+    lessons: await import('../src/memory/lessons.ts'),
+    relevance: await import('../src/memory/agent-relevance.ts'),
   };
 }
 
@@ -66,6 +71,9 @@ test.after(async () => {
   await run('DELETE FROM notifications WHERE user_id = ?', owner);
   await run('DELETE FROM memory_graph_entities WHERE user_id = ?', owner);
   await run('DELETE FROM memory_versions WHERE user_id = ?', owner);
+  await run('DELETE FROM memory_file_proposals WHERE user_id = ?', owner);
+  await run("DELETE FROM agent_rules WHERE reason LIKE ?", `%lesson:%`);
+  await run('DELETE FROM agents_config WHERE id LIKE ?', `pq-${tag}-%`);
   await run('DELETE FROM memories WHERE user_id = ?', owner);
   await run('DELETE FROM users WHERE id = ?', owner);
   await m.closeDatabase?.();
@@ -156,5 +164,51 @@ test('P9 health counts on PostgreSQL (migration 180)', { skip }, async () => {
   assert.equal(Number(n[0].n), 1);
   const b = await m.health.supportBundle(owner);
   assert.equal(b.database.driver, 'postgres');
+  delete process.env.GIRRU_STORE_P9;
+});
+
+test('P9 quality on PostgreSQL: supersede, lesson proposals, project summary, agent profile', { skip }, async () => {
+  process.env.GIRRU_STORE_P9 = '1';
+  // M4: keep new supersedes the contradicted fact.
+  const ex = (content) => ({ content, type: 'fact', importance: 5, origin: 'extraction' });
+  const old = (await m.learning.learn({ userId: owner, actor: 'extraction', candidates: [ex(`The pq${tag} printer is enabled for guests`)] })).saved[0];
+  const out = await m.learning.learn({ userId: owner, actor: 'extraction', candidates: [ex(`The pq${tag} printer is disabled for guests`)] });
+  const p = out.proposed[0];
+  assert.equal(p.conflictWith, old.id);
+  const r = await m.files.decideConflict(owner, p.id, 'keep_new', owner, p.reviewHash);
+  assert.deepEqual(r.applied.replaced, [old.id]);
+  const was = await m.q.one('SELECT status, valid_to, superseded_by FROM memories WHERE id = ?', old.id);
+  assert.equal(was.status, 'replaced');
+  assert.ok(was.valid_to);
+  assert.equal(was.superseded_by, r.applied.added[0]);
+  // M2: a repeated finding becomes one skill proposal, once; an instruction a suggested rule.
+  // (The first test's synthetic experience rows repeat words too; they are not this case.)
+  await m.q.run("DELETE FROM memories WHERE user_id = ? AND drawer_kind = 'experience' AND id LIKE ?", owner, `p9-${tag}-%`);
+  const ins = (id, content, kind, key, type = 'fact') => m.q.run(`INSERT INTO memories (id, user_id, type, content, memory_layer, status, metadata, importance_score, created_at, access_count, drawer_kind, drawer_key)
+    VALUES (?, ?, ?, ?, 'factual', 'active', '{}', 0.5, ?, 0, ?, ?)`, id, owner, type, content, new Date(Date.now() - 1000 * Number(id.slice(-1))).toISOString(), kind, key);
+  await ins(`pq-${tag}-l1`, `The pq${tag} embed endpoint answers 404 when the model is not pulled`, 'experience', null, 'insight');
+  await ins(`pq-${tag}-l2`, `pq${tag} embed endpoint 404 means the model was not pulled`, 'experience', null, 'insight');
+  await ins(`pq-${tag}-l3`, `A 404 from the pq${tag} embed endpoint: the model is not pulled`, 'experience', null, 'insight');
+  await ins(`pq-${tag}-r1`, `Always run the pq${tag} migration test before pushing`, 'experience', null, 'insight');
+  await ins(`pq-${tag}-r2`, `Always run the pq${tag} migration test before you push`, 'experience', null, 'insight');
+  await ins(`pq-${tag}-r3`, `Run the pq${tag} migration test always before pushing`, 'experience', null, 'insight');
+  const props = await m.lessons.promoteLessons(owner);
+  assert.deepEqual(props.map((x) => x.kind).sort(), ['rule', 'skill']);
+  assert.equal((await m.lessons.promoteLessons(owner)).length, 0, 'proposed once');
+  // M7: a versioned project summary.
+  for (let i = 1; i <= 5; i++) await ins(`pq-${tag}-s${i}`, `pq${tag} billing fact number ${i}`, 'project', `pq${tag}`);
+  const first = (await m.summary.runProjectSummaries(owner)).find((x) => x.drawer === `project:pq${tag}`);
+  assert.equal(first.version, 1);
+  assert.equal((await m.summary.runProjectSummaries(owner)).filter((x) => x.drawer === `project:pq${tag}`).length, 0);
+  await ins(`pq-${tag}-s6`, `pq${tag} billing fact number six`, 'project', `pq${tag}`);
+  const second = (await m.summary.runProjectSummaries(owner)).find((x) => x.drawer === `project:pq${tag}`);
+  assert.equal(second.version, 2);
+  assert.equal(second.replaced, first.memoryId);
+  assert.deepEqual((await m.summary.projectSummaryVersions(owner, { kind: 'project', key: `pq${tag}` })).map((v) => v.current), [true, false]);
+  // M3: the agent profile reads specialty, department and team.
+  await m.q.run(`INSERT INTO agents_config (id, name, provider, model, is_primary, department, specialty) VALUES (?, 'A', 'ollama', 'x', 0, 'backend', 'Database API engineer'), (?, 'B', 'ollama', 'x', 0, 'backend', NULL)`, `pq-${tag}-a`, `pq-${tag}-b`);
+  const profile = await m.relevance.agentProfile(`pq-${tag}-a`);
+  assert.ok(profile.terms.has('databas') || profile.terms.size > 0);
+  assert.ok(profile.team.has(`pq-${tag}-b`));
   delete process.env.GIRRU_STORE_P9;
 });

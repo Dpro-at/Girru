@@ -65,6 +65,7 @@ import { currentVersionStep, replaceStep, stampProvenanceStep } from './validity
 import { storeP3Enabled } from '../services/store-p3.js';
 import { storeP9Enabled } from '../services/store-p9.js';
 import { personalDataKinds, specialCategory } from './personal-data.js';
+import { calibratedImportance, nearDuplicate, splitFacts } from './write-quality.js';
 import { ALWAYS_ASK, rulesForDrawer, type EffectiveRules } from './scopes/rules.js';
 
 export const MAX_LEARNED_CONTENT = 50_000;
@@ -153,8 +154,9 @@ export function classifyLearning(c: LearningCandidate, ctx: LearningContext = {}
   const conflictsWith: string[] = [];
   const norm = normText(text);
 
-  // Already known, word for word: nothing to save.
-  if (!c.replaces && (ctx.similar || []).some((s) => normText(s.content) === norm)) {
+  // Already known, word for word (P9, M1: an extraction with the same words in another order or form): nothing to save.
+  const p9 = storeP9Enabled();
+  if (!c.replaces && (ctx.similar || []).some((s) => normText(s.content) === norm || (p9 && c.origin === 'extraction' && nearDuplicate(s.content, text)))) {
     return { kind: 'duplicate', drawer, reasons: [], conflictsWith: [] };
   }
 
@@ -165,7 +167,7 @@ export function classifyLearning(c: LearningCandidate, ctx: LearningContext = {}
   if (c.credentialRef || c.type === 'credential') reasons.add('credentials');
   for (const [reason, re] of TOPICS) if (re.test(text)) reasons.add(reason);
   // STORE-MAP-01 P9: special categories always ask (PRIV7); personal data in imported or channel text is flagged (PRIV3).
-  if (storeP9Enabled()) {
+  if (p9) {
     if (specialCategory(text)) reasons.add('special-category');
     if ((c.imported || c.origin === 'outsider') && personalDataKinds(text).length) reasons.add('personal-data');
   }
@@ -390,7 +392,14 @@ export async function learn(input: LearnInput): Promise<LearnOutcome> {
   const out: LearnOutcome = { saved: [], proposed: [], skipped: [], classified: [], updated: [] };
   const storage = getMemoryStorage();
   const ownerReview = (await userRole(input.userId)) === 'owner';
-  for (const c of input.candidates) {
+  // STORE-MAP-01 P9 (M1): one fact per memory; an extraction with several clear facts becomes one candidate each.
+  const candidates = storeP9Enabled()
+    ? input.candidates.flatMap((c) => {
+      const parts = c?.origin === 'extraction' && typeof c.content === 'string' ? splitFacts(c.content) : [];
+      return parts.length > 1 ? parts.map((content) => ({ ...c, content })) : [c];
+    })
+    : input.candidates;
+  for (const c of candidates) {
     const content = typeof c?.content === 'string' ? c.content.trim() : '';
     if (!content || content.length > MAX_LEARNED_CONTENT) { out.skipped.push({ content: preview(content), reason: 'invalid content' }); continue; }
     const type = typeof c.type === 'string' && TYPE.test(c.type) ? c.type : 'fact';
@@ -436,6 +445,8 @@ export async function learn(input: LearnInput): Promise<LearnOutcome> {
       continue;
     }
     if (cls.kind === 'routine') {
+      // P9 (M1): an extraction never gives itself a pinned importance.
+      if (storeP9Enabled()) entry.importance = calibratedImportance(c.origin, entry.importance);
       const mem = newMemory(input.userId, drawer, entry, { ...(input.metadata || {}), source: c.origin, learned: 'routine' }, topicKey);
       // MEM-GAPS-02: who saved it (an agent run; never an outsider-facing turn's claim).
       if (c.origin === 'agent' && input.agentId) mem.sourceAgentId = input.agentId;
@@ -495,9 +506,11 @@ async function ruleDecides(userId: string, out: LearnOutcome, proposal: MemoryPr
     const r = await decideConflict(userId, proposal.id, rules.contradiction, `rule:${rules.from.contradiction}`, proposal.reviewHash, 'decided by the scope rule');
     const storage = getMemoryStorage();
     if (r.decision === 'keep_new') {
-      const m = await storage.getOwned(userId, proposal.conflictWith);
+      // P9 (M4): the old fact was superseded; the new row is the current one.
+      const id = r.applied?.replaced?.length ? r.applied.added[0] : proposal.conflictWith;
+      const m = await storage.getOwned(userId, id);
       if (m) out.updated.push(m);
-      out.classified.push({ kind: 'important', reasons: [...reasons] as LearningReason[], memoryId: proposal.conflictWith });
+      out.classified.push({ kind: 'important', reasons: [...reasons] as LearningReason[], memoryId: id });
     } else {
       const id = r.applied?.added[0];
       const m = id ? await storage.getOwned(userId, id) : null;

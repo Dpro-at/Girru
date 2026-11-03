@@ -72,6 +72,9 @@ const quietly = async (fn) => { const l = console.log; const w = console.warn; c
 const call = (method, url, who = 'mq-owner', payload) => quietly(() => app.inject({ method, url, headers: auth(who), payload }));
 const reviewHashOf = async (id) => (await call('GET', `/api/memory/proposals/${id}`)).json().reviewHash;
 const mem = (id) => db.prepare('SELECT * FROM memories WHERE id = ?').get(id);
+// STORE-MAP-01 P9 (M4): keep new supersedes; the current fact is at the end of superseded_by.
+const P9 = process.env.GIRRU_STORE_P9 === '1';
+const current = (id) => { let r = mem(id); while (r?.superseded_by) r = mem(r.superseded_by); return r; };
 const byTopic = (key, kind = 'owner', dkey = '') => db.prepare('SELECT * FROM memories WHERE user_id = ? AND drawer_kind = ? AND drawer_key = ? AND topic_key = ?').all('mq-owner', kind, dkey, key);
 const versions = (id) => db.prepare('SELECT version, change, content, reason FROM memory_versions WHERE memory_id = ? ORDER BY version').all(id).map((r) => ({ ...r }));
 const run = (tool, params, ctx) => quietly(() => tool.execute(params, ctx));
@@ -285,7 +288,7 @@ test('conflict: "is now" / "صار" replacing a saved value -> flagged proposal;
   assert.equal(p.conflictWith, oldId);
   assert.ok(p.reasons.includes('conflict'));
   assert.equal((await decideConflict(proposalId, 'keep_new')).statusCode, 200);
-  assert.equal(mem(oldId).content, 'My favourite morning drink is now green tea with honey');
+  assert.equal(current(oldId).content, 'My favourite morning drink is now green tea with honey');
   const ar = await conflictPair('مشروب محمد المفضل في الصباح قهوة بالهيل بدون سكر', 'صار مشروبي المفضل الصبح شاي أخضر مع عسل');
   assert.equal((await call('GET', `/api/memory/proposals/${ar.proposalId}`)).json().conflictWith, ar.oldId);
 });
@@ -295,9 +298,16 @@ test('conflict: keep new -> the existing memory gets the new text as a new versi
   const r = await decideConflict(proposalId, 'keep_new');
   assert.equal(r.statusCode, 200, r.body);
   assert.equal(r.json().proposal.decision, 'keep_new');
-  assert.deepEqual(r.json().applied.updated, [oldId]);
-  assert.equal(mem(oldId).content, 'Garage door is closed');
-  assert.deepEqual(versions(oldId).map((v) => v.change), ['create', 'update']);
+  if (P9) {
+    // STORE-MAP-01 P9 (M4): the old fact is superseded (kept for History); the new row is current.
+    assert.deepEqual(r.json().applied.replaced, [oldId]);
+    assert.equal(mem(oldId).content, 'Garage door is open');
+    assert.equal(current(oldId).content, 'Garage door is closed');
+  } else {
+    assert.deepEqual(r.json().applied.updated, [oldId]);
+    assert.equal(mem(oldId).content, 'Garage door is closed');
+    assert.deepEqual(versions(oldId).map((v) => v.change), ['create', 'update']);
+  }
 });
 
 test('conflict: keep both -> the new text is its own memory, the old one stays', async () => {
@@ -346,7 +356,7 @@ test('conflict decisions: owner only, review hash required, valid decision, conf
   const winner = results.find((r) => r.statusCode === 200).json().decision;
   const copies = db.prepare(`SELECT COUNT(*) AS n FROM memories WHERE user_id = 'mq-owner' AND content = 'Printer is off'`).get().n;
   assert.equal(copies, 1, `one memory with the new text (${winner})`);
-  assert.equal(mem(oldId).content, winner === 'keep_new' ? 'Printer is off' : 'Printer is on');
+  assert.equal(current(oldId).content, winner === 'keep_new' ? 'Printer is off' : 'Printer is on');
 });
 
 // ---------------------------------------------------------------------------
