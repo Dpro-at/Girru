@@ -20,6 +20,9 @@ import { createRun } from './task-runs.js';
 import { contractPrompt, getTaskContract } from './task-contracts.js';
 import { backgroundPaidPurposes, modelCall, type PaidProviderConfig } from '../llm/model-call.js';
 import { executeTaskRun, type AgentRow } from './task-run-executor.js';
+import { storeP4Enabled } from './store-p4.js';
+import { resolveAgentContext } from './agent-context/resolve.js';
+import { renderSystemPrompt } from './agent-context/render.js';
 
 const HEARTBEAT_OK_TOKEN = 'HEARTBEAT_OK';
 const HEARTBEAT_ACK_MAX_CHARS = 300;
@@ -53,7 +56,10 @@ function readHeartbeatFile(agentName: string): string | null {
  * returns anything other than a HEARTBEAT_OK acknowledgment.
  */
 export async function runHeartbeat(agent: AgentRow, heartbeatContent: string): Promise<void> {
-  const systemPrompt = agent.system_prompt ?? `You are ${agent.name}, an AI agent.`;
+  // STORE-MAP-01 P4 (D16): the heartbeat uses the agent's one context (no owner memory); off, as before.
+  const systemPrompt = storeP4Enabled()
+    ? await resolveAgentContext({ agentId: agent.id, entry: 'heartbeat', ownerId: null }).then((ctx) => renderSystemPrompt(ctx), () => agent.system_prompt ?? `You are ${agent.name}, an AI agent.`)
+    : agent.system_prompt ?? `You are ${agent.name}, an AI agent.`;
   const prompt =
     `Read the HEARTBEAT.md checklist below. Follow it strictly. ` +
     `Do not infer or repeat old tasks from prior context. ` +

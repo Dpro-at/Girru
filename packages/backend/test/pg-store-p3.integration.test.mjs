@@ -154,3 +154,35 @@ test('P4 (D7): coding-app notes in the one handoff table (PostgreSQL)', { skip }
     await m.q.run('DELETE FROM chat_projects WHERE id = ?', p.id);
   }
 });
+
+test('P4 (T7): one personality record (PostgreSQL)', { skip }, async () => {
+  const assert = (await import('node:assert/strict')).default;
+  const files = await import('../src/services/agent-files.ts');
+  const store = await import('../src/services/personality-store.ts');
+  const record = await import('../src/services/personality-record.ts');
+  const id = `pp-${tag}`;
+  await m.q.run("INSERT INTO agents_config (id, name, provider, model, system_prompt) VALUES (?, ?, 'ollama', 'm', 'Owner extras.')", id, `Persona ${tag}`);
+  await files.writePersonality(id, '# Mine\nSpeak plainly.');
+  process.env.GIRRU_STORE_P4 = '1';
+  try {
+    assert.equal(await record.ensurePersonalityRecord(id), true);
+    assert.equal(await record.ensurePersonalityRecord(id), false, 'once');
+    assert.equal((await record.recordText(id)).text, '# Mine\nSpeak plainly.');
+    const v = await record.savePersonalityText(id, '# Mine\nSpeak plainly; one example.', 1, owner);
+    assert.equal(v.version, 2);
+    await assert.rejects(record.savePersonalityText(id, 'x', 1, owner), record.PersonalityVersionConflict);
+    await store.savePersonalityVersion(id, { traits: { warmth: 80 } }, owner);
+    assert.match((await record.recordText(id)).text, /one example/, 'a trait version keeps the text');
+    await store.rollbackPersonality(id, 1, owner);
+    assert.equal((await record.recordText(id)).text, '# Mine\nSpeak plainly.');
+    const p = await store.createPersonalityTextProposal(id, { text: 'Suggested.', reason: 'test' }, 'evolution', owner, 'evolution_text');
+    assert.equal(p.proposedText, 'Suggested.');
+    const { version } = await store.approvePersonalityProposal(id, p.id, owner, p.reviewHash);
+    assert.equal(version.textHash, p.proposedTextHash);
+    assert.equal(await record.personalityTextFor(id), 'Suggested.');
+  } finally {
+    delete process.env.GIRRU_STORE_P4;
+    await m.q.run('DELETE FROM personality_proposals WHERE agent_id = ?', id);
+    await m.q.run('DELETE FROM agents_config WHERE id = ?', id);
+  }
+});

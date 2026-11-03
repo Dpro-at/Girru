@@ -22,19 +22,20 @@ test('switches route: GET only, in the browser gate and the desktop bridge; only
     assert.ok(!gate('PUT', STORE_SWITCHES_PATH, { p2: true }));
     assert.ok(!gate('GET', `${STORE_SWITCHES_PATH}/x`, undefined));
   }
-  assert.deepEqual(storeSwitchesResponse(200, { p2: true, secret: 'x' }), { p2: true, p3: false });
-  assert.deepEqual(storeSwitchesResponse(200, { p2: 'yes' }), { p2: false, p3: false });
-  assert.deepEqual(storeSwitchesResponse(200, { p2: false, p3: true }), { p2: false, p3: true });
+  assert.deepEqual(storeSwitchesResponse(200, { p2: true, secret: 'x' }), { p2: true, p3: false, p4: false });
+  assert.deepEqual(storeSwitchesResponse(200, { p2: 'yes' }), { p2: false, p3: false, p4: false });
+  assert.deepEqual(storeSwitchesResponse(200, { p2: false, p3: true }), { p2: false, p3: true, p4: false });
+  assert.deepEqual(storeSwitchesResponse(200, { p4: true }), { p2: false, p3: false, p4: true });
   assert.deepEqual(storeSwitchesResponse(403, {}), { code: 'forbidden' });
 });
 
 test('storeSwitches: read once per client; anything unreadable is off', async () => {
   let n = 0;
   const on = { request: async () => { n++; return { status: 200, body: { p2: true } }; } };
-  assert.deepEqual(await storeSwitches(on), { p2: true, p3: false });
-  assert.deepEqual(await storeSwitches(on), { p2: true, p3: false });
+  assert.deepEqual(await storeSwitches(on), { p2: true, p3: false, p4: false });
+  assert.deepEqual(await storeSwitches(on), { p2: true, p3: false, p4: false });
   assert.equal(n, 1);
-  assert.deepEqual(await storeSwitches({ request: async () => { throw Error('down'); } }), { p2: false, p3: false });
+  assert.deepEqual(await storeSwitches({ request: async () => { throw Error('down'); } }), { p2: false, p3: false, p4: false });
 });
 
 test('rules contract: precedence and groups pass; an unknown group is dropped', () => {

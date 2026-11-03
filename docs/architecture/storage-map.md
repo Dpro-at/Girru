@@ -62,7 +62,7 @@ Girru's own servers store none of this. Updates and the Store index come from th
 | Field | Owner | Copies and views | Conflict rule | State |
 |---|---|---|---|---|
 | Notes from Girru's agents | `agent_handoffs` | chat and task prompts | New version per note; newest wins on read | Today |
-| Notes from coding tools | `memory_bridge_handoffs` | project brief, `latest_handoff`, `AGENTS.md` | Same | Today; chat and task prompts read only the first table — **Planned:** one table read by every entry point |
+| Notes from coding tools | `memory_bridge_handoffs` | project brief, `latest_handoff`, `AGENTS.md` | Same | Today; with `GIRRU_STORE_P4` on they live in `agent_handoffs` too (kind `project`, source `coding_app`) and every entry point reads that one table; the old table is dropped one release later |
 
 ### Agents
 
@@ -70,9 +70,9 @@ Girru's own servers store none of this. Updates and the Store index come from th
 |---|---|---|---|---|
 | Name, model, provider | `agents_config` | task file shows the name with the id | `version` + `If-Match`; **Planned:** required on every write | Today (optional check) |
 | Permissions and tool grants | their database tables | — | Server-side only | Today |
-| Persona text | `PERSONALITY.md` **and** `system_prompt` | — | Two owners today: chat reads the file first, task runs and coding apps read `system_prompt` | Today — **Planned:** one versioned personality record; `PERSONALITY.md` becomes a view whose edits come back through review |
-| Personality traits | `agent_personality_versions` | a generated block in `PERSONALITY.md` | Append-only versions | Today — **Planned:** part of the personality record |
-| Specialties | `agent_specialties` link + `specialty_template_versions` | read-only copy (Planned) | Versioned | Today; the unused `agents_config.specialty` column is removed (Planned) |
+| Personality text and traits | the personality record: `agent_personality_versions` (+ `personality_texts`) | `PERSONALITY.md` (text + a generated settings part) | Append-only versions; an edit names the version it read (`409` when it moved on); an outside edit of the file becomes a proposal | With `GIRRU_STORE_P4` on. Off: the file holds the text, the database the traits |
+| Owner's extra instructions | `agents_config.system_prompt` | prompts | `version` + `If-Match` | Today. With `GIRRU_STORE_P4` on, hiring and Evolution no longer write it |
+| Job (specialties) | `agent_specialties` link + `specialty_template_versions` | read-only copy (Planned) | Versioned | Today; with `GIRRU_STORE_P4` on a linked hire and a team hire from the library write only the link, and `agents_config.specialty` is no longer written |
 | Skills | central skill library (content-addressed) + assignments | read-only copy (Planned) | Content hash and assignment revision are checked | Today |
 | Rules | `agent_rules` + `agent_rule_versions` | `.girru/rules.md`; `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`; prompts | Versions and restore today; **Planned:** compare-and-set on edit | Today |
 | Knowledge files | the files in `knowledge/` | read into prompts | The file is the owner (documents the owner adds) | Today |
@@ -158,6 +158,15 @@ A first version of the change log, the session capability and the shared agent c
 - **Projects by id in memory:** at start-up every project key moves from the slug to the project's id; a key with no project becomes a real project. Deleting a project keeps its memory under its own id, so a new project with the same name starts empty. Links that name a project by its slug keep working for one release. With the switch off again, the keys move back.
 - **Source, trust and replaced facts:** new memories record where they came from (owner, agent, coding app, import, channel) and how far to trust them (checked, unchecked, imported); a background job fills older rows. A new fact on a known topic replaces the old one, which stays in History and is never recalled. `PUT /api/memory/scopes/memories/:id/checked` marks a memory as checked or undoes it.
 - **Start-up after an update:** Girru stops before writing anything when the data was written by a newer Girru, and a failed update step is named with an error id; the desktop start page explains both.
+
+### One store per piece (off by default)
+
+`GIRRU_STORE_P4=1` turns on:
+
+- **One personality record:** an agent's personality text and its adjustments share one versioned history. Edits in Girru save at once (Undo restores the version before); `PERSONALITY.md` is written from the record; a change made to the file outside Girru, and every Evolution text suggestion, waits in Personality review. At start-up each agent's current file text is imported once.
+- **The job from the specialty link:** `system_prompt` keeps only the owner's extra instructions. Chat, task runs, coding apps, public rooms (after the room's own prompt) and the heartbeat use the one agent context, so a hired agent's job reaches chat.
+- **One handoff table** for agents' and coding tools' notes.
+- **The old memory index file** `.data/memory/memory.db` is retired after a verified full backup, and the old skill marketplace routes answer `410`.
 
 ### One agent context and one Girru section (off by default)
 

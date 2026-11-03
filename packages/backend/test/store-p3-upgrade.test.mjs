@@ -32,6 +32,12 @@ for (const file of ['girru-1.3.2.sql', 'girru-1.4.1.sql']) {
     assert.equal(out.provenance.filled, out.before.memories, 'every memory gets its source once');
     assert.equal(out.provenance.again, 0);
     for (const r of out.sources) assert.ok(r.source && r.trust, `${r.id} has source and trust`);
+    // P4 (T7): every agent's text imported once into its record; old versions kept.
+    assert.equal(out.personality.imported, out.after.agents);
+    assert.equal(out.personality.again, 0, 'the import is idempotent');
+    assert.equal(out.personality.missing, 0);
+    assert.equal(out.personality.text, '# Hand-written\nKeep answers short.');
+    assert.equal(out.personality.versionsAfter, out.personality.versionsBefore + out.after.agents, 'history kept, one import version each');
     if (file.includes('1.4')) {
       assert.equal(out.departments.find((d) => d.norm_name === 'engineering').id, 'dept-fx1', 'memory\'s department keeps its id');
       assert.deepEqual(out.questions, ['designers']);

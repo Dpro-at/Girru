@@ -14,6 +14,15 @@ export function storeP2Enabled(env: NodeJS.ProcessEnv = process.env): boolean {
 }
 
 /**
+ * The one resolved context is used by every entry point: with P2 on, and with
+ * P4 on (the personality record and the job text reach chat, task runs and
+ * coding apps the same way; D16). Guides by name stay a P2 choice.
+ */
+export function oneContextEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return storeP2Enabled(env) || /^(1|true|yes|on)$/i.test(String(env.GIRRU_STORE_P4 ?? '').trim());
+}
+
+/**
  * STORE-MAP-01 P2 (MD4): what agents save and what they leave out. One text,
  * used by memory_save and by the project brief that coding tools read.
  */

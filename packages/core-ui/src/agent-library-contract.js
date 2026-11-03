@@ -55,9 +55,10 @@ export function libraryResponse(path, status, body) {
       return { files: body.files.filter(f => record(f) && fileName(f.name) && KINDS.includes(f.kind)).map(f => ({ name: f.name, kind: f.kind, size: Number.isSafeInteger(f.size) ? f.size : 0, read: f.read === true })),
         removed: body.removed.filter(r => record(r) && versionId(r.id) && fileName(r.name)).map(r => ({ id: r.id, name: r.name, removedAt: text(r.removedAt, 40) ? r.removedAt : null })) };
     case 'file':
-      if (status === 201 || 'content' in body === false) { if (!hash(body.hash ?? null)) throw Error('protocol'); return { hash: body.hash ?? null, redacted: body.redacted === true }; }
+      if (status === 201 || 'content' in body === false) { if (!hash(body.hash ?? null)) throw Error('protocol'); return { hash: body.hash ?? null, redacted: body.redacted === true, ...(Number.isSafeInteger(body.version) ? { version: body.version } : {}) }; }
       if (!fileName(body.name) || !KINDS.includes(body.kind) || !text(body.content, LIBRARY_BYTES + 1024) || !hash(body.hash)) throw Error('protocol');
-      return { name: body.name, kind: body.kind, content: body.content, hash: body.hash, managed: text(body.managed, 20000) ? body.managed : null, redacted: body.redacted === true, read: body.read !== false };
+      // STORE-MAP-01 P4: Who it is names the personality version it shows.
+      return { name: body.name, kind: body.kind, content: body.content, hash: body.hash, managed: text(body.managed, 20000) ? body.managed : null, redacted: body.redacted === true, read: body.read !== false, ...(Number.isSafeInteger(body.version) ? { version: body.version } : {}) };
     case 'remove': if (!versionId(body.id)) throw Error('protocol'); return { id: body.id };
     case 'restore': if (!fileName(body.name)) throw Error('protocol'); return { name: body.name };
     case 'read': return { name: fileName(body.name) ? body.name : null, read: body.read === true };

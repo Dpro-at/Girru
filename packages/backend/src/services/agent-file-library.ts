@@ -25,6 +25,41 @@ import { checkedAgentDirectory, readMemorySnapshot, readPersonality, validAgentF
 import { personalityExportBlock, stripPersonalityExport, upsertPersonalityExport } from './personality.js';
 import { readRegularFile } from './read-regular-file.js';
 import { redactImportText } from '../memory/import/redact.js';
+import { storeP4Enabled } from './store-p4.js';
+import { captureOutsideEdit, ensurePersonalityRecord, recordText, savePersonalityText, PersonalityVersionConflict } from './personality-record.js';
+import { currentPersonalityStep, personalityTextStep } from './personality-store.js';
+import { renderPersonalityExport } from './personality.js';
+import { all, one, sql } from '../repositories/sql-steps.js';
+import { isoUtc } from '../api/timestamps.js';
+
+/**
+ * STORE-MAP-01 P4 (T7): with GIRRU_STORE_P4 on, Who it is is the personality
+ * record. Its version tag is the record's version (not the file's bytes), a
+ * save makes a new version at once (Undo = restore the version before), and a
+ * change made to PERSONALITY.md outside Girru waits in Personality review.
+ */
+/** Ids below this are record versions; file saves are named by their time in milliseconds. */
+const RECORD_VERSION_IDS = 1_000_000_000;
+async function recordTextVersions(agentId: string): Promise<{ id: string; savedAt: string; size: number }[]> {
+  const rows = await sql().read(all<{ version: number; text_hash: string; created_at: string; bytes: number }>(`
+    SELECT v.version, v.text_hash, v.created_at, length(t.body) AS bytes FROM agent_personality_versions v
+    JOIN personality_texts t ON t.hash = v.text_hash
+    WHERE v.agent_id = ? ORDER BY v.version DESC LIMIT 200`, agentId));
+  // One entry per text change (a version that only moved a trait keeps the same text).
+  // At most 20, so with the file's own 20 saves the list stays within what the page shows (40).
+  return rows.filter((r, i) => rows[i + 1]?.text_hash !== r.text_hash).slice(0, 20)
+    .map((r) => ({ id: `${r.version}-${r.text_hash.slice(0, 8)}`, savedAt: isoUtc(r.created_at) ?? r.created_at, size: Number(r.bytes) }));
+}
+const recordTag = (version: number, textHash: string | null) => digest(`personality-record:${version}:${textHash ?? ''}`);
+async function whoFromRecord(agentId: string): Promise<FileView | null> {
+  await ensurePersonalityRecord(agentId);
+  await captureOutsideEdit(agentId).catch(() => null);
+  const r = await recordText(agentId);
+  if (!r?.textHash) return null; // not imported yet: the file, as before
+  const current = await sql().read(currentPersonalityStep(agentId));
+  const managed = current ? renderPersonalityExport(current).split('\n').slice(1, -1).join('\n').trim() : null;
+  return { name: WHO, kind: 'who', content: r.text, hash: recordTag(r.version, r.textHash), managed, redacted: false, read: true, version: r.version };
+}
 
 export const WHO = 'PERSONALITY.md', MIND = 'MEMORY.md';
 export const MAX_KNOWLEDGE_BYTES = 1024 * 1024;
@@ -133,7 +168,7 @@ export async function listFiles(agentId: string): Promise<{ files: FileEntry[]; 
   return { files, removed: state.removed.map(r => ({ id: r.id, name: r.name, removedAt: new Date(r.removedAt).toISOString() })) };
 }
 
-export interface FileView { name: string; kind: FileKind; content: string; hash: string | null; managed: string | null; redacted: boolean; read: boolean }
+export interface FileView { name: string; kind: FileKind; content: string; hash: string | null; managed: string | null; redacted: boolean; read: boolean; /** P4: the personality version shown (Who it is). */ version?: number }
 /** One file. Who it is comes without its Personality block (shown apart as `managed`). */
 export async function readFile(agentId: string, name: unknown): Promise<FileView> {
   const kind = kindOf(name);
@@ -143,6 +178,7 @@ export async function readFile(agentId: string, name: unknown): Promise<FileView
     return { name: MIND, kind, content: m.content, hash: m.hash, managed: null, redacted: m.redacted, read: true };
   }
   if (kind === 'who') {
+    if (storeP4Enabled()) { const view = await whoFromRecord(agentId).catch(() => { throw new FileLibraryError(503, 'files_unavailable'); }); if (view) return view; }
     const raw = await readPersonality(agentId).catch(() => { throw new FileLibraryError(503, 'files_unavailable'); });
     const block = personalityExportBlock(raw);
     return { name: WHO, kind, content: stripPersonalityExport(raw), hash: digest(raw), managed: block ? block.split('\n').slice(1, -1).join('\n').trim() : null, redacted: false, read: true };
@@ -156,7 +192,7 @@ export async function readFile(agentId: string, name: unknown): Promise<FileView
 }
 
 /** Save over a file the caller read (expectedHash); a changed file answers 409. */
-export async function saveFile(agentId: string, name: unknown, content: unknown, expectedHash: unknown): Promise<{ hash: string | null; redacted: boolean }> {
+export async function saveFile(agentId: string, name: unknown, content: unknown, expectedHash: unknown): Promise<{ hash: string | null; redacted: boolean; version?: number }> {
   const kind = kindOf(name);
   if (typeof content !== 'string') throw new FileLibraryError(400, 'invalid_content');
   if (!(expectedHash === null || (typeof expectedHash === 'string' && /^[a-f0-9]{64}$/.test(expectedHash)))) throw new FileLibraryError(400, 'invalid_version');
@@ -167,6 +203,20 @@ export async function saveFile(agentId: string, name: unknown, content: unknown,
   }
   if (kind === 'who') {
     if (Buffer.byteLength(content, 'utf8') > MAX_WHO_BYTES) throw new FileLibraryError(413, 'too_large');
+    if (storeP4Enabled()) {
+      await ensurePersonalityRecord(agentId).catch(() => false);
+      const r = await recordText(agentId).catch(() => null);
+      if (r?.textHash) {
+        if (recordTag(r.version, r.textHash) !== expectedHash) throw new FileLibraryError(409, 'changed');
+        try {
+          const v = await savePersonalityText(agentId, content, r.version, 'owner');
+          return { hash: recordTag(v.version, v.textHash ?? null), redacted: false, version: v.version };
+        } catch (e) {
+          if (e instanceof PersonalityVersionConflict) throw new FileLibraryError(409, 'changed');
+          throw new FileLibraryError(503, 'files_unavailable');
+        }
+      }
+    }
     const raw = await readPersonality(agentId).catch(() => { throw new FileLibraryError(503, 'files_unavailable'); });
     if (digest(raw) !== expectedHash) throw new FileLibraryError(409, 'changed');
     const block = personalityExportBlock(raw);
@@ -251,10 +301,12 @@ export async function listVersions(agentId: string, name: unknown): Promise<{ id
   const kind = kindOf(name);
   if (kind === 'mind') return [];
   const f = await folders(agentId);
+  const out = [];
+  // P4 (T7): Who it is lists the record's text versions first (id `<version>-<text hash>`), then the file's older saves.
+  if (kind === 'who' && storeP4Enabled()) out.push(...await recordTextVersions(agentId));
   const dir = path.join(f.versions, digest(name as string).slice(0, 16));
   let all: string[] = [];
-  try { all = (await fs.readdir(dir)).filter(n => /^\d+-[a-f0-9]{8}\.txt$/.test(n)); } catch { return []; }
-  const out = [];
+  try { all = (await fs.readdir(dir)).filter(n => /^\d+-[a-f0-9]{8}\.txt$/.test(n)); } catch { return out; }
   for (const n of all.sort().reverse()) { const st = await fs.lstat(path.join(dir, n)).catch(() => null); if (st?.isFile()) out.push({ id: n.slice(0, -4), savedAt: new Date(Number(n.split('-')[0])).toISOString(), size: st.size }); }
   return out;
 }
@@ -262,6 +314,14 @@ export async function readVersion(agentId: string, name: unknown, id: unknown): 
   const kind = kindOf(name);
   if (kind === 'mind' || typeof id !== 'string' || !/^\d{1,16}-[a-f0-9]{8}$/.test(id)) throw new FileLibraryError(400, 'invalid_id');
   const f = await folders(agentId);
+  if (kind === 'who' && storeP4Enabled() && Number(id.split('-')[0]) < RECORD_VERSION_IDS) {
+    const text = await sql().read((function* () {
+      const row = yield* one<{ text_hash: string | null }>('SELECT text_hash FROM agent_personality_versions WHERE agent_id = ? AND version = ?', agentId, Number(id.split('-')[0]));
+      return row?.text_hash?.startsWith(id.split('-')[1]) ? yield* personalityTextStep(row.text_hash) : null;
+    })());
+    if (text === null) throw new FileLibraryError(404, 'not_found');
+    return { content: text };
+  }
   const text = await readText(path.join(f.versions, digest(name as string).slice(0, 16)), `${id}.txt`, MAX_WHO_BYTES);
   if (text === null) throw new FileLibraryError(404, 'not_found');
   return { content: kind === 'who' ? stripPersonalityExport(text) : text };

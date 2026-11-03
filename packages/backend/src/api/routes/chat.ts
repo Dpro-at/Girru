@@ -14,7 +14,7 @@ import {isPilotAgent} from '../../memory/outbox/pilot.js';
 import {resolveAgentContext} from '../../services/agent-context/resolve.js';
 import {renderCodingAppInstructions,renderMemoryData,renderSystemPrompt} from '../../services/agent-context/render.js';
 import {CODING_APP_MEMORY_TOKENS,capTokens} from '../../services/agent-context/budget.js';
-import {storeP2Enabled} from '../../services/agent-context/switch.js';
+import {oneContextEnabled} from '../../services/agent-context/switch.js';
 import { agentSkillsPrompt } from '../../skills/central-store.js';
 import { safeConsole } from '../../services/safe-error-log.js';
 /**
@@ -471,7 +471,8 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
         const selectedAgent=savedReplyAgent;
         if(!selectedAgent)throw Error('agent_context_unavailable');
         // STORE-MAP-01 P2 (CX6, AG1): the one resolved context; guides by name (read with guide_read through Girru's tools).
-        const p2Context=storeP2Enabled()?await resolveAgentContext({agentId:selectedAgent.id,entry:'coding_app',ownerId:userId,sessionId}):null;
+        // P4 (D16): with the personality record on, coding apps use the same one context.
+        const p2Context=oneContextEnabled()?await resolveAgentContext({agentId:selectedAgent.id,entry:'coding_app',ownerId:userId,sessionId}):null;
         const context=p2Context?renderCodingAppInstructions(p2Context):await subscriptionAgentContext(selectedAgent.id,{sessionId});
         const drawers=await withoutArchivedDrawers(userId,chatTurnDrawers(true,memoryScope));
         // CHAT-BUILD-01: the coding app gets the newest turns plus summaries of older ones and a bounded
@@ -593,7 +594,8 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
     // instructions, personality text, working style, guides by name, team and knowledge; the
     // context pack below adds the memory. Off: the earlier builder, unchanged.
     let resolvedSystemPrompt = '';
-    if (storeP2Enabled() && agentConfig?.id && agentConfig.id !== 'small-local-agent') {
+    // P4 (T7, D16): the personality record and the job text reach chat through the same one context.
+    if (oneContextEnabled() && agentConfig?.id && agentConfig.id !== 'small-local-agent') {
       const ctx = await resolveAgentContext({ agentId: agentConfig.id, entry: channelTurn ? 'channel' : 'chat', ownerId: userId, sessionId, instructionsOverride: systemPrompt ?? null });
       resolvedSystemPrompt = renderSystemPrompt(ctx, { data: false });
       if (memoryFileContent) resolvedSystemPrompt += frameUntrustedMemory(memoryFileContent,'agent');

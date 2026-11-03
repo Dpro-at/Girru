@@ -8,8 +8,8 @@
  * renderers frame them as such and they can never relax anything above them.
  */
 
-export type EntryPoint = 'chat' | 'task' | 'coding_app' | 'channel';
-export const ENTRY_POINTS: readonly EntryPoint[] = ['chat', 'task', 'coding_app', 'channel'];
+export type EntryPoint = 'chat' | 'task' | 'coding_app' | 'channel' | 'heartbeat';
+export const ENTRY_POINTS: readonly EntryPoint[] = ['chat', 'task', 'coding_app', 'channel', 'heartbeat'];
 
 export const PRECEDENCE = ['system', 'owner_rules', 'definition', 'data'] as const;
 
@@ -37,7 +37,9 @@ export interface ContextPolicy {
 export function evaluateContextPolicy(entry: EntryPoint, opts: { outsiderMemory?: boolean } = {}): ContextPolicy {
   if (!(ENTRY_POINTS as readonly string[]).includes(entry)) throw new Error(`Unknown entry point ${entry}`);
   const outsider = entry === 'channel';
-  const memory = !outsider || !!opts.outsiderMemory;
+  // A heartbeat is a short background check: identity, rules and definition only, no owner memory.
+  const heartbeat = entry === 'heartbeat';
+  const memory = heartbeat ? false : !outsider || !!opts.outsiderMemory;
   const task = entry === 'task';
   return {
     entry,
@@ -47,9 +49,9 @@ export function evaluateContextPolicy(entry: EntryPoint, opts: { outsiderMemory?
     memory,
     precedence: PRECEDENCE,
     reasons: {
-      pinnedFacts: !memory ? 'an outside sender never gets owner memory' : task ? 'added by the task run from its narrowed scope' : 'the owner’s pinned facts for this project',
-      handoff: !memory ? 'an outside sender never gets owner memory' : task ? 'the task run adds its own task handoff' : 'the newest handoff of the project, from Girru agents and coding tools',
-      memory: memory ? 'recall from the open drawers' : 'an outside sender never gets owner memory',
+      pinnedFacts: heartbeat ? 'a heartbeat check reads no owner memory' : !memory ? 'an outside sender never gets owner memory' : task ? 'added by the task run from its narrowed scope' : 'the owner’s pinned facts for this project',
+      handoff: heartbeat ? 'a heartbeat check reads no owner memory' : !memory ? 'an outside sender never gets owner memory' : task ? 'the task run adds its own task handoff' : 'the newest handoff of the project, from Girru agents and coding tools',
+      memory: memory ? 'recall from the open drawers' : heartbeat ? 'a heartbeat check reads no owner memory' : 'an outside sender never gets owner memory',
     },
   };
 }

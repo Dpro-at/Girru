@@ -83,6 +83,11 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
   if ((await import('../services/store-p4.js')).storeP4Enabled()) {
     const { copyAppHandoffs } = await import('../memory/bridge/store.js');
     await copyAppHandoffs().catch((err) => console.warn('[Store P4] handoff notes not copied:', (err as Error)?.message));
+    // T7: each agent's PERSONALITY.md text into its one personality record (once; the file becomes a view).
+    const { backfillPersonalityRecords, agentsWithoutRecordText } = await import('../services/personality-record.js');
+    await backfillPersonalityRecords()
+      .then(async (n) => { const left = await agentsWithoutRecordText(); if (n || left) console.log(`[Store P4] personality texts imported: ${n}, still without a text: ${left}`); })
+      .catch((err) => console.warn('[Store P4] personality texts not imported:', (err as Error)?.message));
   }
 
   // APPS-06: apps moved to the Girru Store keep their data under their Store table names (once, after a backup).
