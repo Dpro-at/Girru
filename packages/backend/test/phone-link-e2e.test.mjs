@@ -266,6 +266,9 @@ test('L2: a replayed hs1 is ignored and the live session keeps working', async (
   assert.equal((await first.reply('h0')).ok, true);
   first.client.send(first.qr.computerId, first.lastHs1);
   await assert.rejects(first.next((f) => f.t === 'msg' && f.env.startsWith('g1.hs2.'), 500), /timed out/, 'no second answer');
+  // The same hello with its ECDSA signature re-encoded (s → n − s) is still valid, and still a replay.
+  first.client.send(first.qr.computerId, malleate(first.lastHs1));
+  await assert.rejects(first.next((f) => f.t === 'msg' && f.env.startsWith('g1.hs2.'), 500), /timed out/, 'no answer to a re-signed copy');
   first.command({ type: 'chat.list', ref: 'h1' });
   assert.equal((await first.reply('h1')).ok, true, 'the session was not swapped');
 });
@@ -366,3 +369,16 @@ test('Wi-Fi path (off by default): a phone pairs and talks over the local listen
   viaRelay.send(qr.computerId, E.startHandshake(local.identity, qr.computerId).env);
   assert.equal((await viaRelay.next((f) => f.t === 'drop')).reason, 'offline');
 });
+
+/** The other valid encoding of a P-256 DER signature (s → n − s); needs no private key. */
+function malleate(env) {
+  const parts = env.split('.');
+  const der = Buffer.from(parts[3], 'base64url');
+  const n = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n;
+  let i = 2; const rLen = der[i + 1]; const r = der.subarray(i + 2, i + 2 + rLen); i += 2 + rLen;
+  const s = BigInt('0x' + der.subarray(i + 2, i + 2 + der[i + 1]).toString('hex'));
+  const int = (v) => { let h = v.toString(16); if (h.length % 2) h = '0' + h; let b = Buffer.from(h, 'hex'); if (b[0] & 0x80) b = Buffer.concat([Buffer.from([0]), b]); return Buffer.concat([Buffer.from([2, b.length]), b]); };
+  const body = Buffer.concat([Buffer.from([2, r.length]), r, int(n - s)]);
+  parts[3] = Buffer.concat([Buffer.from([0x30, body.length]), body]).toString('base64url');
+  return parts.join('.');
+}

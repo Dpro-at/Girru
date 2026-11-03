@@ -450,7 +450,9 @@ export class PhoneLink {
     if (S.isExpired(device, now)) { this.dropDevice(from); return; }
     if (env.startsWith('g1.hs1.')) {
       // A replayed hs1 (the relay or the network keeps a copy) would swap the session or its transport.
-      const seen = createHash('sha256').update(env).digest('base64url');
+      // Keyed on the signed hello only: an ECDSA signature can be re-encoded (s, n−s) without the key,
+      // so a hash over the whole envelope would let a re-signed copy through.
+      const seen = createHash('sha256').update(env.split('.')[2] ?? '').digest('base64url');
       if (this.seenHs1.has(seen)) return;
       let answered: ReturnType<typeof answerHandshake>;
       try { answered = answerHandshake(this.identity, device.publicKey, env, now); } catch { return; }
