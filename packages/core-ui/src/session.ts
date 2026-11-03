@@ -429,7 +429,7 @@ export class SessionClient {
     const epoch = this.#state.epoch;
     let result: ReturnType<typeof ownerSetupResponse>;
     try {
-      const response = await this.#send('POST', OWNER_SETUP_PATH, { name: input.name, email: input.email, password: input.password, setupToken: input.setupToken, ...(input.workspaceType ? { workspaceType: input.workspaceType } : {}), ...(input.workspaceType === 'company' ? { companyName: input.companyName } : {}) }, undefined, epoch);
+      const response = await this.#send('POST', OWNER_SETUP_PATH, { name: input.name, email: input.email, password: input.password, setupToken: input.setupToken, ...(input.workspaceType ? { workspaceType: input.workspaceType } : {}), ...(input.workspaceType === 'company' ? { companyName: input.companyName } : {}), ...(input.workspaceType === 'company' && input.companyKind !== undefined ? { companyKind: input.companyKind } : {}) }, undefined, epoch);
       result = ownerSetupResponse(response.status, response.body);
     } catch { return { ok: false, code: 'unavailable' }; }
     if (!result) return { ok: false, code: 'unavailable' };

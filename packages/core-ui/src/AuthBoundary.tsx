@@ -16,6 +16,8 @@ import type { OwnerSetupCode } from './owner-setup-contract.js';
 import { isDeveloperBuild } from './developer-build';
 import { SetupSteps } from './FirstRunSetup';
 import { WorkspaceTypeStep, type WorkspaceType } from './WorkspaceTypeStep';
+import { KindStep } from './CompanyWizard';
+import { COMPANY_KIND_CHOICES } from './company-kinds.js';
 
 const notices = {
   recovered:'Authenticator reset. Sign in again, then set up two-step verification in Settings.',
@@ -168,20 +170,28 @@ function OwnerSetup({ client, setupCode, initialPage }: { client: SessionClient;
   const [workspaceType, setWorkspaceType] = useState<WorkspaceType>();
   const [companyName, setCompanyName] = useState<string>();
   const [chooseType, setChooseType] = useState(true);
+  // ONBOARD-COMPANYTYPE-01: "What does your company do?" right after the company name.
+  const [askKind, setAskKind] = useState(false);
+  const [companyKind, setCompanyKind] = useState<string>();
+  const [kindQuery, setKindQuery] = useState('');
+  const back = () => { if (workspaceType === 'company') setAskKind(true); else setChooseType(true); };
   const code = setupCode ?? '';
   const hasSetupLink = SETUP_CODE.test(code);
   const [busy, setBusy] = useState(false); const [notice, setNotice] = useState<keyof typeof ownerSetupNotices | null>(null);
-  if (chooseType) return <WorkspaceTypeStep value={workspaceType} companyName={companyName} onNext={(type, name) => { setWorkspaceType(type); setCompanyName(name); setChooseType(false); }}/>;
+  if (chooseType) return <WorkspaceTypeStep value={workspaceType} companyName={companyName} onNext={(type, name) => { setWorkspaceType(type); setCompanyName(name); setChooseType(false); setAskKind(type === 'company'); if (type !== 'company') setCompanyKind(undefined); }}/>;
+  if (askKind) return <KindStep orb workspaceType="company" value={companyKind} query={kindQuery} busy={false} more={0}
+    kinds={COMPANY_KIND_CHOICES.filter(k => k.label.toLowerCase().includes(kindQuery.trim().toLowerCase()))} onQuery={setKindQuery} onMore={() => undefined}
+    onBack={() => { setAskKind(false); setChooseType(true); }} onDone={id => { setCompanyKind(id); setAskKind(false); }}/>;
   if (!hasSetupLink) return <section className="setup-pane" aria-label="Open the setup link">
     <h2>Open setup on this computer</h2>
     <p>Open the setup link shown by Girru on the installation computer. It connects this page to your new workspace.</p>
-    <div className="setup-actions"><button type="button" onClick={() => setChooseType(true)}>Back</button></div>
+    <div className="setup-actions"><button type="button" onClick={back}>Back</button></div>
   </section>;
   return <form className="owner-setup" aria-label="Create the owner account" method="post" onSubmit={async e => {
     e.preventDefault();
     if (password.length < 12) { setNotice('weak_password'); return; }
     setBusy(true); setNotice(null);
-    const result = await client.createOwner({ name: name.trim(), email: email.trim(), password, setupToken: code.trim(), workspaceType, ...(workspaceType === 'company' ? { companyName } : {}) });
+    const result = await client.createOwner({ name: name.trim(), email: email.trim(), password, setupToken: code.trim(), workspaceType, ...(workspaceType === 'company' ? { companyName } : {}), ...(workspaceType === 'company' && companyKind !== undefined ? { companyKind } : {}) });
     setBusy(false);
     if (!result.ok) {
       setNotice(result.code);
@@ -200,7 +210,7 @@ function OwnerSetup({ client, setupCode, initialPage }: { client: SessionClient;
     <div className="owner-strength" aria-label={`Password strength: ${strength.label}`}><span data-strength={strength.value}/><b>{password ? strength.label : '—'}</b></div>
     {notice === 'weak_password' && <p className="owner-field-error" role="alert">{ownerSetupNotices[notice]}</p>}
     {notice === 'missing_fields' && <p className="owner-field-error" role="alert">{ownerSetupNotices[notice]}</p>}
-    <div className="setup-actions"><button type="button" disabled={busy} onClick={() => setChooseType(true)}>Back</button>
+    <div className="setup-actions"><button type="button" disabled={busy} onClick={back}>Back</button>
       <button className="primary" disabled={busy}>{busy ? 'Creating…' : 'Continue'}</button></div>
   </form>;
 }

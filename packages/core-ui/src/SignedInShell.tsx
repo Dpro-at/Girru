@@ -80,7 +80,7 @@ export function SignedInShell({ client, notice }: { client: SessionClient; notic
   const first = useFirstRun(client, state.user?.role === 'owner' && state.mode === 'live');
   const [finished, setFinished] = useState(false);
   if (first.pending === null) return <div className="first-run-setup" aria-busy="true"/>;
-  if (first.pending && !finished) return <FirstRunSetup client={client} initialStep={first.step} workspaceType={first.workspaceType} companyName={first.companyName} onDone={chatId => {
+  if (first.pending && !finished) return <FirstRunSetup client={client} initialStep={first.step} workspaceType={first.workspaceType} companyName={first.companyName} companyKind={first.companyKind} onDone={chatId => {
     if (chatId) try { window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#chat=${chatId}`); } catch { /* the last chat opens instead */ }
     setFinished(true);
   }}/>;

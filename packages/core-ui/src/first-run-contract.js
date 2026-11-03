@@ -3,6 +3,7 @@
 // (application-server.cjs). Only these shapes pass in either direction.
 
 import { validCompanyName } from './owner-setup-contract.js';
+import { validCompanyKind } from './company-kinds.js';
 
 export const FIRST_RUN_PATH = '/api/first-run';
 const STEPS = ['discovery', 'tools', 'model', 'team'];
@@ -38,7 +39,8 @@ export function firstRunResponse(path, status, body) {
     if (typeof body.pending !== 'boolean' || !STEPS.includes(body.step)) throw Error('protocol');
     if (Object.hasOwn(body, 'workspaceType') && !['individual', 'company'].includes(body.workspaceType)) throw Error('protocol');
     if (Object.hasOwn(body, 'companyName') && (body.workspaceType !== 'company' || !validCompanyName(body.companyName))) throw Error('protocol');
-    return { pending: body.pending, step: body.step, ...(body.workspaceType ? { workspaceType: body.workspaceType } : {}), ...(body.workspaceType === 'company' && body.companyName ? { companyName: body.companyName } : {}) };
+    if (Object.hasOwn(body, 'companyKind') && (body.workspaceType !== 'company' || !validCompanyKind(body.companyKind))) throw Error('protocol');
+    return { pending: body.pending, step: body.step, ...(body.workspaceType ? { workspaceType: body.workspaceType } : {}), ...(body.workspaceType === 'company' && body.companyName ? { companyName: body.companyName } : {}), ...(body.workspaceType === 'company' && Object.hasOwn(body, 'companyKind') ? { companyKind: body.companyKind } : {}) };
   }
   if (path === `${FIRST_RUN_PATH}/finish`) {
     if (body.conversationId !== null && !text(body.conversationId, 128)) throw Error('protocol');

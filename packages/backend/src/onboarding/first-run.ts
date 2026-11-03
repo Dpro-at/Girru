@@ -20,13 +20,18 @@ import { listLocalModels } from '../llm/local-models.js';
 import { firstRunDiscovery } from './discovery.js';
 import { enableFirstRunAutomaticImport } from '../memory/import/automatic-project-import.js';
 import { addAssistantMessage, createConversation } from '../repositories/chat-conversations.js';
+import { companyKind } from '../services/department-groups.js';
 
 export const FIRST_RUN_STEPS = ['discovery', 'tools', 'model', 'team'] as const;
 export type FirstRunStep = (typeof FIRST_RUN_STEPS)[number];
 export type WorkspaceType = 'individual' | 'company';
-export type FirstRunState = Readonly<{ pending: boolean; step: FirstRunStep; workspaceType?: WorkspaceType; companyName?: string }>;
+export type FirstRunState = Readonly<{ pending: boolean; step: FirstRunStep; workspaceType?: WorkspaceType; companyName?: string; companyKind?: string }>;
 
 export const validCompanyName = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && [...value].length <= 100 && value === value.trim() && !/[\u0000-\u001f\u007f]/.test(value);
+/** "What does your company do?" (ONBOARD-COMPANYTYPE-01): '' = general office and online work, a known kind id, or `custom:<text>`. */
+export const validCompanyKind = (value: unknown): value is string => value === '' || (typeof value === 'string' && (value.startsWith('custom:')
+  ? value.slice(7) === value.slice(7).trim() && /^[\p{L}\p{N} _-]{1,64}$/u.test(value.slice(7))
+  : companyKind(value) !== undefined));
 
 type Row = { answers: string; completed: number };
 const answersOf = (raw: string | undefined): Record<string, unknown> => {
@@ -35,15 +40,15 @@ const answersOf = (raw: string | undefined): Record<string, unknown> => {
 const stepOf = (v: unknown): FirstRunStep => (FIRST_RUN_STEPS as readonly unknown[]).includes(v) ? v as FirstRunStep : 'tools';
 
 /** Inside the owner-creation transaction: the new owner goes through the setup steps once. */
-export function* startFirstRunStep(userId: string, workspaceType?: WorkspaceType, companyName?: string): Step<void> {
+export function* startFirstRunStep(userId: string, workspaceType?: WorkspaceType, companyName?: string, kind?: string): Step<void> {
   yield* run(`INSERT INTO onboarding_state (user_id, current_step, answers, completed, skipped, updated_at)
-    VALUES (?, 1, ?, 0, 0, CURRENT_TIMESTAMP)`, userId, JSON.stringify({ firstRun: true, firstRunStep: 'discovery', ...(workspaceType ? { workspaceType, companyName: workspaceType === 'company' ? companyName : undefined } : {}) }));
+    VALUES (?, 1, ?, 0, 0, CURRENT_TIMESTAMP)`, userId, JSON.stringify({ firstRun: true, firstRunStep: 'discovery', ...(workspaceType ? { workspaceType, companyName: workspaceType === 'company' ? companyName : undefined, companyKind: workspaceType === 'company' && validCompanyKind(kind) ? kind : undefined } : {}) }));
 }
 
 export async function firstRunState(userId: string): Promise<FirstRunState> {
   const row = await sql().read(one<Row>('SELECT answers, completed FROM onboarding_state WHERE user_id = ?', userId));
   const a = answersOf(row?.answers);
-  return { pending: !!row && row.completed === 0 && a.firstRun === true, step: stepOf(a.firstRunStep), ...(['individual', 'company'].includes(a.workspaceType as string) ? { workspaceType: a.workspaceType as WorkspaceType, ...(a.workspaceType === 'company' && validCompanyName(a.companyName) ? { companyName: a.companyName } : {}) } : {}) };
+  return { pending: !!row && row.completed === 0 && a.firstRun === true, step: stepOf(a.firstRunStep), ...(['individual', 'company'].includes(a.workspaceType as string) ? { workspaceType: a.workspaceType as WorkspaceType, ...(a.workspaceType === 'company' && validCompanyName(a.companyName) ? { companyName: a.companyName } : {}), ...(a.workspaceType === 'company' && validCompanyKind(a.companyKind) ? { companyKind: a.companyKind } : {}) } : {}) };
 }
 
 /** Remembers the step reached, so a restart continues where the owner left. */
@@ -55,7 +60,7 @@ export async function saveFirstRunStep(userId: string, step: FirstRunStep, works
     const a = answersOf(row?.answers);
     if (!row || row.completed !== 0 || a.firstRun !== true) return;
     if (a.firstRunStep === 'discovery' && step !== 'discovery' && !discoveryDone) throw Object.assign(new Error('Discovery must complete first'), {code:'discovery_required'});
-    yield* run('UPDATE onboarding_state SET answers = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?', JSON.stringify({ ...a, ...(a.firstRunStep === 'discovery' && step !== 'discovery' && discoveryDone ? {firstRunDiscovery:true} : {}), firstRunStep: step, ...(workspaceType ? { workspaceType, companyName: workspaceType === 'company' ? companyName : undefined } : {}) }), userId);
+    yield* run('UPDATE onboarding_state SET answers = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?', JSON.stringify({ ...a, ...(a.firstRunStep === 'discovery' && step !== 'discovery' && discoveryDone ? {firstRunDiscovery:true} : {}), firstRunStep: step, ...(workspaceType ? { workspaceType, companyName: workspaceType === 'company' ? companyName : undefined, companyKind: workspaceType === 'company' ? a.companyKind : undefined } : {}) }), userId);
   });
   return firstRunState(userId);
 }
