@@ -78,3 +78,35 @@ icon), and the pairing and approval screens on the device.
 - The iPhone device build warns that all interface orientations must be supported unless the app requires full screen. Should the app set `UIRequiresFullScreen`, or support all orientations?
 - **Pairing with a typed code (owner's request).** The owner wants pairing to work by typing the code, not only by scanning. Today "Type the code instead" only checks the code's form. `PROTOCOL.md` has no typed-code exchange, and a 12-character code cannot carry the computer's key. This needs a protocol addition (for example, the code finds the computer's offer on the relay and the 6-digit check binds it) before both apps and the computer can build it. It should be designed with Task 4.
 - **Store review access.** Apple App Review and Google Play review must be able to sign in and use the app, but the app only works paired to a computer the owner approves. What do the reviewers get: a review computer kept online with a typed code in the review notes, a demo mode, or a video plus notes? Decide before the store listing (BUILDING.md › Next tasks 5).
+
+## Task 4: phone connector (started on the owner's go, 3 November 2026)
+
+**Done: pairing over the relay, in both apps, tested against the real computer.**
+
+| Part | iPhone | Android |
+|---|---|---|
+| Relay connection: challenge, hello signed by the identity key and bound to the QR code's relay, allow list with the computer only | `GirruCore/RelayClient.swift` (`URLSessionWebSocketTask`) | `link/RelayPairingClient.kt` (OkHttp) |
+| `g1.preq` to the pairing id, `g1.pchal` and `g1.pwel` back to the phone | `GirruCore/RelayPairingLink.swift`, used by `PairingFlow` instead of the stub | `RelayPairingClient`, used by `GirruApplication` instead of `NotConnectedYet` |
+| Hello rules (wrong relay refused, 32-byte nonce, signature) | `CoreChecks`: **309 passed** (8 new) | `RelayFramesTest`: **4 pass**; all unit tests **90 pass** |
+| **End to end** with the backend's real phone link, through a TLS relay on 127.0.0.1 | `PairCheck`: **PASS**, the same check code on both sides, welcome checked, phone listed | `PairCheckTest`: **PASS**, same |
+
+How to run the end-to-end checks (from `packages/backend`):
+
+```bash
+node --import tsx ../mobile/tools/pair-harness.mjs ../mobile/ios/.build/debug/PairCheck
+node --import tsx ../mobile/tools/pair-harness.mjs ../mobile/tools/android-pair-check.sh
+```
+
+Build `PairCheck` first (`swift build --product PairCheck` in `packages/mobile/ios`)
+and the Android test classes once (`./gradlew :app:testDebugUnitTest`).
+
+- **New Android dependency: OkHttp 4.12.0** (Android has no WebSocket client of
+  its own). It is pinned in `gradle/libs.versions.toml`. The iPhone still uses
+  Apple frameworks only.
+- Both apps still build: iPhone for the simulator and the device, Android `assembleDebug`.
+- **Not done yet:** the "Only on this Wi-Fi" path (the code says so plainly),
+  the session (hs1/hs2), signed commands and replies, live run frames, and
+  pairing on a real phone with the real Girru app on a computer.
+- The owner's feature requests (microphone, photos, files, share into Girru,
+  quick actions, widget) and the typed-code proposal are in
+  [`PHONE_FEATURES.md`](PHONE_FEATURES.md).
