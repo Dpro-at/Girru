@@ -10,7 +10,7 @@
  *    most one per kind per day).
  *  - memoryHealth: the five rows of the health view (Remembering, Saving,
  *    Backups, Coding apps, Background jobs) with a state word each and the
- *    7-day counts.
+ *    7-day counts; a sixth, Memory helper, while GIRRU_MEMORY_HELPER is on.
  *  - supportBundle: versions, counts, ids and timings the owner may choose
  *    to share; never memory text, names, keys or paths in the home folder.
  *  - The scheduled doctor (jobs.ts 'doctor') only reads: it records the
@@ -70,7 +70,7 @@ async function counts(ownerId: string, sinceMs: number): Promise<Record<string, 
 }
 
 export type HealthState = 'ok' | 'needs_you';
-export interface HealthRow { id: 'remembering' | 'saving' | 'backups' | 'coding_apps' | 'background'; state: HealthState; word: string; detail: Record<string, unknown> }
+export interface HealthRow { id: 'remembering' | 'saving' | 'backups' | 'coding_apps' | 'background' | 'memory_helper'; state: HealthState; word: string; detail: Record<string, unknown> }
 
 /** The health view (owner only, callers check). */
 export async function memoryHealth(ownerId: string, now: Date = new Date()): Promise<{ checkedAt: string; rows: HealthRow[] }> {
@@ -108,6 +108,13 @@ export async function memoryHealth(ownerId: string, now: Date = new Date()): Pro
   const found = doctor?.detail ? JSON.parse(doctor.detail) as Record<string, number> : null;
   const issues = found ? Object.values(found).reduce((a, b) => a + Number(b || 0), 0) : 0;
   rows.push({ id: 'background', state: issues > 0 ? 'needs_you' : 'ok', word: issues > 0 ? `${issues} to tidy` : 'Idle', detail: { doctorAt: doctor?.at ?? null, doctor: found } });
+
+  // MODELS-01-INSTALL: the memory helper (runtime + embedding model), while GIRRU_MEMORY_HELPER is on.
+  const { memoryHelperEnabled } = await import('../services/memory-helper-switch.js');
+  if (memoryHelperEnabled()) {
+    const { memoryHelperRow } = await import('./helper.js');
+    rows.push(memoryHelperRow());
+  }
 
   return { checkedAt: now.toISOString(), rows };
 }

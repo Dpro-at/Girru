@@ -34,7 +34,7 @@ process.env.NODE_ENV = 'test';
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-for (const k of ['GIRRU_STORE_P9', 'GIRRU_STORE_P3', 'GIRRU_STORE_P2']) delete process.env[k];
+for (const k of ['GIRRU_STORE_P9', 'GIRRU_STORE_P3', 'GIRRU_STORE_P2', 'GIRRU_MEMORY_HELPER']) delete process.env[k]; // the helper row has its own test (memory-helper-install)
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
