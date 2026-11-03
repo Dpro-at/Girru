@@ -504,7 +504,7 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
         const answer=await subscriptionToolLoop({prompt:replyPrompt,signal:abort.signal,
           tools:registry.getAll().map(t=>({name:t.name,description:t.description,input_schema:t.input_schema})),
           // CHAT-BUILD-01 stage 3: "Accept edits" lets the coding app edit files in the chat's folders (its write folders too).
-          reply:prompt=>runSubscription(subscriptionSource,input.fileReadRoot!,prompt,abort.signal,{...(currentChatRun()?.chatMode==='accept_edits'?{editsOnly:true,addDirs:input.writeFolders??[]}:{appToolsOnly:true}),images:seen,thinking:currentChatRun()?.thinking}),
+          reply:prompt=>runSubscription(subscriptionSource,input.fileReadRoot!,prompt,abort.signal,{...(currentChatRun()?.chatMode==='accept_edits'?{editsOnly:true,addDirs:input.writeFolders??[]}:{appToolsOnly:true}),images:seen,thinking:currentChatRun()?.thinking,agentId:selectedAgent?.id??null}),
           execute:(name,args)=>{toolStep++;if(!reply.raw.writableEnded)reply.raw.write(`data: ${JSON.stringify({type:'tool_start',step:toolStep,tools:[{id:`subscription-${toolStep}`,name,input:JSON.stringify(args)}]})}\n\n`);return registry.execute(name,args);},
           onTool:(name,result)=>{if(!reply.raw.writableEnded)reply.raw.write(`data: ${JSON.stringify({type:'tool_result',step:toolStep,results:[{id:`subscription-${toolStep}`,name,output:result.content.filter(b=>b.type==='text').map(b=>b.text??'').join('\n').slice(0,2000),isError:!!result.error}]})}\n\n`);},
         });

@@ -22,6 +22,7 @@ import { randomBytes, timingSafeEqual, createHmac } from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { sessionProof } from './proof.js';
+import { mcpContractTools } from '../contract.js';
 
 export const MCP_SERVER_NAME = 'dpro-memory';
 const VERSION = '0.1.0';
@@ -114,12 +115,26 @@ export function httpBackend(o: HttpBackendOptions): BridgeBackend {
   };
 }
 
-export function createBridgeMcpServer(backend: BridgeBackend): Server {
+/**
+ * The tools this server lists. With a session Girru started (STORE-MAP-01 P6)
+ * the five verbs of the one memory contract are listed, generated from the
+ * same definition as the native tools (XP1), in place of the three older
+ * tools they replace (still callable by name).
+ */
+export function bridgeTools(verbs: boolean): Array<{ name: string; description: string; inputSchema: unknown }> {
+  if (!verbs) return BRIDGE_TOOL_DEFINITIONS.map((t) => ({ ...t }));
+  // The verbs replace memory_search, handoff_write and memory_propose in the list (the old names still work).
+  const replaced = new Set(['memory_search', 'handoff_write', 'memory_propose']);
+  return [...BRIDGE_TOOL_DEFINITIONS.filter((t) => !replaced.has(t.name)).map((t) => ({ ...t })), ...mcpContractTools()];
+}
+
+export function createBridgeMcpServer(backend: BridgeBackend, opts: { verbs?: boolean } = {}): Server {
   const server = new Server({ name: MCP_SERVER_NAME, version: VERSION }, { capabilities: { tools: {} }, instructions: INSTRUCTIONS });
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: BRIDGE_TOOL_DEFINITIONS.map((t) => ({ ...t })) as any }));
+  const tools = bridgeTools(!!opts.verbs);
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: tools as any }));
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const name = request.params.name;
-    if (!BRIDGE_TOOL_DEFINITIONS.some((t) => t.name === name)) return { content: [{ type: 'text', text: `Unknown tool ${name}` }], isError: true } as any;
+    if (!tools.some((t) => t.name === name)) return { content: [{ type: 'text', text: `Unknown tool ${name}` }], isError: true } as any;
     const args = request.params.arguments && typeof request.params.arguments === 'object' ? request.params.arguments as Record<string, unknown> : {};
     try {
       const r = await backend.call(name, args);

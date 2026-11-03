@@ -25,9 +25,10 @@ import { q } from '../repositories/sql-steps.js';
 import { folderOf, readPlain, writeAtomic, RuleFilesError } from './agent-rule-files.js';
 import { createCard, updateCard, BoardError } from './task-board.js';
 import {
-  MAX_FILE, SHOW_LOG, TASK_HEADER, emptyTask, logLine, nextNumber, priorityName, priorityOf, readLog, readTasks, sameTask, withDone, withTask, withoutTask, writeTask,
-  type ReadFile, type TaskBlock,
+  MAX_FILE, SHOW_LOG, TASK_HEADER, emptyTask, logLine, nextNumber, priorityName, priorityOf, readLog, readTasks, sameTask, stampTasks, withDone, withTask, withoutTask, writeTask,
+  type ReadFile, type Stamp, type TaskBlock,
 } from './task-file-format.js';
+import { storeP6Enabled } from './store-p6.js';
 
 export const TASKS_FILE = '.girru/tasks.md';
 export const DONE_FILE = '.girru/tasks-done.md';
@@ -94,6 +95,34 @@ async function writeFile(folder: string, name: string, text: string): Promise<vo
   if (path.dirname(path.resolve(file)) !== dir) throw new RuleFilesError('unsafe', 'Outside the project folder');
   const cur = await readFile(folder, name);
   if (cur !== text) await writeAtomic(file, text);
+}
+
+/**
+ * STORE-MAP-01 P6: the file text with Girru's hidden id and version stamp on
+ * every task linked to a card of this project (unchanged while P6 is off).
+ * `extra` is a card linked in the same step, before its link row exists.
+ */
+async function stamped(projectId: string, text: string, extra?: { no: string; cardId: string }): Promise<string> {
+  if (!storeP6Enabled()) return text;
+  const rows = await q.all<{ task_no: string; card_id: string; version: number }>(
+    'SELECT l.task_no, l.card_id, c.version FROM task_file_cards l JOIN board_cards c ON c.id = l.card_id WHERE l.project_id = ?', projectId);
+  const stamps = new Map<string, Stamp>(rows.map((r) => [r.task_no, { id: r.card_id, v: Number(r.version) || 1 }]));
+  if (extra) {
+    const c = await q.one<{ version: number }>('SELECT version FROM board_cards WHERE id = ?', extra.cardId);
+    stamps.set(extra.no, { id: extra.cardId, v: Number(c?.version) || 1 });
+  }
+  return stampTasks(text, stamps);
+}
+
+/** P6 (T5, S2, SEC2-5): what is wrong with a task's hidden id, in words for the owner (never which project it came from). */
+async function idProblem(projectId: string, id: string, twice: boolean): Promise<string | null> {
+  if (twice) return 'two tasks carry the same hidden Girru id (a copied block?). Girru changed neither; keep the id line on one of them only';
+  const here = await q.one('SELECT card_id FROM task_file_cards WHERE card_id = ? AND project_id = ?', id, projectId);
+  if (here) return null;
+  const known = await q.one('SELECT id FROM board_cards WHERE id = ?', id);
+  return known
+    ? 'this task carries the hidden id of a task that is not in this project. Girru changed nothing; delete the id line to add it here as a new task'
+    : 'this task carries a hidden Girru id that Girru does not know. Girru changed nothing; delete the id line to add it as a new task';
 }
 /** Creates tasks.md with its header when the task file is turned on (the owner's files button). */
 export async function ensureTaskFile(projectId: string): Promise<void> {
@@ -187,8 +216,32 @@ export function syncTasks(projectId: string): Promise<SyncResult> {
     const depts = await departments(owner.user_id), agents = await agentsList();
     let created = 0, rewrite = false, done = doneText;
     const problems = file.problems.map((p) => ({ line: p.line, message: p.message }));
+    const p6 = storeP6Enabled();
+    const idUses = new Map<string, number>();
+    if (p6) for (const t of file.tasks) if (t.id) idUses.set(t.id, (idUses.get(t.id) ?? 0) + 1);
     for (const t of file.tasks) {
-      const link = linkOf.get(t.task.no);
+      let link = linkOf.get(t.task.no);
+      if (p6 && t.id && !t.problem) {
+        // P6: the hidden id names the card; a duplicate, unknown or foreign id is a review item and nothing is written.
+        const why = await idProblem(projectId, t.id, (idUses.get(t.id) ?? 0) > 1);
+        if (why) {
+          const mine = links.find((l) => l.card_id === t.id);
+          if (mine) await q.run('UPDATE task_file_cards SET problem = ?, updated_at = CURRENT_TIMESTAMP WHERE card_id = ?', `Line ${t.line}: ${why}`, mine.card_id);
+          else problems.push({ line: t.line, message: why });
+          continue;
+        }
+        const byId = links.find((l) => l.card_id === t.id)!;
+        if (byId.task_no !== t.task.no) {
+          // Renumbered in the file: the card follows its id (unless another task already holds that number).
+          if (linkOf.has(t.task.no) && linkOf.get(t.task.no)!.card_id !== byId.card_id) { problems.push({ line: t.line, message: `the number ${t.task.no} already belongs to another task` }); continue; }
+          linkOf.delete(byId.task_no);
+          await q.run('UPDATE task_file_cards SET task_no = ?, updated_at = CURRENT_TIMESTAMP WHERE card_id = ?', t.task.no, byId.card_id);
+          byId.task_no = t.task.no;
+          byId.block = JSON.stringify({ ...(parse(byId.block) ?? emptyTask(t.task.no, t.task.title)), no: t.task.no });
+          linkOf.set(t.task.no, byId);
+        }
+        link = byId;
+      }
       if (t.problem) {
         if (link) await q.run('UPDATE task_file_cards SET problem = ?, updated_at = CURRENT_TIMESTAMP WHERE card_id = ?', t.problem, link.card_id);
         else problems.push({ line: t.line, message: t.problem.replace(/^Line \d+: /, '') });
@@ -264,7 +317,9 @@ export function syncTasks(projectId: string): Promise<SyncResult> {
       }
     }
     await q.run('UPDATE agent_rule_files SET task_problems = ? WHERE project_id = ?', JSON.stringify(problems.slice(0, 20)), projectId);
-    if (rewrite) { await writeFile(folder, TASKS_FILE, text); if (done !== doneText) await writeFile(folder, DONE_FILE, done); }
+    // P6: every linked task carries its hidden id and version stamp (a file without them gets them once).
+    if (p6) { const withIds = await stamped(projectId, text); if (withIds !== text) { text = withIds; rewrite = true; } }
+    if (rewrite) { await writeFile(folder, TASKS_FILE, text); if (done !== doneText) await writeFile(folder, DONE_FILE, await stamped(projectId, done)); }
     return { cards: file.tasks.length, created, problems: problems.length };
   });
 }
@@ -322,10 +377,10 @@ export async function cardChanged(cardId: string): Promise<void> {
     const task = inFile ? { ...inFile.task, title: now.task.title, state: now.task.state, priority: now.task.priority, agent: now.task.agent, department: now.task.department } : now.task;
     if (now.last) {
       const f = finish(text, doneText, task);
-      await writeFile(folder, TASKS_FILE, f.text);
-      await writeFile(folder, DONE_FILE, f.done);
+      await writeFile(folder, TASKS_FILE, await stamped(link.project_id, f.text));
+      await writeFile(folder, DONE_FILE, await stamped(link.project_id, f.done));
     } else {
-      await writeFile(folder, TASKS_FILE, withTask(text, task));
+      await writeFile(folder, TASKS_FILE, await stamped(link.project_id, withTask(text, task)));
       if (fresh.finished) await writeFile(folder, DONE_FILE, withoutTask(doneText, task.no));
     }
     await q.run('UPDATE task_file_cards SET block = ?, finished = ?, problem = NULL, updated_at = CURRENT_TIMESTAMP WHERE card_id = ?', JSON.stringify(task), now.last ? 1 : 0, cardId);
@@ -368,7 +423,7 @@ export async function addCardTask(cardId: string, conversationId: string): Promi
     const base = { ...emptyTask(no, c.title), next: c.description ? [c.description.split('\n')[0]] : [] };
     const now = await cardTask(cardId, { card_id: cardId, project_id: projectId, task_no: no, block: JSON.stringify(base), problem: null, finished: 0 }, owner.user_id);
     if (!now) return;
-    await writeFile(folder, TASKS_FILE, withTask(text, now.task));
+    await writeFile(folder, TASKS_FILE, await stamped(projectId, withTask(text, now.task), { no, cardId }));
     await q.run('INSERT INTO task_file_cards (card_id, project_id, task_no, block, problem, finished) VALUES (?, ?, ?, ?, NULL, 0)', cardId, projectId, no, JSON.stringify(now.task));
   }).catch(() => undefined);
 }
@@ -381,7 +436,7 @@ export interface TaskMark { no: string; projectId: string; projectName: string; 
 /** The file marks of a board's cards (number, project, apps that worked on it). */
 export async function taskMarks(boardId: string): Promise<Map<string, TaskMark>> {
   const rows = await q.all<Link & { name: string }>('SELECT l.*, p.name FROM task_file_cards l JOIN board_cards c ON c.id = l.card_id JOIN chat_projects p ON p.id = l.project_id WHERE c.board_id = ?', boardId).catch(() => []);
-  return new Map(rows.map((r) => [r.card_id, { no: r.task_no, projectId: r.project_id, projectName: r.name, problem: r.problem, apps: (parse(r.block)?.workedOn ?? []).map((w) => w.app), finished: !!r.finished }]));
+  return new Map(rows.map((r) => [r.card_id, { no: r.task_no, projectId: r.project_id, projectName: r.name, problem: r.problem, apps: [...new Set((parse(r.block)?.workedOn ?? []).map((w) => w.app))], finished: !!r.finished }]));
 }
 
 export interface TaskDetail extends TaskMark {
@@ -395,9 +450,9 @@ export async function taskDetail(ownerId: string, boardId: string, cardId: strin
   const task = parse(r.block) ?? emptyTask(r.task_no, '');
   const lines = task.log.map(readLog).filter((x): x is NonNullable<typeof x> => !!x).sort((a, b) => b.at.localeCompare(a.at));
   return {
-    no: r.task_no, projectId: r.project_id, projectName: r.name, problem: r.problem, apps: task.workedOn.map((w) => w.app), finished: !!r.finished,
+    no: r.task_no, projectId: r.project_id, projectName: r.name, problem: r.problem, apps: [...new Set(task.workedOn.map((w) => w.app))], finished: !!r.finished,
     file: r.finished ? DONE_FILE : TASKS_FILE, task, text: writeTask(task),
-    workedOn: task.workedOn.map((w) => { const last = lines.find((l) => l.app.toLowerCase() === w.app.toLowerCase()); return { app: w.app, agent: task.agent, date: w.date, at: last?.at ?? null, what: last?.what ?? null }; }),
+    workedOn: task.workedOn.map((w) => { const last = lines.find((l) => l.app.toLowerCase() === w.app.toLowerCase()); return { app: w.app, agent: w.agent ?? task.agent, date: w.date, at: last?.at ?? null, what: last?.what ?? null }; }),
     log: lines.slice(0, SHOW_LOG),
   };
 }
@@ -441,9 +496,12 @@ export async function agentTaskUpdate(ownerId: string, agentId: string, cardId: 
       ...t, done: done ?? t.done, left: left ?? t.left, next: next ?? t.next,
       // An agent that writes its own "time · name ·" in front gets it once, from Girru.
       log: [logLine(now, GIRRU_APP, `${agent?.name ? `${agent.name}: ` : ''}${(input.log as string).replace(/^\s*\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2})?\s*·\s*(?:[^·]{1,60}·\s*)?/, '')}`), ...t.log],
-      workedOn: [...t.workedOn.filter((w) => w.app.toLowerCase() !== GIRRU_APP.toLowerCase()), { app: GIRRU_APP, date: today }],
+      // P6 (AG5): Girru's line names the agent too ("Girru (Rafid)"); without P6 one "Girru" line as before.
+      workedOn: storeP6Enabled() && agent?.name
+        ? [...t.workedOn.filter((w) => !(w.app.toLowerCase() === GIRRU_APP.toLowerCase() && (w.agent ?? '').toLowerCase() === agent.name.toLowerCase())), { app: GIRRU_APP, date: today, agent: agent.name.slice(0, 60) }]
+        : [...t.workedOn.filter((w) => w.app.toLowerCase() !== GIRRU_APP.toLowerCase()), { app: GIRRU_APP, date: today }],
     };
-    await writeFile(folder, TASKS_FILE, withTask(text, task));
+    await writeFile(folder, TASKS_FILE, await stamped(link.project_id, withTask(text, task)));
     await q.run('UPDATE task_file_cards SET block = ?, problem = NULL, updated_at = CURRENT_TIMESTAMP WHERE card_id = ?', JSON.stringify(task), cardId);
     return task;
   });
@@ -462,7 +520,7 @@ export async function projectTasks(ownerId: string, projectId?: string): Promise
   for (const id of ids) await syncTasks(id).catch(() => undefined);
   const rows = ids.length ? await q.all<Link & { name: string; board_id: string }>(
     `SELECT l.*, p.name, c.board_id FROM task_file_cards l JOIN chat_projects p ON p.id = l.project_id JOIN board_cards c ON c.id = l.card_id WHERE p.user_id = ? AND c.archived = 0 AND l.project_id IN (${ids.map(() => '?').join(',')}) ORDER BY l.finished, l.project_id, l.task_no`, ownerId, ...ids) : [];
-  const tasks = rows.map((r) => { const t = parse(r.block) ?? emptyTask(r.task_no, ''); return { no: r.task_no, title: t.title, state: t.state, department: t.department, agent: t.agent, apps: t.workedOn.map((w) => w.app), projectId: r.project_id, projectName: r.name, boardId: r.board_id, cardId: r.card_id, problem: r.problem, finished: !!r.finished }; });
+  const tasks = rows.map((r) => { const t = parse(r.block) ?? emptyTask(r.task_no, ''); return { no: r.task_no, title: t.title, state: t.state, department: t.department, agent: t.agent, apps: [...new Set(t.workedOn.map((w) => w.app))], projectId: r.project_id, projectName: r.name, boardId: r.board_id, cardId: r.card_id, problem: r.problem, finished: !!r.finished }; });
   const problems = [];
   for (const id of ids) for (const p of await fileProblems(id)) problems.push({ projectId: id, ...p });
   return { tasks, problems };

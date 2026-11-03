@@ -175,6 +175,18 @@ A first version of the change log, the session capability and the shared agent c
 - **Agent notes in the database:** at start-up each agent's `MEMORY.md` is imported once into its own drawer, with the file's earlier versions as history. Prompts read the drawer; the owner saves with the hash of the text read; `MEMORY.md` is written from the drawer, and a file changed outside Girru is kept until the owner decides.
 - **Agent packages:** one JSON document per agent with `schemaVersion` and a content hash. Import is untrusted: permissions, tool grants, credentials, hooks and private history are never imported, a secret refuses the package, specialties and skills are linked only when this computer has the same content, and nothing is downloaded. Each import is recorded with its hash.
 
+### Ids in files and proven sync (off by default)
+
+`GIRRU_STORE_P6=1` turns on:
+
+- **A session for every project:** a coding app's memory calls open a project only with a session Girru issued for it (a folder path never grants anything). Girru issues one when it starts a coding app in a project folder and ends it when the run ends. Company facts reach a session only where the owner allowed them for that project.
+- **Limits on what a session can read:** a search answer is capped, unusual read volume is refused with one notice, and every read is logged with its session (ids only).
+- **Text from repository files is a proposal:** what Girru reads back from files in a project folder becomes a review item marked as coming from a repository file. No rule accepts it on its own.
+- **Hidden ids in the task file:** each task in `.girru/tasks.md` carries a hidden line with its card id and version. A task renumbered or renamed in the file keeps its card. A duplicate, unknown or foreign id becomes a visible problem and nothing is written.
+- **Who did it:** a coding-app session records the agent it works for, so proposals, handoffs and the task file name the app and the agent.
+- **Debounced sync from the change log:** every project with its memory files on keeps a change log. The brief file is rewritten by the outbox worker once the project has been quiet for a moment, so a burst of changes gives one write. The file carries the change-log position and its version.
+- **One memory contract:** coding apps get five verbs (recall, save, supersede, handoff, propose) from the same definition as the native tools. The server checks every argument, a write with a request id happens once, and a failed write says "not saved, try again".
+
 ### One agent context and one Girru section (off by default)
 
 `GIRRU_STORE_P2=1` turns on, for every agent:

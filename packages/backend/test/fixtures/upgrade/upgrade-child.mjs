@@ -55,6 +55,16 @@ const snap = await files.readMemorySnapshot(firstAgent);
 await files.writeMemoryCAS(firstAgent, '# Notes\nShip on Fridays.', snap.hash);
 const drawer = await import(join(backendDir, 'src/memory/agent-drawer.ts'));
 const agentNotes = { imported: await drawer.importAllAgentMemory(), again: await drawer.importAllAgentMemory(), missing: await drawer.agentsWithoutImportedMemory(), text: (await drawer.agentNotes(firstAgent))?.content ?? null };
+// P6: expand only (no backfill): new columns start off, no request ids, a change log only where files were on.
+process.env.GIRRU_STORE_P6 = '1';
+const p6start = await import(join(backendDir, 'src/memory/outbox/p6.ts'));
+const p6 = {
+  scopes: (await p6start.syncP6Scopes()).length,
+  filesOn: q('SELECT COUNT(*) AS n FROM memory_bridge_folders f JOIN chat_projects p ON p.id = f.project_id WHERE f.files_enabled = 1 AND p.folder IS NOT NULL')[0].n,
+  companyFacts: q('SELECT COUNT(*) AS n FROM memory_bridge_folders WHERE company_facts <> 0')[0].n,
+  requests: q('SELECT COUNT(*) AS n FROM write_requests')[0].n,
+  agentColumns: q("SELECT COUNT(*) AS n FROM pragma_table_info('session_capabilities') WHERE name = 'agent_id'")[0].n + q("SELECT COUNT(*) AS n FROM pragma_table_info('memory_bridge_handoffs') WHERE name = 'agent_id'")[0].n,
+};
 const out = {
   before,
   after: { memories: q("SELECT COUNT(*) AS n FROM memories WHERE COALESCE(drawer_kind, '') <> 'agent'")[0].n, agents: q('SELECT COUNT(*) AS n FROM agents_config')[0].n, migrations: q('SELECT COUNT(*) AS n FROM migrations')[0].n },
@@ -64,7 +74,7 @@ const out = {
   agentDepartments: q('SELECT id, department, department_id FROM agents_config ORDER BY id'),
   verify: await sql().read(deps.verifyDepartmentsStep('fx-owner')),
   questions: (await deps.openDepartmentQuestions('fx-owner')).map((x) => x.name),
-  sync1, sync2, provenance, personality, agentNotes,
+  sync1, sync2, provenance, personality, agentNotes, p6,
   sources: q("SELECT id, source, trust FROM memories WHERE COALESCE(drawer_kind, '') <> 'agent' ORDER BY id"),
 };
 log(JSON.stringify(out));

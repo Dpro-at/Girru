@@ -7,6 +7,7 @@ import os from 'node:os';
 import {dataPath} from '../config/data-root.js';
 import {SubscriptionProcesses} from './subscription-processes.js';
 import {minimalChildEnv,safeChildCwd} from '../tools/exec-policy.js';
+import {storeP6Enabled} from './store-p6.js';
 import {MAX_IMAGE_BYTES,sniffImage} from './chat-images.js';
 export type SubscriptionKind='claude'|'codex'|'gemini';
 export const subscriptionModel=(value:unknown):value is string=>typeof value==='string'&&/^subscription:(?:(?:claude|codex)(?::[a-f0-9]{32})?|gemini)(?:\/[a-z0-9][a-z0-9.-]{0,40})?$/.test(value);
@@ -125,7 +126,7 @@ export function subscriptionAnswer(kind:SubscriptionKind,stdout:string,streamed=
  const rows=stdout.split('\n').filter(Boolean).map(line=>JSON.parse(line));const answers=rows.filter(r=>r.type==='item.completed'&&r.item?.type==='agent_message'&&typeof r.item.text==='string');
  if(!answers.length||rows.some(r=>r.type==='error'||r.type==='turn.failed'))throw Error('cli_failed');return answers.map(r=>r.item.text).join('\n\n');
 }
-export async function runSubscription(model:string,folder:string,prompt:string,signal:AbortSignal,options:{appToolsOnly?:boolean;readOnly?:boolean;editsOnly?:boolean;addDirs?:readonly string[];images?:readonly string[];thinking?:unknown}={}):Promise<string>{
+export async function runSubscription(model:string,folder:string,prompt:string,signal:AbortSignal,options:{appToolsOnly?:boolean;readOnly?:boolean;editsOnly?:boolean;addDirs?:readonly string[];images?:readonly string[];thinking?:unknown;agentId?:string|null}={}):Promise<string>{
  if(!subscriptionEnabled()||!subscriptionModel(model))throw Error('cli_disabled');
  const cwd=await fs.realpath(safeChildCwd(folder));if(!(await fs.stat(cwd)).isDirectory()||cwd===os.homedir()||cwd===await fs.realpath(os.homedir()).catch(()=>os.homedir())||cwd===path.parse(cwd).root)throw Error('project_required');
  const kind=model.startsWith('subscription:claude')?'claude':model.startsWith('subscription:gemini')?'gemini':'codex',bin=await subscriptionBinary(kind);
@@ -139,15 +140,17 @@ export async function runSubscription(model:string,folder:string,prompt:string,s
  if(input&&Buffer.byteLength(input,'utf8')>CLAUDE_IMAGE_STDIN_BYTES)throw Error('cli_input_invalid');
  const args=subscriptionArgs(kind,nativeId,subscriptionVariant(model),options.appToolsOnly,options.readOnly,options.editsOnly,options.addDirs,kind==='claude'?imageBlocks.map(b=>b.file):options.images,options.thinking);
  const env=minimalChildEnv({NO_COLOR:'1',TERM:'dumb'});env.PATH=[path.dirname(bin),env.PATH].filter(Boolean).join(path.delimiter);
+ // STORE-MAP-01 P6: Girru is the trusted launcher; the coding app's dpro-memory gets this run's session capability (never a folder path).
+ const session=storeP6Enabled()?await import('../memory/bridge/service.js').then(m=>m.launchSession(cwd,kind,options.agentId??null)).catch(()=>null):null;if(session)Object.assign(env,session.env);
  const geminiConfig=kind==='gemini'?await geminiReplyConfig():undefined;
  if(geminiConfig){env.AGY_CLI_DISABLE_AUTO_UPDATE='1';env.AGY_CLI_NONINTERACTIVE_HEADLESS='1';}
- let launched;try{launched=await launchTrackedSubscription(subscriptionProcesses(),bin,args,{cwd:geminiConfig?.dir??cwd,env,...(streamed?{maxInputBytes:CLAUDE_IMAGE_STDIN_BYTES}:{})});}catch(error){await geminiConfig?.cleanup();throw error;}
+ let launched;try{launched=await launchTrackedSubscription(subscriptionProcesses(),bin,args,{cwd:geminiConfig?.dir??cwd,env,...(streamed?{maxInputBytes:CLAUDE_IMAGE_STDIN_BYTES}:{})});}catch(error){await geminiConfig?.cleanup();await session?.end();throw error;}
  const child=launched.child;
  return new Promise((resolve,reject)=>{
   let output='',bytes=0,failed=false;
   const stop=()=>{if(failed)return;failed=true;if(child.connected)child.disconnect();else child.kill('SIGTERM');};
   const timer=setTimeout(stop,240000);signal.addEventListener('abort',stop,{once:true});
-  const cleanup=()=>{void geminiConfig?.cleanup().catch(()=>{});clearTimeout(timer);signal.removeEventListener('abort',stop);};
+  const cleanup=()=>{void geminiConfig?.cleanup().catch(()=>{});void session?.end();clearTimeout(timer);signal.removeEventListener('abort',stop);};
   child.stdout!.on('data',chunk=>{bytes+=chunk.length;if(bytes>2*1024*1024)stop();else output+=chunk.toString();});child.stderr!.resume();
   child.on('error',()=>{cleanup();reject(Error('cli_unavailable'));});
   void launched.completion.then(code=>{

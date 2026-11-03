@@ -8,6 +8,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { all, one, q, run, sql, type Step } from '../../repositories/sql-steps.js';
 import { storeP4Enabled } from '../../services/store-p4.js';
+import { storeP6Enabled } from '../../services/store-p6.js';
 import { listProjects, type Project } from '../../repositories/chat-conversations.js';
 import type { HandoffBody } from '../handoff/store.js';
 import { BRIDGE_CLIENTS, type BridgeClient } from './clients.js';
@@ -63,16 +64,18 @@ export async function projectForFolder(ownerId: string, cwd: string): Promise<Pr
 
 // --- per-folder settings ---------------------------------------------------
 
-export interface FolderSettings { projectId: string; filesEnabled: boolean; backflowEnabled: boolean; gitExclude: boolean; briefHash: string | null; confirmedAt: string | null; writtenAt: string | null }
-type FolderRow = { project_id: string; files_enabled: number; backflow_enabled: number; git_exclude: number; brief_hash: string | null; confirmed_at: string | null; written_at: string | null };
+export interface FolderSettings { projectId: string; filesEnabled: boolean; backflowEnabled: boolean; gitExclude: boolean; briefHash: string | null; confirmedAt: string | null; writtenAt: string | null; companyFacts?: boolean }
+type FolderRow = { project_id: string; files_enabled: number; backflow_enabled: number; git_exclude: number; brief_hash: string | null; confirmed_at: string | null; written_at: string | null; company_facts?: number };
 const toFolder = (r: FolderRow): FolderSettings => ({
   projectId: r.project_id, filesEnabled: Number(r.files_enabled) === 1, backflowEnabled: Number(r.backflow_enabled) === 1,
   gitExclude: Number(r.git_exclude) === 1, briefHash: r.brief_hash, confirmedAt: r.confirmed_at, writtenAt: r.written_at,
+  // STORE-MAP-01 P6: only sent while the switch is on, so responses stay identical without it.
+  ...(storeP6Enabled() ? { companyFacts: Number(r.company_facts ?? 0) === 1 } : {}),
 });
 
 export async function folderSettings(ownerId: string, projectId: string): Promise<FolderSettings> {
   const r = await q.one<FolderRow>('SELECT * FROM memory_bridge_folders WHERE owner_id = ? AND project_id = ?', ownerId, projectId);
-  return r ? toFolder(r) : { projectId, filesEnabled: false, backflowEnabled: false, gitExclude: true, briefHash: null, confirmedAt: null, writtenAt: null };
+  return r ? toFolder(r) : { projectId, filesEnabled: false, backflowEnabled: false, gitExclude: true, briefHash: null, confirmedAt: null, writtenAt: null, ...(storeP6Enabled() ? { companyFacts: false } : {}) };
 }
 
 export async function allFolderSettings(ownerId: string): Promise<FolderSettings[]> {
@@ -91,6 +94,13 @@ export async function patchFolder(ownerId: string, projectId: string, patch: Par
       git_exclude = excluded.git_exclude, brief_hash = excluded.brief_hash, confirmed_at = excluded.confirmed_at, written_at = excluded.written_at, updated_at = excluded.updated_at`,
     ownerId, projectId, next.files ? 1 : 0, next.back ? 1 : 0, next.git ? 1 : 0, next.hash,
     patch.confirmed ? now() : cur.confirmedAt, patch.written ? now() : cur.writtenAt, now());
+  return folderSettings(ownerId, projectId);
+}
+
+/** STORE-MAP-01 P6: allow (or stop) the company's pinned facts reaching coding tools in this project. */
+export async function setCompanyFacts(ownerId: string, projectId: string, allowed: boolean): Promise<FolderSettings> {
+  await patchFolder(ownerId, projectId, {});
+  await q.run('UPDATE memory_bridge_folders SET company_facts = ?, updated_at = ? WHERE owner_id = ? AND project_id = ?', allowed ? 1 : 0, now(), ownerId, projectId);
   return folderSettings(ownerId, projectId);
 }
 
@@ -142,11 +152,13 @@ const list = (s: string): string[] => { try { const v = JSON.parse(s); return Ar
 /** Notes kept per project (older ones are dropped). */
 const MAX_BRIDGE_HANDOFFS = 20;
 
-export async function saveBridgeHandoff(ownerId: string, projectId: string, client: BridgeClient, body: HandoffBody): Promise<BridgeHandoff> {
+export async function saveBridgeHandoff(ownerId: string, projectId: string, client: BridgeClient, body: HandoffBody, agentId: string | null = null): Promise<BridgeHandoff> {
   const id = randomUUID();
   const at = now();
   await q.run('INSERT INTO memory_bridge_handoffs (id, owner_id, project_id, client, done, remaining, next_steps, open_questions, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     id, ownerId, projectId, client, JSON.stringify(body.done), JSON.stringify(body.left), JSON.stringify(body.next), JSON.stringify(body.questions), at);
+  // STORE-MAP-01 P6 (AG5): the agent the coding app worked for, next to the app.
+  if (agentId) await q.run('UPDATE memory_bridge_handoffs SET agent_id = ? WHERE id = ?', agentId, id);
   // STORE-MAP-01 P4 (D7): the one handoff table too (same id), so the switch can go off again.
   if (storeP4Enabled()) await sql().tx(() => copyAppHandoffStep(ownerId, { id, project_id: projectId, client, done: JSON.stringify(body.done), remaining: JSON.stringify(body.left), next_steps: JSON.stringify(body.next), open_questions: JSON.stringify(body.questions), created_at: at }), { immediate: true });
   await q.run(`DELETE FROM memory_bridge_handoffs WHERE owner_id = ? AND project_id = ? AND id NOT IN

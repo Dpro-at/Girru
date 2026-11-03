@@ -256,21 +256,45 @@ function missing(file: string): boolean {
 let timer: NodeJS.Timeout | null = null;
 let busy = false;
 
-/** One pass over every enabled scope (also what the timer runs). */
-export async function projectionTick(): Promise<void> {
+/**
+ * STORE-MAP-01 P6 (T6): instant sync is debounced per project. A scope with
+ * new events is written once it has been quiet for DEBOUNCE_MS, or at the
+ * latest MAX_WAIT_MS after its first unwritten event, so many changes give one
+ * write. Without a debounce (the pilot) every tick writes at once.
+ */
+export const DEBOUNCE_MS = 1200;
+export const MAX_WAIT_MS = 5000;
+const pending = new Map<string, { seq: number; changedAt: number; since: number }>();
+let debounceOn = false;
+export function setProjectionDebounce(on: boolean): void { debounceOn = on; if (!on) pending.clear(); }
+
+/** Debounce: true when the scope may be written now (always true while the debounce is off). */
+function settled(scope: string, seq: number, now: number): boolean {
+  if (!debounceOn) return true;
+  const p = pending.get(scope);
+  if (!p) { pending.set(scope, { seq, changedAt: now, since: now }); return false; }
+  if (seq !== p.seq) { p.seq = seq; p.changedAt = now; }
+  return now - p.changedAt >= DEBOUNCE_MS || now - p.since >= MAX_WAIT_MS;
+}
+
+/** One pass over every enabled scope (also what the timer runs). `now` is a test seam. */
+export async function projectionTick(now = Date.now()): Promise<void> {
   if (busy) return;
   busy = true;
   try {
     for (const scope of await enabledScopes()) {
       const s = await syncStatus(scope);
-      if (s.status === 'waiting' || s.status === 'unreachable' || (s.status === 'up_to_date' && s.target && missing(s.target))) {
-        await runBriefProjection(scope).catch((err) => console.warn('[Store pilot] projection failed:', (err as Error)?.message));
-      }
+      const due = s.status === 'waiting' || s.status === 'unreachable' || (s.status === 'up_to_date' && s.target && missing(s.target));
+      if (!due) { pending.delete(scope); continue; }
+      if (s.status === 'waiting' && !settled(scope, s.latestSeq, now)) continue;
+      pending.delete(scope);
+      await runBriefProjection(scope).catch((err) => console.warn('[Store pilot] projection failed:', (err as Error)?.message));
     }
   } finally { busy = false; }
 }
 
 export function startProjectionWorker(everyMs = 1500): void {
+  // P6 polls faster; the debounce decides when a scope is written.
   if (timer) return;
   timer = setInterval(() => { void projectionTick(); }, everyMs);
   timer.unref?.();

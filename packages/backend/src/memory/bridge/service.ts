@@ -26,10 +26,12 @@ import { createHash } from 'node:crypto';
 import { applyRegistration, previewRegistration, RegistrationError, undoRegistration } from './registration.js';
 import { runBackflow, type BackflowResult } from './backflow.js';
 import { ensureToken, revokeToken, tokenMatches, checkSessionProof } from './auth.js';
-import { CapabilityError, requireScope, verifyCapability, type Capability } from './capability.js';
+import { CapabilityError, launchCapability, requireScope, revokeCapability, verifyCapability, type Capability } from './capability.js';
 import { isPilotProject } from '../outbox/pilot.js';
+import { storeP6Enabled } from '../../services/store-p6.js';
+import { ContractError, validateVerb, verbOfTool, type MemoryVerb } from '../contract.js';
 import {
-  allFolderSettings, audit, auditLog, bridgeOwner, clientEnabled, clientStates, folderSettings, lastCalls, listRegistrations, patchFolder,
+  allFolderSettings, audit, auditLog, bridgeOwner, setCompanyFacts, clientEnabled, clientStates, folderSettings, lastCalls, listRegistrations, patchFolder,
   projectForFolder, saveBridgeHandoff, setClientEnabled,
 } from './store.js';
 
@@ -118,8 +120,14 @@ export async function filesApply(ownerId: string, projectId: unknown, input: { p
   return result;
 }
 
-export async function setFolder(ownerId: string, projectId: unknown, patch: { filesEnabled?: unknown; backflowEnabled?: unknown; gitExclude?: unknown }, actor = 'owner') {
+export async function setFolder(ownerId: string, projectId: unknown, patch: { filesEnabled?: unknown; backflowEnabled?: unknown; gitExclude?: unknown; companyFacts?: unknown }, actor = 'owner') {
   const p = await ownProject(ownerId, projectId);
+  // P6 (SEC2-1): the owner decides per project whether company facts reach coding tools.
+  if (storeP6Enabled() && patch?.companyFacts !== undefined) {
+    if (typeof patch.companyFacts !== 'boolean') throw new BridgeError('companyFacts must be true or false');
+    await setCompanyFacts(ownerId, p.id, patch.companyFacts);
+    await audit(ownerId, 'folder-settings', { projectId: p.id, note: `${JSON.stringify({ companyFacts: patch.companyFacts })} by ${actor}` });
+  }
   const next: { filesEnabled?: boolean; backflowEnabled?: boolean; gitExclude?: boolean } = {};
   for (const k of ['filesEnabled', 'backflowEnabled', 'gitExclude'] as const) {
     if (patch?.[k] === undefined) continue;
@@ -329,7 +337,9 @@ export async function mcpCall(c: unknown, token: unknown, cwd: unknown, tool: un
   const ownerId = await bridgeOwner();
   if (!ownerId || !(await tokenMatches(ownerId, cl, token))) throw new BridgeError('Not allowed', 401, 'unauthenticated');
   if (!(await clientEnabled(ownerId, cl))) throw new BridgeError(`${CLIENT_NAMES[cl]} is switched off in Girru`, 403, 'client_off');
-  if (typeof tool !== 'string' || !(MCP_TOOLS as readonly string[]).includes(tool)) throw new BridgeError('Unknown tool', 400, 'unknown_tool');
+  // P6 (AG2): the five verbs of the one memory contract are tools too, only with a session (checked below).
+  const verb = typeof tool === 'string' && storeP6Enabled() ? verbOfTool(tool) : null;
+  if (typeof tool !== 'string' || (!verb && !(MCP_TOOLS as readonly string[]).includes(tool))) throw new BridgeError('Unknown tool', 400, 'unknown_tool');
   const folderProject = typeof cwd === 'string' ? await projectForFolder(ownerId, cwd) : null;
   let project: Project | null = folderProject;
   // Every call is checked; only a call that carries no capability at all goes on without one.
@@ -343,21 +353,31 @@ export async function mcpCall(c: unknown, token: unknown, cwd: unknown, tool: un
     project = (await findProject(ownerId, cap.projectId)) ?? null;
     if (!project) throw new BridgeError('The project of this session no longer exists', 404, 'unknown_project');
     if (folderProject && folderProject.id !== project.id) throw new BridgeError('This folder belongs to another project than this session', 403, 'capability_project_mismatch');
-  } else if (folderProject && isPilotProject(folderProject.id)) {
+  } else if (storeP6Enabled() || (folderProject && isPilotProject(folderProject.id))) {
+    // P6 (SEC2-1): no project is opened by a folder path alone, known or not.
     throw new BridgeError('This project needs a session started from Girru', 403, 'capability_required');
   }
   if (!project) throw new BridgeError('Girru does not know this folder. Add it as a project folder in Girru first.', 404, 'unknown_folder');
   const a = args && typeof args === 'object' && !Array.isArray(args) ? args : {};
+  const p6 = storeP6Enabled() && !!cap;
+  // P6: company facts only where the owner allowed them (the capability carries it).
+  const company = !p6 || cap!.scopes.includes('company:read');
   // Reads are logged too (tool name only, never the query), so the owner sees which app used the memory and when.
-  if (tool !== 'memory_propose' && tool !== 'handoff_write') await audit(ownerId, 'mcp-read', { client: cl, projectId: project.id, note: tool });
+  // P6 read log (ENC-01 with CX5): the session's id goes with it, ids only.
+  const writes = tool === 'memory_propose' || tool === 'handoff_write' || (verb !== null && verb !== 'recall');
+  if (!writes) {
+    if (p6) await readVolumeCheck(ownerId, cl, project.id, cap!.id);
+    await audit(ownerId, 'mcp-read', { client: cl, projectId: project.id, note: p6 ? `${tool} session:${cap!.id}` : tool });
+  }
+  if (verb) return contractCall(ownerId, cl, project, cap!, verb, args);
 
   switch (tool as McpTool) {
     case 'project_brief': {
-      const b = await projectBrief(ownerId, project);
+      const b = await projectBrief(ownerId, project, company);
       return { text: briefMarkdown(b), data: { project: { id: project.id, name: b.name }, facts: b.facts.length, memories: b.memories.length, handoff: !!b.handoff } };
     }
     case 'pinned_facts': {
-      const facts = await pinnedFacts(ownerId, project);
+      const facts = await pinnedFacts(ownerId, project, company);
       return { text: facts.length ? facts.map((f) => `- ${f.content}`).join('\n') : 'The owner has not pinned facts for this project yet.', data: { facts } };
     }
     case 'latest_handoff': {
@@ -369,7 +389,8 @@ export async function mcpCall(c: unknown, token: unknown, cwd: unknown, tool: un
       if (!query) throw new BridgeError('query is required');
       const limit = Math.min(Math.max(1, Number.isInteger(a.limit) ? (a.limit as number) : 8), 20);
       const hits = await getMemoryStorage().search({ userId: ownerId, query, drawers: [projectDrawer(project)], limit } as any);
-      const results = hits.slice(0, limit).map((h) => ({ id: h.memory.id, content: clean(h.memory.content), score: Number(h.similarity.toFixed(3)) }));
+      let results = hits.slice(0, limit).map((h) => ({ id: h.memory.id, content: clean(h.memory.content), score: Number(h.similarity.toFixed(3)) }));
+      if (p6) results = capAnswer(results);
       return { text: results.length ? results.map((r) => `- ${r.content}`).join('\n') : 'Nothing found in this project.', data: { results } };
     }
     case 'project_design': {
@@ -381,10 +402,11 @@ export async function mcpCall(c: unknown, token: unknown, cwd: unknown, tool: un
     case 'memory_propose': {
       const content = typeof a.content === 'string' ? a.content.trim() : '';
       if (!content || content.length > 4000) throw new BridgeError('content is required (at most 4000 characters)');
-      const r = await learn({ userId: ownerId, actor: `bridge:${cl}`, review: true,
+      // AG5: with a P6 session the proposal records the app (actor) AND the agent it works for.
+      const r = await learn({ userId: ownerId, actor: `bridge:${cl}`, review: true, ...(p6 && cap!.agentId ? { agentId: cap!.agentId } : {}),
         candidates: [{ content, type: 'fact', importance: 5, drawer: projectDrawer(project), origin: 'agent' }] });
       const proposal = r.proposed[0];
-      await audit(ownerId, 'mcp-propose', { client: cl, projectId: project.id, note: proposal ? `proposal ${proposal.id}` : (r.skipped[0]?.reason ?? 'nothing') });
+      await audit(ownerId, 'mcp-propose', { client: cl, projectId: project.id, note: (proposal ? `proposal ${proposal.id}` : (r.skipped[0]?.reason ?? 'nothing')) + (p6 && cap!.agentId ? ` agent:${cap!.agentId}` : '') });
       if (!proposal) return { text: `Not proposed: ${r.skipped[0]?.reason ?? 'nothing to add'}.`, data: { proposalId: null, reason: r.skipped[0]?.reason ?? null } };
       return { text: 'Proposed. The owner reviews it in Girru; it becomes shared memory only after approval.', data: { proposalId: proposal.id } };
     }
@@ -394,9 +416,159 @@ export async function mcpCall(c: unknown, token: unknown, cwd: unknown, tool: un
         if (err instanceof HandoffInputError) throw new BridgeError(err.message);
         throw err;
       }
-      const h = await saveBridgeHandoff(ownerId, project.id, cl, body);
-      await audit(ownerId, 'mcp-handoff', { client: cl, projectId: project.id });
+      const h = await saveBridgeHandoff(ownerId, project.id, cl, body, p6 ? cap!.agentId ?? null : null);
+      await audit(ownerId, 'mcp-handoff', { client: cl, projectId: project.id, ...(p6 ? { note: `session:${cap!.id}${cap!.agentId ? ` agent:${cap!.agentId}` : ''}` } : {}) });
       return { text: 'Handoff saved. The next agent in this project, of any brand, starts from it.', data: { handoffId: h.id } };
     }
   }
+}
+
+// --- STORE-MAP-01 P6: session capability for every project (CX5, SEC2-1, SEC2-2) ---
+
+/** SEC2-2: a search answer never exceeds this many characters, however many hits there are. */
+export const MAX_SEARCH_ANSWER_CHARS = 6000;
+/** SEC2-2: more reads than this in one minute from one session are refused and raise one notice. */
+export const MAX_READS_PER_MINUTE = 30;
+
+/** Keep whole results, best first, until the answer cap. */
+export function capAnswer<T extends { content: string }>(results: T[], max = MAX_SEARCH_ANSWER_CHARS): T[] {
+  const out: T[] = [];
+  let used = 0;
+  for (const r of results) {
+    if (used + r.content.length > max) break;
+    used += r.content.length;
+    out.push(r);
+  }
+  return out;
+}
+
+const readWindows = new Map<string, number[]>();
+/** Unusual volume (SEC2-2): count a session's reads per minute; over the limit = refused + one audit notice. */
+async function readVolumeCheck(ownerId: string, cl: BridgeClient, projectId: string, sessionId: string): Promise<void> {
+  const now = Date.now();
+  const recent = (readWindows.get(sessionId) ?? []).filter((t) => now - t < 60_000);
+  if (recent.length >= MAX_READS_PER_MINUTE) {
+    // One notice per window: only the first refused read writes it.
+    if (recent.length === MAX_READS_PER_MINUTE) await audit(ownerId, 'mcp-volume', { client: cl, projectId, note: `session:${sessionId} over ${MAX_READS_PER_MINUTE} reads a minute` });
+    recent.push(now);
+    readWindows.set(sessionId, recent);
+    throw new BridgeError('Too many memory reads from this session; wait a minute', 429, 'too_many_reads');
+  }
+  recent.push(now);
+  readWindows.set(sessionId, recent);
+  if (readWindows.size > 500) for (const [k, v] of readWindows) if (!v.some((t) => now - t < 60_000)) readWindows.delete(k);
+}
+
+/** Test seam: forget the per-session read counts. */
+export function resetReadVolume(): void { readWindows.clear(); }
+
+const SUBSCRIPTION_CLIENT: Record<string, BridgeClient> = { claude: 'claude-code', codex: 'codex', gemini: 'antigravity' };
+
+/**
+ * The trusted launcher (P6): before Girru starts a coding app in `folder`, it
+ * issues a session capability for the owner's project of that folder and
+ * hands it to the process as GIRRU_SESSION_CAPABILITY. The project is found
+ * from Girru's own project list (real paths); a folder that is no project gets
+ * nothing. The capability is revoked when the run ends. Null while P6 is off.
+ */
+export async function launchSession(folder: string, kind: string, agentId: string | null = null): Promise<{ env: Record<string, string>; end: () => Promise<void> } | null> {
+  if (!storeP6Enabled()) return null;
+  const ownerId = await bridgeOwner();
+  if (!ownerId) return null;
+  const project = await projectForFolder(ownerId, folder);
+  if (!project) return null;
+  const f = await folderSettings(ownerId, project.id);
+  // AG5: the agent the run works for goes with the session (an unknown agent id is dropped, the run still gets its session).
+  const agent = agentId ? await q.one<{ id: string }>('SELECT id FROM agents_config WHERE id = ?', agentId) : undefined;
+  const { token, capability } = await launchCapability(ownerId, project.id, SUBSCRIPTION_CLIENT[kind] ?? null, !!f.companyFacts, agent?.id ?? null);
+  await audit(ownerId, 'session-start', { client: SUBSCRIPTION_CLIENT[kind] ?? null, projectId: project.id, note: `session:${capability.id}${agent ? ` agent:${agent.id}` : ''}` });
+  return { env: { GIRRU_SESSION_CAPABILITY: token }, end: async () => { await revokeCapability(ownerId, capability.id).catch(() => false); } };
+}
+
+// --- STORE-MAP-01 P6: the one memory contract through dpro-memory (AG2, XP2, FAIL1-3) ---
+
+const BUSY = /SQLITE_BUSY|database is locked|could not serialize|deadlock detected|lock timeout|canceling statement due to lock/i;
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * FAIL3: a write either happens or says clearly that it did not. A busy
+ * database is retried with backoff; any other failure is recorded for the
+ * owner (ids only) and answered with "not saved, try again".
+ */
+async function saveOrSay<T>(ownerId: string, cl: BridgeClient, projectId: string, what: string, fn: () => Promise<T>, tries = [50, 150, 400]): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try { return await fn(); } catch (err) {
+      if (err instanceof BridgeError || err instanceof ContractError) throw err;
+      if (BUSY.test(String((err as Error)?.message)) && attempt < tries.length) { await pause(tries[attempt]); continue; }
+      await audit(ownerId, 'save-failed', { client: cl, projectId, note: what }).catch(() => undefined);
+      throw new BridgeError('Not saved: Girru could not write it just now. Try again (with the same request_id).', 503, 'not_saved');
+    }
+  }
+}
+
+/** FAIL2: a write with a request id happens once; a retry gets the first answer. */
+async function once(ownerId: string, requestId: string | null | undefined, verb: MemoryVerb, fn: () => Promise<McpAnswer>): Promise<McpAnswer> {
+  if (!requestId) return fn();
+  const ins = await q.run('INSERT INTO write_requests (owner_id, request_id, verb) VALUES (?, ?, ?) ON CONFLICT DO NOTHING', ownerId, requestId, verb);
+  if (ins.changes === 0) {
+    const row = await q.one<{ verb: string; status: string; result: string | null }>('SELECT verb, status, result FROM write_requests WHERE owner_id = ? AND request_id = ?', ownerId, requestId);
+    if (!row || row.verb !== verb) throw new BridgeError('This request_id was used for another call; choose a new one', 409, 'request_id_reused');
+    if (row.status !== 'done' || !row.result) throw new BridgeError('The first call with this request_id is still running; try again in a moment', 409, 'in_progress');
+    const first = JSON.parse(row.result) as McpAnswer;
+    return { text: first.text, data: { ...first.data, repeated: true } };
+  }
+  try {
+    const answer = await fn();
+    await q.run("UPDATE write_requests SET status = 'done', result = ? WHERE owner_id = ? AND request_id = ?", JSON.stringify(answer), ownerId, requestId);
+    return answer;
+  } catch (err) {
+    await q.run('DELETE FROM write_requests WHERE owner_id = ? AND request_id = ?', ownerId, requestId).catch(() => undefined);
+    throw err;
+  }
+}
+
+async function contractCall(ownerId: string, cl: BridgeClient, project: Project, cap: Capability, verb: MemoryVerb, raw: Record<string, unknown>): Promise<McpAnswer> {
+  let a;
+  try { a = validateVerb(verb, raw); } catch (err) {
+    if (err instanceof ContractError) throw new BridgeError(err.message, 400, 'invalid_argument');
+    throw err;
+  }
+  const drawer = projectDrawer(project);
+  const who = cap.agentId ? { agentId: cap.agentId } : {};
+  const note = (x: string) => `${x} session:${cap.id}${cap.agentId ? ` agent:${cap.agentId}` : ''}`;
+  if (verb === 'recall') {
+    const limit = a.limit ?? 8;
+    const hits = await getMemoryStorage().search({ userId: ownerId, query: a.query!, drawers: [drawer], limit } as any);
+    const results = capAnswer(hits.slice(0, limit).map((h) => ({ id: h.memory.id, content: clean(h.memory.content), score: Number(h.similarity.toFixed(3)) })));
+    return { text: results.length ? results.map((r) => `- [${r.id}] ${r.content}`).join('\n') : 'Nothing found in this project memory. Do not guess.', data: { results } };
+  }
+  if (verb === 'handoff') {
+    return once(ownerId, a.requestId, verb, () => saveOrSay(ownerId, cl, project.id, note('memory_handoff'), async () => {
+      let body;
+      try { body = cleanHandoff({ done: a.done ?? [], left: a.left ?? [], next: a.next ?? [], questions: a.questions ?? [] }); } catch (err) {
+        if (err instanceof HandoffInputError) throw new BridgeError(err.message, 400, 'invalid_argument');
+        throw err;
+      }
+      const h = await saveBridgeHandoff(ownerId, project.id, cl, body, cap.agentId ?? null);
+      await audit(ownerId, 'mcp-handoff', { client: cl, projectId: project.id, note: note('memory_handoff') });
+      return { text: 'Handoff saved. The next agent in this project, of any brand, starts from it.', data: { handoffId: h.id } };
+    }));
+  }
+  // save, supersede, propose: through a coding app every write is reviewed by the owner first.
+  return once(ownerId, a.requestId, verb, () => saveOrSay(ownerId, cl, project.id, note(`memory_${verb}`), async () => {
+    let replaces: { id: string; content: string; type: string } | null = null;
+    if (verb === 'supersede') {
+      // S2: an id from another owner, project or drawer is refused.
+      const old = await getMemoryStorage().getOwned(ownerId, a.id!);
+      const d = old?.drawer;
+      if (!old || !d || d.kind !== drawer.kind || (d.key ?? '') !== (drawer.key ?? '')) throw new BridgeError('That memory is not in this project; use an id that recall returned', 403, 'foreign_id');
+      replaces = { id: old.id, content: old.content, type: String(old.type) };
+    }
+    const r = await learn({ userId: ownerId, actor: `bridge:${cl}`, review: true, ...who,
+      candidates: [{ content: a.content!, type: 'fact', importance: 5, drawer, origin: 'agent', ...(a.topicKey ? { topicKey: a.topicKey } : {}), ...(replaces ? { replaces } : {}) }] });
+    const proposal = r.proposed[0];
+    await audit(ownerId, 'mcp-propose', { client: cl, projectId: project.id, note: note(proposal ? `proposal ${proposal.id}` : (r.skipped[0]?.reason ?? 'nothing')) });
+    if (!proposal) return { text: `Not proposed: ${r.skipped[0]?.reason ?? 'nothing to add'}.`, data: { proposalId: null, reason: r.skipped[0]?.reason ?? null } };
+    return { text: 'Proposed. The owner reviews it in Girru; it becomes memory only after approval.', data: { proposalId: proposal.id } };
+  }));
 }

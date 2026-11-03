@@ -87,6 +87,15 @@ Delete agent
 
 Agents cannot write their own notes; only the owner saves them.
 
+### Coding-app sessions (`GIRRU_STORE_P6`)
+| Route | Body / answer |
+|---|---|
+| `PATCH /api/memory-bridge/projects/:projectId` | also `{ companyFacts: true | false }`: company facts may reach coding-app sessions in this project; folder settings then include `companyFacts` |
+| `POST /api/memory-bridge/projects/:projectId/capabilities` | `{ scopes, client?, ttlMs? }` → `{ token, capability }` (token shown once); `company:read` is an extra scope |
+| `GET /api/memory-bridge/projects/:projectId/sync` | the brief file's sync state for any project (not only the pilot) |
+
+With the switch on, every dpro-memory call needs a session (`x-girru-capability`, set by Girru as `GIRRU_SESSION_CAPABILITY` when it starts a coding app). A session also lists `memory_recall`, `memory_save`, `memory_supersede`, `memory_handoff` and `memory_propose`; writes accept an optional `request_id` and answer `503 not_saved` when they could not be written.
+
 ### Agent packages (owner only, `GIRRU_STORE_P5`)
 | Route | Body / answer |
 |---|---|

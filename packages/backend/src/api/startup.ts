@@ -280,6 +280,9 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
     // STORE-MAP-01 pilot: change log + brief projection for GIRRU_STORE_PILOT only.
     const { startStorePilot } = await import('../memory/outbox/start.js');
     await startStorePilot().catch((err) => console.warn('[Store pilot] start failed:', (err as Error)?.message));
+    // STORE-MAP-01 P6: the same, debounced, for every project with its memory files on (GIRRU_STORE_P6 only).
+    const { startStoreP6 } = await import('../memory/outbox/p6.js');
+    await startStoreP6().catch((err) => console.warn('[Store P6] start failed:', (err as Error)?.message));
 
     // STORE-MAP-01 P3 data jobs (GIRRU_STORE_P3 only; background work, so not while AGENT_PLAYER_BACKGROUND=off).
     const { storeP3Enabled } = await import('../services/store-p3.js');
