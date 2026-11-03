@@ -227,6 +227,14 @@ With the same switch:
 - **Run notes:** a run's short working notes stay with the run, read only, and are cleared 14 days after its last note. At the run's end lines starting `Done:`, `Left:`, `Next:`, `Blocked:` and `File:` become its handoff when it wrote none, and `Lesson:` lines go to the owner as suggestions. No model is called for this.
 - **Local models unchanged:** the new tool arguments and `run_note` are offered only to models that are not on this computer, so a local model's prompt and tool list stay the same size.
 
+### Hardening, privacy and quality (off by default)
+
+`GIRRU_STORE_P9=1` turns on:
+
+- **Faster recall:** recall keeps its own index in memory: each memory's word counts and vector, checked against the stored text and model on every search and read again only when they changed. The full rows are loaded for the results alone. The scores and order are the same as before. Measured on generated data with 100,000 memories (46,731 in the open drawers): 1.06 s to 0.11 s with offline vectors and 3.8 s to 0.30 s with 1,024-dimension vectors (median), with less than half the memory. The index never goes to disk, is capped (256 MB by default, `GIRRU_RECALL_INDEX_MB`), drops a user's entries after 30 minutes without a search and drops them at once when a memory is forgotten. The drawer filter of every memory query has its own index (migration 179, used with the switch off too).
+- **Backups that really restore:** before a backup is signed, its copy of the main database is unpacked into a scratch folder, opened, checked and counted against what was saved. A backup that fails this is not marked checked and cannot be restored. Backup files are owner-only (0600, folders 0700); the signing key and the forget ledger's key are never in a backup. On PostgreSQL the app still does not dump the database; it reports whether a pg_dump file newer than 26 hours is in the backups folder.
+- **The forget ledger:** each forget adds a line to `forget-ledger.jsonl` in the data folder (owner-only) with the memory and user ids and a keyed hash of the text, never the text. A backup carries a copy. A restore keeps the current ledger and adds the backup's lines, and the next start forgets every line again, including the same text saved under another id, so a restored backup never brings forgotten memory back.
+
 ### One agent context and one Girru section (off by default)
 
 `GIRRU_STORE_P2=1` turns on, for every agent:
@@ -264,7 +272,7 @@ With the same switch:
 - **Export:** each drawer can be exported as a Markdown file. **Planned:** export of everything about one person, and the agent package.
 - **Delete** moves a memory to the Trash and can be undone.
 - **Forget** cannot be undone. It removes the memory, the text of all its versions (one tombstone without text remains), its index rows, its Markdown copies and exports, its text in proposals and its lines in stored summaries.
-- **Planned:** a forget ledger that is applied again after a backup is restored, so forgotten data does not come back.
+- **Forget ledger** (`GIRRU_STORE_P9`): every forget is recorded with ids and a keyed hash only, and applied again after a backup is restored, so forgotten data does not come back. Backups made before a forget still hold the memory until they expire (14 days, 4 Sundays, 30 days for before-update and before-restore backups).
 - **Planned (decided):** in a workspace with members, the owner sees shared scopes only, never a member's private memory; a test will enforce it.
 
 ## Related pages

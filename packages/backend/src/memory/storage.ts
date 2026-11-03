@@ -16,12 +16,14 @@ import { v4 as uuidv4 } from 'uuid';
 import { all, columnExists, dialect, lockName, one, run, sql, type Step } from '../repositories/sql-steps.js';
 import { LEGACY_HASH_MODEL, getEmbeddingService } from './embedding.js';
 import { lexicalTokens } from './text-normalize.js';
-import { MIN_RECALL_SCORE, WORKING_LAYER_BOOST, bm25Scores, hybridScore, vectorScore } from './hybrid.js';
+import { MIN_RECALL_SCORE, WORKING_LAYER_BOOST, bm25FromCounts, bm25Scores, hybridScore, vectorScore } from './hybrid.js';
 import { onMemorySaved } from './graph/store.js';
 import { NOT_ARCHIVED_SQL } from './scopes/store.js';
 import { NOT_REPLACED_SQL } from './validity.js';
 import { unpackVector, writeVectorStep } from './vectors.js';
 import { storeP3Enabled } from '../services/store-p3.js';
+import { storeP9Enabled } from '../services/store-p9.js';
+import { LIGHT_COLUMNS, entriesFor, entryCosine, type LightRow } from './recall-index.js';
 import {
   DRAWER_KEY_SQL,
   DRAWER_KIND_SQL,
@@ -487,6 +489,8 @@ export class MemoryStorage implements IMemoryStorage {
       params.push(query.minImportance / 10);
     }
 
+    if (storeP9Enabled()) return this.searchIndexed(query, q, where, params);
+
     const rows = await sql().read(all(`${where} ORDER BY created_at ASC, id ASC`, ...params));
     const memories = rows.map((row) => this.rowToMemory(row));
     if (q.model === this.embeddingService.targetModel()) await this.reembedStale(memories, q.model);
@@ -513,10 +517,67 @@ export class MemoryStorage implements IMemoryStorage {
     return results.slice(0, query.limit || 10);
   }
 
+  /**
+   * STORE-MAP-01 P9 (D9): the same search over the recall index
+   * (recall-index.ts). Reads light columns only, scores with the kept word
+   * counts and vectors, and loads full rows for the results alone. Same
+   * filter, same numbers and same order as the full-row path above.
+   */
+  private async searchIndexed(
+    query: MemorySearchQuery,
+    q: Awaited<ReturnType<ReturnType<typeof getEmbeddingService>['embedQuery']>>,
+    where: string,
+    params: any[],
+  ): Promise<MemorySearchResult[]> {
+    const light = where.replace(/^SELECT \* FROM memories/, `SELECT ${LIGHT_COLUMNS}, ${DRAWER_KIND_SQL} AS dk, ${DRAWER_KEY_SQL} AS dkey FROM memories`);
+    let rows = await sql().read(all<LightRow>(`${light} ORDER BY created_at ASC, id ASC`, ...params));
+    if (q.model === this.embeddingService.targetModel()) {
+      const stale = rows.filter((r) => (r.has_json ? (r.embedding_model || LEGACY_HASH_MODEL) : undefined) !== q.model);
+      const fakes = stale.map((r) => ({ id: r.id, userId: query.userId, content: r.content } as Memory));
+      if (stale.length && await this.reembedStale(fakes, q.model) > 0) {
+        rows = await sql().read(all<LightRow>(`${light} ORDER BY created_at ASC, id ASC`, ...params));
+      }
+    }
+    // Only a plain drawer search sees every current row of its drawers (and may drop gone entries).
+    const plain = query.drawers && !query.type && !query.layer && query.minImportanceScore === undefined && query.minImportance === undefined;
+    const entries = await entriesFor(query.userId, rows, plain ? { drawers: query.drawers!.map((d) => normalizeDrawer(d)).map((d) => ({ kind: d.kind, key: d.key || '' })) } : null);
+
+    const lexical = bm25FromCounts(lexicalTokens(query.query), entries);
+    const scored: Array<{ i: number; similarity: number; vector: number | null }> = [];
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      const comparable = e.vec && e.model === q.model && e.vec.length === q.dims;
+      const vector = comparable && (q.semantic || lexical[i] > 0) ? vectorScore(entryCosine(q.vector, e), q.semantic) : null;
+      let similarity = hybridScore(vector, lexical[i], q.semantic);
+      if (similarity >= MIN_RECALL_SCORE && e.layer === 'working') similarity += WORKING_LAYER_BOOST;
+      if (similarity >= MIN_RECALL_SCORE) scored.push({ i, similarity, vector });
+    }
+    scored.sort((a, b) => b.similarity - a.similarity);
+    const top = scored.slice(0, query.limit || 10);
+    if (top.length === 0) return [];
+
+    const ids = top.map((t) => entries[t.i].id);
+    // By primary key; the owner is checked here (with `user_id = ?` the planner may scan by user).
+    const full = await sql().read(all(`SELECT * FROM memories WHERE id IN (${ids.map(() => '?').join(', ')})`, ...ids));
+    const byId = new Map(full.filter((row: any) => row.user_id === query.userId).map((row: any) => [row.id, this.rowToMemory(row)]));
+    const results: MemorySearchResult[] = [];
+    for (const t of top) {
+      const memory = byId.get(entries[t.i].id);
+      if (!memory) continue; // deleted between the two reads
+      results.push({
+        memory,
+        similarity: t.similarity,
+        scoreBreakdown: { vectorScore: t.vector ?? 0, keywordScore: lexical[t.i], recencyScore: 0, importanceScore: memory.importanceScore ?? 0.5 },
+      });
+    }
+    return results;
+  }
+
   /** Re-embed up to LAZY_REEMBED_PER_SEARCH memories whose vector is not of `model`. */
-  private async reembedStale(memories: Memory[], model: string): Promise<void> {
+  private async reembedStale(memories: Memory[], model: string): Promise<number> {
     const stale = memories.filter((m) => m.embeddingModel !== model).slice(0, LAZY_REEMBED_PER_SEARCH);
-    if (stale.length === 0) return;
+    if (stale.length === 0) return 0;
+    let written = 0;
     const fresh = await this.embeddingService.embedManyDetailed(stale.map((m) => m.content));
     for (const [i, m] of stale.entries()) {
       const e = fresh[i];
@@ -524,8 +585,10 @@ export class MemoryStorage implements IMemoryStorage {
       if (await this.setEmbedding(m.userId, m.id, m.content, e.vector, e.model)) {
         m.embedding = e.vector;
         m.embeddingModel = e.model;
+        written++;
       }
     }
+    return written;
   }
 
   /**
@@ -534,7 +597,8 @@ export class MemoryStorage implements IMemoryStorage {
    */
   async setEmbedding(userId: string, id: string, content: string, vector: number[], model: string): Promise<boolean> {
     const res = await sql().read(run(
-      'UPDATE memories SET embedding = ?, embedding_model = ?, embedding_dims = ? WHERE id = ? AND user_id = ? AND content = ?',
+      // The packed copy (P3) is cleared with it: it would still hold the old model's numbers.
+      'UPDATE memories SET embedding = ?, embedding_model = ?, embedding_dims = ?, embedding_vec = NULL WHERE id = ? AND user_id = ? AND content = ?',
       JSON.stringify(vector), model, vector.length, id, userId, content,
     ));
     return res.changes === 1;

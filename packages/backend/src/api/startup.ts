@@ -129,6 +129,17 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
   await memoryStorage.initialize();
   console.log('[Server] ✅ Memory system initialized\n');
 
+  // STORE-MAP-01 P9 (PRIV4): after a restore, every forget of the ledger is applied again
+  // (the marker exists only when a ledger did; a failed replay runs on the next start).
+  {
+    const { replayPending, replayForgetLedger } = await import('../memory/forget-ledger.js');
+    if (replayPending()) {
+      await replayForgetLedger()
+        .then((r) => console.log(`[Store P9] forget ledger re-applied: ${r.forgotten} forgotten again, ${r.failed} failed`))
+        .catch((err) => console.warn('[Store P9] forget ledger not re-applied:', (err as Error)?.message));
+    }
+  }
+
   // Initialize Credentials System
   const { getCredentialStorage } = await import('../credentials/index.js');
   const credentialStorage = getCredentialStorage();
