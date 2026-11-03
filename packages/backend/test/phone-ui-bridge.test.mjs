@@ -263,6 +263,13 @@ test('the terminal from a phone: open, stream its output, type, exit; keystrokes
     await new Promise((r) => setTimeout(r, 50));
     const rows = db.prepare("SELECT action, metadata FROM audit_logs WHERE resource_id = ? ORDER BY id").all(c.deviceId);
     assert.deepEqual(rows.map((r) => r.action), ['phone.api.call', 'phone.api.stream', 'phone.terminal.input']);
+    // The route's own gates apply: switched off, or no longer an active owner, nothing streams.
+    process.env.AGENT_TERMINAL = 'false';
+    assert.equal(await code(B.apiStream(ctx(), { type: 'api.stream', path: `/api/terminal/sessions/${TID}/stream` })), 'disabled');
+    process.env.AGENT_TERMINAL = 'true';
+    db.prepare("UPDATE users SET status = 'suspended' WHERE id = 'ui-owner'").run();
+    try { assert.equal(await code(B.apiStream(ctx(), { type: 'api.stream', path: `/api/terminal/sessions/${TID}/stream` })), 'owner_changed'); }
+    finally { db.prepare("UPDATE users SET status = 'active' WHERE id = 'ui-owner'").run(); }
     // Another owner's terminal is not found.
     assert.equal(await code(B.apiStream(ctx(), { type: 'api.stream', path: `/api/terminal/sessions/${TID}/stream` })), 'not_found');
   } finally {

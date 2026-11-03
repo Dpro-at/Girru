@@ -27,6 +27,8 @@ const CORE_UI = fileURLToPath(new URL('../../../core-ui/', import.meta.url));
 export const UI_PART_BYTES = 600 * 1024;
 export const API_BODY_BYTES = 256 * 1024;
 export const API_ANSWER_BYTES = 700 * 1024;
+/** A terminal reader ends after this long (terminal-contract.js › TERMINAL_STREAM_MS). */
+const TERMINAL_STREAM_MS = 10 * 60_000;
 export const LIMITS = { call: 120, get: 600, streams: 4, windowMs: 60_000 };
 
 type Body = Record<string, unknown>;
@@ -261,7 +263,10 @@ export async function apiStream(ctx: CommandContext, body: Body) {
 /** A terminal's output as GET /api/terminal/sessions/:id/stream sends it (`event: output` / `exit`). */
 async function terminalStream(ctx: CommandContext, path: string, id: string, after: number, open: number) {
   const { terminalManager } = await import('../api/routes/terminal.js');
-  const { TerminalError } = await import('../terminal/manager.js');
+  const { TerminalError, terminalEnabled } = await import('../terminal/manager.js');
+  // The same gates as the HTTP route: an active owner (current token version) and the terminal switched on.
+  await ownerHeaders(ctx.ownerId);
+  if (!terminalEnabled()) throw new CommandError('disabled');
   try {
     // Ownership first, as the route does, so a wrong id is not_found before anything streams.
     terminalManager.subscribe(ctx.ownerId, id, Number.MAX_SAFE_INTEGER, () => {})();
@@ -274,9 +279,12 @@ async function terminalStream(ctx: CommandContext, path: string, id: string, aft
     follow: () => new Promise<void>((resolve) => {
       let done = false;
       let stop: (() => void) | null = null;
+      // Like the route's reader: it ends after a while and the page re-attaches with ?after=<seq>.
+      const limit = setTimeout(() => finish('dropped'), TERMINAL_STREAM_MS);
       const finish = (status: 'complete' | 'dropped') => {
         if (done) return;
         done = true;
+        clearTimeout(limit);
         stop?.();
         streams.set(ctx.deviceId, Math.max(0, (streams.get(ctx.deviceId) ?? 1) - 1));
         ctx.push({ type: 'stream.end', status });
