@@ -47,6 +47,7 @@ import { DrawerInputError, chatTurnDrawers, drawerId, sameDrawer, type DrawerRef
 import { pinnedFactsForReply, scopeFactAccess, type ReplyPinnedFacts } from '../../memory/scopes/pinned.js';
 import { storeP9Enabled } from '../../services/store-p9.js';
 import { cloudSafeDrawers, cloudSafePinnedAllow, providerIsLocal } from '../../memory/stays-local.js';
+import { MEMORY_UNAVAILABLE_NOTE, recordHealthEvent } from '../../memory/health.js';
 import { withoutArchivedDrawers } from '../../memory/scopes/store.js';
 import { withGroupDrawers } from '../../memory/scopes/groups.js';
 import { logAudit } from '../../services/audit-logger.js';
@@ -571,7 +572,7 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
     // STORE-MAP-01 P9 (PRIV2, D23): a place that stays on this computer never reaches a model that is not.
     // The provider is decided below from the same inputs; it can only become more local there (no key -> local).
     const p9Cloud = storeP9Enabled() && !providerIsLocal(localModelOnly() ? (input.provider === 'lmstudio' ? 'lmstudio' : 'ollama')
-      : (input.provider || agentConfig?.provider || ((await getSettingsManager().getSettings()).provider === 'claude' ? 'claude' : 'ollama')));
+      : (input.provider || agentConfig?.provider || ((await getSettingsManager().getSettings()).provider === 'claude' ? 'claude' : 'ollama')), resolvedModel);
     let withheldLocal: DrawerRef[] = [];
     if (p9Cloud) ({ drawers: memoryDrawers, withheld: withheldLocal } = await cloudSafeDrawers(userId, memoryDrawers));
     // MEM-SCALE-01: the owner's pinned facts of this scope load first (company, department, project).
@@ -669,6 +670,11 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
       recall = await messageRecall({ userId, drawers, query: messageText(lastUser?.content), pack });
     } catch (err) {
       safeConsole.log('[Chat] Memory context unavailable', safeErrorFields(err));
+      // STORE-MAP-01 P9 (FAIL4, AG8): the reply goes on without memory, says so when it matters, never invents it.
+      if (storeP9Enabled() && includeAgentMemory) {
+        resolvedSystemPrompt += `${resolvedSystemPrompt ? '\n\n' : ''}${MEMORY_UNAVAILABLE_NOTE}`;
+        void recordHealthEvent(userId, 'recall_failed', agentConfig?.id ?? null);
+      }
       if (pinnedFacts.text) resolvedSystemPrompt += `${resolvedSystemPrompt ? '\n\n' : ''}${pinnedFacts.text}`;
       if (input.handoff?.text && includeAgentMemory && !channelTurn) resolvedSystemPrompt += `\n\n${input.handoff.text}`;
     }
@@ -702,6 +708,10 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
       const installed = await resolveLocalModel(resolvedModel, DEFAULT_MODEL);
       if (installed !== resolvedModel) safeConsole.log('[Chat] Local model not installed; using', installed, 'instead of', resolvedModel);
       resolvedModel = installed;
+    }
+    // P9 (PRIV2): the model finally chosen must be as local as the one memory was loaded for (fail closed).
+    if (storeP9Enabled() && !p9Cloud && !providerIsLocal(resolvedProvider, resolvedModel)) {
+      return reply.status(409).send({ error: 'This model is not on this computer, and this reply holds memory that stays on this computer. Pick a local model or try again.', code: 'stays_local' });
     }
     // MEM-CACHE-01: a saved conversation keeps its newest turns in full and
     // gives older ones as rolling summaries, within the context budget.

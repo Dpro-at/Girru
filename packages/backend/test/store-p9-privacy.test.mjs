@@ -59,6 +59,9 @@ test('PRIV2: locality comes from trusted config only', () => {
   assert.equal(S.providerIsLocal('ollama'), true); // OLLAMA_URL is loopback here
   assert.equal(S.providerIsLocal('lmstudio'), true);
   for (const p of ['claude', 'openai', 'gemini', 'codex', '', null, undefined, 'local', 'Ollama']) assert.equal(S.providerIsLocal(p), false, String(p));
+  // Ollama's cloud models run on Ollama's servers.
+  assert.equal(S.providerIsLocal('ollama', 'qwen3:4b'), true);
+  for (const m of ['gpt-oss:120b-cloud', 'deepseek-v3.1:671b-cloud', 'kimi:cloud', 'qwen3-coder:480b-CLOUD']) assert.equal(S.providerIsLocal('ollama', m), false, m);
 });
 
 test('PRIV2: People stays local by default; a place switched on is withheld from a model that is not local', async () => {
@@ -93,6 +96,7 @@ test('PRIV2: the coding-app context and the bridge leave out a project that stay
   await PS.setPlaceSetting(OWNER, `project:${p.slug}`, true);
   assert.deepEqual(await brief.bridgeDrawers(OWNER, p), []);
   assert.deepEqual(await brief.approvedMemories(OWNER, p), []);
+  assert.deepEqual(await brief.topicIndex(OWNER, p), [], 'no topics either');
   const coding = await resolveAgentContext({ agentId: 'a-p9', entry: 'coding_app', ownerId: OWNER, projectId: p.id });
   assert.ok(!coding.drawers.some((d) => d.kind === 'project'));
   const local = await resolveAgentContext({ agentId: 'a-p9', entry: 'task', ownerId: OWNER, projectId: p.id });
@@ -115,6 +119,10 @@ test('PRIV3: personal data kinds, never values', () => {
     ['The build took 12345 ms', []],
   ];
   for (const [text, kinds] of cases) assert.deepEqual(PD.personalDataKinds(text).sort(), [...kinds].sort(), text);
+  // Bounded work on hostile text (no catastrophic backtracking).
+  const t0 = performance.now();
+  for (const evil of ['1'.repeat(50_000) + 'x', '1 '.repeat(40_000), ('9 Aa '.repeat(20_000)) + '!', 'a@'.repeat(30_000)]) { PD.personalDataKinds(evil); PD.specialCategory(evil); }
+  assert.ok(performance.now() - t0 < 1500, `took ${Math.round(performance.now() - t0)} ms`);
 });
 
 test('PRIV3/PRIV7: the classifier flags them with P9 on only', () => {

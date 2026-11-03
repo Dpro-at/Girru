@@ -20,6 +20,7 @@ import { getMemoryStorage } from '../storage.js';
 import { learn } from '../learning.js';
 import { cleanHandoff, HandoffInputError } from '../handoff/store.js';
 import { bridgeClients, CLIENT_NAMES, clientConfigFile, isBridgeClient, launchReady, serverLaunch, type BridgeClient, type BridgeEnv } from './clients.js';
+import { recordHealthEvent } from '../health.js';
 import { briefHash, briefMarkdown, bridgeDrawers, clean, handoffText, projectBrief, projectDrawer, projectHandoff, pinnedFacts } from './brief.js';
 
 /** STORE-MAP-01 P9 (PRIV2): the answer when the project's memory stays on this computer. */
@@ -537,6 +538,7 @@ async function saveOrSay<T>(ownerId: string, cl: BridgeClient, projectId: string
       if (err instanceof BridgeError || err instanceof ContractError) throw err;
       if (BUSY.test(String((err as Error)?.message)) && attempt < tries.length) { await pause(tries[attempt]); continue; }
       await audit(ownerId, 'save-failed', { client: cl, projectId, note: what }).catch(() => undefined);
+      void recordHealthEvent(ownerId, 'save_failed', projectId); // P9 (FAIL6)
       throw new BridgeError('Not saved: Girru could not write it just now. Try again (with the same request_id).', 503, 'not_saved');
     }
   }

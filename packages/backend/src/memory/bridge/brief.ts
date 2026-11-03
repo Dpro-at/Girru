@@ -129,7 +129,9 @@ const MAX_TOPIC_LABEL = 80;
  * fetches the details with `memory_search`. Only the project drawer is read.
  */
 export async function topicIndex(ownerId: string, project: Pick<Project, 'id' | 'slug'>): Promise<BriefTopic[]> {
-  const drawer = projectDrawer(project);
+  // P9 (PRIV2): a project whose place stays on this computer gives coding apps no topics either.
+  const [drawer] = await bridgeDrawers(ownerId, project);
+  if (!drawer) return [];
   const rows = await getMemoryStorage().getByDrawers(ownerId, [drawer]);
   const keys = new Set<string>();
   for (const m of rows) {

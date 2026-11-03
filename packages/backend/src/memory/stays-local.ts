@@ -10,8 +10,10 @@
  * does not retry with an online model while it holds them.
  *
  * Where a model runs is decided by trusted configuration only: Ollama is
- * local when OLLAMA_URL is a loopback address, LM Studio is always loopback;
- * every other provider is not local, whatever its name or a request says.
+ * local when OLLAMA_URL is a loopback address and the model is not one of
+ * Ollama's cloud models (a `cloud` tag, e.g. `gpt-oss:120b-cloud`, runs on
+ * Ollama's servers); LM Studio is always loopback; every other provider is
+ * not local, whatever its name or a request says.
  */
 
 import { isLoopbackUrl } from './embedding.js';
@@ -19,10 +21,13 @@ import { OLLAMA_URL } from '../llm/ollama.js';
 import { localOnlyPlaces, placeOfDrawer } from './place-settings.js';
 import type { DrawerRef } from './drawers.js';
 
-/** True only for a model that runs on this computer. */
-export function providerIsLocal(provider: string | null | undefined): boolean {
+/** An Ollama model that runs on Ollama's servers, not here (`…:cloud`, `…-cloud`). */
+const OLLAMA_CLOUD_MODEL = /(^|[:-])cloud$/i;
+
+/** True only for a model that runs on this computer (`model` given: also that it is not a cloud model). */
+export function providerIsLocal(provider: string | null | undefined, model?: string | null): boolean {
   if (provider === 'lmstudio') return true;
-  if (provider === 'ollama') return isLoopbackUrl(OLLAMA_URL);
+  if (provider === 'ollama') return isLoopbackUrl(OLLAMA_URL) && !(typeof model === 'string' && OLLAMA_CLOUD_MODEL.test(model.trim()));
   return false;
 }
 

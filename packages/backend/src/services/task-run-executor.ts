@@ -399,7 +399,7 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
         localModel = await resolveLocalModel(wanted, DEFAULT_OLLAMA_MODEL);
         console.log('[TaskRun] No Claude key for this agent; using the local model', { agentId: agent.id, model: localModel });
       }
-      systemPrompt = await taskRunBasePrompt(agent, run, storeP9Enabled() && (!localModel || !providerIsLocal('ollama')));
+      systemPrompt = await taskRunBasePrompt(agent, run, storeP9Enabled() && (!localModel || !providerIsLocal('ollama', localModel)));
       // CORE-MEM-HANDOFF: the agent's newest note for this board task, and how to leave the next one.
       // A contract that names its tools, or a delegated task, leaves the handoff tools out, so the note on using them too.
       const handoff = await taskHandoffText(run).catch(() => '');
@@ -428,7 +428,7 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
     }
     // STORE-MAP-01 P9 (PRIV2): the Claude API (or an Ollama that is not on loopback) is not on this
     // computer; places that stay here leave the run.
-    const p9Cloud = !!factsOwner && storeP9Enabled() && (!!claudeClient || !providerIsLocal('ollama'));
+    const p9Cloud = !!factsOwner && storeP9Enabled() && (!!claudeClient || !providerIsLocal('ollama', driver.model));
     if (p9Cloud) registry.updateContext({ memoryDrawers: (await cloudSafeDrawers(factsOwner!, toolMemoryDrawers(registry.getContext()))).drawers });
     // MEM-SCALE-01: the owner's pinned facts of the task's scope (company /
     // department / project), only what this agent may read in this run.

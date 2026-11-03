@@ -11,6 +11,8 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { cliConfigDir } from '../../services/instance-identity.js';
 import { createBridgeMcpServer, httpBackend } from './mcp-server.js';
+import { queueingBackend } from './handoff-queue.js';
+import { storeP9Enabled } from '../../services/store-p9.js';
 
 // cursor and copilot are registered only while GIRRU_STORE_P7 is on (the backend checks the switch).
 const CLIENTS = new Set(['claude-code', 'codex', 'gemini-cli', 'antigravity', 'cursor', 'copilot']);
@@ -19,11 +21,13 @@ async function main(): Promise<void> {
   const i = process.argv.indexOf('--client');
   const client = i >= 0 ? process.argv[i + 1] : '';
   if (!CLIENTS.has(client)) throw new Error('--client must be claude-code, codex, gemini-cli, antigravity, cursor or copilot');
-  const backend = httpBackend({
+  const http = httpBackend({
     client, cwd: process.cwd(), configDir: cliConfigDir(),
     backendUrl: process.env.AGENT_PLAYER_URL || 'http://127.0.0.1:41522',
     capability: process.env.GIRRU_SESSION_CAPABILITY || null,
   });
+  // STORE-MAP-01 P9 (FAIL5): a handoff written while Girru is away waits in a small local queue.
+  const backend = storeP9Enabled() ? queueingBackend(http, { configDir: cliConfigDir(), cwd: process.cwd() }) : http;
   // A session Girru started (P6) also gets the five verbs of the one memory contract.
   await createBridgeMcpServer(backend, { verbs: !!process.env.GIRRU_SESSION_CAPABILITY }).connect(new StdioServerTransport());
 }

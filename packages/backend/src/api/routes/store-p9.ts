@@ -4,10 +4,13 @@
  *
  *   GET   /api/memory/people/:key/export   everything about one person (PRIV6), as a download
  *   POST  /api/memory/people/:key/forget   forget the person in one action: { confirm: <key>, mentionIds? }
+ *   GET   /api/memory/health                the local health view (five rows; OPS6, FAIL6)
+ *   GET   /api/memory/health/support        the support file: versions, counts, ids; never memory text
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { authorizeActiveRole } from '../../auth/route-guards.js';
 import { PersonError, exportPerson, forgetPerson } from '../../memory/person.js';
+import { memoryHealth, supportBundle } from '../../memory/health.js';
 import { storeP9Enabled } from '../../services/store-p9.js';
 import { repositories } from '../../repositories/index.js';
 import { requestMeta } from '../../repositories/audit.js';
@@ -44,6 +47,12 @@ export async function storeP9Routes(fastify: FastifyInstance) {
       resource_type: 'memory_person', resource_id: r.params.key, action: 'memory.forget_person', success: true,
       metadata: out,
     }, requestMeta(r));
+    return out;
+  }));
+  fastify.get('/api/memory/health', { config }, asOwner((o) => memoryHealth(o)));
+  fastify.get('/api/memory/health/support', { config }, asOwner(async (o, _r, reply) => {
+    const out = await supportBundle(o);
+    reply.header('content-disposition', `attachment; filename="girru-support-${String(out.createdAt).slice(0, 10)}.json"`);
     return out;
   }));
 }

@@ -19,10 +19,10 @@ export type PersonalDataKind = 'email' | 'phone' | 'bank-account' | 'card' | 'ad
 
 const EMAIL = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/;
 // +49 170 1234567, (030) 123-4567, 0770 123 4567, ٠٧٧٠١٢٣٤٥٦٧ (Arabic-Indic digits are normalized first).
-const PHONE = /(?:^|[^\w])(?:\+|00)?\d[\d\s().-]{7,}\d(?!\w)/;
+const PHONE = /(?:^|[^\w])(?:\+|00)?\d[\d\s().-]{7,20}\d(?!\w)/;
 const IBAN = /\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]{4}){2,7}(?:\s?[A-Z0-9]{1,4})?\b/;
 const CARD = /\b(?:\d[ -]?){13,19}\b/;
-const ADDRESS = /\b\d{1,5}\s+[A-Z][\p{L}'-]+(?:\s+[A-Z][\p{L}'-]+)*\s+(?:street|st\.?|avenue|ave\.?|road|rd\.?|lane|blvd|boulevard|drive|way|platz|gasse|weg)\b|\b[A-ZÄÖÜ][\p{L}-]+(?:straße|strasse|gasse|weg|platz)\s+\d{1,4}\b|(?:شارع|حي|محلة|زقاق)\s+\S+/iu;
+const ADDRESS = /\b\d{1,5}\s+[A-Z][\p{L}'-]+(?:\s+[A-Z][\p{L}'-]+){0,4}\s+(?:street|st\.?|avenue|ave\.?|road|rd\.?|lane|blvd|boulevard|drive|way|platz|gasse|weg)\b|\b[A-ZÄÖÜ][\p{L}-]+(?:straße|strasse|gasse|weg|platz)\s+\d{1,4}\b|(?:شارع|حي|محلة|زقاق)\s+\S+/iu;
 const ID_NUMBER = /\b(?:passport|ausweis|id card|national id|ssn|social security|tax id|steuer-?id|رقم (?:الجواز|الهوية|البطاقة)|جواز سفر رقم)\b[^\n]{0,20}?\b[A-Z0-9]{6,12}\b|\b\d{3}-\d{2}-\d{4}\b/iu;
 
 function westernDigits(s: string): string {
@@ -41,10 +41,13 @@ function luhn(digits: string): boolean {
   return digits.length >= 13 && sum % 10 === 0;
 }
 
+/** Longest text scanned (bounded work on untrusted text). */
+export const MAX_SCAN_CHARS = 16_000;
+
 /** Which kinds of personal data the text holds (never the values). */
 export function personalDataKinds(text: string): PersonalDataKind[] {
   if (!text) return [];
-  const t = westernDigits(text);
+  const t = westernDigits(text.slice(0, MAX_SCAN_CHARS));
   const out = new Set<PersonalDataKind>();
   if (EMAIL.test(t)) out.add('email');
   const iban = IBAN.exec(t);
@@ -67,5 +70,5 @@ const SPECIAL = /\b(health|doctor|diagnos\w*|disease|illness|hospital|therapy|th
 
 /** True when the text is about a special category of personal data (GDPR Art. 9). */
 export function specialCategory(text: string): boolean {
-  return !!text && SPECIAL.test(text);
+  return !!text && SPECIAL.test(text.slice(0, MAX_SCAN_CHARS));
 }

@@ -51,6 +51,7 @@ if (URL_) {
     person: await import('../src/memory/person.ts'),
     places: await import('../src/memory/place-settings.ts'),
     stays: await import('../src/memory/stays-local.ts'),
+    health: await import('../src/memory/health.ts'),
   };
 }
 
@@ -61,6 +62,8 @@ test.after(async () => {
   if (!URL_) return;
   const run = (s, ...a) => m.pool.pgRun(s, ...a).catch(() => {});
   await run('DELETE FROM memory_place_settings WHERE owner_id = ?', owner);
+  await run('DELETE FROM memory_health_events WHERE owner_id = ?', owner);
+  await run('DELETE FROM notifications WHERE user_id = ?', owner);
   await run('DELETE FROM memory_graph_entities WHERE user_id = ?', owner);
   await run('DELETE FROM memory_versions WHERE user_id = ?', owner);
   await run('DELETE FROM memories WHERE user_id = ?', owner);
@@ -137,5 +140,21 @@ test('P9 one person, people-fact retention and stays-local (PostgreSQL)', { skip
   assert.deepEqual(f, { drawer: 2, mentions: 1, graph: 1 });
   assert.equal((await m.q.all('SELECT id FROM memories WHERE id LIKE ?', `pp-${tag}-%`)).length, 0);
   assert.equal((await m.q.all('SELECT id FROM memory_graph_entities WHERE id = ?', `e-${tag}`)).length, 0);
+  delete process.env.GIRRU_STORE_P9;
+});
+
+test('P9 health counts on PostgreSQL (migration 180)', { skip }, async () => {
+  process.env.GIRRU_STORE_P9 = '1';
+  await m.health.recordHealthEvent(owner, 'recall_failed', 'a-1');
+  await m.health.recordHealthEvent(owner, 'recall_failed', 'a-1');
+  await m.health.recordHealthEvent(owner, 'doctor', 'h', { duplicate: 2 });
+  const h = await m.health.memoryHealth(owner);
+  assert.equal(h.rows.find((r) => r.id === 'remembering').state, 'needs_you');
+  assert.equal(h.rows.find((r) => r.id === 'background').word, '2 to tidy');
+  assert.equal(h.rows.find((r) => r.id === 'backups').detail.postgres, true);
+  const n = await m.q.all("SELECT COUNT(*) AS n FROM memory_health_events WHERE owner_id = ? AND kind = 'notice'", owner);
+  assert.equal(Number(n[0].n), 1);
+  const b = await m.health.supportBundle(owner);
+  assert.equal(b.database.driver, 'postgres');
   delete process.env.GIRRU_STORE_P9;
 });
