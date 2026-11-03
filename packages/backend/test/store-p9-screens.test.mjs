@@ -103,6 +103,8 @@ test('agent tools: one person and the privacy review, with the window\'s owner g
   add('sam-1', 'Sam prefers calls in the morning.', 'people', 'sam');
   add('sam-2', 'Meeting with Sam about the invoice on Friday.', 'project', 'website');
   add('sam-3', 'Samuel from the bank called.', 'owner', null);
+  for (const [id, kind, scope, line] of [['ho-open', 'project', 'website', 'Call Sam back.'], ['ho-closed', 'project', 'other', 'Sam secret plan for other.']])
+    db.prepare(`INSERT INTO agent_handoffs (id, owner_id, agent_id, scope_kind, scope_id, version, source, created_at, done, remaining, next_steps, open_questions) VALUES (?, ?, 'nora', ?, ?, 1, 'agent', ?, '[]', '[]', ?, '[]')`).run(id, OWNER, kind, scope, new Date().toISOString(), JSON.stringify([line]));
   const withSam = { workspaceDir: dir, userId: OWNER, agentId: 'nora', sessionId: 's1', memoryDrawers: [...D.selectDrawers({ audience: 'owner', project: 'website', people: ['sam', 'lena'] })] };
   const withoutSam = { ...withSam, memoryDrawers: D.selectDrawers({ audience: 'owner', project: 'website' }) };
   const member = { ...withSam, userId: MEMBER };
@@ -116,6 +118,9 @@ test('agent tools: one person and the privacy review, with the window\'s owner g
     assert.ok(!e.error, e.content[0].text);
     assert.deepEqual(e.data.export.drawer.map((m) => m.id), ['sam-1']);
     assert.deepEqual(e.data.export.mentions.map((m) => m.id), ['sam-2'], 'whole word: Samuel is not Sam');
+    assert.deepEqual(e.data.export.handoffs.map((h) => h.id), ['ho-open']);
+    assert.equal(e.data.hiddenHandoffs, 1, 'a handoff in a place not open here is a count only');
+    assert.doesNotMatch(e.content[0].text, /secret plan/);
     assert.ok((await T.memoryPersonForgetTool.execute({ person: 'sam', confirm: 'Sam' }, withSam)).error, 'the key confirms');
     assert.ok((await T.memoryPersonForgetTool.execute({ person: 'sam', confirm: 'sam', mention_ids: ['sam-3'] }, withSam)).error, 'only listed mentions');
     assert.ok((await T.memoryPersonForgetTool.execute({ person: 'sam', confirm: 'sam' }, { ...withSam, permissions: { memoryRead: ['owner', 'project', 'people'], memoryWrite: ['project'] } })).error, 'may not write people');
@@ -129,6 +134,8 @@ test('agent tools: one person and the privacy review, with the window\'s owner g
     const item = r.data.items.find((x) => x.id === flagged.id);
     assert.ok(item, r.content[0].text);
     assert.deepEqual(item.sensitive, ['health']);
+    assert.doesNotMatch(r.content[0].text, /depression/, 'kinds and topics only, never the text');
+    assert.equal('text' in item, false);
     assert.equal((await T.memoryPrivacyReviewTool.execute({}, withoutSam)).data.items.some((x) => x.id === flagged.id), false, 'only open drawers');
     for (const bad of [member, outsider]) assert.ok((await T.memoryPrivacyReviewTool.execute({}, bad)).error);
     assert.ok((await T.memoryPrivacyDecideTool.execute({ proposal_id: flagged.id, decision: 'forget', review_hash: 'wrong' }, withSam)).error, 'the review hash binds it');

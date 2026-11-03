@@ -13,7 +13,7 @@
  *                        (the person's key) and only mention ids the export listed in
  *                        drawers the agent may write.
  * memory_privacy_review  read only: waiting memories flagged as personal data or a
- *                        sensitive topic, with the kinds / topics (never the values),
+ *                        sensitive topic, with the kinds / topics (never the text),
  *                        the proposal id and its reviewHash.
  * memory_privacy_decide  keep or forget one of them (approve / reject the proposal with
  *                        its reviewHash), after the owner approves the call.
@@ -66,15 +66,18 @@ Use it before memory_person_forget to see which mentions can be forgotten too.`,
       const out = await exportPerson(g.owner, g.key);
       const mentions = out.mentions.filter((m) => g.open.has(m.drawer));
       const hidden = out.mentions.length - mentions.length;
+      // Handoff lines only from places open for the run; the rest as a count (like agents' own notes).
+      const handoffs = out.handoffs.filter((h) => g.open.has(h.scope));
       auditTool(context, 'memory.person_export', 'memory_person', g.key, { drawer: out.drawer.length, mentions: out.mentions.length, graph: out.graph.length, handoffs: out.handoffs.length });
       const text = [
         `${out.person}: ${out.drawer.length} memories in their place.`,
         ...out.drawer.map((m) => `- ${m.id}${m.status === 'replaced' ? ' (replaced)' : ''}: ${oneLine(m.content)}`),
         `Memories elsewhere that mention them: ${out.mentions.length}${hidden ? ` (${hidden} in places not open here, count only)` : ''}.`,
         ...mentions.map((m) => `- ${m.id} [${m.drawer}, ${m.why === 'graph' ? 'linked' : 'names them'}]: ${oneLine(m.content)}`),
-        `Memory map entries: ${out.graph.length}. Handoff notes that name them: ${out.handoffs.length} (they stay when the person is forgotten). Agents' own notes: ${out.agentNotes.count}.`,
+        `Memory map entries: ${out.graph.length}. Handoff notes that name them: ${out.handoffs.length}${out.handoffs.length - handoffs.length ? ` (${out.handoffs.length - handoffs.length} in places not open here, count only)` : ''}; they stay when the person is forgotten. Agents' own notes: ${out.agentNotes.count}.`,
+        ...handoffs.map((h) => `- handoff ${h.id} [${h.scope}]: ${h.lines.map((l) => oneLine(l, 200)).join(' / ')}`),
       ].join('\n');
-      return ok(text, { export: { ...out, mentions, agentNotes: { count: out.agentNotes.count, ids: [] } }, hiddenMentions: hidden });
+      return ok(text, { export: { ...out, mentions, handoffs, agentNotes: { count: out.agentNotes.count, ids: [] } }, hiddenMentions: hidden, hiddenHandoffs: out.handoffs.length - handoffs.length });
     } catch (err) {
       if (err instanceof PersonError) return fail('memory_person_export', err.message);
       throw err;
@@ -125,7 +128,8 @@ async function flagged(owner: string, open: Set<string>) {
     if (!open.has(p.drawerId)) continue;
     const texts = p.changes.map((c) => ('after' in c && c.after ? c.after.content : ''));
     const flags = privacyFlags(p.reasons ?? [], texts);
-    if (flags) out.push({ id: p.id, drawer: p.drawerId, reviewHash: p.reviewHash, text: oneLine(texts.join(' ')), fromChannel: (p.reasons ?? []).includes('outsider'), ...flags });
+    // Kinds and topics only, never the text: the owner reads it in Memory › Needs you.
+    if (flags) out.push({ id: p.id, drawer: p.drawerId, reviewHash: p.reviewHash, fromChannel: (p.reasons ?? []).includes('outsider'), ...flags });
   }
   return out;
 }
@@ -134,7 +138,8 @@ export const memoryPrivacyReviewTool: Tool = {
   name: 'memory_privacy_review',
   description: `List waiting memories that hold other people's personal data (e-mail, phone, address, bank account, card, ID number)
 or a sensitive topic (health, religion, politics, sexuality, origin, union, genetic). They are never saved by themselves.
-Each item gives the kinds or topics, the proposal id and its reviewHash. Decide one with memory_privacy_decide.
+Each item gives the place, the kinds or topics (never the text; the owner reads it in Memory › Needs you), the proposal id
+and its reviewHash. Decide one with memory_privacy_decide.
 Only the memory drawers open for this conversation are read.`,
   input_schema: { type: 'object', properties: { limit: { type: 'number', minimum: 1, maximum: 50 } } },
   async execute(params: { limit?: unknown }, context?: ToolExecutionContext): Promise<ToolResult> {
@@ -144,7 +149,7 @@ Only the memory drawers open for this conversation are read.`,
     const limit = typeof params?.limit === 'number' ? Math.max(1, Math.min(50, Math.floor(params.limit))) : 20;
     const items = (await flagged(owner, new Set(toolMemoryDrawers(context).map(drawerId)))).slice(0, limit);
     const text = items.length
-      ? items.map((x, i) => `${i + 1}. [${x.drawer}] "${x.text}"${x.sensitive.length ? ` — sensitive: ${x.sensitive.join(', ')}` : ''}${x.personalData.length ? ` — personal data: ${x.personalData.join(', ')}` : ''}${x.fromChannel ? ' — from a channel' : ''} (proposal ${x.id}, reviewHash ${x.reviewHash})`).join('\n')
+      ? items.map((x, i) => `${i + 1}. [${x.drawer}]${x.sensitive.length ? ` — sensitive: ${x.sensitive.join(', ')}` : ''}${x.personalData.length ? ` — personal data: ${x.personalData.join(', ')}` : ''}${x.fromChannel ? ' — from a channel' : ''} (proposal ${x.id}, reviewHash ${x.reviewHash})`).join('\n')
       : 'No personal data or sensitive memory waits in the open drawers.';
     return ok(text, { items });
   },
