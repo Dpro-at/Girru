@@ -25,11 +25,18 @@ public let maxSafeInteger: UInt64 = (1 << 53) - 1
 
 /// A device's identity key. The Secure Enclave key on a phone and a software
 /// key in tests both conform. The private key never leaves the conformer.
+///
+/// The same key both signs and agrees: PROTOCOL.md "Welcome" wraps the
+/// notification key under ECDH(identity key, peer identity key), bound to the
+/// SPKI the pairing request carried, so a second key would not open it.
 public protocol IdentitySigner: Sendable {
     /// SPKI DER of the P-256 public key.
     var publicKeySPKI: Data { get }
     /// ECDSA P-256 / SHA-256 over `message`, DER encoded.
     func sign(_ message: Data) throws -> Data
+    /// ECDH P-256 of this identity key with `peerSPKI` (the 32-byte x
+    /// coordinate), then HKDF-SHA-256. The shared secret stays inside.
+    func agree(peerSPKI: Data, salt: Data, info: Data, count: Int) throws -> Data
 }
 
 public extension IdentitySigner {
@@ -147,6 +154,23 @@ public struct SoftwareIdentitySigner: IdentitySigner {
 
     public func sign(_ message: Data) throws -> Data {
         try key.signature(for: message).derRepresentation
+    }
+
+    public func agree(peerSPKI: Data, salt: Data, info: Data, count: Int) throws -> Data {
+        let own = try P256.KeyAgreement.PrivateKey(rawRepresentation: key.rawRepresentation)
+        return try IdentityAgreement.derive(peerSPKI: peerSPKI, salt: salt, info: info, count: count) { try own.sharedSecretFromKeyAgreement(with: $0) }
+    }
+}
+
+/// The shared part of `IdentitySigner.agree` for every key store.
+public enum IdentityAgreement {
+    public static func derive(peerSPKI: Data, salt: Data, info: Data, count: Int, agree: (P256.KeyAgreement.PublicKey) throws -> SharedSecret) throws -> Data {
+        let peer: P256.KeyAgreement.PublicKey
+        do { peer = try P256.KeyAgreement.PublicKey(derRepresentation: peerSPKI) } catch { throw ProtocolError.wrongKey }
+        // A key store error (no unlock, key gone) passes through unchanged.
+        let shared = try agree(peer)
+        let key = shared.hkdfDerivedSymmetricKey(using: SHA256.self, salt: salt, sharedInfo: info, outputByteCount: count)
+        return key.withUnsafeBytes { Data($0) }
     }
 }
 

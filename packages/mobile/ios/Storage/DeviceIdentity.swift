@@ -6,15 +6,44 @@ import Security
 /// The phone's identity key in the Secure Enclave: P-256, non-exportable,
 /// usable only with user presence. The app lock's LAContext is passed in so
 /// one unlock covers signing until the app locks again.
+///
+/// PROTOCOL.md wraps the notification key under ECDH with this same identity
+/// key (bound to the SPKI the pairing request sent), so one Secure Enclave key
+/// both signs and agrees. CryptoKit has a separate type for each use; both are
+/// opened from the same wrapped blob, and the two public keys must be equal,
+/// else the identity is refused rather than replaced by a second key.
 struct SecureEnclaveSigner: IdentitySigner, @unchecked Sendable {
     private let key: SecureEnclave.P256.Signing.PrivateKey
+    private let agreement: SecureEnclave.P256.KeyAgreement.PrivateKey
 
-    init(key: SecureEnclave.P256.Signing.PrivateKey) { self.key = key }
+    init(blob: Data, context: LAContext) throws {
+        key = try SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: blob, authenticationContext: context)
+        do {
+            agreement = try SecureEnclave.P256.KeyAgreement.PrivateKey(dataRepresentation: blob, authenticationContext: context)
+        } catch {
+            throw IdentityError.keyAgreementUnavailable
+        }
+        guard agreement.publicKey.derRepresentation == key.publicKey.derRepresentation else { throw IdentityError.keyAgreementUnavailable }
+    }
 
     var publicKeySPKI: Data { key.publicKey.derRepresentation }
 
     func sign(_ message: Data) throws -> Data {
         try key.signature(for: message).derRepresentation
+    }
+
+    func agree(peerSPKI: Data, salt: Data, info: Data, count: Int) throws -> Data {
+        try IdentityAgreement.derive(peerSPKI: peerSPKI, salt: salt, info: info, count: count) { try agreement.sharedSecretFromKeyAgreement(with: $0) }
+    }
+}
+
+enum IdentityError: LocalizedError {
+    /// The Secure Enclave key cannot also do key agreement. Pairing cannot
+    /// finish; nothing falls back to a weaker key.
+    case keyAgreementUnavailable
+
+    var errorDescription: String? {
+        "This iPhone cannot finish pairing with its secure key."
     }
 }
 
@@ -29,15 +58,17 @@ enum DeviceIdentity {
             // The stored blob is the key wrapped by this phone's Secure Enclave:
             // useless anywhere else, so it needs no extra access control.
             if let blob = try store.get(account: account) {
-                return SecureEnclaveSigner(key: try SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: blob, authenticationContext: context))
+                return try SecureEnclaveSigner(blob: blob, context: context)
             }
             var error: Unmanaged<CFError>?
             guard let access = SecAccessControlCreateWithFlags(nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, [.privateKeyUsage, .userPresence], &error) else {
                 throw KeychainError.accessControl
             }
             let key = try SecureEnclave.P256.Signing.PrivateKey(accessControl: access, authenticationContext: context)
+            // Checked before it is stored, so an identity that cannot agree is never kept.
+            let signer = try SecureEnclaveSigner(blob: key.dataRepresentation, context: context)
             try store.set(key.dataRepresentation, account: account, protection: .whenUnlocked)
-            return SecureEnclaveSigner(key: key)
+            return signer
         }
         // Simulator only: a software key, readable only with user presence.
         if let raw = try store.get(account: softwareAccount, context: context) {

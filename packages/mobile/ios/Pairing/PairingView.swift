@@ -18,8 +18,10 @@ struct PairingView: View {
             switch flow.step {
             case .idle, .done:
                 scanStep
-            case .confirm(let code, let name):
-                confirmStep(code: code, computerName: name)
+            case .choose(let name):
+                chooseStep(computerName: name)
+            case .waitingForCode:
+                waitingForCodeStep
             case .waitingForApproval(let code):
                 waitingStep(code: code)
             case .failed(let message):
@@ -79,14 +81,11 @@ struct PairingView: View {
         }
     }
 
-    private func confirmStep(code: String, computerName: String?) -> some View {
+    private func chooseStep(computerName: String?) -> some View {
         Group {
-            Text("Check the code")
+            Text("Pair with \(computerName ?? "your computer")")
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(Theme.text)
-            Text("Your computer\(computerName.map { " (\($0))" } ?? "") shows the same code:")
-                .foregroundStyle(Theme.secondaryText)
-            codeText(code)
 
             Text("Stay paired without use for")
                 .font(.headline)
@@ -111,12 +110,28 @@ struct PairingView: View {
         }
     }
 
+    /// No code yet: it appears only once the computer answered this phone.
+    private var waitingForCodeStep: some View {
+        Group {
+            Text("Connecting to your computer")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(Theme.text)
+            Text("A check code appears here when your computer answers.")
+                .foregroundStyle(Theme.secondaryText)
+            ProgressView().frame(maxWidth: .infinity)
+            Spacer(minLength: 0)
+            Button("Cancel") { flow.reset() }
+                .frame(maxWidth: .infinity)
+                .foregroundStyle(Theme.accent)
+        }
+    }
+
     private func waitingStep(code: String) -> some View {
         Group {
             Text("Approve this phone on your computer")
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(Theme.text)
-            Text("Check that your computer shows this code, then click Approve there.")
+            Text("Check that your computer shows the same code, then click Approve there.")
                 .foregroundStyle(Theme.secondaryText)
             codeText(code)
             ProgressView().frame(maxWidth: .infinity)

@@ -123,6 +123,15 @@ func checkSession() throws {
         _ = try Handshake.answer(signer: SoftwareIdentitySigner(), peerSPKI: phone.publicKeySPKI, hello: pending.hello, crypto: crypto, now: now)
     }
     check(Session.nonce(1) == Data([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]), "nonce layout")
+
+    // A fresh hs1 for every handshake: the computer answers each text once.
+    let again = try Handshake.start(signer: phone, peerId: computer.deviceId, crypto: crypto, now: now)
+    check(again.hello != pending.hello, "a new handshake is a new hs1")
+    let p1 = try G1Text.json(String(pending.hello.split(separator: ".")[2])), p2 = try G1Text.json(String(again.hello.split(separator: ".")[2]))
+    check(p1["eph"] as? String != p2["eph"] as? String && p1["nonce"] as? String != p2["nonce"] as? String, "fresh ephemeral key and nonce")
+    fails(ProtocolError.badFormat, "an hs2 answers only its own hs1") {
+        _ = try Handshake.finish(again, peerSPKI: computer.publicKeySPKI, reply: reply, crypto: crypto, now: now)
+    }
 }
 
 // MARK: - signed commands
@@ -270,26 +279,234 @@ func checkPairingMessages() throws {
     wrongSecret.pairingSecret = crypto.randomBytes(32)
     fails(ProtocolError.badTag, "request needs the QR secret") { _ = try PairingMessages.openRequest(sealed, payload: wrongSecret, crypto: crypto) }
 
-    let welcome = PairingWelcome(computer: computer.deviceId, phone: phone.deviceId, notifyKey: Base64URL.encode(crypto.randomBytes(32)), lifetimeDays: 60, name: "Office Mac")
-    let w = try PairingMessages.sealWelcome(welcome, payload: payload, computer: computer, crypto: crypto)
-    check(try PairingMessages.openWelcome(w, payload: payload, phoneId: phone.deviceId, crypto: crypto) == welcome, "welcome round trip")
+    // Check challenge: signed by the computer, sealed, addressed to this phone.
+    let (pchal, challenge) = try PairingMessages.sealChallenge(payload: payload, computer: computer, phoneId: phone.deviceId, crypto: crypto)
+    check(try PairingMessages.openChallenge(pchal, payload: payload, phoneId: phone.deviceId, crypto: crypto) == challenge, "challenge round trip")
+    check(challenge.count == 32, "challenge is 32 bytes")
+    fails(ProtocolError.badSignature, "challenge signed by someone else") {
+        let fake = try PairingMessages.sealChallenge(payload: payload, computer: SoftwareIdentitySigner(), phoneId: phone.deviceId, crypto: crypto).text
+        _ = try PairingMessages.openChallenge(fake, payload: payload, phoneId: phone.deviceId, crypto: crypto)
+    }
+    fails(ProtocolError.wrongTarget, "challenge for another phone") {
+        _ = try PairingMessages.openChallenge(pchal, payload: payload, phoneId: id32(), crypto: crypto)
+    }
+    fails(ProtocolError.badTag, "challenge needs the QR secret") {
+        _ = try PairingMessages.openChallenge(pchal, payload: wrongSecret, phoneId: phone.deviceId, crypto: crypto)
+    }
+    fails(ProtocolError.badFormat, "short challenge is not sealed") {
+        _ = try PairingMessages.sealChallenge(payload: payload, computer: computer, phoneId: phone.deviceId, crypto: crypto, challenge: Data(count: 31))
+    }
+    fails(ProtocolError.badFormat, "short challenge inside a signed box") {
+        // A computer-signed box whose challenge has 31 bytes.
+        let body = try JSONSerialization.data(withJSONObject: ["computer": computer.deviceId, "phone": phone.deviceId, "challenge": Base64URL.encode(Data(count: 31))])
+        let nonce = crypto.randomBytes(12)
+        let box = try crypto.seal(body, key: PairingMessages.pairingKey(payload, crypto: crypto), nonce: nonce, aad: Data("girru/v1/pchal\n\(payload.pairingId)".utf8))
+        let part = Base64URL.encode(nonce + box)
+        _ = try PairingMessages.openChallenge("g1.pchal.\(part).\(Base64URL.encode(try computer.sign(Data("girru/v1/pchal\n\(part)".utf8))))", payload: payload, phoneId: phone.deviceId, crypto: crypto)
+    }
+
+    let code = try PairingMessages.checkCode(secret: payload.pairingSecret, computerKey: computer.publicKeySPKI, phoneKey: phone.publicKeySPKI, challenge: challenge, crypto: crypto)
+    check(code.count == 6 && code.allSatisfy(\.isNumber), "6-digit check code")
+    check(code == (try PairingMessages.checkCode(secret: payload.pairingSecret, computerKey: computer.publicKeySPKI, phoneKey: phone.publicKeySPKI, challenge: challenge, crypto: crypto)), "check code is stable")
+    fails(ProtocolError.badFormat, "no check code without a 32-byte challenge") {
+        _ = try PairingMessages.checkCode(secret: payload.pairingSecret, computerKey: computer.publicKeySPKI, phoneKey: phone.publicKeySPKI, challenge: Data(), crypto: crypto)
+    }
+
+    // Welcome: the notification key is wrapped for the two identity keys.
+    let rawKey = crypto.randomBytes(32)
+    let welcome = PairingWelcome(computer: computer.deviceId, phone: phone.deviceId, notifyKey: Base64URL.encode(rawKey), lifetimeDays: 60, name: "Office Mac")
+    let w = try PairingMessages.sealWelcome(welcome, payload: payload, computer: computer, phoneKey: phone.publicKeySPKI, crypto: crypto)
+    check(try PairingMessages.openWelcome(w, payload: payload, phone: phone, crypto: crypto) == welcome, "welcome round trip, key unwrapped")
     fails(ProtocolError.badSignature, "welcome signed by someone else") {
-        let fake = try PairingMessages.sealWelcome(welcome, payload: payload, computer: SoftwareIdentitySigner(), crypto: crypto)
-        _ = try PairingMessages.openWelcome(fake, payload: payload, phoneId: phone.deviceId, crypto: crypto)
+        let fake = try PairingMessages.sealWelcome(welcome, payload: payload, computer: SoftwareIdentitySigner(), phoneKey: phone.publicKeySPKI, crypto: crypto)
+        _ = try PairingMessages.openWelcome(fake, payload: payload, phone: phone, crypto: crypto)
     }
     fails(ProtocolError.wrongTarget, "welcome for another phone") {
-        _ = try PairingMessages.openWelcome(w, payload: payload, phoneId: id32(), crypto: crypto)
+        _ = try PairingMessages.openWelcome(w, payload: payload, phone: SoftwareIdentitySigner(), crypto: crypto)
+    }
+    fails(ProtocolError.wrongKey, "welcome sealed for a key that is not the phone's") {
+        _ = try PairingMessages.sealWelcome(welcome, payload: payload, computer: computer, phoneKey: SoftwareIdentitySigner().publicKeySPKI, crypto: crypto)
     }
     var badLifetime = welcome
     badLifetime.lifetimeDays = 45
     fails(ProtocolError.badFormat, "lifetime not on the list") {
-        let x = try PairingMessages.sealWelcome(badLifetime, payload: payload, computer: computer, crypto: crypto)
-        _ = try PairingMessages.openWelcome(x, payload: payload, phoneId: phone.deviceId, crypto: crypto)
+        let x = try PairingMessages.sealWelcome(badLifetime, payload: payload, computer: computer, phoneKey: phone.publicKeySPKI, crypto: crypto)
+        _ = try PairingMessages.openWelcome(x, payload: payload, phone: phone, crypto: crypto)
+    }
+    fails(ProtocolError.badFormat, "an unwrapped 32-byte key is refused") {
+        // The old form: notifyKey as the raw key, signed and sealed correctly.
+        let nonce = crypto.randomBytes(12)
+        let box = try crypto.seal(try JSONEncoder().encode(welcome), key: PairingMessages.pairingKey(payload, crypto: crypto), nonce: nonce, aad: Data("girru/v1/pwel\n\(payload.pairingId)".utf8))
+        let part = Base64URL.encode(nonce + box)
+        _ = try PairingMessages.openWelcome("g1.pwel.\(part).\(Base64URL.encode(try computer.sign(Data("girru/v1/pwel\n\(part)".utf8))))", payload: payload, phone: phone, crypto: crypto)
+    }
+    // The wrap key is ECDH(phone, computer) → HKDF(salt = pairing key, info "girru/v1/nkey").
+    let wrapPhone = try phone.agree(peerSPKI: computer.publicKeySPKI, salt: PairingMessages.pairingKey(payload, crypto: crypto), info: Data("girru/v1/nkey".utf8), count: 32)
+    let wrapComputer = try computer.agree(peerSPKI: phone.publicKeySPKI, salt: PairingMessages.pairingKey(payload, crypto: crypto), info: Data("girru/v1/nkey".utf8), count: 32)
+    check(wrapPhone == wrapComputer, "both sides make the same wrap key")
+    fails(ProtocolError.wrongKey, "agreement with junk key") { _ = try phone.agree(peerSPKI: Data(count: 91), salt: Data(), info: Data(), count: 32) }
+}
+
+// MARK: - reference vectors (computer's TypeScript)
+
+func signer(d: String) throws -> SoftwareIdentitySigner { try SoftwareIdentitySigner(rawPrivateKey: Base64URL.decode(d)!) }
+
+func checkReferenceVectors() throws {
+    typealias V = ReferenceVectors
+    let computer = try signer(d: V.computerD), phone = try signer(d: V.phoneD), other = try signer(d: V.otherD)
+    let payload = try PairingPayloadParser.parse(V.qr, crypto: crypto, now: now)
+    check(payload.computerId == computer.deviceId && payload.pairingId == V.pid && payload.pairingSecret == Base64URL.decode(V.secret), "reference QR reads")
+    check(payload.expiresAt == now.addingTimeInterval(120), "QR renews every 2 minutes: exp 2 minutes ahead")
+
+    let req = try PairingMessages.openRequest(V.preq, payload: payload, crypto: crypto)
+    check(req.key == Base64URL.encode(phone.publicKeySPKI) && req.lifetimeDays == 60 && req.name == "Work iPhone", "reference request opens and its sig verifies")
+
+    let challenge = try PairingMessages.openChallenge(V.pchal, payload: payload, phoneId: phone.deviceId, crypto: crypto)
+    check(Base64URL.encode(challenge) == V.challenge, "reference challenge opens")
+    check(try PairingMessages.checkCode(secret: payload.pairingSecret, computerKey: computer.publicKeySPKI, phoneKey: phone.publicKeySPKI, challenge: challenge, crypto: crypto) == V.code, "check code matches the reference")
+    check(try PairingMessages.checkCode(secret: Data(repeating: 1, count: 32), computerKey: computer.publicKeySPKI, phoneKey: phone.publicKeySPKI, challenge: Data(repeating: 0xaa, count: 32), crypto: crypto) == V.fixedCode, "fixed-input check code matches the reference")
+    fails(ProtocolError.wrongTarget, "reference challenge for another phone is refused") {
+        _ = try PairingMessages.openChallenge(V.pchalOther, payload: payload, phoneId: phone.deviceId, crypto: crypto)
+    }
+    check(try PairingMessages.openChallenge(V.pchalOther, payload: payload, phoneId: other.deviceId, crypto: crypto).count == 32, "…and opens for that phone")
+
+    let w = try PairingMessages.openWelcome(V.pwel, payload: payload, phone: phone, crypto: crypto)
+    check(w.notifyKey == V.notifyKey && w.lifetimeDays == 60 && w.name == "Office Mac" && w.phone == phone.deviceId, "reference welcome opens, notification key unwrapped")
+    let never = try PairingMessages.openWelcome(V.pwelNever, payload: payload, phone: phone, crypto: crypto)
+    check(never.lifetimeDays == nil && PairingLifetime(days: never.lifetimeDays) == .never && never.notifyKey == V.notifyKey, "reference welcome with no lifetime = never expires")
+    fails(ProtocolError.wrongTarget, "another phone cannot open the welcome") {
+        _ = try PairingMessages.openWelcome(V.pwel, payload: payload, phone: other, crypto: crypto)
     }
 
-    let code = PairingMessages.checkCode(secret: payload.pairingSecret, computerKey: computer.publicKeySPKI, phoneKey: phone.publicKeySPKI, crypto: crypto)
-    check(code.count == 6 && code.allSatisfy(\.isNumber), "6-digit check code")
-    check(code == PairingMessages.checkCode(secret: payload.pairingSecret, computerKey: computer.publicKeySPKI, phoneKey: phone.publicKeySPKI, crypto: crypto), "check code is stable")
+    // The unwrapped key opens the computer's notice.
+    let record = PairedComputer(computerId: computer.deviceId, computerName: nil, computerKey: computer.publicKeySPKI, relay: nil, localAddresses: [],
+                                phoneId: phone.deviceId, notifyKey: Base64URL.decode(w.notifyKey)!, pairedAt: now, lifetime: .days60)
+    var window = ReplayWindow()
+    let n = try Notice.open(userInfo: ["g": V.ntf], computer: record, replay: &window, crypto: crypto, now: now)
+    check(n.kind == .approval && n.approvalId == "abc-1" && n.title == "Approve?", "reference notice opens with the unwrapped key")
+
+    // The phone's progress against the reference envelopes.
+    var progress = PairingProgress(payload: payload, phoneKey: phone.publicKeySPKI)
+    fails(ProtocolError.badFormat, "no challenge before the request") { _ = try progress.receiveChallenge(V.pchal, crypto: crypto, now: now) }
+    let sent = try progress.requestText(PairingRequest(key: "", name: "Work iPhone", platform: "ios", push: nil, lifetimeDays: nil), signer: phone, crypto: crypto, now: now)
+    fails(ProtocolError.badFormat, "no welcome before a code was shown") { _ = try progress.receiveWelcome(V.pwel, phone: phone, crypto: crypto) }
+    check(try progress.receiveChallenge(V.pchal, crypto: crypto, now: now.addingTimeInterval(30)) == V.code, "progress shows the reference code")
+    check(progress.stage == .codeShown(V.code), "stage: code shown")
+    check(try progress.receiveWelcome(V.pwel, phone: phone, crypto: crypto).notifyKey == V.notifyKey && progress.stage == .paired, "progress takes the welcome")
+    check(sent.hasPrefix("g1.preq."), "request sealed")
+}
+
+// MARK: - pairing progress (phone side rules)
+
+func checkPairingProgress() throws {
+    let computer = SoftwareIdentitySigner(), phone = SoftwareIdentitySigner()
+    let payload = try PairingPayloadParser.parse(makeQR(computer: computer, exp: 120), crypto: crypto, now: now)
+    let req = PairingRequest(key: "", name: "Work iPhone", platform: "ios", push: nil, lifetimeDays: 90)
+
+    var p = PairingProgress(payload: payload, phoneKey: phone.publicKeySPKI)
+    check(p.stage == .scanned, "starts scanned")
+    let first = try p.requestText(req, signer: phone, crypto: crypto, now: now)
+    check(try p.requestText(req, signer: phone, crypto: crypto, now: now.addingTimeInterval(200)) == first, "a resend is the same request, byte for byte")
+    check(try PairingMessages.openRequest(first, payload: payload, crypto: crypto).lifetimeDays == 90, "request carries the wish")
+
+    // Idempotent: the same challenge again shows the same code; a different one ends it.
+    let (c1, _) = try PairingMessages.sealChallenge(payload: payload, computer: computer, phoneId: phone.deviceId, crypto: crypto)
+    let code = try p.receiveChallenge(c1, crypto: crypto, now: now.addingTimeInterval(60))
+    check(try p.receiveChallenge(c1, crypto: crypto, now: now.addingTimeInterval(61)) == code, "same challenge again: same code")
+    let (c2, _) = try PairingMessages.sealChallenge(payload: payload, computer: computer, phoneId: phone.deviceId, crypto: crypto)
+    fails(ProtocolError.wrongTarget, "a different second challenge is refused") { _ = try p.receiveChallenge(c2, crypto: crypto, now: now.addingTimeInterval(62)) }
+    check(p.isCurrent(now: now.addingTimeInterval(600)), "after the challenge, the renewed QR does not end this pairing")
+    let raw = crypto.randomBytes(32)
+    let w = try PairingMessages.sealWelcome(PairingWelcome(computer: computer.deviceId, phone: phone.deviceId, notifyKey: Base64URL.encode(raw), lifetimeDays: nil, name: nil),
+                                            payload: payload, computer: computer, phoneKey: phone.publicKeySPKI, crypto: crypto)
+    check(try p.receiveWelcome(w, phone: phone, crypto: crypto).notifyKey == Base64URL.encode(raw), "welcome after the code")
+
+    // exp passed before the challenge: the owner scans the new code.
+    var late = PairingProgress(payload: payload, phoneKey: phone.publicKeySPKI)
+    check(!late.isCurrent(now: now.addingTimeInterval(120)), "at exp the code no longer counts")
+    fails(ProtocolError.expired, "no request after exp") { _ = try late.requestText(req, signer: phone, crypto: crypto, now: now.addingTimeInterval(121)) }
+    _ = try late.requestText(req, signer: phone, crypto: crypto, now: now.addingTimeInterval(100))
+    let (c3, _) = try PairingMessages.sealChallenge(payload: payload, computer: computer, phoneId: phone.deviceId, crypto: crypto)
+    fails(ProtocolError.expired, "challenge after exp is not shown") { _ = try late.receiveChallenge(c3, crypto: crypto, now: now.addingTimeInterval(125)) }
+    check(late.challenge == nil && late.stage == .requestSent, "no code after exp")
+    check(!PairingProgress.expiredMessage.isEmpty && PairingProgress.expiredMessage.contains("scan"), "plain expiry text")
+
+    var wrongSigner = PairingProgress(payload: payload, phoneKey: phone.publicKeySPKI)
+    fails(ProtocolError.wrongKey, "request only with the phone's own key") { _ = try wrongSigner.requestText(req, signer: SoftwareIdentitySigner(), crypto: crypto, now: now) }
+
+    // A challenge for another phone shows no code.
+    var mine = PairingProgress(payload: payload, phoneKey: phone.publicKeySPKI)
+    _ = try mine.requestText(req, signer: phone, crypto: crypto, now: now)
+    let (forOther, _) = try PairingMessages.sealChallenge(payload: payload, computer: computer, phoneId: id32(), crypto: crypto)
+    fails(ProtocolError.wrongTarget, "challenge for another phone") { _ = try mine.receiveChallenge(forOther, crypto: crypto, now: now) }
+    check(mine.stage == .requestSent, "no code shown")
+}
+
+// MARK: - session messages and approvals
+
+func json(_ s: String) -> Data { Data(s.utf8) }
+
+func checkSessionMessages() throws {
+    // reply / run / run.end, as the computer's service sends them.
+    if case .reply(let ref, true, let data, nil) = try ComputerMessage.parse(json(#"{"type":"reply","ref":"r1","ok":true,"data":{"x":1}}"#)) {
+        check(ref == "r1" && (data as? [String: Any])?["x"] as? Int == 1, "reply ok")
+    } else { check(false, "reply ok parses") }
+    if case .reply(nil, false, nil, let e) = try ComputerMessage.parse(json(#"{"type":"reply","ref":null,"ok":false,"error":"bad_format"}"#)) {
+        check(e == "bad_format", "reply without ref")
+    } else { check(false, "reply without ref parses") }
+    fails(ProtocolError.badFormat, "ok must be a JSON boolean") { _ = try ComputerMessage.parse(json(#"{"type":"reply","ref":"r","ok":1,"data":{}}"#)) }
+    if case .runEnd(_, "phone-1", let end, let code) = try ComputerMessage.parse(json(#"{"type":"run.end","ref":"r1","runId":"phone-1","status":"dropped","code":"slow_link"}"#)) {
+        check(end == .reread && code == "slow_link", "slow_link: read the rest with chat.messages")
+    } else { check(false, "run.end parses") }
+    check(RunEnd(status: "complete", code: nil) == .complete, "complete")
+    check(RunEnd(status: "stopped", code: nil) == .stopped, "stopped")
+    check(RunEnd(status: "error", code: "internal_error") == .failed, "error = failure")
+    check(RunEnd(status: "unknown", code: nil) == .reread, "unknown run: re-read")
+    check(RunEnd(status: "something-new", code: nil) == .failed, "unknown status = failure")
+    if case .run(_, "phone-1", 3, let frame) = try ComputerMessage.parse(json(#"{"type":"run","ref":"r1","runId":"phone-1","seq":3,"frame":{"type":"delta"}}"#)) {
+        check(frame["type"] as? String == "delta", "run frame")
+    } else { check(false, "run parses") }
+    if case .approvalPending("a1", true) = try ComputerMessage.parse(json(#"{"type":"approval.pending","id":"a1","pending":true}"#)) { check(true, "pending answer") } else { check(false, "pending answer parses") }
+    fails(ProtocolError.badFormat, "unknown type") { _ = try ComputerMessage.parse(json(#"{"type":"other"}"#)) }
+
+    check(CommandFailure.message(for: "internal_error") == CommandFailure.message(for: "never_seen_code"), "internal_error is a generic failure")
+    check(!CommandFailure.message(for: "internal_error").contains("internal_error"), "raw code never shown")
+    for c in ["full_view_required", "full_view_unavailable", "too_large"] {
+        check(CommandFailure.message(for: c).contains("on your computer") && CommandFailure.decideOnComputer.contains(c), "\(c): decide on the computer")
+    }
+
+    check(try CommandBody.chatMessages(conversationId: "c1") == #"{"id":"c1","type":"chat.messages"}"#, "chat.messages body")
+    check(try CommandBody.approvalPendingQuery(id: "a1") == #"{"id":"a1","type":"approval.pending"}"#, "pending query")
+    check(try CommandBody.approvalDetail(id: "a1", ref: "d-1") == #"{"id":"a1","ref":"d-1","type":"approval.detail"}"#, "detail body with ref")
+    fails(ProtocolError.badFormat, "bad ref") { _ = try CommandBody.approvalDetail(id: "a1", ref: "has space") }
+    let hash = String(repeating: "ab", count: 32)
+    check(try CommandBody.approvalDecide(id: "a1", approve: true, paramsHash: hash) == #"{"approve":true,"id":"a1","paramsHash":"\#(hash)","type":"approval.decide"}"#, "decide body as in PROTOCOL.md")
+    fails(ProtocolError.badFormat, "approve needs paramsHash") { _ = try CommandBody.approvalDecide(id: "a1", approve: true, paramsHash: nil) }
+    check(try CommandBody.approvalDecide(id: "a1", approve: false, paramsHash: nil) == #"{"approve":false,"id":"a1","type":"approval.decide"}"#, "deny without hash")
+
+    // Approvals: a cut-short preview needs the full view, and approves its hash.
+    let id = "0b9c7b1e-2f43-4a7e-9a55-1d2c3b4a5f60"
+    let list = try ApprovalSummary.list(from: try JSONSerialization.jsonObject(with: json(#"{"approvals":[{"id":"\#(id)","toolName":"email.send","paramsHash":"\#(hash)","truncated":true,"fullViewRequired":true,"paramsPreview":{"to":"[object]"}},{"id":"b","toolName":"t","paramsHash":"\#(hash)","truncated":false,"fullViewRequired":false}]}"#)))
+    check(list.count == 2 && list[0].needsFullView && !list[1].needsFullView, "list reads fullViewRequired / truncated")
+    check(try ApprovalFlow.start(list[1], approve: true) == .decide(body: try CommandBody.approvalDecide(id: "b", approve: true, paramsHash: hash)), "full preview approves directly")
+    check(try ApprovalFlow.start(list[0], approve: true) == .fetchFullView(body: try CommandBody.approvalDetail(id: id)), "cut-short preview fetches the full view")
+    check(try ApprovalFlow.start(list[0], approve: false) == .decide(body: try CommandBody.approvalDecide(id: id, approve: false, paramsHash: hash)), "deny needs no full view")
+    if case .decideOnComputer = try ApprovalFlow.start(ApprovalSummary(id: "c", toolName: "t", paramsHash: nil, truncated: false, fullViewRequired: false), approve: true) { check(true, "no hash: decide on the computer") } else { check(false, "no hash: decide on the computer") }
+
+    let fullHash = String(repeating: "cd", count: 32)
+    let detailData = try JSONSerialization.jsonObject(with: json(#"{"id":"\#(id)","toolName":"email.send","category":"email","agentId":"sara","sessionId":"s1","params":{"to":["a@example.org"],"body":"Full text","token":"***"},"maskedFields":["token"],"runScope":null,"requestedAt":1800000000000,"paramsHash":"\#(fullHash)"}"#))
+    guard case .showFullView(let d) = ApprovalFlow.afterDetail(ok: true, data: detailData, error: nil, askedId: id) else { check(false, "detail shows"); return }
+    check(d.paramsText.contains("\"body\" : \"Full text\"") && d.paramsText.contains("a@example.org") && d.maskedFields == ["token"], "full params shown")
+    check(try ApprovalFlow.approveBody(d) == (try CommandBody.approvalDecide(id: id, approve: true, paramsHash: fullHash)), "approve with the full view's paramsHash")
+    if case .decideOnComputer = ApprovalFlow.afterDetail(ok: true, data: detailData, error: nil, askedId: "other-id") { check(true, "detail for another approval refused") } else { check(false, "detail for another approval refused") }
+    for code in ["full_view_unavailable", "too_large", "full_view_required", "not_pending", "internal_error"] {
+        if case .decideOnComputer(let m) = ApprovalFlow.afterDetail(ok: false, data: nil, error: code, askedId: id) {
+            check(m == CommandFailure.message(for: code), "\(code) after detail")
+        } else { check(false, "\(code) after detail") }
+    }
+    fails(ProtocolError.badFormat, "bad paramsHash in the list") {
+        _ = try ApprovalSummary(json: ["id": "x", "toolName": "t", "paramsHash": "ABC"])
+    }
 }
 
 // MARK: - pairing lifetime
@@ -493,6 +710,7 @@ if CommandLine.arguments.dropFirst().first == "interop" {
 let groups: [(String, () throws -> Void)] = [
     ("base64url", checkBase64), ("crypto", checkCrypto), ("session", checkSession), ("commands", checkCommands),
     ("replay window", checkReplayWindow), ("QR payload", checkPayload), ("pairing messages", checkPairingMessages),
+    ("reference vectors", checkReferenceVectors), ("pairing progress", checkPairingProgress), ("session messages + approvals", checkSessionMessages),
     ("pairing lifetime", checkLifetime), ("lock policy", checkLock), ("bridge + navigation", checkBridge), ("notices", checkNotices),
     ("verified approvals", checkVerifiedApprovals),
 ]

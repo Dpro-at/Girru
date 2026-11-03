@@ -71,7 +71,10 @@ public enum Handshake {
     private struct Hello: Codable { let from: String; let to: String; let eph: String; let ts: UInt64; let nonce: String }
     private struct Reply: Codable { let from: String; let to: String; let eph: String; let ts: UInt64; let h1: String }
 
-    /// Step 1, run by the phone: a signed hello with a fresh ephemeral key.
+    /// Step 1, run by the phone: a signed hello with a fresh ephemeral key,
+    /// nonce and time. Call it again for every handshake (reconnect, retry,
+    /// path change): the computer answers each hs1 text once and ignores a
+    /// copy, so a stored hello must never be resent.
     public static func start(signer: IdentitySigner, peerId: String, crypto: PairingCrypto, now: Date = Date()) throws -> PendingHandshake {
         guard Base64URL.isId(peerId) else { throw ProtocolError.badFormat }
         let eph = crypto.makeEphemeral()

@@ -22,16 +22,21 @@ this folder.
   fallback. The owner can shorten the re-lock time (immediately, 15 s, 30 s,
   1 min) but there is no way to turn the lock off. A phone without a passcode
   cannot open Girru. The app is covered in the app switcher.
-- **Pairing.** Scan the QR code from Settings › Phone on the computer, check
-  that both screens show the same 6-digit code, pick how long the pairing
-  lasts without use (30, 60, 90 or 120 days, or never expires, shown with a
-  warning), then click Approve on the computer. Scan once, stay paired: each
+- **Pairing.** Scan the QR code from Settings › Phone on the computer, pick
+  how long the pairing lasts without use (30, 60, 90 or 120 days, or never
+  expires, shown with a warning) and send. The computer answers with a signed
+  check challenge; only then does the phone show the 6-digit code. Check that
+  both screens show the same code, then click Approve on the computer. The QR
+  code renews on the computer every 2 minutes: if it runs out before the
+  computer answered, the phone asks you to scan the new one. Scan once, stay paired: each
   use starts the time again, and the app never asks to scan while the pairing
   is valid. The computer is the final authority; if it refuses this phone
   (expired or removed), the app shows the pairing screen with a short reason.
 - **Keys.** The phone's identity key is a P-256 key created inside the Secure
   Enclave: it cannot be copied off the phone and signs only while the app is
-  unlocked. Sensitive actions ask for Face ID again before the key signs.
+  unlocked. The same key also does the ECDH that unwraps the notification key
+  in the welcome (the protocol binds it to the identity key), so there is no
+  second key. Sensitive actions ask for Face ID again before the key signs.
 - **Your computer's screens.** A web view shows the computer's own screens.
   They load only from `girru-app://computer/`, a scheme the app answers itself
   by fetching each file through the authenticated end-to-end session. The web
@@ -52,6 +57,12 @@ this folder.
   over the session whether the approval is still waiting. The signed command
   carries the approval id, and the computer must check it is pending and was
   sent to this phone.
+- **Full view before approve.** When the Approvals preview was cut short
+  (`truncated` or `fullViewRequired`), the app fetches `approval.detail`, shows
+  the full parameters (secrets masked by the computer) and signs Approve with
+  that view's `paramsHash`. If the computer cannot give a full view
+  (`full_view_unavailable`, `too_large`, `full_view_required`) the app tells
+  the owner to approve on the computer.
 
 The protocol is described in `packages/relay/PROTOCOL.md` (suite g1: ECDSA
 P-256, ECDH P-256, HKDF-SHA-256, AES-256-GCM).
@@ -60,7 +71,7 @@ P-256, ECDH P-256, HKDF-SHA-256, AES-256-GCM).
 
 | Folder | What is in it |
 |---|---|
-| `Sources/GirruCore` | Pure Swift, no UIKit: suite g1 crypto behind the `PairingCrypto` protocol, session handshake and envelopes, signed commands with counter, QR payload parser, pairing request / welcome / check code, pairing lifetime, push notices, replay window, lock policy, web bridge and navigation rules. Built by both app targets and by `Package.swift`. |
+| `Sources/GirruCore` | Pure Swift, no UIKit: suite g1 crypto behind the `PairingCrypto` protocol, session handshake and envelopes, signed commands with counter, QR payload parser, pairing request / check challenge / check code / welcome and the phone-side pairing rules, session messages (reply, run, run.end) and approval full view, pairing lifetime, push notices, replay window, lock policy, web bridge and navigation rules. Built by both app targets and by `Package.swift`. |
 | `App` | App entry, app delegate (push token, notification buttons), root view, app model, colors, Info.plist, entitlements, privacy manifest. |
 | `Lock` | The app lock and the unlock screen (board P2), the app-switcher cover. |
 | `Pairing` | Pairing screen (board P1), QR camera, typed-code sheet, pairing flow. |
@@ -144,7 +155,7 @@ girru://pair?v=1&cid=<computer device id>&ck=<computer public key>
 | `ck` | computer identity public key | P-256 SPKI DER, base64url |
 | `pid` | pairing id (relay mailbox) | `p_` + 43 characters base64url (32 bytes); the full text, `p_` included, is the HKDF salt of the pairing key |
 | `ps` | pairing secret | 32 bytes, base64url |
-| `exp` | expiry | at most 10 minutes ahead |
+| `exp` | expiry | at most 10 minutes ahead; the computer shows codes that run 2 minutes and renews them |
 | `relay` | relay name | exactly `wss://<host>/v1` (TLS only, no user info, path or query); stored unchanged and compared byte for byte with the `relay` the relay names in its challenge; optional |
 | `lan` | computer's local addresses | up to 4, private ranges or `.local` only; optional |
 | `name` | computer name for display | up to 64 characters; optional |
@@ -152,32 +163,19 @@ girru://pair?v=1&cid=<computer device id>&ck=<computer public key>
 At least one of `relay` and `lan` is required. Unknown fields are ignored,
 repeated fields are refused.
 
-The pairing request `g1.preq`, the check code, the welcome `g1.pwel` and the
-notice `g1.ntf` follow PROTOCOL.md. The phone may send "never expires" only as
-"no wish" (the request allows 30, 60, 90 or 120); the computer's welcome sets
-the final lifetime.
+The pairing request `g1.preq` (with its `sig`), the check challenge
+`g1.pchal`, the check code, the welcome `g1.pwel` (with the wrapped
+notification key) and the notice `g1.ntf` follow PROTOCOL.md byte for byte;
+`Tests/CoreChecks/ReferenceVectors.swift` holds envelopes made by the
+computer's reference code, and the checks open them. The phone may send
+"never expires" only as "no wish" (the request allows 30, 60, 90 or 120); the
+computer's welcome sets the final lifetime.
 
-### Pairing request signature (proposed addition to PROTOCOL.md)
-
-The JSON inside the `g1.preq` box carries one more field, `sig`, so the
-computer knows the phone holds the key it sends:
-
-```
-signed text = "girru/v1/preq-sig\n" + pid + "\n" + phone device id + "\n" + nonce
-sig         = base64url(ECDSA-P256-SHA256, DER, by the phone's identity key over the signed text)
-```
-
-- `pid` is the pairing id exactly as in the QR code, `p_` included.
-- phone device id = base64url(SHA-256(phone SPKI DER)), the 43-character id
-  of the `key` in the same request.
-- `nonce` is the base64url text of the `g1.preq` nonce, as it appears in the
-  envelope.
-- Each part is UTF-8; `\n` is one byte 0x0A; there is no trailing newline.
-
-The computer verifies `sig` against `key` after opening the box and refuses
-the request when it is missing or does not verify. Binding the nonce stops a
-signature being lifted into another request; binding `pid` stops it being used
-for another QR code.
+Phone-side rules (`PairingProgress`): the sealed request is made once and
+resent unchanged, so the computer answers it with the same challenge; no code
+is shown before a valid challenge for this phone; a different second
+challenge ends the pairing; a welcome is refused until the code was shown;
+until the challenge arrives a passed `exp` ends the attempt.
 
 ## Web bridge
 
@@ -210,8 +208,13 @@ through the relay:
 2. **Re-lock.** Background for less than the delay: no prompt. Longer: prompt.
    Set "immediately": prompt every time. The app switcher shows the cover,
    never content.
-3. **Pair.** Scan the QR code, codes match on both screens, pick 30 days,
-   approve on the computer; the computer's screens load. Kill and reopen:
+3. **Pair.** Scan the QR code, pick 30 days, send; the code appears only
+   after the computer answers, and matches on both screens; approve on the
+   computer; the computer's screens load. This is also the first real check
+   that the Secure Enclave key can do the welcome's key agreement (else the
+   app says it cannot finish pairing with its secure key). Wait more than 2
+   minutes on the lifetime screen before sending: the app asks to scan the
+   new code. Kill and reopen:
    still paired, no scan. Reboot the phone: still paired.
 4. **Expiry.** On the computer, set the lifetime short or expire the phone: the
    app shows the pairing screen with the reason.
@@ -221,7 +224,8 @@ through the relay:
    lock screen shows the real text; Approve asks to unlock, opens Girru, and
    the computer records the approval. A sensitive approval asks Face ID again.
    A notice not signed by the computer shows only the neutral line, and its
-   buttons (if a forged push has any) do nothing.
+   buttons (if a forged push has any) do nothing. An approval with long
+   parameters opens the full view first; Approve there is what signs.
 7. **Bridge while locked.** With the app locked, core-ui gets `locked` for
    everything but `lock.state`; a scanner open when the app locks closes.
 8. **Revoke.** Remove the phone on the computer: the next use shows the pairing
@@ -236,6 +240,9 @@ through the relay:
   `CoreUISource` (behind the `girru-app://` scheme handler) are stubs that say
   plainly that the phone cannot reach the computer yet. The scheme handler is
   the only path for core-ui; there is no `http` fallback.
+- Session messages (`reply`, `run`, `run.end` with `slow_link`, and
+  `internal_error` shown as a plain failure) are read in `GirruCore`; the chat
+  screens that use them come with the connector.
 - "Type the code instead" checks the code's form only; PROTOCOL.md has no
   typed-code exchange yet.
 - No app icon yet.

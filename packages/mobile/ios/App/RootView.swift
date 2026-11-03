@@ -43,6 +43,10 @@ struct RootView: View {
         .sheet(isPresented: Binding(get: { bridge.scannerOpen && lock.isUnlocked }, set: { if !$0 { bridge.finishScan(nil) } })) {
             ScannerSheet { bridge.finishScan($0) }
         }
+        // The full view of a cut-short approval; never over the lock.
+        .sheet(item: Binding(get: { lock.isUnlocked ? model.fullView : nil }, set: { if $0 == nil && model.fullView != nil { model.dismissFullView() } })) { detail in
+            ApprovalDetailSheet(detail: detail)
+        }
         .overlay(alignment: .bottom) {
             if let notice = model.notice {
                 Text(notice)
