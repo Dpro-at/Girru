@@ -94,7 +94,69 @@ Agents cannot write their own notes; only the owner saves them.
 | `POST /api/memory-bridge/projects/:projectId/capabilities` | `{ scopes, client?, ttlMs? }` → `{ token, capability }` (token shown once); `company:read` is an extra scope |
 | `GET /api/memory-bridge/projects/:projectId/sync` | the brief file's sync state for any project (not only the pilot) |
 
+### Project files, task numbers and places (owner only, `GIRRU_STORE_P6`)
+| Route | Body / answer |
+|---|---|
+| `GET /api/store-switches` | also `p6: true` while the switch is on |
+| `GET /api/memory/project-files` | `{ projects }`, needs-you first, then by name. Each: `projectId`, `name`, `folder`, `writeFiles`, `companyFacts`, `state`, `needsYou`, `writtenAt`, `version`, `files[{ path, what, version, state, reason? }]`; `state` is `up_to_date`, `waiting`, `changed_in_both`, `folder_not_found` or `could_not_write` |
+| `GET /api/memory/project-files/:projectId/compare?path=` | `{ path, version, girruText, folderText }` (Girru's part only for `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`) |
+| `POST /api/memory/project-files/:projectId/rewrite` | writes the files again, never over a file changed in both → `{ project }` |
+| `POST /api/memory/project-files/:projectId/use-girru` | `{ path }` → `{ project, undo }`; the folder's text becomes a proposal with reason `repository-file` |
+| `POST /api/memory/project-files/:projectId/undo` | `{ undo }` → `{ project }`; `409 undo_expired` once the file changed |
+| `PATCH /api/memory/project-files/:projectId` | `{ writeFiles?, companyFacts? }` → `{ project }` |
+| `GET /api/memory/project-files/needs-you` | `{ items[{ id, kind, projectId, projectName, file, number, titles, line }] }`, `kind` `duplicate_number` or `unknown_number` |
+| `POST /api/memory/project-files/needs-you/:id` | `{ action: "new_task" \| "add_task" \| "leave" }` → `{ ok: true }` |
+| `GET /api/memory/place-settings` | `{ places: { [place]: { staysLocal } } }`; places `owner`, `people`, `experience`, `tasks`, `company`, `project:<key>`; People stays local by default |
+| `PUT /api/memory/place-settings/:place` | `{ staysLocal }` → `{ place, staysLocal }` |
+
+Errors are `{ error, code }` with `not_found`, `folder_not_found`, `bad_path`, `undo_expired`, `could_not_write` or `bad_place`. The task page (`GET /api/boards/:id/cards/:cardId/task`) also carries `task.number`.
+
 With the switch on, every dpro-memory call needs a session (`x-girru-capability`, set by Girru as `GIRRU_SESSION_CAPABILITY` when it starts a coding app). A session also lists `memory_recall`, `memory_save`, `memory_supersede`, `memory_handoff` and `memory_propose`; writes accept an optional `request_id` and answer `503 not_saved` when they could not be written.
+
+### Project folder layout (owner only, `GIRRU_STORE_P7`)
+| Route | Body / answer |
+|---|---|
+| `GET /api/memory-bridge/projects/:projectId/layout` | dry run, writes nothing → `{ preview: { files, previewHash, conflicts, changes } }`; each file has `relative`, `action` (`create`, `update`, `unchanged` or `conflict`), `by` (`project-files`, `rules`, `task-file` or `brief-sync`), a `reason` for a conflict and Girru's part as a `diff` |
+| `POST /api/memory-bridge/projects/:projectId/layout` | `{ previewHash, confirm: true }` → `{ result }`, the same shape after the write. `409 preview_stale` when anything changed since the preview; `409 conflict` writes nothing |
+
+The layout turns the project's files on with the task file in one step: `AGENTS.md`
+with the one Girru section, `CLAUDE.md` and `GEMINI.md` pointers, `.girru/rules.md`,
+`.girru/tasks.md` (an existing one is kept as it is), Girru's lines in
+`.git/info/exclude`, and `.girru/brief.md` when the brief sync (`GIRRU_STORE_P6`) is
+on. It needs the one Girru section (`GIRRU_STORE_P2`): `409 p2_off` otherwise.
+
+### Coding tools with `GIRRU_STORE_P7` (owner only)
+`cursor` and `copilot` (GitHub Copilot CLI) join the `:client` values of the memory bridge
+routes. Turning a tool off (`PUT /api/memory-bridge/clients/:client` with
+`{ enabled: false }`) also undoes Girru's registration in its config and answers
+`{ undone, failed }`. `POST /api/memory-bridge/clean-up` undoes every registration
+before Girru is removed → `{ undone: [{ id, client, mode }], failed }`; only Girru's entry
+leaves each file. Tool configs are written through the safe file writer, so a linked
+config is refused.
+
+### Agent file for Claude Code (owner only, `GIRRU_STORE_P7`)
+| Route | Body / answer |
+|---|---|
+| `GET /api/agents/:id/user-export?tool=claude-code` | `{ agentId, tool, file, action: create\|update\|unchanged\|conflict, reason, text, previewHash }`; writes nothing |
+| `POST /api/agents/:id/user-export` | `{ tool?, previewHash, confirm: true }` → the same answer after the write. `409 preview_stale` or `conflict`, `400 confirm_required` |
+| `DELETE /api/agents/:id/user-export?tool=claude-code` | `{ removed, file }`; `409 not_girru` when the file is not Girru's copy of this agent |
+
+The file is `~/.claude/agents/girru-<name>.md` in the user's home, never in a project. A
+file without Girru's marker line (or with another agent's) is never changed or removed.
+
+### Tasks from the project's task file (owner only, `GIRRU_STORE_P7`)
+| Route | Body / answer |
+|---|---|
+| `GET /api/memory-bridge/projects/:projectId/task-approval` | `{ approval: { projectId, approved, approvedAt, waiting } }`; `waiting` counts open tasks from the file that wait for the approval |
+| `POST /api/memory-bridge/projects/:projectId/task-approval` | `{ confirm: true }` → the same answer, approved. `400 confirm_required` without it |
+| `DELETE /api/memory-bridge/projects/:projectId/task-approval` | takes the approval back → the same answer |
+
+A task written in `.girru/tasks.md` (or a block the file changed) is text from someone
+else. Until the owner approves the project once, Continue on such a task opens its chat
+in "Plan first" mode, so every tool that changes something asks the owner, and its answer
+carries `approval: { needed: true, projectId }`. A scheduled run of it does not start and
+the owner gets a notification. The task's text always reaches the model as data, never as
+a rule.
 
 ### Agent packages (owner only, `GIRRU_STORE_P5`)
 | Route | Body / answer |

@@ -22,9 +22,11 @@ import { createHash, randomBytes } from 'node:crypto';
 import { q } from '../../repositories/sql-steps.js';
 import { nowText } from '../../db/pg/dialect.js';
 import { findProject, type Project } from '../../repositories/chat-conversations.js';
-import { briefMarkdown, projectBrief } from '../bridge/brief.js';
+import { assertProjectFilesOnly, briefMarkdown, projectBrief } from '../bridge/brief.js';
 import { redactImportText } from '../import/redact.js';
 import { latestSeq, scopeInfo, enabledScopes } from './events.js';
+import { safeWriteFile, SafeFileError } from '../../services/safe-file.js';
+import { storeP7Enabled } from '../../services/store-p7.js';
 
 export const BRIEF_CONSUMER = 'brief-file';
 export const BRIEF_FILE = path.join('.girru', 'brief.md');
@@ -58,6 +60,8 @@ export interface RunOptions {
   force?: boolean;
   /** The owner chose Girru's version in a conflict: the outside file is kept beside it, then replaced. */
   overwrite?: boolean;
+  /** P6 screens: false = the caller kept the outside text itself (a memory proposal); no copy beside the file. */
+  keepOutsideFile?: boolean;
   /** Test hook: runs after the new file is staged and before the destination is re-checked. */
   beforeRename?: () => Promise<void> | void;
 }
@@ -201,7 +205,14 @@ async function runOnce(scope: string, opts: RunOptions): Promise<RunResult> {
     if (!opts.force && !outside && s.status === 'up_to_date' && max <= s.watermark && current !== null) return result(s, false);
 
     const nextVersion = s.projectionVersion + 1;
-    const body = briefMarkdown(await projectBrief(ownerId, project));
+    const brief = await projectBrief(ownerId, project);
+    // S4 (P7): owner, people and personal drawers never reach a project file.
+    if (storeP7Enabled()) {
+      try { assertProjectFilesOnly(brief); } catch (err) {
+        return result(await setStatus(s, 'conflict', `${(err as Error).message}; nothing was written`, false), false);
+      }
+    }
+    const body = briefMarkdown(brief);
     // The brief is redacted already (brief.ts); a text that still looks like a secret is never written.
     if (Object.values(redactImportText(body).counts).some((n) => Number(n) > 0)) {
       return result(await setStatus(s, 'conflict', 'The brief still contains something that looks like a secret; nothing was written', false), false);
@@ -209,7 +220,8 @@ async function runOnce(scope: string, opts: RunOptions): Promise<RunResult> {
     const text = `<!-- girru:brief scope=${scope} seq=${max} projection=${nextVersion} · generated from Girru's database; edits here are not read back -->\n\n${body}\n`;
 
     removeStaged(dir);
-    if (outside && opts.overwrite) {
+    if (storeP7Enabled()) return await writeSafely(scope, folder, target, text, current, max, nextVersion, s, !!(outside && opts.overwrite && opts.keepOutsideFile !== false), opts, result);
+    if (outside && opts.overwrite && opts.keepOutsideFile !== false) {
       // The outside version is kept beside it, copied from the file itself (never through a link).
       const kept = readNoFollow(target);
       if (kept) fs.writeFileSync(path.join(dir, `brief.outside-${nextVersion}.md`), kept, { flag: 'wx', mode: 0o644 });
@@ -243,6 +255,39 @@ async function runOnce(scope: string, opts: RunOptions): Promise<RunResult> {
     if (err instanceof UnsafeEntryError) return result(await setStatus(s, 'conflict', err.message, false), false);
     s = await setStatus(s, 'waiting', (err as Error)?.message ?? String(err), true);
     return result(s, false, s.lastError ?? undefined);
+  }
+}
+
+/**
+ * STORE-MAP-01 P7 (SEC2-6): the same write through the one safe file writer.
+ * The projection's own re-check (a newer run wins) happens first; the writer
+ * then re-checks the file itself (compare-and-set on the hash Girru read)
+ * right before the rename, so an outside edit in between is still refused.
+ */
+async function writeSafely(scope: string, folder: string, target: string, text: string, current: string | null, max: number, nextVersion: number,
+  s: ProjectionState, keepOutside: boolean, opts: RunOptions, result: (st: ProjectionState, wrote: boolean, reason?: string) => RunResult): Promise<RunResult> {
+  const rel = BRIEF_FILE.split(path.sep).join('/');
+  try {
+    if (keepOutside) {
+      const kept = readNoFollow(target);
+      if (kept) safeWriteFile(folder, `.girru/brief.outside-${nextVersion}.md`, kept, { expectSha256: null });
+    }
+    await opts.beforeRename?.();
+    const fresh = (await getState(BRIEF_CONSUMER, scope))!;
+    if (fresh.watermark > max || fresh.projectionVersion >= nextVersion) return result(fresh, false, 'superseded by a newer projection');
+    const w = safeWriteFile(folder, rel, text, { expectSha256: current });
+    const done = await q.run(`UPDATE projection_state SET target = ?, watermark = ?, projection_version = ?, content_hash = ?, status = 'up_to_date',
+      attempts = 0, last_error = NULL, updated_at = ${nowText(q.dialect)} WHERE consumer = ? AND scope = ? AND projection_version = ?`,
+      target, max, nextVersion, w.sha256, BRIEF_CONSUMER, scope, s.projectionVersion);
+    const after = (await getState(BRIEF_CONSUMER, scope))!;
+    return result(after, done.changes === 1, done.changes === 1 ? undefined : 'state moved on during the write');
+  } catch (err) {
+    if (err instanceof SafeFileError) {
+      const fresh = (await getState(BRIEF_CONSUMER, scope))!;
+      const why = err.code === 'changed' ? 'The file changed while Girru was writing it' : err.message;
+      return result(await setStatus(fresh, err.code === 'locked' ? 'waiting' : 'conflict', why, err.code === 'locked'), false);
+    }
+    throw err;
   }
 }
 

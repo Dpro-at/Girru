@@ -16,6 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { all, lockName, one, run, sql, type Step } from '../repositories/sql-steps.js';
 import { subscriptionSearchDirs } from '../services/subscription-chat.js';
+import { storeP7Enabled } from '../services/store-p7.js';
 import { listLocalModels } from '../llm/local-models.js';
 import { firstRunDiscovery } from './discovery.js';
 import { enableFirstRunAutomaticImport } from '../memory/import/automatic-project-import.js';
@@ -78,6 +79,15 @@ async function claudeSignedIn(home: string): Promise<boolean> {
   try { const v = JSON.parse(await fs.readFile(path.join(home, '.claude.json'), 'utf8')); return !!v && typeof v === 'object' && !!v.oauthAccount; } catch { return false; }
 }
 
+/**
+ * SUB1 (STORE-MAP-01 P7): Antigravity's CLI `agy` signs in with the Google
+ * account kept in ~/.gemini (the active account's presence only, never its value).
+ */
+async function antigravitySignedIn(home: string): Promise<boolean> {
+  if (await exists(path.join(home, '.gemini', 'oauth_creds.json'))) return true;
+  try { const v = JSON.parse(await fs.readFile(path.join(home, '.gemini', 'google_accounts.json'), 'utf8')); return !!v && typeof v === 'object' && typeof v.active === 'string' && !!v.active; } catch { return false; }
+}
+
 export async function aiTools(env?: Partial<Env>): Promise<AiTool[]> {
   const home = env?.home ?? os.homedir(), platform = env?.platform ?? process.platform;
   const e: Env = { home, platform, dirs: env?.dirs ?? await subscriptionSearchDirs(home) };
@@ -86,13 +96,18 @@ export async function aiTools(env?: Partial<Env>): Promise<AiTool[]> {
   const pkg = (npmName: string, brewName: string) => npm ? `npm install -g ${npmName}` : brew ? `brew install ${brewName}` : `npm install -g ${npmName}`;
   const claude = await findBinary(e, ['claude']), codex = await findBinary(e, ['codex']), gemini = await findBinary(e, ['gemini']);
   const codexHome = process.env.CODEX_HOME && !env?.home ? process.env.CODEX_HOME : path.join(home, '.codex');
+  // SUB1 (P7): the Google app is Antigravity (`agy`); the Gemini CLI no longer serves personal accounts.
+  const agy = storeP7Enabled() ? await findBinary(e, ['agy']) : null;
+  const google: AiTool = storeP7Enabled()
+    ? { id: 'gemini', name: 'Antigravity', installed: !!agy, signedIn: !!agy && await antigravitySignedIn(home), install: null, signIn: 'agy' }
+    : { id: 'gemini', name: 'Gemini CLI', installed: !!gemini, signedIn: !!gemini && await exists(path.join(home, '.gemini', 'oauth_creds.json')),
+      install: gemini ? null : pkg('@google/gemini-cli', 'gemini-cli'), signIn: 'gemini', ...(!gemini && !npm && !brew ? { needs: 'node' as const } : {}) };
   return [
     { id: 'claude', name: 'Claude Code', installed: !!claude, signedIn: !!claude && await claudeSignedIn(home),
       install: claude ? null : win ? 'irm https://claude.ai/install.ps1 | iex' : 'curl -fsSL https://claude.ai/install.sh | bash', signIn: 'claude' },
     { id: 'codex', name: 'ChatGPT Codex', installed: !!codex, signedIn: !!codex && await exists(path.join(codexHome, 'auth.json')),
       install: codex ? null : pkg('@openai/codex', 'codex'), signIn: 'codex login', ...(!codex && !npm && !brew ? { needs: 'node' as const } : {}) },
-    { id: 'gemini', name: 'Gemini CLI', installed: !!gemini, signedIn: !!gemini && await exists(path.join(home, '.gemini', 'oauth_creds.json')),
-      install: gemini ? null : pkg('@google/gemini-cli', 'gemini-cli'), signIn: 'gemini', ...(!gemini && !npm && !brew ? { needs: 'node' as const } : {}) },
+    google,
   ];
 }
 

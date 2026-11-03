@@ -11,6 +11,11 @@
  *   gemini-cli   ~/.gemini/settings.json `mcpServers`; memory: GEMINI.md (imports with @file)
  *   antigravity  ~/.gemini/config/mcp_config.json `mcpServers`; rules: AGENTS.md / GEMINI.md,
  *                .agents/AGENTS.md, .agents/GEMINI.md, .agents/rules/*.md
+ * With STORE-MAP-01 P7 (GIRRU_STORE_P7) also, checked 2026-11-03:
+ *   cursor       ~/.cursor/mcp.json `mcpServers` (stdio: command, args, env); rules:
+ *                .cursor/rules/*.mdc, AGENTS.md
+ *   copilot      GitHub Copilot CLI, ~/.copilot/mcp-config.json `mcpServers`
+ *                (`type: "local"`, command, args, env, tools); instructions: AGENTS.md
  *
  * `home` / `env` are parameters so tests run on a temporary HOME only.
  */
@@ -21,15 +26,24 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { config } from '../../config/index.js';
 import { cliConfigDir } from '../../services/instance-identity.js';
+import { storeP7Enabled } from '../../services/store-p7.js';
 
+/** The clients served without P7 (unchanged). */
 export const BRIDGE_CLIENTS = ['claude-code', 'codex', 'gemini-cli', 'antigravity'] as const;
-export type BridgeClient = (typeof BRIDGE_CLIENTS)[number];
-export const CLIENT_NAMES: Record<BridgeClient, string> = { 'claude-code': 'Claude Code', codex: 'Codex', 'gemini-cli': 'Gemini CLI', antigravity: 'Antigravity' };
+/** Every client Girru knows; Cursor and Copilot only while P7 is on (A7, S9). */
+export const ALL_BRIDGE_CLIENTS = [...BRIDGE_CLIENTS, 'cursor', 'copilot'] as const;
+export type BridgeClient = (typeof ALL_BRIDGE_CLIENTS)[number];
+export const CLIENT_NAMES: Record<BridgeClient, string> = { 'claude-code': 'Claude Code', codex: 'Codex', 'gemini-cli': 'Gemini CLI', antigravity: 'Antigravity', cursor: 'Cursor', copilot: 'GitHub Copilot CLI' };
+
+/** The clients served now. */
+export function bridgeClients(): readonly BridgeClient[] {
+  return storeP7Enabled() ? ALL_BRIDGE_CLIENTS : BRIDGE_CLIENTS;
+}
 /** The name the server gets in every CLI's MCP list. */
 export const SERVER_NAME = 'dpro-memory';
 
 export function isBridgeClient(v: unknown): v is BridgeClient {
-  return typeof v === 'string' && (BRIDGE_CLIENTS as readonly string[]).includes(v);
+  return typeof v === 'string' && (bridgeClients() as readonly string[]).includes(v);
 }
 
 export interface BridgeEnv { home?: string; env?: NodeJS.ProcessEnv }
@@ -41,6 +55,8 @@ export function clientConfigFile(client: BridgeClient, where: BridgeEnv = {}): s
   if (client === 'claude-code') return path.join(home, '.claude.json');
   if (client === 'codex') return path.join(env.CODEX_HOME || path.join(home, '.codex'), 'config.toml');
   if (client === 'gemini-cli') return path.join(home, '.gemini', 'settings.json');
+  if (client === 'cursor') return path.join(home, '.cursor', 'mcp.json');
+  if (client === 'copilot') return path.join(home, '.copilot', 'mcp-config.json');
   return path.join(home, '.gemini', 'config', 'mcp_config.json');
 }
 

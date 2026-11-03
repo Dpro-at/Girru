@@ -21,6 +21,7 @@
  */
 import { promises as fs, watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { q } from '../repositories/sql-steps.js';
 import { folderOf, readPlain, writeAtomic, RuleFilesError } from './agent-rule-files.js';
 import { createCard, updateCard, BoardError } from './task-board.js';
@@ -29,6 +30,7 @@ import {
   type ReadFile, type Stamp, type TaskBlock,
 } from './task-file-format.js';
 import { storeP6Enabled } from './store-p6.js';
+import { markFromFile } from './task-file-trust.js';
 
 export const TASKS_FILE = '.girru/tasks.md';
 export const DONE_FILE = '.girru/tasks-done.md';
@@ -94,7 +96,7 @@ async function writeFile(folder: string, name: string, text: string): Promise<vo
   const file = path.join(folder, name);
   if (path.dirname(path.resolve(file)) !== dir) throw new RuleFilesError('unsafe', 'Outside the project folder');
   const cur = await readFile(folder, name);
-  if (cur !== text) await writeAtomic(file, text);
+  if (cur !== text) await writeAtomic(file, text, folder);
 }
 
 /**
@@ -297,6 +299,8 @@ export function syncTasks(projectId: string): Promise<SyncResult> {
         await updateCard(owner.user_id, boardId, link.card_id, { ...patch, expectedVersion: Number(fresh?.version ?? card.version) });
       }
       await q.run('UPDATE task_file_cards SET block = ?, problem = NULL, finished = 0, updated_at = CURRENT_TIMESTAMP WHERE card_id = ?', JSON.stringify(task), link.card_id);
+      // SEC2-3: text the file changed is no longer Girru's own.
+      await markFromFile(link.card_id, before, task);
       if (last) { ({ text, done } = finish(text, done, task)); rewrite = true; await q.run('UPDATE task_file_cards SET finished = 1 WHERE card_id = ?', link.card_id); }
     }
     // A task gone from tasks.md: in tasks-done.md it is finished (card to Done); otherwise its card is archived (reversible).
@@ -375,6 +379,7 @@ export async function cardChanged(cardId: string): Promise<void> {
     const inFile = readTasks(text).tasks.find((t) => t.task.no === fresh.task_no) ?? readTasks(doneText).tasks.find((t) => t.task.no === fresh.task_no);
     if (inFile?.problem) return;
     const task = inFile ? { ...inFile.task, title: now.task.title, state: now.task.state, priority: now.task.priority, agent: now.task.agent, department: now.task.department } : now.task;
+    if (inFile && before) await markFromFile(cardId, before, { ...inFile.task, title: before.title });
     if (now.last) {
       const f = finish(text, doneText, task);
       await writeFile(folder, TASKS_FILE, await stamped(link.project_id, f.text));
@@ -424,7 +429,8 @@ export async function addCardTask(cardId: string, conversationId: string): Promi
     const now = await cardTask(cardId, { card_id: cardId, project_id: projectId, task_no: no, block: JSON.stringify(base), problem: null, finished: 0 }, owner.user_id);
     if (!now) return;
     await writeFile(folder, TASKS_FILE, await stamped(projectId, withTask(text, now.task), { no, cardId }));
-    await q.run('INSERT INTO task_file_cards (card_id, project_id, task_no, block, problem, finished) VALUES (?, ?, ?, ?, NULL, 0)', cardId, projectId, no, JSON.stringify(now.task));
+    // SEC2-3: a card made in Girru is not from the file (until the file changes it).
+    await q.run('INSERT INTO task_file_cards (card_id, project_id, task_no, block, problem, finished, from_file) VALUES (?, ?, ?, ?, NULL, 0, 0)', cardId, projectId, no, JSON.stringify(now.task));
   }).catch(() => undefined);
 }
 
@@ -492,6 +498,7 @@ export async function agentTaskUpdate(ownerId: string, agentId: string, cardId: 
     if (found.problem) throw new BoardError(400, 'invalid_board', `${link.task_no} is not in the task format (${found.problem}); the owner fixes it first`);
     const now = new Date(), today = now.toISOString().slice(0, 10);
     const t = found.task;
+    await markFromFile(cardId, parse(link.block), t);
     const task: TaskBlock = {
       ...t, done: done ?? t.done, left: left ?? t.left, next: next ?? t.next,
       // An agent that writes its own "time · name ·" in front gets it once, from Girru.
@@ -527,6 +534,97 @@ export async function projectTasks(ownerId: string, projectId?: string): Promise
 }
 export async function openTasks(projectId: string): Promise<number> {
   return Number((await q.one<{ n: number }>('SELECT COUNT(*) AS n FROM task_file_cards WHERE project_id = ? AND finished = 0', projectId))?.n ?? 0);
+}
+
+// ---------------------------------------------------------------------------
+// STORE-MAP-01 P6 screens (P6b): task-number problems in Needs you
+// ---------------------------------------------------------------------------
+
+export type NumberProblemKind = 'duplicate_number' | 'unknown_number';
+export interface NumberProblem { id: string; kind: NumberProblemKind; projectId: string; projectName: string; file: string; number: string; titles: string[]; line: number }
+export type NumberAction = 'new_task' | 'add_task' | 'leave';
+/** Which choices each kind offers: a second block with a used number becomes a new task; an unknown id is added or left. */
+const ACTIONS: Record<NumberProblemKind, readonly NumberAction[]> = { duplicate_number: ['new_task'], unknown_number: ['add_task', 'leave'] };
+
+const problemId = (projectId: string, key: string) => createHash('sha256').update(`${projectId}\0${key}`).digest('hex').slice(0, 24);
+
+/**
+ * Reads only: each block whose number an earlier block already has (or, with
+ * P6, whose hidden id an earlier block carries), and each block whose hidden
+ * id is not a task of this project. `at` = the block's index in the file.
+ */
+async function numberProblemsIn(projectId: string, projectName: string, text: string): Promise<Array<NumberProblem & { at: number }>> {
+  const { tasks } = readTasks(text);
+  const p6 = storeP6Enabled();
+  const out: Array<NumberProblem & { at: number }> = [];
+  const nos = new Map<string, number>(), ids = new Map<string, number>(), idUses = new Map<string, number>();
+  for (const t of tasks) if (t.id) idUses.set(t.id, (idUses.get(t.id) ?? 0) + 1);
+  const item = (kind: NumberProblemKind, key: string, at: number, titles: string[]) =>
+    out.push({ id: problemId(projectId, key), kind, projectId, projectName, file: TASKS_FILE, number: tasks[at].task.no, titles, line: tasks[at].line, at });
+  for (const [at, t] of tasks.entries()) {
+    const n = nos.get(t.task.no) ?? 0;
+    nos.set(t.task.no, n + 1);
+    const m = t.id ? ids.get(t.id) ?? 0 : 0;
+    if (t.id) ids.set(t.id, m + 1);
+    if (n > 0) { item('duplicate_number', `duplicate:${t.task.no}:${n}`, at, tasks.filter((x) => x.task.no === t.task.no).map((x) => x.task.title)); continue; }
+    if (!p6 || !t.id) continue;
+    if (m > 0) item('duplicate_number', `duplicate-id:${t.id}:${m}`, at, tasks.filter((x) => x.id === t.id).map((x) => x.task.title));
+    else if ((idUses.get(t.id) ?? 0) === 1 && await idProblem(projectId, t.id, false)) item('unknown_number', `unknown:${t.id}:${t.task.no}`, at, [t.task.title]);
+  }
+  return out;
+}
+
+/** The owner's open task-number problems, over every project with the task file on (left ones are not shown again). */
+export async function numberProblems(ownerId: string): Promise<NumberProblem[]> {
+  const mine = await q.all<{ id: string; name: string }>('SELECT id, name FROM chat_projects WHERE user_id = ?', ownerId);
+  const on = new Set(await onProjects());
+  const left = new Set((await q.all<{ item_id: string }>('SELECT item_id FROM task_number_dismissals WHERE owner_id = ?', ownerId)).map((r) => r.item_id));
+  const out: NumberProblem[] = [];
+  for (const p of mine.filter((x) => on.has(x.id))) {
+    let text: string | null;
+    try { text = await readFile(await folderOf(p.id), TASKS_FILE); } catch { continue; }
+    if (text === null) continue;
+    for (const { at: _at, ...x } of await numberProblemsIn(p.id, p.name, text)) if (!left.has(x.id)) out.push(x);
+  }
+  return out;
+}
+
+/**
+ * The owner's choice for one problem. new_task / add_task: the block loses its
+ * hidden id line and (for a number in use) gets the next free number, then the
+ * board picks it up as a new task. leave: hidden from Needs you; the file and
+ * the board stay as they are.
+ */
+export async function resolveNumberProblem(ownerId: string, id: unknown, action: unknown): Promise<{ ok: true }> {
+  if (action !== 'new_task' && action !== 'add_task' && action !== 'leave') throw new BoardError(400, 'invalid_board', 'action must be new_task, add_task or leave');
+  const found = typeof id === 'string' ? (await numberProblems(ownerId)).find((x) => x.id === id) : undefined;
+  if (!found) throw new BoardError(404, 'not_found', 'Problem not found');
+  if (!ACTIONS[found.kind].includes(action)) throw new BoardError(400, 'invalid_board', `${found.kind} takes ${ACTIONS[found.kind].join(' or ')}`);
+  if (action === 'leave') {
+    await q.run('INSERT INTO task_number_dismissals (owner_id, item_id, project_id) VALUES (?, ?, ?) ON CONFLICT DO NOTHING', ownerId, found.id, found.projectId);
+    return { ok: true };
+  }
+  await serial(found.projectId, async () => {
+    const folder = await folderOf(found.projectId);
+    const text = (await readFile(folder, TASKS_FILE)) ?? '';
+    const now = (await numberProblemsIn(found.projectId, found.projectName, text)).find((x) => x.id === found.id);
+    if (!now) return; // fixed in the file meanwhile
+    const tasks = readTasks(text).tasks;
+    const t = tasks[now.at];
+    const done = readTasks((await readFile(folder, DONE_FILE)) ?? '').tasks.map((x) => x.task.no);
+    const linked = (await q.all<{ task_no: string }>('SELECT task_no FROM task_file_cards WHERE project_id = ?', found.projectId)).map((r) => r.task_no);
+    const used = tasks.some((x, i) => i !== now.at && x.task.no === t.task.no) || done.includes(t.task.no) || linked.includes(t.task.no);
+    let out = text;
+    if (t.idAt) out = out.slice(0, t.idAt.start) + out.slice(t.idAt.end);
+    if (action === 'new_task' || used) {
+      const no = nextNumber(tasks.map((x) => x.task.no), done, linked);
+      const eol = out.indexOf('\n', t.start), end = eol < 0 ? out.length : eol;
+      out = out.slice(0, t.start) + out.slice(t.start, end).replace(/T-\d+/, no) + out.slice(end);
+    }
+    if (out !== text) await writeFile(folder, TASKS_FILE, out);
+  });
+  await syncTasks(found.projectId);
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------

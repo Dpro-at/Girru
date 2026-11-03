@@ -195,7 +195,7 @@ test('MD4 and MD9: save criteria lead memory_save and the brief; recalled memori
 
 test('routes for the app: the switch, and the eye list strongest group first with groups', async () => {
   const get = (url) => app.inject({ method: 'GET', url, headers: auth });
-  assert.deepEqual((await get('/api/store-switches')).json(), { p2: false, p3: process.env.GIRRU_STORE_P3 === '1', p4: process.env.GIRRU_STORE_P4 === '1' });
+  assert.deepEqual((await get('/api/store-switches')).json(), { p2: false, p3: process.env.GIRRU_STORE_P3 === '1', p4: process.env.GIRRU_STORE_P4 === '1', ...(/^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P6 ?? '') ? { p6: true } : {}) });
   assert.equal((await get('/api/agent-rules')).json().precedence, false);
   const before = (await get(`/api/agent-rules/effective?agentId=cc-agent&projectId=${project.id}`)).json();
   assert.ok(!('precedence' in before) && before.rules.every((r) => !('group' in r)), 'off: unchanged');

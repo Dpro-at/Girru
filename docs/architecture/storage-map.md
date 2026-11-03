@@ -118,9 +118,10 @@ Creating a project today writes no files; they appear when the owner turns them 
 | Codex | `AGENTS.md` | `dpro-memory` MCP server | Today |
 | Gemini CLI | `GEMINI.md` → `AGENTS.md` | `dpro-memory` MCP server | Today |
 | Antigravity | — | `dpro-memory` MCP server | Today (MCP only) |
-| Cursor | — | — | Planned |
+| Cursor | `.cursor/rules/girru.mdc` → `AGENTS.md` | `dpro-memory` MCP server (`~/.cursor/mcp.json`) | With `GIRRU_STORE_P7` |
+| GitHub Copilot CLI | `AGENTS.md` | `dpro-memory` MCP server (`~/.copilot/mcp-config.json`) | With `GIRRU_STORE_P7` |
 
-The MCP server answers only for folders Girru knows as project folders, and only from that project's drawer. Coding tools never write memory directly: `memory_propose` creates a proposal the owner approves, and `handoff_write` leaves a handoff note. Girru changes only its own entry in each tool's settings file; the tools' own memory files are read for import only through review.
+The MCP server answers only for folders Girru knows as project folders, and only from that project's drawer. Coding tools never write memory directly: `memory_propose` creates a proposal the owner approves, and `handoff_write` leaves a handoff note. Girru changes only its own entry in each tool's settings file. With `GIRRU_STORE_P7`, turning a tool off in Girru takes that entry out again, and a clean-up before uninstalling takes it out of every tool, keeping whatever else the tool's file holds; the tools' own memory files are read for import only through review.
 
 When Girru runs a coding app as a reply inside a chat, the app gets the agent's definition, a fixed memory pack and the conversation; it does not use the owner's own MCP settings.
 
@@ -186,6 +187,34 @@ A first version of the change log, the session capability and the shared agent c
 - **Who did it:** a coding-app session records the agent it works for, so proposals, handoffs and the task file name the app and the agent.
 - **Debounced sync from the change log:** every project with its memory files on keeps a change log. The brief file is rewritten by the outbox worker once the project has been quiet for a moment, so a burst of changes gives one write. The file carries the change-log position and its version.
 - **One memory contract:** coding apps get five verbs (recall, save, supersede, handoff, propose) from the same definition as the native tools. The server checks every argument, a write with a request id happens once, and a failed write says "not saved, try again".
+- **Project files screen:** Memory › Coding apps › Project files lists each project's files with one state each (up to date, waiting, changed in both, folder not found, could not write). Girru never writes over a file changed in the folder until the owner picks. "Use Girru's version" keeps the folder's text as a review item marked as coming from a repository file; Undo puts the text back and withdraws it while the file is unchanged.
+- **Task-number problems in Needs you:** a number used twice or a hidden id Girru does not know waits for the owner (new task, add as a task, or leave). Left items are remembered per owner (`task_number_dismissals`).
+- **Places that stay on this computer:** the owner marks Memory places (owner, people, experience, tasks, company, each project) as staying on this computer (`memory_place_settings`; People by default). The switch is stored and shown; replies do not yet read it.
+
+### One safe file writer (off by default)
+
+`GIRRU_STORE_P7=1` turns on, for every file Girru writes into a project folder (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `DESIGN.md`, `.girru/` files and `.git/info/exclude`):
+
+- **Inside the folder only:** no `..`, no absolute, drive or network paths, no `\` or `:`, no Windows device names, and no name ending in a dot or a space. The full path must fit the system's length limit.
+- **Never through a link:** each folder on the way, and the file itself, must be a real folder or a plain file at its own path. Symbolic links, Windows junctions and hard links are refused.
+- **No case collisions:** a name that differs from an existing one only by case (or by Unicode form) is refused.
+- **Text only, with a size limit:** UTF-8 with no NUL bytes, 1 MB at most.
+- **Atomic:** Girru writes a temp file next to the target, flushes it, checks again that the folder and the target are still the ones it checked, then renames it over the target. An interrupted write leaves the old file. A temp file left by a crash is removed on the next write.
+- **Locked files:** a file held open by another program on Windows is retried a few times. If it is still locked, the write is reported and nothing changes.
+
+Nothing is written when any check fails, and the error says why.
+
+The same switch adds **the project folder layout in one step**: a dry run lists every file Girru would create or change, and the owner's confirm writes them all (or nothing, when one is a conflict). The task file comes on with the project's files, with no separate Rules step. An existing `.girru/tasks.md` is kept as it is. The routes are in the [API reference](../API.md).
+
+Tasks that arrive from `.girru/tasks.md` are treated as untrusted. An agent may plan such a task, but until the owner approves the project once, every tool that changes something asks first, and a scheduled run of the task does not start. Rules never come from the file: the task's text reaches the agent as data only.
+
+With the same switch:
+
+- **The brief explains the work:** the task file's format and ids, when to read `project_brief` and `latest_handoff` again (a new session, after a break, taking over), and when to call `handoff_write`. It also lists the project's topics (its topic keys and the topics the memory graph finds) by title only, in a stable order and with a size limit; agents get the details with `memory_search`. This text is in the brief file and the MCP answer, never in a chat prompt.
+- **Private memory stays out of files:** the brief is built only from pinned facts of the company, a department or this project, and from this project's memories. Anything from the owner's own drawer, People or another project stops the write.
+- **Agent file for Claude Code (optional):** an agent can be copied to `~/.claude/agents/girru-<name>.md` in the user's home, never into a project. The owner sees a preview first. The file holds the agent's name, description, personality and instructions, never permissions, memory or keys. Girru replaces or removes only files that carry its own marker line. Routes: `GET`, `POST` and `DELETE /api/agents/:id/user-export`.
+- **Antigravity:** first-run setup looks for the Antigravity CLI (`agy`) instead of the Gemini CLI.
+- **Claude Code's own auto memory** is untrusted input: runs that Girru starts switch it off, and what Claude Code writes there reaches Girru only as review proposals.
 
 ### One agent context and one Girru section (off by default)
 

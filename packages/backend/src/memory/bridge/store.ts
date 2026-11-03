@@ -11,7 +11,7 @@ import { storeP4Enabled } from '../../services/store-p4.js';
 import { storeP6Enabled } from '../../services/store-p6.js';
 import { listProjects, type Project } from '../../repositories/chat-conversations.js';
 import type { HandoffBody } from '../handoff/store.js';
-import { BRIDGE_CLIENTS, type BridgeClient } from './clients.js';
+import { ALL_BRIDGE_CLIENTS, type BridgeClient } from './clients.js';
 
 /** The active owner account (the bridge serves the owner only). */
 export async function bridgeOwner(): Promise<string | null> {
@@ -33,7 +33,7 @@ export async function setClientEnabled(ownerId: string, client: BridgeClient, en
 
 export async function clientStates(ownerId: string): Promise<Record<BridgeClient, boolean>> {
   const rows = await q.all<{ client: BridgeClient; enabled: number }>('SELECT client, enabled FROM memory_bridge_clients WHERE owner_id = ?', ownerId);
-  const out = Object.fromEntries(BRIDGE_CLIENTS.map((c) => [c, false])) as Record<BridgeClient, boolean>;
+  const out = Object.fromEntries(ALL_BRIDGE_CLIENTS.map((c) => [c, false])) as Record<BridgeClient, boolean>;
   for (const r of rows) if (r.client in out) out[r.client] = Number(r.enabled) === 1;
   return out;
 }

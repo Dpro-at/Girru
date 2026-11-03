@@ -19,11 +19,12 @@ import { findProject, listProjects } from '../../repositories/chat-conversations
 import { getMemoryStorage } from '../storage.js';
 import { learn } from '../learning.js';
 import { cleanHandoff, HandoffInputError } from '../handoff/store.js';
-import { BRIDGE_CLIENTS, CLIENT_NAMES, clientConfigFile, isBridgeClient, launchReady, serverLaunch, type BridgeClient, type BridgeEnv } from './clients.js';
+import { bridgeClients, CLIENT_NAMES, clientConfigFile, isBridgeClient, launchReady, serverLaunch, type BridgeClient, type BridgeEnv } from './clients.js';
 import { briefHash, briefMarkdown, clean, handoffText, projectBrief, projectDrawer, projectHandoff, pinnedFacts } from './brief.js';
 import { applyFiles, ManagedFileError, previewFiles, type FilesPreview, type SectionExtras } from './managed-files.js';
 import { createHash } from 'node:crypto';
-import { applyRegistration, previewRegistration, RegistrationError, undoRegistration } from './registration.js';
+import { applyRegistration, previewRegistration, RegistrationError, undoAllRegistrations, undoRegistration } from './registration.js';
+import { storeP7Enabled } from '../../services/store-p7.js';
 import { runBackflow, type BackflowResult } from './backflow.js';
 import { ensureToken, revokeToken, tokenMatches, checkSessionProof } from './auth.js';
 import { CapabilityError, launchCapability, requireScope, revokeCapability, verifyCapability, type Capability } from './capability.js';
@@ -43,6 +44,8 @@ export class BridgeError extends Error {
 let bridgeEnv: BridgeEnv = {};
 export function setBridgeEnv(where: BridgeEnv): void { bridgeEnv = where; }
 const where = (): BridgeEnv => ({ home: bridgeEnv.home ?? os.homedir(), env: bridgeEnv.env ?? process.env });
+/** The home folder the coding apps' user-level files live in (a temporary one in tests). */
+export const bridgeHome = (): string => where().home!;
 
 async function ownProject(ownerId: string, projectId: unknown): Promise<Project> {
   if (typeof projectId !== 'string' || !projectId) throw new BridgeError('projectId is required');
@@ -53,7 +56,7 @@ async function ownProject(ownerId: string, projectId: unknown): Promise<Project>
 }
 
 function client(value: unknown): BridgeClient {
-  if (!isBridgeClient(value)) throw new BridgeError(`client must be one of ${BRIDGE_CLIENTS.join(', ')}`);
+  if (!isBridgeClient(value)) throw new BridgeError(`client must be one of ${bridgeClients().join(', ')}`);
   return value;
 }
 
@@ -74,7 +77,7 @@ export async function bridgeStatus(ownerId: string) {
   const projects = (await listProjects(ownerId)).filter((p) => p.folder);
   const calls = await lastCalls(ownerId);
   return {
-    clients: BRIDGE_CLIENTS.map((c) => {
+    clients: bridgeClients().map((c) => {
       const active = regs.find((r) => r.client === c && r.status === 'applied');
       const last = calls.get(c);
       return { client: c, name: CLIENT_NAMES[c], enabled: states[c], configPath: clientConfigFile(c, where()), registrationId: active?.id ?? null, registeredAt: active?.createdAt ?? null,
@@ -96,7 +99,21 @@ export async function setClient(ownerId: string, c: unknown, enabled: unknown, a
   await setClientEnabled(ownerId, cl, enabled);
   if (!enabled) await revokeToken(ownerId, cl);
   await audit(ownerId, enabled ? 'client-on' : 'client-off', { client: cl, note: actor });
+  // P7 (OPS8): a tool turned off keeps none of Girru's entries in its config.
+  if (!enabled && storeP7Enabled()) {
+    const r = await undoAllRegistrations(ownerId, cl);
+    if (r.undone.length || r.failed.length) await audit(ownerId, 'registration-undone', { client: cl, note: `${r.undone.length} undone, ${r.failed.length} failed` });
+    return { client: cl, enabled, undone: r.undone.length, failed: r.failed };
+  }
   return { client: cl, enabled };
+}
+
+/** P7 (OPS8): before Girru is removed, take Girru's entries out of every tool config (the uninstaller calls it). */
+export async function cleanUpTools(ownerId: string) {
+  if (!storeP7Enabled()) throw new BridgeError('Clean up needs GIRRU_STORE_P7', 409, 'p7_off');
+  const r = await undoAllRegistrations(ownerId);
+  await audit(ownerId, 'registration-undone', { note: `clean up: ${r.undone.length} undone, ${r.failed.length} failed` });
+  return { undone: r.undone.map((u) => ({ id: u.registration.id, client: u.registration.client, mode: u.mode })), failed: r.failed };
 }
 
 export async function filesPreview(ownerId: string, projectId: unknown): Promise<FilesPreview> {
@@ -235,7 +252,7 @@ export async function autoConnect(ownerId: string, allowed: boolean): Promise<{ 
   const w = where();
   const regs = await listRegistrations(ownerId);
   const decided = new Set((await q.all<{ client: string }>('SELECT client FROM memory_bridge_clients WHERE owner_id = ?', ownerId)).map((r) => r.client));
-  for (const cl of BRIDGE_CLIENTS) {
+  for (const cl of bridgeClients()) {
     if (decided.has(cl) || regs.some((r) => r.client === cl)) continue;
     const file = clientConfigFile(cl, w);
     const dirOk = path.dirname(file) !== (w.home ?? os.homedir()) && fs.existsSync(path.dirname(file));
@@ -273,13 +290,13 @@ export async function autoConnect(ownerId: string, allowed: boolean): Promise<{ 
 // --- STORE-MAP-01 P2: one Girru section ---------------------------------------
 
 /** The rules and task pointer of the one section (undefined while P2 is off). */
-async function extrasOf(projectId: string): Promise<SectionExtras | undefined> {
+export async function extrasOf(projectId: string): Promise<SectionExtras | undefined> {
   const { sectionExtras } = await import('../../services/agent-rule-files.js');
   return sectionExtras(projectId);
 }
 
 /** What the files are written from: the brief, plus (P2) the rules and the task pointer. */
-function sectionHash(brief: Parameters<typeof briefHash>[0], extras: SectionExtras | undefined): string {
+export function sectionHash(brief: Parameters<typeof briefHash>[0], extras: SectionExtras | undefined): string {
   return extras ? createHash('sha256').update(JSON.stringify([briefHash(brief), extras])).digest('hex') : briefHash(brief);
 }
 
