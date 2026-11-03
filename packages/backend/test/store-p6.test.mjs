@@ -195,3 +195,46 @@ test('AG5: a write through a session records the app and the agent it works for'
   await s.end(); await t.end();
   off();
 });
+
+// --- T6 / DB2-8: debounced instant sync from the change log ---------------------------------
+
+test('T6: many changes in a burst give one write, after the project is quiet; the file carries its version stamp', async () => {
+  const { readFileSync, existsSync } = await import('node:fs');
+  const { patchFolder } = await import(join(backendDir, 'src/memory/bridge/store.ts'));
+  const P6 = await import(join(backendDir, 'src/memory/outbox/p6.ts'));
+  const P = await import(join(backendDir, 'src/memory/outbox/projection.ts'));
+  const E = await import(join(backendDir, 'src/memory/outbox/events.ts'));
+  on();
+  assert.deepEqual(await P6.syncP6Scopes(), [], 'files off: no change log');
+  await patchFolder(OWNER, project.id, { filesEnabled: true });
+  const scope = E.projectScope(project);
+  assert.deepEqual(await P6.syncP6Scopes(), [scope]);
+  P.setProjectionDebounce(true);
+  const brief = join(folder, '.girru', 'brief.md');
+  const version = () => db.prepare("SELECT projection_version AS v FROM projection_state WHERE consumer = 'brief-file' AND scope = ?").get(scope)?.v ?? 0;
+  const t0 = 1_000_000;
+  await save('Burst fact one.');
+  await P.projectionTick(t0);
+  assert.equal(existsSync(brief), false, 'not written while changes are still coming');
+  await save('Burst fact two.');
+  await save('Burst fact three.');
+  await P.projectionTick(t0 + 600);
+  assert.equal(existsSync(brief), false);
+  await P.projectionTick(t0 + 600 + P.DEBOUNCE_MS);
+  assert.equal(version(), 1, 'one write for the whole burst');
+  const text = readFileSync(brief, 'utf8');
+  assert.match(text, /Burst fact three/);
+  const seq = await E.latestSeq(scope);
+  assert.match(text, new RegExp(`^<!-- girru:brief scope=${scope} seq=${seq} projection=1 `), 'version stamp: the change-log position and the projection version');
+  // A project that never goes quiet is still written within MAX_WAIT_MS.
+  let t = t0 + 10_000;
+  await save('Steady fact 0.');
+  await P.projectionTick(t);
+  for (let n = 1; version() === 1 && n < 20; n++) { t += 1000; await save(`Steady fact ${n}.`); await P.projectionTick(t); }
+  assert.equal(version(), 2);
+  assert.ok(t - (t0 + 10_000) <= P.MAX_WAIT_MS, `written after ${t - (t0 + 10_000)} ms`);
+  P.setProjectionDebounce(false);
+  await patchFolder(OWNER, project.id, { filesEnabled: false });
+  assert.deepEqual(await P6.syncP6Scopes(), []);
+  off();
+});
