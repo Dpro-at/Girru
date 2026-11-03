@@ -22,8 +22,8 @@ export class TaskTrustError extends Error {
   constructor(message: string, readonly status = 400, readonly code = 'invalid_request') { super(message); }
 }
 
-/** What the file may change of a task that Girru then counts as "from the file". */
-const fileFields = (t: TaskBlock) => JSON.stringify([t.title, t.done, t.left, t.next, t.log, t.workedOn]);
+/** Every field the file can set (state, department and agent too: they choose who runs the task). */
+const fileFields = (t: TaskBlock) => JSON.stringify([t.no, t.title, t.state, t.department, t.agent, t.priority, t.done, t.left, t.next, t.log, t.workedOn]);
 
 /** The file changed a task's text: from now on the task counts as from the file. */
 export async function markFromFile(cardId: string, before: TaskBlock | null, fromFile: TaskBlock): Promise<void> {
