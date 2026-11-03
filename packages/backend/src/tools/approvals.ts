@@ -69,6 +69,10 @@ export const APPROVAL_REQUIRED_TOOLS: Readonly<Record<string, ApprovalCategory>>
   memory_graph_review: 'other', // CORE-MEM-GRAPH: an approved link is used by recall; the approval is the confirm
   memory_graph_topic: 'other', // MEM-GRAPH-CLUSTER: gives a memory a topic key / dismisses a suggestion; the approval is the confirm
   memory_person_export: 'other', // STORE-MAP-01 P9: hands everything about one person to the agent; the owner approves each export
+  memory_corrected_checked: 'other', // STORE-MAP-01 P9b: marks a corrected memory as checked; the approval is the confirm
+  memory_question_answer: 'other', // STORE-MAP-01 P9b: the owner approves the exact answer text that is saved
+  memory_question_forget: 'other', // STORE-MAP-01 P9b: forgets an open question; the approval is the confirm
+  open_in_code: 'other', // CODE-OPEN-01: the owner approves which file opens in Code
   memory_privacy_decide: 'other', // STORE-MAP-01 P9: keeps or drops a personal-data / sensitive memory; the approval is the confirm
   memory_graph_sync: 'other', // MEM-FINISH-01 (M14 Rebuild map): re-indexes the map and prunes orphan links; the approval is the confirm
   // spending money

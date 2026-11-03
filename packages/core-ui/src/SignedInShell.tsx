@@ -45,6 +45,7 @@ import { ChatSearchController } from './chat-search';
 import { chatFromLink } from './chat-actions';
 import type { Command } from './CommandPalette';
 import { accountRoleLabel, isDeveloperBuild } from './developer-build';
+import { setCodeHost } from './code-open';
 
 type Page = 'browser' | 'rules' | 'code' | 'trading' | 'library' | 'apps' | 'store' | 'approvals' | 'chat' | 'genvr' | 'agents' | 'board' | 'runs' | 'memory' | 'skills' | 'mcp' | 'terminal' | 'account' | 'settings' | 'about' | 'specialties' | 'personalities';
 /** The section a page is a place of: its "← back" on top of the sidebar goes there. */
@@ -97,6 +98,9 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
   useEffect(()=>()=>{void window.dproApp?.nabu?.select('chat',48,32).catch(()=>{});},[]);
   const openCode=async()=>{if(!chat||!await chat.ensureCodeConversation())return;const folder=await chat.editorDirectory();if(folder)openProjectCode(folder);};
   const openProjectCode=(folder:string,file?:string)=>{const {top,bottom,right}=editorBounds();void window.dproApp?.nabu?.open(folder,file??null,top,bottom,right).then(result=>{if(result?.mode==='code')setPage('code');}).catch(()=>{});};
+  // CODE-OPEN-01: every "Open in Code" in the app opens here (the file at its line), only for the owner.
+  const codeOwner=state.user?.role==='owner';
+  useEffect(()=>{if(!codeOwner){setCodeHost(null,false);return;}setCodeHost(async(t,o)=>{const {top,bottom,right}=editorBounds();const result=await window.dproApp?.nabu?.open(t.folder,t.file,top,bottom,right,{...(t.line?{line:t.line}:{}),...(t.generated?{note:true}:{}),...(o.readOnly?{readOnly:true}:{})});if(result?.mode==='code'){setPage('code');return true;}return false;},nativeEditor);return()=>setCodeHost(null,false);},[codeOwner,nativeEditor]);
   const appearance = useAppTheme();
   const theme = appearance.theme;
   // The title-bar switch goes back to "system" when it lands on the system's own theme.

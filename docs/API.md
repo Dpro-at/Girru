@@ -180,6 +180,26 @@ Each answers `404 not_found` while the switch is off.
 | `GET /api/memory/health` | `{ checkedAt, rows: [{ id: remembering\|saving\|backups\|coding_apps\|background, state: ok\|needs_you, word, detail }] }`; counts and ids only |
 | `GET /api/memory/health/support` | a download (`girru-support-<date>.json`): versions, switches, database driver and migration, counts per memory kind, the health rows and the last 200 events (kind, id, time); never memory text |
 
+### How sure a memory is, corrected after use, open questions (owner only, `GIRRU_STORE_P9B`)
+Each answers `404 not_found` while the switch is off. Agents never mark a memory verified.
+
+| Route | Body / answer |
+|---|---|
+| `GET /api/memory/trust?ids=a,b` | `{ items: [{ id, level: verified\|heard-once\|not-checked, byOwner, heardFrom: [{ kind, agentId? }], uses, lastUsedAt }] }` (at most 200 ids; kinds and ids only) |
+| `POST /api/memory/trust/:id/verify` · `/unverify` | `{ item }`; verify adds the owner's mark (high, verified at once); unverify takes exactly that mark away (Undo) |
+| `GET /api/memory/trust-waiting` | `{ corrected, questions }` that wait for the owner |
+| `GET /api/memory/corrected` | `{ items: [{ memoryId, nowId, drawer, was, now, changedAt, how: edited\|replaced, checked, replyCount, replies: [{ runId, sessionId, title, agentId, at }] }] }` |
+| `POST /api/memory/corrected/:id` | `{ checked: boolean }` → `{ memoryId, checked }` (false = Undo) |
+| `GET /api/memory/open-questions` | `{ items: [{ id, question, agentId, status: open\|resolved\|expired, askedAt, resolvedAt, resolvedMemoryId, endsAt }] }` (last 30 days) |
+| `POST /api/memory/open-questions/:id/answer` | `{ text, drawer? }` → `{ question, memoryId }`: saved as the owner's own fact; `409 not_open` when it no longer waits |
+| `POST /api/memory/open-questions/:id/forget` · `/restore` | forget (no confirmation) → `{ id, undo }`; restore within 10 minutes → `{ question }`, else `410 gone` |
+
+### Open in Code (owner only, CODE-OPEN-01)
+
+| Route | Body / answer |
+|---|---|
+| `POST /api/code-open` | `{ path, line? }` → `{ folder, file, path, line, generated, where: project\|data, project }` for a regular file inside one of the owner's projects or the data folder (real path, no links); `403 { code: outside }`, `403 { code: not_allowed }` for keys, environment files, databases and folders, `404 not_found`, `400 invalid` |
+
 With the switch on, a waiting memory flagged as personal data or a sensitive topic (`GET /api/memory/proposals[/:id]`, reasons `personal-data` / `special-category`) also has `privacy: { personalData: (email|phone|bank-account|card|address|id-number)[], sensitive: (health|religion|politics|sexuality|origin|union|genetic)[] }` (kinds and topics, never the values), and `GET /api/store-switches` answers `p9: true`. Agents do the same through the tools `memory_person_export` and `memory_person_forget` (the person's place open for the run; every call needs the owner's approval), `memory_privacy_review` (read only) and `memory_privacy_decide` (keep or forget one, with its review hash; owner's approval).
 
 With the switch on, a memory retention run's answer also has `people: { forgotten, afterDays }` (replaced facts about people forgotten after 365 days). The dpro-memory `memory_search` and `memory_recall` answer "This project's memory stays on this computer…" for a project whose place stays on this computer.

@@ -3719,3 +3719,25 @@ label.setup-kind { display:flex; align-items:center; justify-content:flex-start;
 .dk-person-mentions .dk-check>span{display:grid;gap:1px;font-size:12.5px;color:var(--text)}
 .dk-facts dd .ui-icon,.dk-facts dd svg{flex:none}
 .dk-title-person{display:inline-flex;align-items:center;gap:6px;padding:2px 4px;align-self:center}
+/* STORE-MAP-01 P9b: how sure a memory is (three bars, one chip; never a number) */
+.dk-sure{display:inline-flex;align-items:flex-end;gap:2px;block-size:12px;margin-inline-end:6px;vertical-align:middle}
+.dk-sure>span{inline-size:4px;border-radius:1px;background:var(--border)}
+.dk-sure>span:nth-child(1){block-size:5px}.dk-sure>span:nth-child(2){block-size:8px}.dk-sure>span:nth-child(3){block-size:12px}
+.dk-sure[data-level="verified"]>span[data-on]{background:var(--mem-ok)}
+.dk-sure[data-level="heard-once"]>span[data-on]{background:var(--accent)}
+.dk-sure[data-level="not-checked"]>span[data-on]{background:var(--mem-warn)}
+.dk-sure-row{display:flex;align-items:center;gap:6px}
+.dk-sure-chip{display:inline-flex;align-items:center;gap:4px;flex:none;align-self:center}
+.dk-sure-chip[data-level="verified"]{background:var(--mem-ok-bg,color-mix(in srgb,var(--mem-ok) 14%,transparent));color:var(--mem-ok)}
+.dk-sure-chip[data-level="not-checked"]{background:var(--mem-warn-bg);color:var(--mem-warn)}
+.dk-row[data-done] .dk-row-main{color:var(--text-3)}
+.dk-was{color:var(--text-3);text-decoration:line-through}
+/* CODE-OPEN-01: the Open in Code icon shows on hover and on the selected row only */
+.dk-open-code{opacity:0;flex:none}
+.dk-row:hover .dk-open-code,.dk-row[aria-selected="true"] .dk-open-code,.dk-open-code:focus-visible,.dk-file-row:hover .dk-open-code,.dk-file-row:focus-within .dk-open-code{opacity:1}
+.dk-pf-files li:has(.dk-open-code){grid-template-columns:20px minmax(0,1fr) auto auto}
+.dk-pf-files li .dk-open-code{align-self:center}
+.dk-pf-files li[aria-selected]{background:var(--row-active,color-mix(in srgb,var(--accent) 10%,transparent))}
+.change-list li.dk-file-row{position:relative}
+.change-list li.dk-file-row>.dk-open-code{position:absolute;inset-inline-end:64px;top:2px}
+.file-edit-review header.dk-file-row .dk-open-code{margin-inline-start:auto}

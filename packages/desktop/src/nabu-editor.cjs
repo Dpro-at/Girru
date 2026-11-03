@@ -43,6 +43,9 @@ function installNabuEditor({ win, electron, getOrigin, runtimeRoot, node, dataDi
   const allowed = event => !disposed && available() && event.sender === win.webContents && event.senderFrame === win.webContents.mainFrame && (() => { try { return new URL(event.senderFrame.url).origin === getOrigin(); } catch { return false; } })();
   const validBottom = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 96;
   const validRight = value => value === undefined || (Number.isFinite(value) && value >= 0 && value <= 1600);
+  // CODE-OPEN-01: { line?, note?, readOnly? } for one file (never for a folder alone).
+  const validOptions = (value, file) => value === undefined || (file !== null && !!value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0 && Object.keys(value).every(k => ['line', 'note', 'readOnly'].includes(k))
+    && (value.line === undefined || (Number.isSafeInteger(value.line) && value.line >= 1 && value.line <= 10000000)) && (value.note === undefined || value.note === true) && (value.readOnly === undefined || value.readOnly === true));
   const validTop = value => typeof value === 'number' && Number.isFinite(value) && value >= 32 && value <= 160;
   const layout = () => {
     if (!view || disposed || win.isDestroyed()) return;
@@ -179,7 +182,7 @@ function installNabuEditor({ win, electron, getOrigin, runtimeRoot, node, dataDi
   });
   cleanup.push(() => { for (const name of ['dpro:nabu-review','dpro:nabu-review-clear','girru:code-review','girru:code-review-decide']) ipcMain.removeHandler(name); });
   const openHandler = async (event, value) => {
-    if (!allowed(event) || !value || !['bottom,file,folder,top','bottom,file,folder,right,top'].includes(Object.keys(value).sort().join(',')) || !validRight(value.right) || !validTop(value.top) || !validBottom(value.bottom) || typeof value.folder !== 'string' || value.folder.length > 4096 || !path.isAbsolute(value.folder) || value.folder.includes('\0') || !(value.file === null || (typeof value.file === 'string' && value.file.length <= 4096 && value.file && !value.file.includes('\0') && !path.isAbsolute(value.file) && !/^[a-z]:/i.test(value.file) && !value.file.split(/[\\/]/).some(x => x === '..' || /^\.env(?:\.|$)|\.(?:pem|key|p12|pfx)$|^id_(?:rsa|ed25519|ecdsa)/i.test(x))))) return null;
+    if (!allowed(event) || !value || !['bottom,file,folder,top','bottom,file,folder,right,top','bottom,file,folder,options,top','bottom,file,folder,options,right,top'].includes(Object.keys(value).sort().join(',')) || !validOptions(value.options, value.file) || !validRight(value.right) || !validTop(value.top) || !validBottom(value.bottom) || typeof value.folder !== 'string' || value.folder.length > 4096 || !path.isAbsolute(value.folder) || value.folder.includes('\0') || !(value.file === null || (typeof value.file === 'string' && value.file.length <= 4096 && value.file && !value.file.includes('\0') && !path.isAbsolute(value.file) && !/^[a-z]:/i.test(value.file) && !value.file.split(/[\\/]/).some(x => x === '..' || /^\.env(?:\.|$)|\.(?:pem|key|p12|pfx)$|^id_(?:rsa|ed25519|ecdsa)/i.test(x))))) return null;
     const sequence = ++targetSequence;
     try {
       const folder = await fs.promises.realpath(value.folder);
@@ -191,7 +194,7 @@ function installNabuEditor({ win, electron, getOrigin, runtimeRoot, node, dataDi
         if (!relative || relative.startsWith('..' + path.sep) || relative === '..' || path.isAbsolute(relative) || !(await fs.promises.stat(file)).isFile()) return null;
       }
       if (!allowed(event) || sequence !== targetSequence) return null;
-      pendingTarget = { id: sequence, folder, file };
+      pendingTarget = { id: sequence, folder, file, ...(value.options?.line ? { line: value.options.line } : {}), ...(value.options?.note ? { note: true } : {}), ...(value.options?.readOnly ? { readOnly: true } : {}) };
       top = value.top; bottom = value.bottom; right = value.right ?? 0; activated = true;
       const result = await select('code');
       if (result.mode === 'code' && pendingTarget) view.webContents.send('girru:code-target-changed');

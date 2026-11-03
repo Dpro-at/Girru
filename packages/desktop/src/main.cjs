@@ -300,6 +300,18 @@ ipcMain.handle('dpro:reveal-folder', async (event, folder) => {
   shell.showItemInFolder(path.join(folder, '.'));
   return true;
 });
+// CODE-OPEN-01: one file in Finder / Explorer. The page checked it with the backend (inside a project or the data
+// folder); here again: an absolute path to a regular file whose real path is the path itself (no links).
+ipcMain.handle('dpro:reveal-file', async (event, file) => {
+  const sender = BrowserWindow.fromWebContents(event.sender);
+  if (!appOrigin || !sender || (sender !== mainWindow && !chatWindows.has(sender)) || event.senderFrame !== sender.webContents.mainFrame) return false;
+  let origin = null;
+  try { origin = new URL(event.senderFrame.url).origin; } catch { /* invalid */ }
+  if (origin !== appOrigin || typeof file !== 'string' || file.length > 4096 || !path.isAbsolute(file) || /[\x00-\x1f]/.test(file)) return false;
+  try { if (fs.realpathSync.native(file) !== path.resolve(file) || !fs.lstatSync(file).isFile()) return false; } catch { return false; }
+  shell.showItemInFolder(file);
+  return true;
+});
 ipcMain.handle('dpro:find-data', async event => {
   if (!fromWelcome(event)) return { ok: false };
   const result = await dialog.showOpenDialog(mainWindow, { title: 'Choose the folder containing agent-player.db', properties: ['openDirectory', 'showHiddenFiles'] });

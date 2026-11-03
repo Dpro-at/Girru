@@ -67,6 +67,8 @@ const { allowedMemoryBridge, memoryBridgeRoute, memoryBridgeResponse } = require
 const { allowedProjectFiles, projectFilesRoute, projectFilesResponse } = require('../src/project-files-contract.js');
 const { allowedTaskLinks, taskLinksPathResponse, taskLinksRoute } = require('../src/task-links-contract.js');
 const { allowedPerson, personPathResponse, personRoute } = require('../src/memory-people-contract.js');
+const { allowedTrust, trustPathResponse, trustRoute } = require('../src/memory-trust-contract.js');
+const { allowedCodeOpen, codeOpenResponse, codeOpenRoute } = require('../src/code-open-contract.js');
 const { allowedDiscovery, discoveryRoute, discoveryResponse } = require('../src/discovery-contract.js');
 const { allowedMemoryDesktop, memoryDesktopRoute, memoryDesktopResponse } = require('../src/memory-desktop-contract.js');
 const { validChatBody, validKey, validId, chatError, SSEParser, CHAT_BYTES, CHAT_DEADLINE_MS, CHAT_IDLE_MS } = require('../src/chat-protocol.js');
@@ -159,6 +161,8 @@ function allowed(method, target, body) {
   if (projectFilesRoute(target)) return allowedProjectFiles(method, target, body);
   if (taskLinksRoute(target)) return allowedTaskLinks(method, target, body);
   if (personRoute(target)) return allowedPerson(method, target, body);
+  if (trustRoute(target)) return allowedTrust(method, target, body);
+  if (codeOpenRoute(target)) return allowedCodeOpen(method, target, body);
   if (discoveryRoute(target)) return allowedDiscovery(method, target, body);
   if (allowedGenVR(method, target, body) || allowedChannel(method, target, body) || allowedPersonality(method, target, body) || allowedHire(method, target, body) || allowedBoard(method, target, body) || allowedConversation(method, target, body) || allowedAgentCard(method, target, body) || allowedTerminal(method, target, body) || allowedConnector(method, target, body) || allowedLocalImport(method, target, body) || allowedChatBoard(method, target, body) || allowedChatMemory(method, target, body) || allowedChatSearch(method, target, body) || allowedChatExport(method, target, body) || allowedChatSecrets(method, target, body)) return true;
   const id = /^\/api\/agents\/([^/?#]+)$/.exec(target)?.[1];
@@ -269,6 +273,8 @@ function project(target, status, body) {
   if (projectFilesRoute(target)) return projectFilesResponse(target, status, body);
   if (taskLinksRoute(target)) return taskLinksPathResponse(target, status, body);
   if (personRoute(target)) return personPathResponse(target, status, body);
+  if (trustRoute(target)) return trustPathResponse(target, status, body);
+  if (codeOpenRoute(target)) return codeOpenResponse(status, body);
   if (discoveryRoute(target)) return discoveryResponse(target, status, body);
   if (target === '/api/agents' || (target.startsWith('/api/agents/') && target !== '/api/agents/name-suggestion')) {
     if (status === 200 && target === '/api/agents') {

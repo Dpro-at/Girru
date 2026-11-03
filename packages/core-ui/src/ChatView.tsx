@@ -542,7 +542,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
     : pane === null && !embeddedCode && <DetailsRail controller={controller} onOpen={openPart}/>}
   {scheduleOpen && client && s.activeId && <ScheduleSheet client={client} chatId={s.activeId} onClose={() => setScheduleOpen(false)}/>}
   {panes && (pane === 'changes' || pane === 'files') && <aside className="chat-panel chat-pane" aria-label={pane === 'changes' ? 'Changes' : 'Files'} onKeyDown={e => { if (e.key === 'Escape') setPane(null); }}><PaneSwitch items={paneButtons} pane={pane} onPane={setPane}/>
-    {pane === 'changes' ? <ChangesPane panes={panes}/> : <FilesPane panes={panes} onOpenCode={onOpenCode&&project?.folder?file=>onOpenCode(project.folder!,file):undefined}/>}
+    {pane === 'changes' ? <ChangesPane panes={panes} client={client} folder={project?.folder ?? null}/> : <FilesPane panes={panes} onOpenCode={onOpenCode&&project?.folder?file=>onOpenCode(project.folder!,file):undefined}/>}
   </aside>}
 
   </div></MomentsContext.Provider>;

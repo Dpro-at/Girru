@@ -3,7 +3,10 @@
 // Girru writes, its version and state; the Compare sheet; the project and place
 // switches; and the task-number questions shown in Needs you. Shown only while
 // the backend's P6 switch is on.
-import { useEffect, useSyncExternalStore } from 'react';
+import { OpenInCodeIcon, fileKeys, openFile } from './CodeOpen';
+import { codeOpenNotice, finderWord, joinPath, revealFile } from './code-open';
+type CodeRequester = Parameters<typeof openFile>[0];
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, RefObject } from 'react';
 import { UiIcon } from './ui-icons';
 import { IconButton, Sheet, Tile } from './desktop-ui';
@@ -79,8 +82,13 @@ export function ProjectFilesView({ c, onMenu, searchRef }: { c: ProjectFilesCont
 }
 
 /** The inspector of the selected project: each file Girru writes, its version and state. */
-export function ProjectFilesInspector({ c, d, project, onMenu }: { c: ProjectFilesController; d: MemoryDesktopController; project: ProjectFiles; onMenu: (e: ReactMouseEvent, p: ProjectFiles) => void }) {
+export function ProjectFilesInspector({ c, d, project, onMenu, client, onFileMenu }: { c: ProjectFilesController; d: MemoryDesktopController; project: ProjectFiles; onMenu: (e: ReactMouseEvent, p: ProjectFiles) => void;
+  /** CODE-OPEN-01: Open in Code for each file (the window's client and right-click menu). */ client?: CodeRequester; onFileMenu?: (e: ReactMouseEvent, path: string) => void }) {
   const s = useStore(c); const p = project;
+  const [sel, setSel] = useState<string | null>(null);
+  const say = (t: string) => d.say(t);
+  const abs = (f: string) => (p.folder ? joinPath(p.folder, f) : null);
+  const selected = sel && p.files.some(f => f.path === sel) ? sel : null;
   return <div className="dk-insp">
     <div className="dk-insp-head dk-pf-insp-head"><Tile name={p.name} size={28}/><div className="dk-pf-head"><h3>{p.name}</h3>
       <p className="fine-print" title={p.folder ?? undefined}>{p.folder ? <span className="dk-path">{p.folder}</span> : <span>No folder</span>}<span>{p.files.length} {p.files.length === 1 ? 'file' : 'files'} Girru writes</span></p></div>
@@ -93,16 +101,20 @@ export function ProjectFilesInspector({ c, d, project, onMenu }: { c: ProjectFil
       <div className="actions"><button type="button" disabled={s.busy} onClick={() => void setWrite(c, d, p, false)}>Stop writing files for this project</button></div></div>}
     {p.state === 'could_not_write' && <div className="dk-ask" role="alert"><p>Girru tried several times and stopped (no space or no permission).</p>
       <div className="actions"><button type="button" className="primary" disabled={s.busy} onClick={() => void c.rewrite(p.projectId)}>Try again</button></div></div>}
-    <ul className="dk-pf-files" aria-label="Files Girru writes">{p.files.map(f => <li key={f.path} data-state={f.state}>
+    <ul className="dk-pf-files" aria-label="Files Girru writes">{p.files.map(f => { const path = abs(f.path); return <li key={f.path} data-state={f.state} className="dk-file-row" tabIndex={client && path ? 0 : undefined} aria-selected={selected === f.path || undefined}
+      onClick={() => setSel(f.path)} onContextMenu={client && path && onFileMenu ? e => { setSel(f.path); onFileMenu(e, path); } : undefined} onKeyDown={client && path ? e => fileKeys(e, client, path, null, say) : undefined}>
       <span className="dk-row-icon"><UiIcon name="file" size={14}/></span>
       <span className="dk-row-text"><span className="dk-row-main dk-path">{f.path}</span>
         <span className="dk-row-sub">{f.what}{f.state === 'changed_in_both' ? ' · changed in the folder and in Girru' : f.version !== null ? ` · version ${f.version}` : ''}</span>
         {f.reason && f.state !== 'up_to_date' && <span className="dk-row-sub">{f.reason}</span>}</span>
+      {client && path && <OpenInCodeIcon client={client} path={path} say={say}/>}
       <StateChip state={f.state}/>
       {f.state === 'changed_in_both' && comparable(f.path) && <span className="actions dk-pf-actions">
         <button type="button" disabled={s.busy} onClick={() => void c.openCompare(p.projectId, f.path)}>Compare…</button>
         <button type="button" className="primary" disabled={s.busy} onClick={() => void applyGirru(c, d, p, f.path)}>Use Girru’s version</button></span>}
-    </li>)}</ul>
+    </li>; })}</ul>
+    {client && selected && abs(selected) && <div className="actions"><button type="button" onClick={() => void revealFile(client, abs(selected)!).then(r => { const n = r === 'revealed' ? null : codeOpenNotice(r); if (n) say(n); })}>Show in {finderWord()}</button>
+      <button type="button" className="primary" onClick={() => void openFile(client, abs(selected)!, null, say)}>Open in Code</button></div>}
     <p className="fine-print">Every file says which version it shows (a hidden stamp at its end). Coding apps read the files when they start; live answers come from Girru while they run.</p>
     <ProjectSwitches c={c} d={d} project={p}/>
     <p className="fine-print">Text outside Girru’s part is never touched. {mod}Z undoes “Use Girru’s version”.</p>
@@ -156,18 +168,20 @@ export function CompareSheet({ c, d }: { c: ProjectFilesController; d: MemoryDes
 }
 
 /** Board P6b1: task-number questions from .girru/tasks.md, one action each. */
-export function TaskProblems({ c }: { c: ProjectFilesController }) {
+export function TaskProblems({ c, client, say }: { c: ProjectFilesController; client?: CodeRequester; say?: (text: string) => void }) {
   const s = useStore(c);
+  /** CODE-OPEN-01: the task's line in tasks.md. */
+  const at = (q: TaskProblem) => { const folder = c.project(q.projectId)?.folder; return client && say && folder ? <button type="button" className="link-button" onClick={() => void openFile(client, joinPath(folder, q.file), q.line, say)}>Open in Code at line {q.line}</button> : null; };
   useEffect(() => { void c.loadProblems(); }, [c]);
   if (!Array.isArray(s.problems) || !s.problems.length) return null;
   return <>{(s.problems as readonly TaskProblem[]).map(q => <article key={q.id} className="dk-question">
     {q.kind === 'duplicate_number' ? <>
       <h3><UiIcon name="check" size={15}/>Two tasks in tasks.md use the same number {q.number}</h3>
-      <p className="fine-print">{q.projectName} · {q.file}{q.titles.length >= 2 ? <> · “{q.titles[0]}” and “{q.titles[1]}”</> : null}. Nothing in the file was changed and no card was moved until you pick.</p>
+      <p className="fine-print">{q.projectName} · {q.file}{q.titles.length >= 2 ? <> · “{q.titles[0]}” and “{q.titles[1]}”</> : null}. Nothing in the file was changed and no card was moved until you pick. {at(q)}</p>
       <div className="actions"><button type="button" className="primary" disabled={s.busy} onClick={() => void c.solve(q, 'new_task')}>Make the second one a new task</button></div>
     </> : <>
       <h3><UiIcon name="check" size={15}/>A task in tasks.md names a number Girru does not know ({q.number})</h3>
-      <p className="fine-print">{q.projectName} · {q.file} · it was probably copied from another project.</p>
+      <p className="fine-print">{q.projectName} · {q.file} · it was probably copied from another project. {at(q)}</p>
       <div className="actions"><button type="button" disabled={s.busy} onClick={() => void c.solve(q, 'leave')}>Leave it</button><button type="button" className="primary" disabled={s.busy} onClick={() => void c.solve(q, 'add_task')}>Add it as a new task</button></div>
     </>}
   </article>)}</>;
