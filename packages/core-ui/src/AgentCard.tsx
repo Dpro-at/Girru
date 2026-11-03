@@ -1,4 +1,5 @@
 import {AgentMemoryList} from './AgentMemoryList';
+import {AgentNotesRow,ExportAgentSheet,useAgentPackages} from './AgentNotes';
 import { modelDisplayName } from './model-names';
 import {MemoryExplorerController} from './memory-explorer';
 import {AgentPersonalityLibrary} from './AgentPersonalityLibrary';
@@ -89,11 +90,14 @@ function GeneralPart({ card, agents, onDone, onChat, onGone }: { card: AgentCard
   const [dept,setDept]=useState<string|null>(null),[editing,setEditing]=useState<string|null>(null),[hint,setHint]=useState(''),[removing,setRemoving]=useState(false),[acting,setActing]=useState(false);
   const menu=useMenu();
   const a = s.agent, id = s.agentId, busy = s.phase === 'saving' || s.phase === 'loading';
+  // STORE-MAP-01 P5c: Export agent… (⇧⌘E) only while agent packages are on.
+  const packages=useAgentPackages(card.client as never,card.client.getSnapshot().user?.role==='owner'),[exporting,setExporting]=useState(false);
+  useEffect(()=>{if(!packages)return;const on=(e:KeyboardEvent)=>{if((e.metaKey||e.ctrlKey)&&e.shiftKey&&e.key.toLowerCase()==='e'&&!document.querySelector('dialog[open]')){e.preventDefault();setExporting(true);}};window.addEventListener('keydown',on);return()=>window.removeEventListener('keydown',on);},[packages,id]);
   const sel = n?.selected?.id === id ? n.selected : undefined;
   const nameOk = n ? validatedDisplayName(n.draft) : null;
   const nameBusy = !!n && ['listing', 'reading', 'saving', 'reconciling', 'generating'].includes(n.phase);
   const departments=[...new Set((n?.agents??[]).map(x=>x.department).filter((d):d is string=>!!d))].sort();
-  useEffect(()=>{const key=(e:KeyboardEvent)=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='e'&&!editing){e.preventDefault();setEditing(card.getSnapshot().profile.description);}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[card,editing]);
+  useEffect(()=>{const key=(e:KeyboardEvent)=>{if((e.metaKey||e.ctrlKey)&&!e.shiftKey&&e.key.toLowerCase()==='e'&&!editing){e.preventDefault();setEditing(card.getSnapshot().profile.description);}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[card,editing]);
   async function change(patch:Partial<ProfileDraft>,text:string,undoable=true){
     if(card.getSnapshot().phase==='saving')return;
     const before=card.getSnapshot().profile;const prev=Object.fromEntries(Object.keys(patch).map(k=>[k,before[k as keyof ProfileDraft]])) as Partial<ProfileDraft>;
@@ -127,7 +131,8 @@ function GeneralPart({ card, agents, onDone, onChat, onGone }: { card: AgentCard
   const more=(e:React.MouseEvent)=>menu.at(e,[
     {label:'Make main agent',icon:'sparkle',disabled:!agents||!!a?.isPrimary||acting,run:()=>void act('main')},
     {label:'Duplicate',icon:'copy',disabled:!agents||acting,run:()=>void act('copy')},
-    {label:'Copy agent id',icon:'key',run:()=>{void navigator.clipboard?.writeText(id);onDone(`Agent id ${id} copied`);}},'sep',
+    {label:'Copy agent id',icon:'key',run:()=>{void navigator.clipboard?.writeText(id);onDone(`Agent id ${id} copied`);}},
+    ...(packages?[{label:'Export agent…',icon:'download' as const,shortcut:'⇧⌘E',run:()=>setExporting(true)}]:[]),'sep',
     {label:'Remove agent…',icon:'trash',danger:true,disabled:!agents||acting,run:()=>setRemoving(true)}]);
   const status=!n||!sel?'':n.phase==='generating'?'Suggesting a name…':n.phase==='saving'?'Saving…':n.phase==='reading'?'Reading…':nameOk&&nameOk!==sel.name&&!n.needsReview?'Enter saves the name · Esc puts it back':'Saved · Undo with ⌘Z';
   return <div className="ag-part ag-general">
@@ -157,6 +162,7 @@ function GeneralPart({ card, agents, onDone, onChat, onGone }: { card: AgentCard
     {editing!==null&&<DocumentEditor title={`${sel?.name??a?.name??'Agent'} · Responsibilities`} files={[{id:'responsibilities',name:'Responsibilities.md',content:editing}]} maxLength={1000} onChange={(_,text)=>setEditing(text)} onClose={()=>{const text=editing;setEditing(null);if(text!==s.profile.description)void change({description:text},'Responsibilities saved');}}/>}
     {removing&&<Sheet title={`Remove ${sel?.name??a?.name??'this agent'}?`} onClose={()=>setRemoving(false)} actions={<><button type="button" onClick={()=>setRemoving(false)}>Cancel</button><button type="button" className="primary ag-danger" disabled={acting||!!a?.isPrimary&&(n?.agents.length??0)>1} onClick={()=>{setRemoving(false);setActing(true);void agents?.remove(id).then(r=>{setActing(false);if(r.ok&&onGone)onGone(r.notice);else onDone(r.notice);});}}>Remove</button></>}>
       <p>{a?.isPrimary&&(n?.agents.length??0)>1?'This is the main agent. Make another agent the main agent first.':'It leaves the team for good. This cannot be undone.'}</p></Sheet>}
+    {exporting&&<ExportAgentSheet client={card.client as never} agentId={id} name={sel?.name??a?.name??'agent'} onClose={()=>setExporting(false)} onDone={onDone}/>}
     <ContextMenu menu={menu.menu} onClose={menu.close}/>
   </div>;
 }
@@ -189,6 +195,7 @@ function MemoryPart({card,name,onDone}:{card:AgentCardController;name:string;onD
  return <div className="ag-part ag-memory">
   <div className="ag-head-row"><h3>Memory</h3><small className="ag-muted">what <bdi>{name}</bdi> remembers · saved memories from this agent</small></div>
   <div className="ag-rules-line"><UiIcon name="database" size={15}/><span>{line}</span><button type="button" className="link-button" disabled={!d} onClick={()=>setRules(true)}>Change…</button></div>
+  <AgentNotesRow client={card.client as never} agentId={s.agentId} name={name} onDone={onDone}/>
   {explorer?<AgentMemoryList c={explorer}/>:<p className="ag-muted" role="status">Reading memories…</p>}
   {rules&&<MemoryRules card={card} onDone={onDone} onClose={()=>setRules(false)}/>}
  </div>;
