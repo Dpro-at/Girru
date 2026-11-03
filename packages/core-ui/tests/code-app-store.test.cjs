@@ -8,9 +8,17 @@ test('Code comes from the server app list like Terminal, Trading and GenVR',()=>
 });
 test('Store › Made by Girru lists the apps that come with Girru, Code included',()=>{
  assert.deepEqual(builtinApps.map(x=>x.id).sort(),['code','genvr','terminal','trading']);
- const ws=fs.readFileSync(path.join(__dirname,'../src/AppsWorkspace.tsx'),'utf8');assert.match(fs.readFileSync(path.join(__dirname,'../../backend/src/services/store-catalogue.ts'),'utf8'),/id:'girru:code'/);assert.match(fs.readFileSync(path.join(__dirname,'../src/SignedInShell.tsx'),'utf8'),/onOpenApp=\{id=>\{if\(id==='browser'\)setPage\('browser'\);else if\(id==='code'\)openCode\(\);else setPage\(id\);\}\}/);
+ const ws=fs.readFileSync(path.join(__dirname,'../src/AppsWorkspace.tsx'),'utf8');assert.match(fs.readFileSync(path.join(__dirname,'../../backend/src/services/store-catalogue.ts'),'utf8'),/id:'girru:code'/);assert.match(fs.readFileSync(path.join(__dirname,'../src/SignedInShell.tsx'),'utf8'),/onOpenApp=\{id=>\{if\(id==='browser'\)setPage\('browser'\);else if\(id==='code'\)openCode\(\);else if\(id==='terminal'\)openTerminal\(\);else setPage\(id\);\}\}/);
 });
 test('without the desktop editor, Open Code is shown but disabled',()=>{
  const h={open(){},onAccountConnections(){},onPermissions(){}};
  assert.equal(tileActions(code,{owner:true},{...h,canOpen:false})[0].disabled,true);assert.equal(tileActions(code,{owner:true},{...h,canOpen:true})[0].disabled,false);
+});
+
+test('Terminal opens beside the chat in one click from the footer, ⌘K and My apps; its SSH hosts stay in ⌘K', () => {
+ const shell=fs.readFileSync(path.join(__dirname,'../src/SignedInShell.tsx'),'utf8');
+ assert.match(shell,/terminal:entry\('terminal',owner,openTerminal,undefined,'store'\)/);
+ assert.match(shell,/\{id:'terminal',label:'Terminal',icon:<UiIcon name="terminal" size=\{14\}\/>,run:openTerminal\}/);
+ assert.match(shell,/label:'Terminal › Saved SSH hosts'[^\n]*?run:\(\)=>setPage\('terminal'\)/);
+ assert.doesNotMatch(shell,/terminal:entry\('terminal',owner,go\('terminal'\)/);
 });
