@@ -45,6 +45,7 @@ import { projectScope } from '../../memory/outbox/events.js';
 import { runBriefProjection, syncStatus } from '../../memory/outbox/projection.js';
 import { isPilotProject } from '../../memory/outbox/pilot.js';
 import { storeP6Enabled } from '../../services/store-p6.js';
+import { storeP9Enabled } from '../../services/store-p9.js';
 import { storeP2Enabled } from '../../services/agent-context/switch.js';
 import { storeP7Enabled } from '../../services/store-p7.js';
 import { layoutApply, layoutPreview } from '../../memory/bridge/layout.js';
@@ -102,7 +103,7 @@ export async function memoryBridgeRoutes(fastify: FastifyInstance) {
   })));
 
   // STORE-MAP-01 P2: which storage switches are on (the app shows the matching words). P6 is named only while it is on.
-  fastify.get('/api/store-switches', { config }, asOwner(async () => ({ p2: storeP2Enabled(), p3: storeP3Enabled(), p4: storeP4Enabled(), ...(storeP6Enabled() ? { p6: true } : {}), ...(storeP8Enabled() ? { p8: true } : {}) })));
+  fastify.get('/api/store-switches', { config }, asOwner(async () => ({ p2: storeP2Enabled(), p3: storeP3Enabled(), p4: storeP4Enabled(), ...(storeP6Enabled() ? { p6: true } : {}), ...(storeP8Enabled() ? { p8: true } : {}), ...(storeP9Enabled() ? { p9: true } : {}) })));
 
   // --- STORE-MAP-01 P6 screens: project files, task-number problems, place settings (owner only) ---
   if (storeP6Enabled()) {

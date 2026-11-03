@@ -180,6 +180,8 @@ Each answers `404 not_found` while the switch is off.
 | `GET /api/memory/health` | `{ checkedAt, rows: [{ id: remembering\|saving\|backups\|coding_apps\|background, state: ok\|needs_you, word, detail }] }`; counts and ids only |
 | `GET /api/memory/health/support` | a download (`girru-support-<date>.json`): versions, switches, database driver and migration, counts per memory kind, the health rows and the last 200 events (kind, id, time); never memory text |
 
+With the switch on, a waiting memory flagged as personal data or a sensitive topic (`GET /api/memory/proposals[/:id]`, reasons `personal-data` / `special-category`) also has `privacy: { personalData: (email|phone|bank-account|card|address|id-number)[], sensitive: (health|religion|politics|sexuality|origin|union|genetic)[] }` (kinds and topics, never the values), and `GET /api/store-switches` answers `p9: true`. Agents do the same through the tools `memory_person_export` and `memory_person_forget` (the person's place open for the run; every call needs the owner's approval), `memory_privacy_review` (read only) and `memory_privacy_decide` (keep or forget one, with its review hash; owner's approval).
+
 With the switch on, a memory retention run's answer also has `people: { forgotten, afterDays }` (replaced facts about people forgotten after 365 days). The dpro-memory `memory_search` and `memory_recall` answer "This project's memory stays on this computer…" for a project whose place stays on this computer.
 
 ### Agent packages (owner only, `GIRRU_STORE_P5`)

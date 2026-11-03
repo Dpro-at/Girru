@@ -3703,3 +3703,19 @@ label.setup-kind { display:flex; align-items:center; justify-content:flex-start;
 .task-handoff-mark.blocked{gap:4px;color:var(--mem-warn)}.task-handoff-mark.blocked i{inline-size:6px;block-size:6px;border-radius:999px;background:currentColor}
 .mem-handoff-files{font:12px/1.5 ui-monospace,Menlo,monospace!important}
 .run-notes-line>summary{display:flex;align-items:center;gap:6px}.run-notes-line>summary small{margin-inline-start:auto}
+/* STORE-MAP-01 P9 (boards P9c, P9d): one person, personal data and sensitive chips */
+.dk-privacy{display:inline-flex;align-items:center;gap:4px}
+.dk-privacy[data-tone="data"]{background:var(--mem-link-bg);color:var(--mem-link)}
+.dk-privacy[data-tone="sensitive"]{background:var(--mem-warn-bg);color:var(--mem-warn)}
+.dk-row-sub+.dk-chips{margin-block-start:3px}
+.dk-who-line{display:flex;align-items:center;gap:8px;margin:0;font-size:12px;color:var(--text-2)}
+.dk-person-forget{display:grid;gap:14px}
+.dk-person-forget h4{display:flex;align-items:center;gap:8px;margin:0 0 6px;font-size:11.5px;font-weight:600;color:var(--text-2)}
+.dk-person-forget h4 .fine-print{margin-inline-start:auto;font-weight:400}
+.dk-person-always{display:grid;gap:4px;margin:0;padding:0;list-style:none;font-size:12.5px}
+.dk-person-always li{display:flex;align-items:center;gap:8px}
+.dk-person-mentions{display:grid;gap:8px}
+.dk-person-mentions .dk-check{align-items:flex-start!important}
+.dk-person-mentions .dk-check>span{display:grid;gap:1px;font-size:12.5px;color:var(--text)}
+.dk-facts dd .ui-icon,.dk-facts dd svg{flex:none}
+.dk-title-person{display:inline-flex;align-items:center;gap:6px;padding:2px 4px;align-self:center}

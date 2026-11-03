@@ -29,7 +29,11 @@ import { Avatar, ContextMenu, IconButton, Notice, Popover, Sheet, Tile, WithSwat
 import type { MenuItem } from './desktop-ui';
 import type { ProjectGroup } from './memory-desktop-contract.js';
 import { NeedsYou } from './MemoryNeeds';
-import { useStoreP3, useStoreP6, useStoreP8 } from './store-switches';
+import { useStoreP3, useStoreP6, useStoreP8, useStoreP9 } from './store-switches';
+import { MemoryPeopleController, personName } from './memory-people';
+import { ExportPersonSheet, ForgetPersonSheet, PersonInspector, personMenu } from './MemoryPeople';
+import type { PersonSheet } from './MemoryPeople';
+import { staysLocalDefault } from './project-files';
 import { ProjectFilesController, bridgeProjectFor } from './project-files';
 import { CompareSheet, ProjectFilesInspector, ProjectFilesView, ProjectSwitches, projectFilesMenu } from './MemoryProjectFiles';
 import { DatabasesView, DesignView, FilesView, GroupView, TrashView } from './MemoryPlaces';
@@ -59,7 +63,7 @@ export type SettingsTarget = 'rules' | 'folders' | 'sources' | 'projects' | 'acc
 
 /** Controllers of the window, made once per client. */
 function useControllers(client: SessionClient) {
-  const [c, setC] = useState<{ d: MemoryDesktopController; x: MemoryExplorerController; sc: MemoryScopesController; rv: MemoryReviewController; mv: MemoryMoveController; map: MemoryMapController; ho: MemoryHandoffsController; disc: DiscoveryController; pf: ProjectFilesController }>();
+  const [c, setC] = useState<{ d: MemoryDesktopController; x: MemoryExplorerController; sc: MemoryScopesController; rv: MemoryReviewController; mv: MemoryMoveController; map: MemoryMapController; ho: MemoryHandoffsController; disc: DiscoveryController; pf: ProjectFilesController; pp: MemoryPeopleController }>();
   useEffect(() => {
     const d = new MemoryDesktopController(client), x = new MemoryExplorerController(client), sc = new MemoryScopesController(client);
     sc.light = true;
@@ -68,8 +72,10 @@ function useControllers(client: SessionClient) {
     const map = new MemoryMapController(client), ho = new MemoryHandoffsController(client), disc = new DiscoveryController(client);
     // STORE-MAP-01 P6: project files, task numbers and place switches (asks nothing until the switch is on).
     const pf = new ProjectFilesController(client); pf.say = text => d.say(text); pf.onSuggestions = () => void rv.load();
-    setC({ d, x, sc, rv, mv, map, ho, disc, pf });
-    return () => { d.dispose(); x.dispose(); sc.dispose(); rv.dispose(); mv.dispose(); map.dispose(); ho.dispose(); disc.dispose(); pf.dispose(); };
+    // STORE-MAP-01 P9: one person's export and forget (asks nothing until a person is opened).
+    const pp = new MemoryPeopleController(client);
+    setC({ d, x, sc, rv, mv, map, ho, disc, pf, pp });
+    return () => { d.dispose(); x.dispose(); sc.dispose(); rv.dispose(); mv.dispose(); map.dispose(); ho.dispose(); disc.dispose(); pf.dispose(); pp.dispose(); };
   }, [client]);
   return c;
 }
@@ -90,11 +96,13 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
   const p6 = useStoreP6(client);
   const p6Ref = useRef(p6); p6Ref.current = p6;
   const p8 = useStoreP8(client);
+  const p9 = useStoreP9(client);
+  const p9Ref = useRef(p9); p9Ref.current = p9;
   // STORE-MAP-01 P8: a task's notes opened from its page (Memory › Tasks › T-n) keep that task's place as the list.
   const taskScope = useRef<string | null>(null);
   const ds = useStore(k?.d), xs = useStore(k?.x), ss = useStore(k?.sc), rs = useStore(k?.rv), ms = useStore(k?.mv), fs = useStore(k?.pf);
   const menu = useMenu();
-  const [sheet, setSheet] = useState<null | { kind: 'remember' } | { kind: 'history' } | { kind: 'weekly' } | { kind: 'group'; projects: string[] } | { kind: 'rename-group'; id: string } | { kind: 'project'; action: ProjectAction; slug: string } | { kind: 'forget'; ids?: string[] } | { kind: 'trash-project'; slug: string } | { kind: 'edit-pinned'; fact: PinnedFact }>(null);
+  const [sheet, setSheet] = useState<null | { kind: 'remember' } | { kind: 'history' } | { kind: 'weekly' } | { kind: 'group'; projects: string[] } | { kind: 'rename-group'; id: string } | { kind: 'project'; action: ProjectAction; slug: string } | { kind: 'forget'; ids?: string[] } | { kind: 'trash-project'; slug: string } | { kind: 'edit-pinned'; fact: PinnedFact } | PersonSheet>(null);
   const [filters, setFilters] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const filesSearchRef = useRef<HTMLInputElement>(null);
@@ -130,7 +138,7 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
       return;
     }
     if ('scope' in focus) { k.d.open(focus.scope.startsWith('agent:') || focus.scope.startsWith('project:') ? focus.scope as Place : 'all'); return; }
-    const place: Place = focus.drawerId === 'owner' || focus.drawerId === 'experience' ? focus.drawerId : focus.drawerId.startsWith('project:') ? focus.drawerId as Place : focus.drawerId.startsWith('people:') ? 'people' : focus.drawerId.startsWith('task:') ? 'tasks' : 'all';
+    const place: Place = focus.drawerId === 'owner' || focus.drawerId === 'experience' ? focus.drawerId : focus.drawerId.startsWith('project:') ? focus.drawerId as Place : focus.drawerId.startsWith('people:') ? (p9Ref.current ? focus.drawerId as Place : 'people') : focus.drawerId.startsWith('task:') ? 'tasks' : 'all';
     k.d.open(place); void k.x.openMemory(focus.memoryId);
   }, [focus?.n, k]);
 
@@ -149,6 +157,7 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
       const files = p6Ref.current && k.d.getSnapshot().extra === 'project-files';
       if (files && cmd && key === 'f') { e.preventDefault(); filesSearchRef.current?.focus(); }
       else if (files && cmd && key === 'r' && !e.shiftKey) { e.preventDefault(); const sel = k.pf.getSnapshot().selected; if (sel && !k.pf.getSnapshot().busy) void k.pf.rewrite(sel); }
+      else if (cmd && key === 'e' && !e.shiftKey && p9Ref.current && k.d.getSnapshot().place.startsWith('people:') && !k.d.getSnapshot().extra) { e.preventDefault(); setSheet({ kind: 'export-person', key: k.d.getSnapshot().place.slice(7) }); }
       else if (cmd && key === 'n' && !e.shiftKey) { e.preventDefault(); k.x.startAdd(); setSheet({ kind: 'remember' }); }
       else if (cmd && key === 'f') { e.preventDefault(); searchRef.current?.focus(); }
       else if (cmd && key === 'z' && !e.shiftKey && !typing) { e.preventDefault(); void k.d.undo().then(() => { void k.x.load(); void k.sc.load(true); }); }
@@ -171,7 +180,11 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
 
   if (!owner) return <section className="dk-mem" aria-label="Memory"><div className="dk-empty"><p>Only the owner manages the memory here.</p></div></section>;
   if (!k || !ds || !xs || !ss || !rs || !fs) return <section className="dk-mem" aria-label="Memory"><p className="dk-empty" role="status">Opening memory…</p></section>;
-  const { d, x, sc, rv, mv, pf } = k;
+  const { d, x, sc, rv, mv, pf, pp } = k;
+  // STORE-MAP-01 P9 (board P9c): the open person (Memory › People › X).
+  const person = p9 && ds.place.startsWith('people:') ? ds.place.slice(7) : null;
+  const peopleLocal = p6 && fs.phase === 'ready' ? pf.staysLocal('people') : staysLocalDefault('people');
+  const openPerson = (s: PersonSheet) => setSheet(s);
 
   const waiting = (rs.phase === 'ready' ? rs.items.length : ss.tree?.company.pendingReviews ?? 0) + (p6 ? pf.problemCount() : 0);
   const filesOpen = p6 && ds.extra === 'project-files';
@@ -213,6 +226,7 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
     sc.startAction(action); void sc.previewAction(action); setSheet({ kind: 'project', action, slug });
   }
   const moreMenu: MenuItem[] = [
+    ...(person ? [...personMenu(person, openPerson), 'sep' as const] : []),
     { label: 'Show the map', icon: 'map', shortcut: `${mod}⇧M`, run: () => d.setExtra('map') },
     { label: 'Handoff notes', icon: 'note', run: () => d.setExtra('handoffs') },
     { label: 'Open as files', icon: 'file', run: () => d.setExtra('files') },
@@ -240,14 +254,14 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
     try { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/markdown' })); a.download = `${e.project}-memory.md`; a.click(); URL.revokeObjectURL(a.href); d.say(`Exported ${e.files.length} files.`); } catch { d.say('The export could not be saved.'); }
   }
 
-  const sidebar = <MemorySidebar k={k} p6={p6} filesNeedYou={p6 ? pf.needsCount() : 0} waiting={waiting} searchRef={searchRef} onRemember={() => { x.startAdd(); setSheet({ kind: 'remember' }); }} menu={menu} projectMenu={projectMenu}
+  const sidebar = <MemorySidebar k={k} p6={p6} p9={p9} peopleLocal={peopleLocal} onPersonMenu={(e, key) => menu.at(e, personMenu(key, openPerson))} filesNeedYou={p6 ? pf.needsCount() : 0} waiting={waiting} searchRef={searchRef} onRemember={() => { x.startAdd(); setSheet({ kind: 'remember' }); }} menu={menu} projectMenu={projectMenu}
     onNewGroup={projects => setSheet({ kind: 'group', projects })} onRenameGroup={id => setSheet({ kind: 'rename-group', id })}/>;
 
   // ---- the content of the open place ----
   const place = ds.place;
   const title = ds.extra === 'map' ? 'Map' : ds.extra === 'handoffs' ? 'Handoff notes' : ds.extra === 'files' ? 'Open as files' : ds.extra === 'project-files' ? 'Project files'
     : project ? project.name : place.startsWith('group:') ? (Array.isArray(ds.groups) ? (ds.groups as readonly ProjectGroup[]).find(g => g.id === place.slice(6))?.name ?? 'Group' : 'Group')
-    : place.startsWith('agent:') ? ss.agents[place.slice(6)] ?? 'Agent' : xs.query && !place.startsWith('project:') && placeScope(place) ? 'Search' : PLACE_NAME[place] ?? 'Memory';
+    : place.startsWith('agent:') ? ss.agents[place.slice(6)] ?? 'Agent' : person ? personName(person) : xs.query && !place.startsWith('project:') && placeScope(place) ? 'Search' : PLACE_NAME[place] ?? 'Memory';
   const sub = ds.extra === 'map' ? 'people, projects and topics in memory' : ds.extra === 'handoffs' ? 'what agents left for the next session' : ds.extra === 'files' ? 'read-only view of the memory files per agent' : ds.extra === 'project-files' ? 'what Girru writes into each project folder for coding apps'
     : place === 'needs' ? `${waiting} ${waiting === 1 ? 'question' : 'questions'}` : place === 'trash' ? `kept ${ds.trash && ds.trash !== 'missing' ? (ds.trash.trashDays ? `${ds.trash.trashDays} days` : 'until you empty it') : '30 days'}, then forgotten`
     : project ? `${project.memories} ${project.memories === 1 ? 'memory' : 'memories'}${project.archived ? ' · archived' : ''}` : placeScope(place) && xs.phase === 'ready' ? `${xs.total} ${xs.total === 1 ? 'memory' : 'memories'}` : '';
@@ -273,6 +287,7 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
   const inspector = filesOpen ? (filesProject ? <ProjectFilesInspector c={pf} d={d} project={filesProject} onMenu={filesMenu}/> : null)
     : ds.extra ? null
     : xs.open && open && listPlace ? <MemoryInspector k={k} item={open} onHistory={() => setSheet({ kind: 'history' })} onTrash={() => void trashIds([open.id])}/>
+    : person ? <PersonInspector c={pp} personKey={person} staysLocal={peopleLocal}/>
     : project && ds.details === 'project' ? <ProjectInspector k={k} p6={p6} project={project} onSettings={onOpenSettings} onGroup={() => setSheet({ kind: 'group', projects: [project.slug] })}/>
     : null;
 
@@ -282,7 +297,7 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
       <header className="dk-toolbar">
         {ds.extra && !filesOpen && <IconButton icon="arrow-left" label="Back to the list" onClick={() => d.setExtra(null)}/>}
         <div className="dk-title">
-          {project && !ds.extra ? <button type="button" className="dk-title-button" title="Project details" onClick={() => d.showDetails(ds.details === 'project' ? null : 'project')}><Tile name={project.name}/><h2>{title}</h2></button> : <h2>{title}</h2>}
+          {project && !ds.extra ? <button type="button" className="dk-title-button" title="Project details" onClick={() => d.showDetails(ds.details === 'project' ? null : 'project')}><Tile name={project.name}/><h2>{title}</h2></button> : person && !ds.extra ? <span className="dk-title-person"><Avatar name={title}/><h2>{title}</h2></span> : <h2>{title}</h2>}
           {sub && <span className="dk-sub">{sub}</span>}
         </div>
         <ImportStatus client={client} active={active} onReview={() => d.open('needs')}/>
@@ -321,6 +336,9 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
     {sheet?.kind === 'forget' && <ForgetSheet k={k} ids={sheet.ids} onClose={() => setSheet(null)}/>}
     {ms?.memory && <MoveSheet k={k} several={selection.length > 1 ? [...selection] : null} onClose={() => mv.close()}/>}
     {sheet?.kind === 'edit-pinned' && <EditPinnedSheet k={k} fact={sheet.fact} onClose={() => setSheet(null)}/>}
+    {p9 && sheet?.kind === 'export-person' && <ExportPersonSheet c={pp} personKey={sheet.key} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); d.say(`Saved everything about ${personName(sheet.key)}.`); }}/>}
+    {p9 && sheet?.kind === 'forget-person' && <ForgetPersonSheet c={pp} personKey={sheet.key} onClose={() => setSheet(null)} onExport={() => setSheet({ kind: 'export-person', key: sheet.key })}
+      onForgotten={text => { setSheet(null); if (d.getSnapshot().place === `people:${sheet.key}`) d.open('people'); d.say(text); void x.load(); void sc.load(true); void rv.load(); }}/>}
     {p6 && <CompareSheet c={pf} d={d}/>}
     <Notice toast={ds.toast} onUndo={() => void d.undo().then(() => { void x.load(); void sc.load(true); })} onShow={ds.toast?.show ? () => d.open(ds.toast!.show!) : undefined} onDone={id => d.dismiss(id)}/>
   </section></P3.Provider>;
@@ -329,8 +347,8 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
 // ---------------------------------------------------------------- sidebar
 type K = NonNullable<ReturnType<typeof useControllers>>;
 
-function MemorySidebar({ k, p6, filesNeedYou, waiting, searchRef, onRemember, menu, projectMenu, onNewGroup, onRenameGroup }: {
-  k: K; p6: boolean; filesNeedYou: number; waiting: number; searchRef: React.RefObject<HTMLInputElement | null>; onRemember: () => void; menu: ReturnType<typeof useMenu>;
+function MemorySidebar({ k, p6, p9, peopleLocal, onPersonMenu, filesNeedYou, waiting, searchRef, onRemember, menu, projectMenu, onNewGroup, onRenameGroup }: {
+  k: K; p6: boolean; p9: boolean; peopleLocal: boolean; onPersonMenu: (e: React.MouseEvent, key: string) => void; filesNeedYou: number; waiting: number; searchRef: React.RefObject<HTMLInputElement | null>; onRemember: () => void; menu: ReturnType<typeof useMenu>;
   projectMenu: (p: TreeProject) => MenuItem[]; onNewGroup: (projects: string[]) => void; onRenameGroup: (id: string) => void;
 }) {
   const { d, x, sc } = k;
@@ -407,6 +425,10 @@ function MemorySidebar({ k, p6, filesNeedYou, waiting, searchRef, onRemember, me
     {ds.groups === 'missing' && projects.length > 1 && <p className="dk-side-note">Groups of projects arrive with the next update.</p>}
     <p className="section-label dk-label"><span>Also</span></p>
     {row('people', 'users', 'People', tree?.company.drawers.people)}
+    {p9 && (tree?.people ?? []).slice().sort((a, b) => a.key.localeCompare(b.key)).map(p => <button key={p.key} type="button" className="nav-item dk-place" data-nested
+      aria-current={ds.place === `people:${p.key}` && !ds.extra ? 'page' : undefined} onClick={() => go(`people:${p.key}`)} onContextMenu={e => onPersonMenu(e, p.key)}>
+      <Avatar name={personName(p.key)} size={16}/><span className="dk-place-name">{personName(p.key)}</span>{peopleLocal && <span className="dk-muted" title="Stays on this computer" aria-label="Stays on this computer"><UiIcon name="lock" size={11}/></span>}
+    </button>)}
     {row('agents', 'sparkle', 'Agents')}
     {row('archived', 'archive', 'Archived', tree?.company.archivedProjects)}
     {row('trash', 'trash', 'Trash', trashCount)}

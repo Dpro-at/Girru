@@ -9,8 +9,8 @@ import { queryString } from './memory-pages-contract.js';
 import type { ExplorerItem, ExplorerPage, PinnedFact, WeeklySummary } from './memory-pages-contract.js';
 import type { DatabaseLevel, ProjectDatabases, ProjectDesign, ProjectGroup, TrashItem, TrashList } from './memory-desktop-contract.js';
 
-/** A sidebar place: Needs you, All memories, a drawer kind, a project, a group, an agent, Archived or Trash. */
-export type Place = 'needs' | 'all' | 'owner' | 'experience' | 'tasks' | 'people' | 'agents' | 'archived' | 'trash' | `project:${string}` | `group:${string}` | `agent:${string}`;
+/** A sidebar place: Needs you, All memories, a drawer kind, a project, a group, an agent, one person (P9), Archived or Trash. */
+export type Place = 'needs' | 'all' | 'owner' | 'experience' | 'tasks' | 'people' | 'agents' | 'archived' | 'trash' | `project:${string}` | `group:${string}` | `agent:${string}` | `people:${string}`;
 export type ProjectView = 'memories' | 'design' | 'databases' | 'files';
 /** Views that fill the content area from the ⋯ menu (Project files: from the Coding apps group, P6). */
 export type Extra = 'map' | 'handoffs' | 'files' | 'project-files' | null;
@@ -36,7 +36,7 @@ export type DesktopState = Readonly<{
 
 type Undo = { label: string; run: () => Promise<boolean> };
 const placeScope = (p: Place): string | null => p === 'all' ? 'company' : p === 'owner' || p === 'experience' ? p : p === 'tasks' ? 'kind:task' : p === 'people' ? 'kind:people'
-  : p.startsWith('project:') || p.startsWith('agent:') ? p : null;
+  : p.startsWith('project:') || p.startsWith('agent:') || p.startsWith('people:') ? p : null;
 export { placeScope };
 
 /** "flowxtra" → a stable tile colour for a project (or an agent avatar). */
