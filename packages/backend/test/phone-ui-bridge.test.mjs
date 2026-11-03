@@ -101,6 +101,12 @@ test('api.call runs as the owner through the desktop gate and projection', async
 
   const made = await B.apiCall(c, { type: 'api.call', method: 'POST', path: '/api/chat/conversations', body: { title: 'From the phone' } });
   assert.equal(made.status, 201, JSON.stringify(made));
+  // A change made from the phone is audited with the phone; a read is not.
+  await new Promise((r) => setTimeout(r, 50));
+  const rows = db.prepare("SELECT action, resource_id, metadata FROM audit_logs WHERE action = 'phone.api.call'").all();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].resource_id, c.deviceId);
+  assert.match(rows[0].metadata, /"path":"\/api\/chat\/conversations"/);
   const list = await B.apiCall(c, { type: 'api.call', method: 'GET', path: '/api/chat/conversations' });
   assert.equal(list.status, 200);
   assert.ok(JSON.stringify(list.body).includes('From the phone'));

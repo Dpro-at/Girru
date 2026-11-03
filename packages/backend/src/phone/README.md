@@ -59,7 +59,9 @@ tool: `phone_devices` (read only). No tool pairs, allows or forgets a phone.
   pins the short list. The request runs through Fastify inject with a
   60-second owner token made for that one request; it never reaches the
   phone. `ui.get` serves only files named in the verified build's manifest.
-  Limits per phone: 120 `api.call` and 600 `ui.get` a minute, 4 open streams.
+  Every change (`api.call` other than GET) and every stream is audited with
+  the device id. Limits per phone: 120 `api.call` and 600 `ui.get` a minute,
+  4 open streams.
 
 ## Wi-Fi listener (needs the owner's decision)
 

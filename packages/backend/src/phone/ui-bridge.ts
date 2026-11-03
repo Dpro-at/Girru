@@ -17,6 +17,7 @@
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import type { FastifyInstance } from 'fastify';
+import { logAudit } from '../services/audit-logger.js';
 import { CommandError, type CommandContext } from './commands.js';
 
 const require = createRequire(import.meta.url);
@@ -105,6 +106,15 @@ export function forgetUiLimits(deviceId?: string): void {
   used.delete(deviceId); streams.delete(deviceId);
 }
 
+/** Every change the page makes from a phone is recorded with the phone, like the other phone commands. */
+function audit(ctx: CommandContext, action: string, path: string, success: boolean, metadata: Record<string, unknown> = {}): void {
+  logAudit({
+    event_type: action === 'phone.api.stream' ? 'data.read' : 'data.update', event_category: action === 'phone.api.stream' ? 'data_access' : 'data_modification',
+    severity: 'info', user_id: ctx.ownerId, resource_type: 'phone_command', resource_id: ctx.deviceId, action, success,
+    metadata: { via: 'phone', device: ctx.deviceId, path: path.split('?')[0], ...metadata },
+  });
+}
+
 function only(body: Body, keys: string[]): void {
   for (const k of Object.keys(body)) if (k !== 'type' && k !== 'ref' && !keys.includes(k)) throw new CommandError('bad_format');
 }
@@ -179,6 +189,7 @@ export async function apiCall(ctx: CommandContext, body: Body) {
     headers: { ...(await ownerHeaders(ctx.ownerId)), accept: 'application/json', ...(body.body !== undefined ? { 'content-type': 'application/json' } : {}) },
     ...(body.body !== undefined ? { payload: JSON.stringify(body.body) } : {}),
   });
+  if (method !== 'GET') audit(ctx, 'phone.api.call', target, res.statusCode < 400, { method, status: res.statusCode });
   if (!/^application\/json/i.test(String(res.headers['content-type'] ?? '')) && res.body !== '') return { status: 502, body: null };
   let parsed: unknown;
   try { parsed = res.body === '' ? undefined : JSON.parse(res.body); } catch { return { status: 502, body: null }; }
@@ -203,6 +214,7 @@ export async function apiStream(ctx: CommandContext, body: Body) {
   const run = chatRuns.get(route.run);
   if (!run || run.userId !== ctx.ownerId) throw new CommandError('not_found');
   streams.set(ctx.deviceId, open + 1);
+  audit(ctx, 'phone.api.stream', body.path, true, { run: route.run });
   const after = route.after ?? 0;
   return { follow: () => followEvents(ctx, run, after, projectRunEvent) };
 }
