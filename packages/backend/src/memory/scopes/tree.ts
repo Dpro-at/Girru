@@ -64,7 +64,7 @@ const add = (a: ScopeCounts, b: ScopeCounts) => {
 
 function* buildTreeStep(ownerId: string, now: number): Step<ScopeTree> {
   const drawerRows = yield* all<{ kind: string; key: string | null; n: number; last: string | null }>(
-    `SELECT drawer_kind AS kind, drawer_key AS key, COUNT(*) AS n, MAX(created_at) AS last FROM memories WHERE user_id = ? AND ${NOT_REPLACED_SQL} GROUP BY drawer_kind, drawer_key`, ownerId);
+    `SELECT drawer_kind AS kind, drawer_key AS key, COUNT(*) AS n, MAX(created_at) AS last FROM memories WHERE user_id = ? AND COALESCE(drawer_kind, 'owner') <> 'agent' AND ${NOT_REPLACED_SQL} GROUP BY drawer_kind, drawer_key`, ownerId);
   const reviewRows = yield* all<{ kind: string; key: string; n: number; c: number }>(
     `SELECT drawer_kind AS kind, drawer_key AS key, COUNT(*) AS n, SUM(CASE WHEN conflict_with IS NOT NULL THEN 1 ELSE 0 END) AS c
        FROM memory_file_proposals WHERE user_id = ? AND status = 'pending' GROUP BY drawer_kind, drawer_key`, ownerId);
@@ -318,7 +318,8 @@ export async function exploreScope(ownerId: string, input: ExplorerInput): Promi
     const d = yield* dialect();
     const cond = yield* scopeCondition(ownerId, scope);
     // Base: owner + scope + text search (facets count over this).
-    const base = [`user_id = ?`, `(${cond.sql})`];
+    // STORE-MAP-01 P5: an agent's own notes show only in their own row on the agent page, never in a scope list.
+    const base = [`user_id = ?`, `(${cond.sql})`, "COALESCE(drawer_kind, 'owner') <> 'agent'"];
     const baseParams: Array<string | number> = [ownerId, ...cond.params];
     if (q) { base.push(`content ${likeCi(d)} ? ESCAPE '\\'`); baseParams.push(`%${escLike(q)}%`); }
     if (!showReplaced) base.push(NOT_REPLACED_SQL);

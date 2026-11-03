@@ -55,14 +55,50 @@ Update agent
 ### DELETE /api/agents/:id
 Delete agent
 
-### GET /api/agents/:id/files
-Get agent files (PERSONALITY.md, MEMORY.md)
+### Agent files (owner only)
+| Route | Body / answer |
+|---|---|
+| `GET /api/agents/:id/library` | `{ files: [{ name, kind, size, read }], removed }` — `PERSONALITY.md` (who it is), `MEMORY.md` (its notes), knowledge files |
+| `GET /api/agents/:id/library/file?name=` | `{ name, kind, content, hash, managed, redacted, read, version? }` |
+| `PUT /api/agents/:id/library/file` | `{ name, content, expectedHash }` → `{ hash, redacted, version? }`; `409 changed` when the file moved on |
+| `POST /api/agents/:id/library/file` | add a knowledge file `{ name, content, read? }` |
+| `GET /api/agents/:id/library/versions?name=` · `GET …/library/version?name=&id=` | earlier versions |
 
-### PUT /api/agents/:id/files/personality
-Update agent PERSONALITY.md
+### Personality (owner only)
+| Route | Body / answer |
+|---|---|
+| `GET /api/agents/:id/personality/current` | the current version (traits, dialect, lock); with `GIRRU_STORE_P4` also `text` |
+| `GET /api/agents/:id/personality/versions` | every version, newest first |
+| `PUT /api/agents/:id/personality/text` | `{ text, expectedVersion }` → a new version (`GIRRU_STORE_P4`; `409 changed`) |
+| `POST /api/agents/:id/personality/rollback` | `{ version }` → a new version with that version's content |
+| `GET /api/agents/:id/personality/proposals` | suggestions and outside edits of `PERSONALITY.md`, with the text before and after |
+| `POST /api/agents/:id/personality/proposals/:pid/approve` · `…/reject` | `{ expectedReviewHash }` |
+| `GET /api/agents/:id/personality` · `PUT …` | the `PERSONALITY.md` file; with `GIRRU_STORE_P4` the `PUT` needs `{ content, expectedVersion }` |
 
-### PUT /api/agents/:id/files/memory
-Update agent MEMORY.md
+### Agent notes (MEMORY.md, owner only)
+| Route | Body / answer |
+|---|---|
+| `GET /api/agents/:id/memory` | `{ content, hash, truncated, redacted }` — with `GIRRU_STORE_P5`, from the agent's own drawer after the import |
+| `PUT /api/agents/:id/memory` | `{ content, expectedHash }`; a write with an old hash is refused (`409`) |
+| `GET /api/agents/:id/memory/status` | `{ imported, versions, outsideChange }` (`GIRRU_STORE_P5`) |
+| `GET /api/agents/:id/memory/history` | `{ versions: [{ version, change, createdAt, by, reason, content }] }`, newest first; `by` is `owner` for the owner's own changes (`GIRRU_STORE_P5`, else `404`) |
+| `GET /api/agents/:id/memory/outside` | `{ outside: { file, fileHash, notes, notesHash } }` while MEMORY.md differs from what Girru last wrote, else `{ outside: null }` |
+| `POST /api/agents/:id/memory/outside` | `{ pick: "use" \| "keep", fileHash }` → `{ hash, previousHash }`. `use` saves the file text as the next version of the notes; `keep` writes the file again from the notes. `409 changed` when the file moved on since `fileHash` |
+
+Agents cannot write their own notes; only the owner saves them.
+
+### Agent packages (owner only, `GIRRU_STORE_P5`)
+| Route | Body / answer |
+|---|---|
+| `GET /api/agent-packages/status` | `{ on: true }` while the switch is on (`404` otherwise); the pages show Export and Import only then |
+| `GET /api/agents/:id/package` | one JSON package: `format: "girru.agent"`, `schemaVersion`, `packageHash`, agent, instructions, personality, specialties and skills (by content hash), knowledge files |
+| `POST /api/agent-packages/preview` | `{ package }` → what an import creates, what it leaves out (`refused`) and what this computer lacks (`missing`) |
+| `POST /api/agent-packages/import` | `{ package, expectedPackageHash, again? }` → `{ agentId, refused, missing }` |
+
+An imported package is untrusted: permissions, tool grants, credentials, hooks and
+private history (notes, conversations) are never imported, a value that looks
+like a secret refuses the package, and nothing is downloaded. The new agent
+starts with the default permissions.
 
 ---
 

@@ -55,7 +55,7 @@ Girru's own servers store none of this. Updates and the Store index come from th
 | Embedding | derived from the text | — | Never edited; recomputed when the text or the model changes | Today |
 | History | `memory_versions` (append-only) | Trash | Delete keeps the history (undo); Forget removes it | Today |
 | Pinned facts (company, department, project) | `memory_pinned_facts` | project brief; `AGENTS.md`; prompts | Owner edits only | Today |
-| Agent `MEMORY.md` | the file, with a hash check and `.memory-versions/` history | read into chat as untrusted text | A write with an old hash is refused | Today — **Planned:** an agent drawer in the database, the file becomes its view |
+| Agent `MEMORY.md` | the file, with a hash check and `.memory-versions/` history; with `GIRRU_STORE_P5` on, one memory in the agent's own drawer (`agent:<id>`) whose history holds the file's earlier versions | `MEMORY.md` (written from the drawer; a file changed outside Girru is kept, never overwritten); read into prompts as untrusted text | A write with an old hash is refused | With `GIRRU_STORE_P5`. Only the agent's own prompt and the owner read it; no search, access rule or other agent opens it |
 
 ### Handoffs
 
@@ -164,9 +164,16 @@ A first version of the change log, the session capability and the shared agent c
 `GIRRU_STORE_P4=1` turns on:
 
 - **One personality record:** an agent's personality text and its adjustments share one versioned history. Edits in Girru save at once (Undo restores the version before); `PERSONALITY.md` is written from the record; a change made to the file outside Girru, and every Evolution text suggestion, waits in Personality review. At start-up each agent's current file text is imported once.
-- **The job from the specialty link:** `system_prompt` keeps only the owner's extra instructions. Chat, task runs, coding apps, public rooms (after the room's own prompt) and the heartbeat use the one agent context, so a hired agent's job reaches chat.
+- **The job from the specialty link:** `system_prompt` keeps only the owner's extra instructions. Chat, task runs, coding apps and the heartbeat use the one agent context, so a hired agent's job reaches chat. A public room gets its own prompt and then only the agent's personality text.
 - **One handoff table** for agents' and coding tools' notes.
 - **The old memory index file** `.data/memory/memory.db` is retired after a verified full backup, and the old skill marketplace routes answer `410`.
+
+### Agent notes and agent packages (off by default)
+
+`GIRRU_STORE_P5=1` turns on:
+
+- **Agent notes in the database:** at start-up each agent's `MEMORY.md` is imported once into its own drawer, with the file's earlier versions as history. Prompts read the drawer; the owner saves with the hash of the text read; `MEMORY.md` is written from the drawer, and a file changed outside Girru is kept until the owner decides.
+- **Agent packages:** one JSON document per agent with `schemaVersion` and a content hash. Import is untrusted: permissions, tool grants, credentials, hooks and private history are never imported, a secret refuses the package, specialties and skills are linked only when this computer has the same content, and nothing is downloaded. Each import is recorded with its hash.
 
 ### One agent context and one Girru section (off by default)
 

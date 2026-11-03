@@ -353,7 +353,8 @@ export class MemoryStorage implements IMemoryStorage {
   *getOwnedStep(userId: string, id: string, lock = false): Step<Memory | null> {
     if (typeof id !== 'string' || !id) return null;
     const d = yield* dialect();
-    const row = yield* one(`SELECT * FROM memories WHERE id = ? AND user_id = ?${lock && d === 'postgres' ? ' FOR UPDATE' : ''}`, id, userId);
+    // STORE-MAP-01 P5: an agent's own notes are never opened by id here (only memory/agent-drawer.ts reads them).
+    const row = yield* one(`SELECT * FROM memories WHERE id = ? AND user_id = ? AND ${NOT_AGENT_NOTES_SQL}${lock && d === 'postgres' ? ' FOR UPDATE' : ''}`, id, userId);
     return row ? this.rowToMemory(row) : null;
   }
 
@@ -361,7 +362,7 @@ export class MemoryStorage implements IMemoryStorage {
    * Get a memory by ID
    */
   async get(id: string): Promise<Memory | null> {
-    const row = await sql().read(one('SELECT * FROM memories WHERE id = ?', id));
+    const row = await sql().read(one(`SELECT * FROM memories WHERE id = ? AND ${NOT_AGENT_NOTES_SQL}`, id));
 
     if (!row) return null;
 
@@ -473,7 +474,8 @@ export class MemoryStorage implements IMemoryStorage {
       params.push(...filter.params);
     }
     // MEM-SCALE-01: an archived project is kept but never recalled; P3: nor is a replaced fact.
-    where += ` AND ${NOT_ARCHIVED_SQL} AND ${NOT_REPLACED_SQL}`;
+    // STORE-MAP-01 P5: an agent's own notes are read only by that agent's prompt, never by a search.
+    where += ` AND ${NOT_ARCHIVED_SQL} AND ${NOT_REPLACED_SQL} AND ${NOT_AGENT_NOTES_SQL}`;
 
     // Support both legacy minImportance (1-10) and new minImportanceScore (0-1)
     if (query.minImportanceScore !== undefined) {
@@ -659,6 +661,9 @@ function* sqliteColumnsStep(): Step<void> {
   }
   yield* sqliteDdlStep(SQLITE_MEMORIES_INDEXES);
 }
+
+/** STORE-MAP-01 P5: rows of an agent's own drawer (read only through memory/agent-drawer.ts). */
+export const NOT_AGENT_NOTES_SQL = "COALESCE(drawer_kind, '') <> 'agent'";
 
 function rowDrawer(row: any): DrawerRef {
   if (row.drawer_kind) {

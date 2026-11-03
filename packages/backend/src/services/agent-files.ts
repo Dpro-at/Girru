@@ -169,6 +169,30 @@ export async function writeMemoryCAS(agentId:string,content:string,expectedHash:
   await syncDir(events);return await readMemorySnapshot(agentId);
  }finally{await fs.unlink(temp).catch(()=>{});await lock.close();await fs.unlink(path.join(dir,'.memory-lock'));}
 }
+/**
+ * STORE-MAP-01 P5: the MEMORY.md history kept by writeMemoryCAS, oldest
+ * first (the text before the first saved change, then each applied change),
+ * for the one-time import into the agent drawer. Entries that are missing,
+ * linked, too large or not ours are skipped, never followed.
+ */
+export async function readMemoryHistory(agentId:string):Promise<{hash:string;content:string;appliedAt:number|null}[]>{
+ const dir=await checkedMemoryDir(agentId);if(!dir)return [];
+ const versions=path.join(dir,'.memory-versions'),events=path.join(versions,'events');
+ async function json(file:string):Promise<any|null>{
+  let handle;try{handle=await fs.open(file,constants.O_RDONLY|constants.O_NOFOLLOW);}catch{return null;}
+  try{const st=await handle.stat();if(!st.isFile()||st.nlink!==1||st.uid!==process.getuid?.()||(st.mode&0o077)!==0||st.size>262144)return null;return JSON.parse(await handle.readFile('utf8'));}catch{return null;}finally{await handle.close();}
+ }
+ let names:string[]=[];try{if(!await checkDirectory(versions)||!await checkDirectory(events))return [];names=(await fs.readdir(events)).filter(n=>/^\d{1,16}-[0-9a-f-]{36}\.json$/.test(n)).sort((a,b)=>Number(a.split('-')[0])-Number(b.split('-')[0])||a.localeCompare(b));}catch{return [];}
+ const content=async(hash:string|null)=>{if(!hash||!/^[a-f0-9]{64}$/.test(hash))return null;const v=await json(path.join(versions,hash+'.json'));return v&&v.hash===hash&&typeof v.content==='string'?v.content:null;};
+ const out:{hash:string;content:string;appliedAt:number|null}[]=[];
+ for(const n of names.slice(0,1000)){
+  const e=await json(path.join(events,n));if(!e||e.kind!=='applied_transition')continue;
+  if(!out.length&&e.previousHash){const before=await content(e.previousHash);if(before!==null)out.push({hash:e.previousHash,content:before,appliedAt:null});}
+  const next=await content(e.nextHash);if(next!==null&&out[out.length-1]?.hash!==e.nextHash)out.push({hash:e.nextHash,content:next,appliedAt:Number.isFinite(e.appliedAt)?e.appliedAt:null});
+ }
+ return out;
+}
+
 /** Blind writes are retired; no model may silently replace its own memory file. */
 export async function writeMemory(_agentId:string,_content:string):Promise<void>{throw Error('reviewed_memory_required');}
 export async function appendMemory(_agentId:string,_content:string):Promise<void>{throw Error('reviewed_memory_required');}

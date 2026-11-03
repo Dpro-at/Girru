@@ -7,6 +7,7 @@ import type {MenuItem} from './desktop-ui';
 import {UiIcon} from './ui-icons';
 import type {UiIconName} from './ui-icons';
 import {DocumentEditor} from './DocumentEditor';
+import {NotesOutsideChip} from './AgentNotes';
 import {LIBRARY_BYTES,fileName as validFileName,libraryPath} from './agent-library-contract.js';
 
 type Kind='who'|'mind'|'knowledge';
@@ -116,6 +117,7 @@ export function AgentFiles({client,agentId,name,onDone,onPersonality}:{client:Se
       <IconButton icon="more" label="More for this file" onClick={e=>{const entry=list.files.find(f=>f.name===open.name);if(entry)menu.at(e,items(entry));}}/></div>
      {state==='changed'&&<p className="ag-alert af-changed" role="alert"><UiIcon name="alert" size={14}/>{SAY.changed}<button type="button" onClick={()=>void loadLatest(false)}>Load latest</button><button type="button" onClick={()=>void loadLatest(true)}>Keep mine</button></p>}
      {open.kind==='who'&&open.managed&&<details className="af-managed"><summary><UiIcon name="smile" size={14}/><b>Written by Personality</b><small>Show the settings it wrote</small></summary>{onPersonality&&<button type="button" className="link-button" onClick={onPersonality}>Change it in Personality</button>}<pre>{open.managed}</pre></details>}
+     {open.kind==='mind'&&<NotesOutsideChip client={client} agentId={agentId} onDone={onDone} onSettled={()=>void pick('MEMORY.md')}/>}
      {open.redacted&&<p className="af-note"><UiIcon name="lock" size={14}/>Values that looked like passwords or keys are hidden in this file.</p>}
      <DocumentEditor key={open.name+(open.hash??'')} inline title={`${name} · ${titleOf(open)}`} files={[{id:open.name,name:open.name,content:draft}]} maxLength={open.kind==='mind'?32768:LIBRARY_BYTES} onChange={(_,text)=>edit(text)} onClose={()=>{}}/>
      <p className="af-status" role="status">{state==='saving'?'Saving…':state==='saved'?(open.kind==='who'&&open.version?`Saved as version ${open.version} of its personality · ⌘Z undoes`:'Saved · ⌘Z undoes'):state==='error'?'Not saved':' '}{open.kind==='who'&&open.managed?<span>The part written by Personality is not saved from here</span>:null}</p>

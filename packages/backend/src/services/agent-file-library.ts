@@ -26,6 +26,7 @@ import { personalityExportBlock, stripPersonalityExport, upsertPersonalityExport
 import { readRegularFile } from './read-regular-file.js';
 import { redactImportText } from '../memory/import/redact.js';
 import { storeP4Enabled } from './store-p4.js';
+import { AgentMemoryConflict, AgentMemoryInputError, agentNotes, saveAgentNotes } from '../memory/agent-drawer.js';
 import { captureOutsideEdit, ensurePersonalityRecord, recordText, savePersonalityText, PersonalityVersionConflict } from './personality-record.js';
 import { currentPersonalityStep, personalityTextStep } from './personality-store.js';
 import { renderPersonalityExport } from './personality.js';
@@ -174,6 +175,9 @@ export async function readFile(agentId: string, name: unknown): Promise<FileView
   const kind = kindOf(name);
   const f = await folders(agentId);
   if (kind === 'mind') {
+    // STORE-MAP-01 P5: after the import, What it keeps in mind is the agent's own drawer.
+    const notes = await agentNotes(agentId).catch(() => null);
+    if (notes) return { name: MIND, kind, content: notes.content, hash: notes.hash, managed: null, redacted: false, read: true };
     const m = await readMemorySnapshot(agentId).catch(() => { throw new FileLibraryError(503, 'files_unavailable'); });
     return { name: MIND, kind, content: m.content, hash: m.hash, managed: null, redacted: m.redacted, read: true };
   }
@@ -197,6 +201,10 @@ export async function saveFile(agentId: string, name: unknown, content: unknown,
   if (typeof content !== 'string') throw new FileLibraryError(400, 'invalid_content');
   if (!(expectedHash === null || (typeof expectedHash === 'string' && /^[a-f0-9]{64}$/.test(expectedHash)))) throw new FileLibraryError(400, 'invalid_version');
   const f = await folders(agentId);
+  if (kind === 'mind' && typeof expectedHash === 'string' && await agentNotes(agentId).catch(() => null)) {
+    try { const saved = await saveAgentNotes(agentId, content, expectedHash, 'owner'); return { hash: saved.hash, redacted: saved.redacted }; }
+    catch (e) { throw new FileLibraryError(e instanceof AgentMemoryConflict ? 409 : e instanceof AgentMemoryInputError ? 413 : 503, e instanceof AgentMemoryConflict ? 'changed' : e instanceof AgentMemoryInputError ? 'too_large' : 'files_unavailable'); }
+  }
   if (kind === 'mind') {
     try { const m = await writeMemoryCAS(agentId, content, expectedHash as string | null); return { hash: m.hash, redacted: m.redacted || redactImportText(content).text !== content }; }
     catch (e) { const msg = (e as Error).message; throw new FileLibraryError(/conflict/.test(msg) ? 409 : /invalid/.test(msg) ? 413 : 503, /conflict/.test(msg) ? 'changed' : /invalid/.test(msg) ? 'too_large' : 'files_unavailable'); }

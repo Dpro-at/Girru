@@ -20,7 +20,8 @@ import { forUpdate, greatest } from '../../db/pg/dialect.js';
 import { orderedId } from '../../repositories/ordered-id.js';
 import { getUserIdFromRequest } from '../../auth/jwt.js';
 import { randomUUID } from 'crypto';
-import { readPersonality, readMemory } from '../../services/agent-files.js';
+import { readPersonality } from '../../services/agent-files.js';
+import { agentMemoryForPrompt } from '../../memory/agent-drawer.js';
 import { storeP4Enabled } from '../../services/store-p4.js';
 import { personalityTextFor } from '../../services/personality-record.js';
 import { outsiderAgentMemoryEnabled } from '../../services/outsider-memory.js';
@@ -618,7 +619,7 @@ export async function registerPublicChatRoutes(fastify: FastifyInstance) {
     if (room.agent_id) {
       try {
         personalityContent = await readPersonality(room.agent_id);
-        memoryContent = includeAgentMemory ? await readMemory(room.agent_id) : '';
+        memoryContent = includeAgentMemory ? await agentMemoryForPrompt(room.agent_id) : '';
       } catch {
         // No agent files, will use room system_prompt
       }
