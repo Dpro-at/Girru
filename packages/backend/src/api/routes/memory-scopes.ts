@@ -10,7 +10,8 @@
  *   GET  /api/memory/scopes/memories?scope=&q=&type=&layer=&topic=&source=&agent=&importance=&from=&to=&cursor=&limit=
  *                                                   memories of one scope, newest first, cursor paging + facets;
  *                                                   scope also kind:<drawer kind>; items carry usedIn (MEM-GAPS-02)
- *   GET  /api/memory/scopes/memories/:id           one memory: text, used in N replies, linked entities, readers
+ *   GET  /api/memory/scopes/memories/:id           one memory: text, used in N replies, linked entities, readers, validity (P3)
+ *   PUT  /api/memory/scopes/memories/:id/checked   { checked } Mark as checked / undo (GIRRU_STORE_P3)
  * Review rules per scope (MEM-GAPS-02)
  *   GET  /api/memory/scopes/rules?scope=           { scope, own, effective }
  *   GET  /api/memory/scopes/rules/all              { rules: [{ scope, own }] }
@@ -49,6 +50,11 @@ import type { Actor } from '../../repositories/actor.js';
 import { requestMeta } from '../../repositories/audit.js';
 import { actorOrReply, requireOwner } from '../../repositories/scope.js';
 import { resolveFileAgent } from '../../memory/memory-files.js';
+import { provenanceJobStatus, setChecked } from '../../memory/validity.js';
+import { vectorJobStatus } from '../../memory/vectors.js';
+import { storeP3Enabled } from '../../services/store-p3.js';
+import { adoptProjectMemory, currentProjectKey, deletedProjectMemory } from '../../memory/project-keys.js';
+import { createProject as createChatProject, findProject as findChatProject } from '../../repositories/chat-conversations.js';
 import {
   ScopeInputError, accessOverview, addPinnedFact, applyAccessChanges, applyProjectAction, createDepartment, deleteDepartment, effectiveAccess,
   exploreScope, exportProject, invalidateScopeTree, listAgentScopes, listPinnedFacts, parseActionInput, parsePinnedScope, pinnedScopeId,
@@ -88,6 +94,27 @@ function requireConfirm(b: Record<string, unknown>): void {
   if (b.confirm !== true) throw new ScopeInputError('Confirm the change (confirm: true)', 400, 'confirm_required');
 }
 
+/**
+ * STORE-MAP-01 P3 compatibility (one release): a project named by its old slug
+ * (a link, a saved filter, a merge target) is answered with its id.
+ */
+async function oldProjectNames(ownerId: string, request: FastifyRequest): Promise<void> {
+  if (!storeP3Enabled()) return;
+  const params = request.params as Record<string, string> | undefined;
+  if (params?.slug) params.slug = await currentProjectKey(ownerId, params.slug);
+  const fix = async (o: Record<string, unknown> | undefined, k: string) => {
+    const v = o?.[k];
+    if (typeof v !== 'string') return;
+    if (k === 'target') o![k] = await currentProjectKey(ownerId, v);
+    else if (v.startsWith('project:')) o![k] = `project:${await currentProjectKey(ownerId, v.slice(8))}`;
+  };
+  const query = request.query as Record<string, unknown> | undefined;
+  const b = request.body && typeof request.body === 'object' && !Array.isArray(request.body) ? request.body as Record<string, unknown> : undefined;
+  await fix(query, 'scope');
+  await fix(b, 'scope');
+  await fix(b, 'target');
+}
+
 export async function memoryScopeRoutes(fastify: FastifyInstance) {
   const config = { access: 'owner' as const };
   type Handler = (owner: Actor, request: FastifyRequest, reply: FastifyReply) => Promise<unknown>;
@@ -96,7 +123,10 @@ export async function memoryScopeRoutes(fastify: FastifyInstance) {
     handler: async (request, reply) => {
       const owner = ownerOf(request, reply);
       if (owner === null) return reply;
-      try { return await handler(owner, request, reply); } catch (err) { return send(reply, err); }
+      try {
+        await oldProjectNames(owner.userId!, request);
+        return await handler(owner, request, reply);
+      } catch (err) { return send(reply, err); }
     },
   });
 
@@ -112,6 +142,14 @@ export async function memoryScopeRoutes(fastify: FastifyInstance) {
   route('GET', '/api/memory/scopes/agents', async (owner, request) => listAgentScopes(owner.userId!, q(request)));
   route('GET', '/api/memory/scopes/memories', async (owner, request) => exploreScope(owner.userId!, q(request)));
   route('GET', '/api/memory/scopes/memories/:id', async (owner, request) => ({ memory: await memoryDetail(owner.userId!, (request.params as { id: string }).id) }));
+  // STORE-MAP-01 P3 (FD3): "Mark as checked" and its undo. 404 while the switch is off.
+  route('PUT', '/api/memory/scopes/memories/:id/checked', async (owner, request, reply) => {
+    if (!storeP3Enabled()) return reply.code(404).send({ error: 'Not found', code: 'p3_off' });
+    const trust = await setChecked(owner.userId!, (request.params as { id: string }).id, body(request).checked === true);
+    if (!trust) return reply.code(404).send({ error: 'Memory not found', code: 'not_found' });
+    audit(request, owner, 'memory.checked', 'memories', (request.params as { id: string }).id, { trust });
+    return { trust };
+  });
 
   // ---- review rules per scope ----
   route('GET', '/api/memory/scopes/rules', async (owner, request) => scopeRules(owner.userId!, q(request).scope ?? 'company'));
@@ -176,6 +214,40 @@ export async function memoryScopeRoutes(fastify: FastifyInstance) {
   });
 
   // ---- project lifecycle ----
+  // STORE-MAP-01 P3 (FD4d): data jobs after the update, for Memory › Health and backup.
+  route('GET', '/api/memory/scopes/jobs', async (_owner, _request, reply) => {
+    if (!storeP3Enabled()) return reply.code(404).send({ error: 'Not found', code: 'p3_off' });
+    const [sources, vectors] = await Promise.all([provenanceJobStatus(), vectorJobStatus()]);
+    return { jobs: [{ id: 'sources', ...sources }, { id: 'vectors', ...vectors }] };
+  });
+  // STORE-MAP-01 P3 (FD1): a real project made from Memory (no folder needed); the memory a deleted
+  // project with the same name left behind, and "Use its memory". 404 while the switch is off.
+  route('POST', '/api/memory/scopes/projects', async (owner, request, reply) => {
+    if (!storeP3Enabled()) return reply.code(404).send({ error: 'Not found', code: 'p3_off' });
+    const name = body(request).name;
+    if (typeof name !== 'string' || !name.trim()) throw new ScopeInputError('Give the project a name');
+    const p = await createChatProject(owner.userId!, { name });
+    invalidateScopeTree(owner.userId!);
+    return reply.code(201).send({ project: { key: p.id, name: p.name } });
+  });
+  route('GET', '/api/memory/scopes/projects/:slug/deleted-memory', async (owner, request, reply) => {
+    if (!storeP3Enabled()) return reply.code(404).send({ error: 'Not found', code: 'p3_off' });
+    const p = await findChatProject(owner.userId!, (request.params as { slug: string }).slug);
+    if (!p) throw new ScopeInputError('Project not found', 404, 'not_found');
+    return { memory: await deletedProjectMemory(owner.userId!, p) };
+  });
+  route('POST', '/api/memory/scopes/projects/:slug/adopt', async (owner, request, reply) => {
+    if (!storeP3Enabled()) return reply.code(404).send({ error: 'Not found', code: 'p3_off' });
+    const projectId = body(request).projectId;
+    if (typeof projectId !== 'string') throw new ScopeInputError('projectId is required');
+    const p = await findChatProject(owner.userId!, projectId);
+    const offer = p ? await deletedProjectMemory(owner.userId!, p) : null;
+    if (!offer || offer.key !== (request.params as { slug: string }).slug) throw new ScopeInputError('Nothing to take over', 409, 'nothing_to_adopt');
+    const moved = await adoptProjectMemory(owner.userId!, offer.key, projectId);
+    invalidateScopeTree(owner.userId!);
+    audit(request, owner, 'memory_scope.project_adopt', 'memory_project', projectId, { from: offer.key, moved });
+    return { moved };
+  });
   route('POST', '/api/memory/scopes/projects/:slug/preview', async (owner, request) =>
     previewProjectAction(owner.userId!, (request.params as { slug: string }).slug, parseActionInput(body(request))));
   route('POST', '/api/memory/scopes/projects/:slug/apply', async (owner, request) => {

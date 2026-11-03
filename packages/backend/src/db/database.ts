@@ -5,6 +5,8 @@
 
 import { mainDatabasePath } from '../config/data-root.js';
 import { dbDriver } from './pg/config.js';
+import { StartProblem, appVersion, newErrorId, newerLayout, unknownMigrations } from './layout.js';
+import { storeP3Enabled } from '../services/store-p3.js';
 import Database from 'better-sqlite3';
 import { readFileSync, readdirSync, chmodSync } from 'fs';
 import { join, dirname } from 'path';
@@ -58,6 +60,9 @@ export class DatabaseManager {
 
     // Enable WAL mode for better concurrency
     this.db.pragma('journal_mode = WAL');
+    // STORE-MAP-01 P3: a memory row is rewritten more often (source, trust, packed vector); freed
+    // space is zeroed so an earlier copy of a forgotten memory never stays in the file.
+    if (storeP3Enabled()) this.db.pragma('secure_delete = ON');
 
     console.log(`[Database] ✅ Connected to ${config.path}`);
   }
@@ -66,6 +71,9 @@ export class DatabaseManager {
    * Initialize database schema
    */
   async initialize(): Promise<void> {
+    // STORE-MAP-01 P3 (OPS2): never open data a newer Girru wrote (before anything is written).
+    this.checkLayout();
+
     console.log('[Database] Initializing schema...');
 
     const schemaPath = join(__dirname, 'schema.sql');
@@ -182,26 +190,65 @@ export class DatabaseManager {
       if (!appliedIds.has(migration.id)) {
         console.log(`[Database] 🚀 Applying migration: ${migration.name}`);
 
-        this.db.transaction(() => {
-          // Execute migration
-          this.db.exec(migration.up);
+        try {
+          this.db.transaction(() => {
+            // Execute migration
+            this.db.exec(migration.up);
 
-          // Record migration
-          this.db.prepare('INSERT INTO migrations (id, name) VALUES (?, ?)').run(
-            migration.id,
-            migration.name
-          );
-        })();
+            // Record migration
+            this.db.prepare('INSERT INTO migrations (id, name) VALUES (?, ?)').run(
+              migration.id,
+              migration.name
+            );
+          })();
+        } catch (err) {
+          // STORE-MAP-01 P3 (OPS1): the start-up page names the step and gives an error id.
+          if (!storeP3Enabled()) throw err;
+          const errorId = newErrorId();
+          console.error(`[Database] Update step ${migration.name} failed (${errorId}):`, (err as Error)?.message);
+          throw new StartProblem('migration_failed', `The update could not finish (step ${migration.name}).`,
+            { step: migration.name, errorId, thisVersion: appVersion() });
+        }
 
         console.log(`[Database] ✅ Applied migration: ${migration.name}`);
       }
     }
+
+    if (storeP3Enabled()) this.writeLayout(migrations.map((m) => m.id));
 
     if (pending.length === 0) {
       console.log('[Database] ✨ All migrations are up to date!');
     } else {
       console.log(`[Database] ✨ Successfully applied ${pending.length} migration(s)!`);
     }
+  }
+
+  /**
+   * STORE-MAP-01 P3 (OPS2): stop before writing anything when the data has
+   * migrations this build does not know (a newer Girru wrote it). Only logged
+   * while GIRRU_STORE_P3 is off.
+   */
+  private checkLayout(): void {
+    const has = (name: string) => !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
+    if (!has('migrations')) return;
+    const applied = (this.db.prepare('SELECT id FROM migrations').all() as Array<{ id: string }>).map((r) => String(r.id));
+    const unknown = unknownMigrations(applied, this.migrationFiles().map((f) => f.split('_')[0]));
+    if (!unknown.length) return;
+    const writtenBy = has('schema_layout') ? ((this.db.prepare('SELECT written_by FROM schema_layout WHERE id = 1').get() as { written_by?: string } | undefined)?.written_by ?? null) : null;
+    if (storeP3Enabled()) throw newerLayout(unknown, writtenBy);
+    console.warn(`[Database] This data has update steps this Girru does not know (${unknown.join(', ')}); a newer Girru wrote it.`);
+  }
+
+  /** STORE-MAP-01 P3: record the level and the version that last opened the data. */
+  private writeLayout(ids: string[]): void {
+    const level = [...ids].sort().pop() ?? '';
+    this.db.prepare(`INSERT INTO schema_layout (id, level, written_by, updated_at) VALUES (1, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET level = excluded.level, written_by = excluded.written_by, updated_at = excluded.updated_at`).run(level, appVersion(), new Date().toISOString());
+  }
+
+  private migrationFiles(): string[] {
+    const dir = join(__dirname, 'migrations');
+    return existsSync(dir) ? readdirSync(dir).filter(f => f.endsWith('.sql')).sort() : [];
   }
 
   /**

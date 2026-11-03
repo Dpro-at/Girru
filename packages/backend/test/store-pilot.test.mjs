@@ -78,7 +78,10 @@ mkdirSync(folder, { recursive: true });
 mkdirSync(otherFolder, { recursive: true });
 const project = await createProject(OWNER, { name: 'Alpha', folder });
 const other = await createProject(OWNER, { name: 'Beta', folder: otherFolder });
-const DRAWER = { kind: 'project', key: project.slug };
+const { projectKeyOf } = await import(join(backendDir, 'src/memory/project-keys.ts'));
+// The project's memory key: its slug, or its id while GIRRU_STORE_P3 is on.
+const KEY = projectKeyOf(project);
+const DRAWER = { kind: 'project', key: KEY };
 const save = (content, drawer = DRAWER) => saveVersioned(newMemory(OWNER, drawer, { type: 'fact', importance: 6, content }, {}), 'test', 'test');
 const events = (scope) => db.prepare('SELECT seq, op, entity_id, record_version FROM change_events WHERE scope = ? ORDER BY seq').all(scope);
 const brief = join(folder, '.girru', 'brief.md');
@@ -91,7 +94,7 @@ test('change log: inert until a drawer is opted in', async () => {
 
 test('change log: every write of an opted-in drawer adds events in the same transaction; a rollback adds none', async () => {
   scope = await E.enableScope(OWNER, project);
-  assert.equal(scope, `project:${project.slug}`);
+  assert.equal(scope, `project:${KEY}`);
   const m = await save('Alpha staging is restored every Sunday.');
   const ev = events(scope);
   assert.deepEqual(ev.map((e) => e.op), ['insert', 'version']);
@@ -105,7 +108,7 @@ test('change log: every write of an opted-in drawer adds events in the same tran
   assert.equal(events(scope).length, 2);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM memories WHERE id = ?').get(doomed.id).n, 0);
   // Other drawers and other projects write no events into this scope.
-  await save('Beta uses Go.', { kind: 'project', key: other.slug });
+  await save('Beta uses Go.', { kind: 'project', key: projectKeyOf(other) });
   await save('The owner likes short replies.', { kind: 'owner' });
   assert.equal(events(scope).length, 2);
   // An unversioned path (plain update) and a forget are caught too.
@@ -177,7 +180,7 @@ test('projection: an outside edit is a conflict; nothing is overwritten until th
 });
 
 test('projection: the file is a view — removing lines or the file never forgets a memory', async () => {
-  const count = () => db.prepare("SELECT COUNT(*) AS n FROM memories WHERE drawer_kind = 'project' AND drawer_key = ?").get(project.slug).n;
+  const count = () => db.prepare("SELECT COUNT(*) AS n FROM memories WHERE drawer_kind = 'project' AND drawer_key = ?").get(KEY).n;
   const n = count();
   rmSync(brief);
   await P.projectionTick();
@@ -286,7 +289,7 @@ test('capability: the pilot project needs one; other projects work as before', a
 
 test('resolved context: chat, task run and coding app share identity, hired instructions, personality and owner rules', async () => {
   await addStarterRules(OWNER);
-  await addPinnedFact(OWNER, parsePinnedScope(`project:${project.slug}`), 'Alpha is for Al-Zawraa Trading.', OWNER);
+  await addPinnedFact(OWNER, parsePinnedScope(`project:${KEY}`), 'Alpha is for Al-Zawraa Trading.', OWNER);
   const ctx = {};
   for (const entry of ['chat', 'task', 'coding_app', 'channel']) {
     ctx[entry] = await resolveAgentContext({ agentId: 'sp-agent', entry, ownerId: OWNER, projectId: project.id });

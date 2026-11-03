@@ -39,6 +39,7 @@ const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
 
 const { getDatabase } = await import(join(backendDir, 'src/db/database.ts'));
+const { projectKeyOf } = await import(join(backendDir, 'src/memory/project-keys.ts')); // project memory key (id while GIRRU_STORE_P3 is on)
 const db = getDatabase();
 await db.initialize();
 const { getCredentialStorage } = await import(join(backendDir, 'src/credentials/storage.ts'));
@@ -126,7 +127,7 @@ test('the project drawer only for a project conversation; bad requests are refus
   const pm = await addAssistantMessage(pc.id, { runId: 'run-cm-0003', content: 'Use the blue logo.', parts: [], status: 'complete', durationMs: 1 });
   const r = await call('cm-owner', 'POST', `/api/chat/conversations/${pc.id}/memories`, { messageId: pm.id, content: 'Use the blue logo.', drawer: 'project', type: 'preference', importance: 9 });
   assert.equal(r.statusCode, 201, r.body);
-  assert.equal(r.json().memory.drawerId, `project:${project.slug}`);
+  assert.equal(r.json().memory.drawerId, `project:${projectKeyOf(project)}`);
 });
 
 test('an agent proposes a memory in the chat; nothing is saved until the owner accepts (review hash)', async () => {

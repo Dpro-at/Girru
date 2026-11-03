@@ -3651,3 +3651,13 @@ label.setup-kind { display:flex; align-items:center; justify-content:flex-start;
 .setup-discovery-lane>.setup-discovery-particle small{flex:1;min-width:0;max-width:none;font-size:12px;line-height:1.5}
 @keyframes discovery-lane-rise{0%{opacity:0;transform:translate3d(0,18px,0)}17%{opacity:.85}42%{opacity:1;transform:translate3d(calc(var(--particle-drift)*-.5),-62px,0)}72%{opacity:.75;transform:translate3d(var(--particle-drift),-130px,0);filter:blur(0)}100%{opacity:0;transform:translate3d(calc(var(--particle-drift)*.3),-205px,0);filter:blur(2px)}}
 @media(prefers-reduced-motion:reduce){.setup-discovery-lane>.setup-discovery-particle{animation:none;opacity:.8;top:38px;bottom:auto;transform:none}}
+/* STORE-MAP-01 P3 (FD2a): Settings › Departments as the one list (reuses the specialty list and inspector). */
+.dept-one{min-height:520px}.dept-toolbar-one{min-height:52px}.dept-toolbar-note{margin-inline-end:auto;color:var(--muted);font-size:12px}.dept-look{display:inline-grid;place-items:center;border-radius:6px;background:var(--secondary);color:#fff;font-weight:650;font-size:11px;flex-shrink:0}.specialty-title-line .dept-look{font-size:18px;border-radius:10px}
+.dept-projects{display:flex;gap:4px}.dept-insp-tools{display:flex;gap:4px;margin-inline-start:auto}.dept-rename{display:flex;gap:8px;flex:1;min-width:0}.dept-rename input{flex:1;min-width:0}
+.dept-swatches{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.dept-swatch{inline-size:22px;block-size:22px;border-radius:6px;border:2px solid transparent;padding:0}.dept-swatch[aria-checked=true]{border-color:var(--text)}
+.dept-question{gap:10px;flex-wrap:wrap}.dept-question select{max-width:220px}.dept-pick{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:3px}
+/* STORE-MAP-01 P3 (FD3): replaced facts muted; trust words. */
+.dk-row[data-replaced] .dk-row-main{color:var(--muted);text-decoration:line-through;text-decoration-color:color-mix(in srgb,var(--muted) 50%,transparent)}
+.dk-trust{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.dk-trust[data-trust=imported]{color:var(--warning,#c8952a)}.dk-replaced p{display:flex;gap:6px;align-items:center}.dk-check{display:flex!important;align-items:center;gap:8px}
+/* STORE-MAP-01 P3 (FD4d): data jobs after an update. */
+.mem-jobs{border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:14px}.mem-jobs h4{margin:0 0 8px;font-size:12px}.mem-jobs ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}.mem-jobs li{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:8px;align-items:center;font-size:12px}

@@ -4,7 +4,7 @@
 // and right-click menus for everything else, sheets for short tasks, and Undo
 // (⌘Z and the notice) for every reversible change.
 import { skillTitle } from './skill-display';
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { DragEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { SessionClient } from './session';
@@ -29,6 +29,7 @@ import { Avatar, ContextMenu, IconButton, Notice, Popover, Sheet, Tile, WithSwat
 import type { MenuItem } from './desktop-ui';
 import type { ProjectGroup } from './memory-desktop-contract.js';
 import { NeedsYou } from './MemoryNeeds';
+import { useStoreP3 } from './store-switches';
 import { DatabasesView, DesignView, FilesView, GroupView, TrashView } from './MemoryPlaces';
 
 /** Where a memory came from, as a kind icon and a short word (board rule 13: show things, not codes). */
@@ -45,6 +46,8 @@ export function kindOf(i: Pick<ExplorerItem, 'type' | 'source' | 'drawerId' | 's
 }
 const PLACE_NAME: Record<string, string> = { needs: 'Needs you', all: 'All memories', owner: 'About you', experience: 'Lessons', tasks: 'Tasks', people: 'People', agents: 'Agents', archived: 'Archived', trash: 'Trash' };
 const TYPE_LABEL: Record<string, string> = { fact: 'Fact', event: 'Event', context: 'Context', insight: 'Lesson', preference: 'Preference', skill: 'Skill', relationship: 'Relationship', task: 'Task' };
+/** STORE-MAP-01 P3 (D11): the three trust words. */
+const TRUST_LABEL = { checked: 'Checked by you', unchecked: 'Agent, not checked', imported: 'Imported — data only' } as const;
 const SOURCE_LABEL: Record<string, string> = { owner: 'You', agent: 'An agent', chat: 'A chat', conversation: 'An imported chat', learning: 'Learning', import: 'Import', memory_file: 'Project notes', outsider: 'Outside sender', retention: 'Summary' };
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent ?? '');
 const mod = isMac ? '⌘' : 'Ctrl+';
@@ -67,6 +70,8 @@ function useControllers(client: SessionClient) {
   return c;
 }
 const noop = () => () => {};
+/** STORE-MAP-01 P3: source, trust and replaced facts show only while the backend switch is on. */
+const P3 = createContext(false);
 function useStore<S>(store: { subscribe: (fn: () => void) => () => void; getSnapshot: () => S } | undefined): S | undefined {
   return useSyncExternalStore(store?.subscribe ?? noop, store?.getSnapshot ?? (() => undefined), store?.getSnapshot ?? (() => undefined)) as S | undefined;
 }
@@ -77,6 +82,7 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
 }) {
   const owner = useSyncExternalStore(client.subscribe, client.getSnapshot, client.getSnapshot).user?.role === 'owner';
   const k = useControllers(client);
+  const p3 = useStoreP3(client);
   const ds = useStore(k?.d), xs = useStore(k?.x), ss = useStore(k?.sc), rs = useStore(k?.rv), ms = useStore(k?.mv);
   const menu = useMenu();
   const [sheet, setSheet] = useState<null | { kind: 'remember' } | { kind: 'history' } | { kind: 'weekly' } | { kind: 'group'; projects: string[] } | { kind: 'rename-group'; id: string } | { kind: 'project'; action: ProjectAction; slug: string } | { kind: 'forget'; ids?: string[] } | { kind: 'trash-project'; slug: string } | { kind: 'edit-pinned'; fact: PinnedFact }>(null);
@@ -239,7 +245,7 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
     : project && ds.details === 'project' ? <ProjectInspector k={k} project={project} onSettings={onOpenSettings} onGroup={() => setSheet({ kind: 'group', projects: [project.slug] })}/>
     : null;
 
-  return <section className="dk-mem" aria-label="Memory" data-inspector={inspector ? 'open' : undefined} data-inline-sidebar={sidebarSlot ? undefined : 'true'}>
+  return <P3.Provider value={p3}><section className="dk-mem" aria-label="Memory" data-inspector={inspector ? 'open' : undefined} data-inline-sidebar={sidebarSlot ? undefined : 'true'}>
     {sidebarSlot ? (active ? createPortal(sidebar, sidebarSlot) : null) : sidebar}
     <div className="dk-content">
       <header className="dk-toolbar">
@@ -285,7 +291,7 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
     {ms?.memory && <MoveSheet k={k} several={selection.length > 1 ? [...selection] : null} onClose={() => mv.close()}/>}
     {sheet?.kind === 'edit-pinned' && <EditPinnedSheet k={k} fact={sheet.fact} onClose={() => setSheet(null)}/>}
     <Notice toast={ds.toast} onUndo={() => void d.undo().then(() => { void x.load(); void sc.load(true); })} onShow={ds.toast?.show ? () => d.open(ds.toast!.show!) : undefined} onDone={id => d.dismiss(id)}/>
-  </section>;
+  </section></P3.Provider>;
 }
 
 // ---------------------------------------------------------------- sidebar
@@ -426,11 +432,11 @@ function MemoryList({ k, pinned, showPinned, onMenu, onPinnedMenu, empty }: { k:
       </div>)}
     </section>}
     {groups.map(([topic, items]) => <section key={topic || '_'} className="dk-list-group">{(topic || groups.length > 1) && <h3>{topic ? topic.replace(/-/g, ' ').replace(/^./, c => c.toUpperCase()) : 'Other'}</h3>}
-      {items.map(i => { const kind = kindOf(i); const checked = s.checked.includes(i.id); return <div key={i.id} data-id={i.id} className="dk-row" role="option" aria-selected={s.open === i.id || checked} data-checked={checked || undefined}
+      {items.map(i => { const kind = kindOf(i); const checked = s.checked.includes(i.id); return <div key={i.id} data-id={i.id} className="dk-row" role="option" aria-selected={s.open === i.id || checked} data-checked={checked || undefined} data-replaced={i.supersededBy ? true : undefined}
         onClick={e => click(e, i)} onDoubleClick={() => { void x.openMemory(i.id).then(() => x.startEdit()); }} onContextMenu={e => { if (!checked && s.open !== i.id) void x.openMemory(i.id); onMenu(e, i); }}>
         <span className="dk-row-icon" title={kind.word}><UiIcon name={kind.icon} size={14}/></span>
         <span className="dk-row-text"><span className="dk-row-main" dir="auto"><WithSwatches text={oneLine(i.preview)}/></span>
-          <span className="dk-row-sub">{kind.word} · {ago(i.createdAt)}{!i.drawerId.startsWith('project:') || placeScope(k.d.getSnapshot().place) === 'company' ? ` · ${drawerName(i.drawerId)}` : ''}</span></span>
+          <span className="dk-row-sub">{i.supersededBy ? 'Not true any more · ' : ''}{kind.word} · {ago(i.createdAt)}{!i.drawerId.startsWith('project:') || placeScope(k.d.getSnapshot().place) === 'company' ? ` · ${drawerName(i.drawerId)}` : ''}</span></span>
       </div>; })}
     </section>)}
     {count === 0 && <div className="dk-empty">{empty}</div>}
@@ -439,18 +445,18 @@ function MemoryList({ k, pinned, showPinned, onMenu, onPinnedMenu, empty }: { k:
 }
 
 // ---------------------------------------------------------------- inspector
-function MemoryInspector({ k, item, onHistory, onTrash }: { k: K; item: ExplorerItem; onHistory: () => void; onTrash: () => void }) {
+function MemoryInspector({ k, item, onHistory, onTrash, onChecked }: { k: K; item: ExplorerItem; onHistory: () => void; onTrash: () => void; onChecked?: (id: string) => void }) {
   const { x, d, mv, sc } = k;
   const s = useStore(x)!; const ss = useStore(sc)!;
-  const det = s.detail; const kind = kindOf(item);
+  const det = s.detail; const kind = kindOf(item); const p3 = useContext(P3); const v = det?.id === item.id ? det.validity ?? null : null;
   const by = item.sourceAgentId ? ss.agents[item.sourceAgentId] ?? 'An agent' : SOURCE_LABEL[item.source ?? ''] ?? kind.word;
   const before = { content: s.full ?? item.preview, importance: item.importance };
   return <div className="dk-insp">
-    {s.editing ? <form className="dk-edit" onSubmit={e => { e.preventDefault(); void x.saveEdit().then(() => d.edited(item.id, before)); }}>
+    {s.editing ? <form className="dk-edit" onSubmit={e => { e.preventDefault(); void x.saveEdit().then(ok => { if (ok) d.edited(item.id, before); }); }}>
       <textarea aria-label="Memory text" dir="auto" rows={6} value={s.draft} maxLength={50000} autoFocus onChange={e => x.editDraft(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void x.saveEdit().then(() => d.edited(item.id, before)); } if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); x.cancelEdit(); } }}/>
+        onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void x.saveEdit().then(ok => { if (ok) d.edited(item.id, before); }); } if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); x.cancelEdit(); } }}/>
       <label className="dk-field-inline">Importance<input type="range" min={1} max={10} value={s.draftImportance} onChange={e => x.editImportance(Number(e.target.value))}/><span>{s.draftImportance}</span></label>
-      <div className="actions"><button type="button" onClick={() => x.cancelEdit()}>Cancel</button><button type="submit" className="primary" disabled={s.busy || !s.draft.trim()}>Save</button></div>
+      {!s.conflict && <div className="actions"><button type="button" onClick={() => x.cancelEdit()}>Cancel</button><button type="submit" className="primary" disabled={s.busy || !s.draft.trim()}>Save</button></div>}
       <p className="fine-print">Saved as a new version; History keeps the old one. {mod}↩ saves.</p>
     </form> : <p className="dk-insp-text" dir="auto"><WithSwatches text={s.full ?? item.preview}/></p>}
     {!s.editing && <div className="dk-insp-icons">
@@ -459,8 +465,16 @@ function MemoryInspector({ k, item, onHistory, onTrash }: { k: K; item: Explorer
       <IconButton icon="move" label="Move…" shortcut={`${mod}M`} onClick={() => void mv.open({ id: item.id, text: item.preview, drawerId: item.drawerId, topicKey: item.topicKey })}/>
       <IconButton icon="trash" label="Move to Trash" shortcut="⌫" onClick={onTrash}/>
     </div>}
+    {s.conflict && <div className="dk-ask" role="alert"><p><b>This memory changed while you were editing.</b> Nothing was overwritten. Saved meanwhile:</p><p className="dk-insp-text" dir="auto">{s.conflict.content}</p>
+      <div className="actions"><button type="button" className="primary" disabled={s.busy} onClick={() => void x.saveEdit(true).then(ok => { if (ok) d.edited(item.id, before); })}>Save mine as the newest</button><button type="button" disabled={s.busy} onClick={() => void x.keepTheirs()}>Keep theirs</button></div>
+      <p className="fine-print">Saving yours makes a new version; theirs stays in History.</p></div>}
+    {p3 && v?.validTo && <div className="dk-ask dk-replaced"><p><UiIcon name="history" size={13}/> Not true any more since {new Date(v.validTo).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}. Agents no longer get it.</p>
+      {v.supersededBy && <div className="actions"><button type="button" className="link-button" onClick={() => void x.openMemory(v.supersededBy!)}>Open the newer one</button></div>}</div>}
     <dl className="dk-facts">
       <dt>From</dt><dd><Avatar name={by}/>{by}, {new Date(`${item.createdAt}Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</dd>
+      {p3 && v?.trust && <><dt>Trust</dt><dd className="dk-trust" data-trust={v.trust}><UiIcon name={v.trust === 'checked' ? 'check' : v.trust === 'imported' ? 'download' : 'sparkle'} size={13}/>{TRUST_LABEL[v.trust]}
+        {v.trust !== 'checked' && <button type="button" className="link-button" disabled={s.busy} onClick={() => void x.setChecked(item.id, true).then(ok => { if (ok) onChecked?.(item.id); })}>Mark as checked</button>}</dd></>}
+      {p3 && v && v.replaces.length > 0 && <><dt>Valid</dt><dd>since {v.validFrom ? new Date(v.validFrom).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : 'it was saved'} · replaces an older fact <button type="button" className="link-button" onClick={() => { const older = v.replaces[0]; void (s.replaced ? x.openMemory(older) : x.showReplaced(true).then(() => x.openMemory(older))); }}>open</button></dd></>}
       <dt>Where</dt><dd>{drawerName(item.drawerId)}</dd>
       <dt>Kind</dt><dd><UiIcon name={kind.icon} size={13}/>{TYPE_LABEL[item.type] ?? item.type} · importance {item.importance}</dd>
       <dt>Used</dt><dd>{det ? (det.usage.usedIn ? `in ${det.usage.usedIn} ${det.usage.usedIn === 1 ? 'reply' : 'replies'}${det.usage.lastUsedAt ? `, last ${ago(det.usage.lastUsedAt)}` : ''}` : 'not used in a reply yet') : '…'}</dd>
@@ -532,6 +546,8 @@ function FilterPopover({ k, tree, agents }: { k: K; tree: import('./memory-pages
     <label>From<select value={s.source} onChange={e => x.setSource(e.target.value)}><option value="">any</option>{Object.entries(SOURCE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
     <label>Importance<select value={s.importance} onChange={e => x.setImportance(e.target.value as typeof s.importance)}><option value="">any</option><option value="8-10">high (8–10)</option><option value="5-7">medium (5–7)</option><option value="1-4">low (1–4)</option></select></label>
     <label>Date<select value={s.since} onChange={e => x.setSince(e.target.value as typeof s.since)}><option value="">any time</option><option value="7">last 7 days</option><option value="30">last 30 days</option><option value="90">last 90 days</option></select></label>
+    {useContext(P3) && <><label>Trust<select value={s.trust} onChange={e => x.setTrust(e.target.value as typeof s.trust)}><option value="">any</option>{(Object.keys(TRUST_LABEL) as Array<keyof typeof TRUST_LABEL>).map(t => <option key={t} value={t}>{TRUST_LABEL[t]}</option>)}</select></label>
+      <label className="dk-check"><input type="checkbox" checked={s.replaced} onChange={e => x.showReplaced(e.target.checked)}/>Show replaced facts</label></>}
     <p className="fine-print">Search finds by meaning; put words in "quotes" for exact words.</p>
     <div className="actions"><button type="button" onClick={() => x.clearFilters()}>Clear</button></div>
   </div>;
@@ -588,7 +604,19 @@ function RememberSheet({ k, onClose, onSaved }: { k: K; onClose: () => void; onS
     const i = v.indexOf(':');
     x.editAdd({ drawer: i < 0 ? { kind: v as 'owner' } : { kind: v.slice(0, i) as 'project', key: v.slice(i + 1) } });
   }
-  const save = async () => { const before = x.getSnapshot().result; await x.saveAdd(); const after = x.getSnapshot(); if (!after.adding && after.result !== before) onSaved(); };
+  const p3 = useContext(P3);
+  const save = async () => {
+    const before = x.getSnapshot().result;
+    // P3 (FD1b): a new project name becomes a real project (also in Chat and Board) before the memory is saved.
+    const cur = x.getSnapshot().adding;
+    if (p3 && cur && cur.drawer.kind === 'project' && cur.drawer.key && !projects.some(p => p.slug === cur.drawer.key)) {
+      const key = await x.makeProject(cur.drawer.key);
+      if (!key) return;
+      x.editAdd({ drawer: { kind: 'project', key } });
+      void sc.load(true);
+    }
+    await x.saveAdd(); const after = x.getSnapshot(); if (!after.adding && after.result !== before) onSaved();
+  };
   return <Sheet title="Remember" onClose={onClose} actions={<><button type="button" onClick={onClose}>Cancel</button><button type="button" className="primary" disabled={s.busy || !a.content.trim()} onClick={() => void save()}>Remember</button></>}>
     <label className="dk-field">What to remember<textarea autoFocus rows={3} dir="auto" value={a.content} maxLength={50000} onChange={e => x.editAdd({ content: e.target.value })}
       onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void save(); } }}/></label>
@@ -598,7 +626,7 @@ function RememberSheet({ k, onClose, onSaved }: { k: K; onClose: () => void; onS
       {where.startsWith('project:') && !projects.some(p => `project:${p.slug}` === where) && <option value={where}>{where.slice(8) || 'New project…'}</option>}
       <option value="project:">New project…</option><option value="task:">A task…</option><option value="people:">A person…</option></select></label>
     {(where === 'project:' || where.startsWith('task:') || where.startsWith('people:') || (where.startsWith('project:') && !projects.some(p => `project:${p.slug}` === where))) &&
-      <label className="dk-field">Name<input value={a.drawer.key ?? ''} placeholder={a.drawer.kind === 'people' ? 'e.g. mona' : a.drawer.kind === 'task' ? 'e.g. logo' : 'e.g. new-shop'} maxLength={64} onChange={e => x.editAdd({ drawer: { kind: a.drawer.kind, key: e.target.value } })}/></label>}
+      <label className="dk-field">Name<input value={a.drawer.key ?? ''} placeholder={a.drawer.kind === 'people' ? 'e.g. mona' : a.drawer.kind === 'task' ? 'e.g. logo' : p3 ? 'e.g. New shop' : 'e.g. new-shop'} maxLength={p3 && a.drawer.kind === 'project' ? 80 : 64} onChange={e => x.editAdd({ drawer: { kind: a.drawer.kind, key: e.target.value } })}/></label>}
     <button type="button" className="link-button dk-disclose" aria-expanded={more} onClick={() => setMore(v => !v)}><UiIcon name="chevron" size={11}/>More (kind, importance, topic)</button>
     {more && <div className="dk-more-fields">
       <label className="dk-field">Kind<select value={a.type} onChange={e => x.editAdd({ type: e.target.value as MemoryType })}>{memoryTypes.map(t => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}</select></label>
@@ -639,8 +667,21 @@ function MoveSheet({ k, several, onClose }: { k: K; several: string[] | null; on
   </Sheet>;
 }
 
+/** P3 (FD3d): who made a version and why, in plain words. */
+function versionWho(by: string | undefined, agents: Readonly<Record<string, string>>): string {
+  if (!by || by === 'system') return 'Girru';
+  if (by.startsWith('agent:')) return agents[by.slice(6)] ?? 'an agent';
+  return 'you';
+}
+function versionWhy(reason: string): string {
+  if (/^learning(:|$)/.test(reason)) return 'learned in a chat';
+  if (reason === 'api' || reason === 'edit') return 'edited';
+  if (/^(import|memory_file)/.test(reason)) return 'from a file';
+  return /^[a-z_:-]+$/.test(reason) ? '' : reason.slice(0, 80);
+}
+
 function HistorySheet({ k, onClose }: { k: K; onClose: () => void }) {
-  const { x, d } = k; const s = useStore(x)!;
+  const { x, d, sc } = k; const s = useStore(x)!; const ss = useStore(sc)!; const p3 = useContext(P3); const v = s.detail?.validity ?? null;
   const [pick, setPick] = useState<number | null>(null);
   const versions = (s.versions ?? []).filter(v => v.change !== 'forget');
   const current = s.full ?? '';
@@ -649,8 +690,9 @@ function HistorySheet({ k, onClose }: { k: K; onClose: () => void }) {
     <button type="button" className="primary" disabled={!chosen || chosen.content === current || !s.open} onClick={() => { if (chosen && s.open) void d.bringBack(s.open, current, chosen.content).then(ok => { if (ok) { void x.openMemory(s.open!); void x.load(); onClose(); } }); }}>Bring back</button></>}>
     {s.versions === null ? <p role="status">Reading the history…</p> : !versions.length ? <p>No earlier versions.</p>
       : <ol className="dk-history" role="listbox" aria-label="Versions">{versions.map((v, i) => <li key={v.version}><button type="button" role="option" aria-selected={pick === v.version} onClick={() => setPick(v.version)}>
-        <span dir="auto"><WithSwatches text={oneLine(v.content)}/></span><span className="fine-print">{i === 0 ? 'now' : ago(v.createdAt)} · {v.change === 'move' ? 'moved' : v.change === 'delete' ? 'moved to Trash' : v.change === 'create' ? 'first saved' : 'changed'}</span>
+        <span dir="auto"><WithSwatches text={oneLine(v.content)}/></span><span className="fine-print">{i === 0 ? 'now' : ago(v.createdAt)} · {v.change === 'move' ? 'moved' : v.change === 'delete' ? 'moved to Trash' : v.change === 'create' ? 'first saved' : 'changed'}{p3 ? ` by ${versionWho(v.by, ss.agents)}${versionWhy(v.reason) ? ` · ${versionWhy(v.reason)}` : ''}` : ''}</span>
       </button></li>)}</ol>}
+    {p3 && v && (v.supersededBy || v.replaces.length > 0) && <p className="fine-print">{v.supersededBy ? 'Replaced by a newer fact; agents no longer get this one.' : `Replaces ${v.replaces.length === 1 ? 'an older fact' : `${v.replaces.length} older facts`}, kept here as not true any more.`}</p>}
     <p className="fine-print">Select a version to see it; Bring back makes it current again (undo {mod}Z).</p>
   </Sheet>;
 }

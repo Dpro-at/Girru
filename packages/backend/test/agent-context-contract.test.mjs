@@ -46,6 +46,7 @@ const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
 
 const { getDatabase } = await import(join(backendDir, 'src/db/database.ts'));
+const { projectKeyOf } = await import(join(backendDir, 'src/memory/project-keys.ts')); // project memory key (id while GIRRU_STORE_P3 is on)
 const db = getDatabase();
 await db.initialize();
 const { getCredentialStorage } = await import(join(backendDir, 'src/credentials/storage.ts'));
@@ -80,7 +81,7 @@ const conv = await createConversation(OWNER, { title: 'Release', agentId: 'cc-ag
 await addStarterRules(OWNER);
 await createRule({ text: 'In Alpha, release only on Tuesdays.', when: null, projectId: project.id, who: 'all', targets: [], paused: false }, OWNER);
 await createRule({ text: 'Engineering writes tests first.', when: null, projectId: null, who: 'departments', targets: ['engineering'], paused: false }, OWNER);
-await addPinnedFact(OWNER, parsePinnedScope(`project:${project.slug}`), 'Alpha is for Al-Zawraa Trading.', OWNER);
+await addPinnedFact(OWNER, parsePinnedScope(`project:${projectKeyOf(project)}`), 'Alpha is for Al-Zawraa Trading.', OWNER);
 const STEP = 'Keep each release step reversible and write the decision down with its reason.';
 const skill = await centralSkills().installMarkdown(`---\nname: release-check\ndescription: How we check a release before it ships.\n---\n\n# Release check\n\n${STEP}\n`, 'release-check', 'contract-test');
 const skillId = skill.id ?? skill.skill?.id;
@@ -98,7 +99,7 @@ async function chatPrompt(channel = false) {
   }
   try {
     const res = await app.inject({ method: 'POST', url: '/api/chat', headers,
-      payload: { stream: false, sessionId: conv.id, ...(channel ? {} : { agentId: 'cc-agent', memoryScope: { project: project.slug } }), messages: [{ role: 'user', content: QUESTION }] } });
+      payload: { stream: false, sessionId: conv.id, ...(channel ? {} : { agentId: 'cc-agent', memoryScope: { project: projectKeyOf(project) } }), messages: [{ role: 'user', content: QUESTION }] } });
     assert.ok(bodies.length, `no model call: ${res.statusCode} ${res.body.slice(0, 200)}`);
     const body = bodies[0];
     return { system: body.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n'), tools: (body.tools ?? []).map((t) => t.function?.name ?? t.name) };
@@ -179,8 +180,8 @@ test('MD4 and MD9: save criteria lead memory_save and the brief; recalled memori
   const { newMemory, saveVersioned } = await import(join(backendDir, 'src/memory/learning.ts'));
   assert.ok(!memorySaveTool.description.startsWith(SAVE_CRITERIA), 'off: unchanged');
   assert.ok(!standingRules().includes(SAVE_CRITERIA));
-  await saveVersioned(newMemory(OWNER, { kind: 'project', key: project.slug }, { type: 'fact', importance: 6, content: 'Alpha staging is restored every Sunday night.' }, {}), 'test', 'test');
-  const drawers = [{ kind: 'project', key: project.slug }];
+  await saveVersioned(newMemory(OWNER, { kind: 'project', key: projectKeyOf(project) }, { type: 'fact', importance: 6, content: 'Alpha staging is restored every Sunday night.' }, {}), 'test', 'test');
+  const drawers = [{ kind: 'project', key: projectKeyOf(project) }];
   const pack = { key: 'contract', text: '', memoryChars: 0, items: [], hit: false, memoryIds: [] };
   const off = await messageRecall({ userId: OWNER, drawers, query: 'When is alpha staging restored?', pack });
   assert.match(off.text, /restored every Sunday night\.\n/);
@@ -188,18 +189,18 @@ test('MD4 and MD9: save criteria lead memory_save and the brief; recalled memori
     assert.ok(memorySaveTool.description.startsWith(SAVE_CRITERIA));
     assert.equal(standingRules()[0], SAVE_CRITERIA);
     const on = await messageRecall({ userId: OWNER, drawers, query: 'When is the alpha staging data restored on Sunday?', pack });
-    assert.match(on.text, new RegExp(`restored every Sunday night\\. \\(as of \\d{4}-\\d{2}-\\d{2} · project:${project.slug}\\)`));
+    assert.match(on.text, new RegExp(`restored every Sunday night\\. \\(as of \\d{4}-\\d{2}-\\d{2} · project:${projectKeyOf(project)}\\)`));
   });
 });
 
 test('routes for the app: the switch, and the eye list strongest group first with groups', async () => {
   const get = (url) => app.inject({ method: 'GET', url, headers: auth });
-  assert.deepEqual((await get('/api/store-switches')).json(), { p2: false });
+  assert.deepEqual((await get('/api/store-switches')).json(), { p2: false, p3: process.env.GIRRU_STORE_P3 === '1' });
   assert.equal((await get('/api/agent-rules')).json().precedence, false);
   const before = (await get(`/api/agent-rules/effective?agentId=cc-agent&projectId=${project.id}`)).json();
   assert.ok(!('precedence' in before) && before.rules.every((r) => !('group' in r)), 'off: unchanged');
   await withP2(async () => {
-    assert.deepEqual((await get('/api/store-switches')).json(), { p2: true });
+    assert.deepEqual((await get('/api/store-switches')).json(), { p2: true, p3: process.env.GIRRU_STORE_P3 === '1' });
     assert.equal((await get('/api/agent-rules')).json().precedence, true);
     const eye = (await get(`/api/agent-rules/effective?agentId=cc-agent&projectId=${project.id}`)).json();
     assert.equal(eye.precedence, true);

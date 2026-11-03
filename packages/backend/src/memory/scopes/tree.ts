@@ -24,6 +24,7 @@ import { likeCi } from '../../db/pg/dialect.js';
 import { DRAWER_KINDS, drawerId, isValidDrawerKey, parseDrawerId, DrawerInputError, type DrawerKind } from '../drawers.js';
 import { memoryUseCounts } from '../context/trace.js';
 import { GENERAL_DEPARTMENT, ScopeInputError, departmentStep, listDepartmentsStep, listProjectsStep, type ProjectScope } from './store.js';
+import { NOT_REPLACED_SQL, TRUST } from '../validity.js';
 
 export const SCOPE_TREE_TTL_MS = 15_000;
 export const STALE_DAYS = 90;
@@ -63,7 +64,7 @@ const add = (a: ScopeCounts, b: ScopeCounts) => {
 
 function* buildTreeStep(ownerId: string, now: number): Step<ScopeTree> {
   const drawerRows = yield* all<{ kind: string; key: string | null; n: number; last: string | null }>(
-    'SELECT drawer_kind AS kind, drawer_key AS key, COUNT(*) AS n, MAX(created_at) AS last FROM memories WHERE user_id = ? GROUP BY drawer_kind, drawer_key', ownerId);
+    `SELECT drawer_kind AS kind, drawer_key AS key, COUNT(*) AS n, MAX(created_at) AS last FROM memories WHERE user_id = ? AND ${NOT_REPLACED_SQL} GROUP BY drawer_kind, drawer_key`, ownerId);
   const reviewRows = yield* all<{ kind: string; key: string; n: number; c: number }>(
     `SELECT drawer_kind AS kind, drawer_key AS key, COUNT(*) AS n, SUM(CASE WHEN conflict_with IS NOT NULL THEN 1 ELSE 0 END) AS c
        FROM memory_file_proposals WHERE user_id = ? AND status = 'pending' GROUP BY drawer_kind, drawer_key`, ownerId);
@@ -225,6 +226,11 @@ export interface ExplorerItem {
   source: string | null;
   /** Replies that used it (reply trace, MEM-GAPS-02). */
   usedIn: number;
+  /** STORE-MAP-01 P3: checked | unchecked | imported, else null (not filled yet). */
+  trust: string | null;
+  /** STORE-MAP-01 P3: the newer memory that replaced it (shown only with replaced=show), else null. */
+  supersededBy: string | null;
+  validTo: string | null;
 }
 export interface ExplorerPage { scope: string; items: ExplorerItem[]; nextCursor: string | null; total: number; facets: { type: Record<string, number>; layer: Record<string, number>; drawer: Record<string, number>; source: Record<string, number> } }
 
@@ -272,6 +278,10 @@ function* scopeCondition(ownerId: string, scope: string): Step<{ sql: string; pa
 export interface ExplorerInput {
   scope?: unknown; q?: unknown; type?: unknown; layer?: unknown; topic?: unknown; cursor?: unknown; limit?: unknown;
   source?: unknown; agent?: unknown; importance?: unknown; from?: unknown; to?: unknown;
+  /** STORE-MAP-01 P3 filter: checked | unchecked | imported. */
+  trust?: unknown;
+  /** STORE-MAP-01 P3: 'show' lists replaced facts too (Filter › Show replaced facts); hidden by default. */
+  replaced?: unknown;
 }
 
 export async function exploreScope(ownerId: string, input: ExplorerInput): Promise<ExplorerPage> {
@@ -300,6 +310,10 @@ export async function exploreScope(ownerId: string, input: ExplorerInput): Promi
   const from = day(input.from, 'from');
   const to = day(input.to, 'to');
   const after = decodeCursor(input.cursor, 2);
+  const trust = input.trust === undefined || input.trust === '' ? null : input.trust;
+  if (trust !== null && !(TRUST as readonly unknown[]).includes(trust)) throw new ScopeInputError(`trust must be one of ${TRUST.join(', ')}`);
+  if (input.replaced !== undefined && input.replaced !== '' && input.replaced !== 'show' && input.replaced !== 'hide') throw new ScopeInputError('replaced must be show or hide');
+  const showReplaced = input.replaced === 'show';
   return sql().read((function* () {
     const d = yield* dialect();
     const cond = yield* scopeCondition(ownerId, scope);
@@ -307,8 +321,10 @@ export async function exploreScope(ownerId: string, input: ExplorerInput): Promi
     const base = [`user_id = ?`, `(${cond.sql})`];
     const baseParams: Array<string | number> = [ownerId, ...cond.params];
     if (q) { base.push(`content ${likeCi(d)} ? ESCAPE '\\'`); baseParams.push(`%${escLike(q)}%`); }
+    if (!showReplaced) base.push(NOT_REPLACED_SQL);
     const filters = [...base];
     const filterParams = [...baseParams];
+    if (trust) { filters.push('trust = ?'); filterParams.push(trust as string); }
     if (type) { filters.push('type = ?'); filterParams.push(type); }
     if (layer) { filters.push("COALESCE(memory_layer, 'factual') = ?"); filterParams.push(layer); }
     if (topic === 'has') filters.push('topic_key IS NOT NULL');
@@ -323,8 +339,8 @@ export async function exploreScope(ownerId: string, input: ExplorerInput): Promi
     const page = [...filters];
     const pageParams = [...filterParams];
     if (after) { page.push('(created_at < ? OR (created_at = ? AND id < ?))'); pageParams.push(after[0], after[0], after[1]); }
-    const rows = yield* all<{ id: string; type: string; content: string; drawer_kind: string | null; drawer_key: string | null; topic_key: string | null; importance_score: number | null; memory_layer: string | null; created_at: string; source_agent_id: string | null; metadata: string | null }>(
-      `SELECT id, type, content, drawer_kind, drawer_key, topic_key, importance_score, memory_layer, created_at, source_agent_id, metadata
+    const rows = yield* all<{ id: string; type: string; content: string; drawer_kind: string | null; drawer_key: string | null; topic_key: string | null; importance_score: number | null; memory_layer: string | null; created_at: string; source_agent_id: string | null; metadata: string | null; trust: string | null; superseded_by: string | null; valid_to: string | null }>(
+      `SELECT id, type, content, drawer_kind, drawer_key, topic_key, importance_score, memory_layer, created_at, source_agent_id, metadata, trust, superseded_by, valid_to
          FROM memories WHERE ${page.join(' AND ')} ORDER BY created_at DESC, id DESC LIMIT ?`, ...pageParams, limit + 1);
     const facet = function* (col: string) {
       const r = yield* all<{ v: string | null; n: number }>(`SELECT ${col} AS v, COUNT(*) AS n FROM memories WHERE ${base.join(' AND ')} GROUP BY ${col} ORDER BY n DESC LIMIT 50`, ...baseParams);
@@ -342,7 +358,7 @@ export async function exploreScope(ownerId: string, input: ExplorerInput): Promi
       id: r.id, type: r.type, preview: r.content.length > PREVIEW_CHARS ? `${r.content.slice(0, PREVIEW_CHARS)}…` : r.content,
       drawerId: drawerIdOf(r.drawer_kind, r.drawer_key), topicKey: r.topic_key, importance: Math.round((r.importance_score ?? 0.5) * 10),
       layer: r.memory_layer ?? 'factual', createdAt: r.created_at, sourceAgentId: r.source_agent_id ?? null,
-      source: sourceOf(r.metadata), usedIn: 0,
+      source: sourceOf(r.metadata), usedIn: 0, trust: r.trust ?? null, supersededBy: r.superseded_by ?? null, validTo: r.valid_to ?? null,
     }));
     const last = items[items.length - 1];
     return {

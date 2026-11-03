@@ -23,6 +23,8 @@ export type ExplorerState = Readonly<{
   confirmForget: boolean;
   checked: readonly string[]; bulk: 'move' | 'forget' | null; bulkTo: string; result?: string;
   adding: NewMemory | null;
+  /** STORE-MAP-01 P3 (FD3): trust filter, replaced facts shown, and a change made while editing. */
+  trust: '' | 'checked' | 'unchecked' | 'imported'; replaced: boolean; conflict: { content: string; version: number } | null;
 }>;
 
 const asItem = (m: MemoryItem): ExplorerItem => ({
@@ -36,13 +38,13 @@ export class MemoryExplorerController extends Store<ExplorerState> {
   constructor(client: Requester,readonly fixedScope?:string) {
     super({ phase: 'idle', busy: false, scope: fixedScope??'company', query: '', meaning: false, type: '', topic: '', source: '', agent: '', importance: '', since: '', items: [], total: 0, nextCursor: null, facets: EMPTY_FACETS,
       open: null, versions: null, full: null, detail: null, editing: false, draft: '', draftImportance: 5, moving: false, moveTo: '', confirmForget: false,
-      checked: [], bulk: null, bulkTo: '', adding: null }, client);
+      checked: [], bulk: null, bulkTo: '', adding: null, trust: '', replaced: false, conflict: null }, client);
   }
 
   private path(cursor?: string | null) {
     const s = this.getSnapshot();
     const from = s.since ? new Date(Date.now() - Number(s.since) * 86400000).toISOString().slice(0, 10) : undefined;
-    return '/api/memory/scopes/memories' + queryString({ scope: s.scope, q: s.query.trim().slice(0, 200), type: s.type, topic: s.topic, source: s.source, agent: s.agent, importance: s.importance, from, cursor: cursor ?? undefined, limit: 50 });
+    return '/api/memory/scopes/memories' + queryString({ scope: s.scope, q: s.query.trim().slice(0, 200), type: s.type, topic: s.topic, source: s.source, agent: s.agent, importance: s.importance, from, trust: s.trust, replaced: s.replaced ? 'show' : undefined, cursor: cursor ?? undefined, limit: 50 });
   }
 
   /** First page of the current scope, search and filters (words; the server counts). */
@@ -108,6 +110,8 @@ export class MemoryExplorerController extends Store<ExplorerState> {
   close() { this.publish({ open: null, versions: null, full: null, detail: null, editing: false, moving: false, confirmForget: false }); }
   setSource(source: string) { this.publish({ source }); void this.load(); }
   setAgent(agent: string) { this.publish({ agent }); void this.load(); }
+  setTrust(trust: ExplorerState['trust']) { this.publish({ trust }); void this.load(); }
+  showReplaced(replaced: boolean) { this.publish({ replaced }); return this.load(); }
   /** Clears every filter at once (the filter popover's Clear). */
   clearFilters() { this.publish({ type: '', topic: '', source: '', agent: '', importance: '', since: '' }); void this.load(); }
   setImportance(importance: ExplorerState['importance']) { this.publish({ importance }); void this.load(); }
@@ -121,22 +125,55 @@ export class MemoryExplorerController extends Store<ExplorerState> {
   startEdit() { const s = this.getSnapshot(); const i = this.item(s.open); if (i) this.publish({ editing: true, moving: false, confirmForget: false, draft: s.full ?? i.preview, draftImportance: Math.max(1, i.importance) }); }
   editDraft(draft: string) { this.publish({ draft }); }
   editImportance(n: number) { this.publish({ draftImportance: Math.max(1, Math.min(10, n)) }); }
-  cancelEdit() { this.publish({ editing: false }); }
-  async saveEdit() {
+  cancelEdit() { this.publish({ editing: false, conflict: null }); }
+  /**
+   * Save the edit. While P3 is on the save carries the version the editor saw;
+   * a memory changed meanwhile is refused and the newer text is shown (FD3e).
+   * `force` saves this text as the newest version anyway ("Save mine as the newest").
+   */
+  async saveEdit(force = false): Promise<boolean> {
     const s = this.getSnapshot(); const i = this.item(s.open);
-    if (!i || !s.draft.trim()) return;
+    if (!i || !s.draft.trim()) return false;
     const body: Record<string, unknown> = {};
     if (s.draft !== s.full) body.content = s.draft;
     if (s.draftImportance !== i.importance) body.importance = s.draftImportance;
-    if (!Object.keys(body).length) { this.publish({ editing: false }); return; }
+    if (!Object.keys(body).length) { this.publish({ editing: false, conflict: null }); return false; }
+    const seen = force && s.conflict ? s.conflict.version : s.detail?.validity?.version;
+    if (seen !== undefined && s.detail?.validity) body.expectedVersion = seen;
     this.publish({ busy: true, notice: undefined });
     try {
       const r = await this.req('PUT', `/api/memory/${i.id}`, body);
-      if (r.status !== 200) { this.publish({ busy: false, notice: 'The change was not saved.' }); return; }
+      const changed = r.status === 409 ? (r.body as { code?: string; current?: { content: string; version: number } } | null) : null;
+      if (changed?.code === 'version_conflict' && changed.current) { this.publish({ busy: false, conflict: changed.current }); return false; }
+      if (r.status !== 200) { this.publish({ busy: false, notice: 'The change was not saved.' }); return false; }
       const m = (r.body as { memory: MemoryItem }).memory;
-      this.publish({ busy: false, editing: false, items: s.items.map(x => (x.id === i.id ? { ...x, preview: m.content.slice(0, 400), importance: m.importance } : x)) });
+      this.publish({ busy: false, editing: false, conflict: null, items: s.items.map(x => (x.id === i.id ? { ...x, preview: m.content.slice(0, 400), importance: m.importance } : x)) });
       await this.openMemory(i.id);
-    } catch { this.publish({ busy: false, notice: 'The change was not saved (no connection).' }); }
+      return true;
+    } catch { this.publish({ busy: false, notice: 'The change was not saved (no connection).' }); return false; }
+  }
+
+  /** STORE-MAP-01 P3 (FD1b): "Remember › New project…" makes a real project; resolves with its key. */
+  async makeProject(name: string): Promise<string | null> {
+    try {
+      const r = await this.req('POST', '/api/memory/scopes/projects', { name: name.trim().slice(0, 80) });
+      if (r.status !== 201 && r.status !== 200) { this.publish({ notice: 'The project was not made. Try again.' }); return null; }
+      return (r.body as { project: { key: string } }).project.key;
+    } catch { this.publish({ notice: 'The project was not made (no connection).' }); return null; }
+  }
+  /** FD3e: drop my text and show the version saved meanwhile. */
+  async keepTheirs() { const id = this.getSnapshot().open; this.publish({ editing: false, conflict: null }); if (id) await this.openMemory(id); }
+  /** FD3: "Mark as checked" and its undo (P3). */
+  async setChecked(id: string, checked: boolean) {
+    this.publish({ busy: true, notice: undefined });
+    try {
+      const r = await this.req('PUT', `/api/memory/scopes/memories/${encodeURIComponent(id)}/checked`, { checked });
+      if (r.status !== 200) { this.publish({ busy: false, notice: 'That did not work. Try again.' }); return false; }
+      const trust = (r.body as { trust: ExplorerItem['trust'] }).trust;
+      const s = this.getSnapshot();
+      this.publish({ busy: false, items: s.items.map(x => (x.id === id ? { ...x, trust } : x)), detail: s.detail && s.detail.id === id && s.detail.validity ? { ...s.detail, validity: { ...s.detail.validity, trust: trust ?? null } } : s.detail });
+      return true;
+    } catch { this.publish({ busy: false, notice: 'That did not work (no connection).' }); return false; }
   }
 
   startMove() { this.publish({ moving: true, editing: false, confirmForget: false, moveTo: '' }); }

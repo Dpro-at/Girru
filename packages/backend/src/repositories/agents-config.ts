@@ -56,6 +56,8 @@ import { AGENT_ROLES, PersonalityInputError, isAgentRole, normalizeDepartment, t
 import { checkOwnerPersonalityInput, seedPersonalityForNewAgent, type SaveInput } from '../services/personality-store.js';
 import { seedNewAgentPermissionsStep } from '../tools/agent-permissions.js';
 import { releaseReportsStep } from '../services/agent-org.js';
+import { storeP3Enabled } from '../services/store-p3.js';
+import { companyOwnerStep, departmentKey, linkAgentDepartment, renameDepartmentEverywhere, syncDepartments } from '../services/departments.js';
 
 export interface AgentConfigRow {
   id: string;
@@ -212,6 +214,16 @@ export const agentConfigs: AgentConfigsRepository = {
     try { from = normalizeDepartment(body.from); to = normalizeDepartment(body.to); } catch { throw new AgentConfigInputError('A department is at most 64 characters', 'invalid_input'); }
     if (!from || !to || /[\u0000-\u001f\u007f]/.test(to)) throw new AgentConfigInputError('from and to are required', 'invalid_input');
     if (from === to) return { from, to, moved: 0 };
+    if (storeP3Enabled()) {
+      // P3: rename the department in the one list; rules, boards and projects follow too.
+      await syncDepartments();
+      const owner = await sql().read(companyOwnerStep());
+      const dep = owner ? await sql().read(one<{ id: string }>('SELECT id FROM departments WHERE owner_id = ? AND norm_name = ?', owner, departmentKey(from))) : undefined;
+      if (!owner || !dep) throw new AgentConfigError(404, 'No agent is in that department');
+      const n = await sql().read(one<{ n: number }>('SELECT COUNT(*) AS n FROM agents_config WHERE department_id = ? AND id != ?', dep.id, RESERVED_AGENT_ID));
+      await renameDepartmentEverywhere(owner, dep.id, String(body.to).trim());
+      return { from, to, moved: Number(n?.n ?? 0) };
+    }
     const moved = await sql().tx(function* () {
       const d = yield* dialect();
       const r = yield* run(`UPDATE agents_config SET department = ?, updated_at = ${nowText(d)} WHERE department = ? AND id != ?`, to, from, RESERVED_AGENT_ID);
@@ -270,6 +282,7 @@ export const agentConfigs: AgentConfigsRepository = {
     }
 
     await sql().tx(() => insertAgentConfigStep({ id, name, language, body, role, department, explicit, userId: a.userId ?? null }));
+    if (department && storeP3Enabled()) await linkAgentDepartment(id);
 
     // SECURITY (S1.1): the key goes to the encrypted credentials store only.
     if (typeof body.api_key === 'string' && body.api_key.trim()) await setAgentApiKey(id, body.api_key);
@@ -350,6 +363,7 @@ export const agentConfigs: AgentConfigsRepository = {
       if (!current) throw new AgentConfigError(404, NOT_FOUND);
       throw new AgentConfigConflictError(current);
     }
+    if (body.department !== undefined && storeP3Enabled()) await linkAgentDepartment(id);
 
     // SECURITY (S1.1): a new key goes to the encrypted credentials store; an
     // empty or masked value keeps the stored key.

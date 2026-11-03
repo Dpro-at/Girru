@@ -16,6 +16,8 @@
 import { randomUUID } from 'node:crypto';
 import { all, one, run, sql, type Step } from '../../repositories/sql-steps.js';
 import { isValidDrawerKey, type DrawerRef } from '../drawers.js';
+import { departmentTable, storeP3Enabled } from '../../services/store-p3.js';
+import { chatProjectKeyColumn, projectKeyOf } from '../project-keys.js';
 
 export const GENERAL_DEPARTMENT = 'general';
 export const GENERAL_NAME = 'General';
@@ -36,7 +38,7 @@ export interface ProjectScope {
   archived: boolean;
   archivedAt: string | null;
   mergedInto: string | null;
-  /** chat_projects.id of the owner's chat project with this slug, else null. */
+  /** chat_projects.id of the owner's chat project with this key (its slug; its id while P3 is on), else null. */
   chatProjectId: string | null;
   /** MEM-TRASH-01: when the project was moved to the Trash, else null. */
   trashedAt: string | null;
@@ -71,14 +73,14 @@ export function assertProjectSlug(slug: unknown): asserts slug is string {
 // ---------------------------------------------------------------------------
 
 export function* listDepartmentsStep(ownerId: string): Step<Department[]> {
-  const rows = yield* all<{ id: string; name: string }>('SELECT id, name FROM memory_departments WHERE owner_id = ? ORDER BY norm_name, id', ownerId);
+  const rows = yield* all<{ id: string; name: string }>(`SELECT id, name FROM ${departmentTable()} WHERE owner_id = ? ORDER BY norm_name, id`, ownerId);
   return [{ id: GENERAL_DEPARTMENT, name: GENERAL_NAME, isDefault: true }, ...rows.map((r) => ({ id: r.id, name: r.name, isDefault: false }))];
 }
 
 export function* departmentStep(ownerId: string, id: string): Step<Department | null> {
   if (id === GENERAL_DEPARTMENT) return { id, name: GENERAL_NAME, isDefault: true };
   if (typeof id !== 'string' || !DEPARTMENT_ID.test(id)) return null;
-  const r = yield* one<{ id: string; name: string }>('SELECT id, name FROM memory_departments WHERE owner_id = ? AND id = ?', ownerId, id);
+  const r = yield* one<{ id: string; name: string }>(`SELECT id, name FROM ${departmentTable()} WHERE owner_id = ? AND id = ?`, ownerId, id);
   return r ? { id: r.id, name: r.name, isDefault: false } : null;
 }
 
@@ -90,13 +92,15 @@ export async function createDepartment(ownerId: string, nameInput: unknown, by: 
   const name = cleanName(nameInput, 'department');
   return sql().tx(function* () {
     if (normName(name) === normName(GENERAL_NAME)) throw new ScopeInputError('That department already exists', 409, 'name_taken');
-    if (yield* one('SELECT 1 AS x FROM memory_departments WHERE owner_id = ? AND norm_name = ?', ownerId, normName(name))) {
+    if (yield* one(`SELECT 1 AS x FROM ${departmentTable()} WHERE owner_id = ? AND norm_name = ?`, ownerId, normName(name))) {
       throw new ScopeInputError('That department already exists', 409, 'name_taken');
     }
-    const n = (yield* one<{ n: number }>('SELECT COUNT(*) AS n FROM memory_departments WHERE owner_id = ?', ownerId))?.n ?? 0;
+    const n = (yield* one<{ n: number }>(`SELECT COUNT(*) AS n FROM ${departmentTable()} WHERE owner_id = ?`, ownerId))?.n ?? 0;
     if (Number(n) >= MAX_DEPARTMENTS) throw new ScopeInputError('Too many departments', 409, 'too_many');
     const id = `dept-${randomUUID().slice(0, 12)}`;
-    yield* run('INSERT INTO memory_departments (id, owner_id, name, norm_name, created_by) VALUES (?, ?, ?, ?, ?)', id, ownerId, name, normName(name), by);
+    yield* run(`INSERT INTO ${departmentTable()} (id, owner_id, name, norm_name, created_by) VALUES (?, ?, ?, ?, ?)`, id, ownerId, name, normName(name), by);
+    // P3: the old table mirrors the one list, so the switch can go off again.
+    if (storeP3Enabled()) yield* run('INSERT INTO memory_departments (id, owner_id, name, norm_name, created_by) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING', id, ownerId, name, normName(name), by);
     return { id, name, isDefault: false };
   }, { immediate: true });
 }
@@ -104,6 +108,13 @@ export async function createDepartment(ownerId: string, nameInput: unknown, by: 
 export async function renameDepartment(ownerId: string, id: string, nameInput: unknown): Promise<Department> {
   if (id === GENERAL_DEPARTMENT) throw new ScopeInputError('The General department cannot be renamed');
   const name = cleanName(nameInput, 'department');
+  if (normName(name) === normName(GENERAL_NAME)) throw new ScopeInputError('That department already exists', 409, 'name_taken');
+  if (storeP3Enabled()) {
+    // P3: the one list; agents, boards and rules follow the new name too.
+    const { renameDepartmentEverywhere } = await import('../../services/departments.js');
+    const d = await renameDepartmentEverywhere(ownerId, id, name);
+    return { id: d.id, name: d.name, isDefault: false };
+  }
   return sql().tx(function* () {
     const d = yield* departmentStep(ownerId, id);
     if (!d) throw new ScopeInputError('Department not found', 404, 'not_found');
@@ -145,10 +156,11 @@ export function* listProjectsStep(ownerId: string): Step<ProjectScope[]> {
     bySlug.set(r.slug, p);
   }
   for (const c of chats) {
-    const p = bySlug.get(c.slug) ?? base(c.slug);
+    const key = projectKeyOf(c); // P3: the id
+    const p = bySlug.get(key) ?? base(key);
     p.chatProjectId = c.id;
     p.name = c.name || p.name;
-    bySlug.set(c.slug, p);
+    bySlug.set(key, p);
   }
   return [...bySlug.values()].sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.name.localeCompare(b.name) || a.slug.localeCompare(b.slug));
 }
@@ -160,7 +172,7 @@ export function listProjects(ownerId: string): Promise<ProjectScope[]> {
 /** One project of the owner, or null when no chat project, memory or scope row knows it. */
 export function* projectStep(ownerId: string, slug: string): Step<ProjectScope | null> {
   if (!isValidDrawerKey('project', slug)) return null;
-  const chat = yield* one<{ id: string; name: string }>('SELECT id, name FROM chat_projects WHERE user_id = ? AND slug = ?', ownerId, slug);
+  const chat = yield* one<{ id: string; name: string }>(`SELECT id, name FROM chat_projects WHERE user_id = ? AND ${chatProjectKeyColumn()} = ?`, ownerId, slug);
   const row = yield* one<ScopeRow>('SELECT slug, name, department_id, pinned, archived_at, merged_into, trashed_at FROM memory_project_scopes WHERE owner_id = ? AND slug = ?', ownerId, slug);
   const group = yield* one<{ group_id: string }>('SELECT group_id FROM memory_project_group_members WHERE owner_id = ? AND slug = ?', ownerId, slug);
   const has = yield* one("SELECT 1 AS x FROM memories WHERE user_id = ? AND drawer_kind = 'project' AND drawer_key = ? LIMIT 1", ownerId, slug);

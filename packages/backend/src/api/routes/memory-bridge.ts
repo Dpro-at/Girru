@@ -31,6 +31,7 @@ import { projectScope } from '../../memory/outbox/events.js';
 import { runBriefProjection, syncStatus } from '../../memory/outbox/projection.js';
 import { isPilotProject } from '../../memory/outbox/pilot.js';
 import { storeP2Enabled } from '../../services/agent-context/switch.js';
+import { storeP3Enabled } from '../../services/store-p3.js';
 
 const OWNER_ONLY = ['owner'] as const;
 export const BRIDGE_TOKEN_HEADER = 'x-dpro-bridge-token';
@@ -68,7 +69,7 @@ export async function memoryBridgeRoutes(fastify: FastifyInstance) {
   })));
 
   // STORE-MAP-01 P2: which storage switches are on (the app shows the matching words).
-  fastify.get('/api/store-switches', { config }, asOwner(async () => ({ p2: storeP2Enabled() })));
+  fastify.get('/api/store-switches', { config }, asOwner(async () => ({ p2: storeP2Enabled(), p3: storeP3Enabled() })));
 
   // --- STORE-MAP-01 pilot: session capabilities and the brief projection (owner only) ---
   const pilotProject = async (o: string, id: string) => {

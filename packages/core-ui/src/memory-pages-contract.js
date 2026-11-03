@@ -37,7 +37,8 @@
 //   Conflicts (CORE-MEM-CONFLICT)
 //   POST   /api/memory/proposals/:id/decide              { decision, expectedReviewHash, note? }
 //   Built on MEM-GAPS-02 / MEM-FINISH-01 (boards M2, M3, M4, M7, M9, M12–M14)
-//   GET    /api/memory/scopes/memories/:id               one memory: used in N replies, entities, readers
+//   GET    /api/memory/scopes/memories/:id               one memory: used in N replies, entities, readers, validity (P3)
+//   PUT    /api/memory/scopes/memories/:id/checked       { checked } Mark as checked / undo (P3)
 //   GET    /api/memory/scopes/rules?scope=               review rules of one scope (own + effective)
 //   PUT    /api/memory/scopes/rules                      { scope, routine?, important?, contradiction?, reviewerAgentId?, weeklyDay?, weeklyHour? }
 //   GET    /api/memory/access/agents?scope=&column=&mode=&q=&cursor=&limit=
@@ -140,6 +141,7 @@ const QUERIES = {
   memories: {
     scope: validScope, q: queryText(200), type: word, layer: word, topic: x => x === 'has' || x === 'none', cursor, limit: limit(200),
     source: x => MEMORY_SOURCES.includes(x), agent: agentId, importance: x => /^(10|[1-9])(-(10|[1-9]))?$/.test(x), from: day, to: day,
+    trust: x => ['checked', 'unchecked', 'imported'].includes(x), replaced: x => x === 'show' || x === 'hide',
   },
   pinned: { scope: validRuleScope },
   effective: { project: slug },
@@ -191,15 +193,18 @@ export function memoryPagesPath(path) {
     case '/api/memory/graph/clusters': return with_('clusters', QUERIES.clusters);
     case '/api/memory/graph/sync': return with_('graph-sync', null);
     case '/api/handoffs/coding-apps': return with_('coding-handoffs', QUERIES.codingHandoffs);
+    case '/api/memory/scopes/projects': return with_('project-create', null);
+    case '/api/memory/scopes/jobs': return with_('jobs', null);
   }
   if ((m = /^\/api\/memory\/scopes\/pinned\/([^/]+)$/.exec(base)) && plainId(m[1])) return with_('pinned-fact', null, { id: m[1] });
-  if ((m = /^\/api\/memory\/scopes\/projects\/([^/]+)\/(preview|apply|export)$/.exec(base)) && slug(m[1])) return with_(`project-${m[2]}`, null, { id: m[1] });
+  if ((m = /^\/api\/memory\/scopes\/projects\/([^/]+)\/(preview|apply|export|deleted-memory|adopt)$/.exec(base)) && slug(m[1])) return with_(`project-${m[2]}`, null, { id: m[1] });
   if ((m = /^\/api\/memory\/access\/effective\/([^/]+)$/.exec(base)) && agentId(m[1])) return with_('effective', QUERIES.effective, { id: m[1] });
   if ((m = /^\/api\/memory\/graph\/entities\/([^/]+)$/.exec(base)) && plainId(m[1])) return with_('entity', null, { id: m[1] });
   if ((m = /^\/api\/memory\/graph\/links\/([^/]+)\/(approve|reject)$/.exec(base)) && plainId(m[1])) return with_(`link-${m[2]}`, null, { id: m[1] });
   if ((m = /^\/api\/handoffs\/(conversation|task)\/([^/]+)$/.exec(base)) && scopeId(m[2])) return with_('handoff', QUERIES.handoff, { id: m[2], kind: m[1] });
   if ((m = /^\/api\/memory\/proposals\/([^/]+)\/decide$/.exec(base)) && proposalId(m[1])) return with_('decide', null, { id: m[1] });
   if ((m = /^\/api\/memory\/scopes\/memories\/([^/]+)$/.exec(base)) && plainId(m[1])) return with_('memory-detail', null, { id: m[1] });
+  if ((m = /^\/api\/memory\/scopes\/memories\/([^/]+)\/checked$/.exec(base)) && plainId(m[1])) return with_('memory-checked', null, { id: m[1] });
   if ((m = /^\/api\/memory\/access\/templates\/([^/]+)$/.exec(base)) && /^[A-Za-z0-9_-]{1,64}$/.test(m[1])) return with_('template', QUERIES.template, { id: m[1] });
   if ((m = /^\/api\/memory\/graph\/agent-view\/([^/]+)$/.exec(base)) && agentId(m[1])) return with_('agent-view', QUERIES.agentView, { id: m[1] });
   if ((m = /^\/api\/memory\/graph\/clusters\/([^/]+)\/(topic-preview|topic|dismiss)$/.exec(base)) && plainId(m[1])) return with_(`cluster-${m[2]}`, null, { id: m[1] });
@@ -265,6 +270,10 @@ export function allowedMemoryPages(method, path, body) {
       if (method === 'DELETE') return body === undefined;
       return method === 'PATCH' && record(body) && onlyKeys(body, ['text', 'position']) && Object.keys(body).length > 0
         && (body.text === undefined || text(body.text, MAX_PINNED_TEXT)) && (body.position === undefined || (Number.isInteger(body.position) && body.position >= 0 && body.position <= 1000));
+    // STORE-MAP-01 P3 (FD1): a real project from Memory; the memory a deleted one left; "Use its memory".
+    case 'project-create': return method === 'POST' && record(body) && onlyKeys(body, ['name']) && text(body.name, 80) && body.name.trim().length > 0;
+    case 'project-deleted-memory': case 'jobs': return get;
+    case 'project-adopt': return method === 'POST' && record(body) && onlyKeys(body, ['projectId']) && plainId(body.projectId);
     case 'project-preview': return method === 'POST' && projectAction(body, false);
     case 'project-apply': return method === 'POST' && projectAction(body, true);
     case 'access-preview': return method === 'POST' && record(body) && onlyKeys(body, ['changes']) && changes(body.changes);
@@ -280,6 +289,7 @@ export function allowedMemoryPages(method, path, body) {
     case 'decide':
       return method === 'POST' && record(body) && onlyKeys(body, ['decision', 'expectedReviewHash', 'note']) && CONFLICT_DECISIONS.includes(body.decision)
         && hash(body.expectedReviewHash) && (body.note === undefined || text(body.note, 500));
+    case 'memory-checked': return method === 'PUT' && record(body) && onlyKeys(body, ['checked']) && typeof body.checked === 'boolean';
     case 'memory-detail': case 'access-agents': case 'access-counts': case 'template': case 'review-groups': case 'agent-view': case 'clusters': case 'coding-handoffs':
       return get;
     case 'rules':
@@ -370,6 +380,7 @@ function explorerItem(i) {
     id: i.id, type: clip(i.type, 32), preview: clip(i.preview, 400), drawerId: idOr(i.drawerId, validDrawerId, 'owner'), topicKey: typeof i.topicKey === 'string' ? clip(i.topicKey, 120) : null,
     importance: Math.min(10, Math.max(0, count(i.importance))), layer: clip(i.layer, 20), createdAt: when(i.createdAt), sourceAgentId: idOr(i.sourceAgentId, agentId),
     source: typeof i.source === 'string' && /^[a-z_-]{1,32}$/.test(i.source) ? i.source : null, usedIn: count(i.usedIn),
+    trust: TRUST_WORDS.includes(i.trust) ? i.trust : null, supersededBy: plainId(i.supersededBy) ? i.supersededBy : null, validTo: whenOrNull(i.validTo),
   };
 }
 function fact(f) {
@@ -509,7 +520,17 @@ function memoryDetail(m) {
     usage: { usedIn: count(u.usedIn), lastUsedAt: whenOrNull(u.lastUsedAt), recent: list(u.recent, 20).filter(x => record(x)).map(x => ({ runId: clip(x.runId, 128), sessionId: typeof x.sessionId === 'string' ? clip(x.sessionId, 128) : null, agentId: idOr(x.agentId, agentId), at: when(x.at) })) },
     graph: { entities: list(g.entities, 100).filter(e => record(e) && plainId(e.id)).map(shortEntity), links: list(g.links, 200).map(link) },
     readers: { scope: clip(r.scope, 140), count: count(r.count), total: count(r.total), all: r.all === true, archived: r.archived === true },
+    validity: validity(m.validity),
   };
+}
+/** STORE-MAP-01 P3 (FD3): where it came from, trust, still true, what it replaced, its version. */
+const TRUST_WORDS = ['checked', 'unchecked', 'imported'];
+const SOURCE_WORDS = ['owner', 'agent', 'coding_app', 'import', 'channel', 'system'];
+function validity(v) {
+  if (!record(v)) return null;
+  return { source: SOURCE_WORDS.includes(v.source) ? v.source : null, sourceRef: typeof v.sourceRef === 'string' ? clip(v.sourceRef, 128) : null, trust: TRUST_WORDS.includes(v.trust) ? v.trust : null,
+    validFrom: whenOrNull(v.validFrom), validTo: whenOrNull(v.validTo), supersededBy: plainId(v.supersededBy) ? v.supersededBy : null,
+    replaces: list(v.replaces, 20).filter(plainId), version: count(v.version) };
 }
 function cluster(c) {
   if (!record(c) || typeof c.id !== 'string' || !/^[0-9a-f]{32}$/.test(c.id)) fail();
@@ -581,6 +602,10 @@ export function memoryPagesResponse(path, status, body) {
         effects: effects(body.effects), ...(p.route === 'project-preview' ? (hash(body.previewHash) ? { previewHash: body.previewHash } : fail()) : { result: effects(body.result) }),
       };
     case 'project-export': return exported(body, p.id);
+    case 'project-create': return { project: record(body.project) && plainId(body.project.key) ? { key: body.project.key, name: clip(body.project.name, 80) } : fail() };
+    case 'project-deleted-memory': return { memory: record(body.memory) && plainId(body.memory.key) ? { key: body.memory.key, name: clip(body.memory.name, 80), memories: count(body.memory.memories) } : null };
+    case 'project-adopt': return { moved: count(body.moved) };
+    case 'jobs': return { jobs: list(body.jobs, 10).filter(j => record(j) && ['sources', 'vectors'].includes(j.id)).map(j => ({ id: j.id, done: count(j.done), total: count(j.total) })) };
     case 'access': return { version: count(body.version), rules: list(body.rules, 5000).map(rule), templates: list(body.templates, 200).map(template) };
     case 'access-preview': return accessPreview(body);
     case 'access-apply': return { version: count(body.version), preview: accessPreview(record(body.preview) ? body.preview : fail()) };
@@ -614,6 +639,7 @@ export function memoryPagesResponse(path, status, body) {
       if (!CONFLICT_DECISIONS.includes(body.decision) || !record(body.proposal) || !proposalId(body.proposal.id)) fail();
       return { decision: body.decision, proposal: { id: body.proposal.id, status: clip(body.proposal.status, 20) }, applied: body.applied === true || record(body.applied) };
     }    case 'memory-detail': return { memory: memoryDetail(body.memory) };
+    case 'memory-checked': return { trust: TRUST_WORDS.includes(body.trust) ? body.trust : fail() };
     case 'rules': return rulesView(body);
     case 'access-agents':
       return {

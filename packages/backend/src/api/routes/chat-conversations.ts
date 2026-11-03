@@ -76,6 +76,7 @@ import { HANDOFF_NOTE } from '../../memory/handoff/store.js';
 import { packHandoffText } from '../../memory/handoff/scope.js';
 import { refreshSummaries, type HistoryTurn } from '../../memory/context/summaries.js';
 import { approvalOutcomes, toolWorkRecords, type ApprovalOutcome } from '../../services/chat-tool-history.js';
+import { projectKeyOf } from '../../memory/project-keys.js';
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}$/;
 /** A model id the chat may pick (local model names like qwen3.5:9b, or claude-…). */
@@ -310,7 +311,7 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
       runId: b.runId, conversation: { turns }, handoff,
       ...(images.length ? { images: images.map((i) => ({ type: i.type, data: i.bytes.toString('base64'), name: i.name, file: i.file })) } : {}),
       ...(project?.folders.some((f) => f.write) ? { writeFolders: project.folders.filter((f) => f.write).map((f) => f.path) } : {}),
-      ...(project ? { memoryScope: { project: project.slug }, ...(project.folder ? { fileReadRoot: project.folder } : {}) } : {}),
+      ...(project ? { memoryScope: { project: projectKeyOf(project) }, ...(project.folder ? { fileReadRoot: project.folder } : {}) } : {}),
       ...(codingFolder ? { fileReadRoot: codingFolder } : {}),
       systemPromptAppend: [codeEnabled ? 'Code is open on this conversation folder. Use the separately granted edit tool for reviewed changes to existing project files. The write tool still writes only to your own agent workspace; do not substitute it for a project edit. If edit is unavailable, explain that the owner must enable that file-edit capability. Never claim a file changed until the tool confirms it. A stale proposal must be read and proposed again.' : '', t.participantContext ?? '', t.participantReply ? 'You are the selected participant in this shared conversation. Give only your own reply, in your own personality and department; never impersonate or answer on behalf of another participant.' : '', approvedResults, project ? projectNote(project.name, project.folder, project.repoUrl, project.folders) : '', PLAN_NOTE, c.mode === 'plan' ? PLAN_FIRST_NOTE : c.mode === 'ask' ? ASK_NOTE : '', HANDOFF_NOTE, [...prior, userMessage].some((m) => new RegExp(SECRET_REF_RE.source).test(m.content)) ? SECRET_NOTE : '', prior.some((m) => m.role === 'assistant' && (m.agentId ?? c.agentId ?? null) !== (replyAgent ?? null)) ? TEAM_NOTE : ''].filter(Boolean).join('\n\n'),
       ...(effectiveModel ? { model: effectiveModel, ...(effectiveModel === AUTO_MODEL ? {} : { provider: modelProvider(effectiveModel) }) } : {}),

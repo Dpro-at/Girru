@@ -29,11 +29,13 @@ import { startDiscoveryWatch, stopDiscoveryWatch } from '../discovery/service.js
 import { resumePendingImports, stopLocalImports } from '../memory/import/local-import.js';
 import {recoverSubscriptionProcesses,stopSubscriptionProcesses} from '../services/subscription-chat.js';
 import { getOrchestrator } from '../multi-agent/orchestrator.js';
+import { START_PROBLEM_EXIT, reportStartProblem } from '../db/layout.js';
 
 const PORT = config.port;
 const HOST = config.host;
 
-const fastify = await buildServer();
+// STORE-MAP-01 P3: the database opens inside buildServer; a start-up problem is reported for the desktop.
+const fastify = await buildServer().catch((err) => { if (reportStartProblem(err)) process.exit(START_PROBLEM_EXIT); throw err; });
 
 /** Python availability for audio features (a startup probe: skipped with background off). */
 async function probePython(): Promise<string> {
@@ -120,6 +122,8 @@ ${storageLines()}
     `);
   } catch (err) {
     fastify.log.error(err);
+    // STORE-MAP-01 P3: a start-up problem the desktop's start page can explain.
+    if (reportStartProblem(err)) process.exit(START_PROBLEM_EXIT);
     process.exit(1);
   }
 }
@@ -160,8 +164,9 @@ if (process.env[LAUNCH_TOKEN_ENV] && typeof process.send === 'function') {
     if (message && typeof message === 'object' && (message as { type?: unknown }).type === 'shutdown') void shutdown();
     // MACAPP-01: the app asks for a backup before it replaces itself with a new version.
     if (message && typeof message === 'object' && (message as { type?: unknown }).type === 'backup') {
-      void import('../services/backups.js').then(({ backUpNow }) => backUpNow('before-update'))
-        .then((b) => process.send?.({ type: 'backup-done', ok: b.checked, id: b.id, ...(b.checked ? {} : { error: 'a part did not pass its check' }) }))
+      // STORE-MAP-01 P3 (FD4a): the folder too, so the app can ask for this backup back if the update cannot finish.
+      void import('../services/backups.js').then(async ({ backUpNow, workspaceBackupsDir }) => ({ b: await backUpNow('before-update'), folder: workspaceBackupsDir() }))
+        .then(({ b, folder }) => process.send?.({ type: 'backup-done', ok: b.checked, id: b.id, folder, ...(b.checked ? {} : { error: 'a part did not pass its check' }) }))
         .catch((error: unknown) => process.send?.({ type: 'backup-done', ok: false, error: error instanceof Error ? error.message.slice(0, 200) : 'failed' }));
     }
   });

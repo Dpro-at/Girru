@@ -70,6 +70,16 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
   await (await import('../services/backups.js')).loadBackupsFolder();
   console.log('[Server] ✅ Database initialized\n');
 
+  // STORE-MAP-01 P3: project memory keys follow the switch (ids while on, slugs again when it goes off),
+  // before anything reads memory. Small set-based updates; a failure is logged and start-up goes on.
+  const { moveProjectKeys } = await import('../memory/project-keys.js');
+  await moveProjectKeys().catch((err) => console.warn('[Store P3] project keys not moved:', (err as Error)?.message));
+  // STORE-MAP-01 P3: the one list of departments and its ids (small tables; idempotent; before the first request).
+  if ((await import('../services/store-p3.js')).storeP3Enabled()) {
+    const { syncDepartments } = await import('../services/departments.js');
+    await syncDepartments().catch((err) => console.warn('[Store P3] departments backfill failed:', (err as Error)?.message));
+  }
+
   // APPS-06: apps moved to the Girru Store keep their data under their Store table names (once, after a backup).
   try { await (await import('../services/legacy-app-tables.js')).moveLegacyAppTables(); }
   catch (err) { console.warn('[Server] Old app tables not moved:', (err as Error).message); }
@@ -253,6 +263,19 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
     // STORE-MAP-01 pilot: change log + brief projection for GIRRU_STORE_PILOT only.
     const { startStorePilot } = await import('../memory/outbox/start.js');
     await startStorePilot().catch((err) => console.warn('[Store pilot] start failed:', (err as Error)?.message));
+
+    // STORE-MAP-01 P3 data jobs (GIRRU_STORE_P3 only; background work, so not while AGENT_PLAYER_BACKGROUND=off).
+    const { storeP3Enabled } = await import('../services/store-p3.js');
+    if (storeP3Enabled()) {
+      // Source and trust of existing memories: in the background, small batches, resumes after a restart.
+      const { backfillProvenance } = await import('../memory/validity.js');
+      // Packed vectors (faster recall): after the sources, same small batches, resumable.
+      const { backfillVectors } = await import('../memory/vectors.js');
+      setImmediate(() => {
+        backfillProvenance().catch((err) => console.warn('[Store P3] memory source backfill failed:', (err as Error)?.message))
+          .then(() => backfillVectors()).catch((err) => console.warn('[Store P3] vector backfill failed:', (err as Error)?.message));
+      });
+    }
 
     // MEM-UX-02: exported memory files follow the database (untouched files only).
     const { startMemoryFilesSync } = await import('../memory/files-sync.js');

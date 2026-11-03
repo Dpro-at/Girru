@@ -28,6 +28,7 @@ import { handoffText, projectHandoff } from '../../memory/bridge/brief.js';
 import { selectDrawers, type DrawerRef } from '../../memory/drawers.js';
 import { outsiderAgentMemoryEnabled } from '../outsider-memory.js';
 import { evaluateContextPolicy, type ContextPolicy, type EntryPoint } from './policy.js';
+import { projectKeyOf } from '../../memory/project-keys.js';
 
 export interface ResolvedAgentContext {
   entry: EntryPoint;
@@ -96,7 +97,7 @@ export async function resolveAgentContext(input: ResolveInput): Promise<Resolved
 
   // What THIS agent may read here (CORE-PERMS-01, MEM-SCALE-01), applied before anything is loaded,
   // as chat does: pinned facts by its fact access, the handoff and the drawers by its memory access.
-  const slug = project?.slug ?? null;
+  const slug = project ? projectKeyOf(project) : null; // the project's memory key (P3: its id)
   const perms = ownerId && policy.memory
     ? await loadRunPermissions(agent.id, [], { userId: ownerId, project: slug }).catch(() => null)
     : null;

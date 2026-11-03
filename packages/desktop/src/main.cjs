@@ -16,6 +16,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { createLocalRuntime, openLog } = require('./local-runtime.cjs');
+const { startProblemOf, failedParams } = require('./start-problem.cjs');
 const { resolvePayload, backendArgs, checkPayload } = require('./payload.cjs');
 const { loadSettings, saveSettings, remoteOrigin } = require('./settings.cjs');
 const { installNabuEditor } = require('./nabu-editor.cjs');
@@ -162,11 +163,15 @@ async function startLocal() {
     appOrigin = started.origin;
     startupStatus('Opening your workspace…');
     await mainWindow.loadURL(started.url);
+    updater?.startedFine(); // STORE-MAP-01 P3: this version works, the one it replaced can go
   } catch (error) {
     runtime = null;
     log?.write(`start failed: ${error.message}`);
     for (const line of error.logTail || []) log?.write(`  ${line}`);
-    await showPage('failed.html', { reason: error.message });
+    // STORE-MAP-01 P3: an update step that failed, or data from a newer Girru, gets its own page.
+    const problem = startProblemOf(error.logTail || []);
+    const earlier = problem?.kind === 'migration_failed' ? updater?.previous() : null;
+    await showPage('failed.html', problem ? { ...failedParams(problem), ...(earlier ? { previous: earlier.version } : {}) } : { reason: error.message });
   }
 }
 
@@ -363,6 +368,26 @@ ipcMain.handle('dpro:retry', async event => {
   return { ok: true };
 });
 
+// STORE-MAP-01 P3 (FD4b): from the start page of a workspace a newer Girru wrote.
+ipcMain.handle('dpro:failed-update', async event => {
+  if (!fromFailed(event)) return { ok: false };
+  const view = updater ? await updater.check().catch(() => null) : null;
+  await shell.openExternal(view?.update?.page || 'https://github.com/Dpro-at/Girru/releases');
+  return { ok: true };
+});
+// STORE-MAP-01 P3 (FD4a): restore the backup from before the update and open the version that made it.
+ipcMain.handle('dpro:failed-restore', async event => {
+  if (!fromFailed(event) || !updater?.previous()) return { ok: false };
+  await showPage('starting.html', { status: 'Putting your data back…' });
+  try { await stopLocal(); updater.restorePrevious(dataDir()); return { ok: true }; }
+  catch (error) { log?.write(`restore failed: ${error.message}`); await showPage('failed.html', { reason: `The earlier version could not be opened: ${error.message}` }); return { ok: false }; }
+});
+ipcMain.handle('dpro:failed-workspace', async event => {
+  if (!fromFailed(event)) return { ok: false };
+  await chooseWorkspace();
+  return { ok: true };
+});
+
 ipcMain.handle('dpro:open-connect', event => {
   if (!(mainWindow && event.sender === mainWindow.webContents && !appOrigin)) return { ok: false };
   openConnectWindow();
@@ -451,9 +476,10 @@ async function boot() {
   });
   const permissions = permissionStatus(electron.systemPreferences, process.platform);
   const firstMacLaunch = process.platform === 'darwin' && (!fs.existsSync(path.join(settingsDir(), 'permissions-reviewed-v3.json')));
+  // Before the first start: a start that fails after an update can offer the version it replaced (FD4a).
+  startUpdater();
   if (firstMacLaunch || (process.platform === 'win32' && permissions.microphone === 'denied' && !fs.existsSync(path.join(settingsDir(), 'permissions-reviewed-v3.json')))) await showPage('permissions.html');
   else await applyMode();
-  startUpdater();
 }
 
 // The app lives in one window: closing it quits (and stops the backend) on every OS.

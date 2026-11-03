@@ -90,7 +90,8 @@ test('the reader keeps only human and agent text; tool output, thinking, injecte
 });
 
 test('import: secrets removed before the archive and the model; archive is private; memories become pending proposals', async () => {
-  await createProject('li-owner', { name: 'App', folder: app });
+  const created = await createProject('li-owner', { name: 'App', folder: app });
+  const { projectKeyOf } = await loadFile(join(backendDir, 'src/memory/project-keys.ts')); // id while GIRRU_STORE_P3 is on
   const seen = [];
   const extract = async (text, ctx) => { seen.push(text); return ctx.source === 'claude-code'
     ? [{ title: 'Language', content: 'The owner wants answers in Arabic.', scope: 'owner', evidence: 'Always answer me in Arabic' }, { title: 'Stack', content: 'The app project uses Fastify.', scope: 'project', evidence: 'Understood, Arabic it is' }]
@@ -108,7 +109,7 @@ test('import: secrets removed before the archive and the model; archive is priva
   if (process.platform !== 'win32') assert.equal(statSync(join(arch, 'claude-code', files[0])).mode & 0o777, 0o600);
   assert.ok(!readFileSync(join(arch, 'claude-code', files[0]), 'utf8').includes(SECRET), 'the archive holds the redacted text only');
   const props = db.prepare("SELECT drawer_kind, drawer_key FROM memory_file_proposals WHERE status = 'pending'").all().map((r) => (r.drawer_key ? `${r.drawer_kind}:${r.drawer_key}` : r.drawer_kind)).sort();
-  assert.deepEqual(props, ['owner', 'owner', 'project:app'], 'project facts go to the matching project drawer');
+  assert.deepEqual(props, ['owner', 'owner', `project:${projectKeyOf(created)}`], 'project facts go to the matching project drawer');
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM memories').get().n, 0, 'nothing is remembered before approval');
   const imported = await L.importedSessions('li-owner');
   assert.equal(imported.size, 2);

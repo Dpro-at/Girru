@@ -33,6 +33,7 @@ const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
 
 const { getDatabase } = await import(join(backendDir, 'src/db/database.ts'));
+const { projectKeyOf } = await import(join(backendDir, 'src/memory/project-keys.ts')); // project memory key (id while GIRRU_STORE_P3 is on)
 const db = getDatabase();
 await db.initialize();
 const { getCredentialStorage } = await import(join(backendDir, 'src/credentials/storage.ts'));
@@ -125,7 +126,7 @@ test('owner API: only the owner; status lists the CLIs (all off) and the project
 });
 
 test('a fact approved in Girru appears in the managed brief; owner text outside the markers is untouched', async () => {
-  await learn({ userId: OWNER, actor: `owner:${OWNER}`, review: true, candidates: [{ content: 'Alpha deploys with the release script in scripts/release.sh', type: 'fact', drawer: { kind: 'project', key: project.slug }, origin: 'owner' }] });
+  await learn({ userId: OWNER, actor: `owner:${OWNER}`, review: true, candidates: [{ content: 'Alpha deploys with the release script in scripts/release.sh', type: 'fact', drawer: { kind: 'project', key: projectKeyOf(project) }, origin: 'owner' }] });
   assert.equal(await approveAll(), 1);
   const pv = await call(OWNER, 'GET', `/api/memory-bridge/projects/${project.id}/files`);
   assert.equal(pv.statusCode, 200, pv.body);
@@ -160,7 +161,7 @@ test('the owner edits outside the markers, a new fact (with a secret) is approve
   const path = join(folder, 'AGENTS.md');
   const edited = readFileSync(path, 'utf8') + '\nOwner later note.\n';
   writeFileSync(path, edited);
-  await learn({ userId: OWNER, actor: `owner:${OWNER}`, review: true, candidates: [{ content: `Alpha CI token is ${SECRET} and runs on push`, type: 'fact', drawer: { kind: 'project', key: project.slug }, origin: 'owner' }] });
+  await learn({ userId: OWNER, actor: `owner:${OWNER}`, review: true, candidates: [{ content: `Alpha CI token is ${SECRET} and runs on push`, type: 'fact', drawer: { kind: 'project', key: projectKeyOf(project) }, origin: 'owner' }] });
   await approveAll();
   const r = await syncMemoryBridge();
   assert.ok(r.written >= 1, JSON.stringify(r));
@@ -187,7 +188,7 @@ test('MCP: switched off -> refused; on -> read tools serve the project of the fo
   // pinned_facts = the owner's scope facts (MEM-SCALE-01), not the drawer's memories.
   assert.match((await claude.tool('pinned_facts')).text, /not pinned facts for this project yet/);
   assert.equal((await call(OWNER, 'POST', '/api/memory/scopes/pinned', { scope: 'company', text: 'We review every change.' })).statusCode, 201);
-  assert.equal((await call(OWNER, 'POST', '/api/memory/scopes/pinned', { scope: `project:${project.slug}`, text: `Alpha ships weekly. ${SECRET}` })).statusCode, 201);
+  assert.equal((await call(OWNER, 'POST', '/api/memory/scopes/pinned', { scope: `project:${projectKeyOf(project)}`, text: `Alpha ships weekly. ${SECRET}` })).statusCode, 201);
   const pinned = (await claude.tool('pinned_facts')).text;
   assert.match(pinned, /We review every change\.[\s\S]*Alpha ships weekly\./);
   assert.ok(!pinned.includes('release script') && !pinned.includes(SECRET));

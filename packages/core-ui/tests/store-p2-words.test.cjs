@@ -16,24 +16,25 @@ const src = (f) => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')
 const ID = '3f0c2b6e-1d2a-4f4e-9b1a-6c7d8e9f0a1b';
 const rule = (x = {}) => ({ id: ID, text: 'Chat in Arabic', when: null, projectId: null, who: 'all', targets: [], paused: false, status: 'active', source: 'owner', suggestedBy: null, reason: null, version: 1, createdAt: '', updatedAt: '', shipped: false, locked: false, ...x });
 
-test('switches route: GET only, in the browser gate and the desktop bridge; only p2 passes back', () => {
+test('switches route: GET only, in the browser gate and the desktop bridge; only p2 and p3 pass back', () => {
   for (const gate of [allowedStoreSwitches, (m, p, b) => allowedRequest(m, p, b), (m, p, b) => allowed(m, p, b)]) {
     assert.ok(gate('GET', STORE_SWITCHES_PATH, undefined));
     assert.ok(!gate('PUT', STORE_SWITCHES_PATH, { p2: true }));
     assert.ok(!gate('GET', `${STORE_SWITCHES_PATH}/x`, undefined));
   }
-  assert.deepEqual(storeSwitchesResponse(200, { p2: true, secret: 'x' }), { p2: true });
-  assert.deepEqual(storeSwitchesResponse(200, { p2: 'yes' }), { p2: false });
+  assert.deepEqual(storeSwitchesResponse(200, { p2: true, secret: 'x' }), { p2: true, p3: false });
+  assert.deepEqual(storeSwitchesResponse(200, { p2: 'yes' }), { p2: false, p3: false });
+  assert.deepEqual(storeSwitchesResponse(200, { p2: false, p3: true }), { p2: false, p3: true });
   assert.deepEqual(storeSwitchesResponse(403, {}), { code: 'forbidden' });
 });
 
 test('storeSwitches: read once per client; anything unreadable is off', async () => {
   let n = 0;
   const on = { request: async () => { n++; return { status: 200, body: { p2: true } }; } };
-  assert.deepEqual(await storeSwitches(on), { p2: true });
-  assert.deepEqual(await storeSwitches(on), { p2: true });
+  assert.deepEqual(await storeSwitches(on), { p2: true, p3: false });
+  assert.deepEqual(await storeSwitches(on), { p2: true, p3: false });
   assert.equal(n, 1);
-  assert.deepEqual(await storeSwitches({ request: async () => { throw Error('down'); } }), { p2: false });
+  assert.deepEqual(await storeSwitches({ request: async () => { throw Error('down'); } }), { p2: false, p3: false });
 });
 
 test('rules contract: precedence and groups pass; an unknown group is dropped', () => {

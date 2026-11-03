@@ -57,6 +57,8 @@ import { textSimilarity } from './embedding.js';
 import { detectContradiction, detectReplacement } from './contradiction.js';
 import { TopicKeyError, normalizeTopicKey } from './topic-key.js';
 import { TopicKeyTakenError } from './storage.js';
+import { currentVersionStep, replaceStep, stampProvenanceStep } from './validity.js';
+import { storeP3Enabled } from '../services/store-p3.js';
 import { ALWAYS_ASK, rulesForDrawer, type EffectiveRules } from './scopes/rules.js';
 
 export const MAX_LEARNED_CONTENT = 50_000;
@@ -220,16 +222,46 @@ export async function saveVersioned(memory: Memory, actor: string, reason: strin
   await sql().tx(function* () {
     yield* storage.writeRowStep(memory);
     yield* recordVersionStep({ memoryId: memory.id, userId: memory.userId, drawer: memory.drawer!, change: 'create', entry: versionEntryOf(memory), actor, reason });
+    if (storeP3Enabled()) yield* stampProvenanceStep(memory, actor);
   });
   await storage.writeMarkdownCopy(memory);
   return memory;
 }
 
+/**
+ * STORE-MAP-01 P3: a new fact on a known topic replaces the old memory instead
+ * of overwriting it. One transaction: the old row stops being true (kept for
+ * History), the new row takes the topic and gets its `create` version.
+ */
+export async function replaceVersioned(older: Memory, newer: Memory, actor: string, reason: string): Promise<Memory> {
+  const storage = getMemoryStorage();
+  await storage.ensureEmbedding(newer);
+  await sql().tx(function* () {
+    yield* replaceStep(older.userId, older.id, newer.id);
+    yield* storage.writeRowStep(newer);
+    yield* recordVersionStep({ memoryId: newer.id, userId: newer.userId, drawer: newer.drawer!, change: 'create', entry: versionEntryOf(newer), actor, reason: `${reason} replaces ${older.id}` });
+    yield* stampProvenanceStep(newer, actor);
+  });
+  await storage.writeMarkdownCopy(newer);
+  return newer;
+}
+
+/** An edit based on an older version than the stored one (STORE-MAP-01 P3, FD3e). Nothing was written. */
+export class MemoryVersionConflictError extends Error {
+  readonly status = 409;
+  constructor(readonly current: { id: string; content: string; type: string; importance: number; version: number }) { super('This memory changed while you were editing'); }
+}
+
 /** Update a memory (allowlisted fields) with baseline + `update` version. */
-export async function updateVersioned(userId: string, id: string, updates: Partial<Memory>, actor: string, reason: string): Promise<Memory | null> {
+export async function updateVersioned(userId: string, id: string, updates: Partial<Memory>, actor: string, reason: string, expectedVersion?: number): Promise<Memory | null> {
   const storage = getMemoryStorage();
   const old = await storage.getOwned(userId, id);
   if (!old) return null;
+  if (expectedVersion !== undefined) {
+    // Compare-and-set: refuse an edit made on an older version (the editor keeps its text).
+    const v = await sql().read(currentVersionStep(id));
+    if (v !== expectedVersion) throw new MemoryVersionConflictError({ id, content: old.content, type: old.type, importance: versionEntryOf(old).importance, version: v });
+  }
   await recordBaselineIfMissing(old, actor);
   await storage.update(id, updates);
   const updated = (await storage.getOwned(userId, id))!;
@@ -476,6 +508,14 @@ async function learnTopicUpdate(input: LearnInput, out: LearnOutcome, existing: 
   });
   const reasons: LearningReason[] = contradiction ? [...new Set<LearningReason>(['conflict', ...cls.reasons])] : cls.reasons;
   if (input.review && !reasons.length) reasons.push('chat');
+  if (!reasons.length && storeP3Enabled()) {
+    // P3: the new fact replaces the old one; the old row stays in History.
+    const mem = newMemory(input.userId, drawer, entry, { ...(input.metadata || {}), source: c.origin, learned: 'topic' }, existing.topicKey ?? null);
+    if (c.origin === 'agent' && input.agentId) mem.sourceAgentId = input.agentId;
+    out.updated.push(await replaceVersioned(existing, mem, input.actor, 'learning:topic'));
+    out.classified.push({ kind: 'routine', reasons: [], memoryId: mem.id });
+    return;
+  }
   if (!reasons.length) {
     const updated = await updateVersioned(input.userId, existing.id, {
       content: entry.content, type: entry.type as MemoryType,

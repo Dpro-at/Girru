@@ -132,15 +132,25 @@ async function appInfo(appPath) {
  * The updater: state for the page, a daily check, and install. Everything that
  * touches the outside is passed in, so the tests run it with fakes.
  */
-function createUpdater({ currentVersion, settingsDir, backUp, relaunch, fetchRelease = () => get(LATEST, { json: true }), download = get, now = () => Date.now(), platform = process.platform, arch = process.arch, execPath = process.execPath, unpack = (zip, dir) => run('/usr/bin/ditto', ['-x', '-k', zip, dir]), readApp = appInfo }) {
+/** The backend's restore request file in the data folder (packages/backend/src/services/backups.ts RESTORE_MARKER). */
+const RESTORE_MARKER = 'restore-pending.json';
+const BACKUP_ID = /^\d{8}-\d{6}-before-update$/;
+function validPrevious(p) {
+  if (!p || typeof p !== 'object' || typeof p.version !== 'string' || typeof p.app !== 'string' || !path.isAbsolute(p.app)) return null;
+  return { version: p.version.slice(0, 40), app: p.app, backupId: typeof p.backupId === 'string' && BACKUP_ID.test(p.backupId) ? p.backupId : null,
+    backupFolder: typeof p.backupFolder === 'string' && path.isAbsolute(p.backupFolder) ? p.backupFolder : null, at: typeof p.at === 'string' ? p.at : null };
+}
+
+function createUpdater({ currentVersion, settingsDir, backUp, relaunch, fetchRelease = () => get(LATEST, { json: true }), download = get, now = () => Date.now(), platform = process.platform, arch = process.arch, execPath = process.execPath, unpack = (zip, dir) => run('/usr/bin/ditto', ['-x', '-k', zip, dir]), readApp = appInfo, keepPrevious = /^(1|true|yes|on)$/i.test(String(process.env.GIRRU_STORE_P3 || '').trim()) }) {
   const stateFile = path.join(settingsDir, 'app-update.json');
-  let state = { version: currentVersion, checkedAt: null, release: null, busy: null, error: null };
+  let state = { version: currentVersion, checkedAt: null, release: null, busy: null, error: null, previous: null };
   // Only when it last looked is kept on disk; what GitHub offers (and where to download it) is asked again after a restart.
-  try { const saved = JSON.parse(fs.readFileSync(stateFile, 'utf8')); state = { ...state, checkedAt: typeof saved.checkedAt === 'string' ? saved.checkedAt : null }; } catch { /* first run */ }
+  // STORE-MAP-01 P3 (FD4a): also the version this one replaced, until this one has started once.
+  try { const saved = JSON.parse(fs.readFileSync(stateFile, 'utf8')); state = { ...state, checkedAt: typeof saved.checkedAt === 'string' ? saved.checkedAt : null, previous: validPrevious(saved.previous) }; } catch { /* first run */ }
   const listeners = new Set();
   const set = patch => {
     state = { ...state, ...patch };
-    try { fs.writeFileSync(stateFile, JSON.stringify({ checkedAt: state.checkedAt }), { mode: 0o600 }); } catch { /* not important */ }
+    try { fs.writeFileSync(stateFile, JSON.stringify({ checkedAt: state.checkedAt, ...(state.previous ? { previous: state.previous } : {}) }), { mode: 0o600 }); } catch { /* not important */ }
     for (const l of listeners) l(view());
   };
   const view = () => ({
@@ -195,7 +205,8 @@ function createUpdater({ currentVersion, settingsDir, backUp, relaunch, fetchRel
       const old = path.join(path.dirname(current), `.${path.basename(current)}.old-${now()}`);
       fs.renameSync(current, old);
       try { fs.renameSync(fresh, current); } catch (error) { fs.renameSync(old, current); throw error; }
-      set({ busy: null, release: null });
+      const previous = keepPrevious ? validPrevious({ version: state.version, app: old, backupId: backup.id, backupFolder: backup.folder, at: new Date(now()).toISOString() }) : null;
+      set({ busy: null, release: null, previous });
       relaunch();
     } catch (error) {
       set({ busy: null, error: `The update did not finish: ${error.message}. Girru is unchanged.` });
@@ -205,15 +216,55 @@ function createUpdater({ currentVersion, settingsDir, backUp, relaunch, fetchRel
     return view();
   }
 
-  /** On start: remove the app an earlier update kept beside this one. */
+  /**
+   * On start: remove the app an earlier update kept beside this one. With P3 the
+   * version this one replaced stays until this one has started once (startedFine).
+   */
   function cleanOld() {
     const current = currentAppPath(execPath);
     if (!current) return;
+    const keep = keepPrevious && state.previous ? state.previous.app : null;
     const dir = path.dirname(current), prefix = `.${path.basename(current)}.old-`;
-    try { for (const n of fs.readdirSync(dir)) if (n.startsWith(prefix)) fs.rmSync(path.join(dir, n), { recursive: true, force: true }); } catch { /* not ours to clean */ }
+    try { for (const n of fs.readdirSync(dir)) if (n.startsWith(prefix) && path.join(dir, n) !== keep) fs.rmSync(path.join(dir, n), { recursive: true, force: true }); } catch { /* not ours to clean */ }
   }
 
-  return { view, check, checkIfDue, install, cleanOld, onChange: l => { listeners.add(l); return () => listeners.delete(l); } };
+  /** This version started: the one it replaced is no longer needed. */
+  function startedFine() {
+    if (!state.previous) return;
+    try { fs.rmSync(state.previous.app, { recursive: true, force: true }); } catch { /* gone already */ }
+    set({ previous: null });
+  }
+
+  /** What "Restore and open" would bring back (FD4a), or null. */
+  function previous() {
+    const p = state.previous;
+    if (!keepPrevious || !p || !p.backupId || !p.backupFolder) return null;
+    try { if (!fs.statSync(p.app).isDirectory()) return null; } catch { return null; }
+    return { version: p.version, backupId: p.backupId, at: p.at };
+  }
+
+  /**
+   * FD4a: put the data back to the backup made before the update and open the
+   * version that made it. The restore itself runs in that version's start-up,
+   * before any store opens (the backend's restore marker); this version is moved
+   * aside, never deleted.
+   */
+  function restorePrevious(dataDir) {
+    const p = previous();
+    const current = currentAppPath(execPath);
+    if (!p || !current) throw new Error('There is no earlier version to open');
+    const marker = path.join(dataDir, RESTORE_MARKER);
+    fs.writeFileSync(marker + '.tmp', JSON.stringify({ id: state.previous.backupId, folder: state.previous.backupFolder, at: new Date(now()).toISOString() }), { mode: 0o600 });
+    fs.renameSync(marker + '.tmp', marker);
+    const failed = path.join(path.dirname(current), `.${path.basename(current)}.failed-${now()}`);
+    fs.renameSync(current, failed);
+    try { fs.renameSync(state.previous.app, current); } catch (error) { fs.renameSync(failed, current); fs.rmSync(marker, { force: true }); throw error; }
+    set({ previous: null });
+    relaunch();
+    return { version: p.version };
+  }
+
+  return { view, check, checkIfDue, install, cleanOld, startedFine, previous, restorePrevious, onChange: l => { listeners.add(l); return () => listeners.delete(l); } };
 }
 
 module.exports = { createUpdater, readRelease, newer, sumFor, platformId, currentAppPath, get, LATEST };
