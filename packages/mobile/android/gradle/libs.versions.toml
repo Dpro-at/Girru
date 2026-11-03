@@ -1,0 +1,28 @@
+# Versions are known-good stable releases; bump to the current stable ones
+# when the project is first built (see README, "Build").
+[versions]
+agp = "8.7.3"
+kotlin = "2.0.21"
+googleServices = "4.4.2"
+coreKtx = "1.13.1"
+appcompat = "1.7.0"
+activity = "1.9.3"
+webkit = "1.12.1"
+biometric = "1.1.0"
+firebaseBom = "33.7.0"
+junit = "4.13.2"
+
+[libraries]
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+androidx-activity-ktx = { group = "androidx.activity", name = "activity-ktx", version.ref = "activity" }
+androidx-webkit = { group = "androidx.webkit", name = "webkit", version.ref = "webkit" }
+androidx-biometric = { group = "androidx.biometric", name = "biometric", version.ref = "biometric" }
+firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
+firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }

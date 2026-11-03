@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Light tokens from the phone boards; dark ones in values-night. -->
+<resources>
+    <color name="surface">#FFFFFF</color>
+    <color name="surface_raised">#F4F4F6</color>
+    <color name="text">#252528</color>
+    <color name="muted">#6B6B73</color>
+    <color name="accent">#0053FD</color>
+    <color name="on_accent">#FFFFFF</color>
+    <color name="error">#C4262E</color>
+    <color name="notice_bg">#FFF4E0</color>
+    <color name="ic_launcher_background">#0053FD</color>
+</resources>
