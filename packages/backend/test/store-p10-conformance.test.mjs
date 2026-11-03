@@ -163,6 +163,21 @@ for (const [provider, label] of [['anthropic', 'Claude API'], ['ollama', 'Ollama
   });
 }
 
+// Live run (qwen3:4b): a model added a guessed filter (type "fact") to every recall of facts saved with the
+// default type, and found nothing. When the filters hide every match, the words are searched without them.
+test('native door: a guessed filter that hides every match falls back to the words alone', async () => {
+  const conv = await createConversation(OWNER, { title: 'XP3 filter', agentId: 'xp-main' });
+  const registry = await createAgentToolsRegistry({ userId: OWNER, sessionId: conv.id, agentId: 'xp-main', workspaceDir: dir, chatPlan: true });
+  await registry.execute('memory_save', { content: 'The Orbit checklist lives in docs/release.md', topic_key: 'orbit-checklist', importance: 5 });
+  await approvePending();
+  const r = await registry.execute('memory_search', { query: 'Orbit checklist', type: 'fact', layer: 'factual' });
+  assert.match(textOf(r), /No memory matched the filters; these match the words without them/);
+  assert.match(textOf(r), /docs\/release\.md/);
+  assert.equal(r.data?.widened, true);
+  const none = await registry.execute('memory_search', { query: 'zebra migration timetable', type: 'fact' });
+  assert.match(textOf(none), /No memories found/);
+});
+
 // --- 2 The subscription JSON tool protocol: Claude Code, Codex, Antigravity ----------------------
 
 /** What each CLI prints for one reply whose text is `text` (the shapes subscriptionAnswer reads). */
