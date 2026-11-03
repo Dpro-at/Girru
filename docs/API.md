@@ -96,6 +96,18 @@ Agents cannot write their own notes; only the owner saves them.
 
 With the switch on, every dpro-memory call needs a session (`x-girru-capability`, set by Girru as `GIRRU_SESSION_CAPABILITY` when it starts a coding app). A session also lists `memory_recall`, `memory_save`, `memory_supersede`, `memory_handoff` and `memory_propose`; writes accept an optional `request_id` and answer `503 not_saved` when they could not be written.
 
+### Project folder layout (owner only, `GIRRU_STORE_P7`)
+| Route | Body / answer |
+|---|---|
+| `GET /api/memory-bridge/projects/:projectId/layout` | dry run, writes nothing → `{ preview: { files, previewHash, conflicts, changes } }`; each file has `relative`, `action` (`create`, `update`, `unchanged` or `conflict`), `by` (`project-files`, `rules`, `task-file` or `brief-sync`), a `reason` for a conflict and Girru's part as a `diff` |
+| `POST /api/memory-bridge/projects/:projectId/layout` | `{ previewHash, confirm: true }` → `{ result }`, the same shape after the write. `409 preview_stale` when anything changed since the preview; `409 conflict` writes nothing |
+
+The layout turns the project's files on with the task file in one step: `AGENTS.md`
+with the one Girru section, `CLAUDE.md` and `GEMINI.md` pointers, `.girru/rules.md`,
+`.girru/tasks.md` (an existing one is kept as it is), Girru's lines in
+`.git/info/exclude`, and `.girru/brief.md` when the brief sync (`GIRRU_STORE_P6`) is
+on. It needs the one Girru section (`GIRRU_STORE_P2`): `409 p2_off` otherwise.
+
 ### Agent packages (owner only, `GIRRU_STORE_P5`)
 | Route | Body / answer |
 |---|---|

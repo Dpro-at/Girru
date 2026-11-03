@@ -33,6 +33,8 @@ import { runBriefProjection, syncStatus } from '../../memory/outbox/projection.j
 import { isPilotProject } from '../../memory/outbox/pilot.js';
 import { storeP6Enabled } from '../../services/store-p6.js';
 import { storeP2Enabled } from '../../services/agent-context/switch.js';
+import { storeP7Enabled } from '../../services/store-p7.js';
+import { layoutApply, layoutPreview } from '../../memory/bridge/layout.js';
 import { storeP3Enabled } from '../../services/store-p3.js';
 
 const OWNER_ONLY = ['owner'] as const;
@@ -64,6 +66,11 @@ export async function memoryBridgeRoutes(fastify: FastifyInstance) {
   fastify.post('/api/memory-bridge/registrations/:id/undo', { config }, asOwner((o, r) => registrationUndo(o, r.params.id)));
   fastify.get('/api/memory-bridge/projects/:projectId/files', { config }, asOwner(async (o, r) => ({ preview: await filesPreview(o, r.params.projectId) })));
   fastify.post('/api/memory-bridge/projects/:projectId/files', { config }, asOwner(async (o, r) => ({ result: await filesApply(o, r.params.projectId, bodyOf(r)) })));
+  // STORE-MAP-01 P7: the project folder layout, a dry run first, then the write the owner confirmed.
+  if (storeP7Enabled()) {
+    fastify.get('/api/memory-bridge/projects/:projectId/layout', { config }, asOwner(async (o, r) => ({ preview: await layoutPreview(o, r.params.projectId) })));
+    fastify.post('/api/memory-bridge/projects/:projectId/layout', { config }, asOwner(async (o, r) => ({ result: await layoutApply(o, r.params.projectId, bodyOf(r)) })));
+  }
   fastify.patch('/api/memory-bridge/projects/:projectId', { config }, asOwner(async (o, r) => ({ folder: await setFolder(o, r.params.projectId, bodyOf(r)) })));
   fastify.post('/api/memory-bridge/projects/:projectId/backflow', { config }, asOwner(async (o, r) => ({ result: await backflowNow(o, r.params.projectId) })));
   fastify.get('/api/memory-bridge/audit', { config }, asOwner(async (o, r) => ({

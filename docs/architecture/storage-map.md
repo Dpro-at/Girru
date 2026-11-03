@@ -200,6 +200,8 @@ A first version of the change log, the session capability and the shared agent c
 
 Nothing is written when any check fails, and the error says why.
 
+The same switch adds **the project folder layout in one step**: a dry run lists every file Girru would create or change, and the owner's confirm writes them all (or nothing, when one is a conflict). The task file comes on with the project's files, with no separate Rules step. An existing `.girru/tasks.md` is kept as it is. The routes are in the [API reference](../API.md).
+
 ### One agent context and one Girru section (off by default)
 
 `GIRRU_STORE_P2=1` turns on, for every agent:
