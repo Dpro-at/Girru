@@ -163,6 +163,10 @@ Returns:
       // CORE-03: the run's own user and only the drawers selected for this turn
       // (B1.6: enforced by the memory repository from the tool call's actor).
       if (!toolMemoryUser(context)) throw new Error('No user for this memory search');
+      // STORE-MAP-01 P10 (XP2 on the native door): a call without a query is refused and says what to fix.
+      if (typeof params.query !== 'string' || !params.query.trim()) {
+        return { content: [{ type: 'text', text: 'Error: query is required (the words to look for)' }], error: 'query is required' };
+      }
 
       // Search memories using new Multi-Tier Memory API
       const actor = await toolMemoryActor(context);

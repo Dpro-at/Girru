@@ -33,7 +33,7 @@ process.env.NODE_ENV = 'test';
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-const SWITCHES = ['GIRRU_STORE_P2', 'GIRRU_STORE_P3', 'GIRRU_STORE_P4', 'GIRRU_STORE_P6', 'GIRRU_STORE_P7', 'GIRRU_STORE_P8', 'GIRRU_STORE_PILOT'];
+const SWITCHES = ['GIRRU_STORE_P2', 'GIRRU_STORE_P3', 'GIRRU_STORE_P4', 'GIRRU_STORE_P5', 'GIRRU_STORE_P6', 'GIRRU_STORE_P7', 'GIRRU_STORE_P8', 'GIRRU_STORE_P9', 'GIRRU_STORE_P9B', 'GIRRU_STORE_PILOT'];
 for (const k of [...SWITCHES, 'CODEX_HOME', 'DEFAULT_MODEL', 'AGENT_EXEC_TOOLS']) delete process.env[k];
 // The only "model": a stub local Ollama for the delegated specialist. Anything else is a bug.
 let ollamaAnswer = 'Checked the login form; the bug is in the session cookie.';

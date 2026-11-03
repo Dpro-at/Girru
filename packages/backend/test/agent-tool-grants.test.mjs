@@ -84,9 +84,13 @@ test.after(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+// STORE-MAP-01 P2 (AG1): an agent may read its own guides (guide_read) wherever it runs; it is prompt text on demand, not a grant.
+const P2_ON = /^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P2 ?? '');
+const noGuide = (list) => list.filter((n) => n !== 'guide_read');
 const addAgent = (id) => db.prepare(`INSERT INTO agents_config (id, name, provider, model) VALUES (?, ?, 'claude', 'claude-test')`).run(id, id);
 const registryFor = (agentId, extra = {}) => tools.createToolsRegistry({ userId: 'gr-owner', workspaceDir: dir, agentId, ...extra });
-const names = (reg) => reg.getToolsForAPI().map((t) => t.name).sort();
+const names = (reg) => noGuide(reg.getToolsForAPI().map((t) => t.name)).sort();
+const offersGuide = (reg) => reg.getToolsForAPI().some((t) => t.name === 'guide_read');
 const quietly = async (fn) => { const l = console.log, w = console.warn; console.log = () => {}; console.warn = () => {}; try { return await fn(); } finally { console.log = l; console.warn = w; } };
 
 test('legacy agents keep their current non-exec tools; exec-class tools are never seeded', () => {
@@ -107,6 +111,7 @@ test('new agents start with the minimal safe set; a registry without an agent to
   assert.equal(db.prepare(`SELECT source FROM agent_grant_profiles WHERE agent_id = 'gr-new'`).get().source, 'default');
   assert.deepEqual(names(registryFor(undefined)), [...grants.DEFAULT_AGENT_TOOLS].sort());
   assert.deepEqual(names(registryFor('no-such-agent')), [], 'unknown agent: nothing');
+  assert.equal(offersGuide(registryFor('gr-new')), P2_ON);
 });
 
 test('an ungranted call is refused even if the model emits it; exec needs grant AND server gate', async () => {
@@ -152,7 +157,7 @@ test('chat: the model sees only granted tools and ungranted emitted calls are re
       payload: { agentId: 'gr-chat', stream: false, messages: [{ role: 'user', content: 'hi' }] } }));
   } finally { emitToolCalls = null; }
   assert.equal(res.statusCode, 200, res.body);
-  assert.deepEqual((modelRequests[0].tools || []).map((t) => t.name).sort(), ['memory_search', 'read']);
+  assert.deepEqual(noGuide((modelRequests[0].tools || []).map((t) => t.name)).sort(), ['memory_search', 'read']);
   assert.equal(existsSync(target), false);
   assert.deepEqual(notified, []);
   const results = modelRequests[1].messages.at(-1).content.filter((b) => b.type === 'tool_result');

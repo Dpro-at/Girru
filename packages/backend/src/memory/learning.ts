@@ -280,8 +280,23 @@ export class MemoryVersionConflictError extends Error {
   constructor(readonly current: { id: string; content: string; type: string; importance: number; version: number }) { super('This memory changed while you were editing'); }
 }
 
+// STORE-MAP-01 P10: edits of one memory run one after another, so the version check and the write
+// below cannot interleave with another edit (two edits on the same version: one wins, one is refused).
+const editQueue = new Map<string, Promise<unknown>>();
+function oneEditAtATime<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  const prev = editQueue.get(id) ?? Promise.resolve();
+  const next = prev.catch(() => undefined).then(fn);
+  editQueue.set(id, next);
+  void next.finally(() => { if (editQueue.get(id) === next) editQueue.delete(id); }).catch(() => undefined);
+  return next;
+}
+
 /** Update a memory (allowlisted fields) with baseline + `update` version. */
-export async function updateVersioned(userId: string, id: string, updates: Partial<Memory>, actor: string, reason: string, expectedVersion?: number): Promise<Memory | null> {
+export function updateVersioned(userId: string, id: string, updates: Partial<Memory>, actor: string, reason: string, expectedVersion?: number): Promise<Memory | null> {
+  return oneEditAtATime(id, () => updateVersionedNow(userId, id, updates, actor, reason, expectedVersion));
+}
+
+async function updateVersionedNow(userId: string, id: string, updates: Partial<Memory>, actor: string, reason: string, expectedVersion?: number): Promise<Memory | null> {
   const storage = getMemoryStorage();
   const old = await storage.getOwned(userId, id);
   if (!old) return null;
@@ -484,7 +499,12 @@ export async function learn(input: LearnInput): Promise<LearnOutcome> {
       // CORE-MEM-CONFLICT: never written over the existing memory; the proposal
       // updates the first contradicted one only if the owner keeps the new text.
       const old = cls.conflictsWith.length ? await storage.getOwned(input.userId, cls.conflictsWith[0]) : null;
-      const change: MemoryChange = old
+      // STORE-MAP-01 P10 (XP3): a candidate that names the memory it replaces (memory_supersede) proposes
+      // an update of that memory, so approving it retires the old text instead of adding a second fact.
+      const replaced = !old && c.replaces ? await storage.getOwned(input.userId, c.replaces.id) : null;
+      const change: MemoryChange = replaced && replaced.drawer && sameDrawer(replaced.drawer, drawer)
+        ? { op: 'update', id: replaced.id, before: versionEntryOf(replaced), after: entry }
+        : old
         ? { op: 'update', id: old.id, before: versionEntryOf(old), after: entry }
         : { op: 'add', after: entry, ...(topicKey ? { topicKey } : {}) };
       const proposal = await createChangeProposal({

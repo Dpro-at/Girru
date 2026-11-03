@@ -64,7 +64,7 @@ const C = await import(join(backendDir, 'src/memory/bridge/capability.ts'));
 const { mcpCall, setBridgeEnv, setClient } = await import(join(backendDir, 'src/memory/bridge/service.ts'));
 const { ensureToken } = await import(join(backendDir, 'src/memory/bridge/auth.ts'));
 const { addPinnedFact, parsePinnedScope } = await import(join(backendDir, 'src/memory/scopes/pinned.ts'));
-const { addStarterRules, rulesContext } = await import(join(backendDir, 'src/services/agent-rules.ts'));
+const { addStarterRules, rulesContext, rulesByPrecedence } = await import(join(backendDir, 'src/services/agent-rules.ts'));
 const { resolveAgentContext } = await import(join(backendDir, 'src/services/agent-context/resolve.ts'));
 const { renderSystemPrompt, renderMemoryData } = await import(join(backendDir, 'src/services/agent-context/render.ts'));
 const { evaluateContextPolicy } = await import(join(backendDir, 'src/services/agent-context/policy.ts'));
@@ -277,11 +277,16 @@ test('capability: expired and revoked capabilities are refused', async () => {
 
 test('capability: the pilot project needs one; other projects work as before', async () => {
   const tok = await ensureToken(OWNER, 'claude-code');
-  assert.match((await mcpCall('claude-code', tok, folder, 'project_brief')).text, /Alpha/, 'pilot off: unchanged');
+  // P6 rolls the capability out to every project: then no project opens without one.
+  const p6 = /^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P6 ?? '');
+  const required = (e) => e.code === 'capability_required';
+  if (p6) await assert.rejects(mcpCall('claude-code', tok, folder, 'project_brief'), required);
+  else assert.match((await mcpCall('claude-code', tok, folder, 'project_brief')).text, /Alpha/, 'pilot off: unchanged');
   process.env.GIRRU_STORE_PILOT = project.id;
   try {
-    await assert.rejects(mcpCall('claude-code', tok, folder, 'project_brief'), (e) => e.code === 'capability_required');
-    assert.match((await mcpCall('claude-code', tok, otherFolder, 'project_brief')).text, /Beta/);
+    await assert.rejects(mcpCall('claude-code', tok, folder, 'project_brief'), required);
+    if (p6) await assert.rejects(mcpCall('claude-code', tok, otherFolder, 'project_brief'), required);
+    else assert.match((await mcpCall('claude-code', tok, otherFolder, 'project_brief')).text, /Beta/);
   } finally { delete process.env.GIRRU_STORE_PILOT; }
 });
 
@@ -294,7 +299,8 @@ test('resolved context: chat, task run and coding app share identity, hired inst
   for (const entry of ['chat', 'task', 'coding_app', 'channel']) {
     ctx[entry] = await resolveAgentContext({ agentId: 'sp-agent', entry, ownerId: OWNER, projectId: project.id });
   }
-  const rules = await rulesContext('sp-agent', { projectId: project.id });
+  // P2 (AG6): the rules come in precedence groups.
+  const rules = await (/^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P2 ?? '') ? rulesByPrecedence('sp-agent', project.id) : rulesContext('sp-agent', { projectId: project.id }));
   assert.ok(rules, 'the agent has owner rules');
   for (const entry of ['chat', 'task', 'coding_app', 'channel']) {
     assert.equal(ctx[entry].agent.name, 'Rafid');
@@ -343,7 +349,8 @@ test('routes: owner only; capability issue and revoke; sync status and rebuild o
     assert.equal((await call(OWNER, 'POST', `${url}/capabilities`, { scopes: ['root'] })).statusCode, 400);
     assert.equal((await call(OWNER, 'DELETE', `/api/memory-bridge/capabilities/${capability.id}`)).statusCode, 200);
     assert.equal((await call(OWNER, 'DELETE', `/api/memory-bridge/capabilities/${capability.id}`)).statusCode, 404);
-    assert.equal((await call(OWNER, 'GET', `${url}/sync`)).statusCode, 409, 'not the pilot project');
+    // P6 rolls the change log and brief projection out to every project.
+    if (!/^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P6 ?? '')) assert.equal((await call(OWNER, 'GET', `${url}/sync`)).statusCode, 409, 'not the pilot project');
     process.env.GIRRU_STORE_PILOT = project.id;
     try {
       const s = await call(OWNER, 'GET', `${url}/sync`);

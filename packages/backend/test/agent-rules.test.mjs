@@ -46,6 +46,7 @@ const { ruleSuggestTool } = await import(join(backendDir, 'src/tools/rules/rule-
 const app = await buildServer({ logger: false });
 await app.ready();
 const call = (user, method, url, payload) => app.inject({ method, url, headers: { authorization: `Bearer ${generateToken(user, 1)}` }, ...(payload ? { payload } : {}) });
+const p2 = /^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P2 ?? '');
 const texts = (list) => list.filter((r) => r.source !== 'girru').map((r) => r.text);
 
 test('where and who decide who gets a rule; the order is everywhere, project, chosen agents; paused rules are left out', async () => {
@@ -57,10 +58,18 @@ test('where and who decide who gets a rule; the order is everywhere, project, ch
   const paused = await add({ text: 'Paused everywhere', paused: true });
   assert.equal(paused.paused, true);
   const eff = async (agentId, projectId) => texts((await call('r-owner', 'GET', `/api/agent-rules/effective?agentId=${agentId}${projectId ? `&projectId=${projectId}` : ''}`)).json().rules);
-  assert.deepEqual(await eff('a-dev', 'p-dpro'), ['Everywhere for all', 'Dpro for development']);
-  assert.deepEqual(await eff('a-qa', 'p-dpro'), ['Everywhere for all', 'Agent rule for QA'], 'the rule for one agent comes last, so it wins');
-  assert.deepEqual(await eff('a-dev', null), ['Everywhere for all'], 'a project rule stays in its project');
-  assert.deepEqual(await eff('a-lead', 'p-other'), ['Everywhere for all', 'Other project only']);
+  if (p2) {
+    // GIRRU_STORE_P2 (AG6): strongest group first (project, then the agent by name, then all agents), not the written order.
+    assert.deepEqual(await eff('a-dev', 'p-dpro'), ['Dpro for development', 'Everywhere for all']);
+    assert.deepEqual(await eff('a-qa', 'p-dpro'), ['Agent rule for QA', 'Everywhere for all'], 'the rule for one agent is in a stronger group, so it wins');
+    assert.deepEqual(await eff('a-dev', null), ['Everywhere for all'], 'a project rule stays in its project');
+    assert.deepEqual(await eff('a-lead', 'p-other'), ['Other project only', 'Everywhere for all']);
+  } else {
+    assert.deepEqual(await eff('a-dev', 'p-dpro'), ['Everywhere for all', 'Dpro for development']);
+    assert.deepEqual(await eff('a-qa', 'p-dpro'), ['Everywhere for all', 'Agent rule for QA'], 'the rule for one agent comes last, so it wins');
+    assert.deepEqual(await eff('a-dev', null), ['Everywhere for all'], 'a project rule stays in its project');
+    assert.deepEqual(await eff('a-lead', 'p-other'), ['Everywhere for all', 'Other project only']);
+  }
   const page = (await call('r-owner', 'GET', '/api/agent-rules')).json();
   assert.equal(page.rules.filter((r) => r.source !== 'girru').length, 5);
   assert.deepEqual(page.departments, ['development', 'research']);
@@ -192,7 +201,7 @@ test('RULES-03: coding app files — one source, a pointer line for Claude Code 
   writeFileSync(join(folder, 'CLAUDE.md'), '# My notes\nKeep this.\n');
   db.prepare(`INSERT INTO chat_projects (id, user_id, name, slug, folder) VALUES ('p-files', 'r-owner', 'Files', 'files', ?)`).run(folder);
   const before = (await call('r-owner', 'GET', '/api/agent-rules/files/p-files')).json().files;
-  assert.deepEqual(before.files.map((f) => [f.name, f.action]), [['.girru/rules.md', 'create'], ['CLAUDE.md', 'add'], ['GEMINI.md', 'create'], ['AGENTS.md', 'create']]);
+  assert.deepEqual(before.files.map((f) => [f.name, f.action]), [['.girru/rules.md', 'create'], ['CLAUDE.md', p2 ? 'update' : 'add'], ['GEMINI.md', 'create'], ['AGENTS.md', 'create']], 'P2: the app files show the one Girru section\'s action');
   assert.equal(existsSync(join(folder, '.girru')), false, 'looking writes nothing');
   const w = (await call('r-owner', 'POST', '/api/agent-rules/files/p-files', { mode: 'private' })).json().files;
   assert.equal(w.upToDate, true);
@@ -200,13 +209,21 @@ test('RULES-03: coding app files — one source, a pointer line for Claude Code 
   assert.match(source, /1\. Never show, send or save a secret/);
   assert.match(source, /When you stop in the middle of a task: Write a handoff note/);
   const claude = readFileSync(join(folder, 'CLAUDE.md'), 'utf8');
-  assert.match(claude, /^# My notes\nKeep this\.\n\n<!-- girru:rules[^\n]*-->\n@\.girru\/rules\.md\n<!-- \/girru:rules -->\n$/);
-  assert.match(readFileSync(join(folder, 'GEMINI.md'), 'utf8'), /@\.girru\/rules\.md/);
   const agents = readFileSync(join(folder, 'AGENTS.md'), 'utf8');
-  assert.match(agents, /# Rules[\s\S]*1\. Never show, send or save a secret[\s\S]*<!-- \/girru:rules -->/);
+  if (p2) {
+    // P2: one Girru section — CLAUDE.md and GEMINI.md point at AGENTS.md, which holds the rules (one-girru-section.test.mjs has the details).
+    assert.match(claude, /^# My notes\nKeep this\.\n\n<!-- girru:start[^\n]*-->\n@AGENTS\.md\n[\s\S]*<!-- girru:end[^\n]*-->\n$/);
+    assert.match(readFileSync(join(folder, 'GEMINI.md'), 'utf8'), /@(\.\/)?AGENTS\.md/);
+    assert.match(agents, /1\. Never show, send or save a secret/);
+  } else {
+    assert.match(claude, /^# My notes\nKeep this\.\n\n<!-- girru:rules[^\n]*-->\n@\.girru\/rules\.md\n<!-- \/girru:rules -->\n$/);
+    assert.match(readFileSync(join(folder, 'GEMINI.md'), 'utf8'), /@\.girru\/rules\.md/);
+    assert.match(agents, /# Rules[\s\S]*1\. Never show, send or save a secret[\s\S]*<!-- \/girru:rules -->/);
+  }
   assert.doesNotMatch(agents, /@\.girru/, 'Codex has no imports: AGENTS.md carries the rules');
   const exclude = readFileSync(join(folder, '.git/info/exclude'), 'utf8');
-  assert.match(exclude, /# girru:rules[^\n]*\n\/\.girru\/\n\/CLAUDE\.md\n\/GEMINI\.md\n\/AGENTS\.md\n# \/girru:rules/);
+  if (p2) assert.match(exclude, /# girru:rules[^\n]*\n\/\.girru\/\n\/AGENTS\.md\n\/CLAUDE\.md\n\/GEMINI\.md\n# \/girru:rules/, 'P2: the source first, then the app files');
+  else assert.match(exclude, /# girru:rules[^\n]*\n\/\.girru\/\n\/CLAUDE\.md\n\/GEMINI\.md\n\/AGENTS\.md\n# \/girru:rules/);
   assert.equal(execFileSync('git', ['-C', folder, 'status', '--porcelain']).toString(), '', 'nothing shows to Git');
   // A rule change re-writes the files by itself; the pointer lines stay as they are.
   await call('r-owner', 'POST', '/api/agent-rules', { text: 'Use the project test command.', projectId: 'p-files' });
@@ -218,7 +235,9 @@ test('RULES-03: coding app files — one source, a pointer line for Claude Code 
   // With the project: the exclude part goes away; Girru still never commits.
   await call('r-owner', 'POST', '/api/agent-rules/files/p-files', { mode: 'project' });
   assert.doesNotMatch(readFileSync(join(folder, '.git/info/exclude'), 'utf8'), /girru:rules/);
-  assert.match(execFileSync('git', ['-C', folder, 'status', '--porcelain']).toString(), /\?\? AGENTS\.md/);
+  // P2: AGENTS.md and GEMINI.md hold the one Girru section, kept out of Git by the memory bridge's own exclude setting.
+  if (p2) assert.match(execFileSync('git', ['-C', folder, 'status', '--porcelain']).toString(), /\?\? CLAUDE\.md/);
+  else assert.match(execFileSync('git', ['-C', folder, 'status', '--porcelain']).toString(), /\?\? AGENTS\.md/);
   // A link is never written through; a tracked file stays untouched while private.
   const other = mkdtempSync(join(dir, 'proj-'));
   execFileSync('git', ['init', '-q', other]);
@@ -227,8 +246,10 @@ test('RULES-03: coding app files — one source, a pointer line for Claude Code 
   writeFileSync(join(other, 'AGENTS.md'), '# Team\n');
   execFileSync('git', ['-C', other, 'add', 'AGENTS.md']);
   db.prepare(`INSERT INTO chat_projects (id, user_id, name, slug, folder) VALUES ('p-safe', 'r-owner', 'Safe', 'safe', ?)`).run(other);
-  const safe = (await call('r-owner', 'POST', '/api/agent-rules/files/p-safe', { mode: 'private' })).json().files;
-  assert.deepEqual(safe.files.map((f) => [f.name, f.action]).filter(([n]) => n !== '.girru/rules.md' && n !== 'CLAUDE.md'), [['GEMINI.md', 'link'], ['AGENTS.md', 'tracked']]);
+  const safe = await call('r-owner', 'POST', '/api/agent-rules/files/p-safe', { mode: 'private' });
+  // P2: the one Girru section is written all or nothing; a linked app file stops the whole write.
+  if (p2) assert.deepEqual([safe.statusCode, safe.json().code], [409, 'conflict']);
+  else assert.deepEqual(safe.json().files.files.map((f) => [f.name, f.action]).filter(([n]) => n !== '.girru/rules.md' && n !== 'CLAUDE.md'), [['GEMINI.md', 'link'], ['AGENTS.md', 'tracked']]);
   assert.equal(readFileSync(join(dir, 'outside.md'), 'utf8'), 'outside\n');
   assert.equal(readFileSync(join(other, 'AGENTS.md'), 'utf8'), '# Team\n');
   assert.equal((await call('r-owner', 'POST', '/api/agent-rules/files/p-dpro', { mode: 'private' })).json().code, 'no_folder');

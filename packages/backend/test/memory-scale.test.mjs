@@ -84,7 +84,11 @@ const ok = async (method, url, payload, status = 200) => {
 const save = (content, drawer, topicKey = null, userId = OWNER) =>
   quietly(() => saveVersioned(newMemory(userId, drawer, { type: 'fact', importance: 5, content }, {}, topicKey), 'test', 'test'));
 const project = (key) => ({ kind: 'project', key });
-const chatProject = (id, slug, name) => db.prepare('INSERT INTO chat_projects (id, user_id, name, slug) VALUES (?, ?, ?, ?)').run(id, OWNER, name, slug);
+// STORE-MAP-01 P3 (D3): memory keys a chat project by its id. The memories here are written by key, so with
+// P3 on each chat project's id is its slug and the same keys name it (store-p3-project-keys.test.mjs covers slug -> id).
+const P3 = /^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P3 ?? '');
+const cp = (id, slug) => (P3 ? slug : id);
+const chatProject = (id, slug, name) => db.prepare('INSERT INTO chat_projects (id, user_id, name, slug) VALUES (?, ?, ?, ?)').run(cp(id, slug), OWNER, name, slug);
 const searchIds = async (query, drawers) => (await quietly(() => memoryRecall.search(owner, { query, limit: 20, ...(drawers ? { drawers } : {}) }))).map((r) => r.memory.id);
 const lifecycle = async (slug, body) => {
   const preview = await ok('POST', `/api/memory/scopes/projects/${slug}/preview`, body);
@@ -131,7 +135,7 @@ test('tree: departments, General default, counts and health per scope', async ()
   assert.equal(eng.memories, 2);
   const alpha = tree.projects.find((p) => p.slug === 'alpha');
   assert.equal(alpha.name, 'Alpha App');
-  assert.equal(alpha.chatProjectId, 'cp-alpha');
+  assert.equal(alpha.chatProjectId, cp('cp-alpha', 'alpha'));
   assert.equal(alpha.departmentId, department.id);
   assert.equal(alpha.memories, 2);
   assert.equal(alpha.health, 'ok');
@@ -229,8 +233,8 @@ test('merge: memories, topics (conflicts as reviews), graph, pinned facts, conve
   const b = await save('src: database is mysql', project('src-app'), 'database');
   const keep = await save('dst: database is postgres', project('dst-app'), 'database');
   await S.addPinnedFact(OWNER, { kind: 'project', id: 'src-app' }, 'Source pinned fact.', OWNER);
-  db.prepare("INSERT INTO chat_sessions (id, user_id, title, model, project_id) VALUES ('conv-src-1', ?, 'c', 'default', 'cp-src')").run(OWNER);
-  db.prepare("INSERT INTO agent_handoffs (id, owner_id, agent_id, scope_kind, scope_id, project_id, version, source) VALUES ('h1', ?, 'agent-a', 'conversation', 'conv-src-1', 'cp-src', 1, 'agent')").run(OWNER);
+  db.prepare("INSERT INTO chat_sessions (id, user_id, title, model, project_id) VALUES ('conv-src-1', ?, 'c', 'default', ?)").run(OWNER, cp('cp-src', 'src-app'));
+  db.prepare("INSERT INTO agent_handoffs (id, owner_id, agent_id, scope_kind, scope_id, project_id, version, source) VALUES ('h1', ?, 'agent-a', 'conversation', 'conv-src-1', ?, 1, 'agent')").run(OWNER, cp('cp-src', 'src-app'));
   // The graph indexer (deterministic fallback) already made the project entities from the drawers.
   await G.graphIdle();
   const ent = (name) => {
@@ -277,8 +281,8 @@ test('merge: memories, topics (conflicts as reviews), graph, pinned facts, conve
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM memory_graph_mentions WHERE entity_id = ? AND memory_id = ?').get(eDst, a.id).n, 1);
   // Pinned facts, conversations, handoffs.
   assert.deepEqual((await S.listPinnedFacts(OWNER, { kind: 'project', id: 'dst-app' })).map((f) => f.text), ['Source pinned fact.']);
-  assert.equal(db.prepare("SELECT project_id FROM chat_sessions WHERE id = 'conv-src-1'").get().project_id, 'cp-dst');
-  assert.equal(db.prepare("SELECT project_id FROM agent_handoffs WHERE id = 'h1'").get().project_id, 'cp-dst');
+  assert.equal(db.prepare("SELECT project_id FROM chat_sessions WHERE id = 'conv-src-1'").get().project_id, cp('cp-dst', 'dst-app'));
+  assert.equal(db.prepare("SELECT project_id FROM agent_handoffs WHERE id = 'h1'").get().project_id, cp('cp-dst', 'dst-app'));
   // The source is archived as merged.
   const src = await S.getProject(OWNER, 'src-app');
   assert.equal(src.archived, true);
@@ -290,7 +294,7 @@ test('export and forget all (CORE-07 tombstones, pinned facts, rules, handoffs)'
   const m1 = await save('old app note one', project('old-app'));
   await save('old app note two', project('old-app'));
   await S.addPinnedFact(OWNER, { kind: 'project', id: 'old-app' }, 'Old pinned.', OWNER);
-  db.prepare("INSERT INTO agent_handoffs (id, owner_id, agent_id, scope_kind, scope_id, project_id, version, source, done) VALUES ('h-old', ?, 'agent-a', 'conversation', 'conv-old', 'cp-old', 1, 'agent', '[\"wrote tests\"]')").run(OWNER);
+  db.prepare("INSERT INTO agent_handoffs (id, owner_id, agent_id, scope_kind, scope_id, project_id, version, source, done) VALUES ('h-old', ?, 'agent-a', 'conversation', 'conv-old', ?, 1, 'agent', '[\"wrote tests\"]')").run(OWNER, cp('cp-old', 'old-app'));
 
   const exp = await ok('GET', '/api/memory/scopes/projects/old-app/export');
   assert.deepEqual(exp.files.map((f) => f.name), ['project-old-app-memory.md', 'project-old-app-pinned-facts.md', 'project-old-app-handoffs.md']);
@@ -459,7 +463,8 @@ test('scale: 100 projects in 10 departments, 3,000 agents: tree, scope switch an
   const OWNER2 = 'ms-big';
   addUser(OWNER2, 'owner');
   const big = userActor({ id: OWNER2, role: 'owner' });
-  const insertDept = db.prepare('INSERT INTO memory_departments (id, owner_id, name, norm_name) VALUES (?, ?, ?, ?)');
+  // P3: the one `departments` list holds the departments; memory's own list otherwise.
+  const insertDept = db.prepare(`INSERT INTO ${P3 ? 'departments' : 'memory_departments'} (id, owner_id, name, norm_name) VALUES (?, ?, ?, ?)`);
   const insertScope = db.prepare('INSERT INTO memory_project_scopes (owner_id, slug, department_id) VALUES (?, ?, ?)');
   const insertMem = db.prepare(`INSERT INTO memories (id, user_id, type, content, created_at, drawer_kind, drawer_key, memory_layer, importance_score)
     VALUES (?, ?, 'fact', ?, ?, 'project', ?, 'factual', 0.5)`);

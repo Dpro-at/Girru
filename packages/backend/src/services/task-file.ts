@@ -396,6 +396,12 @@ export async function cardChanged(cardId: string): Promise<void> {
   }).catch(() => undefined);
 }
 
+/** STORE-MAP-01 P10: an agent was renamed; every task-file card it works on writes its block again (the Agent line). */
+export async function agentRenamed(agentId: string): Promise<void> {
+  const cards = await q.all<{ card_id: string }>('SELECT DISTINCT t.card_id FROM task_file_cards t JOIN board_card_agents l ON l.card_id = t.card_id WHERE l.agent_id = ?', agentId).catch(() => []);
+  for (const c of cards) await cardChanged(c.card_id);
+}
+
 /** The owner sends a task waiting in To sort to a department: its board, its lead (when the card has no agent), written back to the file. */
 export async function sortTask(ownerId: string, boardId: string, cardId: string, department: unknown): Promise<{ boardId: string }> {
   if (typeof department !== 'string' || !department.trim() || department.length > 64) throw new BoardError(400, 'invalid_board', 'department is required');

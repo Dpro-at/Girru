@@ -41,7 +41,9 @@ const MF = await import(join(backendDir, 'src/memory/memory-files.ts'));
 const FS = await import(join(backendDir, 'src/memory/files-sync.ts'));
 const B = await import(join(backendDir, 'src/memory/bridge/service.ts'));
 const { syncMemoryBridge } = await import(join(backendDir, 'src/memory/bridge/sync.ts'));
-const { MARK_START } = await import(join(backendDir, 'src/memory/bridge/managed-files.ts'));
+const { MARK_START, GIRRU_START } = await import(join(backendDir, 'src/memory/bridge/managed-files.ts'));
+// P2: the one Girru section replaces the dpro-memory markers.
+const SECTION_START = /^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P2 ?? '') ? GIRRU_START : MARK_START;
 const P = await import(join(backendDir, 'src/discovery/places.ts'));
 const { createProject } = await import(join(backendDir, 'src/repositories/chat-conversations.ts'));
 const { getMemoryIndexer } = await import(join(backendDir, 'src/memory/indexer.ts'));
@@ -97,9 +99,10 @@ test('coding apps and project folders connect on their own only after the owner 
   assert.equal(claude.theme, 'dark', 'the rest of the config is kept');
   assert.match(readFileSync(join(dir, '.codex', 'config.toml'), 'utf8'), /dpro-memory/);
   assert.ok(!existsSync(join(dir, '.gemini')), 'an app that is not on this computer is left alone');
-  assert.ok(readFileSync(join(folder, 'AGENTS.md'), 'utf8').includes(MARK_START), 'managed files written (default on)');
+  assert.ok(readFileSync(join(folder, 'AGENTS.md'), 'utf8').includes(SECTION_START), 'managed files written (default on)');
   const agents = readFileSync(join(folder, 'AGENTS.md'), 'utf8');
-  assert.match(agents, /### Standing rules for this project\n- Start by reading this memory[\s\S]*DESIGN\.md[\s\S]*handoff_write/, 'the standing project rules travel with the brief');
+  // P2 puts the save criteria first in the list.
+  assert.match(agents, /### Standing rules for this project\n(?:- Save only what will matter later[^\n]*\n)?- Start by reading this memory[\s\S]*DESIGN\.md[\s\S]*handoff_write/, 'the standing project rules travel with the brief');
   const status = await B.bridgeStatus(OWNER);
   const cc = status.clients.find((c) => c.client === 'claude-code');
   assert.equal(cc.enabled, true);

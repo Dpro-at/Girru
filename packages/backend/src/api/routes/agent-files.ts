@@ -21,7 +21,7 @@ import {
 import { sendInternalError } from '../error-handler.js';
 import { storeP4Enabled } from '../../services/store-p4.js';
 import { AgentMemoryConflict, AgentMemoryInputError, agentMemoryStatus, agentNotes, agentNotesHistory, agentNotesOutside, saveAgentNotes, settleAgentNotesOutside } from '../../memory/agent-drawer.js';
-import { PersonalityVersionConflict, savePersonalityText } from '../../services/personality-record.js';
+import { PersonalityVersionConflict, recordText, savePersonalityText } from '../../services/personality-record.js';
 import { PersonalityInputError } from '../../services/personality.js';
 import { PersonalityNotFoundError } from '../../services/personality-store.js';
 import { FileLibraryError, addFile, listFiles, listVersions, readFile, readVersion, removeFile, restoreFile, saveFile, setRead } from '../../services/agent-file-library.js';
@@ -40,6 +40,8 @@ export async function agentFilesRoutes(fastify: FastifyInstance) {
 
       try {
         const content = await readPersonality(id);
+        // STORE-MAP-01 P10: with P4 on, the version read goes with the text, so the save can check it (expectedVersion).
+        if (storeP4Enabled()) return { success: true, content, version: (await recordText(id))?.version ?? 0 };
         return {
           success: true,
           content

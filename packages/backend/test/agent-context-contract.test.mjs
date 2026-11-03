@@ -108,6 +108,13 @@ async function chatPrompt(channel = false) {
 const withP2 = async (fn) => { process.env.GIRRU_STORE_P2 = '1'; try { return await fn(); } finally { delete process.env.GIRRU_STORE_P2; } };
 
 test('switch off: every entry point is unchanged (known gaps pinned)', async () => {
+  // P4 also turns the one context on (oneContextEnabled); this test pins the state with both off.
+  const p4 = process.env.GIRRU_STORE_P4;
+  delete process.env.GIRRU_STORE_P4;
+  try { await knownGaps(); } finally { if (p4 !== undefined) process.env.GIRRU_STORE_P4 = p4; }
+});
+
+async function knownGaps() {
   const chat = await chatPrompt();
   assert.ok(!chat.system.includes(HIRED), 'today chat drops the hired instructions');
   assert.ok(chat.system.includes(STEP), 'today the full skill text goes into chat');
@@ -115,7 +122,7 @@ test('switch off: every entry point is unchanged (known gaps pinned)', async () 
   const task = await taskRunBasePrompt({ id: 'cc-agent', name: 'Rafid', system_prompt: HIRED }, { user_id: OWNER });
   assert.ok(task.includes(HIRED));
   assert.ok(!task.includes('release only on Tuesdays'), 'today task runs drop the owner rules');
-});
+}
 
 test('switch on: chat, task run and coding app carry the name, hired instructions and owner rules, rules first', async () => {
   await withP2(async () => {
@@ -196,12 +203,15 @@ test('MD4 and MD9: save criteria lead memory_save and the brief; recalled memori
 
 test('routes for the app: the switch, and the eye list strongest group first with groups', async () => {
   const get = (url) => app.inject({ method: 'GET', url, headers: auth });
-  assert.deepEqual((await get('/api/store-switches')).json(), { p2: false, p3: process.env.GIRRU_STORE_P3 === '1', p4: process.env.GIRRU_STORE_P4 === '1', ...(/^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P6 ?? '') ? { p6: true } : {}) });
+  // The route lists p6, p8 and p9 only while they are on.
+  const switches = (p2) => ({ p2, p3: process.env.GIRRU_STORE_P3 === '1', p4: process.env.GIRRU_STORE_P4 === '1',
+    ...Object.fromEntries(['p6', 'p8', 'p9'].filter((k) => /^(1|true|yes|on)$/i.test(process.env[`GIRRU_STORE_${k.toUpperCase()}`] ?? '')).map((k) => [k, true])) });
+  assert.deepEqual((await get('/api/store-switches')).json(), switches(false));
   assert.equal((await get('/api/agent-rules')).json().precedence, false);
   const before = (await get(`/api/agent-rules/effective?agentId=cc-agent&projectId=${project.id}`)).json();
   assert.ok(!('precedence' in before) && before.rules.every((r) => !('group' in r)), 'off: unchanged');
   await withP2(async () => {
-    assert.deepEqual((await get('/api/store-switches')).json(), { p2: true, p3: process.env.GIRRU_STORE_P3 === '1', p4: process.env.GIRRU_STORE_P4 === '1' });
+    assert.deepEqual((await get('/api/store-switches')).json(), switches(true));
     assert.equal((await get('/api/agent-rules')).json().precedence, true);
     const eye = (await get(`/api/agent-rules/effective?agentId=cc-agent&projectId=${project.id}`)).json();
     assert.equal(eye.precedence, true);

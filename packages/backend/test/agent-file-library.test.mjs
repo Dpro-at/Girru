@@ -15,6 +15,9 @@ process.env.HOME = root;
 process.env.DATABASE_PATH = join(root, 'agent-player.db');
 process.env.JWT_SECRET = randomBytes(64).toString('hex'); // throwaway, test only
 process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway, test only
+// STORE-MAP-01 P4: with the switch on, Who it is is read from the personality record in the database.
+const { getDatabase } = await import('../src/db/database.ts');
+await getDatabase().initialize();
 const lib = await import('../src/services/agent-file-library.ts');
 const files = await import('../src/services/agent-files.ts');
 const { EXPORT_BEGIN, EXPORT_END } = await import('../src/services/personality.ts');

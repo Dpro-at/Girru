@@ -348,6 +348,8 @@ export async function skillsRoutes(fastify: FastifyInstance) {
   // the central library and reviewed installs. Its tables stay until a later step (backup, owner OK).
   fastify.addHook('onRequest', async (request, reply) => {
     if (storeP4Enabled() && request.url.startsWith('/api/skills/marketplace')) {
+      // P10: sign-in is checked first, so an anonymous or forged request still gets 401, never the route's state.
+      if (requireUser(request, reply) === null) return reply;
       return reply.code(410).send({ error: 'The old skill marketplace is retired. Use the skill library.', code: 'retired' });
     }
   });
