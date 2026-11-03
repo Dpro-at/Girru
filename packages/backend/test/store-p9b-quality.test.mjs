@@ -88,10 +88,14 @@ test('MD3: confidence from corroboration (pure)', () => {
   const sameTwice = T.trustOf([{ key: 'bridge:test-cli', kind: 'tool' }, { key: 'bridge:test-cli', kind: 'tool' }]);
   assert.equal(sameTwice.confidence, tool.confidence, 'the same source counts once');
   const tools = T.trustOf([1, 2, 3, 4, 5, 6].map((i) => ({ key: `bridge:c${i}`, kind: 'tool' })));
-  assert.ok(tools.confidence > tool.confidence && tools.confidence <= T.MAX_UNOWNED);
+  assert.ok(tools.confidence > tool.confidence && tools.confidence <= T.UNVERIFIED_MAX);
+  assert.notEqual(T.bandOf(tools.confidence), 'high', 'repetition never makes an unverified fact high');
   assert.equal(tools.verified, false, 'tools never verify a fact on their own, however often');
   const channels = T.trustOf([1, 2, 3].map((i) => ({ key: `channel:${i}`, kind: 'channel' })));
   assert.equal(channels.verified, false);
+  // The same kind repeated (many chat days, many agents) is one witness: not verified.
+  assert.equal(T.trustOf([1, 2, 3].map((i) => ({ key: `chat:day-${i}`, kind: 'chat' }))).verified, false);
+  assert.equal(T.trustOf([1, 2, 3].map((i) => ({ key: `agent:a${i}`, kind: 'agent' }))).verified, false);
   const chatAgent = T.trustOf([{ key: 'chat:2026-11-01', kind: 'chat' }, { key: 'agent:a', kind: 'agent' }]);
   assert.equal(chatAgent.verified, true, 'two trusted sources verify');
   assert.ok(chatAgent.confidence > T.START_CONFIDENCE.chat);
@@ -200,7 +204,8 @@ test('MD1: the background step finds the same fact written through another path'
   assert.equal(trust(oid).enrich_state, 'pending');
   await PL.enrichmentIdle();
   assert.equal(trust(oid).enrich_state, 'ready');
-  assert.deepEqual(sources(oid).map((s) => s.kind).sort(), ['agent', 'owner']);
+  assert.deepEqual(sources(oid).map((s) => s.kind).sort(), ['agent'], 'the owner\'s word is never carried to a look-alike');
+  assert.equal(trust(oid).verified, 0);
   assert.deepEqual(sources(own.id).map((s) => s.kind).sort(), ['agent', 'owner']);
   void agent;
   // An edit: the old judgement no longer counts for the new text.

@@ -179,9 +179,12 @@ export async function enrichOne(userId: string, id: string): Promise<void> {
   for (const r of similar) {
     const o = r.memory;
     if (nearDuplicate(o.content, m.content)) {
-      // The same fact twice (two paths): each corroborates the other with its own first source.
-      const theirs = await sourcesOf(o.id);
-      const mine = await sourcesOf(id);
+      // The same fact twice (two paths): each corroborates the other with its sources — except the
+      // owner's own word or approval, which belong to that text only (a tool's look-alike never
+      // becomes "owner-verified" by resembling it).
+      const carry = (list: TrustSource[]) => list.filter((x) => x.kind !== 'owner' && x.kind !== 'approved');
+      const theirs = carry(await sourcesOf(o.id));
+      const mine = carry(await sourcesOf(id));
       await sql().tx(function* (): Step<void> {
         for (const s of theirs) yield* corroborateStep(m, s, own.source, at);
         for (const s of mine) yield* corroborateStep(o, s, others.get(o.id)?.source ?? s.kind, at);
