@@ -88,10 +88,7 @@ class PageBridgeTest {
         assertEquals(PageBridge.TerminalUse.Session("abc"), PageBridge.terminalUse("GET", "/api/terminal/sessions/abc/stream?after=3"))
         assertEquals(PageBridge.TerminalUse.Session("abc"), PageBridge.terminalUse("POST", "/api/terminal/sessions/abc/input"))
         assertEquals(PageBridge.TerminalUse.None, PageBridge.terminalUse("GET", "/api/chat/conversations"))
-        assertEquals("event: output
-data: {"data":"hi","seq":4}
-
-", String(PageBridge.sse(mapOf("seq" to 4L, "data" to "hi"), "output")))
+        assertEquals("event: output\ndata: {\"data\":\"hi\",\"seq\":4}\n\n", String(PageBridge.sse(mapOf("seq" to 4L, "data" to "hi"), "output")))
         val gate = TerminalGate()
         assertFalse(gate.takeFresh(1000))
         gate.checked(1000)
