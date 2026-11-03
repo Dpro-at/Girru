@@ -16,6 +16,18 @@
  *    can be undone by restoring that backup.
  *
  * SQLite only: on PostgreSQL the database is backed up with pg_dump outside the app.
+ *
+ * STORE-MAP-01 P9 (D10, S8, PRIV4; GIRRU_STORE_P9):
+ *  - every new backup is restored for real into a scratch folder before it is
+ *    signed: the copy of the main database is unpacked, opened, checked
+ *    (integrity_check) and its tables and memories counted against the
+ *    numbers read at backup time (`restoreTest` in the manifest);
+ *  - the forget ledger (memory/forget-ledger.ts) is carried by every backup,
+ *    but a restore keeps the current ledger and adds the backup's lines, then
+ *    the next start forgets every ledger line again; its key, like the
+ *    backups' signing key, is never in a backup;
+ *  - on PostgreSQL the status says whether a recent pg_dump file is in the
+ *    backups folder (pgDumpStatus).
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -25,6 +37,8 @@ import { pipeline } from 'node:stream/promises';
 import Database from 'better-sqlite3';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { dataRoot, dataPathOr, mainDatabasePath, realish, defaultBackupsFolder, backupsFolder, setSavedBackupsFolder } from '../config/data-root.js';
+import { storeP9Enabled } from './store-p9.js';
+import { LEDGER_FILE, LEDGER_KEY_FILE, REPLAY_MARKER, mergeLedgerAfterRestore, readLedger } from '../memory/forget-ledger.js';
 
 export type BackupKind = 'daily' | 'manual' | 'before-update' | 'before-restore';
 export const BACKUP_KINDS: readonly BackupKind[] = ['daily', 'manual', 'before-update', 'before-restore'];
@@ -39,17 +53,19 @@ const STATE_FILE = 'backups-state.json';
 export const RESTORE_MARKER = 'restore-pending.json';
 /** Top-level names in the data root that are never part of a backup. */
 const KEY_FILE = 'backups.key';
-const SKIP_TOP = new Set(['backups', 'logs', 'tmp', 'run', 'home', 'browser', 'python', 'node_modules', STATE_FILE, RESTORE_MARKER, KEY_FILE]);
+const SKIP_TOP = new Set(['backups', 'logs', 'tmp', 'run', 'home', 'browser', 'python', 'node_modules', STATE_FILE, RESTORE_MARKER, KEY_FILE, LEDGER_KEY_FILE, REPLAY_MARKER]);
 /** The SQLite stores Girru itself writes (relative to the data root). Every other file, uploads included, is copied byte for byte. */
 const STORES = ['audit/audit.db', 'encryption/keys.db', 'encryption/credentials.db', 'multi-agent/orchestrator.db', 'webhooks/webhooks.db', 'memory/memory.db'];
 /** Saved, but a restore leaves the current ones (configuration and identity). */
-const KEEP_ON_RESTORE = new Set(['secrets.env', 'instance.json', '.env']);
+const KEEP_ON_RESTORE = new Set(['secrets.env', 'instance.json', '.env', LEDGER_FILE]);
 const CLOUD = /(Library\/Mobile Documents|iCloud|Dropbox|Google Drive|OneDrive|CloudStorage|Box Sync)/i;
 
 type Root = 'data' | 'database' | 'memory' | 'uploads' | 'config';
 interface Entry { root: Root; path: string; type: 'sqlite' | 'file'; size: number; mtimeMs: number; stored: number; sha256?: string; check?: 'ok' | 'failed' }
-export interface Manifest { version: 1; id: string; kind: BackupKind; at: string; checked: boolean; entries: Entry[]; mac?: string }
-export interface BackupInfo { id: string; kind: BackupKind; at: string; checked: boolean; size: number; parts: { data: boolean; audit: boolean; keys: boolean }; keepUntil: string | null }
+/** P9 (D10): the result of the real restore of the main database into a scratch folder. */
+export interface RestoreTest { ok: boolean; at: string; tables: number; memories: number; error?: string }
+export interface Manifest { version: 1; id: string; kind: BackupKind; at: string; checked: boolean; entries: Entry[]; restoreTest?: RestoreTest; mac?: string }
+export interface BackupInfo { id: string; kind: BackupKind; at: string; checked: boolean; size: number; parts: { data: boolean; audit: boolean; keys: boolean }; keepUntil: string | null; restoreTested?: boolean | null }
 
 export class BackupError extends Error { constructor(readonly status: number, readonly code: string, message: string) { super(message); } }
 
@@ -177,6 +193,7 @@ const info = (m: Manifest, all: Manifest[]): BackupInfo => ({
   id: m.id, kind: m.kind, at: m.at, checked: m.checked, size: m.entries.reduce((s, e) => s + (e.stored || 0), 0),
   parts: { data: m.entries.some((e) => isMain(e) && e.check === 'ok'), audit: m.entries.some((e) => isAudit(e) && e.check === 'ok'), keys: m.entries.some((e) => e.root === 'data' && e.path.startsWith('encryption' + path.sep) && (e.type === 'file' || e.check === 'ok')) },
   keepUntil: keepUntil(m, all),
+  ...(m.restoreTest ? { restoreTested: m.restoreTest.ok } : storeP9Enabled() ? { restoreTested: null } : {}),
 });
 
 interface State { lastAttemptAt?: string; lastOkAt?: string; lastError?: string | null; lastErrorAt?: string | null; lastRestore?: { id: string; at: string; ok: boolean; error?: string } }
@@ -298,7 +315,15 @@ function walk(root: string, rootKind: Root): Array<{ rel: string; st: fs.Stats }
   return out;
 }
 
-async function sqliteCopy(src: string, dest: string): Promise<'ok' | 'failed'> {
+/** Tables and memories in an open SQLite copy (what the restore test compares). */
+function countsOf(db: Database.Database): { tables: number; memories: number } {
+  const tables = (db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table'").get() as { n: number }).n;
+  let memories = 0;
+  try { memories = (db.prepare('SELECT COUNT(*) AS n FROM memories').get() as { n: number }).n; } catch { /* no memories table */ }
+  return { tables, memories };
+}
+
+async function sqliteCopy(src: string, dest: string, counts?: { tables: number; memories: number }): Promise<'ok' | 'failed'> {
   const tmp = dest + '.tmp';
   if (src === path.resolve(mainDatabasePath())) {
     const { getDatabase } = await import('../db/index.js');
@@ -310,10 +335,70 @@ async function sqliteCopy(src: string, dest: string): Promise<'ok' | 'failed'> {
   let check: 'ok' | 'failed' = 'failed';
   // The copy keeps the source's journal mode; a plain file needs no -wal/-shm to open later.
   const copy = new Database(tmp, { fileMustExist: true });
-  try { copy.pragma('journal_mode = DELETE'); check = (copy.pragma('integrity_check', { simple: true }) as string) === 'ok' ? 'ok' : 'failed'; } finally { copy.close(); }
+  try {
+    copy.pragma('journal_mode = DELETE');
+    check = (copy.pragma('integrity_check', { simple: true }) as string) === 'ok' ? 'ok' : 'failed';
+    if (counts) Object.assign(counts, countsOf(copy));
+  } finally { copy.close(); }
   await pipeline(fs.createReadStream(tmp), createGzip({ level: 6 }), fs.createWriteStream(dest, { mode: 0o600 }));
   fs.rmSync(tmp, { force: true });
   return check;
+}
+
+/**
+ * P9 (D10): restore the stored main database for real into a scratch folder
+ * (owner-only, removed after): unpack, check its hash, open it, run
+ * integrity_check and compare its tables and memories with the numbers read
+ * when the backup was made. Nothing in the data folder is touched.
+ */
+export async function restoreTest(dir: string, main: Entry, expected: { tables: number; memories: number } | null): Promise<RestoreTest> {
+  const at = new Date().toISOString();
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'girru-restore-test-'));
+  try {
+    fs.chmodSync(scratch, 0o700);
+    const stored = path.join(dir, main.root, main.path);
+    if (typeof main.sha256 !== 'string' || (await sha256(stored)) !== main.sha256) return { ok: false, at, tables: 0, memories: 0, error: 'The stored copy does not match its checksum' };
+    const file = path.join(scratch, 'restored.db');
+    if (main.type === 'sqlite') await gunzipTo(stored, file);
+    else fs.copyFileSync(stored, file);
+    const db = new Database(file, { readonly: true, fileMustExist: true });
+    try {
+      if ((db.pragma('integrity_check', { simple: true }) as string) !== 'ok') return { ok: false, at, tables: 0, memories: 0, error: 'The restored copy did not pass its integrity check' };
+      const got = countsOf(db);
+      if (expected && (got.tables !== expected.tables || got.memories !== expected.memories)) {
+        return { ok: false, at, ...got, error: 'The restored copy does not hold what was saved' };
+      }
+      return { ok: true, at, ...got };
+    } finally { db.close(); }
+  } catch (err) {
+    return { ok: false, at, tables: 0, memories: 0, error: err instanceof Error ? err.message.slice(0, 200) : 'The restore test failed' };
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+/**
+ * P9 (OPS5): on PostgreSQL the app does not back up the database; this says
+ * whether a pg_dump file (.dump, .sql, .sql.gz, .backup) newer than
+ * `maxHours` is in the backups folder.
+ */
+export function pgDumpStatus(now: Date = new Date(), maxHours = 26): { folder: string; newestAt: string | null; ageHours: number | null; fresh: boolean } {
+  const folder = backupsFolder();
+  let newest = 0;
+  const visit = (d: string, depth: number) => {
+    let names: string[] = [];
+    try { names = fs.readdirSync(d); } catch { return; }
+    for (const n of names) {
+      const f = path.join(d, n);
+      const st = fs.lstatSync(f, { throwIfNoEntry: false });
+      if (!st) continue;
+      if (st.isDirectory() && depth < 2) visit(f, depth + 1);
+      else if (st.isFile() && /\.(dump|sql|sql\.gz|backup)$/i.test(n) && st.size > 0) newest = Math.max(newest, st.mtimeMs);
+    }
+  };
+  visit(folder, 0);
+  const ageHours = newest ? +((now.getTime() - newest) / 3_600_000).toFixed(1) : null;
+  return { folder, newestAt: newest ? new Date(newest).toISOString() : null, ageHours, fresh: ageHours !== null && ageHours <= maxHours };
 }
 
 let running: Promise<BackupInfo> | null = null;
@@ -346,6 +431,7 @@ async function make(kind: BackupKind, now: Date): Promise<BackupInfo> {
     const prevDir = previous ? path.join(base, previous.id) : null;
     const prev = new Map(previous?.entries.map((e) => [`${e.root}:${e.path}`, e]) ?? []);
     const entries: Entry[] = [];
+    let mainCounts: { tables: number; memories: number } | null = null;
     for (const [rootKind, root] of Object.entries(roots()) as Array<[Root, string]>) {
       for (const { rel, st } of walk(root, rootKind)) {
         const src = path.join(root, rel);
@@ -353,7 +439,8 @@ async function make(kind: BackupKind, now: Date): Promise<BackupInfo> {
         fs.mkdirSync(path.dirname(dest), { recursive: true, mode: 0o700 });
         if (isStore(rootKind, rel, src)) {
           let check: 'ok' | 'failed' = 'failed';
-          try { check = await sqliteCopy(src, dest); } catch (err) {
+          const counts = isMain({ root: rootKind, path: rel } as Entry) ? (mainCounts = { tables: 0, memories: 0 }) : undefined;
+          try { check = await sqliteCopy(src, dest, counts); } catch (err) {
             // The main database must be in every backup; another store that cannot be read is noted, not fatal.
             if (isMain({ root: rootKind, path: rel } as Entry)) throw err;
             fs.rmSync(dest, { force: true }); fs.rmSync(dest + '.tmp', { force: true });
@@ -378,6 +465,11 @@ async function make(kind: BackupKind, now: Date): Promise<BackupInfo> {
     }
     if (!entries.some((e) => isMain(e))) throw new BackupError(500, 'no_database', 'The database was not found');
     const manifest: Manifest = { version: 1, id, kind, at: now.toISOString(), checked: entries.every((e) => e.type === 'file' || e.check === 'ok'), entries };
+    if (storeP9Enabled()) {
+      // P9 (D10): a backup counts as checked only when it really restores.
+      manifest.restoreTest = await restoreTest(dir, entries.find((e) => isMain(e))!, mainCounts);
+      if (!manifest.restoreTest.ok) manifest.checked = false;
+    }
     manifest.mac = macOf(manifest, backupKey(true)!);
     writePrivate(path.join(dir, MANIFEST), manifest);
     patchState({ lastOkAt: new Date().toISOString(), ...(manifest.checked ? { lastError: null, lastErrorAt: null } : { lastError: 'A part of the backup did not pass its check', lastErrorAt: new Date().toISOString() }) });
@@ -499,6 +591,9 @@ export async function applyPendingRestore(): Promise<{ id: string; ok: boolean; 
       for (const side of ['-wal', '-shm', '-journal']) fs.rmSync(target + side, { force: true });
       fs.renameSync(tmp, target);
     }
+    // P9 (PRIV4): the current forget ledger stays; the backup's lines are added; the next start replays it.
+    const savedLedger = m.entries.find((e) => e.root === 'data' && e.path === LEDGER_FILE);
+    if (savedLedger || readLedger().length > 0) mergeLedgerAfterRestore(savedLedger ? path.join(dir, 'data', LEDGER_FILE) : null);
     // Files made after the backup leave (they are in the before-restore backup).
     for (const [rootKind, root] of Object.entries(where) as Array<[Root, string]>) {
       if (rootKind === 'config') continue;

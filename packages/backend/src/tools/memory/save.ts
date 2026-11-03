@@ -5,6 +5,7 @@
  * Information persists across conversations and can be recalled later
  */
 
+import { recordHealthEvent } from '../../memory/health.js';
 import type { Tool, ToolResult } from '../types.js';
 import { SAVE_CRITERIA, storeP2Enabled } from '../../services/agent-context/switch.js';
 import type { MemoryType } from '../../memory/types.js';
@@ -268,6 +269,8 @@ export const memorySaveTool: Tool = {
         },
       };
     } catch (error: any) {
+      // STORE-MAP-01 P9 (FAIL6): a save that did not happen is counted for the local health view.
+      if (!/owner approval|drawer|invalid|required|too long|secret/i.test(String(error?.message))) void recordHealthEvent(context?.userId, 'save_failed', context?.agentId ?? null);
       return {
         content: [
           {

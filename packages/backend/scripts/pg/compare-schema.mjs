@@ -263,6 +263,16 @@ export function compare(sq, pg, expectedFkDrops) {
       if (!p) { add(`${t}: index ${i.name} missing in PostgreSQL`); continue; }
       pgIdx.delete(i.name);
       if (i.unique !== p.unique) add(`${t}: index ${i.name} unique sqlite=${i.unique} pg=${p.unique}`);
+      // An expression index (SQLite lists an expression key as an empty name): PostgreSQL rewrites the
+      // expression text (casts, ARRAY for IN), so it is compared by its plain columns and noted; the
+      // query plan on each driver is checked by the tests (store-p9-index, pg-store-p9).
+      if (i.cols.some((c) => c === '' || c === null)) {
+        const plain = i.cols.filter((c) => c).every((c) => p.def.includes(c));
+        if (!plain) add(`${t}: expression index ${i.name} plain columns differ: sqlite=(${i.cols.join(', ')}) pg=${p.def}`);
+        else expected.push(`${t}: expression index ${i.name} (same plain columns; expressions checked by the tests)`);
+        if (normPred(i.pred, false) !== normPred(p.pred, true)) add(`${t}: index ${i.name} WHERE sqlite=${i.pred} pg=${p.pred}`);
+        continue;
+      }
       const pc = pgIndexCols(p.def).join(', ');
       if (i.cols.join(', ') !== pc) add(`${t}: index ${i.name} columns sqlite=(${i.cols.join(', ')}) pg=(${pc})`);
       if (normPred(i.pred, false) !== normPred(p.pred, true)) add(`${t}: index ${i.name} WHERE sqlite=${i.pred} pg=${p.pred}`);

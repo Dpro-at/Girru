@@ -45,6 +45,9 @@ import { purgePgIndexStep } from './indexer-pg.js';
 import { forgetMemoryGraphStep } from './graph/store.js';
 import { dropContextCache } from './context/cache.js';
 import { clearEmbeddingCache } from './embedding.js';
+import { forgetRecallIndex } from './recall-index.js';
+import { recordMemoryForget } from './forget-ledger.js';
+import { storeP9Enabled } from '../services/store-p9.js';
 import { DEFAULT_MEMORY_CONFIG, type Memory, type MemoryType } from './types.js';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -203,7 +206,7 @@ export async function forgetMemory(userId: string, memoryId: string, actor: stri
 
   // Freed pages are zeroed so deleted text does not linger in the file (SQLite).
   await sqlitePragma('secure_delete = ON');
-  const done = await sql().tx(function* (): Step<{ drawer: DrawerRef; types: string[]; cancelled: string[] } | null> {
+  const done = await sql().tx(function* (): Step<{ drawer: DrawerRef; types: string[]; cancelled: string[]; texts: string[] } | null> {
     const live = yield* storage.getOwnedStep(userId, memoryId);
     const history = yield* all<{ drawer_kind: string; drawer_key: string; type: string | null; content: string | null; change: string }>(
       `SELECT drawer_kind, drawer_key, type, content, change FROM memory_versions WHERE user_id = ? AND memory_id = ? ORDER BY version`, userId, memoryId);
@@ -231,12 +234,17 @@ export async function forgetMemory(userId: string, memoryId: string, actor: stri
     yield* removeRelated(memoryId);
     yield* forgetMemoryGraphStep(userId, memoryId); // CORE-MEM-GRAPH: attachments + orphan links
     yield* scrubSummaries(userId, memoryId, texts);
-    return { drawer, types, cancelled };
+    return { drawer, types, cancelled, texts };
   });
   if (!done) return null;
+  // P9 (PRIV4): ids and keyed hashes only, outside the database, re-applied after a restore.
+  if (storeP9Enabled()) {
+    try { recordMemoryForget(userId, memoryId, done.texts); } catch (err) { console.warn('[Memory] Forget ledger write failed:', (err as Error).message); }
+  }
   // MEM-CACHE-01: no cached context or vector keeps the forgotten text in RAM.
   dropContextCache(userId);
   clearEmbeddingCache();
+  forgetRecallIndex(userId); // P9: nor does the recall index
 
   // Outside the database, after the commit: index file (SQLite), readable
   // copies, exports (best effort, but each is attempted; the DB no longer
@@ -276,4 +284,19 @@ export async function forgetAll(userId: string, actor: string, drawer?: DrawerRe
     if (r) results.push(r);
   }
   return { forgotten: results.length, results };
+}
+
+/**
+ * STORE-MAP-01 P9 (PRIV6): forget a person's drawer of this user (every
+ * memory in it and their history). With P9 on the forget ledger gets one
+ * 'person' line, so a restore forgets the drawer again.
+ */
+export async function forgetPersonMemories(userId: string, personKey: string, actor: string): Promise<{ forgotten: number; results: ForgetResult[] }> {
+  if (typeof personKey !== 'string' || !ID.test(personKey)) return { forgotten: 0, results: [] };
+  const out = await forgetAll(userId, actor, { kind: 'people', key: personKey });
+  if (storeP9Enabled()) {
+    const { recordForgets } = await import('./forget-ledger.js');
+    try { recordForgets([{ userId, memoryId: personKey, kind: 'person' }]); } catch (err) { console.warn('[Memory] Forget ledger write failed:', (err as Error).message); }
+  }
+  return out;
 }

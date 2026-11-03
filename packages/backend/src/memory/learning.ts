@@ -27,6 +27,10 @@
  *                   never auto-saved into the owner's drawers
  *   chat            proposed by an agent in a saved chat conversation (CHAT-PRO-02 E):
  *                   the owner accepts or rejects it in the chat, never saved by itself
+ *   special-category  (GIRRU_STORE_P9, PRIV7) health, religion, politics, sexuality, origin,
+ *                   union, genetic or biometric data: always asks, never saved by itself
+ *   personal-data   (GIRRU_STORE_P9, PRIV3) other people's contact or identity data in
+ *                   imported or channel text (personal-data.ts; kinds only)
  *
  * Proposals are reviewed by the owner account only (owner-only API). For a
  * non-owner account an important item is not saved (reported as skipped).
@@ -59,6 +63,8 @@ import { TopicKeyError, normalizeTopicKey } from './topic-key.js';
 import { TopicKeyTakenError } from './storage.js';
 import { currentVersionStep, replaceStep, stampProvenanceStep } from './validity.js';
 import { storeP3Enabled } from '../services/store-p3.js';
+import { storeP9Enabled } from '../services/store-p9.js';
+import { personalDataKinds, specialCategory } from './personal-data.js';
 import { ALWAYS_ASK, rulesForDrawer, type EffectiveRules } from './scopes/rules.js';
 
 export const MAX_LEARNED_CONTENT = 50_000;
@@ -82,7 +88,11 @@ export type LearningReason =
   /** STORE-MAP-01 P6 (SEC2-5): text read from a file inside a project folder (attacker-controlled in a cloned repo). */
   | 'repository-file'
   /** STORE-MAP-01 P8 (D27): a lesson an agent marked in its run's working notes. */
-  | 'run-notes';
+  | 'run-notes'
+  /** STORE-MAP-01 P9 (PRIV7): health, religion, politics, sexuality, origin, union, genetic or biometric data. */
+  | 'special-category'
+  /** STORE-MAP-01 P9 (PRIV3): other people's contact or identity data in imported or channel text. */
+  | 'personal-data';
 
 export interface LearningCandidate {
   content: string;
@@ -97,6 +107,8 @@ export interface LearningCandidate {
   replaces?: { id: string; content: string; type: string; important?: boolean } | null;
   /** A safe reference to a secret saved in the credential store. */
   credentialRef?: boolean;
+  /** STORE-MAP-01 P9 (PRIV3): the text comes from an import (checked for personal data). */
+  imported?: boolean;
   /** Stable topic key (CORE-MEM-TOPIC); normalized by learn(). */
   topicKey?: string | null;
 }
@@ -152,6 +164,11 @@ export function classifyLearning(c: LearningCandidate, ctx: LearningContext = {}
   if (drawer.kind === 'people' || c.type === 'relationship') reasons.add('people');
   if (c.credentialRef || c.type === 'credential') reasons.add('credentials');
   for (const [reason, re] of TOPICS) if (re.test(text)) reasons.add(reason);
+  // STORE-MAP-01 P9: special categories always ask (PRIV7); personal data in imported or channel text is flagged (PRIV3).
+  if (storeP9Enabled()) {
+    if (specialCategory(text)) reasons.add('special-category');
+    if ((c.imported || c.origin === 'outsider') && personalDataKinds(text).length) reasons.add('personal-data');
+  }
   if (typeof c.confidence === 'number' && Number.isFinite(c.confidence) && c.confidence < LOW_CONFIDENCE) reasons.add('low-confidence');
 
   if (c.replaces) {

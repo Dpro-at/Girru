@@ -8,6 +8,9 @@
 //                       query is embedded by the local Ollama model.
 // Run from packages/backend (one size per process, so memory is measured alone):
 //   node --max-old-space-size=12288 --import tsx scripts/memory-baseline/latency.mjs --size 100000 --vectors hash [--queries 20] [--out f.json]
+// P9: --packed also stores the packed Float32 copy (P3, embedding_vec) as a save does
+// today; GIRRU_STORE_P9=1 measures the recall index (coldMs = the first search, which
+// builds it).
 import { backendDir, addUser, argValue, cleanup, ollamaHas, openDb, percentile, quietly } from './env.mjs';
 import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -17,6 +20,7 @@ const size = Number(argValue('size', '10000'));
 const vectors = argValue('vectors', 'hash');
 const nQueries = Number(argValue('queries', '20'));
 const out = argValue('out', null);
+const packedVectors = process.argv.includes('--packed');
 const SEM_MODEL = 'qwen3-embedding:0.6b';
 if (vectors === 'semantic' && !(await ollamaHas(SEM_MODEL))) {
   console.error(`${SEM_MODEL} is not available on the local Ollama; nothing measured`);
@@ -31,6 +35,7 @@ addUser(db, OWNER, 'owner');
 const { getMemoryStorage } = await import(join(backendDir, 'src/memory/storage.ts'));
 const { hashEmbed, HASH_MODEL, HASH_DIMS } = await import(join(backendDir, 'src/memory/embedding.ts'));
 const { normalizeMemoryText } = await import(join(backendDir, 'src/memory/text-normalize.ts'));
+const { packVector } = await import(join(backendDir, 'src/memory/vectors.ts'));
 const D = await import(join(backendDir, 'src/memory/drawers.ts'));
 const storage = getMemoryStorage();
 await quietly(() => storage.initialize());
@@ -45,8 +50,8 @@ function semanticVector() {
 }
 
 const insert = db.prepare(`INSERT INTO memories (id, user_id, type, content, embedding, embedding_model, embedding_dims,
-  memory_layer, status, metadata, importance_score, created_at, access_count, drawer_kind, drawer_key)
-  VALUES (?, ?, ?, ?, ?, ?, ?, 'factual', 'active', '{}', 0.5, ?, 0, ?, ?)`);
+  memory_layer, status, metadata, importance_score, created_at, access_count, drawer_kind, drawer_key, embedding_vec)
+  VALUES (?, ?, ?, ?, ?, ?, ?, 'factual', 'active', '{}', 0.5, ?, 0, ?, ?, ?)`);
 const t0 = Date.now();
 const drawerCount = {};
 let chars = 0;
@@ -57,7 +62,8 @@ for (const m of syntheticMemories(size, 23)) {
   const emb = vectors === 'semantic'
     ? [semanticVector(), `ollama:${SEM_MODEL}`, 1024]
     : [JSON.stringify(hashEmbed(normalizeMemoryText(m.content))), HASH_MODEL, HASH_DIMS];
-  batch.push([`m-${i++}`, OWNER, m.type, m.content, ...emb, m.createdAt, m.drawerKind, m.drawerKey]);
+  const vec = packedVectors ? packVector(JSON.parse(emb[0])) : null;
+  batch.push([`m-${i++}`, OWNER, m.type, m.content, ...emb, m.createdAt, m.drawerKind, m.drawerKey, vec]);
   drawerCount[m.drawerKind] = (drawerCount[m.drawerKind] || 0) + 1;
   chars += m.content.length;
   if (batch.length >= 5000) flush();
@@ -74,7 +80,9 @@ const SET = JSON.parse(readFileSync(join(backendDir, 'scripts/memory-baseline/re
 const queries = SET.hit.flatMap((h) => h.queries.map((q) => q.q)).slice(0, nQueries);
 
 // One warm-up query (module load, query embedding model load), not counted.
+const tCold = performance.now();
 await quietly(() => storage.search({ query: 'warm up', userId: OWNER, drawers: OPEN, limit: 5 }));
+const coldMs = +(performance.now() - tCold).toFixed(1);
 const times = [];
 let peakRss = process.memoryUsage().rss;
 for (const q of queries) {
@@ -94,7 +102,7 @@ if (vectors === 'semantic') {
 }
 
 const report = {
-  size, vectors, openedRows: opened, drawerSplit: drawerCount, avgChars: Math.round(chars / size), seedMs,
+  size, vectors, packed: packedVectors, p9: process.env.GIRRU_STORE_P9 === '1', coldMs, openedRows: opened, drawerSplit: drawerCount, avgChars: Math.round(chars / size), seedMs,
   dbMB: +(dbBytes / 1e6).toFixed(1), queries: times.length,
   searchMs: { p50: +percentile(times, 50).toFixed(1), p95: +percentile(times, 95).toFixed(1), max: +Math.max(...times).toFixed(1) },
   queryEmbedMs: embedMs, peakRssMB: Math.round(peakRss / 1e6),

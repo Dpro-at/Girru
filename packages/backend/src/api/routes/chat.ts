@@ -45,6 +45,9 @@ import { stripPersonalityExport, type Behavior } from '../../services/personalit
 import { outsiderAgentMemoryEnabled } from '../../services/outsider-memory.js';
 import { DrawerInputError, chatTurnDrawers, drawerId, sameDrawer, type DrawerRef } from '../../memory/drawers.js';
 import { pinnedFactsForReply, scopeFactAccess, type ReplyPinnedFacts } from '../../memory/scopes/pinned.js';
+import { storeP9Enabled } from '../../services/store-p9.js';
+import { cloudSafeDrawers, cloudSafePinnedAllow, providerIsLocal } from '../../memory/stays-local.js';
+import { MEMORY_UNAVAILABLE_NOTE, recordHealthEvent } from '../../memory/health.js';
 import { withoutArchivedDrawers } from '../../memory/scopes/store.js';
 import { withGroupDrawers } from '../../memory/scopes/groups.js';
 import { logAudit } from '../../services/audit-logger.js';
@@ -475,7 +478,9 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
         // P4 (D16): with the personality record on, coding apps use the same one context.
         const p2Context=oneContextEnabled()?await resolveAgentContext({agentId:selectedAgent.id,entry:'coding_app',ownerId:userId,sessionId}):null;
         const context=p2Context?renderCodingAppInstructions(p2Context):await subscriptionAgentContext(selectedAgent.id,{sessionId});
-        const drawers=await withoutArchivedDrawers(userId,chatTurnDrawers(true,memoryScope));
+        let drawers=await withoutArchivedDrawers(userId,chatTurnDrawers(true,memoryScope));
+        // STORE-MAP-01 P9 (PRIV2): a coding app is not on this computer; places that stay here are left out.
+        if(storeP9Enabled())drawers=(await cloudSafeDrawers(userId,drawers)).drawers;
         // CHAT-BUILD-01: the coding app gets the newest turns plus summaries of older ones and a bounded
         // set of top memories, instead of the whole conversation on every turn (plan usage).
         const lines=(list:readonly {role:string;content:unknown}[])=>list.map(m=>`${m.role}: ${messageText(m.content as ChatMessage['content'])}`).join('\n\n');
@@ -564,6 +569,12 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
         metadata: { agentId: agentConfig?.id ?? null, project: memoryDrawers.find((d) => d.kind === 'project')?.key ?? null, added: grouped.added.map((d) => d.key) },
       });
     }
+    // STORE-MAP-01 P9 (PRIV2, D23): a place that stays on this computer never reaches a model that is not.
+    // The provider is decided below from the same inputs; it can only become more local there (no key -> local).
+    const p9Cloud = storeP9Enabled() && !providerIsLocal(localModelOnly() ? (input.provider === 'lmstudio' ? 'lmstudio' : 'ollama')
+      : (input.provider || agentConfig?.provider || ((await getSettingsManager().getSettings()).provider === 'claude' ? 'claude' : 'ollama')), resolvedModel);
+    let withheldLocal: DrawerRef[] = [];
+    if (p9Cloud) ({ drawers: memoryDrawers, withheld: withheldLocal } = await cloudSafeDrawers(userId, memoryDrawers));
     // MEM-SCALE-01: the owner's pinned facts of this scope load first (company, department, project).
     // Only facts of drawers this agent may read in this project (its inherited access, CORE-PERMS-01 cap).
     const pinnedProject = memoryDrawers.find((d) => d.kind === 'project')?.key ?? null;
@@ -573,7 +584,8 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
         const perms = agentConfig?.id
           ? await loadRunPermissions(agentConfig.id, [], { userId, project: pinnedProject })
           : { memoryRead: ['owner', 'project'] };
-        const allow = scopeFactAccess(perms, memoryDrawers.some((d) => d.kind === 'owner'));
+        let allow = scopeFactAccess(perms, memoryDrawers.some((d) => d.kind === 'owner'));
+        if (p9Cloud) allow = await cloudSafePinnedAllow(userId, pinnedProject ?? withheldLocal.find((d) => d.kind === 'project')?.key ?? null, allow);
         if (allow.company || allow.project) pinnedFacts = await pinnedFactsForReply(userId, pinnedProject, allow);
       } catch { pinnedFacts = { text: '', facts: [] }; }
     }
@@ -658,6 +670,11 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
       recall = await messageRecall({ userId, drawers, query: messageText(lastUser?.content), pack });
     } catch (err) {
       safeConsole.log('[Chat] Memory context unavailable', safeErrorFields(err));
+      // STORE-MAP-01 P9 (FAIL4, AG8): the reply goes on without memory, says so when it matters, never invents it.
+      if (storeP9Enabled() && includeAgentMemory) {
+        resolvedSystemPrompt += `${resolvedSystemPrompt ? '\n\n' : ''}${MEMORY_UNAVAILABLE_NOTE}`;
+        void recordHealthEvent(userId, 'recall_failed', agentConfig?.id ?? null);
+      }
       if (pinnedFacts.text) resolvedSystemPrompt += `${resolvedSystemPrompt ? '\n\n' : ''}${pinnedFacts.text}`;
       if (input.handoff?.text && includeAgentMemory && !channelTurn) resolvedSystemPrompt += `\n\n${input.handoff.text}`;
     }
@@ -691,6 +708,10 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
       const installed = await resolveLocalModel(resolvedModel, DEFAULT_MODEL);
       if (installed !== resolvedModel) safeConsole.log('[Chat] Local model not installed; using', installed, 'instead of', resolvedModel);
       resolvedModel = installed;
+    }
+    // P9 (PRIV2): the model finally chosen must be as local as the one memory was loaded for (fail closed).
+    if (storeP9Enabled() && !p9Cloud && !providerIsLocal(resolvedProvider, resolvedModel)) {
+      return reply.status(409).send({ error: 'This model is not on this computer, and this reply holds memory that stays on this computer. Pick a local model or try again.', code: 'stays_local' });
     }
     // MEM-CACHE-01: a saved conversation keeps its newest turns in full and
     // gives older ones as rolling summaries, within the context budget.
@@ -754,6 +775,8 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
           drawers: {
             loaded: loadedDrawers.map(drawerId),
             noAccess: memoryDrawers.filter((d) => !loadedDrawers.some((x) => sameDrawer(x, d))).map(drawerId),
+            // P9 (PRIV2): ids only; the places that stayed on this computer for this provider.
+            ...(withheldLocal.length ? { staysLocal: withheldLocal.map(drawerId), provider: resolvedProvider } : {}),
           },
         },
         packHit: !!pack?.hit, packChars: pack?.memoryChars ?? 0, promptTokens,

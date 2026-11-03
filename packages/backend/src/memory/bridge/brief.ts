@@ -15,6 +15,8 @@ import { getMemoryStorage } from '../storage.js';
 import { redactImportText } from '../import/redact.js';
 import { drawerId, type DrawerRef } from '../drawers.js';
 import { pinnedFactsForReply } from '../scopes/pinned.js';
+import { storeP9Enabled } from '../../services/store-p9.js';
+import { cloudSafeDrawers, cloudSafePinnedAllow } from '../stays-local.js';
 import { latestBridgeHandoff } from './store.js';
 import { CLIENT_NAMES, SERVER_NAME, type BridgeClient } from './clients.js';
 import { projectKeyOf } from '../project-keys.js';
@@ -47,13 +49,28 @@ export const projectDrawer = (p: Pick<Project, 'id' | 'slug'>): DrawerRef => ({ 
  * rules for all work, so a coding agent in this folder gets them too.
  */
 export async function pinnedFacts(ownerId: string, project: Pick<Project, 'id' | 'slug'>, company = true): Promise<PinnedFact[]> {
-  const r = await pinnedFactsForReply(ownerId, projectKeyOf(project), { company, project: true });
+  let allow = { company, project: true };
+  // STORE-MAP-01 P9 (PRIV2): coding apps are not on this computer; places that stay here are left out.
+  if (storeP9Enabled()) allow = await cloudSafePinnedAllow(ownerId, projectKeyOf(project), allow);
+  if (!allow.company && !allow.project) return [];
+  const r = await pinnedFactsForReply(ownerId, projectKeyOf(project), allow);
   return r.facts.map((f) => ({ id: f.id, scope: f.scope, content: clean(f.text) })).filter((f) => f.content);
+}
+
+/**
+ * The project drawer a coding app may read: none while P9 is on and the
+ * project's place stays on this computer (PRIV2).
+ */
+export async function bridgeDrawers(ownerId: string, project: Pick<Project, 'id' | 'slug'>): Promise<DrawerRef[]> {
+  const d = [projectDrawer(project)];
+  return storeP9Enabled() ? (await cloudSafeDrawers(ownerId, d)).drawers : d;
 }
 
 /** The project's approved memories, most important first, newest first on a tie. */
 export async function approvedMemories(ownerId: string, project: Pick<Project, 'id' | 'slug'>, limit = MAX_PINNED): Promise<ApprovedMemory[]> {
-  const rows = await getMemoryStorage().getByDrawers(ownerId, [projectDrawer(project)]);
+  const drawers = await bridgeDrawers(ownerId, project);
+  if (drawers.length === 0) return [];
+  const rows = await getMemoryStorage().getByDrawers(ownerId, drawers);
   return rows
     .map((m) => ({ m, at: new Date(m.createdAt as any).getTime() || 0, imp: Number(m.importance ?? 5) }))
     .sort((a, b) => b.imp - a.imp || b.at - a.at)
@@ -112,7 +129,9 @@ const MAX_TOPIC_LABEL = 80;
  * fetches the details with `memory_search`. Only the project drawer is read.
  */
 export async function topicIndex(ownerId: string, project: Pick<Project, 'id' | 'slug'>): Promise<BriefTopic[]> {
-  const drawer = projectDrawer(project);
+  // P9 (PRIV2): a project whose place stays on this computer gives coding apps no topics either.
+  const [drawer] = await bridgeDrawers(ownerId, project);
+  if (!drawer) return [];
   const rows = await getMemoryStorage().getByDrawers(ownerId, [drawer]);
   const keys = new Set<string>();
   for (const m of rows) {
