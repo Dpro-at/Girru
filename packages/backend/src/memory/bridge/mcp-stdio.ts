@@ -23,7 +23,8 @@ async function main(): Promise<void> {
     backendUrl: process.env.AGENT_PLAYER_URL || 'http://127.0.0.1:41522',
     capability: process.env.GIRRU_SESSION_CAPABILITY || null,
   });
-  await createBridgeMcpServer(backend).connect(new StdioServerTransport());
+  // A session Girru started (P6) also gets the five verbs of the one memory contract.
+  await createBridgeMcpServer(backend, { verbs: !!process.env.GIRRU_SESSION_CAPABILITY }).connect(new StdioServerTransport());
 }
 
 main().catch((err) => {

@@ -30,6 +30,11 @@ export const TOOL_SCOPE: Record<string, CapabilityScope> = {
   memory_search: 'memory:read',
   memory_propose: 'memory:propose',
   handoff_write: 'handoff:write',
+  // STORE-MAP-01 P6: the one memory contract (AG2); writes through a coding app are reviewed, so save and supersede need propose.
+  memory_recall: 'memory:read',
+  memory_save: 'memory:propose',
+  memory_supersede: 'memory:propose',
+  memory_handoff: 'handoff:write',
 };
 
 export const DEFAULT_TTL_MS = 8 * 60 * 60 * 1000;

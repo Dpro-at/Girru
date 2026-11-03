@@ -29,6 +29,7 @@ import { ensureToken, revokeToken, tokenMatches, checkSessionProof } from './aut
 import { CapabilityError, launchCapability, requireScope, revokeCapability, verifyCapability, type Capability } from './capability.js';
 import { isPilotProject } from '../outbox/pilot.js';
 import { storeP6Enabled } from '../../services/store-p6.js';
+import { ContractError, validateVerb, verbOfTool, type MemoryVerb } from '../contract.js';
 import {
   allFolderSettings, audit, auditLog, bridgeOwner, setCompanyFacts, clientEnabled, clientStates, folderSettings, lastCalls, listRegistrations, patchFolder,
   projectForFolder, saveBridgeHandoff, setClientEnabled,
@@ -336,7 +337,9 @@ export async function mcpCall(c: unknown, token: unknown, cwd: unknown, tool: un
   const ownerId = await bridgeOwner();
   if (!ownerId || !(await tokenMatches(ownerId, cl, token))) throw new BridgeError('Not allowed', 401, 'unauthenticated');
   if (!(await clientEnabled(ownerId, cl))) throw new BridgeError(`${CLIENT_NAMES[cl]} is switched off in Girru`, 403, 'client_off');
-  if (typeof tool !== 'string' || !(MCP_TOOLS as readonly string[]).includes(tool)) throw new BridgeError('Unknown tool', 400, 'unknown_tool');
+  // P6 (AG2): the five verbs of the one memory contract are tools too, only with a session (checked below).
+  const verb = typeof tool === 'string' && storeP6Enabled() ? verbOfTool(tool) : null;
+  if (typeof tool !== 'string' || (!verb && !(MCP_TOOLS as readonly string[]).includes(tool))) throw new BridgeError('Unknown tool', 400, 'unknown_tool');
   const folderProject = typeof cwd === 'string' ? await projectForFolder(ownerId, cwd) : null;
   let project: Project | null = folderProject;
   // Every call is checked; only a call that carries no capability at all goes on without one.
@@ -361,10 +364,12 @@ export async function mcpCall(c: unknown, token: unknown, cwd: unknown, tool: un
   const company = !p6 || cap!.scopes.includes('company:read');
   // Reads are logged too (tool name only, never the query), so the owner sees which app used the memory and when.
   // P6 read log (ENC-01 with CX5): the session's id goes with it, ids only.
-  if (tool !== 'memory_propose' && tool !== 'handoff_write') {
+  const writes = tool === 'memory_propose' || tool === 'handoff_write' || (verb !== null && verb !== 'recall');
+  if (!writes) {
     if (p6) await readVolumeCheck(ownerId, cl, project.id, cap!.id);
     await audit(ownerId, 'mcp-read', { client: cl, projectId: project.id, note: p6 ? `${tool} session:${cap!.id}` : tool });
   }
+  if (verb) return contractCall(ownerId, cl, project, cap!, verb, args);
 
   switch (tool as McpTool) {
     case 'project_brief': {
@@ -478,4 +483,92 @@ export async function launchSession(folder: string, kind: string, agentId: strin
   const { token, capability } = await launchCapability(ownerId, project.id, SUBSCRIPTION_CLIENT[kind] ?? null, !!f.companyFacts, agent?.id ?? null);
   await audit(ownerId, 'session-start', { client: SUBSCRIPTION_CLIENT[kind] ?? null, projectId: project.id, note: `session:${capability.id}${agent ? ` agent:${agent.id}` : ''}` });
   return { env: { GIRRU_SESSION_CAPABILITY: token }, end: async () => { await revokeCapability(ownerId, capability.id).catch(() => false); } };
+}
+
+// --- STORE-MAP-01 P6: the one memory contract through dpro-memory (AG2, XP2, FAIL1-3) ---
+
+const BUSY = /SQLITE_BUSY|database is locked|could not serialize|deadlock detected|lock timeout|canceling statement due to lock/i;
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * FAIL3: a write either happens or says clearly that it did not. A busy
+ * database is retried with backoff; any other failure is recorded for the
+ * owner (ids only) and answered with "not saved, try again".
+ */
+async function saveOrSay<T>(ownerId: string, cl: BridgeClient, projectId: string, what: string, fn: () => Promise<T>, tries = [50, 150, 400]): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try { return await fn(); } catch (err) {
+      if (err instanceof BridgeError || err instanceof ContractError) throw err;
+      if (BUSY.test(String((err as Error)?.message)) && attempt < tries.length) { await pause(tries[attempt]); continue; }
+      await audit(ownerId, 'save-failed', { client: cl, projectId, note: what }).catch(() => undefined);
+      throw new BridgeError('Not saved: Girru could not write it just now. Try again (with the same request_id).', 503, 'not_saved');
+    }
+  }
+}
+
+/** FAIL2: a write with a request id happens once; a retry gets the first answer. */
+async function once(ownerId: string, requestId: string | null | undefined, verb: MemoryVerb, fn: () => Promise<McpAnswer>): Promise<McpAnswer> {
+  if (!requestId) return fn();
+  const ins = await q.run('INSERT INTO write_requests (owner_id, request_id, verb) VALUES (?, ?, ?) ON CONFLICT DO NOTHING', ownerId, requestId, verb);
+  if (ins.changes === 0) {
+    const row = await q.one<{ verb: string; status: string; result: string | null }>('SELECT verb, status, result FROM write_requests WHERE owner_id = ? AND request_id = ?', ownerId, requestId);
+    if (!row || row.verb !== verb) throw new BridgeError('This request_id was used for another call; choose a new one', 409, 'request_id_reused');
+    if (row.status !== 'done' || !row.result) throw new BridgeError('The first call with this request_id is still running; try again in a moment', 409, 'in_progress');
+    const first = JSON.parse(row.result) as McpAnswer;
+    return { text: first.text, data: { ...first.data, repeated: true } };
+  }
+  try {
+    const answer = await fn();
+    await q.run("UPDATE write_requests SET status = 'done', result = ? WHERE owner_id = ? AND request_id = ?", JSON.stringify(answer), ownerId, requestId);
+    return answer;
+  } catch (err) {
+    await q.run('DELETE FROM write_requests WHERE owner_id = ? AND request_id = ?', ownerId, requestId).catch(() => undefined);
+    throw err;
+  }
+}
+
+async function contractCall(ownerId: string, cl: BridgeClient, project: Project, cap: Capability, verb: MemoryVerb, raw: Record<string, unknown>): Promise<McpAnswer> {
+  let a;
+  try { a = validateVerb(verb, raw); } catch (err) {
+    if (err instanceof ContractError) throw new BridgeError(err.message, 400, 'invalid_argument');
+    throw err;
+  }
+  const drawer = projectDrawer(project);
+  const who = cap.agentId ? { agentId: cap.agentId } : {};
+  const note = (x: string) => `${x} session:${cap.id}${cap.agentId ? ` agent:${cap.agentId}` : ''}`;
+  if (verb === 'recall') {
+    const limit = a.limit ?? 8;
+    const hits = await getMemoryStorage().search({ userId: ownerId, query: a.query!, drawers: [drawer], limit } as any);
+    const results = capAnswer(hits.slice(0, limit).map((h) => ({ id: h.memory.id, content: clean(h.memory.content), score: Number(h.similarity.toFixed(3)) })));
+    return { text: results.length ? results.map((r) => `- [${r.id}] ${r.content}`).join('\n') : 'Nothing found in this project memory. Do not guess.', data: { results } };
+  }
+  if (verb === 'handoff') {
+    return once(ownerId, a.requestId, verb, () => saveOrSay(ownerId, cl, project.id, note('memory_handoff'), async () => {
+      let body;
+      try { body = cleanHandoff({ done: a.done ?? [], left: a.left ?? [], next: a.next ?? [], questions: a.questions ?? [] }); } catch (err) {
+        if (err instanceof HandoffInputError) throw new BridgeError(err.message, 400, 'invalid_argument');
+        throw err;
+      }
+      const h = await saveBridgeHandoff(ownerId, project.id, cl, body, cap.agentId ?? null);
+      await audit(ownerId, 'mcp-handoff', { client: cl, projectId: project.id, note: note('memory_handoff') });
+      return { text: 'Handoff saved. The next agent in this project, of any brand, starts from it.', data: { handoffId: h.id } };
+    }));
+  }
+  // save, supersede, propose: through a coding app every write is reviewed by the owner first.
+  return once(ownerId, a.requestId, verb, () => saveOrSay(ownerId, cl, project.id, note(`memory_${verb}`), async () => {
+    let replaces: { id: string; content: string; type: string } | null = null;
+    if (verb === 'supersede') {
+      // S2: an id from another owner, project or drawer is refused.
+      const old = await getMemoryStorage().getOwned(ownerId, a.id!);
+      const d = old?.drawer;
+      if (!old || !d || d.kind !== drawer.kind || (d.key ?? '') !== (drawer.key ?? '')) throw new BridgeError('That memory is not in this project; use an id that recall returned', 403, 'foreign_id');
+      replaces = { id: old.id, content: old.content, type: String(old.type) };
+    }
+    const r = await learn({ userId: ownerId, actor: `bridge:${cl}`, review: true, ...who,
+      candidates: [{ content: a.content!, type: 'fact', importance: 5, drawer, origin: 'agent', ...(a.topicKey ? { topicKey: a.topicKey } : {}), ...(replaces ? { replaces } : {}) }] });
+    const proposal = r.proposed[0];
+    await audit(ownerId, 'mcp-propose', { client: cl, projectId: project.id, note: note(proposal ? `proposal ${proposal.id}` : (r.skipped[0]?.reason ?? 'nothing')) });
+    if (!proposal) return { text: `Not proposed: ${r.skipped[0]?.reason ?? 'nothing to add'}.`, data: { proposalId: null, reason: r.skipped[0]?.reason ?? null } };
+    return { text: 'Proposed. The owner reviews it in Girru; it becomes memory only after approval.', data: { proposalId: proposal.id } };
+  }));
 }

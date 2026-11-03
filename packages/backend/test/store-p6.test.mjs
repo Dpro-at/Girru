@@ -238,3 +238,87 @@ test('T6: many changes in a burst give one write, after the project is quiet; th
   assert.deepEqual(await P6.syncP6Scopes(), []);
   off();
 });
+
+// --- AG2 / XP1 / XP2 / FAIL1-3: one memory contract -----------------------------------------
+
+test('XP1: both doors come from one definition; the MCP list adds the verbs only with a session', async () => {
+  const K = await import(join(backendDir, 'src/memory/contract.ts'));
+  const { bridgeTools } = await import(join(backendDir, 'src/memory/bridge/mcp-server.ts'));
+  const mcp = K.mcpContractTools(), native = K.nativeContractTools();
+  assert.deepEqual(mcp.map((t) => t.name), ['memory_recall', 'memory_save', 'memory_supersede', 'memory_handoff', 'memory_propose']);
+  assert.deepEqual(mcp.map((t) => [t.name, t.description, t.inputSchema]), native.map((t) => [t.name, t.description, t.input_schema]));
+  assert.equal(bridgeTools(false).some((t) => t.name === 'memory_recall'), false);
+  const withVerbs = bridgeTools(true);
+  assert.equal(withVerbs.filter((t) => t.name === 'memory_propose').length, 1);
+  assert.ok(withVerbs.some((t) => t.name === 'memory_recall') && withVerbs.some((t) => t.name === 'project_brief'));
+});
+
+test('XP2: the server checks every argument and says what to fix', async () => {
+  const K = await import(join(backendDir, 'src/memory/contract.ts'));
+  const bad = [
+    ['recall', {}, /query is required/], ['recall', { query: 'x', limit: 99 }, /limit must be a whole number from 1 to 20/],
+    ['recall', { query: 'x', drawer: 'owner' }, /drawer is not an argument/], ['save', { content: 'x'.repeat(4001) }, /longer than 4000/],
+    ['save', { content: 'ok', topic_key: '!!!' }, /topic_key/], ['supersede', { id: 'a b', content: 'x' }, /not a memory id/],
+    ['handoff', { done: 'all' }, /must be a list/], ['propose', { content: 'x', request_id: 'short' }, /request_id/], ['propose', 'text', /must be an object/],
+  ];
+  for (const [verb, args, re] of bad) assert.throws(() => K.validateVerb(verb, args), re, `${verb} ${JSON.stringify(args)}`);
+  assert.deepEqual(K.validateVerb('save', { content: '  Release day is Thursday. ', topic_key: 'release-day' }), { content: 'Release day is Thursday.', topicKey: 'release-day' });
+});
+
+test('AG2 through dpro-memory: recall, save, supersede, handoff, propose; S2 refuses a foreign id', async () => {
+  on();
+  B.resetReadVolume();
+  const s = await B.launchSession(folder, 'claude', 'p6-sara');
+  const call = (tool, args) => B.mcpCall('claude-code', tok, folder, tool, args, s.env.GIRRU_SESSION_CAPABILITY);
+  const fact = await save('Alpha release day is Thursday.');
+  const r = await call('memory_recall', { query: 'Alpha release day' });
+  assert.ok(r.data.results.some((x) => x.id === fact.id));
+  await assert.rejects(call('memory_recall', { query: 'x', drawer: 'owner' }), (e) => e.status === 400 && e.code === 'invalid_argument');
+  const sv = await call('memory_save', { content: 'Alpha staging resets on Sundays.', topic_key: 'staging-reset' });
+  assert.ok(sv.data.proposalId, 'a coding app write is reviewed first');
+  const sup = await call('memory_supersede', { id: fact.id, content: 'Alpha release day is Wednesday.' });
+  assert.ok(sup.data.proposalId);
+  assert.equal(db.prepare('SELECT agent_id FROM memory_file_proposals WHERE id = ?').get(sup.data.proposalId).agent_id, 'p6-sara');
+  const outside = await saveVersioned(newMemory(OWNER, { kind: 'owner' }, { type: 'fact', importance: 5, content: 'Owner-only note.' }, {}), 'test', 'test');
+  await assert.rejects(call('memory_supersede', { id: outside.id, content: 'x' }), (e) => e.code === 'foreign_id');
+  const h = await call('memory_handoff', { done: ['release notes'], next: ['tag'] });
+  assert.ok(h.data.handoffId);
+  assert.ok((await call('memory_propose', { content: 'Alpha needs a second reviewer for releases.' })).data.proposalId);
+  await s.end();
+  off();
+});
+
+test('FAIL2: a retry with the same request id never writes twice; another verb cannot reuse it', async () => {
+  on();
+  B.resetReadVolume();
+  const s = await B.launchSession(folder, 'claude');
+  const call = (tool, args) => B.mcpCall('claude-code', tok, folder, tool, args, s.env.GIRRU_SESSION_CAPABILITY);
+  const count = () => db.prepare('SELECT COUNT(*) AS n FROM memory_file_proposals').get().n;
+  const before = count();
+  const first = await call('memory_propose', { content: 'Alpha uses semantic version tags.', request_id: 'req-alpha-0001' });
+  const again = await call('memory_propose', { content: 'Alpha uses semantic version tags.', request_id: 'req-alpha-0001' });
+  assert.equal(count(), before + 1);
+  assert.equal(again.data.proposalId, first.data.proposalId);
+  assert.equal(again.data.repeated, true);
+  await assert.rejects(call('memory_handoff', { done: ['x'], request_id: 'req-alpha-0001' }), (e) => e.code === 'request_id_reused');
+  // The log holds ids, never the text.
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM write_requests WHERE result LIKE '%semantic%'").get().n, 0);
+  await s.end();
+  off();
+});
+
+test('FAIL3: a failed write says "not saved", is recorded for the owner, and leaves no request behind', async () => {
+  on();
+  B.resetReadVolume();
+  const s = await B.launchSession(folder, 'claude');
+  db.exec(`CREATE TRIGGER p6_fail BEFORE INSERT ON memory_bridge_handoffs BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END;`);
+  try {
+    await assert.rejects(B.mcpCall('claude-code', tok, folder, 'memory_handoff', { done: ['x'], request_id: 'req-fail-0001' }, s.env.GIRRU_SESSION_CAPABILITY),
+      (e) => e.status === 503 && e.code === 'not_saved' && /Try again/.test(e.message));
+  } finally { db.exec('DROP TRIGGER p6_fail'); }
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM memory_bridge_audit WHERE action = 'save-failed'").get().n, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM write_requests WHERE request_id = 'req-fail-0001'").get().n, 0, 'a retry with the same id can write it');
+  assert.ok((await B.mcpCall('claude-code', tok, folder, 'memory_handoff', { done: ['x'], request_id: 'req-fail-0001' }, s.env.GIRRU_SESSION_CAPABILITY)).data.handoffId);
+  await s.end();
+  off();
+});
