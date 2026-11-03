@@ -74,6 +74,11 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
   // before anything reads memory. Small set-based updates; a failure is logged and start-up goes on.
   const { moveProjectKeys } = await import('../memory/project-keys.js');
   await moveProjectKeys().catch((err) => console.warn('[Store P3] project keys not moved:', (err as Error)?.message));
+  // STORE-MAP-01 P3: the one list of departments and its ids (small tables; idempotent; before the first request).
+  if ((await import('../services/store-p3.js')).storeP3Enabled()) {
+    const { syncDepartments } = await import('../services/departments.js');
+    await syncDepartments().catch((err) => console.warn('[Store P3] departments backfill failed:', (err as Error)?.message));
+  }
 
   // APPS-06: apps moved to the Girru Store keep their data under their Store table names (once, after a backup).
   try { await (await import('../services/legacy-app-tables.js')).moveLegacyAppTables(); }
@@ -259,12 +264,9 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
     const { startStorePilot } = await import('../memory/outbox/start.js');
     await startStorePilot().catch((err) => console.warn('[Store pilot] start failed:', (err as Error)?.message));
 
-    // STORE-MAP-01 P3: fill the one list of departments and its ids (GIRRU_STORE_P3 only; idempotent; a failure never stops the start).
+    // STORE-MAP-01 P3 data jobs (GIRRU_STORE_P3 only; background work, so not while AGENT_PLAYER_BACKGROUND=off).
     const { storeP3Enabled } = await import('../services/store-p3.js');
     if (storeP3Enabled()) {
-      const { syncDepartments } = await import('../services/departments.js');
-      // Small tables: done before the first request so lists never miss a department.
-      await syncDepartments().catch((err) => console.warn('[Store P3] departments backfill failed:', (err as Error)?.message));
       // Source and trust of existing memories: in the background, small batches, resumes after a restart.
       const { backfillProvenance } = await import('../memory/validity.js');
       // Packed vectors (faster recall): after the sources, same small batches, resumable.

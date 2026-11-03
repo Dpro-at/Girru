@@ -60,6 +60,9 @@ export class DatabaseManager {
 
     // Enable WAL mode for better concurrency
     this.db.pragma('journal_mode = WAL');
+    // STORE-MAP-01 P3: a memory row is rewritten more often (source, trust, packed vector); freed
+    // space is zeroed so an earlier copy of a forgotten memory never stays in the file.
+    if (storeP3Enabled()) this.db.pragma('secure_delete = ON');
 
     console.log(`[Database] ✅ Connected to ${config.path}`);
   }
