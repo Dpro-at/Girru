@@ -157,6 +157,13 @@ const MARK = { hired: 'Your specialty is backend engineering', rules: ruleLine.t
 report.ruleMarker = MARK.rules;
 const present = (body) => Object.fromEntries(Object.entries(MARK).map(([k, v]) => [k, has(body, v)]));
 report.entryPoints.chat = { status: chatRes.statusCode, modelCalls: captured.length, tools: chatBody.tools?.length ?? 0, includes: present(chatBody), ...(await measure(splitBody(chatBody))) };
+// P9b: what per-message recall put next to the question (line count, and whether it said "nothing reliable").
+{
+  const convo = splitBody(chatBody).conversation;
+  const block = convo.match(/\[Memory recalled for this message[\s\S]*?\[End of recalled memory\]/)?.[0] ?? '';
+  report.entryPoints.chat.recall = { lines: block.split('\n').filter((l) => l.startsWith('- ')).length, chars: block.length, noReliable: convo.includes('nothing reliable is stored'),
+    sample: block.split('\n').filter((l) => l.startsWith('- ')).map((l) => l.slice(0, 90)) };
+}
 
 // 2. Channel turn (outside sender, as plugins/sdk.ts sends it).
 const { beginChannelTurn, CHANNEL_TURN_HEADER } = await import(join(backendDir, 'src/tools/channel-policy.ts'));

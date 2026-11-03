@@ -21,7 +21,7 @@
  * (retention.ts) while P9 is on.
  */
 
-import { all, run, sql } from '../repositories/sql-steps.js';
+import { all, run, sql, tableExists } from '../repositories/sql-steps.js';
 import { normalizeMemoryText } from './text-normalize.js';
 import { DRAWER_KEY_SQL, DRAWER_KIND_SQL, isValidDrawerKey } from './drawers.js';
 import { forgetMemory, forgetPersonMemories } from './forget.js';
@@ -134,6 +134,17 @@ export async function forgetPerson(userId: string, personKey: string, actor: str
     await sql().read(run('DELETE FROM memory_graph_entities WHERE user_id = ? AND id = ?', userId, e.id)).catch(() => undefined);
   }
   const graph = exp.graph.length;
+  // P9b (MD8): open questions that name the person (case-insensitive, by word) go too.
+  if (await sql().read(tableExists('memory_open_questions')).catch(() => false)) {
+    const names = exp.names.map((n) => n.trim().toLowerCase()).filter((n) => n.length >= 2);
+    const qs = await sql().read(all<{ id: string; question: string }>('SELECT id, question FROM memory_open_questions WHERE user_id = ?', userId));
+    for (const q of qs) {
+      const text = ` ${q.question.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ')} `;
+      if (names.some((n) => text.includes(` ${n.replace(/[^\p{L}\p{N}]+/gu, ' ').trim()} `))) {
+        await sql().read(run('DELETE FROM memory_open_questions WHERE user_id = ? AND id = ?', userId, q.id));
+      }
+    }
+  }
   return { drawer, mentions, graph };
 }
 

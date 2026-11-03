@@ -11,6 +11,8 @@
 // P9: --packed also stores the packed Float32 copy (P3, embedding_vec) as a save does
 // today; GIRRU_STORE_P9=1 measures the recall index (coldMs = the first search, which
 // builds it).
+// P9b: --p9b times the reply recall of the quality engine instead (intent,
+// fetch of 24 candidates, local re-rank within 300 ms; memory/quality/recall.ts).
 import { backendDir, addUser, argValue, cleanup, ollamaHas, openDb, percentile, quietly } from './env.mjs';
 import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -78,16 +80,26 @@ const opened = db.prepare(`SELECT COUNT(*) AS n FROM memories WHERE user_id = ? 
 
 const SET = JSON.parse(readFileSync(join(backendDir, 'scripts/memory-baseline/recall-set-p0.json'), 'utf-8'));
 const queries = SET.hit.flatMap((h) => h.queries.map((q) => q.q)).slice(0, nQueries);
+const p9b = process.argv.includes('--p9b');
+if (p9b) process.env.GIRRU_STORE_P9B = '1';
+const engine = p9b ? await import(join(backendDir, 'src/memory/quality/recall.ts')) : null;
+let fellBack = 0;
+const recallOnce = async (q) => {
+  if (!engine) return storage.search({ query: q, userId: OWNER, drawers: OPEN, limit: 5 });
+  const r = await engine.qualityRecall({ userId: OWNER, drawers: OPEN, query: q, limit: 6 });
+  if (r.fellBack) fellBack++;
+  return r;
+};
 
 // One warm-up query (module load, query embedding model load), not counted.
 const tCold = performance.now();
-await quietly(() => storage.search({ query: 'warm up', userId: OWNER, drawers: OPEN, limit: 5 }));
+await quietly(() => recallOnce('warm up'));
 const coldMs = +(performance.now() - tCold).toFixed(1);
 const times = [];
 let peakRss = process.memoryUsage().rss;
 for (const q of queries) {
   const t = performance.now();
-  await quietly(() => storage.search({ query: q, userId: OWNER, drawers: OPEN, limit: 5 }));
+  await quietly(() => recallOnce(q));
   times.push(performance.now() - t);
   peakRss = Math.max(peakRss, process.memoryUsage().rss);
 }
@@ -103,7 +115,7 @@ if (vectors === 'semantic') {
 
 const report = {
   size, vectors, packed: packedVectors, p9: process.env.GIRRU_STORE_P9 === '1', coldMs, openedRows: opened, drawerSplit: drawerCount, avgChars: Math.round(chars / size), seedMs,
-  dbMB: +(dbBytes / 1e6).toFixed(1), queries: times.length,
+  dbMB: +(dbBytes / 1e6).toFixed(1), engine: p9b ? 'p9b quality recall' : 'storage.search', ...(p9b ? { fellBack } : {}), queries: times.length,
   searchMs: { p50: +percentile(times, 50).toFixed(1), p95: +percentile(times, 95).toFixed(1), max: +Math.max(...times).toFixed(1) },
   queryEmbedMs: embedMs, peakRssMB: Math.round(peakRss / 1e6),
 };

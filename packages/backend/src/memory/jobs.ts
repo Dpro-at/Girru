@@ -18,6 +18,12 @@
  *                   owner approves) and each project gets a new version of its
  *                   summary when it changed (memory/project-summary.ts). Rule
  *                   based, no model. Scheduled only while GIRRU_STORE_P9 is on.
+ *   usage           STORE-MAP-01 P9b (MD7, MD1): once a week, verified memories
+ *                   that replies used gain weight, unused ones slowly lose it,
+ *                   corrections after use are flagged (memory/quality/usage.ts),
+ *                   and memories whose background enrichment a restart cut off
+ *                   are queued again; old open questions expire and go.
+ *                   Scheduled only while GIRRU_STORE_P9B is on.
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -32,6 +38,9 @@ import { checkMemory } from './doctor.js';
 import { recordHealthEvent } from './health.js';
 import { promoteLessons } from './lessons.js';
 import { runProjectSummaries } from './project-summary.js';
+import { storeP9bEnabled } from '../services/store-p9b.js';
+import { learnFromUse } from './quality/usage.js';
+import { cleanQuestions, requeuePending } from './quality/pipeline.js';
 
 export const MEMORY_JOB_ACTION = 'memory-job';
 export const WEEKLY_SUMMARY_CRON = '0 8 * * 1'; // Mondays 08:00
@@ -39,8 +48,9 @@ export const RETENTION_CRON = '0 4 * * *'; // daily 04:00 (no-op while retention
 export const TRASH_CRON = '30 3 * * *'; // daily 03:30 (no-op while trashDays is 0)
 export const DOCTOR_CRON = '40 2 * * *'; // daily 02:40 (P9 only; read-only)
 export const QUALITY_CRON = '20 5 * * 1'; // Mondays 05:20 (P9 only)
-export type MemoryJobName = 'weekly-summary' | 'retention' | 'trash' | 'doctor' | 'quality';
-const JOBS: ReadonlySet<string> = new Set(['weekly-summary', 'retention', 'trash', 'doctor', 'quality']);
+export const USAGE_CRON = '50 5 * * 1'; // Mondays 05:50 (P9b only)
+export type MemoryJobName = 'weekly-summary' | 'retention' | 'trash' | 'doctor' | 'quality' | 'usage';
+const JOBS: ReadonlySet<string> = new Set(['weekly-summary', 'retention', 'trash', 'doctor', 'quality', 'usage']);
 const SCHEDULE: ReadonlyArray<[MemoryJobName, string, string]> = [
   ['weekly-summary', WEEKLY_SUMMARY_CRON, 'Weekly memory summary (what I learned this week)'],
   ['retention', RETENTION_CRON, 'Memory retention rules (task TTL, experience consolidation); only when turned on'],
@@ -48,6 +58,7 @@ const SCHEDULE: ReadonlyArray<[MemoryJobName, string, string]> = [
 ];
 const DOCTOR_JOB: [MemoryJobName, string, string] = ['doctor', DOCTOR_CRON, 'Memory doctor: a read-only check at night for the health view'];
 const QUALITY_JOB: [MemoryJobName, string, string] = ['quality', QUALITY_CRON, 'Memory quality: propose repeated lessons, refresh project summaries'];
+const USAGE_JOB: [MemoryJobName, string, string] = ['usage', USAGE_CRON, 'Memory use: verified memories that helped gain weight, unused ones slowly lose it'];
 
 async function isOwner(userId: unknown): Promise<boolean> {
   if (typeof userId !== 'string' || !userId) return false;
@@ -99,6 +110,13 @@ export async function runMemoryJob(action: { job?: unknown; userId?: unknown }):
     const summaries = await runProjectSummaries(userId);
     return { lessons: lessons.length, summaries: summaries.length };
   }
+  if (job === 'usage') {
+    if (!storeP9bEnabled()) return { skipped: 'off' };
+    const res = await learnFromUse(userId);
+    const requeued = await requeuePending(userId);
+    await cleanQuestions(userId);
+    return { ...res, requeued };
+  }
   throw new Error('Unknown memory job');
 }
 
@@ -119,7 +137,7 @@ export async function ensureMemoryJobs(): Promise<Array<{ id: string; name: stri
   const owners = await sql().read(all<{ id: string }>(`SELECT id FROM users WHERE role = 'owner' AND COALESCE(status, 'active') = 'active' ORDER BY id`));
   const created: Array<{ id: string; name: string; cronExpression: string; actionData: Record<string, unknown> }> = [];
   for (const { id: userId } of owners) {
-    const schedule = storeP9Enabled() ? [...SCHEDULE, DOCTOR_JOB, QUALITY_JOB] : SCHEDULE;
+    const schedule = [...SCHEDULE, ...(storeP9Enabled() ? [DOCTOR_JOB, QUALITY_JOB] : []), ...(storeP9bEnabled() ? [USAGE_JOB] : [])];
     for (const [job, cronExpression, description] of schedule) {
       const name = memoryJobName(job, userId);
       const id = uuidv4();

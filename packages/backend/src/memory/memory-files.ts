@@ -46,6 +46,8 @@ import { isMemoryType, type Memory, type MemoryType, type ImportanceLevel, type 
 import { drawerId, normalizeDrawer, parseDrawerId, type DrawerRef } from './drawers.js';
 import { replaceStep } from './validity.js';
 import { storeP9Enabled } from '../services/store-p9.js';
+import { storeP9bEnabled } from '../services/store-p9b.js';
+import { sourceOfProposal, stored } from './quality/pipeline.js';
 
 export const MAX_FILE_BYTES = 1024 * 1024;
 export const MAX_CHANGES = 500;
@@ -832,6 +834,14 @@ export async function approveProposal(
   for (const m of removed) await bestEffort('removing a memory copy', () => storage.removeMarkdownCopy(m));
   for (const m of written) await bestEffort('writing a memory copy', () => storage.writeMarkdownCopy(m));
   await bestEffort('re-exporting the drawer', () => exportDrawerFile(userId, proposal.agentId, drawer));
+  // STORE-MAP-01 P9b (MD1, MD3): the text's own source, plus the owner's approval when the owner
+  // decided it (not a scope rule, a reviewer agent or an automatic import).
+  if (storeP9bEnabled()) {
+    const ownerApproved = decidedBy === userId && !opts.beforeCommit;
+    await bestEffort('recording memory trust', () => stored(written, [
+      sourceOfProposal(proposal, userId), ...(ownerApproved ? [{ kind: 'approved' as const, key: 'owner-approval', label: 'owner approved' }] : []),
+    ]));
+  }
 
   return { proposal: (await getProposal(userId, proposal.id))!, revision, applied };
 }

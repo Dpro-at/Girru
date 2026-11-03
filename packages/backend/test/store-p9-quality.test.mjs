@@ -191,8 +191,12 @@ test('M3: recall ranks the same memories by specialty, department and team', asy
     return r.items.map((i) => i.id);
   };
   off();
+  // P9b's re-rank (MD6) uses the agent's relevance too: "off" here means both off.
+  const p9b = process.env.GIRRU_STORE_P9B;
+  delete process.env.GIRRU_STORE_P9B;
   const offBack = await recallFor('q-back');
   const offMkt = await recallFor('q-mkt');
+  if (p9b !== undefined) process.env.GIRRU_STORE_P9B = p9b;
   assert.deepEqual(offBack, offMkt, 'off: the agent does not change the order');
   on();
   const back = await recallFor('q-back');

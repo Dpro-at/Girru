@@ -11,6 +11,8 @@ import type { ToolExecutionContext } from '../types.js';
 import { toolMemoryUser } from './scope.js';
 import { repositories } from '../../repositories/index.js';
 import { toolMemoryActor } from '../../repositories/actor.js';
+import { storeP9bEnabled } from '../../services/store-p9b.js';
+import { bandOf, confidenceOf, trustRows } from '../../memory/quality/trust.js';
 
 interface MemorySearchParams {
   /** Search query */
@@ -163,7 +165,8 @@ Returns:
       if (!toolMemoryUser(context)) throw new Error('No user for this memory search');
 
       // Search memories using new Multi-Tier Memory API
-      const results = await repositories.memory.search(await toolMemoryActor(context), {
+      const actor = await toolMemoryActor(context);
+      const results = await repositories.memory.search(actor, {
         query: params.query,
         type: params.type,
         layer: params.layer,
@@ -208,6 +211,10 @@ Returns:
         };
       }
 
+      // STORE-MAP-01 P9b (MD3): recall output shows how far each memory can be trusted.
+      const trust = storeP9bEnabled() && actor.userId ? await trustRows(actor.userId, filtered).catch(() => null) : null;
+      const confidence = (m: (typeof filtered)[number]) => (trust ? confidenceOf(m, trust) : null);
+
       // Format response text
       let responseText = `Found ${filtered.length} relevant ${filtered.length === 1 ? 'memory' : 'memories'} for: "${params.query}"\n\n`;
 
@@ -235,7 +242,8 @@ Returns:
           : 'Private';
 
         responseText += `${index + 1}. ${memory.content}\n`;
-        responseText += `   Type: ${memory.type} | Importance: ${importance}/10 | Layer: ${layerDisplay}\n`;
+        const c = confidence(memory);
+        responseText += `   Type: ${memory.type} | Importance: ${importance}/10 | Layer: ${layerDisplay}${c ? ` | Confidence: ${bandOf(c.confidence)}${c.verified ? ' (verified)' : ''}` : ''}\n`;
         responseText += `   Visibility: ${visibilityDisplay}`;
 
         // Show team-critical flag
@@ -298,6 +306,7 @@ Returns:
             createdAt: m.createdAt,
             accessCount: m.accessCount,
             tags: m.metadata?.tags || [],
+            ...(trust ? { confidence: confidence(m)!.confidence, verified: confidence(m)!.verified } : {}),
           })),
         },
       };
