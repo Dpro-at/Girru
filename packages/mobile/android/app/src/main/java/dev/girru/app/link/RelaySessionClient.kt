@@ -16,7 +16,8 @@ import java.util.concurrent.TimeUnit
 
 /** One event of an `api.stream`, or its end. */
 sealed class StreamEvent {
-    class Data(val data: Map<String, Any?>) : StreamEvent()
+    /** [event] names the event stream's `event:` line (a terminal's `output` / `exit`); null for a run. */
+    class Data(val data: Map<String, Any?>, val event: String? = null) : StreamEvent()
     class End(val complete: Boolean) : StreamEvent()
 }
 
@@ -181,7 +182,7 @@ class RelaySessionClient(
             is PhoneFrame.Run -> f.ref?.let { runs[it]?.invoke(f) }
             is PhoneFrame.RunFailed -> f.ref?.let { runs[it]?.invoke(f) }
             is PhoneFrame.RunEnd -> f.ref?.let { runs.remove(it)?.invoke(f) }
-            is PhoneFrame.Stream -> f.ref?.let { streams[it]?.invoke(StreamEvent.Data(f.data)) }
+            is PhoneFrame.Stream -> f.ref?.let { streams[it]?.invoke(StreamEvent.Data(f.data, f.event)) }
             is PhoneFrame.StreamEnd -> f.ref?.let { streams.remove(it)?.invoke(StreamEvent.End(f.complete)) }
             is PhoneFrame.PendingAnswer -> pendingQueries.remove(f.id)?.invoke(f.pending)
         }

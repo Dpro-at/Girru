@@ -31,14 +31,16 @@ import dev.girru.app.link.RelaySessionClient
  * The four places after pairing (phone boards): Chat is the computer's own
  * chat page ([chat], the web view); Tasks, Approvals and Team are drawn here
  * from signed commands. Approve and Deny open the confirm screen, which walks
- * the full-view and unlock steps. The board's terminal button is left out on
- * purpose: the terminal never opens from the phone.
+ * the full-view and unlock steps. The terminal button opens the computer's
+ * terminal after the fingerprint / screen-lock check (the owner's decision).
  */
 class PhoneTabs(
     context: Context,
     private val chat: View,
     private val client: RelaySessionClient,
     private val decide: (approvalId: String, approve: Boolean) -> Unit,
+    /** The terminal button: the activity asks for the fingerprint, then opens the page's terminal. */
+    private val openTerminal: () -> Unit,
 ) : LinearLayout(context) {
     enum class Place(val label: String, val icon: Int) {
         CHAT("Chat", R.drawable.ic_place_chat), TASKS("Tasks", R.drawable.ic_place_tasks),
@@ -165,7 +167,7 @@ class PhoneTabs(
     }
 
     private fun tasks(): View = column {
-        addView(titleRow("Tasks", action = iconButton("New task") { select(Place.CHAT) }))
+        addView(titleRow("Tasks", action = iconButton("New task") { select(Place.CHAT) }, extra = terminalButton()))
         addView(segments(listOf("Now", "Scheduled", "Done"), show) { show = it; render(); refresh() })
         problemLine(this)
         when (show) {
@@ -304,11 +306,20 @@ class PhoneTabs(
         addView(v)
     }
 
-    private fun titleRow(title: String, action: View? = null) = LinearLayout(context).apply {
+    private fun titleRow(title: String, action: View? = null, extra: View? = null) = LinearLayout(context).apply {
         gravity = Gravity.CENTER_VERTICAL
         setPadding(dp(2), dp(12), 0, dp(10))
         addView(text(title, 30f, p.text, bold = true), LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        extra?.let { addView(it, LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(6) }) }
         action?.let { addView(it, LayoutParams(dp(44), dp(44))) }
+    }
+
+    private fun terminalButton() = ImageView(context).apply {
+        setImageResource(R.drawable.ic_terminal)
+        imageTintList = ColorStateList.valueOf(p.secondary)
+        scaleType = ImageView.ScaleType.CENTER
+        contentDescription = "Terminal"
+        setOnClickListener { openTerminal() }
     }
 
     private fun iconButton(label: String, onClick: () -> Unit) = TextView(context).apply {

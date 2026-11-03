@@ -119,7 +119,7 @@ sealed class PhoneFrame {
     class PendingAnswer(val id: String, val pending: Boolean) : PhoneFrame()
 
     /** `{type:"stream", ref, data}`: one event of an `api.stream`, as the chat page reads it. */
-    class Stream(val ref: String?, val data: Map<String, Any?>) : PhoneFrame()
+    class Stream(val ref: String?, val data: Map<String, Any?>, val event: String? = null) : PhoneFrame()
 
     /** `{type:"stream.end", ref, status}`: `complete`, or `dropped` (the page re-attaches with `after`). */
     class StreamEnd(val ref: String?, val complete: Boolean) : PhoneFrame()
@@ -158,7 +158,7 @@ sealed class PhoneFrame {
                 "stream" -> {
                     @Suppress("UNCHECKED_CAST")
                     val data = m["data"] as? Map<String, Any?> ?: return null
-                    Stream(ref, data)
+                    Stream(ref, data, (m["event"] as? String)?.takeIf { CODE.matches(it) })
                 }
                 "stream.end" -> StreamEnd(ref, (m["status"] as? String ?: return null) == "complete")
                 "approval.pending" -> {

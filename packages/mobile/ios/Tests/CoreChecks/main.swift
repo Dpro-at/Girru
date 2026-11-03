@@ -773,10 +773,14 @@ func checkPageBridge() throws {
 
     check(String(decoding: PageBridge.sse(["seq": 3, "type": "text", "content": "Hi"]), as: UTF8.self) == "id: 3\ndata: {\"content\":\"Hi\",\"seq\":3,\"type\":\"text\"}\n\n", "a numbered event")
     check(!String(decoding: PageBridge.sse(["seq": 0, "type": "preview", "content": "H"]), as: UTF8.self).contains("id:"), "a preview has no id")
+    check(String(decoding: PageBridge.sse(["seq": 4, "data": "hi"], event: "output"), as: UTF8.self) == "event: output\ndata: {\"data\":\"hi\",\"seq\":4}\n\n", "a terminal event keeps its name")
+    if case let .stream(_, _, event) = try ComputerMessage.parse(Data(#"{"type":"stream","ref":"t1","event":"exit","data":{"exitCode":0}}"#.utf8)) {
+        check(event == "exit", "terminal stream event read")
+    } else { check(false, "terminal stream event read") }
 
     // Stream messages from the computer.
-    if case let .stream(ref, data) = try ComputerMessage.parse(Data(#"{"type":"stream","ref":"s1","data":{"seq":1,"type":"text"}}"#.utf8)) {
-        check(ref == "s1" && data["type"] as? String == "text", "stream frame read")
+    if case let .stream(ref, data, event) = try ComputerMessage.parse(Data(#"{"type":"stream","ref":"s1","data":{"seq":1,"type":"text"}}"#.utf8)) {
+        check(ref == "s1" && data["type"] as? String == "text" && event == nil, "stream frame read")
     } else { check(false, "stream frame read") }
     if case let .streamEnd(_, complete) = try ComputerMessage.parse(Data(#"{"type":"stream.end","ref":"s1","status":"dropped"}"#.utf8)) {
         check(!complete, "a dropped stream is not complete")
@@ -786,6 +790,11 @@ func checkPageBridge() throws {
     let call = try CommandBody.apiCall(method: "POST", path: "/api/chat/conversations", body: ["title": "x"], ref: "p1")
     check(call == #"{"body":{"title":"x"},"method":"POST","path":"/api/chat/conversations","ref":"p1","type":"api.call"}"#, "api.call body")
     check(try CommandBody.uiGet(path: "/", part: 0, ref: "f1") == #"{"path":"/","ref":"f1","type":"ui.get"}"#, "ui.get first part")
+    check(TerminalUse.of(method: "POST", path: "/api/terminal/sessions") == .open, "opening a terminal needs the check")
+    check(TerminalUse.of(method: "GET", path: "/api/terminal") == .none && TerminalUse.of(method: "GET", path: "/api/terminal/prefs") == .none, "settings need no check")
+    check(TerminalUse.of(method: "GET", path: "/api/terminal/sessions/abc/stream?after=3") == .session("abc"), "reading one terminal")
+    check(TerminalUse.of(method: "POST", path: "/api/terminal/sessions/abc/input") == .session("abc"), "typing into one terminal")
+    check(TerminalUse.of(method: "GET", path: "/api/chat/conversations") == .none, "chat is not the terminal")
     check(try CommandBody.uiGet(path: "/a.js", part: 2, ref: "f1") == #"{"part":2,"path":"/a.js","ref":"f1","type":"ui.get"}"#, "ui.get later part")
 }
 

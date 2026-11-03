@@ -94,10 +94,27 @@ object PageBridge {
         return Answer(200, first.type.substringBefore(';').trim(), out.toByteArray())
     }
 
+    /** Which page requests touch a terminal (it opens only after the phone's biometric check). */
+    sealed class TerminalUse {
+        object None : TerminalUse()
+        object Open : TerminalUse()
+        data class Session(val id: String) : TerminalUse()
+    }
+
+    fun terminalUse(method: String, path: String): TerminalUse {
+        val base = path.substringBefore('?')
+        if (!base.startsWith("/api/terminal/sessions")) return TerminalUse.None
+        val rest = base.removePrefix("/api/terminal/sessions")
+        if (rest.isEmpty()) return if (method.uppercase() == "POST") TerminalUse.Open else TerminalUse.None
+        val id = rest.trimStart('/').substringBefore('/')
+        return if (id.isEmpty()) TerminalUse.None else TerminalUse.Session(id)
+    }
+
     /** One stream event as the page's event stream reads it. */
-    fun sse(data: Map<String, Any?>): ByteArray {
+    fun sse(data: Map<String, Any?>, event: String? = null): ByteArray {
         val seq = data["seq"] as? Long
         val sorted = sortedMapOf<String, Any?>().apply { putAll(data) }
-        return ((if (seq != null && seq > 0) "id: $seq\n" else "") + "data: ${Json.compact(sorted)}\n\n").toByteArray(Charsets.UTF_8)
+        return ((if (event != null) "event: $event\n" else "") + (if (event == null && seq != null && seq > 0) "id: $seq\n" else "") +
+            "data: ${Json.compact(sorted)}\n\n").toByteArray(Charsets.UTF_8)
     }
 }

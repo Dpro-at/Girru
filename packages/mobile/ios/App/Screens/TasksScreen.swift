@@ -1,19 +1,25 @@
 import SwiftUI
 
 /// Phone board Tasks: what waits for the owner, what runs, what comes next.
-/// The board's terminal button is left out on purpose: the terminal never
-/// opens from the phone (PROTOCOL.md threat model).
+/// The terminal button opens the computer's terminal after Face ID / Touch ID
+/// (the owner's decision).
 struct TasksScreen: View {
     enum Show: String, CaseIterable { case now = "Now", scheduled = "Scheduled", done = "Done" }
 
     let openChat: () -> Void
     let openApprovals: () -> Void
+    let openTerminal: () -> Void
     @EnvironmentObject private var data: PhoneData
     @State private var show: Show = .now
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ScreenTitle(text: "Tasks") {
+                Button(action: openTerminal) {
+                    Image(systemName: "apple.terminal").font(.system(size: 20)).foregroundStyle(Theme.secondaryText)
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Terminal")
                 Button(action: openChat) {
                     Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(.white)
                         .frame(width: 44, height: 44).background(Theme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))

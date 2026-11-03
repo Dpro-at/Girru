@@ -41,6 +41,7 @@ struct WebHostView: UIViewRepresentable {
         web.isInspectable = true
         #endif
         context.coordinator.load(in: web)
+        context.coordinator.watchTerminal(web)
         return web
     }
 
@@ -60,6 +61,18 @@ struct WebHostView: UIViewRepresentable {
             self.policy = policy
             self.bridge = bridge
         }
+
+        private var terminalWatch: NSObjectProtocol?
+
+        /// The terminal button (after its fingerprint check) asks the page to open its terminal.
+        func watchTerminal(_ web: WKWebView) {
+            terminalWatch = NotificationCenter.default.addObserver(forName: .girruOpenTerminal, object: nil, queue: .main) { [weak web, weak self] _ in
+                guard let web, self?.policy.paired == true else { return }
+                web.evaluateJavaScript("location.hash = 'terminal'")
+            }
+        }
+
+        deinit { if let terminalWatch { NotificationCenter.default.removeObserver(terminalWatch) } }
 
         func load(in web: WKWebView) {
             if policy.paired {

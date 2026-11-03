@@ -65,8 +65,13 @@ class GirruApplication : Application() {
         }
     }
 
-    /** The computer's chat page, through the session. */
-    val content: SessionContentSource by lazy { SessionContentSource(session) }
+    /** The computer's chat page, through the session. The activity sets [terminalCheck] while it is shown. */
+    var terminalCheck: ((String, (Boolean) -> Unit) -> Unit)? = null
+    val content: SessionContentSource by lazy {
+        SessionContentSource(session) { reason, done ->
+            mainThread.post { terminalCheck?.invoke(reason, done) ?: done(false) }
+        }
+    }
     val qrScanner: QrScanner = NoQrScanner
 
     override fun onCreate() {

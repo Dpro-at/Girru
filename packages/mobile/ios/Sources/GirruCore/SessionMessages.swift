@@ -112,7 +112,8 @@ public enum ComputerMessage {
     /// The answer to the unsigned `approval.pending {id}` query.
     case approvalPending(id: String, pending: Bool)
     /// One event of an `api.stream`, as the chat page reads it.
-    case stream(ref: String?, data: [String: Any])
+    /// `event` names the stream's `event:` line (a terminal's `output` / `exit`); nil for a run.
+    case stream(ref: String?, data: [String: Any], event: String?)
     /// The end of an `api.stream`: `complete`, or `dropped` (re-attach with `after`).
     case streamEnd(ref: String?, complete: Bool)
 
@@ -139,7 +140,8 @@ public enum ComputerMessage {
             return .approvalPending(id: id, pending: p)
         case "stream":
             guard let data = m["data"] as? [String: Any] else { throw ProtocolError.badFormat }
-            return .stream(ref: ref, data: data)
+            let event = (m["event"] as? String).flatMap { e in e.range(of: "^[a-z][a-z0-9_]{0,31}$", options: .regularExpression) != nil ? e : nil }
+            return .stream(ref: ref, data: data, event: event)
         case "stream.end":
             guard let status = m["status"] as? String else { throw ProtocolError.badFormat }
             return .streamEnd(ref: ref, complete: status == "complete")

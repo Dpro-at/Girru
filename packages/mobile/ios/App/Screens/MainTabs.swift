@@ -8,6 +8,7 @@ struct MainTabs: View {
     let computer: PairedComputer
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var bridge: WebBridge
+    @EnvironmentObject private var lock: AppLock
     @StateObject private var data: PhoneData
     @State private var place: Place = .chat
 
@@ -20,11 +21,13 @@ struct MainTabs: View {
         TabView(selection: $place) {
             WebHostView(computer: computer, bridge: bridge, source: SessionCoreUISource(send: { [model] body, stream in
                 try await model.send(body, stream: stream)
+            }, terminal: data.terminal, confirm: { [model] reason in
+                await model.lock.confirmSensitive(reason: reason) != nil
             }))
             .tabItem { Label("Chat", systemImage: "message") }
             .tag(Place.chat)
 
-            TasksScreen(openChat: { place = .chat }, openApprovals: { place = .approvals })
+            TasksScreen(openChat: { place = .chat }, openApprovals: { place = .approvals }, openTerminal: openTerminal)
                 .tabItem { Label("Tasks", systemImage: "chart.bar.doc.horizontal") }
                 .tag(Place.tasks)
 
@@ -39,6 +42,8 @@ struct MainTabs: View {
         }
         .tint(Theme.accent)
         .environmentObject(data)
+        // Locking forgets every terminal: the next use asks for the check again.
+        .onChange(of: lock.state) { _, state in if state != .unlocked { data.terminal.forget() } }
         // The badge stays current while the app is open; nothing is read while it is locked.
         .task {
             while !Task.isCancelled {
@@ -47,6 +52,23 @@ struct MainTabs: View {
             }
         }
     }
+}
+
+extension MainTabs {
+    /// The terminal button: Face ID / Touch ID / passcode first, then the chat page opens its terminal full size.
+    func openTerminal() {
+        Task { @MainActor in
+            guard await model.lock.confirmSensitive(reason: "Open the terminal") != nil else { return }
+            data.terminal.checked()
+            place = .chat
+            NotificationCenter.default.post(name: .girruOpenTerminal, object: nil)
+        }
+    }
+}
+
+extension Notification.Name {
+    /// Asks the chat page to open its terminal (WebHostView sets #terminal).
+    static let girruOpenTerminal = Notification.Name("dev.girru.app.openTerminal")
 }
 
 /// An agent's round picture: its colour and the person mark from the boards.

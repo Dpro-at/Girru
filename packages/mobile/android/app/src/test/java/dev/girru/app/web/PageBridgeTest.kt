@@ -80,6 +80,29 @@ class PageBridgeTest {
         assertEquals(null, BridgeCall.parse("api.call", "a1", mapOf("method" to "POST", "path" to "/api/x", "body" to "", "extra" to 1)))
     }
 
+    @Test
+    fun terminalRequestsThatNeedTheFingerprint() {
+        assertEquals(PageBridge.TerminalUse.Open, PageBridge.terminalUse("POST", "/api/terminal/sessions"))
+        assertEquals(PageBridge.TerminalUse.None, PageBridge.terminalUse("GET", "/api/terminal"))
+        assertEquals(PageBridge.TerminalUse.None, PageBridge.terminalUse("GET", "/api/terminal/prefs"))
+        assertEquals(PageBridge.TerminalUse.Session("abc"), PageBridge.terminalUse("GET", "/api/terminal/sessions/abc/stream?after=3"))
+        assertEquals(PageBridge.TerminalUse.Session("abc"), PageBridge.terminalUse("POST", "/api/terminal/sessions/abc/input"))
+        assertEquals(PageBridge.TerminalUse.None, PageBridge.terminalUse("GET", "/api/chat/conversations"))
+        assertEquals("event: output
+data: {"data":"hi","seq":4}
+
+", String(PageBridge.sse(mapOf("seq" to 4L, "data" to "hi"), "output")))
+        val gate = TerminalGate()
+        assertFalse(gate.takeFresh(1000))
+        gate.checked(1000)
+        assertTrue(gate.takeFresh(20_000))
+        assertFalse(gate.takeFresh(40_000))
+        gate.add("abc")
+        assertTrue(gate.knows("abc"))
+        gate.forget()
+        assertFalse(gate.knows("abc"))
+    }
+
     private fun assertFails(block: () -> Unit) {
         try { block() } catch (e: PageBridge.BadAnswer) { return }
         throw AssertionError("expected BadAnswer")

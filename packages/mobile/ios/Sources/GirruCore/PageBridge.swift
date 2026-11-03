@@ -126,15 +126,37 @@ public enum PageBridge {
     }
 
     /// One stream event as the page's event stream reads it: `id: <seq>` (when numbered) and `data: <json>`.
-    public static func sse(_ data: [String: Any]) -> Data {
+    public static func sse(_ data: [String: Any], event: String? = nil) -> Data {
         var out = ""
-        if let seq = (data["seq"] as? NSNumber)?.intValue, seq > 0 { out += "id: \(seq)\n" }
+        if let event { out += "event: \(event)\n" } else if let seq = (data["seq"] as? NSNumber)?.intValue, seq > 0 { out += "id: \(seq)\n" }
         let json = (try? JSONSerialization.data(withJSONObject: data, options: [.sortedKeys])) ?? Data("{}".utf8)
         out += "data: \(String(decoding: json, as: UTF8.self))\n\n"
         return Data(out.utf8)
     }
 
     public static let streamHeaders = ["Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store"]
+}
+
+/// The terminal on the phone opens only after the phone's own biometric check
+/// (the owner's decision). Which page requests touch a terminal:
+public enum TerminalUse: Equatable, Sendable {
+    /// Not a terminal, or only its settings and list: no check.
+    case none
+    /// Opens a new terminal: needs a fresh check.
+    case open
+    /// Reads, types into, resizes or closes one terminal: needs a check unless
+    /// this phone opened or joined that terminal after a check.
+    case session(String)
+
+    public static func of(method: String, path: String) -> TerminalUse {
+        let base = path.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? path
+        guard base.hasPrefix("/api/terminal/sessions") else { return .none }
+        let rest = base.dropFirst("/api/terminal/sessions".count)
+        if rest.isEmpty { return method.uppercased() == "POST" ? .open : .none }
+        let parts = rest.split(separator: "/").map(String.init)
+        guard let id = parts.first, !id.isEmpty else { return .none }
+        return .session(id)
+    }
 }
 
 public enum PageError: Error, Equatable {

@@ -69,7 +69,13 @@ agent must know"), pair, then check and write down each:
    when nothing waits.
 4. **Team**: main agent first, then who needs you, who works, who is free;
    search and the chips filter; tapping an agent opens Chat.
-5. Dark mode on each screen; locking the app hides everything and nothing
+5. **Terminal** (owner's decision: it is on the phone, behind the fingerprint):
+   the terminal button in Tasks asks Face ID / Touch ID / fingerprint, then
+   Chat opens the computer's terminal full size; type `echo hi; date` and see
+   the real output. Without the check nothing opens. After locking and
+   unlocking the app, the next terminal use asks again. The computer needs
+   `AGENT_TERMINAL=true`.
+6. Dark mode on each screen; locking the app hides everything and nothing
    loads until the unlock.
 
 Report as before in `RESULT.md`, with screenshots of each place.

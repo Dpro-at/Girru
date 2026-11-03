@@ -53,6 +53,7 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
     private lateinit var auth: Authenticator
     private var webHost: WebHost? = null
     private var tabs: PhoneTabs? = null
+    private var webView: WebView? = null
     private var promptedThisForeground = false
 
     // A read code before it is sent; after that the waiting record (encrypted store) holds the pairing.
@@ -162,6 +163,8 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
 
     private fun render() {
         val screen = currentScreen()
+        // Locking forgets every terminal: the next use asks for the check again.
+        if (screen == Screen.LOCKED) app.content.terminal.forget()
         lockScreen.isVisible = screen == Screen.LOCKED
         screenLockNeeded.isVisible = screen == Screen.NEEDS_SCREEN_LOCK
         pairScreen.isVisible = screen == Screen.PAIR
@@ -422,7 +425,10 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
         if (webHost != null) return
         val origin = WebOrigin.COMPUTER
         val view = WebView(this)
-        tabs = PhoneTabs(this, view, app.session, ::decideFromList).also {
+        webView = view
+        // The page's own terminal requests ask for the same check.
+        app.terminalCheck = { reason, done -> ask(LockPolicy.Prompt.CONFIRM, getString(R.string.confirm_title), reason, done) }
+        tabs = PhoneTabs(this, view, app.session, ::decideFromList, ::openTerminal).also {
             webContainer.addView(it, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         }
         webHost = WebHost(view, origin, app.content, ::openExternal, ::onRendererGone)
@@ -434,6 +440,18 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
         webHost = null
         tabs?.let { webContainer.removeView(it) }
         tabs = null
+        webView = null
+        app.terminalCheck = null
+    }
+
+    /** The terminal button: the fingerprint / screen-lock check, then the chat page opens its terminal full size. */
+    private fun openTerminal() {
+        ask(LockPolicy.Prompt.CONFIRM, getString(R.string.confirm_title), "Open the terminal") { ok ->
+            if (!ok) return@ask
+            app.content.terminal.checked()
+            tabs?.select(PhoneTabs.Place.CHAT)
+            webView?.evaluateJavascript("location.hash = 'terminal'", null)
+        }
     }
 
     /** Approve or Deny on the Approvals screen: the confirm screen walks the full view and unlock steps. */

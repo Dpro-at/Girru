@@ -15,6 +15,8 @@ final class PhoneData: ObservableObject {
     @Published private(set) var problem: String?
 
     private let model: AppModel
+    /// Terminals this phone opened after a fingerprint / Face ID check.
+    let terminal = TerminalGate()
 
     init(model: AppModel) { self.model = model }
 

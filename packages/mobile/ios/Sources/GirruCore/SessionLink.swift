@@ -11,7 +11,7 @@ public struct LinkReply: @unchecked Sendable {
 
 /// One event of an `api.stream`, or its end.
 public enum StreamEvent: @unchecked Sendable {
-    case data([String: Any])
+    case data([String: Any], event: String?)
     case end(complete: Bool)
 }
 
@@ -216,8 +216,8 @@ public actor SessionLink {
             if let ref { runs.removeValue(forKey: ref)?(.end(runId: runId, end: end, code: code)) }
         case let .approvalPending(id, pending):
             pendingQueries.removeValue(forKey: id)?.resume(returning: pending)
-        case let .stream(ref, data):
-            if let ref { streams[ref]?(.data(data)) }
+        case let .stream(ref, data, event):
+            if let ref { streams[ref]?(.data(data, event: event)) }
         case let .streamEnd(ref, complete):
             if let ref { streams.removeValue(forKey: ref)?(.end(complete: complete)) }
         }

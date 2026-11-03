@@ -19,12 +19,19 @@ import java.util.concurrent.TimeUnit
  * the bridge ([apiCall]). Nothing goes to the network and no token is sent;
  * while the app is locked nothing can be signed, so nothing loads.
  */
-class SessionContentSource(private val client: RelaySessionClient) : ContentSource {
+class SessionContentSource(
+    private val client: RelaySessionClient,
+    /** Asks for the fingerprint / screen-lock check on the main thread; the answer may come on any thread. */
+    private val confirm: (reason: String, done: (Boolean) -> Unit) -> Unit,
+) : ContentSource {
+    /** Terminals this phone opened or joined after a check (the owner's decision: the terminal opens behind the fingerprint). */
+    val terminal = TerminalGate()
+
     override fun load(path: String): ContentSource.Content = when (val r = PageBridge.classify("GET", path)) {
         is PageBridge.Request.Refuse -> content(PageBridge.Answer(r.status, "text/plain", ByteArray(0)))
         is PageBridge.Request.File -> content(file(r.path))
-        is PageBridge.Request.Api -> content(blockingApi("GET", r.path, null))
-        is PageBridge.Request.Stream -> stream(r.path)
+        is PageBridge.Request.Api -> if (terminalAllowedBlocking("GET", r.path)) content(blockingApi("GET", r.path, null)) else content(PageBridge.json(403, mapOf("code" to "forbidden")))
+        is PageBridge.Request.Stream -> if (terminalAllowedBlocking("GET", r.path)) stream(r.path) else content(PageBridge.json(403, mapOf("code" to "forbidden")))
     }
 
     /** A request with a body, from the page through the bridge. */
@@ -33,7 +40,33 @@ class SessionContentSource(private val client: RelaySessionClient) : ContentSour
         if (r !is PageBridge.Request.Api) return done(PageBridge.json(400, mapOf("code" to "bad_format")))
         if (bodyText != null && bodyText.toByteArray(Charsets.UTF_8).size > PageBridge.MAX_BODY) return done(PageBridge.json(413, mapOf("code" to "too_large")))
         val body = if (bodyText.isNullOrEmpty()) null else (Json.parse(bodyText) ?: return done(PageBridge.json(400, mapOf("code" to "bad_format"))))
-        client.call(client.signer(PhoneCommands.apiCall(r.method, r.path, body, ref())), { reply -> done(answer(reply)) })
+        terminalAllowed(r.method, r.path) { ok ->
+            if (!ok) return@terminalAllowed done(PageBridge.json(403, mapOf("code" to "forbidden")))
+            client.call(client.signer(PhoneCommands.apiCall(r.method, r.path, body, ref())), { reply ->
+                // A terminal this phone just opened may be used without asking again.
+                if (PageBridge.terminalUse(r.method, r.path) == PageBridge.TerminalUse.Open && reply is CommandReply.Ok) {
+                    (((reply.data as? Map<*, *>)?.get("body") as? Map<*, *>)?.get("id") as? String)?.let(terminal::add)
+                }
+                done(answer(reply))
+            })
+        }
+    }
+
+    private fun terminalAllowed(method: String, path: String, done: (Boolean) -> Unit) {
+        when (val use = PageBridge.terminalUse(method, path)) {
+            PageBridge.TerminalUse.None -> done(true)
+            PageBridge.TerminalUse.Open -> if (terminal.takeFresh()) done(true) else confirm(REASON, done)
+            is PageBridge.TerminalUse.Session -> if (terminal.knows(use.id) || terminal.takeFresh()) { terminal.add(use.id); done(true) }
+                else confirm(REASON) { ok -> if (ok) terminal.add(use.id); done(ok) }
+        }
+    }
+
+    /** For WebView threads: waits for the check (the prompt runs on the main thread). */
+    private fun terminalAllowedBlocking(method: String, path: String): Boolean {
+        val latch = CountDownLatch(1)
+        var ok = false
+        terminalAllowed(method, path) { ok = it; latch.countDown() }
+        return latch.await(120, TimeUnit.SECONDS) && ok
     }
 
     private fun answer(reply: CommandReply): PageBridge.Answer = when (reply) {
@@ -65,7 +98,7 @@ class SessionContentSource(private val client: RelaySessionClient) : ContentSour
         var first: CommandReply? = null
         client.call(client.signer(PhoneCommands.apiStream(path, ref())), { reply -> first = reply; started.countDown() }, stream = { event ->
             when (event) {
-                is StreamEvent.Data -> body.add(PageBridge.sse(event.data))
+                is StreamEvent.Data -> body.add(PageBridge.sse(event.data, event.event))
                 // A dropped stream just ends; the page re-attaches with after=<last seq>.
                 is StreamEvent.End -> body.end()
             }
@@ -126,5 +159,22 @@ class SessionContentSource(private val client: RelaySessionClient) : ContentSour
 
     private companion object {
         const val TIMEOUT_S = 20L
+        const val REASON = "Open the terminal"
     }
+}
+
+/**
+ * Which terminals this phone may use without asking again: those opened or
+ * joined after a check, and anything asked for shortly after the terminal
+ * button's own check. Memory only; locking the app forgets them all.
+ */
+class TerminalGate {
+    private val ids = HashSet<String>()
+    private var freshUntil = 0L
+
+    @Synchronized fun checked(now: Long = System.currentTimeMillis()) { freshUntil = now + 30_000 }
+    @Synchronized fun takeFresh(now: Long = System.currentTimeMillis()) = now < freshUntil
+    @Synchronized fun knows(id: String) = id in ids
+    @Synchronized fun add(id: String) { if (ids.size < 32) ids.add(id) }
+    @Synchronized fun forget() { ids.clear(); freshUntil = 0L }
 }
