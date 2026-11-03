@@ -1,0 +1,50 @@
+# Phone link (computer side)
+
+Pairs the Girru phone app with this computer and serves it over an end-to-end
+encrypted link. The contract is `packages/relay/PROTOCOL.md`; this folder is
+the computer's half of it. No UI here.
+
+| File | What it does |
+|---|---|
+| `protocol/e2e.ts`, `protocol/encoding.ts`, `protocol/websocket.ts` | Copies of `packages/relay/src`, unchanged. `test/phone-protocol.test.mjs` fails when they drift: copy them again, never edit them here. |
+| `protocol/pairing.ts` | QR code, pairing key, `g1.preq`, check code, `g1.pwel`, `g1.ntf` (both sides). |
+| `store.ts` | Migration 164 tables: paired phones, the computer identity, settings, approvals shown to each phone. Private key, notification keys and push tokens are encrypted with the app's `ENCRYPTION_KEY`. |
+| `service.ts` | `phoneLink()`: pairing sessions, relay connection, sessions, the command gate. |
+| `relay-connector.ts` | Outbound WebSocket to the relay: signed hello, allow list, open pairing ids, backoff with jitter. |
+| `commands.ts` | What a phone may ask, run as the owner through the same code as the computer's pages. |
+| `lan-listener.ts` | Wi-Fi path. **Off by default** (see below). |
+
+Owner API: `src/api/routes/phone.ts` (`/api/phone/*`, owner only). Agent
+tool: `phone_devices` (read only). No tool pairs, allows or forgets a phone.
+
+## Rules kept here
+
+- The relay connection opens only while a paired anywhere-phone or an open
+  pairing needs it, and only after `startPhoneLink()` (server.ts, background
+  on). With `AGENT_PLAYER_BACKGROUND=off` nothing dials out.
+- A shown QR code renews every 2 minutes; the old pairing id closes on the
+  relay at once. One request per pairing id; a second, different one cancels
+  the pairing with the warning `second_request`.
+- Nothing is paired without the owner's Allow. Every other phone then gets a
+  signed notice.
+- Every command is signed and sealed and passes the counter, time, nonce and
+  lifetime checks. The counter is stored before the command runs.
+- A phone may decide only approvals it was shown (`approval.pending`). An
+  owner with a second factor gets `verification_required`: the phone never
+  skips it.
+- A `wifi` phone is never on the relay allow list, and relay frames from it
+  are ignored.
+- Audit rows carry the phone's device id.
+
+## Wi-Fi listener (needs the owner's decision)
+
+Every service binds to 127.0.0.1. A listener the phone can reach on the local
+network must bind to a local network address, so it is built but **not
+switched on**: it starts only when the `phone.lanListen` setting holds
+`{"host","port"}`, and there is no API that sets it. Until it is on, a `wifi`
+phone can be paired and stored but is reached only once the listener runs.
+
+## Not done yet
+
+Push notifications (APNs / FCM through the relay), the direct internet path,
+file chunks, the pairing screens, and the second-factor flow on the phone.

@@ -209,7 +209,11 @@ The JSON request:
 | `sig` | the phone's signature, below. Required |
 
 The request is sent with `{t:"send", pairing, env}` on the relay, so it arrives
-with the phone's proven device id in `from`.
+with the phone's proven device id in `from`. The phone lists the computer's
+device id (`cid` from the QR code) in its own allow list from the scan on: the
+welcome comes back addressed to the phone's device id, by the same path the
+request used (relay or local network), whatever path the owner picks for the
+phone afterwards.
 
 **Request signature.** `sig` proves the phone holds the private key of the
 `key` it sends:
@@ -307,6 +311,13 @@ works. The app shows which path is active.
    connection details they swap for this are themselves sent as encrypted
    envelopes through the relay.
 3. **Relay.** As the last resort, envelopes go through the relay.
+
+On the local network the computer speaks the relay's own frames (below) on a
+direct connection: `challenge`, the signed `hello` over the name
+`ws://<host>:<port>/v1`, `ready`, then `send` and `msg`. Only paired phones, or
+a phone sending to an open pairing id, get anything through. A phone paired
+as "Wi-Fi only" is never served through the relay: the computer leaves it off
+its relay allow list.
 
 The same end-to-end encryption and the same signed commands are used on every
 path. The computer only dials out (to the relay and for the direct path), so it
@@ -434,8 +445,13 @@ allow permissions stay in force.
 An approval or denial is the signed command
 
 ```
-body = {"approve": true | false, "id": "<approval id>", "type": "approval.decide"}
+body = {"approve": true | false, "id": "<approval id>", "paramsHash": "<hex>", "type": "approval.decide"}
 ```
+
+`paramsHash` is the value the computer sent with that approval in the
+Approvals list; it is required to approve (optional to deny), so the phone
+approves exactly the parameters it showed. A changed request has a new hash
+and is refused.
 
 (the iPhone app writes the keys in sorted order; the computer reads the body as
 JSON and must not depend on key order, since the signature covers the exact
@@ -470,6 +486,28 @@ only under rules 1 and 2 above, so the answer tells a phone nothing about
 approvals it was not given. The answer is a hint for the phone's screen, not a
 permission: the computer checks again when the signed `approval.decide`
 arrives.
+
+### Inside a session: requests and answers
+
+Every message inside a session is one JSON object in a `g1.msg` envelope.
+
+- **Phone → computer.** A signed command (above), or the one unsigned query
+  `approval.pending` with an `id`. The command `body` is JSON with a `type`
+  and an optional `ref` (1 to 64 letters, digits, `-` or `_`).
+- **Computer → phone.** `{type:"reply", ref, ok:true, data}` or
+  `{type:"reply", ref, ok:false, error}`. `ref` is the body's `ref`, or the
+  command's `nonce` when there is none or the command was refused before its
+  body was read (`replay`, `stale`, `bad_signature`, `expired`, ...). A
+  started chat turn then sends `{type:"run", ref, runId, seq, frame}` for each
+  run event and one `{type:"run.end", ref, runId, status}`.
+
+Commands in v1: `chat.list`, `chat.messages {id, before?}`,
+`chat.send {id?, message, agentId?, model?}`, `chat.stop {runId}`,
+`approval.pending` (no `id`: the pending approvals, each recorded as given to
+this phone), `approval.pending {id}`, `approval.decide`, `tasks.list {place?}`,
+`schedules.list`, `team.list`. An owner with a second factor gets
+`verification_required` for an approval: the phone sends the owner to the
+computer and nothing runs.
 
 ## Relay wire protocol
 
@@ -556,6 +594,8 @@ shows it.
   computer's identity key. The phone (iOS Notification Service Extension, or
   the Android app) checks the signature and decrypts before showing anything.
   A notification without a valid signature is never shown with its content.
+- Until push delivery exists, the computer sends a notice as an envelope to
+  each paired phone that is connected at that moment (`{t:"send", to, env}`).
 - Apple and Google see only that a notification was sent to a token, and an
   encrypted blob. The APNs key and the Firebase key live only on the relay
   server, never in the apps or in this repository.
