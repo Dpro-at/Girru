@@ -437,6 +437,19 @@ export function startDailyBackups(): void {
 
 // --- restore -------------------------------------------------------------------------
 
+/**
+ * STORE-MAP-01 P4 (D8): true when backup `id` passed its check, its signed
+ * list still verifies, and it holds the data file `rel` (e.g. memory/memory.db)
+ * with a passed integrity check. Used before a step deletes that file.
+ */
+export async function backupHolds(id: string, rel: string): Promise<boolean> {
+  const b = getBackup(id);
+  if (!b.checked) return false;
+  const m = readManifest(b.dir);
+  if (!m || m.id !== id || !m.checked || (await verified(b.dir, m))) return false;
+  return m.entries.some((e) => e.root === 'data' && e.path.split(/[\\/]/).join('/') === rel && e.check !== 'failed');
+}
+
 /** Ask for a restore: back up now, then leave the marker for the next start. The caller restarts. */
 export async function requestRestore(id: string): Promise<{ undoId: string }> {
   const b = getBackup(id);

@@ -277,6 +277,15 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
       });
     }
 
+    // STORE-MAP-01 P4 (D8): the old memory index file goes after a verified backup (GIRRU_STORE_P4 only).
+    if ((await import('../services/store-p4.js')).storeP4Enabled()) {
+      const { retireLegacyIndex } = await import('../memory/legacy-index.js');
+      setImmediate(() => {
+        retireLegacyIndex().then((r) => { if (r.state !== 'none') console.log(`[Store P4] old memory index: ${r.state}${r.state === 'retired' ? ` (backup ${r.backupId})` : r.state === 'kept' ? ` (${r.reason})` : ''}`); })
+          .catch((err) => console.warn('[Store P4] old memory index not retired:', (err as Error)?.message));
+      });
+    }
+
     // MEM-UX-02: exported memory files follow the database (untouched files only).
     const { startMemoryFilesSync } = await import('../memory/files-sync.js');
     startMemoryFilesSync();
