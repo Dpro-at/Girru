@@ -44,6 +44,8 @@ export class BridgeError extends Error {
 let bridgeEnv: BridgeEnv = {};
 export function setBridgeEnv(where: BridgeEnv): void { bridgeEnv = where; }
 const where = (): BridgeEnv => ({ home: bridgeEnv.home ?? os.homedir(), env: bridgeEnv.env ?? process.env });
+/** The home folder the coding apps' user-level files live in (a temporary one in tests). */
+export const bridgeHome = (): string => where().home!;
 
 async function ownProject(ownerId: string, projectId: unknown): Promise<Project> {
   if (typeof projectId !== 'string' || !projectId) throw new BridgeError('projectId is required');
