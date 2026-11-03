@@ -8,6 +8,7 @@
  *   .girru/tasks.md      the task file (on with the layout; no separate Rules step)
  *   .girru/brief.md      written by the debounced brief sync (P6), when that is on
  *   .git/info/exclude    Girru's files kept out of Git (when the owner keeps that on)
+ *   .cursor/rules/girru.mdc  a pointer to AGENTS.md, while the Cursor client is on
  *
  * `layoutPreview` writes nothing. `layoutApply` takes the preview's hash and
  * refuses when anything changed since, or when any file is a conflict: then
@@ -21,7 +22,17 @@ import { storeP6Enabled } from '../../services/store-p6.js';
 import { storeP7Enabled } from '../../services/store-p7.js';
 import { projectBrief } from './brief.js';
 import { ManagedFileError, previewFiles, type FilePlan } from './managed-files.js';
-import { audit, folderSettings, patchFolder } from './store.js';
+import { audit, clientEnabled, folderSettings, patchFolder } from './store.js';
+import { SafeFileError, safeWriteFile } from '../../services/safe-file.js';
+
+/** Cursor reads its own rule files, not AGENTS.md: one always-on rule points it there. */
+export const CURSOR_RULE = '.cursor/rules/girru.mdc';
+export const CURSOR_RULE_TEXT = [
+  '---', 'description: Girru project memory, rules and tasks', 'alwaysApply: true', '---',
+  '<!-- Written by Girru. Turning Cursor off in Girru removes nothing else. -->',
+  'Read the Girru section of AGENTS.md before you start: it holds the project brief, the owner\'s rules and where the task file is.',
+  'Use the dpro-memory tools to recall and save memory, and write a handoff when you stop.', '',
+].join('\n');
 import { BridgeError } from './service.js';
 
 export type LayoutAction = 'create' | 'update' | 'unchanged' | 'conflict';
@@ -29,7 +40,7 @@ export interface LayoutFile {
   relative: string;
   action: LayoutAction;
   /** Which part of Girru keeps the file up to date afterwards. */
-  by: 'project-files' | 'rules' | 'task-file' | 'brief-sync';
+  by: 'project-files' | 'rules' | 'task-file' | 'brief-sync' | 'cursor';
   reason?: string;
   /** Girru's part before (-) and after (+), where there is one. */
   diff?: string;
@@ -87,6 +98,7 @@ async function plan(ownerId: string, projectId: unknown): Promise<{ project: Pro
     // Written and kept current by the brief sync from the database; the layout only starts it.
     files.push(await own('.girru/brief.md', null, 'brief-sync'));
   }
+  if (await clientEnabled(ownerId, 'cursor')) files.push(await own(CURSOR_RULE, CURSOR_RULE_TEXT, 'cursor'));
   return { project, folder, files };
 }
 
@@ -129,6 +141,7 @@ export async function layoutApply(ownerId: string, projectId: unknown, input: { 
     // Rules file, the one Girru section, the task rule and the Git exclude list, as the rules writer keeps them.
     await rf.writeFiles(p.project.id);
     await ensureTaskFile(p.project.id);
+    if (p.files.some((f) => f.by === 'cursor' && f.action !== 'unchanged')) safeWriteFile(p.folder, CURSOR_RULE, CURSOR_RULE_TEXT);
   } catch (err) {
     // Put the switches back as they were; files already written stay valid and are rewritten on the next sync.
     await patchFolder(ownerId, p.project.id, { filesEnabled: was.filesEnabled });
@@ -136,6 +149,7 @@ export async function layoutApply(ownerId: string, projectId: unknown, input: { 
     else await q.run('DELETE FROM agent_rule_files WHERE project_id = ?', p.project.id);
     if (err instanceof rf.RuleFilesError) throw new BridgeError(err.message, 409, err.code === 'unsafe' ? 'unsafe_path' : err.code);
     if (err instanceof ManagedFileError) throw new BridgeError(err.message, err.status, err.code);
+    if (err instanceof SafeFileError) throw new BridgeError(err.message, 409, 'unsafe_path');
     throw err;
   }
   if (storeP6Enabled()) {

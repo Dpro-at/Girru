@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Entry of the dpro-memory MCP server (MEM-BRIDGE-01), started by a CLI:
- *   node mcp-stdio.js --client claude-code|codex|gemini-cli|antigravity
+ *   node mcp-stdio.js --client claude-code|codex|gemini-cli|antigravity|cursor|copilot
  * Environment (set by Girru's registration: paths only, never a secret; plus, from Girru's launcher only):
  *   AGENT_PLAYER_CONFIG_DIR  folder of instance.json;  AGENT_PLAYER_URL  the local backend
  *   GIRRU_SESSION_CAPABILITY  only in a process Girru's launcher started (STORE-MAP-01 pilot): its session
@@ -12,12 +12,13 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { cliConfigDir } from '../../services/instance-identity.js';
 import { createBridgeMcpServer, httpBackend } from './mcp-server.js';
 
-const CLIENTS = new Set(['claude-code', 'codex', 'gemini-cli', 'antigravity']);
+// cursor and copilot are registered only while GIRRU_STORE_P7 is on (the backend checks the switch).
+const CLIENTS = new Set(['claude-code', 'codex', 'gemini-cli', 'antigravity', 'cursor', 'copilot']);
 
 async function main(): Promise<void> {
   const i = process.argv.indexOf('--client');
   const client = i >= 0 ? process.argv[i + 1] : '';
-  if (!CLIENTS.has(client)) throw new Error('--client must be claude-code, codex, gemini-cli or antigravity');
+  if (!CLIENTS.has(client)) throw new Error('--client must be claude-code, codex, gemini-cli, antigravity, cursor or copilot');
   const backend = httpBackend({
     client, cwd: process.cwd(), configDir: cliConfigDir(),
     backendUrl: process.env.AGENT_PLAYER_URL || 'http://127.0.0.1:41522',

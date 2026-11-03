@@ -118,9 +118,10 @@ Creating a project today writes no files; they appear when the owner turns them 
 | Codex | `AGENTS.md` | `dpro-memory` MCP server | Today |
 | Gemini CLI | `GEMINI.md` → `AGENTS.md` | `dpro-memory` MCP server | Today |
 | Antigravity | — | `dpro-memory` MCP server | Today (MCP only) |
-| Cursor | — | — | Planned |
+| Cursor | `.cursor/rules/girru.mdc` → `AGENTS.md` | `dpro-memory` MCP server (`~/.cursor/mcp.json`) | With `GIRRU_STORE_P7` |
+| GitHub Copilot CLI | `AGENTS.md` | `dpro-memory` MCP server (`~/.copilot/mcp-config.json`) | With `GIRRU_STORE_P7` |
 
-The MCP server answers only for folders Girru knows as project folders, and only from that project's drawer. Coding tools never write memory directly: `memory_propose` creates a proposal the owner approves, and `handoff_write` leaves a handoff note. Girru changes only its own entry in each tool's settings file; the tools' own memory files are read for import only through review.
+The MCP server answers only for folders Girru knows as project folders, and only from that project's drawer. Coding tools never write memory directly: `memory_propose` creates a proposal the owner approves, and `handoff_write` leaves a handoff note. Girru changes only its own entry in each tool's settings file. With `GIRRU_STORE_P7`, turning a tool off in Girru takes that entry out again, and a clean-up before uninstalling takes it out of every tool, keeping whatever else the tool's file holds; the tools' own memory files are read for import only through review.
 
 When Girru runs a coding app as a reply inside a chat, the app gets the agent's definition, a fixed memory pack and the conversation; it does not use the owner's own MCP settings.
 
@@ -201,6 +202,8 @@ A first version of the change log, the session capability and the shared agent c
 Nothing is written when any check fails, and the error says why.
 
 The same switch adds **the project folder layout in one step**: a dry run lists every file Girru would create or change, and the owner's confirm writes them all (or nothing, when one is a conflict). The task file comes on with the project's files, with no separate Rules step. An existing `.girru/tasks.md` is kept as it is. The routes are in the [API reference](../API.md).
+
+Tasks that arrive from `.girru/tasks.md` are treated as untrusted. An agent may plan such a task, but until the owner approves the project once, every tool that changes something asks first, and a scheduled run of the task does not start. Rules never come from the file: the task's text reaches the agent as data only.
 
 ### One agent context and one Girru section (off by default)
 

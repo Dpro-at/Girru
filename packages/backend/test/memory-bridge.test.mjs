@@ -120,7 +120,8 @@ test('owner API: only the owner; status lists the CLIs (all off) and the project
   assert.equal((await call('br-user', 'GET', '/api/memory-bridge')).statusCode, 403);
   assert.equal((await app.inject({ method: 'GET', url: '/api/memory-bridge' })).statusCode, 401);
   const s = (await call(OWNER, 'GET', '/api/memory-bridge')).json();
-  assert.deepEqual(s.clients.map((c) => [c.client, c.enabled]), [['claude-code', false], ['codex', false], ['gemini-cli', false], ['antigravity', false]]);
+  // With GIRRU_STORE_P7 on, Cursor and Copilot follow these four (test/store-p7-clients.test.mjs).
+  assert.deepEqual(s.clients.filter((c) => ['claude-code', 'codex', 'gemini-cli', 'antigravity'].includes(c.client)).map((c) => [c.client, c.enabled]), [['claude-code', false], ['codex', false], ['gemini-cli', false], ['antigravity', false]]);
   assert.equal(s.projects[0].projectId, project.id);
   assert.equal(s.projects[0].filesEnabled, false);
 });
@@ -288,7 +289,7 @@ test('registration: preview -> confirm -> undo restores each CLI config byte for
     tokens.push(reg);
   }
   const s = (await call(OWNER, 'GET', '/api/memory-bridge')).json();
-  assert.ok(s.clients.every((c) => c.enabled && c.registrationId), 'registration switches the CLI on');
+  assert.ok(s.clients.filter((c) => ['claude-code', 'codex', 'gemini-cli', 'antigravity'].includes(c.client)).every((c) => c.enabled && c.registrationId), 'registration switches the CLI on');
 
   for (const reg of tokens) {
     const u = await call(OWNER, 'POST', `/api/memory-bridge/registrations/${reg.id}/undo`);

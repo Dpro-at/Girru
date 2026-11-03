@@ -23,7 +23,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { storeP4Enabled } from '../../services/store-p4.js';
 import { authorizeActiveRole } from '../../auth/route-guards.js';
 import {
-  activity, backflowNow, BridgeError, bridgeStatus, filesApply, filesPreview, mcpCall, openSession, registrationApply, registrationPreview,
+  activity, backflowNow, BridgeError, bridgeStatus, cleanUpTools, filesApply, filesPreview, mcpCall, openSession, registrationApply, registrationPreview,
   registrationUndo, setClient, setFolder,
 } from '../../memory/bridge/service.js';
 import { CAPABILITY_HEADER, CapabilityError, issueCapability, listCapabilities, revokeCapability } from '../../memory/bridge/capability.js';
@@ -35,6 +35,7 @@ import { storeP6Enabled } from '../../services/store-p6.js';
 import { storeP2Enabled } from '../../services/agent-context/switch.js';
 import { storeP7Enabled } from '../../services/store-p7.js';
 import { layoutApply, layoutPreview } from '../../memory/bridge/layout.js';
+import { approveTaskFile, revokeTaskFile, taskTrust, TaskTrustError } from '../../services/task-file-trust.js';
 import { storeP3Enabled } from '../../services/store-p3.js';
 
 const OWNER_ONLY = ['owner'] as const;
@@ -45,7 +46,7 @@ type Req = FastifyRequest<{ Params: Record<string, string>; Querystring: Record<
 const bodyOf = (r: { body?: unknown }): Record<string, any> => (r.body && typeof r.body === 'object' && !Array.isArray(r.body) ? r.body as Record<string, any> : {});
 
 function fail(reply: FastifyReply, err: unknown) {
-  if (err instanceof BridgeError || err instanceof CapabilityError) return reply.code(err.status).send({ error: err.message, code: err.code });
+  if (err instanceof BridgeError || err instanceof CapabilityError || err instanceof TaskTrustError) return reply.code(err.status).send({ error: err.message, code: err.code });
   throw err;
 }
 
@@ -70,6 +71,12 @@ export async function memoryBridgeRoutes(fastify: FastifyInstance) {
   if (storeP7Enabled()) {
     fastify.get('/api/memory-bridge/projects/:projectId/layout', { config }, asOwner(async (o, r) => ({ preview: await layoutPreview(o, r.params.projectId) })));
     fastify.post('/api/memory-bridge/projects/:projectId/layout', { config }, asOwner(async (o, r) => ({ result: await layoutApply(o, r.params.projectId, bodyOf(r)) })));
+    // OPS8: Girru's entries out of every tool config (the uninstaller calls this).
+    fastify.post('/api/memory-bridge/clean-up', { config }, asOwner((o) => cleanUpTools(o)));
+    // SEC2-3: tasks from the project's file run tools only after the owner approves the project once.
+    fastify.get('/api/memory-bridge/projects/:projectId/task-approval', { config }, asOwner(async (o, r) => ({ approval: await taskTrust(o, r.params.projectId) })));
+    fastify.post('/api/memory-bridge/projects/:projectId/task-approval', { config }, asOwner(async (o, r) => ({ approval: await approveTaskFile(o, r.params.projectId, bodyOf(r)) })));
+    fastify.delete('/api/memory-bridge/projects/:projectId/task-approval', { config }, asOwner(async (o, r) => ({ approval: await revokeTaskFile(o, r.params.projectId) })));
   }
   fastify.patch('/api/memory-bridge/projects/:projectId', { config }, asOwner(async (o, r) => ({ folder: await setFolder(o, r.params.projectId, bodyOf(r)) })));
   fastify.post('/api/memory-bridge/projects/:projectId/backflow', { config }, asOwner(async (o, r) => ({ result: await backflowNow(o, r.params.projectId) })));

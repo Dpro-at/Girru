@@ -108,6 +108,29 @@ with the one Girru section, `CLAUDE.md` and `GEMINI.md` pointers, `.girru/rules.
 `.git/info/exclude`, and `.girru/brief.md` when the brief sync (`GIRRU_STORE_P6`) is
 on. It needs the one Girru section (`GIRRU_STORE_P2`): `409 p2_off` otherwise.
 
+### Coding tools with `GIRRU_STORE_P7` (owner only)
+`cursor` and `copilot` (GitHub Copilot CLI) join the `:client` values of the memory bridge
+routes. Turning a tool off (`PUT /api/memory-bridge/clients/:client` with
+`{ enabled: false }`) also undoes Girru's registration in its config and answers
+`{ undone, failed }`. `POST /api/memory-bridge/clean-up` undoes every registration
+before Girru is removed → `{ undone: [{ id, client, mode }], failed }`; only Girru's entry
+leaves each file. Tool configs are written through the safe file writer, so a linked
+config is refused.
+
+### Tasks from the project's task file (owner only, `GIRRU_STORE_P7`)
+| Route | Body / answer |
+|---|---|
+| `GET /api/memory-bridge/projects/:projectId/task-approval` | `{ approval: { projectId, approved, approvedAt, waiting } }`; `waiting` counts open tasks from the file that wait for the approval |
+| `POST /api/memory-bridge/projects/:projectId/task-approval` | `{ confirm: true }` → the same answer, approved. `400 confirm_required` without it |
+| `DELETE /api/memory-bridge/projects/:projectId/task-approval` | takes the approval back → the same answer |
+
+A task written in `.girru/tasks.md` (or a block the file changed) is text from someone
+else. Until the owner approves the project once, Continue on such a task opens its chat
+in "Plan first" mode, so every tool that changes something asks the owner, and its answer
+carries `approval: { needed: true, projectId }`. A scheduled run of it does not start and
+the owner gets a notification. The task's text always reaches the model as data, never as
+a rule.
+
 ### Agent packages (owner only, `GIRRU_STORE_P5`)
 | Route | Body / answer |
 |---|---|

@@ -29,6 +29,7 @@ import {
   type ReadFile, type Stamp, type TaskBlock,
 } from './task-file-format.js';
 import { storeP6Enabled } from './store-p6.js';
+import { markFromFile } from './task-file-trust.js';
 
 export const TASKS_FILE = '.girru/tasks.md';
 export const DONE_FILE = '.girru/tasks-done.md';
@@ -297,6 +298,8 @@ export function syncTasks(projectId: string): Promise<SyncResult> {
         await updateCard(owner.user_id, boardId, link.card_id, { ...patch, expectedVersion: Number(fresh?.version ?? card.version) });
       }
       await q.run('UPDATE task_file_cards SET block = ?, problem = NULL, finished = 0, updated_at = CURRENT_TIMESTAMP WHERE card_id = ?', JSON.stringify(task), link.card_id);
+      // SEC2-3: text the file changed is no longer Girru's own.
+      await markFromFile(link.card_id, before, task);
       if (last) { ({ text, done } = finish(text, done, task)); rewrite = true; await q.run('UPDATE task_file_cards SET finished = 1 WHERE card_id = ?', link.card_id); }
     }
     // A task gone from tasks.md: in tasks-done.md it is finished (card to Done); otherwise its card is archived (reversible).
@@ -375,6 +378,7 @@ export async function cardChanged(cardId: string): Promise<void> {
     const inFile = readTasks(text).tasks.find((t) => t.task.no === fresh.task_no) ?? readTasks(doneText).tasks.find((t) => t.task.no === fresh.task_no);
     if (inFile?.problem) return;
     const task = inFile ? { ...inFile.task, title: now.task.title, state: now.task.state, priority: now.task.priority, agent: now.task.agent, department: now.task.department } : now.task;
+    if (inFile && before) await markFromFile(cardId, before, { ...inFile.task, title: before.title });
     if (now.last) {
       const f = finish(text, doneText, task);
       await writeFile(folder, TASKS_FILE, await stamped(link.project_id, f.text));
@@ -424,7 +428,8 @@ export async function addCardTask(cardId: string, conversationId: string): Promi
     const now = await cardTask(cardId, { card_id: cardId, project_id: projectId, task_no: no, block: JSON.stringify(base), problem: null, finished: 0 }, owner.user_id);
     if (!now) return;
     await writeFile(folder, TASKS_FILE, await stamped(projectId, withTask(text, now.task), { no, cardId }));
-    await q.run('INSERT INTO task_file_cards (card_id, project_id, task_no, block, problem, finished) VALUES (?, ?, ?, ?, NULL, 0)', cardId, projectId, no, JSON.stringify(now.task));
+    // SEC2-3: a card made in Girru is not from the file (until the file changes it).
+    await q.run('INSERT INTO task_file_cards (card_id, project_id, task_no, block, problem, finished, from_file) VALUES (?, ?, ?, ?, NULL, 0, 0)', cardId, projectId, no, JSON.stringify(now.task));
   }).catch(() => undefined);
 }
 
@@ -492,6 +497,7 @@ export async function agentTaskUpdate(ownerId: string, agentId: string, cardId: 
     if (found.problem) throw new BoardError(400, 'invalid_board', `${link.task_no} is not in the task format (${found.problem}); the owner fixes it first`);
     const now = new Date(), today = now.toISOString().slice(0, 10);
     const t = found.task;
+    await markFromFile(cardId, parse(link.block), t);
     const task: TaskBlock = {
       ...t, done: done ?? t.done, left: left ?? t.left, next: next ?? t.next,
       // An agent that writes its own "time · name ·" in front gets it once, from Girru.

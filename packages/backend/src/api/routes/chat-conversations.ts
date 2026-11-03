@@ -77,6 +77,7 @@ import { packHandoffText } from '../../memory/handoff/scope.js';
 import { refreshSummaries, type HistoryTurn } from '../../memory/context/summaries.js';
 import { approvalOutcomes, toolWorkRecords, type ApprovalOutcome } from '../../services/chat-tool-history.js';
 import { projectKeyOf } from '../../memory/project-keys.js';
+import { approvalNeeded } from '../../services/task-file-trust.js';
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}$/;
 /** A model id the chat may pick (local model names like qwen3.5:9b, or claude-…). */
@@ -348,9 +349,12 @@ export async function sendScheduled(userId: string, sessionId: string, message: 
  * card), with the chosen agent (put on the card when it is not yet) and app; its first turn starts at once.
  * The Continue button and a card's schedule both start here.
  */
-export async function continueCard(userId: string, role: string, boardId: string, cardId: string, agentIdIn?: string, model?: string, runId?: string, options?: Partial<CardRunOptions> & { onFinished?: (status: string) => Promise<void> }): Promise<{ code: number; body: Record<string, unknown>; conversationId?: string }> {
+export async function continueCard(userId: string, role: string, boardId: string, cardId: string, agentIdIn?: string, model?: string, runId?: string, options?: Partial<CardRunOptions> & { onFinished?: (status: string) => Promise<void>; scheduled?: boolean }): Promise<{ code: number; body: Record<string, unknown>; conversationId?: string }> {
   const m = await cardContinueMessage(userId, boardId, cardId);
   if (!m) return { code: 404, body: { code: 'not_found' } };
+  // STORE-MAP-01 P7 (SEC2-3): a task from the project's file is planned only until the owner approves the project once.
+  const untrusted = await approvalNeeded(cardId);
+  if (untrusted && options?.scheduled) return { code: 403, body: { code: 'task_file_approval_needed', projectId: untrusted.projectId } };
   const agentId = agentIdIn ?? (await q.one<{ agent_id: string }>('SELECT agent_id FROM board_card_agents WHERE card_id = ? ORDER BY agent_id LIMIT 1', cardId))?.agent_id;
   if (agentId && !(await q.one('SELECT 1 FROM board_card_agents WHERE card_id = ? AND agent_id = ?', cardId, agentId)) && await q.one('SELECT id FROM agents_config WHERE id = ?', agentId)) {
     // The one who continues does the work: it gets the card (so its board tools reach it).
@@ -358,7 +362,7 @@ export async function continueCard(userId: string, role: string, boardId: string
     await q.run('UPDATE board_cards SET version = version + 1 WHERE id = ?', cardId);
   }
   // RUNS-01 (board RN6): a repeating task may keep one chat for all its runs instead of a new chat each time.
-  if (options?.newChat === false) {
+  if (options?.newChat === false && !untrusted) {
     const last = (await q.one<{ conversation_id: string }>('SELECT conversation_id FROM board_card_chats WHERE card_id = ? ORDER BY added_at DESC, conversation_id DESC LIMIT 1', cardId).catch(() => undefined))?.conversation_id;
     const same = last ? await findConversation(userId, last) : null;
     if (same && !same.archived) {
@@ -366,14 +370,14 @@ export async function continueCard(userId: string, role: string, boardId: string
       return { code: out.code, body: out.body, conversationId: same.id };
     }
   }
-  const made = await createConversation(userId, { title: m.title, agentId: agentId ?? null, projectId: options?.projectId ?? m.projectId, model: model || undefined, ...(options?.thinking ? { thinking: options.thinking } : {}) });
+  const made = await createConversation(userId, { title: m.title, agentId: agentId ?? null, projectId: options?.projectId ?? m.projectId, model: model || undefined, ...(options?.thinking ? { thinking: options.thinking } : {}), ...(untrusted ? { mode: 'plan' as const } : {}) });
   // The card keeps the chat it came from; every Continue is one more of its chats (TASKPAGE-02).
   await q.run('UPDATE board_cards SET conversation_id = ? WHERE id = ? AND conversation_id IS NULL', made.id, cardId);
   await addCardChat(cardId, made.id);
   const c = await findConversation(userId, made.id);
   if (!c) return { code: 404, body: { code: 'not_found' } };
   const out = await startTurn({ userId, role, c, runId: runId ?? `task-${randomUUID()}`, message: m.message, model: model || undefined, onFinished: options?.onFinished });
-  return { code: out.code, body: out.body, conversationId: made.id };
+  return { code: out.code, body: untrusted ? { ...out.body, approval: { needed: true, projectId: untrusted.projectId } } : out.body, conversationId: made.id };
 }
 /** A card's schedule is due: Continue as its agent and app (owner only, like chat schedules). */
 export async function runScheduledCard(userId: string, boardId: string, cardId: string, agentId: string | null, model: string, runKey: string, options?: CardRunOptions): Promise<'started' | 'busy' | 'failed'> {
@@ -385,7 +389,11 @@ export async function runScheduledCard(userId: string, boardId: string, cardId: 
     const tell = options?.notify === 'all' || ((options?.notify ?? 'important') === 'important' && status !== 'complete');
     if (tell) await notifyOwner({ userId, title: `“${title}” ${status === 'complete' ? 'finished' : status === 'stopped' ? 'was stopped' : 'did not finish'}`, body: 'Open Runs to see its steps, log and why.', type: status === 'complete' ? 'success' : 'warning', channel: 'in_app', source: 'system', meta: { runId: `chat:${runKey}` } }).catch(() => undefined);
   };
-  const out = await continueCard(userId, user.role, boardId, cardId, agentId ?? undefined, model || undefined, runKey, { ...options, onFinished });
+  const out = await continueCard(userId, user.role, boardId, cardId, agentId ?? undefined, model || undefined, runKey, { ...options, onFinished, scheduled: true });
+  if (out.body.code === 'task_file_approval_needed') {
+    await notifyOwner({ userId, title: `“${title}” did not start`, body: 'It is a task from the project\'s task file. Approve tasks from this file once before they run on a schedule.', type: 'warning', channel: 'in_app', source: 'system', meta: { projectId: String(out.body.projectId ?? '') } }).catch(() => undefined);
+    return 'failed';
+  }
   return out.code < 300 ? 'started' : out.code === 409 || out.code === 429 ? 'busy' : 'failed';
 }
 
