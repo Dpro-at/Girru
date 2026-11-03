@@ -533,7 +533,7 @@ export async function createPreview(userId: string, input: CreatePreviewInput): 
       seen.add(`${drawerId(drawer)}\u0000${n}`);
       const counts: Partial<Record<RedactionType, number>> = {};
       for (const m of c.content.matchAll(/\[REDACTED:([a-z_]+)\]/g)) counts[m[1] as RedactionType] = (counts[m[1] as RedactionType] ?? 0) + 1;
-      const cls = classifyLearning({ content: c.content, type, drawer, origin: 'owner' });
+      const cls = classifyLearning({ content: c.content, type, drawer, origin: 'owner', imported: true });
       items.push({
         id: `i${items.length + 1}`, file: index, heading: c.heading, content: c.content, drawer: drawerId(drawer), type,
         include: !dup, status: dup ? 'duplicate' : 'eligible', redactions: counts, reasons: cls.reasons,
@@ -614,7 +614,7 @@ export async function revisePreview(userId: string, id: string, input: ReviseInp
     }
   }
   for (const i of next) {
-    const cls = classifyLearning({ content: i.content, type: i.type, drawer: parseDrawerId(i.drawer), origin: 'owner' });
+    const cls = classifyLearning({ content: i.content, type: i.type, drawer: parseDrawerId(i.drawer), origin: 'owner', imported: true });
     i.reasons = cls.reasons;
   }
   if (JSON.stringify(next) === JSON.stringify(items)) throw new ImportError('Nothing changed');

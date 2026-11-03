@@ -233,6 +233,11 @@ With the same switch:
 
 - **Faster recall:** recall keeps its own index in memory: each memory's word counts and vector, checked against the stored text and model on every search and read again only when they changed. The full rows are loaded for the results alone. The scores and order are the same as before. Measured on generated data with 100,000 memories (46,731 in the open drawers): 1.06 s to 0.11 s with offline vectors and 3.8 s to 0.30 s with 1,024-dimension vectors (median), with less than half the memory. The index never goes to disk, is capped (256 MB by default, `GIRRU_RECALL_INDEX_MB`), drops a user's entries after 30 minutes without a search and drops them at once when a memory is forgotten. The drawer filter of every memory query has its own index (migration 179, used with the switch off too).
 - **Backups that really restore:** before a backup is signed, its copy of the main database is unpacked into a scratch folder, opened, checked and counted against what was saved. A backup that fails this is not marked checked and cannot be restored. Backup files are owner-only (0600, folders 0700); the signing key and the forget ledger's key are never in a backup. On PostgreSQL the app still does not dump the database; it reports whether a pg_dump file newer than 26 hours is in the backups folder.
+- **Stays on this computer, enforced:** a Memory place whose switch is on (People by default) reaches only a model on this computer. For any other model (a provider's API, a coding app, an MCP client) its memories, memory tools and pinned facts leave the turn: in chat, coding-app replies, task runs and the coding tools' memory search, recall and brief. A coding app asking about such a project is told its memory stays on this computer. Where a model runs comes from configuration only: Ollama on a loopback address and LM Studio are local; nothing else is. A reply's trace lists the places that stayed (ids only).
+- **Personal data and special categories:** imported text and channel messages that hold other people's e-mail addresses, phone numbers, bank or card numbers, street addresses or identity numbers are flagged in the review (the kinds, never the values). Memories about health, religion, politics, sexuality, origin, union membership or genetic and biometric data are never saved by themselves, even where a scope rule saves everything else; the owner decides.
+- **One person:** `GET /api/memory/people/:key/export` gives everything about one person in one file: their memory place (current and replaced facts), memories elsewhere that mention them (by the memory graph or their name), their graph entries and the handoff lines that name them; an agent's own notes appear as ids only. `POST /api/memory/people/:key/forget` (with the person's name to confirm) forgets their place with its history, the mentioning memories the owner picked from the export and their graph entries in one action; handoff notes stay (they are work records). Both are owner only and audited (ids and counts).
+- **Old facts about people:** when memory retention runs, a fact about a person that was replaced more than 365 days ago is forgotten; the current fact stays.
+- **Members' private memory:** the owner cannot read a member's private memory through any memory route (tested).
 - **The forget ledger:** each forget adds a line to `forget-ledger.jsonl` in the data folder (owner-only) with the memory and user ids and a keyed hash of the text, never the text. A backup carries a copy. A restore keeps the current ledger and adds the backup's lines, and the next start forgets every line again, including the same text saved under another id, so a restored backup never brings forgotten memory back.
 
 ### One agent context and one Girru section (off by default)
@@ -255,7 +260,7 @@ With the same switch:
 | Memory extraction and summaries | the local model | Always local unless the owner explicitly allows a paid provider for that job |
 | Embeddings | the local embedding model on this computer, or an offline hash | Never a remote address |
 | Channel messages (Telegram, Discord and others) | the channel's service, and the model provider | A channel sender gets no owner memory |
-| Facts about people | **Planned:** the local model only, unless the owner allows a provider | Planned |
+| Facts about people | the local model only, unless the owner turns off "Stays on this computer" for People | With `GIRRU_STORE_P9`: enforced in chat, coding apps, task runs and the coding tools' memory |
 
 ### How long it is kept
 
@@ -266,14 +271,16 @@ With the same switch:
 | Memory history | Until the memory is forgotten |
 | Handoff notes | The newest 20 versions of each agent's note, and the newest 20 notes per project from coding tools |
 | A run's working notes (`GIRRU_STORE_P8`) | 14 days after the run's last note, then cleared |
+| A replaced fact about a person (`GIRRU_STORE_P9`) | 365 days after it was replaced, when memory retention runs; then forgotten |
+| The forget ledger (`GIRRU_STORE_P9`) | Ids and keyed hashes, kept so a restored backup never brings forgotten memory back |
 
 ### Export and forget
 
-- **Export:** each drawer can be exported as a Markdown file. **Planned:** export of everything about one person, and the agent package.
+- **Export:** each drawer can be exported as a Markdown file; with `GIRRU_STORE_P9` everything about one person in one file, and forgetting that person is one action.
 - **Delete** moves a memory to the Trash and can be undone.
 - **Forget** cannot be undone. It removes the memory, the text of all its versions (one tombstone without text remains), its index rows, its Markdown copies and exports, its text in proposals and its lines in stored summaries.
 - **Forget ledger** (`GIRRU_STORE_P9`): every forget is recorded with ids and a keyed hash only, and applied again after a backup is restored, so forgotten data does not come back. Backups made before a forget still hold the memory until they expire (14 days, 4 Sundays, 30 days for before-update and before-restore backups).
-- **Planned (decided):** in a workspace with members, the owner sees shared scopes only, never a member's private memory; a test will enforce it.
+- **Decided and tested:** in a workspace with members, the owner sees shared scopes only, never a member's private memory.
 
 ## Related pages
 

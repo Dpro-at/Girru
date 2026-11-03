@@ -170,6 +170,16 @@ A handoff in these answers is `{ id, agentId, agentName, app, fromAgentId, fromA
 
 The dpro-memory tools `project_brief` and `latest_handoff` take an optional `task` (`T-12`); `handoff_write` and `memory_handoff` take `blockers`, `files` and `task` (`404 unknown_task` for a number that is no task of the project). These arguments are listed only in a dpro-memory process started with the switch on. Agents on a model that is not on this computer (the Claude API, coding apps) also get `run_note`, `handoff_save` with `blockers` and `files`, and `team_delegate` with `task` and `handoff`; local models keep the tools they had.
 
+### One person's data (owner only, `GIRRU_STORE_P9`)
+Both answer `404 not_found` while the switch is off.
+
+| Route | Body / answer |
+|---|---|
+| `GET /api/memory/people/:key/export` | a download (`person-<key>-<date>.json`): `{ person, exportedAt, names, drawer, mentions, agentNotes: { count, ids }, graph, handoffs }`; `mentions` items carry `why: graph \| name`; `400` for a key that is not a person |
+| `POST /api/memory/people/:key/forget` | `{ confirm: <key>, mentionIds?: string[] }` → `{ drawer, mentions, graph }` (how many were forgotten); `mentionIds` must come from the export (`400` otherwise); handoff notes are kept |
+
+With the switch on, a memory retention run's answer also has `people: { forgotten, afterDays }` (replaced facts about people forgotten after 365 days). The dpro-memory `memory_search` and `memory_recall` answer "This project's memory stays on this computer…" for a project whose place stays on this computer.
+
 ### Agent packages (owner only, `GIRRU_STORE_P5`)
 | Route | Body / answer |
 |---|---|

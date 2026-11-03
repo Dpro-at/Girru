@@ -37,7 +37,7 @@ export type ContradictionRule = (typeof CONTRADICTION_RULES)[number];
 
 export const DEFAULT_RULES = { routine: 'save', important: 'ask', contradiction: 'ask' } as const;
 /** Reasons that always wait for the owner, whatever the rules say. */
-export const ALWAYS_ASK: ReadonlySet<string> = new Set(['credentials', 'outsider', 'permissions', 'low-confidence', 'overwrite', 'chat', 'repository-file', 'run-notes']);
+export const ALWAYS_ASK: ReadonlySet<string> = new Set(['credentials', 'outsider', 'permissions', 'low-confidence', 'overwrite', 'chat', 'repository-file', 'run-notes', 'special-category', 'personal-data']);
 
 export interface OwnRules {
   routine: RoutineRule | null;

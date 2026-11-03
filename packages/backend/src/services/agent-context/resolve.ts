@@ -25,6 +25,8 @@ import { loadRunPermissions } from '../../tools/agent-permissions.js';
 import { narrowProjectMemory } from '../../tools/memory/project-access.js';
 import { handoffText, projectHandoff } from '../../memory/bridge/brief.js';
 import { selectDrawers, type DrawerRef } from '../../memory/drawers.js';
+import { storeP9Enabled } from '../store-p9.js';
+import { cloudSafeDrawers, cloudSafePinnedAllow } from '../../memory/stays-local.js';
 import { outsiderAgentMemoryEnabled } from '../outsider-memory.js';
 import { evaluateContextPolicy, type ContextPolicy, type EntryPoint } from './policy.js';
 import { projectKeyOf } from '../../memory/project-keys.js';
@@ -65,6 +67,11 @@ export interface ResolveInput {
   sessionId?: string | null;
   /** Chat only: instructions sent with the request replace the hired instructions and personality text (as before). */
   instructionsOverride?: string | null;
+  /**
+   * STORE-MAP-01 P9 (PRIV2): the model of this context is not on this computer, so places that
+   * stay on this computer are left out. A coding app (entry 'coding_app') always counts as not local.
+   */
+  cloud?: boolean;
 }
 
 /** Longest instructions or personality text kept (the middle is cut, like chat did). */
@@ -101,13 +108,16 @@ export async function resolveAgentContext(input: ResolveInput): Promise<Resolved
     : null;
   const memoryRead: readonly string[] = perms?.memoryRead ?? [];
   const openDrawers = policy.memory ? selectDrawers({ audience: 'owner', project: slug }) : [];
-  const drawers = perms && ownerId
+  let drawers = perms && ownerId
     ? ((await narrowProjectMemory({ agentId: agent.id, userId: ownerId, memoryDrawers: openDrawers }).catch(() => [])) ?? []).filter((d) => memoryRead.includes(d.kind))
     : [];
+  const cloud = !!ownerId && storeP9Enabled() && (input.cloud ?? input.entry === 'coding_app');
+  if (cloud) drawers = (await cloudSafeDrawers(ownerId!, drawers)).drawers;
 
   const data = { pinnedFacts: '', handoff: '' };
   if (ownerId && perms && policy.pinnedFacts) {
-    const allow = scopeFactAccess(perms, openDrawers.some((d) => d.kind === 'owner'));
+    let allow = scopeFactAccess(perms, openDrawers.some((d) => d.kind === 'owner'));
+    if (cloud) allow = await cloudSafePinnedAllow(ownerId, slug, allow);
     if (allow.company || allow.project) data.pinnedFacts = await pinnedFactsBlock(ownerId, slug, allow).catch(() => '');
   }
   if (ownerId && perms && project && policy.handoff && drawers.some((d) => d.kind === 'project')) {

@@ -48,6 +48,9 @@ if (URL_) {
     forget: await import('../src/memory/forget.ts'),
     ledger: await import('../src/memory/forget-ledger.ts'),
     index: await import('../src/memory/recall-index.ts'),
+    person: await import('../src/memory/person.ts'),
+    places: await import('../src/memory/place-settings.ts'),
+    stays: await import('../src/memory/stays-local.ts'),
   };
 }
 
@@ -57,6 +60,8 @@ let owner;
 test.after(async () => {
   if (!URL_) return;
   const run = (s, ...a) => m.pool.pgRun(s, ...a).catch(() => {});
+  await run('DELETE FROM memory_place_settings WHERE owner_id = ?', owner);
+  await run('DELETE FROM memory_graph_entities WHERE user_id = ?', owner);
   await run('DELETE FROM memory_versions WHERE user_id = ?', owner);
   await run('DELETE FROM memories WHERE user_id = ?', owner);
   await run('DELETE FROM users WHERE id = ?', owner);
@@ -108,5 +113,29 @@ test('P9 drawer index, recall index parity and the forget ledger (PostgreSQL)', 
   assert.equal(m.index.recallIndexStats().users, 0);
   const after = await m.storage.search({ query: 'item 1', userId: owner, drawers: OPEN, limit: 50 });
   assert.ok(!after.some((r) => r.memory.id === id));
+  delete process.env.GIRRU_STORE_P9;
+});
+
+test('P9 one person, people-fact retention and stays-local (PostgreSQL)', { skip }, async () => {
+  process.env.GIRRU_STORE_P9 = '1';
+  const ins = (id, content, kind, key, status = 'active', validTo = null) => m.q.run(`INSERT INTO memories (id, user_id, type, content, memory_layer, status, metadata, importance_score, created_at, access_count, drawer_kind, drawer_key, valid_to)
+    VALUES (?, ?, 'fact', ?, 'factual', ?, '{}', 0.5, ?, 0, ?, ?, ?)`, id, owner, content, status, new Date().toISOString(), kind, key, validTo);
+  await ins(`pp-${tag}-1`, 'Rana likes green tea.', 'people', `rana${tag}`);
+  await ins(`pp-${tag}-old`, 'Rana lives in Basra.', 'people', `rana${tag}`, 'replaced', new Date(Date.now() - 400 * 86_400_000).toISOString());
+  await ins(`pp-${tag}-m`, `Lunch with rana${tag} on Monday.`, 'owner', null);
+  await m.q.run(`INSERT INTO memory_graph_entities (id, user_id, kind, name, norm_name, aliases) VALUES (?, ?, 'person', ?, ?, '[]')`, `e-${tag}`, owner, `Rana${tag}`, `rana${tag}`);
+  const ex = await m.person.exportPerson(owner, `rana${tag}`);
+  assert.deepEqual(ex.drawer.map((x) => x.id).sort(), [`pp-${tag}-1`, `pp-${tag}-old`]);
+  assert.deepEqual(ex.mentions.map((x) => x.id), [`pp-${tag}-m`]);
+  assert.equal(ex.graph.length, 1);
+  assert.deepEqual((await m.person.stalePeopleFacts(owner)).map((x) => x.id), [`pp-${tag}-old`]);
+  // People stays local by default; a project switched on too.
+  await m.places.setPlaceSetting(owner, 'project:alpha', true);
+  const r = await m.stays.cloudSafeDrawers(owner, [{ kind: 'owner' }, { kind: 'project', key: 'alpha' }, { kind: 'people', key: `rana${tag}` }]);
+  assert.deepEqual(r.drawers, [{ kind: 'owner' }]);
+  const f = await m.person.forgetPerson(owner, `rana${tag}`, owner, { confirm: `rana${tag}`, mentionIds: [`pp-${tag}-m`] });
+  assert.deepEqual(f, { drawer: 2, mentions: 1, graph: 1 });
+  assert.equal((await m.q.all('SELECT id FROM memories WHERE id LIKE ?', `pp-${tag}-%`)).length, 0);
+  assert.equal((await m.q.all('SELECT id FROM memory_graph_entities WHERE id = ?', `e-${tag}`)).length, 0);
   delete process.env.GIRRU_STORE_P9;
 });

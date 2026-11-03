@@ -20,7 +20,10 @@ import { getMemoryStorage } from '../storage.js';
 import { learn } from '../learning.js';
 import { cleanHandoff, HandoffInputError } from '../handoff/store.js';
 import { bridgeClients, CLIENT_NAMES, clientConfigFile, isBridgeClient, launchReady, serverLaunch, type BridgeClient, type BridgeEnv } from './clients.js';
-import { briefHash, briefMarkdown, clean, handoffText, projectBrief, projectDrawer, projectHandoff, pinnedFacts } from './brief.js';
+import { briefHash, briefMarkdown, bridgeDrawers, clean, handoffText, projectBrief, projectDrawer, projectHandoff, pinnedFacts } from './brief.js';
+
+/** STORE-MAP-01 P9 (PRIV2): the answer when the project's memory stays on this computer. */
+const STAYS_LOCAL_TEXT = 'This project\'s memory stays on this computer, so it is not shared with coding apps. Do not guess it.';
 import { applyFiles, ManagedFileError, previewFiles, type FilesPreview, type SectionExtras } from './managed-files.js';
 import { createHash } from 'node:crypto';
 import { applyRegistration, previewRegistration, RegistrationError, undoAllRegistrations, undoRegistration } from './registration.js';
@@ -416,7 +419,9 @@ export async function mcpCall(c: unknown, token: unknown, cwd: unknown, tool: un
       const query = typeof a.query === 'string' ? a.query.trim().slice(0, 500) : '';
       if (!query) throw new BridgeError('query is required');
       const limit = Math.min(Math.max(1, Number.isInteger(a.limit) ? (a.limit as number) : 8), 20);
-      const hits = await getMemoryStorage().search({ userId: ownerId, query, drawers: [projectDrawer(project)], limit } as any);
+      const drawers = await bridgeDrawers(ownerId, project);
+      if (drawers.length === 0) return { text: STAYS_LOCAL_TEXT, data: { results: [] } };
+      const hits = await getMemoryStorage().search({ userId: ownerId, query, drawers, limit } as any);
       let results = hits.slice(0, limit).map((h) => ({ id: h.memory.id, content: clean(h.memory.content), score: Number(h.similarity.toFixed(3)) }));
       if (p6) results = capAnswer(results);
       return { text: results.length ? results.map((r) => `- ${r.content}`).join('\n') : 'Nothing found in this project.', data: { results } };
@@ -569,7 +574,9 @@ async function contractCall(ownerId: string, cl: BridgeClient, project: Project,
   const note = (x: string) => `${x} session:${cap.id}${cap.agentId ? ` agent:${cap.agentId}` : ''}`;
   if (verb === 'recall') {
     const limit = a.limit ?? 8;
-    const hits = await getMemoryStorage().search({ userId: ownerId, query: a.query!, drawers: [drawer], limit } as any);
+    const drawers = await bridgeDrawers(ownerId, project);
+    if (drawers.length === 0) return { text: STAYS_LOCAL_TEXT, data: { results: [] } };
+    const hits = await getMemoryStorage().search({ userId: ownerId, query: a.query!, drawers, limit } as any);
     const results = capAnswer(hits.slice(0, limit).map((h) => ({ id: h.memory.id, content: clean(h.memory.content), score: Number(h.similarity.toFixed(3)) })));
     return { text: results.length ? results.map((r) => `- [${r.id}] ${r.content}`).join('\n') : 'Nothing found in this project memory. Do not guess.', data: { results } };
   }

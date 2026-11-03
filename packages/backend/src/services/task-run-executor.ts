@@ -6,6 +6,8 @@ import { renderSystemPrompt } from './agent-context/render.js';
 import { oneContextEnabled } from './agent-context/switch.js';
 import { taskHandoffText, taskRunOwner } from '../memory/handoff/scope.js';
 import { taskRunPinnedFacts } from '../memory/scopes/task-facts.js';
+import { storeP9Enabled } from './store-p9.js';
+import { cloudSafeDrawers, providerIsLocal } from '../memory/stays-local.js';
 /**
  * Durable task-run executor + startup recovery (CORE-08, R2).
  *
@@ -299,9 +301,9 @@ async function gatedStepCall(driver: ModelDriver, messages: LoopMessage[], runId
  * resolved context (owner rules, instructions, personality, team, knowledge);
  * otherwise today's prompt (instructions and skills only).
  */
-export async function taskRunBasePrompt(agent: Pick<AgentRow, 'id' | 'name' | 'system_prompt'>, run: { user_id: string | null }): Promise<string> {
+export async function taskRunBasePrompt(agent: Pick<AgentRow, 'id' | 'name' | 'system_prompt'>, run: { user_id: string | null }, cloud = false): Promise<string> {
   if (oneContextEnabled() || isPilotAgent(agent.id)) {
-    return renderSystemPrompt(await resolveAgentContext({ agentId: agent.id, entry: 'task', ownerId: await taskRunOwner(run.user_id).catch(() => null), projectId: null }));
+    return renderSystemPrompt(await resolveAgentContext({ agentId: agent.id, entry: 'task', ownerId: await taskRunOwner(run.user_id).catch(() => null), projectId: null, cloud }));
   }
   return (agent.system_prompt ?? `You are ${agent.name}, an AI agent.`) + await agentSkillsPrompt(agent.id);
 }
@@ -397,7 +399,7 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
         localModel = await resolveLocalModel(wanted, DEFAULT_OLLAMA_MODEL);
         console.log('[TaskRun] No Claude key for this agent; using the local model', { agentId: agent.id, model: localModel });
       }
-      systemPrompt = await taskRunBasePrompt(agent, run);
+      systemPrompt = await taskRunBasePrompt(agent, run, storeP9Enabled() && (!localModel || !providerIsLocal('ollama')));
       // CORE-MEM-HANDOFF: the agent's newest note for this board task, and how to leave the next one.
       // A contract that names its tools, or a delegated task, leaves the handoff tools out, so the note on using them too.
       const handoff = await taskHandoffText(run).catch(() => '');
@@ -424,11 +426,15 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
       // ones, or the audience default when none are set); never widen.
       registry.updateContext({ memoryDrawers: contractRunDrawers(contract, toolMemoryDrawers(registry.getContext())) });
     }
+    // STORE-MAP-01 P9 (PRIV2): the Claude API (or an Ollama that is not on loopback) is not on this
+    // computer; places that stay here leave the run.
+    const p9Cloud = !!factsOwner && storeP9Enabled() && (!!claudeClient || !providerIsLocal('ollama'));
+    if (p9Cloud) registry.updateContext({ memoryDrawers: (await cloudSafeDrawers(factsOwner!, toolMemoryDrawers(registry.getContext()))).drawers });
     // MEM-SCALE-01: the owner's pinned facts of the task's scope (company /
     // department / project), only what this agent may read in this run.
     const facts = await taskRunPinnedFacts({
       ownerId: factsOwner, agentId: agent.id, taskId, delegatedFrom: delegatingAgents(taskId),
-      drawers: toolMemoryDrawers(registry.getContext()), drawersNarrowed: !!contract?.allowedDrawers,
+      drawers: toolMemoryDrawers(registry.getContext()), drawersNarrowed: !!contract?.allowedDrawers, cloud: p9Cloud,
     });
     if (facts) systemPrompt += `\n\n${facts}`;
     if (contract?.allowedTools || contract?.allowedDrawers || facts) {
