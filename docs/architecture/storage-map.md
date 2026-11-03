@@ -187,6 +187,19 @@ A first version of the change log, the session capability and the shared agent c
 - **Debounced sync from the change log:** every project with its memory files on keeps a change log. The brief file is rewritten by the outbox worker once the project has been quiet for a moment, so a burst of changes gives one write. The file carries the change-log position and its version.
 - **One memory contract:** coding apps get five verbs (recall, save, supersede, handoff, propose) from the same definition as the native tools. The server checks every argument, a write with a request id happens once, and a failed write says "not saved, try again".
 
+### One safe file writer (off by default)
+
+`GIRRU_STORE_P7=1` turns on, for every file Girru writes into a project folder (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `DESIGN.md`, `.girru/` files and `.git/info/exclude`):
+
+- **Inside the folder only:** no `..`, no absolute, drive or network paths, no `\` or `:`, no Windows device names, and no name ending in a dot or a space. The full path must fit the system's length limit.
+- **Never through a link:** each folder on the way, and the file itself, must be a real folder or a plain file at its own path. Symbolic links, Windows junctions and hard links are refused.
+- **No case collisions:** a name that differs from an existing one only by case (or by Unicode form) is refused.
+- **Text only, with a size limit:** UTF-8 with no NUL bytes, 1 MB at most.
+- **Atomic:** Girru writes a temp file next to the target, flushes it, checks again that the folder and the target are still the ones it checked, then renames it over the target. An interrupted write leaves the old file. A temp file left by a crash is removed on the next write.
+- **Locked files:** a file held open by another program on Windows is retried a few times. If it is still locked, the write is reported and nothing changes.
+
+Nothing is written when any check fails, and the error says why.
+
 ### One agent context and one Girru section (off by default)
 
 `GIRRU_STORE_P2=1` turns on, for every agent:

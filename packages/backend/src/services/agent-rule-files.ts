@@ -18,6 +18,8 @@ import { q } from '../repositories/sql-steps.js';
 import { projectFileRules, ruleGroup, ruleLine, setTaskRule, RULE_PRECEDENCE } from './agent-rules.js';
 import { storeP2Enabled } from './agent-context/switch.js';
 import type { SectionExtras } from '../memory/bridge/managed-files.js';
+import { safeWriteAt, SafeFileError } from './safe-file.js';
+import { storeP7Enabled } from './store-p7.js';
 
 const run = promisify(execFile);
 export type FileMode = 'private' | 'project';
@@ -96,7 +98,12 @@ async function git(folder: string, ...args: string[]): Promise<string | null> {
 async function tracked(folder: string, name: string): Promise<boolean> {
   return (await git(folder, 'ls-files', '--error-unmatch', '--', name)) !== null;
 }
-export async function writeAtomic(file: string, text: string): Promise<void> {
+/** `root` = the folder the file must stay in (P7: the one safe file writer, SEC2-6). */
+export async function writeAtomic(file: string, text: string, root?: string): Promise<void> {
+  if (storeP7Enabled()) {
+    try { safeWriteAt(root ?? path.dirname(file), file, text); } catch (e) { if (e instanceof SafeFileError) throw new RuleFilesError('unsafe', e.message); throw e; }
+    return;
+  }
   const tmp = `${file}.girru-${process.pid}-${Date.now()}`;
   await fs.writeFile(tmp, text, { encoding: 'utf8', flag: 'wx', mode: 0o644 });
   await fs.rename(tmp, file);
@@ -153,7 +160,7 @@ async function setExclude(folder: string, names: readonly string[], mode: FileMo
   const next = part ? `${kept.replace(/\s*$/, '')}${kept.trim() ? '\n' : ''}${part}` : kept;
   if (next === cur) return;
   await fs.mkdir(path.dirname(file), { recursive: true });
-  await writeAtomic(file, next);
+  await writeAtomic(file, next, folder);
 }
 
 /** Write the project's files (the owner's button, or a rule change after the first write). */
@@ -188,7 +195,7 @@ async function writeNow(projectId: string, mode?: FileMode): Promise<FilesState>
     if (f.action !== 'unchanged') {
       const cur = await readPlain(file);
       if (cur === 'link') continue;
-      await writeAtomic(file, f.name === SOURCE ? plan.rules : withPart(cur, appPart(f.name, plan.rules)));
+      await writeAtomic(file, f.name === SOURCE ? plan.rules : withPart(cur, appPart(f.name, plan.rules)), folder);
     }
     done.push(f.name === SOURCE ? '.girru/' : f.name);
   }

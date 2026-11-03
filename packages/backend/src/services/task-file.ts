@@ -94,7 +94,7 @@ async function writeFile(folder: string, name: string, text: string): Promise<vo
   const file = path.join(folder, name);
   if (path.dirname(path.resolve(file)) !== dir) throw new RuleFilesError('unsafe', 'Outside the project folder');
   const cur = await readFile(folder, name);
-  if (cur !== text) await writeAtomic(file, text);
+  if (cur !== text) await writeAtomic(file, text, folder);
 }
 
 /**

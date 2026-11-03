@@ -25,6 +25,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { redactImportText } from '../import/redact.js';
 import { briefMarkdown, type ProjectBrief } from './brief.js';
 import { SERVER_NAME } from './clients.js';
+import { safeWriteFile, SafeFileError } from '../../services/safe-file.js';
+import { storeP7Enabled } from '../../services/store-p7.js';
 
 export const MARK_START = '<!-- dpro-memory:start — managed by Dpro: the text between these two markers is replaced on every sync; write your own notes outside them -->';
 export const MARK_END = '<!-- dpro-memory:end -->';
@@ -248,7 +250,13 @@ export function previewFiles(projectId: string, brief: ProjectBrief | null, fold
   return { projectId, folder: p.folder, files, previewHash: hashOf(p.folder, files), conflicts: files.filter((f) => f.action === 'conflict').length, changes: files.filter((f) => f.action === 'create' || f.action === 'update').length };
 }
 
-function writeAtomic(abs: string, text: string, mode: number | null): void {
+function writeAtomic(folder: string, relative: string, abs: string, text: string, mode: number | null): void {
+  // STORE-MAP-01 P7 (SEC2-6): the one safe file writer.
+  if (storeP7Enabled()) {
+    try { safeWriteFile(folder, relative.split(path.sep).join('/'), text, { mode: mode ?? 0o644, maxBytes: MAX_MANAGED_FILE_BYTES }); }
+    catch (e) { if (e instanceof SafeFileError) throw new ManagedFileError(`Nothing written to ${relative}: ${e.message}`, 409, e.code === 'locked' ? 'locked' : 'unsafe_path'); throw e; }
+    return;
+  }
   fs.mkdirSync(path.dirname(abs), { recursive: true });
   const tmp = path.join(path.dirname(abs), `.${path.basename(abs)}.${randomUUID()}.tmp`);
   fs.writeFileSync(tmp, text, { flag: 'wx', mode: mode ?? 0o644 });
@@ -267,7 +275,7 @@ export function applyFiles(projectId: string, brief: ProjectBrief | null, folder
   if (expectedHash !== null && hash !== expectedHash) throw new ManagedFileError('The files or the memory changed since the preview; preview again', 409, 'preview_stale');
   const conflicts = p.files.filter((f) => f.action === 'conflict');
   if (conflicts.length) throw new ManagedFileError(`Nothing written: ${conflicts.map((c) => c.reason).join('; ')}`, 409, 'conflict');
-  for (const f of p.files) if ((f.action === 'create' || f.action === 'update') && f.after !== null) writeAtomic(f.abs, f.after, f.mode);
+  for (const f of p.files) if ((f.action === 'create' || f.action === 'update') && f.after !== null) writeAtomic(p.folder, f.relative, f.abs, f.after, f.mode);
   return { projectId, folder: p.folder, files, previewHash: hash, conflicts: 0, changes: files.filter((f) => f.action === 'create' || f.action === 'update').length };
 }
 
@@ -286,6 +294,6 @@ export function writeSection(folderRaw: string | null, relative: string, block: 
   if (cur.text !== null && splitManaged(cur.text, marks) === 'broken') throw new ManagedFileError(`${relative} has broken Girru markers; fix or remove them by hand`, 409, 'markers_broken');
   const after = replaceManaged(cur.text ?? '', block, marks);
   if (cur.text === after) return { action: 'unchanged', file: abs };
-  writeAtomic(abs, after, cur.mode);
+  writeAtomic(folder, relative, abs, after, cur.mode);
   return { action: cur.text === null ? 'create' : 'update', file: abs };
 }
