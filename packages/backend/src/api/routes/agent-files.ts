@@ -19,6 +19,7 @@ import {
 } from '../../services/agent-files.js';
 import { sendInternalError } from '../error-handler.js';
 import { storeP4Enabled } from '../../services/store-p4.js';
+import { AgentMemoryConflict, AgentMemoryInputError, agentMemoryStatus, agentNotes, saveAgentNotes } from '../../memory/agent-drawer.js';
 import { PersonalityVersionConflict, savePersonalityText } from '../../services/personality-record.js';
 import { PersonalityInputError } from '../../services/personality.js';
 import { PersonalityNotFoundError } from '../../services/personality-store.js';
@@ -105,13 +106,23 @@ export async function agentFilesRoutes(fastify: FastifyInstance) {
   fastify.get<{Params:{id:string}}>('/api/agents/:id/memory',{config:{access:'owner'}},async(request,reply)=>{
     if(!await memoryOwner(request,reply))return;
     if(Object.keys(request.query as object).length)return reply.code(400).send({code:'invalid_memory_request'});
-    try{return {success:true,...await readMemorySnapshot(request.params.id)};}catch{return reply.code(503).send({code:'memory_unavailable'});}
+    // STORE-MAP-01 P5: after the import the notes are read from the agent's own drawer (same shape).
+    try{const notes=await agentNotes(request.params.id);if(notes)return {success:true,content:notes.content,hash:notes.hash,truncated:false,redacted:false};return {success:true,...await readMemorySnapshot(request.params.id)};}catch{return reply.code(503).send({code:'memory_unavailable'});}
+  });
+  // STORE-MAP-01 P5: imported or not, history rows, and whether MEMORY.md was changed outside Girru.
+  fastify.get<{Params:{id:string}}>('/api/agents/:id/memory/status',{config:{access:'owner'}},async(request,reply)=>{
+    if(!await memoryOwner(request,reply))return;
+    try{return await agentMemoryStatus(request.params.id);}catch{return reply.code(503).send({code:'memory_unavailable'});}
   });
   fastify.put<{Params:{id:string};Body:{content?:unknown;expectedHash?:unknown}}>('/api/agents/:id/memory',{config:{access:'owner'}},async(request,reply)=>{
     if(!await memoryOwner(request,reply))return;
     const body=request.body;
     if(!body||typeof body.content!=='string'||Buffer.byteLength(body.content,'utf8')>32768||Object.keys(request.query as object).length)return reply.code(400).send({code:'invalid_memory_request'});
     if(!Object.hasOwn(body,'expectedHash')||!(body.expectedHash===null||typeof body.expectedHash==='string'&&/^[a-f0-9]{64}$/.test(body.expectedHash)))return reply.code(409).send({code:'memory_review_required'});
+    if(typeof body.expectedHash==='string'&&await agentNotes(request.params.id).catch(()=>null)){
+      try{const saved=await saveAgentNotes(request.params.id,body.content,body.expectedHash,(request as any).actor?.userId??'owner');return {success:true,content:saved.content,hash:saved.hash,truncated:false,redacted:saved.redacted};}
+      catch(error){return reply.code(error instanceof AgentMemoryConflict||error instanceof AgentMemoryInputError?409:503).send({code:error instanceof AgentMemoryConflict||error instanceof AgentMemoryInputError?'memory_not_written':'memory_write_unconfirmed'});}
+    }
     try{return {success:true,...await writeMemoryCAS(request.params.id,body.content,body.expectedHash)};}catch(error){return reply.code(error instanceof Error&&/conflict|reviewed_memory_required|memory_too_large/.test(error.message)?409:503).send({code:error instanceof Error&&/conflict|reviewed_memory_required|memory_too_large/.test(error.message)?'memory_not_written':'memory_write_unconfirmed'});}
   });
   fastify.post('/api/agents/:id/memory/append',{config:{access:'owner'}},async(request,reply)=>{

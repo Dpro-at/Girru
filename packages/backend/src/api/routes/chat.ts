@@ -39,7 +39,8 @@ import { claudeCliTool } from '../../tools/cli/claude-cli.js';
 import { getJsonRenderPrompt, uiSpecPrompt } from './json-render-prompt.js';
 import { safeErrorFields } from '../../services/safe-error-log.js';
 import { resolveProviderApiKey } from '../../credentials/authority.js';
-import { readPersonality, readMemory } from '../../services/agent-files.js';
+import { readPersonality } from '../../services/agent-files.js';
+import { agentMemoryForPrompt } from '../../memory/agent-drawer.js';
 import { stripPersonalityExport, type Behavior } from '../../services/personality.js';
 import { outsiderAgentMemoryEnabled } from '../../services/outsider-memory.js';
 import { DrawerInputError, chatTurnDrawers, drawerId, sameDrawer, type DrawerRef } from '../../memory/drawers.js';
@@ -583,7 +584,8 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
       try {
         // The generated settings block is a readable export; the database values are used instead.
         personalityContent = stripPersonalityExport(await readPersonality(agentConfig.id));
-        memoryFileContent = includeAgentMemory ? await readMemory(agentConfig.id) : '';
+        // STORE-MAP-01 P5: the agent's own notes from its drawer once imported (else the file), framed as data below.
+        memoryFileContent = includeAgentMemory ? await agentMemoryForPrompt(agentConfig.id) : '';
         console.log(`[Chat] 📝 Loaded PERSONALITY.md (${personalityContent.length} chars) and MEMORY.md (${memoryFileContent.length} chars) for agent ${agentConfig.name}`);
       } catch (err) {
         console.log('[Chat] No agent files found, using database system_prompt');

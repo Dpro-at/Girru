@@ -49,17 +49,23 @@ const personality = {
   imported: await record.backfillPersonalityRecords(), again: await record.backfillPersonalityRecords(), missing: await record.agentsWithoutRecordText(),
   text: (await record.recordText(firstAgent)).text, versionsBefore, versionsAfter: q('SELECT COUNT(*) AS n FROM agent_personality_versions')[0].n,
 };
+// P5: each agent's MEMORY.md (with its history) into its own drawer, once.
+process.env.GIRRU_STORE_P5 = '1';
+const snap = await files.readMemorySnapshot(firstAgent);
+await files.writeMemoryCAS(firstAgent, '# Notes\nShip on Fridays.', snap.hash);
+const drawer = await import(join(backendDir, 'src/memory/agent-drawer.ts'));
+const agentNotes = { imported: await drawer.importAllAgentMemory(), again: await drawer.importAllAgentMemory(), missing: await drawer.agentsWithoutImportedMemory(), text: (await drawer.agentNotes(firstAgent))?.content ?? null };
 const out = {
   before,
-  after: { memories: q('SELECT COUNT(*) AS n FROM memories')[0].n, agents: q('SELECT COUNT(*) AS n FROM agents_config')[0].n, migrations: q('SELECT COUNT(*) AS n FROM migrations')[0].n },
-  memoryIds: q('SELECT id FROM memories ORDER BY id').map((r) => r.id),
+  after: { memories: q("SELECT COUNT(*) AS n FROM memories WHERE COALESCE(drawer_kind, '') <> 'agent'")[0].n, agents: q('SELECT COUNT(*) AS n FROM agents_config')[0].n, migrations: q('SELECT COUNT(*) AS n FROM migrations')[0].n },
+  memoryIds: q("SELECT id FROM memories WHERE COALESCE(drawer_kind, '') <> 'agent' ORDER BY id").map((r) => r.id),
   integrity: q('PRAGMA integrity_check')[0].integrity_check,
   departments: q("SELECT id, name, norm_name FROM departments WHERE owner_id = 'fx-owner' ORDER BY norm_name"),
   agentDepartments: q('SELECT id, department, department_id FROM agents_config ORDER BY id'),
   verify: await sql().read(deps.verifyDepartmentsStep('fx-owner')),
   questions: (await deps.openDepartmentQuestions('fx-owner')).map((x) => x.name),
-  sync1, sync2, provenance, personality,
-  sources: q('SELECT id, source, trust FROM memories ORDER BY id'),
+  sync1, sync2, provenance, personality, agentNotes,
+  sources: q("SELECT id, source, trust FROM memories WHERE COALESCE(drawer_kind, '') <> 'agent' ORDER BY id"),
 };
 log(JSON.stringify(out));
 process.exit(0);

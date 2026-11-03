@@ -473,7 +473,8 @@ export class MemoryStorage implements IMemoryStorage {
       params.push(...filter.params);
     }
     // MEM-SCALE-01: an archived project is kept but never recalled; P3: nor is a replaced fact.
-    where += ` AND ${NOT_ARCHIVED_SQL} AND ${NOT_REPLACED_SQL}`;
+    // STORE-MAP-01 P5: an agent's own notes are read only by that agent's prompt, never by a search.
+    where += ` AND ${NOT_ARCHIVED_SQL} AND ${NOT_REPLACED_SQL} AND ${NOT_AGENT_NOTES_SQL}`;
 
     // Support both legacy minImportance (1-10) and new minImportanceScore (0-1)
     if (query.minImportanceScore !== undefined) {
@@ -659,6 +660,9 @@ function* sqliteColumnsStep(): Step<void> {
   }
   yield* sqliteDdlStep(SQLITE_MEMORIES_INDEXES);
 }
+
+/** STORE-MAP-01 P5: rows of an agent's own drawer (read only through memory/agent-drawer.ts). */
+export const NOT_AGENT_NOTES_SQL = "COALESCE(drawer_kind, '') <> 'agent'";
 
 function rowDrawer(row: any): DrawerRef {
   if (row.drawer_kind) {

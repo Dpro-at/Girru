@@ -14,7 +14,7 @@ its own notes and knowledge files.
 | Personality: its text and its adjustments (traits, dialect, lock) | The personality record: one versioned history in the database | `PERSONALITY.md` (with `GIRRU_STORE_P4` on) |
 | Job | The agent's specialty links (Agent › Specialties) | none |
 | Owner's extra instructions | Agent › General (`agents_config.system_prompt`) | none |
-| Own notes | `MEMORY.md` | none |
+| Own notes | `MEMORY.md`; with `GIRRU_STORE_P5` on, the agent's own drawer in the database | `MEMORY.md` (with `GIRRU_STORE_P5` on) |
 | Reference files | `knowledge/` (Files › Knowledge) | none |
 
 A personality changes how an agent talks. It never changes its job, skills or
@@ -167,7 +167,7 @@ knowledge/
 ## What an agent reads when it answers
 
 With the one context (`GIRRU_STORE_P2` or `GIRRU_STORE_P4` on) chat, task
-runs, coding apps, public rooms and the heartbeat read the same parts, in this
+runs, coding apps and the heartbeat read the same parts, in this
 order. The order is for prompt caching; precedence is a rule: owner rules come
 before everything, and data never overrides instructions.
 
@@ -181,8 +181,9 @@ before everything, and data never overrides instructions.
 8. Knowledge files the owner marked as read
 9. Memory, framed as data (`MEMORY.md`, pinned facts, the newest handoff)
 
-A public room puts the room's prompt first and never gets owner memory. The
-heartbeat reads no owner memory.
+A public room is different: it gets the room's prompt and then only the
+agent's personality text (never the owner's rules, instructions, team or
+skills). The heartbeat reads no owner memory.
 
 ---
 

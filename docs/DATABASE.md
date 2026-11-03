@@ -88,6 +88,17 @@ run_id, client, created_at
 `memory_bridge_handoffs` still receives coding-app notes too (same id) while
 `GIRRU_STORE_P4` is on, and is dropped one release later.
 
+### agent_memory_imports, agent_package_imports
+STORE-MAP-01 P5 (migration 171, used while `GIRRU_STORE_P5` is on).
+```sql
+-- agent_memory_imports: agent_id, memory_id (the agent drawer memory), file_hash (MEMORY.md when
+--   imported), versions (history rows from .memory-versions), written_hash (what Girru last wrote)
+-- agent_package_imports: id, agent_id, package_hash, schema_version, source_name,
+--   refused (JSON: what the import left out), imported_by, imported_at
+```
+An agent's notes are one row of `memories` with `drawer_kind = 'agent'` and
+`drawer_key` = the agent id; searches and the owner's memory list skip them.
+
 ### agent_activity
 Agent execution logs
 ```sql

@@ -133,6 +133,7 @@ import { systemRoutes } from './routes/system.js';
 import { appUpdateRoutes } from './routes/app-updates.js';
 import { registerTelephonyRoutes } from './routes/telephony.js';
 import { agentFilesRoutes } from './routes/agent-files.js';
+import { agentPackagesRoutes } from './routes/agent-packages.js';
 import { registerDashboardRoutes } from './routes/dashboard.js';
 import { registerCalendarRoutes } from './routes/calendar.js';
 import { registerPublicChatRoutes } from './routes/public-chat.js';
@@ -466,6 +467,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await fastify.register(appUpdateRoutes()); // Settings › About and updates (owner)
   await fastify.register(systemRoutes);        // ⚙️ System Operations (Restart, Shutdown)
   await fastify.register(agentFilesRoutes);    // 📝 Agent Files (PERSONALITY.md + MEMORY.md)
+  await fastify.register(agentPackagesRoutes); // STORE-MAP-01 P5: agent packages (GIRRU_STORE_P5)
   await fastify.register(registerDashboardRoutes); // 📊 Customizable Dashboard (Widgets + Layouts)
   await fastify.register(registerCalendarRoutes);  // 📅 Calendar System (Events + Google Calendar Sync)
   await fastify.register(registerPublicChatRoutes); // 💬 Public Chat Rooms (Multi-User Chat with AI Agents)

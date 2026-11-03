@@ -186,3 +186,37 @@ test('P4 (T7): one personality record (PostgreSQL)', { skip }, async () => {
     await m.q.run('DELETE FROM agents_config WHERE id = ?', id);
   }
 });
+
+test('P5: agent notes drawer and agent package (PostgreSQL)', { skip }, async () => {
+  const assert = (await import('node:assert/strict')).default;
+  const files = await import('../src/services/agent-files.ts');
+  const drawer = await import('../src/memory/agent-drawer.ts');
+  const pack = await import('../src/services/agent-package.ts');
+  const id = `p5-${tag}`;
+  await m.q.run("INSERT INTO agents_config (id, name, provider, model, system_prompt) VALUES (?, ?, 'ollama', 'm', 'Short lines.')", id, `Notes ${tag}`);
+  await files.initializeAgentDir(id);
+  const first = await files.readMemorySnapshot(id);
+  await files.writeMemoryCAS(id, '# Notes\nFridays.', first.hash);
+  process.env.GIRRU_STORE_P5 = '1';
+  let imported;
+  try {
+    assert.equal(await drawer.importAgentMemory(id), true);
+    assert.equal(await drawer.importAgentMemory(id), false, 'once');
+    const notes = await drawer.agentNotes(id);
+    assert.equal(notes.content, '# Notes\nFridays.');
+    const saved = await drawer.saveAgentNotes(id, '# Notes\nFridays and Mondays.', notes.hash, owner);
+    await assert.rejects(drawer.saveAgentNotes(id, 'x', notes.hash, owner), drawer.AgentMemoryConflict);
+    assert.equal((await drawer.agentNotes(id)).hash, saved.hash);
+    const pkg = await pack.exportAgentPackage(id);
+    const plan = await pack.planAgentPackage({ ...pkg, permissions: { all: true }, packageHash: undefined });
+    assert.ok(plan.refused.some((r) => r.field === 'permissions'));
+    imported = (await pack.importAgentPackage(pkg, owner, { expectedPackageHash: pkg.packageHash })).agentId;
+    assert.equal((await m.q.all('SELECT system_prompt FROM agents_config WHERE id = ?', imported))[0].system_prompt, 'Short lines.');
+  } finally {
+    delete process.env.GIRRU_STORE_P5;
+    await m.q.run("DELETE FROM memory_versions WHERE memory_id IN (SELECT id FROM memories WHERE drawer_kind = 'agent' AND drawer_key = ?)", id);
+    await m.q.run("DELETE FROM memories WHERE drawer_kind = 'agent' AND drawer_key = ?", id);
+    if (imported) await m.q.run('DELETE FROM agents_config WHERE id = ?', imported);
+    await m.q.run('DELETE FROM agents_config WHERE id = ?', id);
+  }
+});

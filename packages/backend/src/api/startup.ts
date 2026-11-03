@@ -89,6 +89,13 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
       .then(async (n) => { const left = await agentsWithoutRecordText(); if (n || left) console.log(`[Store P4] personality texts imported: ${n}, still without a text: ${left}`); })
       .catch((err) => console.warn('[Store P4] personality texts not imported:', (err as Error)?.message));
   }
+  // STORE-MAP-01 P5: each agent's MEMORY.md (and its history) into its own drawer, once.
+  if ((await import('../services/store-p5.js')).storeP5Enabled()) {
+    const { importAllAgentMemory, agentsWithoutImportedMemory } = await import('../memory/agent-drawer.js');
+    await importAllAgentMemory()
+      .then(async (n) => { const left = await agentsWithoutImportedMemory(); if (n || left) console.log(`[Store P5] agent notes imported: ${n}, not yet imported: ${left}`); })
+      .catch((err) => console.warn('[Store P5] agent notes not imported:', (err as Error)?.message));
+  }
 
   // APPS-06: apps moved to the Girru Store keep their data under their Store table names (once, after a backup).
   try { await (await import('../services/legacy-app-tables.js')).moveLegacyAppTables(); }

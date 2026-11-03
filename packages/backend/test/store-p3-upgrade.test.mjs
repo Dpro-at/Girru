@@ -38,6 +38,11 @@ for (const file of ['girru-1.3.2.sql', 'girru-1.4.1.sql']) {
     assert.equal(out.personality.missing, 0);
     assert.equal(out.personality.text, '# Hand-written\nKeep answers short.');
     assert.equal(out.personality.versionsAfter, out.personality.versionsBefore + out.after.agents, 'history kept, one import version each');
+    // P5: every agent's notes imported once into its own drawer.
+    assert.equal(out.agentNotes.imported, out.after.agents);
+    assert.equal(out.agentNotes.again, 0);
+    assert.equal(out.agentNotes.missing, 0);
+    assert.equal(out.agentNotes.text, '# Notes\nShip on Fridays.');
     if (file.includes('1.4')) {
       assert.equal(out.departments.find((d) => d.norm_name === 'engineering').id, 'dept-fx1', 'memory\'s department keeps its id');
       assert.deepEqual(out.questions, ['designers']);
