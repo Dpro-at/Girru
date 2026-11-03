@@ -59,6 +59,18 @@ async function main() {
   process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway, test only
   process.env.NODE_ENV = 'test';
   process.env.AGENT_PLAYER_BACKGROUND = 'off';
+  process.env.OLLAMA_URL = 'http://127.0.0.1:11434';
+  for (const k of ['AGENT_EXEC_TOOLS', 'OLLAMA_THINK', 'DEFAULT_MODEL']) delete process.env[k];
+  // A phone's chat turn runs against a stubbed local model; no network beyond 127.0.0.1.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url) === 'http://127.0.0.1:11434/api/chat') {
+      const enc = new TextEncoder();
+      const lines = [{ message: { content: 'Hello from the computer' }, done: false }, { message: { content: '' }, done: true }];
+      return new Response(new ReadableStream({ start(c) { for (const l of lines) c.enqueue(enc.encode(JSON.stringify(l) + '\n')); c.close(); } }), { status: 200 });
+    }
+    return realFetch(url, init);
+  };
   const log = (line) => process.stderr.write(`computer: ${line}\n`);
   const quiet = () => {};
   console.log = quiet; console.info = quiet; console.warn = quiet;
@@ -68,7 +80,10 @@ async function main() {
   await db.initialize();
   const { getCredentialStorage } = await import(join(backendDir, 'src/credentials/storage.ts'));
   await getCredentialStorage().initialize();
+  const { getOrchestrator } = await import(join(backendDir, 'src/multi-agent/index.ts'));
+  await getOrchestrator().initialize(join(dir, '.data', 'multi-agent', 'orchestrator.db'));
   db.prepare(`INSERT INTO users (id, email, username, password_hash, role, status, email_verified) VALUES ('ph-owner', 'ph-owner@example.test', 'ph-owner', 'x', 'owner', 'active', 1)`).run();
+  db.prepare(`INSERT INTO agents_config (id, name, provider, model, is_primary) VALUES ('ph-main', 'Main', 'ollama', 'qwen-test', 1)`).run();
   const { generateToken } = await import(join(backendDir, 'src/auth/jwt.ts'));
   const { buildServer } = await import(join(backendDir, 'src/api/app.ts'));
   const { phoneLink } = await import(join(backendDir, 'src/phone/service.ts'));
@@ -149,7 +164,8 @@ async function main() {
     assert.ok(said.paired, 'the phone checked the welcome');
     const listed = (await call('GET', '/api/phone')).json().devices ?? [];
     assert.ok(listed.some((d) => d.id === said.id), `the computer lists the phone ${said.id}`);
-    await until(() => said.exit !== null, 'phone exit', 10_000);
+    // After pairing the phone may go on with a session (commands, replies, run frames).
+    await until(() => said.exit !== null, 'phone exit', 60_000);
     assert.equal(said.exit, 0, 'the phone command succeeded');
     clearTimeout(timer);
     await done(0, 'PASS: paired end to end');

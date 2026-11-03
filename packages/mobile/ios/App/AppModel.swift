@@ -9,8 +9,9 @@ struct CommandReply: @unchecked Sendable {
     var error: String?
 }
 
-/// Talks to the computer over the authenticated g1 session. Built with
-/// MOB-LINK-01; until then every call says plainly that it cannot.
+/// Talks to the computer over the authenticated g1 session (MOB-LINK-01):
+/// `SessionComputerLink`. `signer` proves this phone to the relay and signs
+/// the session's hs1, so it comes from the unlocked identity key.
 ///
 /// The link owns the session: every new session starts with a fresh
 /// `Handshake.start` (the computer answers each hs1 once). Run frames end with
@@ -18,18 +19,18 @@ struct CommandReply: @unchecked Sendable {
 /// `chat.messages`, `RunEnd.failed` is shown as a plain failure.
 protocol ComputerLink: Sendable {
     /// Sends a signed command and returns the computer's reply to it.
-    func call(_ command: SignedCommand, to computer: PairedComputer) async throws -> CommandReply
+    func call(_ command: SignedCommand, to computer: PairedComputer, signer: IdentitySigner) async throws -> CommandReply
     /// Asks the computer whether this approval is still waiting for this phone.
     /// The answer comes over the session, so a forged push cannot fake it.
-    func isPending(approvalId: String, on computer: PairedComputer) async throws -> Bool
+    func isPending(approvalId: String, on computer: PairedComputer, signer: IdentitySigner) async throws -> Bool
 }
 
 struct NotConnectedLink: ComputerLink {
     struct NotBuilt: LocalizedError {
         var errorDescription: String? { "Not sent: this version of Girru cannot reach your computer yet." }
     }
-    func call(_ command: SignedCommand, to computer: PairedComputer) async throws -> CommandReply { throw NotBuilt() }
-    func isPending(approvalId: String, on computer: PairedComputer) async throws -> Bool { throw NotBuilt() }
+    func call(_ command: SignedCommand, to computer: PairedComputer, signer: IdentitySigner) async throws -> CommandReply { throw NotBuilt() }
+    func isPending(approvalId: String, on computer: PairedComputer, signer: IdentitySigner) async throws -> Bool { throw NotBuilt() }
 }
 
 /// What the computer can answer that ends a pairing.
@@ -55,7 +56,7 @@ final class AppModel: ObservableObject {
     private var pendingDecision: (approvalId: String, approve: Bool, sensitive: Bool)?
     private static let installedKey = "installed"
 
-    init(link: ComputerLink = NotConnectedLink(), defaults: UserDefaults = .standard) {
+    init(link: ComputerLink = SessionComputerLink(), defaults: UserDefaults = .standard) {
         self.link = link
         // Keychain items outlive an uninstall, UserDefaults does not. A missing
         // flag means a fresh install: drop any old keys so uninstalling really
@@ -143,7 +144,8 @@ final class AppModel: ObservableObject {
         pendingDecision = nil
         do {
             // Re-check with the computer before signing anything.
-            guard try await link.isPending(approvalId: d.approvalId, on: computer) else {
+            let signer = try DeviceIdentity.loadOrCreate(context: context)
+            guard try await link.isPending(approvalId: d.approvalId, on: computer, signer: signer) else {
                 notice = "This request is no longer waiting."
                 return
             }
@@ -231,6 +233,6 @@ final class AppModel: ObservableObject {
         let signer = try DeviceIdentity.loadOrCreate(context: context)
         let command = try CommandSigner(signer: signer, counter: MonotonicCounter(store: KeychainCounterStore()), crypto: crypto)
             .sign(body: body, to: computer.computerId)
-        return try await link.call(command, to: computer)
+        return try await link.call(command, to: computer, signer: signer)
     }
 }
