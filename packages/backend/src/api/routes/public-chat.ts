@@ -22,8 +22,7 @@ import { getUserIdFromRequest } from '../../auth/jwt.js';
 import { randomUUID } from 'crypto';
 import { readPersonality, readMemory } from '../../services/agent-files.js';
 import { storeP4Enabled } from '../../services/store-p4.js';
-import { resolveAgentContext } from '../../services/agent-context/resolve.js';
-import { renderSystemPrompt } from '../../services/agent-context/render.js';
+import { personalityTextFor } from '../../services/personality-record.js';
 import { outsiderAgentMemoryEnabled } from '../../services/outsider-memory.js';
 import { handleError } from '../error-handler.js';
 import { DEFAULT_OLLAMA_MODEL, OLLAMA_URL } from '../../llm/ollama.js';
@@ -625,11 +624,13 @@ export async function registerPublicChatRoutes(fastify: FastifyInstance) {
       }
     }
 
-    // STORE-MAP-01 P4 (D16): the room's prompt first, then the agent's one context (its clean
-    // personality text, never the raw file with its generated part), as an outside audience.
+    // STORE-MAP-01 P4 (D16): the room's prompt first, then the agent's clean personality text from
+    // its one record (never the raw file with its generated part). A visitor never gets the owner's
+    // rules, instructions, team or skills: only how the agent talks.
     let agentContext = '';
     if (storeP4Enabled() && room.agent_id) {
-      try { agentContext = renderSystemPrompt(await resolveAgentContext({ agentId: room.agent_id, entry: 'channel', ownerId: null }), { data: false }); } catch { agentContext = ''; }
+      const text = await personalityTextFor(room.agent_id).catch(() => '');
+      agentContext = text ? `## Your personality\n${text}` : '';
     }
     // Build system prompt (priority: room > agent PERSONALITY.md > default)
     const systemPrompt = agentContext

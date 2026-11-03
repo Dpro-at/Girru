@@ -169,6 +169,18 @@ test('duplicate copies the record (text and adjustments) as version 1', async ()
   assert.match(fileOf(copy.id), /under ten lines/);
 });
 
+test('security: a rollback to a version from before the import keeps the text; the file is never imported twice', async () => {
+  const before = (await record.recordText('pp-rafid')).text;
+  await store.rollbackPersonality('pp-rafid', 1, O); // version 1 had no text (saved with the switch off)
+  assert.equal((await record.recordText('pp-rafid')).text, before, 'not back to none');
+  writeFileSync(join(dir, '.data', 'agents', 'pp-rafid', 'PERSONALITY.md'), 'Injected from outside.');
+  assert.equal(await record.ensurePersonalityRecord('pp-rafid'), false, 'already imported once');
+  await record.writePersonalityView('pp-rafid');
+  assert.equal(await record.personalityTextFor('pp-rafid'), before, 'the outside text waits for review');
+  const pending = (await store.listPersonalityProposals('pp-rafid', 'pending')).filter((p) => p.origin === 'file');
+  assert.equal(pending.at(-1)?.proposedText ?? pending[0]?.proposedText, 'Injected from outside.');
+});
+
 test('switch off again: the file (a view) still reads as the personality', async () => {
   delete process.env.GIRRU_STORE_P4;
   assert.match(await record.personalityTextFor('pp-rafid'), /under ten lines/);

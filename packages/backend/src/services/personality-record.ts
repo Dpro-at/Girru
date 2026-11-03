@@ -168,6 +168,9 @@ export async function ensurePersonalityRecord(id: string): Promise<boolean> {
     if (!storeP4Enabled()) return false;
     const done = await sql().read(one<{ text_hash: string | null }>('SELECT text_hash FROM agent_personality_versions WHERE agent_id = ? ORDER BY version DESC LIMIT 1', id));
     if (done?.text_hash) return false;
+    // Imported once only: after that the file is a view, and a change in it is a proposal, never an import.
+    if (await sql().read(one('SELECT agent_id FROM personality_file_state WHERE agent_id = ?', id))) return false;
+    if (await sql().read(one('SELECT 1 AS ok FROM agent_personality_versions WHERE agent_id = ? AND text_hash IS NOT NULL LIMIT 1', id))) return false;
     let text = '';
     try { text = textOfFile(await readPersonality(id)); } catch { return false; } // an unsafe file is left alone and retried next start
     if (Buffer.byteLength(text, 'utf8') > MAX_PERSONALITY_TEXT_BYTES) return false;

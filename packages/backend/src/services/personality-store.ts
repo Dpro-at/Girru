@@ -178,8 +178,11 @@ export function* appendVersion(agentId: string, createdBy: string, v: NewVersion
   const max = (yield* one<{ v: number | null }>('SELECT MAX(version) AS v FROM agent_personality_versions WHERE agent_id = ?', agentId))?.v ?? 0;
   const version = max + 1;
   // T7: text and adjustments share one history; a version that does not set a text keeps the previous one.
+  const textOf = function* (n: number | null) { return (yield* one<{ text_hash: string | null }>('SELECT text_hash FROM agent_personality_versions WHERE agent_id = ? AND version = ?', agentId, n))?.text_hash ?? null; };
+  // A rollback to a version from before the text was imported keeps the current text (never back to none).
   const textHash = v.textHash !== undefined ? v.textHash
-    : (yield* one<{ text_hash: string | null }>('SELECT text_hash FROM agent_personality_versions WHERE agent_id = ? AND version = ?', agentId, v.source === 'rollback' ? v.basedOnVersion : max))?.text_hash ?? null;
+    : v.source === 'rollback' ? ((yield* textOf(v.basedOnVersion)) ?? (yield* textOf(max)))
+    : yield* textOf(max);
   yield* run(`
     INSERT INTO agent_personality_versions
       (agent_id, version, traits, preset, dialect, locked, locked_traits, source, based_on_version, note, created_by, text_hash)
