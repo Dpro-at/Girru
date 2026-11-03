@@ -112,14 +112,19 @@ keys. It happens once per phone.
    the phone's identity key, which proves the phone holds the key it sends, and
    it is encrypted and authenticated under the pairing key, so only someone who
    saw the QR code can produce or read it.
-4. **Both screens show the same 6-digit check code** (formula below). The owner
-   checks the codes match.
+4. **The computer answers with a check challenge** (`g1.pchal`, below): 32
+   fresh random bytes, made only after the request arrived, signed by the
+   computer and addressed to the phone's proven device id. **Both screens then
+   show the same 6-digit check code** (formula below), which mixes in that
+   challenge. The phone shows no code until it holds a valid challenge for
+   itself. The owner checks the codes match.
 5. **The owner confirms or changes the pairing lifetime and clicks Approve on
    the computer.** Nothing is paired without this click; the phone cannot
    approve itself, and the relay cannot approve anything.
 6. **The computer sends a signed welcome** (`g1.pwel`, below), encrypted under
    the pairing key and signed with the computer's identity key. It carries the
-   per-phone notification key (see Notifications) and the final pairing
+   per-phone notification key (see Notifications), wrapped a second time under
+   a key only the two identity keys can make, and the final pairing
    lifetime. The phone checks the signature against the public key it got from
    the QR code before it reads anything inside.
 7. **The pairing secret and pairing id are thrown away** on both sides. The
@@ -131,18 +136,26 @@ keys. It happens once per phone.
    pairing you did not make is noticed at once.
 
 A pairing id opens on the relay for at most 10 minutes and passes at most 16
-messages, then closes. A QR code works for one phone only.
+messages, then closes. A QR code works for one phone only. On the computer a
+pairing screen lasts at most 10 minutes in all: a received request does not
+restart that time.
 
 Rules on the computer while a QR code is open:
 
 - It accepts **one** pairing request per pairing id. If a second, different
   request arrives for the same pairing id, it cancels this pairing, shows a
   warning (someone else may have seen the QR code) and asks the owner to start
-  again. This matters because the check code is short: someone who
-  photographed the QR code could search for a key whose check code matches
-  the real phone's. With one request per QR code, such a request either
-  replaces nothing (it is refused) or is the only one, and then the owner's
-  phone shows a different code or none.
+  again. The check code is short, so it must not be searchable: someone who
+  photographed the QR code and controls the relay can drop the real phone's
+  request, read its key (the request is sealed only under the pairing key)
+  and send a request of their own instead. Without a challenge they could
+  first search for a key whose code matches the real phone's (about a
+  million tries, seconds of work). With the challenge the code depends on 32
+  random bytes the computer makes only after it took the request, so the
+  requesting key is fixed before the code can be known; the challenge is
+  addressed to that key's device id and the real phone refuses it. The
+  owner's phone then shows no code at all, and the owner does not click
+  Allow.
 - The phone's device id as seen on the way in (the `from` the relay stamps, or
   the local session's peer) must equal SHA-256 of the `key` in the request.
 - An expired QR code (`exp` passed) accepts nothing.
@@ -236,16 +249,36 @@ request when `sig` is missing or does not verify. Binding the nonce stops a
 signature being lifted into another request; binding the pairing id stops it
 being used for another QR code.
 
+### Check challenge (`g1.pchal`)
+
+Sent by the computer once it has taken a pairing request, to the phone's
+proven device id, by the path the request came (`{t:"send", to, env}` on the
+relay). The same request sent again gets the same challenge again.
+
+```
+g1.pchal.<payload>.<sig>
+payload = base64url(nonce(12 random bytes) || AES-256-GCM ciphertext || 16-byte tag)
+          under the pairing key, AAD = "girru/v1/pchal\n" + pairing id
+sig     = base64url(ECDSA-P256-SHA256 by the computer's identity key over "girru/v1/pchal\n" + payload)
+```
+
+The JSON inside: `computer` (the computer's device id, must equal `cid`),
+`phone` (the phone's device id, must be this phone) and `challenge` (32 random
+bytes, base64url). The phone checks the signature first (against `ck`), then
+decrypts, then checks both ids and the challenge length. Anything wrong and it
+is refused, and the phone shows no code.
+
 ### Check code
 
 ```
-digest = SHA-256("girru/v1/check\n" || pairing secret || computer SPKI DER || phone SPKI DER)
+digest = SHA-256("girru/v1/check\n" || pairing secret || computer SPKI DER || phone SPKI DER || challenge)
 code   = (first 4 bytes of digest as a big-endian unsigned number) mod 1 000 000,
          written as 6 digits with leading zeros
 ```
 
-`||` joins raw bytes. Both public keys are P-256 SPKI DER (fixed length), so
-the joined bytes cannot be read two ways.
+`||` joins raw bytes. Both public keys are P-256 SPKI DER (fixed length) and
+the challenge is exactly 32 bytes, so the joined bytes cannot be read two
+ways. `challenge` is the raw bytes from `g1.pchal`.
 
 ### Welcome (`g1.pwel`)
 
@@ -262,13 +295,25 @@ The JSON welcome inside:
 |---|---|
 | `computer` | the computer's device id; must equal `cid` from the QR code |
 | `phone` | the phone's device id; must be this phone |
-| `notifyKey` | the per-phone notification key, 32 random bytes, base64url |
+| `notifyKey` | the per-phone notification key, wrapped (below): base64url of 60 bytes |
 | `lifetimeDays` | the final pairing lifetime: 30, 60, 90 or 120. Left out (or `null`) = never expires. Any other value makes the welcome invalid |
 | `name` | optional: the computer's display name |
 
 The phone checks the signature first (against `ck` from the QR code), then
-decrypts, then checks `computer`, `phone`, the notification key length and the
-lifetime. Anything wrong and the welcome is refused.
+decrypts, then checks `computer`, `phone`, the wrapped key length and the
+lifetime, then unwraps the notification key. Anything wrong and the welcome is
+refused.
+
+**Wrapped notification key.** The pairing key alone (all a QR photo gives)
+must not open it:
+
+```
+shared  = ECDH(computer identity private key, phone identity public key from the request)
+          (the phone: its identity private key with ck); the 32-byte x coordinate
+wrap    = HKDF-SHA-256(shared, salt = pairing key, info = "girru/v1/nkey", 32 bytes)
+notifyKey field = base64url(nonce(12 random bytes) || AES-256-GCM(wrap, nonce, 32-byte key) ciphertext || 16-byte tag)
+AAD     = "girru/v1/nkey\n" + computer device id + "\n" + phone device id
+```
 
 ### Pairing lifetime: scan once, stay paired
 
@@ -315,9 +360,12 @@ works. The app shows which path is active.
 On the local network the computer speaks the relay's own frames (below) on a
 direct connection: `challenge`, the signed `hello` over the name
 `ws://<host>:<port>/v1`, `ready`, then `send` and `msg`. Only paired phones, or
-a phone sending to an open pairing id, get anything through. A phone paired
-as "Wi-Fi only" is never served through the relay: the computer leaves it off
-its relay allow list.
+a phone sending to an open pairing id, get anything through; a phone let in
+only for a pairing is dropped once that pairing closes. The computer listens
+on one private, link-local or loopback address, never on every address
+(`0.0.0.0` or `::`), caps connections that have not proven an id yet, and
+drops a peer that misses a ping. A phone paired as "Wi-Fi only" is never
+served through the relay: the computer leaves it off its relay allow list.
 
 The same end-to-end encryption and the same signed commands are used on every
 path. The computer only dials out (to the relay and for the direct path), so it
@@ -367,6 +415,10 @@ session id = base64url(transcript[0..16])
 
 Signatures are always made over the exact base64url text that was sent, so no
 side ever has to re-encode JSON the same way as the other.
+
+The answering side answers each hs1 text once: a copy sent again (by the relay
+or anyone on the path) within its time window is ignored, so it can never
+replace a live session or move it to another path.
 
 ## Envelope
 
@@ -453,6 +505,24 @@ Approvals list; it is required to approve (optional to deny), so the phone
 approves exactly the parameters it showed. A changed request has a new hash
 and is refused.
 
+**Full view.** The list carries only a preview: long text is cut and nested
+values show as `[object]` (`truncated: true`, `fullViewRequired: true`). Such
+an approval can be approved only after the phone fetched its full view:
+
+```
+body   = {"id": "<approval id>", "type": "approval.detail"}
+answer = {id, toolName, category, agentId, sessionId, params, maskedFields, runScope, requestedAt, paramsHash}
+```
+
+`params` are the full parameters with secrets masked (`maskedFields` lists
+where), at most 256 KiB in all (`too_large` above that: decide on the
+computer). The computer records, per phone, the `paramsHash` of each full view
+it sent; `approval.decide` with `approve: true` for a cut-short approval
+without a full view of that same hash on this phone is refused with
+`full_view_required`. The phone shows the full view to the owner before it
+signs. The record lives in the computer's memory: after a restart, or a new
+pairing, the phone fetches the full view again.
+
 (the iPhone app writes the keys in sorted order; the computer reads the body as
 JSON and must not depend on key order, since the signature covers the exact
 text either way). `id` is the approval id from the approval notice or the
@@ -499,12 +569,16 @@ Every message inside a session is one JSON object in a `g1.msg` envelope.
   command's `nonce` when there is none or the command was refused before its
   body was read (`replay`, `stale`, `bad_signature`, `expired`, ...). A
   started chat turn then sends `{type:"run", ref, runId, seq, frame}` for each
-  run event and one `{type:"run.end", ref, runId, status}`.
+  run event and one `{type:"run.end", ref, runId, status}`. When the link is
+  backed up the computer stops streaming and sends
+  `{type:"run.end", ref, runId, status:"dropped", code:"slow_link"}`; the phone
+  reads the rest with `chat.messages`. A command that fails inside the
+  computer is answered `internal_error`; no other internal code is sent.
 
 Commands in v1: `chat.list`, `chat.messages {id, before?}`,
 `chat.send {id?, message, agentId?, model?}`, `chat.stop {runId}`,
 `approval.pending` (no `id`: the pending approvals, each recorded as given to
-this phone), `approval.pending {id}`, `approval.decide`, `tasks.list {place?}`,
+this phone), `approval.pending {id}`, `approval.detail {id}`, `approval.decide`, `tasks.list {place?}`,
 `schedules.list`, `team.list`. An owner with a second factor gets
 `verification_required` for an approval: the phone sends the owner to the
 computer and nothing runs.
@@ -590,7 +664,7 @@ shows it.
   hands the relay the token and a sealed payload; the relay passes them to
   APNs or FCM and forgets them.
 - The payload is encrypted with a per-phone notification key (32 random bytes
-  sent in the signed welcome at pairing) using AES-256-GCM, and signed by the
+  sent wrapped in the signed welcome at pairing) using AES-256-GCM, and signed by the
   computer's identity key. The phone (iOS Notification Service Extension, or
   the Android app) checks the signature and decrypts before showing anything.
   A notification without a valid signature is never shown with its content.

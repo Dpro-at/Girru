@@ -1,13 +1,13 @@
 /**
  * Pairing and notice formats (PROTOCOL.md "QR code", "Pairing key", "Pairing
- * request", "Check code", "Welcome" and "Notice format"). The relay reference
+ * request", "Check challenge", "Check code", "Welcome" and "Notice format"). The relay reference
  * code has no copy of these yet; this file follows the text byte for byte.
  * Both sides are here (the phone side is used by tests and as a reference).
  *
  * Only Node `crypto`. Nothing here logs or keeps a secret.
  */
 
-import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes, sign, verify, type KeyObject } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, diffieHellman, hkdfSync, randomBytes, sign, verify, type KeyObject } from 'node:crypto';
 import { ID_PATTERN, PAIRING_PATTERN, RELAY_NAME_PATTERN, b64url, deviceIdOf, fromB64url, p256PublicKey } from './encoding.js';
 import { PAIRING_LIFETIME_DAYS, ProtocolError, publicKeyText, type Identity, type PairingLifetimeDays } from './e2e.js';
 
@@ -200,13 +200,56 @@ export function openPairingRequest(env: string, pairingId: string, secret: Uint8
   return { key, phoneId, name, platform, ...(push ? { push } : {}), ...(lifetime !== undefined ? { lifetimeDays: lifetime as 30 | 60 | 90 | 120 } : {}) };
 }
 
-/** SHA-256("girru/v1/check\n" || secret || computer SPKI || phone SPKI): first 4 bytes mod 1 000 000, 6 digits. */
-export function checkCode(secret: Uint8Array, computerKey: KeyObject, phoneKey: KeyObject): string {
+// ---------- check challenge (g1.pchal) and check code ----------
+
+export const CHALLENGE_BYTES = 32;
+
+/**
+ * The computer side: once it has taken a request, a fresh random challenge for
+ * that phone, sealed under the pairing key and signed. The phone's key is fixed
+ * (in the request) before the challenge exists, so a key cannot be ground to
+ * match a check code.
+ */
+export function sealChallenge(computer: Identity, pairingId: string, secret: Uint8Array, phoneId: string): { env: string; challenge: Buffer } {
+  const challenge = randomBytes(CHALLENGE_BYTES);
+  const nonce = randomBytes(12);
+  const body = { computer: computer.id, phone: phoneId, challenge: b64url(challenge) };
+  const box = gcmSeal(pairingKey(secret, pairingId), nonce, `girru/v1/pchal\n${pairingId}`, Buffer.from(JSON.stringify(body), 'utf8'));
+  const payload = b64url(Buffer.concat([nonce, box]));
+  const sig = b64url(sign('sha256', Buffer.from(`girru/v1/pchal\n${payload}`, 'utf8'), computer.privateKey));
+  return { env: `${SUITE}.pchal.${payload}.${sig}`, challenge };
+}
+
+/** The phone side: signature first (against `ck`), then the box, then the ids; returns the challenge bytes. */
+export function openChallenge(env: string, computerKey: KeyObject, pairingId: string, secret: Uint8Array, phoneId: string): Buffer {
+  const parts = typeof env === 'string' ? env.split('.') : [];
+  if (parts.length !== 4 || parts[0] !== SUITE || parts[1] !== 'pchal') throw new ProtocolError('bad_format');
+  let ok = false;
+  try { ok = verify('sha256', Buffer.from(`girru/v1/pchal\n${parts[2]}`, 'utf8'), computerKey, fromB64url(parts[3])); } catch { ok = false; }
+  if (!ok) throw new ProtocolError('bad_signature');
+  const raw = decodePart(parts[2]);
+  if (raw.length < 12 + 16) throw new ProtocolError('bad_format');
+  const plain = gcmOpen(pairingKey(secret, pairingId), raw.subarray(0, 12), `girru/v1/pchal\n${pairingId}`, raw.subarray(12));
+  let c: Record<string, unknown>;
+  try { c = JSON.parse(plain.toString('utf8')); } catch { throw new ProtocolError('bad_format'); }
+  if (!c || c.computer !== deviceIdOf(computerKey) || c.phone !== phoneId) throw new ProtocolError('wrong_key');
+  const challenge = typeof c.challenge === 'string' ? decodePart(c.challenge) : Buffer.alloc(0);
+  if (challenge.length !== CHALLENGE_BYTES) throw new ProtocolError('bad_format');
+  return challenge;
+}
+
+/**
+ * SHA-256("girru/v1/check\n" || secret || computer SPKI || phone SPKI || challenge):
+ * first 4 bytes mod 1 000 000, 6 digits. The challenge is the computer's g1.pchal.
+ */
+export function checkCode(secret: Uint8Array, computerKey: KeyObject, phoneKey: KeyObject, challenge: Uint8Array): string {
+  if (!challenge || challenge.length !== CHALLENGE_BYTES) throw new ProtocolError('bad_format');
   const digest = createHash('sha256')
     .update(Buffer.from('girru/v1/check\n', 'utf8'))
     .update(secret)
     .update(computerKey.export({ type: 'spki', format: 'der' }))
     .update(phoneKey.export({ type: 'spki', format: 'der' }))
+    .update(challenge)
     .digest();
   return String(digest.readUInt32BE(0) % 1_000_000).padStart(6, '0');
 }
@@ -216,24 +259,44 @@ export function checkCode(secret: Uint8Array, computerKey: KeyObject, phoneKey: 
 export interface Welcome {
   computer: string;
   phone: string;
+  /** The raw 32-byte notification key, base64url (wrapped on the wire, see notifyWrapKey). */
   notifyKey: string;
   lifetimeDays: PairingLifetimeDays;
   name?: string;
 }
 
-/** The computer side: the sealed and signed welcome. */
-export function sealWelcome(computer: Identity, pairingId: string, secret: Uint8Array, w: Welcome): string {
+/**
+ * The key that wraps the notification key inside the welcome: HKDF-SHA-256(
+ * ECDH(computer identity, phone identity), salt = pairing key, info =
+ * "girru/v1/nkey", 32 bytes). Someone who saw only the QR code (the pairing
+ * key) cannot unwrap it.
+ */
+function notifyWrapKey(own: KeyObject, peer: KeyObject, pairingId: string, secret: Uint8Array): Buffer {
+  let shared: Buffer;
+  try { shared = diffieHellman({ privateKey: own, publicKey: peer }); } catch { throw new ProtocolError('bad_key'); }
+  return Buffer.from(hkdfSync('sha256', shared, pairingKey(secret, pairingId), 'girru/v1/nkey', 32));
+}
+
+const nkeyAad = (computerId: string, phoneId: string) => `girru/v1/nkey\n${computerId}\n${phoneId}`;
+
+/** The computer side: the sealed and signed welcome. `phoneKey` is the key from the request. */
+export function sealWelcome(computer: Identity, pairingId: string, secret: Uint8Array, phoneKey: KeyObject, w: Welcome): string {
   if (!(PAIRING_LIFETIME_DAYS as readonly unknown[]).includes(w.lifetimeDays)) throw new ProtocolError('bad_lifetime');
+  if (deviceIdOf(phoneKey) !== w.phone) throw new ProtocolError('wrong_key');
+  const raw = decodePart(w.notifyKey);
+  if (raw.length !== 32) throw new ProtocolError('bad_format');
+  const kn = randomBytes(12);
+  const wrapped = b64url(Buffer.concat([kn, gcmSeal(notifyWrapKey(computer.privateKey, phoneKey, pairingId, secret), kn, nkeyAad(w.computer, w.phone), raw)]));
   const nonce = randomBytes(12);
-  const body = { computer: w.computer, phone: w.phone, notifyKey: w.notifyKey, ...(w.lifetimeDays === null ? {} : { lifetimeDays: w.lifetimeDays }), ...(w.name ? { name: w.name } : {}) };
+  const body = { computer: w.computer, phone: w.phone, notifyKey: wrapped, ...(w.lifetimeDays === null ? {} : { lifetimeDays: w.lifetimeDays }), ...(w.name ? { name: w.name } : {}) };
   const box = gcmSeal(pairingKey(secret, pairingId), nonce, `girru/v1/pwel\n${pairingId}`, Buffer.from(JSON.stringify(body), 'utf8'));
   const payload = b64url(Buffer.concat([nonce, box]));
   const sig = b64url(sign('sha256', Buffer.from(`girru/v1/pwel\n${payload}`, 'utf8'), computer.privateKey));
   return `${SUITE}.pwel.${payload}.${sig}`;
 }
 
-/** The phone side: signature first (against `ck` from the QR code), then the box, then every field. */
-export function openWelcome(env: string, computerKey: KeyObject, pairingId: string, secret: Uint8Array, phoneId: string): Welcome {
+/** The phone side: signature first (against `ck` from the QR code), then the box, then every field; unwraps the notification key. */
+export function openWelcome(env: string, computerKey: KeyObject, pairingId: string, secret: Uint8Array, phone: Identity): Welcome {
   const parts = typeof env === 'string' ? env.split('.') : [];
   if (parts.length !== 4 || parts[0] !== SUITE || parts[1] !== 'pwel') throw new ProtocolError('bad_format');
   let ok = false;
@@ -245,10 +308,12 @@ export function openWelcome(env: string, computerKey: KeyObject, pairingId: stri
   let w: Record<string, unknown>;
   try { w = JSON.parse(plain.toString('utf8')); } catch { throw new ProtocolError('bad_format'); }
   const lifetime = w.lifetimeDays === undefined ? null : w.lifetimeDays;
-  if (w.computer !== deviceIdOf(computerKey) || w.phone !== phoneId) throw new ProtocolError('wrong_key');
-  if (typeof w.notifyKey !== 'string' || decodePart(w.notifyKey).length !== 32) throw new ProtocolError('bad_format');
+  if (w.computer !== deviceIdOf(computerKey) || w.phone !== phone.id) throw new ProtocolError('wrong_key');
+  const wrapped = typeof w.notifyKey === 'string' ? decodePart(w.notifyKey) : Buffer.alloc(0);
+  if (wrapped.length !== 12 + 32 + 16) throw new ProtocolError('bad_format');
   if (!(PAIRING_LIFETIME_DAYS as readonly unknown[]).includes(lifetime)) throw new ProtocolError('bad_lifetime');
-  return { computer: w.computer as string, phone: phoneId, notifyKey: w.notifyKey, lifetimeDays: lifetime as PairingLifetimeDays, ...(typeof w.name === 'string' ? { name: w.name } : {}) };
+  const notifyKey = gcmOpen(notifyWrapKey(phone.privateKey, computerKey, pairingId, secret), wrapped.subarray(0, 12), nkeyAad(w.computer as string, phone.id), wrapped.subarray(12));
+  return { computer: w.computer as string, phone: phone.id, notifyKey: b64url(notifyKey), lifetimeDays: lifetime as PairingLifetimeDays, ...(typeof w.name === 'string' ? { name: w.name } : {}) };
 }
 
 // ---------- notice (g1.ntf) ----------

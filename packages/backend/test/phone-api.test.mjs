@@ -38,7 +38,7 @@ for (const [id, role] of [['ph-owner', 'owner'], ['ph-admin', 'admin'], ['ph-use
 }
 const { generateToken } = await import(join(backendDir, 'src/auth/jwt.ts'));
 const { buildServer } = await import(join(backendDir, 'src/api/app.ts'));
-const { phoneLink, QR_RENEW_MS } = await import(join(backendDir, 'src/phone/service.ts'));
+const { phoneLink, QR_RENEW_MS, PAIRING_MAX_MS } = await import(join(backendDir, 'src/phone/service.ts'));
 const store = await import(join(backendDir, 'src/phone/store.ts'));
 const P = await import(join(backendDir, 'src/phone/protocol/pairing.ts'));
 const E = await import(join(backendDir, 'src/phone/protocol/e2e.ts'));
@@ -51,6 +51,25 @@ const call = (user, method, url, payload) => app.inject({ method, url, headers: 
 const DAY = 24 * 60 * 60 * 1000;
 
 test.after(async () => { await phoneLink().stop(); await app.close(); });
+
+// Everything the link sends (no relay here): pairing challenges and welcomes are read from it.
+const sent = [];
+{
+  const link = phoneLink();
+  const real = link.deliver.bind(link);
+  link.deliver = (id, env, ...rest) => { sent.push({ id, env }); return real(id, env, ...rest); };
+}
+const challengeFor = (phone, qr) => {
+  const f = [...sent].reverse().find((m) => m.id === phone.id && m.env.startsWith('g1.pchal.'));
+  return f ? P.openChallenge(f.env, qr.computerKey, qr.pairingId, qr.secret, phone.id) : null;
+};
+/** Opens a pairing and feeds a request from `phone` in, as the relay would. */
+async function requestFrom(phone, name = 'Phone', opts = {}) {
+  const p = (await call('ph-owner', 'POST', '/api/phone/pairing', { path: 'anywhere' })).json();
+  const qr = P.readQr(p.qr);
+  phoneLink().onEnvelope(phone.id, P.sealPairingRequest(phone, qr.pairingId, qr.secret, { name, platform: 'ios', ...opts }), qr.pairingId, 'relay');
+  return { p, qr };
+}
 
 test('migration 164 creates the phone tables', () => {
   for (const t of ['phone_identity', 'phone_devices', 'phone_settings', 'phone_approvals_shown']) {
@@ -130,7 +149,15 @@ test('the QR code renews: new pairing id and secret; a request on the old code i
   const req = (await call('ph-owner', 'GET', `/api/phone/pairing/${pairing.id}`)).json();
   assert.equal(req.state, 'request');
   assert.equal(req.qr, null);
-  assert.deepEqual(req.request, { name: 'Work iPhone', model: 'ios', checkCode: P.checkCode(after.secret, after.computerKey, phone.publicKey), lifetimeDays: 30 });
+  // The phone got a signed challenge for itself, and both screens show the code made with it.
+  const challenge = challengeFor(phone, after);
+  assert.ok(challenge, 'a check challenge went back to the phone');
+  assert.deepEqual(req.request, { name: 'Work iPhone', model: 'ios', checkCode: P.checkCode(after.secret, after.computerKey, phone.publicKey, challenge), lifetimeDays: 30 });
+  // The same request again: the same challenge again, the code stays.
+  const count = sent.filter((m) => m.env.startsWith('g1.pchal.')).length;
+  link.onEnvelope(phone.id, P.sealPairingRequest(phone, after.pairingId, after.secret, { name: 'Work iPhone', platform: 'ios', lifetimeDays: 30 }), after.pairingId, 'relay');
+  assert.equal(sent.filter((m) => m.env.startsWith('g1.pchal.')).length, count + 1);
+  assert.deepEqual(challengeFor(phone, after), challenge);
   assert.equal(await phoneLink().renew(pairing.id), false, 'a received request stops the renewing');
 
   for (const body of [{}, { lifetimeDays: 45, path: 'anywhere' }, { lifetimeDays: 30 }, { lifetimeDays: 30, path: 'anywhere', name: 'x' }]) {
@@ -222,4 +249,91 @@ test('devices: patch with exact bodies, sliding lifetime, forget wipes the keys,
   assert.deepEqual((await call('ph-owner', 'POST', '/api/phone/devices/forget-all')).json(), { forgotten: 2 });
   assert.deepEqual((await call('ph-owner', 'GET', '/api/phone')).json().devices, []);
   assert.deepEqual(sockets, [], 'still no connection');
+});
+
+test('M1: an attacker with the QR photo cannot pre-pick a key for the code: the challenge comes after its request', async () => {
+  // The relay drops the real phone's request and sends the attacker's (sealed with the photographed secret).
+  const real = E.createIdentity(), attacker = E.createIdentity();
+  const { p, qr } = await requestFrom(attacker, 'Mine');
+  const view = (await call('ph-owner', 'GET', `/api/phone/pairing/${p.id}`)).json();
+  assert.equal(view.state, 'request');
+  // The challenge was made after the attacker's key was fixed and is addressed to the attacker only.
+  const f = sent.findLast((m) => m.env.startsWith('g1.pchal.'));
+  assert.equal(f.id, attacker.id);
+  assert.throws(() => P.openChallenge(f.env, qr.computerKey, qr.pairingId, qr.secret, real.id), /wrong_key/, 'the real phone never shows a code for it');
+  assert.equal(view.request.checkCode, P.checkCode(qr.secret, qr.computerKey, attacker.publicKey, challengeFor(attacker, qr)));
+  phoneLink().deny(p.id, 'ph-owner');
+});
+
+test('L9: a request does not restart the 10-minute pairing deadline', async () => {
+  const phone = E.createIdentity();
+  const p = (await call('ph-owner', 'POST', '/api/phone/pairing', { path: 'anywhere' })).json();
+  const qr = P.readQr(p.qr);
+  const t0 = Date.now();
+  phoneLink().onPairingRequest(qr.pairingId, phone.id, P.sealPairingRequest(phone, qr.pairingId, qr.secret, { name: 'Late', platform: 'ios' }), 'relay', t0 + 60_000);
+  assert.equal(phoneLink().pairingView(p.id, 'ph-owner', t0 + 61_000).state, 'request');
+  assert.equal(phoneLink().pairingView(p.id, 'ph-owner', t0 + PAIRING_MAX_MS + 1000).state, 'expired', 'ten minutes from the screen, not from the request');
+});
+
+test('L5: Allow cannot be cut in half; a cancel during Allow leaves nothing paired', async () => {
+  const phone = E.createIdentity();
+  const { p } = await requestFrom(phone, 'Racing');
+  const allowing = phoneLink().allow(p.id, 'ph-owner', { lifetimeDays: 30, path: 'anywhere' });
+  // Everything below runs before the Allow's first await returns.
+  assert.throws(() => phoneLink().closePairing(p.id, 'ph-owner'), (e) => e.code === 'allowing');
+  const fresh = phoneLink().startPairing('ph-owner', 'anywhere');
+  assert.throws(() => phoneLink().deny(p.id, 'ph-owner'), (e) => e.code === 'pairing_closed');
+  // A second, different request arrives meanwhile (a security cancel always wins): the Allow undoes itself.
+  const pid = phoneLink().pairings.get(p.id).request.pid, secret = phoneLink().pairings.get(p.id).request.secret;
+  const other = E.createIdentity();
+  phoneLink().onEnvelope(other.id, P.sealPairingRequest(other, pid, secret, { name: 'Other', platform: 'ios' }), pid, 'relay');
+  await assert.rejects(fresh, (e) => e.code === 'allowing');
+  await assert.rejects(allowing, (e) => e.code === 'pairing_closed');
+  assert.equal((await call('ph-owner', 'GET', `/api/phone/pairing/${p.id}`)).json().state, 'cancelled');
+  assert.ok(!(await call('ph-owner', 'GET', '/api/phone')).json().devices.some((d) => d.id === phone.id), 'nothing paired');
+  assert.equal(phoneLink().devices.has(phone.id), false);
+  assert.ok(!sent.some((m) => m.id === phone.id && m.env.startsWith('g1.pwel.')), 'no welcome went out');
+});
+
+test('M3: a forgotten phone never comes back through a refresh, only through a new Allow', async () => {
+  const phone = E.createIdentity();
+  const { p } = await requestFrom(phone, 'Back');
+  assert.equal((await call('ph-owner', 'POST', `/api/phone/pairing/${p.id}/allow`, { lifetimeDays: 30, path: 'anywhere' })).statusCode, 200);
+  assert.equal(phoneLink().devices.has(phone.id), true);
+  const key = db.prepare('SELECT public_key FROM phone_devices WHERE id = ?').get(phone.id).public_key;
+  // Two refreshes overlap with the forget; then a stale read (the row as it was) lands last.
+  const a = phoneLink().refresh(), b = phoneLink().forget('ph-owner', phone.id), c = phoneLink().refresh();
+  await Promise.all([a, b, c]);
+  assert.equal(phoneLink().devices.has(phone.id), false);
+  db.prepare('UPDATE phone_devices SET revoked_at = NULL, public_key = ? WHERE id = ?').run(key, phone.id);
+  await phoneLink().refresh();
+  assert.equal(phoneLink().devices.has(phone.id), false, 'a stale row does not bring it back');
+  assert.equal(phoneLink().verifier.lastCounter(phone.id), undefined, 'not in the command gate either');
+  db.prepare('UPDATE phone_devices SET revoked_at = 1 WHERE id = ?').run(phone.id);
+  const again = await requestFrom(phone, 'Back');
+  assert.equal((await call('ph-owner', 'POST', `/api/phone/pairing/${again.p.id}/allow`, { lifetimeDays: 30, path: 'anywhere' })).statusCode, 200);
+  assert.equal(phoneLink().devices.has(phone.id), true, 'a new Allow brings it back');
+  await phoneLink().forget('ph-owner', phone.id);
+});
+
+test('L4: a relay setting that cannot be read is no unhandled rejection', async () => {
+  const link = phoneLink();
+  const { p } = await requestFrom(E.createIdentity(), 'x');
+  link.deny(p.id, 'ph-owner');
+  await call('ph-owner', 'POST', '/api/phone/pairing', { path: 'anywhere' });
+  const seen = [];
+  const onRejection = (e) => seen.push(e);
+  process.on('unhandledRejection', onRejection);
+  db.exec('ALTER TABLE phone_settings RENAME TO phone_settings_away');
+  link.started = true;
+  try {
+    link.syncRelay();
+    await new Promise((r) => setTimeout(r, 50));
+  } finally {
+    link.started = false;
+    db.exec('ALTER TABLE phone_settings_away RENAME TO phone_settings');
+    process.off('unhandledRejection', onRejection);
+  }
+  assert.deepEqual(seen, []);
+  assert.equal(link.relay, null);
 });

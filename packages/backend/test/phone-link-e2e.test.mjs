@@ -1,10 +1,11 @@
 // MOB-LINK-01 end to end: a real relay on 127.0.0.1, the backend's phone link on a throwaway database,
 // and a fake phone built from the relay's reference code.
-//  scan QR → g1.preq → owner Allow → g1.pwel → handshake → signed chat.list → sealed reply;
+//  scan QR → g1.preq → g1.pchal (check code) → owner Allow → g1.pwel → handshake → signed chat.list → sealed reply;
 //  a replayed command is refused; chat.send streams the run back; approvals: list, pending, decide,
 //  2FA owners get verification_required; a second phone pairing notifies the first (g1.ntf);
 //  an old QR code is closed on the relay at once; a Wi-Fi-only phone is not reachable via the relay;
-//  a forgotten phone is refused.
+//  a forgotten phone is refused; a cut-short approval needs the full view first; a replayed hs1 is ignored;
+//  a phone paired again starts its counter over.
 // No network beyond 127.0.0.1 (the local model is stubbed).
 // Run: node --import tsx --import ../../scripts/test-temp-root.mjs --test test/phone-link-e2e.test.mjs
 import test from 'node:test';
@@ -101,14 +102,23 @@ class Phone {
     this.client.sendPairing(this.qr.pairingId, P.sealPairingRequest(this.identity, this.qr.pairingId, this.qr.secret, { name: this.name, platform: 'ios', ...opts }), 'preq');
   }
   next(match = () => true, ms = 3000) { return this.client.next(match, ms); }
+  /** The computer's signed challenge; only then does the phone show its check code. */
+  async challenge() {
+    const f = await this.next((f) => f.t === 'msg' && f.env.startsWith('g1.pchal.'));
+    assert.equal(f.from, this.qr.computerId);
+    const c = P.openChallenge(f.env, this.qr.computerKey, this.qr.pairingId, this.qr.secret, this.identity.id);
+    this.checkCode = P.checkCode(this.qr.secret, this.qr.computerKey, this.identity.publicKey, c);
+    return this.checkCode;
+  }
   async welcome() {
     const f = await this.next((f) => f.t === 'msg' && f.env.startsWith('g1.pwel.'));
     assert.equal(f.from, this.qr.computerId);
-    this.welcomed = P.openWelcome(f.env, this.qr.computerKey, this.qr.pairingId, this.qr.secret, this.identity.id);
+    this.welcomed = P.openWelcome(f.env, this.qr.computerKey, this.qr.pairingId, this.qr.secret, this.identity);
     return this.welcomed;
   }
   async handshake() {
     const { env, pending } = E.startHandshake(this.identity, this.qr.computerId);
+    this.lastHs1 = env;
     this.client.send(this.qr.computerId, env);
     const f = await this.next((f) => (f.t === 'msg' && f.env.startsWith('g1.hs2.')) || f.t === 'drop');
     if (f.t === 'drop') return f;
@@ -135,7 +145,7 @@ async function pair(phone, { path = 'anywhere', lifetimeDays = 30 } = {}) {
   await until(() => relay.stats().pairings >= 1, 'pairing id open on the relay');
   phone.request();
   const view = await until(async () => { const v = (await call('GET', `/api/phone/pairing/${p.id}`)).json(); return v.state === 'request' && v; }, 'pairing request');
-  assert.equal(view.request.checkCode, P.checkCode(phone.qr.secret, phone.qr.computerKey, phone.identity.publicKey), 'both screens show the same check code');
+  assert.equal(view.request.checkCode, await phone.challenge(), 'both screens show the same check code');
   assert.equal((await call('POST', `/api/phone/pairing/${p.id}/allow`, { lifetimeDays, path })).statusCode, 200);
   const w = await phone.welcome();
   assert.equal(w.lifetimeDays, lifetimeDays);
@@ -225,6 +235,41 @@ test('approvals: pending only once shown to this phone; deny; approve needs para
   assert.equal(JSON.parse(row.metadata).device, first.identity.id);
 });
 
+test('M2: a cut-short or nested preview is approved only after the full view of that very hash', async () => {
+  db.prepare('DELETE FROM verification_factors WHERE user_id = ?').run('pe-owner');
+  const tool = { name: 'phone_test_tool' };
+  const id = (await approvals.requestApproval(tool, { text: 'y'.repeat(2000), nested: { deep: 1 } }, { userId: 'pe-owner', agentId: 'pe-main', sessionId: 's1' }, 'other')).details.approvalId;
+  first.command({ type: 'approval.detail', ref: 'm0', id });
+  assert.equal((await first.reply('m0')).error, 'not_pending', 'no full view of an approval never given to this phone');
+  first.command({ type: 'approval.pending', ref: 'm1' });
+  const item = (await first.reply('m1')).data.approvals.find((x) => x.id === id);
+  assert.equal(item.truncated, true);
+  assert.equal(item.fullViewRequired, true);
+  first.command({ type: 'approval.decide', ref: 'm2', id, approve: true, paramsHash: item.paramsHash });
+  assert.equal((await first.reply('m2')).error, 'full_view_required');
+  assert.equal((await approvals.getApproval(id)).status, 'pending', 'nothing ran');
+  first.command({ type: 'approval.detail', ref: 'm3', id });
+  const detail = (await first.reply('m3')).data;
+  assert.equal(detail.params.text.length, 2000);
+  assert.deepEqual(detail.params.nested, { deep: 1 });
+  assert.equal(detail.paramsHash, item.paramsHash);
+  assert.ok(Array.isArray(detail.maskedFields));
+  // Another phone's full view does not count for this one; this phone's does.
+  first.command({ type: 'approval.decide', ref: 'm4', id, approve: true, paramsHash: item.paramsHash });
+  const decided = await first.reply('m4', 5000);
+  assert.notEqual(decided.error, 'full_view_required', JSON.stringify(decided));
+  assert.notEqual((await approvals.getApproval(id)).status, 'pending', 'the full view let the approval through');
+});
+
+test('L2: a replayed hs1 is ignored and the live session keeps working', async () => {
+  first.command({ type: 'chat.list', ref: 'h0' });
+  assert.equal((await first.reply('h0')).ok, true);
+  first.client.send(first.qr.computerId, first.lastHs1);
+  await assert.rejects(first.next((f) => f.t === 'msg' && f.env.startsWith('g1.hs2.'), 500), /timed out/, 'no second answer');
+  first.command({ type: 'chat.list', ref: 'h1' });
+  assert.equal((await first.reply('h1')).ok, true, 'the session was not swapped');
+});
+
 const second = new Phone('Tablet');
 test('pairing a second phone notifies the first with a signed notice', async () => {
   await pair(second);
@@ -273,9 +318,29 @@ test('a forgotten phone is refused', async () => {
   assert.deepEqual(devices, [second.identity.id]);
 });
 
+test('L6: a phone paired again starts its counter over', async () => {
+  const again = new Phone('Again');
+  await pair(again);
+  await again.handshake();
+  for (const ref of ['c1', 'c2', 'c3']) { again.command({ type: 'chat.list', ref }); assert.equal((await again.reply(ref)).ok, true); }
+  // Same identity, new QR code: the computer stores counter 0 and must not keep the old 3 in memory.
+  await pair(again);
+  again.ctr = 0;
+  await again.handshake();
+  again.command({ type: 'chat.list', ref: 'c4' });
+  assert.deepEqual({ ok: (await again.reply('c4')).ok }, { ok: true });
+  await call('DELETE', `/api/phone/devices/${again.identity.id}`);
+});
+
 test('Wi-Fi path (off by default): a phone pairs and talks over the local listener, never via the relay', async () => {
   assert.equal((await call('GET', '/api/phone')).json().wifi, 'off');
   const store = await import(join(backendDir, 'src/phone/store.ts'));
+  // Every address at once is never bound: one private (or loopback) address only.
+  for (const host of ['0.0.0.0', '::']) {
+    await store.setSetting('phone.lanListen', JSON.stringify({ host, port: 0 }));
+    await phoneLink().restartLan();
+    assert.equal((await call('GET', '/api/phone')).json().wifi, 'failed', host);
+  }
   await store.setSetting('phone.lanListen', JSON.stringify({ host: '127.0.0.1', port: 0 }));
   await phoneLink().restartLan();
   assert.equal((await call('GET', '/api/phone')).json().wifi, 'on');
@@ -288,7 +353,8 @@ test('Wi-Fi path (off by default): a phone pairs and talks over the local listen
   local.client = await connect(`ws://${qr.lan[0]}/v1`, { identity: local.identity });
   clients.push(local.client);
   local.request();
-  await until(async () => (await call('GET', `/api/phone/pairing/${p.id}`)).json().state === 'request', 'request over Wi-Fi');
+  const view = await until(async () => { const v = (await call('GET', `/api/phone/pairing/${p.id}`)).json(); return v.state === 'request' && v; }, 'request over Wi-Fi');
+  assert.equal(view.request.checkCode, await local.challenge(), 'the challenge comes back over Wi-Fi too');
   assert.equal((await call('POST', `/api/phone/pairing/${p.id}/allow`, { lifetimeDays: null, path: 'wifi' })).statusCode, 200);
   assert.equal((await local.welcome()).lifetimeDays, null);
   assert.equal((await local.handshake()).t, 'msg');

@@ -16,33 +16,38 @@
  * `ref` is the body's `ref` when given, else the command's nonce.
  */
 
-import { hostname, networkInterfaces } from 'node:os';
-import { randomBytes } from 'node:crypto';
+import { hostname } from 'node:os';
+import { createHash, randomBytes } from 'node:crypto';
 import { backgroundEnabled } from '../config/background.js';
 import { logAudit } from '../services/audit-logger.js';
-import { CommandVerifier, ProtocolError, answerHandshake, open, seal, type Identity, type PairingLifetimeDays, type Session } from './protocol/e2e.js';
+import { CommandVerifier, DEFAULT_WINDOW_MS, answerHandshake, open, seal, type Identity, type PairingLifetimeDays, type Session } from './protocol/e2e.js';
 import { b64url } from './protocol/encoding.js';
 import {
-  checkCode, cleanName, newPairingId, newPairingSecret, openPairingRequest, qrText, sealNotice, sealWelcome, type PairingRequest,
+  checkCode, cleanName, newPairingId, newPairingSecret, openPairingRequest, qrText, sealChallenge, sealNotice, sealWelcome, type PairingRequest,
 } from './protocol/pairing.js';
 import * as S from './store.js';
 import { RelayConnector, type RelayState } from './relay-connector.js';
 import { LanListener } from './lan-listener.js';
-import { CommandError, approvalPending, runCommand } from './commands.js';
+import { CommandError, approvalPending, forgetDetails, runCommand } from './commands.js';
 
 /** A shown QR code renews this often (PROTOCOL.md "A shown QR code renews itself every 2 minutes"). */
 export const QR_RENEW_MS = 2 * 60 * 1000;
-/** A pairing screen (or a received request) gives up after this long. */
+/** A pairing screen gives up this long after it opened, a received request included (never restarted). */
 export const PAIRING_MAX_MS = 10 * 60 * 1000;
 /** A finished pairing still answers GET this long. */
 const PAIRING_KEEP_MS = 10 * 60 * 1000;
 const MAX_ENVELOPE = 1024 * 1024;
+const ENV_RE = /^[A-Za-z0-9._-]+$/;
+/** A handshake is answered once: its hash is kept a little longer than the time window it can pass. */
+const HS1_KEEP_MS = 2 * DEFAULT_WINDOW_MS + 60_000;
+const HS1_MAX = 4096;
 
 export type PairingState = 'waiting' | 'request' | 'paired' | 'cancelled' | 'expired';
 type Transport = 'relay' | 'lan';
 
 interface Code { pid: string; secret: Buffer; exp: number; qr: string }
-interface Received { pid: string; secret: Buffer; req: PairingRequest; checkCode: string; transport: Transport; at: number }
+/** `pchal` is the signed check challenge sent back to this phone (sent again if the same request repeats). */
+interface Received { pid: string; secret: Buffer; req: PairingRequest; checkCode: string; pchal: string; transport: Transport; at: number }
 interface Pairing {
   id: string;
   ownerId: string;
@@ -76,6 +81,12 @@ export class PhoneLink {
   private lan: LanListener | null = null;
   private lanError: string | null = null;
   private readonly chains = new Map<string, Promise<void>>();
+  /** Forgotten here: a refresh never brings these back; only a new Allow does. */
+  private readonly revoked = new Set<string>();
+  /** Refreshes run one after another, so an older read never lands after a newer one. */
+  private refreshing: Promise<void> = Promise.resolve();
+  /** Answered handshakes (hash → time): a replayed hs1 never swaps a session. */
+  private readonly seenHs1 = new Map<string, number>();
 
   /** Starts the link (server.ts, background on). Connects only when something needs it. */
   async start(): Promise<void> {
@@ -117,7 +128,10 @@ export class PhoneLink {
 
   async startPairing(ownerId: string, path: S.PhonePath, now = Date.now()): Promise<{ id: string; qr: string; expiresAt: number }> {
     if (path === 'wifi' && !this.lan) throw new PhoneLinkError('wifi_off', 409);
+    // An Allow still running finishes first; a new screen never cuts it in half.
+    if ([...this.pairings.values()].some((p) => p.allowing)) throw new PhoneLinkError('allowing', 409);
     this.identity ??= await S.loadIdentity(true);
+    if ([...this.pairings.values()].some((p) => p.allowing)) throw new PhoneLinkError('allowing', 409);
     // One pairing screen at a time: a new one closes the old.
     for (const p of this.pairings.values()) if (p.state === 'waiting' || p.state === 'request') this.finish(p, 'cancelled');
     const p: Pairing = { id: `ps_${b64url(randomBytes(16))}`, ownerId, path, state: 'waiting', code: null, request: null, deadline: now + PAIRING_MAX_MS, renewTimer: null, endTimer: null };
@@ -175,18 +189,36 @@ export class PhoneLink {
   }
 
   private async completeAllow(p: Pairing, ownerId: string, choice: { lifetimeDays: PairingLifetimeDays; path: S.PhonePath }, now: number): Promise<{ deviceId: string }> {
-    const r = p.request as Received, identity = this.identity as Identity;
-    const notifyKey = await S.addDevice({ id: r.req.phoneId, ownerId, name: r.req.name, model: r.req.platform, publicKey: r.req.key, path: choice.path, lifetimeDays: choice.lifetimeDays, push: r.req.push, now });
-    const welcome = sealWelcome(identity, r.pid, r.secret, { computer: identity.id, phone: r.req.phoneId, notifyKey: b64url(notifyKey), lifetimeDays: choice.lifetimeDays, name: computerName() });
-    p.deviceId = r.req.phoneId;
+    const r = p.request as Received, identity = this.identity as Identity, id = r.req.phoneId;
+    // Cancelled, expired, replaced or stopped while an await ran: nothing of this Allow stays.
+    const alive = () => p.state === 'request' && p.request === r && this.pairings.get(p.id) === p;
+    const notifyKey = await S.addDevice({ id, ownerId, name: r.req.name, model: r.req.platform, publicKey: r.req.key, path: choice.path, lifetimeDays: choice.lifetimeDays, push: r.req.push, now });
+    if (!alive()) return this.abortAllow(id);
+    // A phone paired again starts over: its old counter record and session go before the reload.
+    this.revoked.delete(id);
+    this.sessions.delete(id);
+    this.verifier?.revoke(id);
+    forgetDetails(id);
     // The allow list takes the phone first (the pairing id still holds the connection open), then the
     // welcome goes back the way the request came: one pairing message, whatever the final path.
     await this.refresh();
-    this.deliver(r.req.phoneId, welcome, r.transport, true);
+    if (!alive()) return this.abortAllow(id);
+    const welcome = sealWelcome(identity, r.pid, r.secret, r.req.key, { computer: identity.id, phone: id, notifyKey: b64url(notifyKey), lifetimeDays: choice.lifetimeDays, name: computerName() });
+    p.deviceId = id;
+    this.deliver(id, welcome, r.transport, true);
     this.finish(p, 'paired');
-    audit(ownerId, 'phone.pair', r.req.phoneId, { name: r.req.name, model: r.req.platform, path: choice.path, lifetimeDays: choice.lifetimeDays });
-    await this.noticeOthers(r.req.phoneId, { kind: 'security', title: 'New phone paired', body: `${r.req.name} was paired with ${computerName()}. If this was not you, remove it on the computer.` }, now);
-    return { deviceId: r.req.phoneId };
+    audit(ownerId, 'phone.pair', id, { name: r.req.name, model: r.req.platform, path: choice.path, lifetimeDays: choice.lifetimeDays });
+    await this.noticeOthers(id, { kind: 'security', title: 'New phone paired', body: `${r.req.name} was paired with ${computerName()}. If this was not you, remove it on the computer.` }, now);
+    return { deviceId: id };
+  }
+
+  /** Undoes a half-done Allow: the stored phone is forgotten again and nothing was sent. */
+  private async abortAllow(id: string): Promise<never> {
+    this.revoked.add(id);
+    this.dropDevice(id);
+    await S.forgetDevice(id, Date.now()).catch(() => undefined);
+    await this.refresh().catch(() => undefined);
+    throw new PhoneLinkError('pairing_closed', 409);
   }
 
   deny(id: string, ownerId: string): void {
@@ -200,6 +232,7 @@ export class PhoneLink {
   closePairing(id: string, ownerId: string): void {
     const p = this.pairings.get(id);
     if (!p || p.ownerId !== ownerId) throw new PhoneLinkError('not_found', 404);
+    if (p.allowing) throw new PhoneLinkError('allowing', 409);
     if (p.state === 'waiting' || p.state === 'request') this.finish(p, 'cancelled');
   }
 
@@ -208,10 +241,12 @@ export class PhoneLink {
     this.clearTimers(p);
     p.code = state === 'waiting' ? p.code : null;
     // Pairing secrets are dropped; a finished pairing keeps only what GET shows.
-    if (p.request) p.request = state === 'request' ? p.request : { ...p.request, secret: Buffer.alloc(0) };
+    if (p.request) p.request = state === 'request' ? p.request : { ...p.request, secret: Buffer.alloc(0), pchal: '' };
     p.endTimer = setTimeout(() => { if (this.pairings.get(p.id) === p) this.pairings.delete(p.id); }, PAIRING_KEEP_MS);
     p.endTimer.unref();
     this.syncRelay();
+    // A phone let onto the Wi-Fi listener only for this pairing goes with it.
+    this.lan?.recheck();
   }
 
   private clearTimers(p: Pairing): void {
@@ -243,21 +278,23 @@ export class PhoneLink {
         let req: PairingRequest;
         try { req = openPairingRequest(env, pid, p.code.secret, from); } catch { return; }
         const identity = this.identity as Identity;
-        p.request = { pid, secret: p.code.secret, req, checkCode: checkCode(p.code.secret, identity.publicKey, req.key), transport, at: now };
+        // The check code needs a challenge made only now, after the phone's key is fixed (PROTOCOL.md "Check challenge").
+        const { env: pchal, challenge } = sealChallenge(identity, pid, p.code.secret, req.phoneId);
+        p.request = { pid, secret: p.code.secret, req, checkCode: checkCode(p.code.secret, identity.publicKey, req.key, challenge), pchal, transport, at: now };
         p.state = 'request';
         p.code = null;
         if (p.renewTimer) clearInterval(p.renewTimer);
         p.renewTimer = null;
-        p.deadline = now + PAIRING_MAX_MS;
-        this.armEnd(p);
+        // The deadline stays where the screen set it: a request never buys more time.
         this.syncRelay();
+        this.deliver(req.phoneId, pchal, transport, true);
         return;
       }
       if (p.state === 'request' && p.request?.pid === pid) {
         let req: PairingRequest;
         try { req = openPairingRequest(env, pid, p.request.secret, from); } catch { return; }
-        // The same phone sending again changes nothing; any other request means someone else saw the code.
-        if (req.phoneId === p.request.req.phoneId) return;
+        // The same phone sending again gets the same challenge again; any other request means someone else saw the code.
+        if (req.phoneId === p.request.req.phoneId) { this.deliver(req.phoneId, p.request.pchal, transport, true); return; }
         p.warning = 'second_request';
         audit(p.ownerId, 'phone.pair.second_request', p.request.req.phoneId, {});
         this.finish(p, 'cancelled');
@@ -281,25 +318,29 @@ export class PhoneLink {
   async forget(ownerId: string, id: string, now = Date.now()): Promise<boolean> {
     const d = await S.getDevice(id);
     if (!d || d.ownerId !== ownerId) return false;
-    await S.forgetDevice(id, now);
+    this.revoked.add(id);
     this.dropDevice(id);
+    await S.forgetDevice(id, now);
     audit(ownerId, 'phone.forget', id, { name: d.name });
     await this.refresh();
     return true;
   }
 
   async forgetAll(ownerId: string, now = Date.now()): Promise<number> {
+    for (const d of await S.listDevices(ownerId)) { this.revoked.add(d.id); this.dropDevice(d.id); }
     const ids = await S.forgetAll(ownerId, now);
-    for (const id of ids) this.dropDevice(id);
+    for (const id of ids) { this.revoked.add(id); this.dropDevice(id); }
     audit(ownerId, 'phone.forget_all', ownerId, { count: ids.length });
     await this.refresh();
     return ids.length;
   }
 
   private dropDevice(id: string): void {
+    this.devices.delete(id);
     this.sessions.delete(id);
     this.verifier?.revoke(id);
     this.lan?.drop(id);
+    forgetDetails(id);
   }
 
   async setRelayUrl(url: string): Promise<void> {
@@ -308,12 +349,20 @@ export class PhoneLink {
     this.syncRelay();
   }
 
-  /** Reloads paired phones into the command gate and the relay allow list. */
-  async refresh(now = Date.now()): Promise<void> {
+  /** Reloads paired phones into the command gate and the relay allow list. Calls queue up; each reads afresh. */
+  refresh(): Promise<void> {
+    const run = this.refreshing.then(() => this.load());
+    this.refreshing = run.catch(() => undefined);
+    return run;
+  }
+
+  private async load(): Promise<void> {
     const list = await S.listDevices();
     const owner = await S.activeOwner();
+    const now = Date.now();
     const before = [...this.devices.keys()];
-    this.devices = new Map(list.filter((d) => d.ownerId === owner && !S.isExpired(d, now)).map((d) => [d.id, d]));
+    // Applied in one step after the reads: a phone forgotten meanwhile is in `revoked` and stays out.
+    this.devices = new Map(list.filter((d) => d.ownerId === owner && !S.isExpired(d, now) && !this.revoked.has(d.id)).map((d) => [d.id, d]));
     // Forgotten, expired or another owner's: out of the command gate, sessions closed.
     for (const id of before) if (!this.devices.has(id)) this.dropDevice(id);
     if (this.identity) {
@@ -325,6 +374,7 @@ export class PhoneLink {
     }
     for (const id of [...this.sessions.keys()]) if (!this.devices.has(id)) this.dropDevice(id);
     this.syncRelay();
+    this.lan?.recheck();
   }
 
   private syncRelay(): void {
@@ -338,7 +388,7 @@ export class PhoneLink {
         if (this.relay || !this.started) { this.syncRelay(); return; }
         this.relay = new RelayConnector({ identity, url, onFrame: (f) => this.onRelayFrame(f) });
         this.syncRelay();
-      });
+      }).catch(() => { /* the setting could not be read: the next change tries again */ });
       return;
     }
     if (!this.relay) return;
@@ -359,7 +409,7 @@ export class PhoneLink {
       admit: (id) => this.devices.has(id) || [...this.pairings.values()].some((p) => p.state === 'waiting' || p.state === 'request'),
       onEnvelope: (e) => this.onEnvelope(e.from, e.env, e.via, 'lan'),
     });
-    try { await lan.listen(); this.lan = lan; this.lanError = null; } catch { this.lanError = 'listen_failed'; }
+    try { await lan.listen(); this.lan = lan; this.lanError = null; } catch (err) { this.lanError = err instanceof Error && err.message === 'bad_host' ? 'bad_host' : 'listen_failed'; }
   }
 
   /** Turns the Wi-Fi listener on from the stored setting (used after it changes). */
@@ -376,19 +426,16 @@ export class PhoneLink {
     if (!this.lan) return [];
     const m = /^ws:\/\/(.+):(\d+)\/v1$/.exec(this.lan.address);
     if (!m) return [];
-    const port = m[2];
-    if (m[1] !== '0.0.0.0' && m[1] !== '[::]') return [`${m[1]}:${port}`];
-    const out: string[] = [];
-    for (const list of Object.values(networkInterfaces())) for (const a of list ?? []) {
-      if (a.family === 'IPv4' && !a.internal && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.)/.test(a.address)) out.push(`${a.address}:${port}`);
-    }
-    return out.slice(0, 4);
+    // The listener binds one address (never 0.0.0.0 or ::), so that is the one address to show.
+    return [`${m[1]}:${m[2]}`];
   }
 
   // ---------- inbound ----------
 
   private onRelayFrame(f: Record<string, unknown>): void {
     if (f.t !== 'msg' || typeof f.from !== 'string' || typeof f.env !== 'string') return;
+    // The relay is not trusted with sizes either: what no device may send is dropped unread.
+    if (f.env.length > MAX_ENVELOPE || !ENV_RE.test(f.env)) return;
     this.onEnvelope(f.from, f.env, typeof f.via === 'string' ? f.via : undefined, 'relay');
   }
 
@@ -402,8 +449,12 @@ export class PhoneLink {
     const now = Date.now();
     if (S.isExpired(device, now)) { this.dropDevice(from); return; }
     if (env.startsWith('g1.hs1.')) {
+      // A replayed hs1 (the relay or the network keeps a copy) would swap the session or its transport.
+      const seen = createHash('sha256').update(env).digest('base64url');
+      if (this.seenHs1.has(seen)) return;
       let answered: ReturnType<typeof answerHandshake>;
       try { answered = answerHandshake(this.identity, device.publicKey, env, now); } catch { return; }
+      this.rememberHs1(seen, now);
       this.sessions.set(from, { session: answered.session, transport });
       this.deliver(from, answered.env, transport);
       if (this.verifier?.touch(from, now)) { device.lastUsedAt = Math.max(device.lastUsedAt, now); void S.markUsed(from, now).catch(() => undefined); }
@@ -419,7 +470,7 @@ export class PhoneLink {
     // Checks run now, in arrival order; the work runs one after another.
     if (msg.type === 'approval.pending' && typeof msg.id === 'string' && msg.sig === undefined) {
       const id = msg.id;
-      this.enqueue(from, async () => { this.reply(from, { type: 'approval.pending', id, pending: await approvalPending(from, id) }); });
+      this.enqueue(from, async () => { if (this.known(from)) this.reply(from, { type: 'approval.pending', id, pending: await approvalPending(from, id) }); });
       return;
     }
     this.onCommand(from, device, msg, now);
@@ -439,11 +490,14 @@ export class PhoneLink {
     try { body = JSON.parse(check.body); if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('x'); } catch { body = {}; }
     const ref = typeof body.ref === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(body.ref) ? body.ref : nonce;
     this.enqueue(from, async () => {
+      // Forgotten or expired while this waited in line: it never runs.
+      const current = this.known(from) ? this.devices.get(from) as S.PhoneDevice : null;
+      if (!current || !current.publicKey.equals(device.publicKey)) return;
       // The counter is stored before anything runs, so a restart never accepts it again.
-      if (record) { device.lastCounter = record.lastCounter; device.lastUsedAt = record.lastUsed; await S.markUsed(from, record.lastUsed, record.lastCounter); }
+      if (record) { current.lastCounter = record.lastCounter; current.lastUsedAt = record.lastUsed; await S.markUsed(from, record.lastUsed, record.lastCounter); }
       if (typeof body.type !== 'string') { this.reply(from, { type: 'reply', ref, ok: false, error: 'bad_format' }); return; }
       const owner = await S.activeOwner();
-      if (owner !== device.ownerId) { this.reply(from, { type: 'reply', ref, ok: false, error: 'owner_changed' }); return; }
+      if (owner !== current.ownerId) { this.reply(from, { type: 'reply', ref, ok: false, error: 'owner_changed' }); return; }
       const ctx = { deviceId: from, ownerId: owner, now: () => Date.now(), push: (frame: Record<string, unknown>) => this.reply(from, { ...frame, ref }) };
       try {
         const data = await runCommand(ctx, body) as Record<string, unknown>;
@@ -452,10 +506,22 @@ export class PhoneLink {
         this.reply(from, { type: 'reply', ref, ok: true, data });
         if (follow) void follow().catch(() => undefined);
       } catch (err) {
-        const code = err instanceof CommandError ? err.code : err instanceof ProtocolError ? err.reason : 'internal_error';
+        // Only the commands' own codes reach the phone; anything else is internal_error, never a raw code.
+        const code = err instanceof CommandError ? err.code : 'internal_error';
         this.reply(from, { type: 'reply', ref, ok: false, error: code });
       }
     });
+  }
+
+  /** Still paired, not forgotten, not expired. */
+  private known(id: string): boolean {
+    const d = this.devices.get(id);
+    return !!d && !this.revoked.has(id) && !S.isExpired(d);
+  }
+
+  private rememberHs1(hash: string, now: number): void {
+    for (const [h, at] of this.seenHs1) { if (now - at <= HS1_KEEP_MS && this.seenHs1.size < HS1_MAX) break; this.seenHs1.delete(h); }
+    this.seenHs1.set(hash, now);
   }
 
   /** One phone's commands run one after another; phones do not wait for each other. */
@@ -473,14 +539,15 @@ export class PhoneLink {
     if (!live) return false;
     let text = JSON.stringify(obj);
     if (Buffer.byteLength(text) > MAX_ENVELOPE - 4096) text = JSON.stringify({ type: obj.type === 'run' ? 'run' : 'reply', ref: obj.ref ?? null, ok: false, error: 'too_large', ...(obj.runId ? { runId: obj.runId } : {}) });
-    return this.deliver(deviceId, seal(live.session, text), live.transport);
+    // Run frames are bulk: on a backed-up link they are refused first (the run then ends with a notice).
+    return this.deliver(deviceId, seal(live.session, text), live.transport, false, obj.type === 'run');
   }
 
-  private deliver(deviceId: string, env: string, transport: Transport, pairing = false): boolean {
-    if (transport === 'lan') return this.lan?.send(deviceId, env) ?? false;
+  private deliver(deviceId: string, env: string, transport: Transport, pairing = false, bulk = false): boolean {
+    if (transport === 'lan') return this.lan?.send(deviceId, env, bulk) ?? false;
     // Only pairing messages may reach a phone that is not an 'anywhere' phone through the relay.
     if (!pairing && this.devices.get(deviceId)?.path !== 'anywhere') return false;
-    return this.relay?.send(deviceId, env) ?? false;
+    return this.relay?.send(deviceId, env, bulk) ?? false;
   }
 
   /** A signed notice to every other paired phone that can be reached now (push comes later). */
