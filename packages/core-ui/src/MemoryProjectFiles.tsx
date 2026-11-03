@@ -82,8 +82,8 @@ export function ProjectFilesView({ c, onMenu, searchRef }: { c: ProjectFilesCont
 export function ProjectFilesInspector({ c, d, project, onMenu }: { c: ProjectFilesController; d: MemoryDesktopController; project: ProjectFiles; onMenu: (e: ReactMouseEvent, p: ProjectFiles) => void }) {
   const s = useStore(c); const p = project;
   return <div className="dk-insp">
-    <div className="dk-insp-head"><Tile name={p.name} size={28}/><div><h3>{p.name}</h3>
-      <p className="fine-print" title={p.folder ?? undefined}>{p.folder ? <span className="dk-path">{p.folder}</span> : 'No folder'} · {p.files.length} {p.files.length === 1 ? 'file' : 'files'} Girru writes</p></div>
+    <div className="dk-insp-head dk-pf-insp-head"><Tile name={p.name} size={28}/><div className="dk-pf-head"><h3>{p.name}</h3>
+      <p className="fine-print" title={p.folder ?? undefined}>{p.folder ? <span className="dk-path">{p.folder}</span> : <span>No folder</span>}<span>{p.files.length} {p.files.length === 1 ? 'file' : 'files'} Girru writes</span></p></div>
       <span className="dk-toolbar-gap"/>
       <IconButton icon="refresh" label="Write the files again" shortcut={`${mod}R`} disabled={s.busy || !p.writeFiles} onClick={() => void c.rewrite(p.projectId)}/>
       {p.folder && canRevealFolder() && <IconButton icon="open" label={finder} onClick={() => revealFolder(p.folder!)}/>}

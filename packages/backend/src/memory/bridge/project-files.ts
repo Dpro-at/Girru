@@ -218,6 +218,13 @@ const undos = new Map<string, UndoEntry>();
 /** Test seam: forget every Undo. */
 export function resetProjectFileUndo(): void { undos.clear(); }
 
+/** The lines someone added in the folder (what Girru's text lacks), without list marks: only these become the suggestion. */
+function addedLines(folder: string, girru: string): string {
+  const norm = (l: string) => l.trim().replace(/^(?:[-*+]|\d+\.)\s+(?:\[[ xX]\]\s+)?/, '').trim();
+  const known = new Set(girru.split(/\r?\n/).map(norm).filter(Boolean));
+  return folder.split(/\r?\n/).map(norm).filter((l) => l && !known.has(l) && !/^<!--[\s\S]*-->$/.test(l)).join('\n');
+}
+
 /**
  * "Use Girru's version" of one file: the folder's text of Girru's part becomes
  * a memory proposal (reason repository-file), then Girru's version is written.
@@ -234,8 +241,8 @@ export async function useGirruVersion(ownerId: string, projectId: unknown, relat
 
   // The folder's text is kept first, as a suggestion the owner reviews (never memory by itself).
   let proposalId: string | null = null;
-  const kept = (d.folderText ?? '').trim();
-  if (kept && kept !== d.girru!.trim()) {
+  const kept = addedLines(d.folderText ?? '', d.girru!);
+  if (kept) {
     const r = await learn({ userId: ownerId, actor: 'bridge:project-files', review: true, reviewReason: 'repository-file',
       candidates: [{ content: redactImportText(kept).text, type: 'fact', importance: 5, drawer: projectDrawer(p), origin: 'extraction' }] });
     proposalId = r.proposed[0]?.id ?? null;

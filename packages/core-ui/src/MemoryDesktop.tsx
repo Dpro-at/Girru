@@ -67,7 +67,7 @@ function useControllers(client: SessionClient) {
     const mv = new MemoryMoveController(client, (id, drawer) => x.moved(id, drawer));
     const map = new MemoryMapController(client), ho = new MemoryHandoffsController(client), disc = new DiscoveryController(client);
     // STORE-MAP-01 P6: project files, task numbers and place switches (asks nothing until the switch is on).
-    const pf = new ProjectFilesController(client); pf.say = text => d.say(text);
+    const pf = new ProjectFilesController(client); pf.say = text => d.say(text); pf.onSuggestions = () => void rv.load();
     setC({ d, x, sc, rv, mv, map, ho, disc, pf });
     return () => { d.dispose(); x.dispose(); sc.dispose(); rv.dispose(); mv.dispose(); map.dispose(); ho.dispose(); disc.dispose(); pf.dispose(); };
   }, [client]);

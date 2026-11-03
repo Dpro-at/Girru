@@ -83,6 +83,8 @@ export class ProjectFilesController extends Store<ProjectFilesState> {
   #ticket = 0;
   /** Where short results go (the window's notice). */
   say: (text: string) => void = () => {};
+  /** Called when a suggestion was added or withdrawn (Use Girru’s version, its undo), so Needs you reads again. */
+  onSuggestions: () => void = () => {};
   constructor(client: Requester) {
     super({ phase: 'idle', projects: [], selected: null, query: '', busy: false, compare: null, problems: null, places: null }, client);
   }
@@ -151,7 +153,7 @@ export class ProjectFilesController extends Store<ProjectFilesState> {
       this.publish({ busy: false });
       if (r.status !== 200) { this.fail(r, 'Girru’s version was not written.'); return null; }
       const out = r.body as { project: ProjectFiles; undo: string };
-      this.put(out.project); this.publish({ compare: null });
+      this.put(out.project); this.publish({ compare: null }); this.onSuggestions();
       return out.undo;
     } catch { this.publish({ busy: false }); this.say('Girru’s version was not written (no connection).'); return null; }
   }
@@ -160,7 +162,7 @@ export class ProjectFilesController extends Store<ProjectFilesState> {
     try {
       const r = await this.req('POST', projectFilesActionPath(projectId, 'undo'), { undo });
       if (r.status !== 200) { this.fail(r, 'The file was not put back.'); return false; }
-      this.put((r.body as { project: ProjectFiles }).project);
+      this.put((r.body as { project: ProjectFiles }).project); this.onSuggestions();
       return true;
     } catch { return false; }
   }

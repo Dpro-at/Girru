@@ -3667,5 +3667,6 @@ label.setup-kind { display:flex; align-items:center; justify-content:flex-start;
 .dk-pf-files{list-style:none;margin:0;padding:0;display:grid;gap:2px}.dk-pf-files li{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:4px 8px;align-items:start;padding:6px 4px;border-radius:6px}.dk-pf-files .dk-row-text{display:grid;gap:2px;min-inline-size:0;font-size:12.5px}.dk-pf-files .dk-row-sub{font-size:11px;color:var(--text-3)}
 .dk-pf-actions{grid-column:2/-1;display:flex;gap:6px;justify-content:flex-end}
 .dk-pf-switches{display:grid;gap:8px}.dk-insp-head .dk-icon{flex:none}
+.dk-pf-insp-head,.dk-pf-head{min-inline-size:0}.dk-pf-head{flex:1}.dk-pf-head .fine-print{display:grid;min-inline-size:0}
 .dk-pf-text{margin:0;max-block-size:280px;overflow:auto;white-space:pre-wrap;font:12px/1.5 ui-monospace,Menlo,monospace}
 .task-worked{display:grid;gap:4px;font-size:12px;color:var(--muted)}.task-worked>span{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.task-worked b{color:var(--text)}.task-number{font:12px ui-monospace,Menlo,monospace;color:var(--text-3)}

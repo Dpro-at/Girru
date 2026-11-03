@@ -194,6 +194,7 @@ test('changed in both: compare, write again leaves it, Use Girru keeps the folde
     const kept = (await listPendingProposals(OWNER)).find((p) => JSON.stringify(p.changes).includes('make ship-it'));
     assert.ok(kept, 'the folder text is a proposal');
     assert.ok(kept.reasons.includes('repository-file'));
+    assert.doesNotMatch(JSON.stringify(kept.changes), /deploys with scripts\/release\.sh/, 'only the lines added in the folder are kept, not Girru\'s own text');
 
     const undo = await on('POST', `/api/memory/project-files/${alpha.project.id}/undo`, { undo: u.json().undo });
     assert.equal(undo.statusCode, 200, undo.body);
