@@ -117,14 +117,15 @@ export function httpBackend(o: HttpBackendOptions): BridgeBackend {
 
 /**
  * The tools this server lists. With a session Girru started (STORE-MAP-01 P6)
- * the five verbs of the one memory contract are added, generated from the
- * same definition as the native tools (XP1); memory_propose takes the
- * contract's shape.
+ * the five verbs of the one memory contract are listed, generated from the
+ * same definition as the native tools (XP1), in place of the three older
+ * tools they replace (still callable by name).
  */
 export function bridgeTools(verbs: boolean): Array<{ name: string; description: string; inputSchema: unknown }> {
   if (!verbs) return BRIDGE_TOOL_DEFINITIONS.map((t) => ({ ...t }));
-  const contract = mcpContractTools();
-  return [...BRIDGE_TOOL_DEFINITIONS.filter((t) => !contract.some((c) => c.name === t.name)).map((t) => ({ ...t })), ...contract];
+  // The verbs replace memory_search, handoff_write and memory_propose in the list (the old names still work).
+  const replaced = new Set(['memory_search', 'handoff_write', 'memory_propose']);
+  return [...BRIDGE_TOOL_DEFINITIONS.filter((t) => !replaced.has(t.name)).map((t) => ({ ...t })), ...mcpContractTools()];
 }
 
 export function createBridgeMcpServer(backend: BridgeBackend, opts: { verbs?: boolean } = {}): Server {

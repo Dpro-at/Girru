@@ -43,6 +43,9 @@ for (const file of ['girru-1.3.2.sql', 'girru-1.4.1.sql']) {
     assert.equal(out.agentNotes.again, 0);
     assert.equal(out.agentNotes.missing, 0);
     assert.equal(out.agentNotes.text, '# Notes\nShip on Fridays.');
+    // P6: expand only; nothing turns on by itself.
+    assert.ok(out.p6.scopes <= out.p6.filesOn, 'a change log only where the owner had files on');
+    assert.deepEqual([out.p6.companyFacts, out.p6.requests, out.p6.agentColumns], [0, 0, 2]);
     if (file.includes('1.4')) {
       assert.equal(out.departments.find((d) => d.norm_name === 'engineering').id, 'dept-fx1', 'memory\'s department keeps its id');
       assert.deepEqual(out.questions, ['designers']);

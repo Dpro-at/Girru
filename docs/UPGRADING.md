@@ -478,6 +478,7 @@ Each one runs at start-up, is safe to run again, and keeps the old data.
 |---|---|---|
 | `GIRRU_STORE_P3=1` | Fills department ids, memory source and trust, project ids, packed vectors (background jobs) | Old columns, until a later release |
 | `GIRRU_STORE_P4=1` | Makes a full backup and checks it, then retires `.data/memory/memory.db`; copies coding-app handoff notes into the one handoff table; copies each agent's `PERSONALITY.md` text into its personality record once, then rewrites `PERSONALITY.md` from the record | The backup with `memory.db`; `memory_bridge_handoffs` (dropped one release later); older personality versions |
+| `GIRRU_STORE_P6=1` | Nothing is copied: new columns start off. Coding apps started outside Girru lose memory access (every memory call needs a session Girru issued); projects with memory files on get a change log and a debounced `.girru/brief.md`; linked tasks in `.girru/tasks.md` get a hidden id line | Everything; turning the switch off again leaves the hidden id lines, which still read |
 
 After the first start with `GIRRU_STORE_P4` on:
 

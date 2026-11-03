@@ -99,6 +99,16 @@ STORE-MAP-01 P5 (migration 171, used while `GIRRU_STORE_P5` is on).
 An agent's notes are one row of `memories` with `drawer_kind = 'agent'` and
 `drawer_key` = the agent id; searches and the owner's memory list skip them.
 
+### write_requests and the P6 columns
+STORE-MAP-01 P6 (migrations 172-174, used while `GIRRU_STORE_P6` is on).
+```sql
+-- memory_bridge_folders.company_facts: 1 = company facts may reach coding-app sessions in this project
+-- session_capabilities.agent_id: the agent a coding-app session works for (NULL: the owner's own run)
+-- memory_bridge_handoffs.agent_id: the agent of a coding-app handoff note
+-- write_requests: owner_id, request_id, verb, status ('pending' | 'done'), result (ids only), created_at
+--   one row per memory-contract write that carried a request id; a retry gets the same answer
+```
+
 ### agent_activity
 Agent execution logs
 ```sql

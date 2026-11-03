@@ -251,6 +251,7 @@ test('XP1: both doors come from one definition; the MCP list adds the verbs only
   const withVerbs = bridgeTools(true);
   assert.equal(withVerbs.filter((t) => t.name === 'memory_propose').length, 1);
   assert.ok(withVerbs.some((t) => t.name === 'memory_recall') && withVerbs.some((t) => t.name === 'project_brief'));
+  assert.equal(withVerbs.some((t) => t.name === 'memory_search' || t.name === 'handoff_write'), false, 'replaced by recall and handoff in the list');
 });
 
 test('XP2: the server checks every argument and says what to fix', async () => {
