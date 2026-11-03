@@ -10,6 +10,10 @@ import { relayHello, type Identity } from './protocol/e2e.js';
 
 export type RelayState = 'off' | 'connecting' | 'connected' | 'waiting';
 
+/** Above this many unsent bytes, bulk frames (run streaming) are refused; above the second, everything. */
+export const BULK_QUEUE_BYTES = 1024 * 1024;
+export const MAX_QUEUE_BYTES = 6 * 1024 * 1024;
+
 export interface RelayConnectorOptions {
   identity: Identity;
   url: string;
@@ -69,9 +73,14 @@ export class RelayConnector {
     if (this.ready) this.raw({ t: 'pairing', open: this.pairings });
   }
 
-  /** Sends one envelope to a device id; false when not connected (the caller keeps or drops it). */
-  send(to: string, env: string): boolean {
+  /**
+   * Sends one envelope to a device id; false when not connected or when the socket is backed up
+   * (the caller keeps or drops it). `bulk` frames give way first, so a reply still gets through.
+   */
+  send(to: string, env: string, bulk = false): boolean {
     if (!this.ready) return false;
+    const queued = this.ws?.bufferedAmount ?? 0;
+    if (queued > (bulk ? BULK_QUEUE_BYTES : MAX_QUEUE_BYTES)) return false;
     return this.raw({ t: 'send', to, env });
   }
 

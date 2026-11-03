@@ -11,7 +11,9 @@
  *   chat.stop {runId}
  *   approval.pending                           pending approvals (each is marked shown to this phone)
  *   approval.pending {id}                      { pending } for one approval (also accepted unsigned)
- *   approval.decide {id, approve, paramsHash?} first decision wins; 2FA owners get verification_required
+ *   approval.detail {id}                       the full (masked) parameters of a shown approval
+ *   approval.decide {id, approve, paramsHash?} first decision wins; 2FA owners get verification_required;
+ *                                              a cut-short preview needs approval.detail first (full_view_required)
  *   tasks.list {place?}                        runs ('running' by default)
  *   schedules.list
  *   team.list                                  the owner's agents
@@ -43,6 +45,34 @@ const HASH = /^[0-9a-f]{64}$/;
 const MESSAGE_CHARS = 100_000;
 const PAGE_LIMIT = 30;
 const PAGE_CHARS = 150_000;
+/** The largest full view a phone gets; a bigger request is decided on the computer. */
+export const DETAIL_MAX_BYTES = 256 * 1024;
+const DETAIL_PER_PHONE = 200;
+/** Codes from deeper layers that may reach the phone as they are; anything else is internal_error. */
+const SAFE_CODE = /^[a-z][a-z0-9_]{1,40}$/;
+
+/**
+ * Full views this phone fetched (approval id → the paramsHash it showed). Memory only: after a
+ * restart, or once the phone is forgotten or paired again, it fetches the full view again.
+ */
+const detailShown = new Map<string, Map<string, string>>();
+
+export function forgetDetails(deviceId: string): void {
+  detailShown.delete(deviceId);
+}
+
+function recordDetail(deviceId: string, approvalId: string, hash: string): void {
+  let m = detailShown.get(deviceId);
+  if (!m) { m = new Map(); detailShown.set(deviceId, m); }
+  m.delete(approvalId);
+  m.set(approvalId, hash);
+  while (m.size > DETAIL_PER_PHONE) m.delete(m.keys().next().value as string);
+}
+
+/** A preview that left something out (cut text or a nested value) cannot be approved from the list alone. */
+function needsFullView(d: { truncated?: boolean; paramsPreview?: unknown }): boolean {
+  return !!d.truncated || JSON.stringify(d.paramsPreview ?? null).includes('[object]');
+}
 
 type Body = Record<string, unknown>;
 
@@ -74,6 +104,7 @@ export async function runCommand(ctx: CommandContext, body: Body): Promise<unkno
     case 'chat.send': return chatSend(ctx, body);
     case 'chat.stop': return chatStop(ctx, body);
     case 'approval.pending': return body.id === undefined ? approvalList(ctx, body) : (only(body, ['id']), { type: 'approval.pending', id: body.id, pending: await approvalPending(ctx.deviceId, body.id) });
+    case 'approval.detail': return approvalDetail(ctx, body);
     case 'approval.decide': return approvalDecide(ctx, body);
     case 'tasks.list': return tasksList(ctx, body);
     case 'schedules.list': return schedulesList(ctx, body);
@@ -145,7 +176,9 @@ async function followRun(ctx: CommandContext, runId: string): Promise<void> {
       stopListening();
       return;
     }
-    if (!ctx.push({ type: 'run', runId, seq: e.seq, frame: e.frame })) { done = true; stopListening(); }
+    // A refused frame (no session, or the link is backed up) ends the stream with a notice; the
+    // phone reads the rest with chat.messages.
+    if (!ctx.push({ type: 'run', runId, seq: e.seq, frame: e.frame })) { done = true; stopListening(); ctx.push({ type: 'run.end', runId, status: 'dropped', code: 'slow_link' }); }
   };
   const stopListening = () => { run.emitter.off('event', forward); };
   run.emitter.on('event', forward);
@@ -175,10 +208,26 @@ async function approvalList(ctx: CommandContext, body: Body) {
   for (const a of pending) {
     const d = await getApprovalDetail(a.id);
     if (!d || d.status !== 'pending') continue;
-    out.push({ id: d.id, toolName: d.toolName, category: d.category, agentId: d.agentId, sessionId: d.sessionId, paramsPreview: d.paramsPreview, truncated: d.truncated, requestedAt: d.requestedAt, paramsHash: d.paramsHash });
+    out.push({ id: d.id, toolName: d.toolName, category: d.category, agentId: d.agentId, sessionId: d.sessionId, paramsPreview: d.paramsPreview, truncated: d.truncated, fullViewRequired: needsFullView(d), requestedAt: d.requestedAt, paramsHash: d.paramsHash });
   }
   await markShown(ctx.deviceId, out.map((a) => a.id), ctx.now());
   return { approvals: out };
+}
+
+/** The full, masked parameters of an approval this phone was shown; recorded so it may then approve. */
+async function approvalDetail(ctx: CommandContext, body: Body) {
+  only(body, ['id']);
+  if (typeof body.id !== 'string' || !APPROVAL_ID.test(body.id)) throw new CommandError('bad_format');
+  if (!(await approvalPending(ctx.deviceId, body.id))) throw new CommandError('not_pending');
+  const { getApprovalDetail } = await import('../tools/approvals.js');
+  const d = await getApprovalDetail(body.id);
+  if (!d || d.status !== 'pending') throw new CommandError('not_pending');
+  if (d.params === null || !d.paramsHash) throw new CommandError('full_view_unavailable');
+  const out = { id: d.id, toolName: d.toolName, category: d.category, agentId: d.agentId, sessionId: d.sessionId, params: d.params, maskedFields: d.maskedFields, runScope: d.runScope, requestedAt: d.requestedAt, paramsHash: d.paramsHash };
+  if (Buffer.byteLength(JSON.stringify(out)) > DETAIL_MAX_BYTES) throw new CommandError('too_large');
+  recordDetail(ctx.deviceId, d.id, d.paramsHash);
+  audit(ctx, 'phone.approval.detail', true, { tool: d.toolName }, { type: 'tool_approval', id: d.id });
+  return out;
 }
 
 async function approvalDecide(ctx: CommandContext, body: Body) {
@@ -200,6 +249,9 @@ async function approvalDecide(ctx: CommandContext, body: Body) {
       audit(ctx, 'tool_approval.deny', true, { tool: record.toolName, agentId: record.agentId }, { type: 'tool_approval', id: record.id });
       return { id: record.id, status: record.status };
     }
+    // The phone approves only what it showed in full: a cut-short preview needs the full view of this very hash.
+    const d = await A.getApprovalDetail(body.id);
+    if (d && needsFullView(d) && detailShown.get(ctx.deviceId)?.get(body.id) !== body.paramsHash) throw new CommandError('full_view_required');
     const { record, result } = await A.approveAndRun(body.id, ctx.ownerId, body.paramsHash);
     audit(ctx, 'tool_approval.approve', record.status === 'executed', { tool: record.toolName, agentId: record.agentId, status: record.status }, { type: 'tool_approval', id: record.id });
     return { id: record.id, status: record.status, ok: !result.error, preview: record.resultPreview, error: record.error };
@@ -207,7 +259,9 @@ async function approvalDecide(ctx: CommandContext, body: Body) {
     // The owner's second factor is never skipped: the phone is told to decide on the computer.
     if (err instanceof A.ApprovalVerificationRequiredError) { audit(ctx, approve ? 'tool_approval.approve' : 'tool_approval.deny', false, { code: 'verification_required' }, { type: 'tool_approval', id: body.id }); throw new CommandError('verification_required'); }
     if (err instanceof A.ApprovalStateError) throw new CommandError(err.status === 404 ? 'not_found' : err.status === 409 ? 'not_pending' : 'refused');
-    if (err && typeof err === 'object' && typeof (err as { code?: unknown }).code === 'string') throw new CommandError((err as { code: string }).code);
+    if (err instanceof CommandError) throw err;
+    const code = err && typeof err === 'object' ? (err as { code?: unknown }).code : undefined;
+    if (typeof code === 'string' && SAFE_CODE.test(code)) throw new CommandError(code);
     throw err;
   }
 }

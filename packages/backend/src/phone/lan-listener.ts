@@ -11,11 +11,16 @@
  * id exactly as with the relay, signing over this listener's name
  * `ws://<host>:<port>/v1`. Only a paired phone, or a phone sending to an open
  * pairing id, gets anything through; the end-to-end layer is the same.
+ *
+ * It binds one private (or loopback) address, never 0.0.0.0 or ::. Only
+ * connections that have not proven an id yet are capped; admission is checked
+ * again whenever pairings or phones change (`recheck`), and a peer that misses
+ * a ping is dropped.
  */
 
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { randomBytes, verify } from 'node:crypto';
-import type { AddressInfo } from 'node:net';
+import { isIP, type AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { ID_PATTERN, PAIRING_PATTERN, b64url, deviceIdOf, fromB64url, p256PublicKey, relayHelloBytes } from './protocol/encoding.js';
 import { CLOSE, WsConnection, completeUpgrade, refuseUpgrade } from './protocol/websocket.js';
@@ -30,30 +35,47 @@ export interface LanListenerOptions {
   /** May this proven device id talk at all (paired, or an open pairing exists)? */
   admit(deviceId: string): boolean;
   onEnvelope(e: LanEnvelope): void;
+  /** Ping interval; a peer that misses one ping is dropped. Default 30 s. */
+  pingMs?: number;
+}
+
+/** One private, link-local or loopback address: never every address (0.0.0.0, ::). */
+export function lanHostAllowed(host: string): boolean {
+  const v = isIP(host);
+  if (v === 4) return /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|127\.)/.test(host) && host !== '0.0.0.0';
+  if (v === 6) { const h = host.toLowerCase(); return h === '::1' || /^f[cd][0-9a-f]{2}:/.test(h) || /^fe[89ab][0-9a-f]:/.test(h); }
+  return false;
 }
 
 const MAX_ENV = 1024 * 1024;
 const ENV_RE = /^[A-Za-z0-9._-]+$/;
-const MAX_PEERS = 16;
+/** Connections that have not proven an id; proven ones are bounded by the paired phones. */
+const MAX_UNPROVEN = 16;
+const MAX_PEERS = 96;
+/** Above this many unsent bytes, bulk frames are refused; above the second, everything. */
+const BULK_QUEUE_BYTES = 1024 * 1024;
+const MAX_QUEUE_BYTES = 6 * 1024 * 1024;
 
-interface Peer { ws: WsConnection; nonce: string; id: string | null; timer: NodeJS.Timeout | null }
+interface Peer { ws: WsConnection; nonce: string; id: string | null; timer: NodeJS.Timeout | null; alive: boolean }
 
 export class LanListener {
   private server: Server | null = null;
   private name = '';
   private readonly peers = new Set<Peer>();
   private readonly byId = new Map<string, Peer>();
+  private pinger: NodeJS.Timeout | null = null;
 
   constructor(private readonly opts: LanListenerOptions) {}
 
   get address(): string { return this.name; }
 
   async listen(): Promise<{ host: string; port: number }> {
+    if (!lanHostAllowed(this.opts.host)) throw new Error('bad_host');
     const server = createServer((_req, res) => { res.writeHead(404); res.end(); });
     server.on('clientError', (_e, s) => s.destroy());
     server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
       if (req.url !== '/v1') return refuseUpgrade(socket, 404, 'Not Found');
-      if (this.peers.size >= MAX_PEERS) return refuseUpgrade(socket, 503, 'Service Unavailable');
+      if (this.unproven() >= MAX_UNPROVEN || this.peers.size >= MAX_PEERS) return refuseUpgrade(socket, 503, 'Service Unavailable');
       if (!completeUpgrade(req, socket)) return;
       this.accept(socket, head);
     });
@@ -64,15 +86,37 @@ export class LanListener {
     });
     const a = server.address() as AddressInfo;
     this.name = `ws://${a.address.includes(':') ? `[${a.address}]` : a.address}:${a.port}/v1`;
+    this.pinger = setInterval(() => this.tick(), this.opts.pingMs ?? 30_000);
+    this.pinger.unref();
     return { host: a.address, port: a.port };
   }
 
-  /** Sends one envelope from the computer to a connected phone; false when it is not here. */
-  send(to: string, env: string): boolean {
+  /** Sends one envelope from the computer to a connected phone; false when it is not here or backed up. */
+  send(to: string, env: string, bulk = false): boolean {
     const p = this.byId.get(to);
     if (!p || !p.ws.isOpen) return false;
+    if (p.ws.queuedBytes > (bulk ? BULK_QUEUE_BYTES : MAX_QUEUE_BYTES)) return false;
     p.ws.sendText(JSON.stringify({ t: 'msg', from: this.opts.selfId, env }));
     return true;
+  }
+
+  /** Closes every proven peer that may no longer talk (its pairing closed, or it was forgotten). */
+  recheck(): void {
+    for (const p of [...this.byId.values()]) if (!this.opts.admit(p.id as string)) p.ws.close(CLOSE.policy, 'not paired');
+  }
+
+  private unproven(): number {
+    let n = 0;
+    for (const p of this.peers) if (p.id === null) n++;
+    return n;
+  }
+
+  private tick(): void {
+    for (const p of [...this.peers]) {
+      if (!p.alive) { p.ws.destroy(); continue; }
+      p.alive = false;
+      p.ws.ping();
+    }
   }
 
   isConnected(id: string): boolean { return !!this.byId.get(id)?.ws.isOpen; }
@@ -81,6 +125,8 @@ export class LanListener {
   drop(id: string): void { this.byId.get(id)?.ws.close(CLOSE.policy, 'not paired'); }
 
   async close(): Promise<void> {
+    if (this.pinger) clearInterval(this.pinger);
+    this.pinger = null;
     for (const p of [...this.peers]) p.ws.close(CLOSE.goingAway, 'stopping');
     const s = this.server;
     this.server = null;
@@ -88,10 +134,10 @@ export class LanListener {
   }
 
   private accept(socket: Duplex, head: Buffer): void {
-    const peer: Peer = { ws: null as unknown as WsConnection, nonce: b64url(randomBytes(32)), id: null, timer: null };
+    const peer: Peer = { ws: null as unknown as WsConnection, nonce: b64url(randomBytes(32)), id: null, timer: null, alive: true };
     peer.ws = new WsConnection(socket, { maxMessageBytes: MAX_ENV + 1024, maxQueuedBytes: 8 * 1024 * 1024, controlFramesPerSecond: 100 }, {
-      onText: (t) => this.onText(peer, t),
-      onPong: () => undefined,
+      onText: (t) => { peer.alive = true; this.onText(peer, t); },
+      onPong: () => { peer.alive = true; },
       onClose: () => this.forget(peer),
     }, head);
     if (!peer.ws.isOpen) return;
