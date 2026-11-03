@@ -38,6 +38,17 @@ const sync1 = await deps.syncDepartments();
 const sync2 = await deps.syncDepartments();
 const { backfillProvenance } = await import(join(backendDir, 'src/memory/validity.ts'));
 const provenance = { filled: await backfillProvenance(2), again: await backfillProvenance(2) };
+// P4 (T7): each agent's PERSONALITY.md text goes into its one personality record, once.
+process.env.GIRRU_STORE_P4 = '1';
+const firstAgent = q('SELECT id FROM agents_config ORDER BY id LIMIT 1')[0].id;
+const files = await import(join(backendDir, 'src/services/agent-files.ts'));
+await files.writePersonality(firstAgent, '# Hand-written\nKeep answers short.');
+const record = await import(join(backendDir, 'src/services/personality-record.ts'));
+const versionsBefore = q('SELECT COUNT(*) AS n FROM agent_personality_versions')[0].n;
+const personality = {
+  imported: await record.backfillPersonalityRecords(), again: await record.backfillPersonalityRecords(), missing: await record.agentsWithoutRecordText(),
+  text: (await record.recordText(firstAgent)).text, versionsBefore, versionsAfter: q('SELECT COUNT(*) AS n FROM agent_personality_versions')[0].n,
+};
 const out = {
   before,
   after: { memories: q('SELECT COUNT(*) AS n FROM memories')[0].n, agents: q('SELECT COUNT(*) AS n FROM agents_config')[0].n, migrations: q('SELECT COUNT(*) AS n FROM migrations')[0].n },
@@ -47,7 +58,7 @@ const out = {
   agentDepartments: q('SELECT id, department, department_id FROM agents_config ORDER BY id'),
   verify: await sql().read(deps.verifyDepartmentsStep('fx-owner')),
   questions: (await deps.openDepartmentQuestions('fx-owner')).map((x) => x.name),
-  sync1, sync2, provenance,
+  sync1, sync2, provenance, personality,
   sources: q('SELECT id, source, trust FROM memories ORDER BY id'),
 };
 log(JSON.stringify(out));

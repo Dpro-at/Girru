@@ -17,7 +17,7 @@ export function cardRoute(path: string): boolean;
 export function validProfileEdit(b: unknown): boolean;
 export function allowedAgentCard(method: string, path: string, body?: unknown): boolean;
 export type Persona = { version: number; traits: Traits; preset: string | null; dialect: string; locked: boolean; note: string | null; source: string; createdAt: string | null };
-export type PersonaCurrent = Persona & { traitNames: TraitName[]; dialects: string[]; presets: { id: string; label: string; traits: Traits }[] };
+export type PersonaCurrent = Persona & { /** STORE-MAP-01 P4: the record's text (only with the switch on). */ text?: string; traitNames: TraitName[]; dialects: string[]; presets: { id: string; label: string; traits: Traits }[] };
 export type MemoryItem = { id: string; type: MemoryType; content: string; importance: number; drawer: Drawer; layer: string | null; createdAt: string; tags: string[]; topicKey?: string };
 export type MemoryVersion = { version: number; change: string; type: string; content: string; createdAt: string; reason: string; by?: string; proposal?: boolean };
 export function topicKey(x: unknown): x is string;

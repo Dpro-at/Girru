@@ -18,6 +18,10 @@ import {
   initializeAgentDir
 } from '../../services/agent-files.js';
 import { sendInternalError } from '../error-handler.js';
+import { storeP4Enabled } from '../../services/store-p4.js';
+import { PersonalityVersionConflict, savePersonalityText } from '../../services/personality-record.js';
+import { PersonalityInputError } from '../../services/personality.js';
+import { PersonalityNotFoundError } from '../../services/personality-store.js';
 import { FileLibraryError, addFile, listFiles, listVersions, readFile, readVersion, removeFile, restoreFile, saveFile, setRead } from '../../services/agent-file-library.js';
 
 export async function agentFilesRoutes(fastify: FastifyInstance) {
@@ -55,6 +59,23 @@ export async function agentFilesRoutes(fastify: FastifyInstance) {
       if(!validAgentFileId(request.params.id))return reply.code(400).send({code:'invalid_agent_id'});
       const { id } = request.params;
       const content = request.body?.content;
+
+      // STORE-MAP-01 P4 (T7): a version of the one personality record, with a change check
+      // (expectedVersion, the version read); the generated settings part is never taken from the body.
+      if (storeP4Enabled()) {
+        const body = (request.body ?? {}) as { content?: unknown; expectedVersion?: unknown };
+        if (typeof body.content!=='string'||Buffer.byteLength(body.content,'utf8')>MAX_PERSONALITY_BYTES||Object.keys(body).some(k=>k!=='content'&&k!=='expectedVersion')) return reply.code(400).send({ success:false, error:'content is required' });
+        if (body.expectedVersion===undefined) return reply.code(400).send({ success:false, error:'expectedVersion is required (the version you read)', code:'expected_version_required' });
+        try {
+          const v = await savePersonalityText(id, body.content, body.expectedVersion, actorOf(request)?.userId ?? 'owner');
+          return { success:true, message:'Personality updated', version:v.version };
+        } catch (err: any) {
+          if (err instanceof PersonalityVersionConflict) return reply.code(409).send({ success:false, code:'changed' });
+          if (err instanceof PersonalityInputError) return reply.code(400).send({ success:false, error:err.message });
+          if (err instanceof PersonalityNotFoundError) return reply.code(404).send({ success:false, code:'not_found' });
+          return sendInternalError(reply, '[AgentFiles] PUT /api/agents/:id/personality', err);
+        }
+      }
 
       if (typeof content!=='string'||!content||Buffer.byteLength(content,'utf8')>MAX_PERSONALITY_BYTES||Object.keys(request.body).some(k=>k!=='content')) {
         return reply.code(400).send({

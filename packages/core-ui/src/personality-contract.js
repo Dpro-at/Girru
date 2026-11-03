@@ -28,11 +28,20 @@ export function parseTraits(x) {
   if (traitNames.some(n => !integer(x[n]) || x[n] > 100)) fail();
   return Object.fromEntries(traitNames.map(n => [n, x[n]]));
 }
+// STORE-MAP-01 P4 (T7): a text suggestion also carries the text before and after
+// (and where it came from); a trait drift looks exactly as before.
+const TEXT_KEYS = ['baseTextHash','proposedTextHash','origin','baseText','proposedText'];
+const MAX_TEXT = 1024 * 1024;
+const textHash = x => typeof x === 'string' && /^[0-9a-f]{64}$/.test(x);
 export function parsePersonalityProposal(x) {
-  exact(x, ['id','agentId','baseVersion','baseTraits','proposedTraits','delta','reason','evidence','source','status','createdBy','createdAt','decidedBy','decidedAt','decisionNote','appliedVersion','reviewHash']);
+  const hasText = obj(x) && Object.hasOwn(x, 'proposedTextHash');
+  exact(x, ['id','agentId','baseVersion','baseTraits','proposedTraits','delta','reason','evidence','source','status','createdBy','createdAt','decidedBy','decidedAt','decisionNote','appliedVersion','reviewHash', ...(hasText ? TEXT_KEYS : [])]);
+  if (hasText && (!textHash(x.proposedTextHash) || !(x.baseTextHash === null || textHash(x.baseTextHash)) || ![null,'file','evolution_text'].includes(x.origin)
+    || !text(x.baseText, MAX_TEXT) || !text(x.proposedText, MAX_TEXT))) fail();
+  const textChanges = hasText && x.proposedTextHash !== x.baseTextHash;
   const baseTraits = parseTraits(x.baseTraits), proposedTraits = parseTraits(x.proposedTraits);
   const changed = traitNames.filter(n => baseTraits[n] !== proposedTraits[n]); exact(x.delta, changed);
-  if (!changed.length || changed.some(n => x.delta[n] !== proposedTraits[n] - baseTraits[n] || Math.abs(x.delta[n]) > 5)) fail();
+  if ((!changed.length && !textChanges) || changed.some(n => x.delta[n] !== proposedTraits[n] - baseTraits[n] || Math.abs(x.delta[n]) > 5)) fail();
   if (!personalityAgentId(x.agentId) || !personalityProposalId(x.id) || !integer(x.baseVersion) || !reviewHash(x.reviewHash)
     || !text(x.reason) || !x.reason.trim() || !Array.isArray(x.evidence) || x.evidence.length > 20
     || x.evidence.some(e => !text(e,200) || !e.trim() || /[\u0000-\u001f\u007f]/.test(e))
@@ -45,12 +54,15 @@ export function parsePersonalityProposal(x) {
   return { ...x, baseTraits, proposedTraits, delta: { ...x.delta }, evidence: [...x.evidence] };
 }
 export function parsePersonalityVersion(x) {
-  exact(x, ['agentId','version','traits','preset','dialect','locked','lockedTraits','source','basedOnVersion','note','createdBy','createdAt','behavior']);
+  // P4: a version of the one personality record names its text (textHash) once the agent has one.
+  const hasText = obj(x) && Object.hasOwn(x, 'textHash');
+  exact(x, ['agentId','version','traits','preset','dialect','locked','lockedTraits','source','basedOnVersion','note','createdBy','createdAt','behavior', ...(hasText ? ['textHash'] : [])]);
+  if (hasText && !textHash(x.textHash)) fail();
   const dialects = ['ar-IQ','ar','en','de','fr','es','zh','ja','ko','pt-BR','ru','tr','hi'];
   const traits = parseTraits(x.traits);
   if (!personalityAgentId(x.agentId) || !integer(x.version) || !nullable(x.preset) || !dialects.includes(x.dialect)
     || typeof x.locked !== 'boolean' || !Array.isArray(x.lockedTraits) || x.lockedTraits.some(n => !traitNames.includes(n)) || new Set(x.lockedTraits).size !== x.lockedTraits.length
-    || !['default','seed','owner','rollback','lock','unlock','evolution'].includes(x.source) || !(x.basedOnVersion === null || integer(x.basedOnVersion))
+    || !['default','seed','owner','rollback','lock','unlock','evolution','import'].includes(x.source) || !(x.basedOnVersion === null || integer(x.basedOnVersion))
     || !nullable(x.note) || !nullable(x.createdBy) || !time(x.createdAt)) fail();
   const b = x.behavior;
   exact(b,['temperature','maxTokens','responseLength','verificationChecks','selfReviewPasses','confirmBefore','retryBudget','exploration','tone','dialect','promptBlock']);

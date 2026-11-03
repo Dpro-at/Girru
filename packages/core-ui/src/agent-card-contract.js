@@ -37,7 +37,7 @@ const traits = x => record(x) && Object.keys(x).length === traitNames.length && 
 /** The card or memory path this request names, or null. */
 export function cardPath(path) {
   if (/^\/api\/memory\/page(?:\?cursor=[A-Za-z0-9_-]{1,1024})?$/.test(path)) return { kind: 'memory-page' };
-  let m = /^\/api\/agents\/([^/?#]+)\/personality\/(current|versions|lock|unlock|rollback)$/.exec(path);
+  let m = /^\/api\/agents\/([^/?#]+)\/personality\/(current|versions|lock|unlock|rollback|text)$/.exec(path);
   if (m) return validAgentId(m[1]) ? { kind: `persona-${m[2]}`, agent: m[1] } : null;
   // AG1: make main agent and duplicate (owner actions on an existing agent).
   m = /^\/api\/agents\/([^/?#]+)\/(set-primary|duplicate)$/.exec(path);
@@ -74,6 +74,8 @@ export function allowedAgentCard(method, path, body) {
     case 'memory-page': return method === 'GET' && body === undefined;
     case 'models': return method === 'GET' && body === undefined;
     case 'persona-current': return method === 'GET' && body === undefined;
+    // STORE-MAP-01 P4 (T7c): the personality text, saved over the version read.
+    case 'persona-text': return method === 'PUT' && record(body) && onlyKeys(body, ['text', 'expectedVersion']) && Object.keys(body).length === 2 && typeof body.text === 'string' && body.text.length <= MAX_PERSONA_TEXT && version(body.expectedVersion);
     case 'persona-versions':
       if (method === 'GET') return body === undefined;
       return method === 'POST' && record(body) && onlyKeys(body, ['preset', 'traits', 'dialect', 'note']) && Object.keys(body).length > 0
@@ -125,7 +127,9 @@ export function memoryItem(x) {
     ...(topicKey(x.topicKey) ? { topicKey: x.topicKey } : {}) };
 }
 
-const ERRORS = { 400: ['invalid_role', 'invalid_version', 'no_change'], 403: ['reserved_agent'], 404: [], 409: ['version_conflict', 'personality_locked'] };
+const ERRORS = { 400: ['invalid_role', 'invalid_version', 'no_change'], 403: ['reserved_agent'], 404: [], 409: ['version_conflict', 'personality_locked', 'changed'] };
+/** The longest personality text shown or saved (the record's limit). */
+const MAX_PERSONA_TEXT = 1024 * 1024;
 
 /** Reviewed fields only. Throws on a malformed success body. */
 export function agentCardResponse(path, status, body) {
@@ -160,14 +164,14 @@ export function agentCardResponse(path, status, body) {
     }
     case 'persona-current': {
       const v = persona(body);
-      return { ...v, traitNames: [...traitNames],
+      return { ...v, ...(typeof body.text === 'string' ? { text: body.text.slice(0, MAX_PERSONA_TEXT) } : {}), traitNames: [...traitNames],
         dialects: Array.isArray(body.dialects) ? body.dialects.filter(d => typeof d === 'string').slice(0, 40).map(d => d.slice(0, 8)) : [],
         presets: Array.isArray(body.presets) ? body.presets.filter(x => record(x) && typeof x.id === 'string' && traits(x.traits)).slice(0, 30).map(x => ({ id: str(x.id, 40), label: str(x.label, 60), traits: { ...x.traits } })) : [] };
     }
     case 'persona-versions':
       if (Array.isArray(body.versions)) return { versions: body.versions.slice(0, 500).map(persona) };
       return persona(body);
-    case 'persona-lock': case 'persona-unlock': case 'persona-rollback': return persona(body);
+    case 'persona-lock': case 'persona-unlock': case 'persona-rollback': case 'persona-text': return persona(body);
     case 'agent-set-primary': return { ok: body.success === true };
     case 'agent-duplicate': return record(body.agent) && validAgentId(body.agent.id) ? { agent: { id: body.agent.id } } : fail();
     case 'memories':

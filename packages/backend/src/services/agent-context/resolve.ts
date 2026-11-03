@@ -12,8 +12,7 @@
 
 import { one, sql } from '../../repositories/sql-steps.js';
 import { findProject } from '../../repositories/chat-conversations.js';
-import { readPersonality, getDefaultPersonality } from '../agent-files.js';
-import { stripPersonalityExport } from '../personality.js';
+import { personalityTextFor } from '../personality-record.js';
 import { libraryBehavior } from '../personality-library.js';
 import { agentSkillsPrompt } from '../../skills/central-store.js';
 import { teamContext } from '../agent-org.js';
@@ -37,9 +36,9 @@ export interface ResolvedAgentContext {
   ownerId: string | null;
   project: { id: string; slug: string; name: string } | null;
   definition: {
-    /** The instructions the agent was hired with (agents_config.system_prompt). */
+    /** The owner's extra instructions (agents_config.system_prompt; with P4 on the job itself comes from the specialty links). */
     hired: string;
-    /** PERSONALITY.md written for this agent ('' for the untouched template). */
+    /** The personality text: P4 on, from the one personality record; off, PERSONALITY.md ('' for the untouched template). */
     personality: string;
     /** The owner-set behaviour profile. */
     behavior: string;
@@ -89,8 +88,7 @@ export async function resolveAgentContext(input: ResolveInput): Promise<Resolved
   const project = projectId && ownerId ? await findProject(ownerId, projectId) : undefined;
 
   const override = input.instructionsOverride?.trim() || '';
-  const file = override ? '' : await readPersonality(agent.id).catch(() => '');
-  const personality = file && file.trim() !== getDefaultPersonality().trim() ? stripPersonalityExport(file).trim() : '';
+  const personality = override ? '' : await personalityTextFor(agent.id).catch(() => '');
   // P2 (AG1, AG6): guides by name with the full text on demand; owner rules in precedence order.
   const p2 = storeP2Enabled();
   const behavior = (await libraryBehavior(agent.id).catch(() => null))?.promptBlock ?? '';

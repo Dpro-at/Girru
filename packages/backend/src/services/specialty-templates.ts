@@ -17,6 +17,7 @@ import {currentMcpTool,currentMcpToolStep} from '../mcp-client/grant-binding.js'
 import {insertAgentConfigStep,newAgentId} from '../repositories/agents-config.js';
 import {suggestAgentName,resolveNamingLanguage,validateAgentName} from './agent-names.js';
 import {redactImportText} from '../memory/import/redact.js';
+import {storeP4Enabled} from './store-p4.js';
 export class TemplateError extends Error{constructor(readonly code:string,readonly status=400){super(code);}}
 export type TemplateConfig={primarySkill:string|null;skills:string[];tools:{name:string;fingerprint:string|null}[];memoryRead:string[];memoryWrite:string[];sharedMemory:boolean;modes:Record<string,string>;requirements?:{id:string;name:string;toolName:string|null;server:string|null}[]};
 type Row={id:string;name:string;department:string;description:string;revision:number;content_hash:string;config_json:string};
@@ -140,13 +141,16 @@ export class SpecialtyTemplates{
   const prior=await q.one<{fingerprint:string;agent_id:string}>('SELECT fingerprint,agent_id FROM template_hire_requests WHERE owner_id=? AND request_id=?',ownerId,input.requestId);if(prior){if(prior.fingerprint!==print)throw new TemplateError('request_conflict',409);return {id:prior.agent_id,duplicate:true};}
   const template=await this.get(input.templateId);if(template.revision!==input.revision)throw new TemplateError('version_conflict',409);const config=await this.config(template.config,input.linked!==true),permissions=parsePermissionsInput('new-template-agent',{...config,confirmRisky:input.linked===true||input.confirmRisky});
   const available=(await createAgentToolsRegistry({workspaceDir:process.cwd()})).listRegistered();const language=await resolveNamingLanguage(ownerId),name=requestedName??(await suggestAgentName(language)).name,id=newAgentId();
+  const p4=storeP4Enabled();
   return sql().tx(function*(){
    const d=yield* dialect();
    yield* one('SELECT id FROM users WHERE id=?'+forUpdate(d),ownerId);
    const existing=yield* one<{fingerprint:string;agent_id:string}>('SELECT fingerprint,agent_id FROM template_hire_requests WHERE owner_id=? AND request_id=?',ownerId,input.requestId);if(existing){if(existing.fingerprint!==print)throw new TemplateError('request_conflict',409);return {id:existing.agent_id,duplicate:true};}
    const current=yield* one<Row>('SELECT * FROM specialty_templates WHERE id=?'+forUpdate(d),input.templateId);if(!current||current.revision!==input.revision)throw new TemplateError('version_conflict',409);
    yield* insertAgentConfigStep({id,name,language,role:'specialist',department:template.department,explicit:null,userId:ownerId,body:{...(input.libraryPersonality?{libraryPersonality:input.libraryPersonality}:{}),description:`${template.name}: ${template.description}`,system_prompt:input.linked===true?'':template.instructions}});
-   yield* run('UPDATE agents_config SET specialty=? WHERE id=?',template.name,id);
+   // STORE-MAP-01 P4 (D14): a linked hire reads its job from the link only. A copy hire keeps its frozen copy
+   // (later library revisions never change it); the old specialty column is no longer written.
+   if(!p4)yield* run('UPDATE agents_config SET specialty=? WHERE id=?',template.name,id);
    if(input.linked===true){yield* run('INSERT INTO agent_specialties(agent_id,template_id,linked_by) VALUES(?,?,?)',id,template.id,ownerId);}else{
    yield* run('UPDATE agent_permissions SET memory_read=?,memory_write=?,shared_memory=?,modes=?,updated_by=? WHERE agent_id=?',JSON.stringify(permissions.memoryRead),JSON.stringify(permissions.memoryWrite),permissions.sharedMemory?1:0,JSON.stringify(permissions.modes),ownerId,id);
    yield* setAgentGrantsStep(id,{grants:config.tools.map(t=>t.name)},ownerId,available);

@@ -29,9 +29,17 @@ export function PersonalityReview({ controller, agentName = 'This agent' }: { co
   if (!p) return history ? <section className="ag-earlier-box" aria-label="Earlier suggestions">{history}</section> : null;
   const changed = traitNames.filter(n => p.delta[n] !== undefined && p.delta[n] !== 0);
   const at = Math.max(0, pending.findIndex(x => x.id === p.id));
+  // STORE-MAP-01 P4 (T7b, T7d): a text change shows before → after next to the trait bars.
+  const textChange = p.proposedText !== undefined && p.proposedText !== p.baseText;
+  const outside = p.origin === 'file';
   return <section className="ag-needs" aria-label="Suggested persona changes">
-    <div className="ag-head-row"><b><bdi>{agentName}</bdi> suggests a small change</b><small className="ag-muted">{p.status === 'pending' ? `${at + 1} of ${pending.length} · it changes nothing until you agree` : STATUS[p.status] ?? p.status}</small></div>
-    <p className="personality-copy" dir="auto">“{p.reason}”</p>
+    <div className="ag-head-row"><b>{outside ? <><bdi>{agentName}</bdi>’s personality text changed outside Girru</> : <><bdi>{agentName}</bdi> suggests a small change</>}</b><small className="ag-muted">{p.status === 'pending' ? `${at + 1} of ${pending.length} · it changes nothing until you agree` : STATUS[p.status] ?? p.status}</small></div>
+    {outside ? <p className="personality-copy">The file PERSONALITY.md was changed by a coding app or by hand. Girru keeps one personality, so the change waits here. Agree makes it a new version; No keeps the current one and writes the file back.</p>
+      : <p className="personality-copy" dir="auto">“{p.reason}”</p>}
+    {textChange && <div className="ag-text-diff" aria-label="Text before and after">
+      <pre className="ag-text-before" dir="auto" aria-label="Now">{p.baseText || '(no text)'}</pre>
+      <pre className="ag-text-after" dir="auto" aria-label="Suggested">{p.proposedText || '(no text)'}</pre>
+    </div>}
     <div className="ag-delta">{changed.map(n => <span key={n} className="ag-delta-row"><span>{label(n)}</span>
       <span className="ag-bar"><i style={{ inlineSize: `${p.baseTraits[n]}%` }}/><i data-next style={{ inlineSize: `${p.proposedTraits[n]}%` }}/></span><span className="ag-delta-n">{p.baseTraits[n]} → {p.proposedTraits[n]}</span></span>)}</div>
     <details className="ag-details"><summary>What it noticed ({p.evidence.length}) and every trait</summary>

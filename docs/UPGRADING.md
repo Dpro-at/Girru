@@ -95,7 +95,7 @@ sc stop AgentPlayerFrontend
 1. **Database:** `.data/agent-player.db`
 2. **Environment:** `.env` files (both frontend and backend)
 3. **User Files:** `public/storage/` directory
-4. **Agent Memories:** `.data/memory/` directory
+4. **Agent Memories:** `.data/memory/` directory (with `GIRRU_STORE_P4` on, the old `.data/memory/memory.db` index is retired after a verified backup; see [Storage map switches](#storage-map-switches))
 5. **Agent Files:** `.data/agents/` directory
 6. **Extensions:** `packages/backend/extensions/` (custom extensions only)
 
@@ -468,6 +468,24 @@ sqlite3 .data/agent-player.db "SELECT * FROM schema_migrations ORDER BY version 
 cd packages/backend
 npx node dist/db/migrate.js
 ```
+
+### Storage map switches
+
+Some data moves happen only when their switch is on (all are off by default).
+Each one runs at start-up, is safe to run again, and keeps the old data.
+
+| Switch | What start-up does | What stays |
+|---|---|---|
+| `GIRRU_STORE_P3=1` | Fills department ids, memory source and trust, project ids, packed vectors (background jobs) | Old columns, until a later release |
+| `GIRRU_STORE_P4=1` | Makes a full backup and checks it, then retires `.data/memory/memory.db`; copies coding-app handoff notes into the one handoff table; copies each agent's `PERSONALITY.md` text into its personality record once, then rewrites `PERSONALITY.md` from the record | The backup with `memory.db`; `memory_bridge_handoffs` (dropped one release later); older personality versions |
+
+After the first start with `GIRRU_STORE_P4` on:
+
+- `PERSONALITY.md` is a view. A change made to it outside Girru is not used;
+  it waits in the agent's Personality review.
+- The start-up log line `[Store P4] personality texts imported: N, still
+  without a text: 0` confirms the import. A number above 0 means an agent's
+  file could not be read safely; it is tried again at the next start.
 
 ### Custom Extensions
 

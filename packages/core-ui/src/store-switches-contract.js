@@ -12,5 +12,5 @@ export function allowedStoreSwitches(method, path, body) {
 export function storeSwitchesResponse(status, body) {
   if (status !== 200) return { code: status === 403 ? 'forbidden' : 'unavailable' };
   const on = k => typeof body === 'object' && body !== null && body[k] === true;
-  return { p2: on('p2'), p3: on('p3') };
+  return { p2: on('p2'), p3: on('p3'), p4: on('p4') };
 }

@@ -62,6 +62,32 @@ cron_schedule TEXT
 tools_enabled TEXT (JSON array)
 ```
 
+### agent_personality_versions, personality_texts, personality_file_state, personality_proposals
+An agent's personality record (append-only; the current personality is the highest version).
+```sql
+-- agent_personality_versions: agent_id, version, traits (JSON), preset, dialect, locked,
+--   locked_traits (JSON), source, based_on_version, note, created_by, created_at,
+--   text_hash TEXT  -- the personality text of this version (personality_texts.hash); NULL before
+--                   -- the GIRRU_STORE_P4 import; a version that does not set it keeps the one before
+-- personality_texts: hash TEXT PRIMARY KEY (sha256), body TEXT  -- each text stored once
+-- personality_file_state: agent_id, written_hash, written_version -- what Girru last wrote into
+--   PERSONALITY.md; another hash means the file was changed outside Girru (a proposal)
+-- personality_proposals: + base_text_hash, proposed_text_hash, origin ('file' | 'evolution_text')
+```
+
+### agent_handoffs
+Handoff notes, one table (STORE-MAP-01 P4, migration 169).
+```sql
+id TEXT PRIMARY KEY, owner_id, agent_id,       -- agent_id 'app:<client>' for a coding-app note
+scope_kind TEXT  -- 'conversation' | 'task' | 'project' (a coding app's note for a project)
+scope_id, project_id, version,
+done, remaining, next_steps, open_questions,    -- JSON lists
+source TEXT      -- 'agent' | 'model' | 'fallback' | 'owner' | 'coding_app'
+run_id, client, created_at
+```
+`memory_bridge_handoffs` still receives coding-app notes too (same id) while
+`GIRRU_STORE_P4` is on, and is dropped one release later.
+
 ### agent_activity
 Agent execution logs
 ```sql

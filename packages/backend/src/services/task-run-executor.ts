@@ -3,7 +3,7 @@ import { HANDOFF_NOTE } from '../memory/handoff/store.js';
 import { isPilotAgent } from '../memory/outbox/pilot.js';
 import { resolveAgentContext } from './agent-context/resolve.js';
 import { renderSystemPrompt } from './agent-context/render.js';
-import { storeP2Enabled } from './agent-context/switch.js';
+import { oneContextEnabled } from './agent-context/switch.js';
 import { taskHandoffText, taskRunOwner } from '../memory/handoff/scope.js';
 import { taskRunPinnedFacts } from '../memory/scopes/task-facts.js';
 /**
@@ -299,7 +299,7 @@ async function gatedStepCall(driver: ModelDriver, messages: LoopMessage[], runId
  * otherwise today's prompt (instructions and skills only).
  */
 export async function taskRunBasePrompt(agent: Pick<AgentRow, 'id' | 'name' | 'system_prompt'>, run: { user_id: string | null }): Promise<string> {
-  if (storeP2Enabled() || isPilotAgent(agent.id)) {
+  if (oneContextEnabled() || isPilotAgent(agent.id)) {
     return renderSystemPrompt(await resolveAgentContext({ agentId: agent.id, entry: 'task', ownerId: await taskRunOwner(run.user_id).catch(() => null), projectId: null }));
   }
   return (agent.system_prompt ?? `You are ${agent.name}, an AI agent.`) + await agentSkillsPrompt(agent.id);

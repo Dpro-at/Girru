@@ -79,6 +79,16 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
     const { syncDepartments } = await import('../services/departments.js');
     await syncDepartments().catch((err) => console.warn('[Store P3] departments backfill failed:', (err as Error)?.message));
   }
+  // STORE-MAP-01 P4 (D7): older coding-app notes into the one handoff table (idempotent; readers use it).
+  if ((await import('../services/store-p4.js')).storeP4Enabled()) {
+    const { copyAppHandoffs } = await import('../memory/bridge/store.js');
+    await copyAppHandoffs().catch((err) => console.warn('[Store P4] handoff notes not copied:', (err as Error)?.message));
+    // T7: each agent's PERSONALITY.md text into its one personality record (once; the file becomes a view).
+    const { backfillPersonalityRecords, agentsWithoutRecordText } = await import('../services/personality-record.js');
+    await backfillPersonalityRecords()
+      .then(async (n) => { const left = await agentsWithoutRecordText(); if (n || left) console.log(`[Store P4] personality texts imported: ${n}, still without a text: ${left}`); })
+      .catch((err) => console.warn('[Store P4] personality texts not imported:', (err as Error)?.message));
+  }
 
   // APPS-06: apps moved to the Girru Store keep their data under their Store table names (once, after a backup).
   try { await (await import('../services/legacy-app-tables.js')).moveLegacyAppTables(); }
@@ -274,6 +284,15 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
       setImmediate(() => {
         backfillProvenance().catch((err) => console.warn('[Store P3] memory source backfill failed:', (err as Error)?.message))
           .then(() => backfillVectors()).catch((err) => console.warn('[Store P3] vector backfill failed:', (err as Error)?.message));
+      });
+    }
+
+    // STORE-MAP-01 P4 (D8): the old memory index file goes after a verified backup (GIRRU_STORE_P4 only).
+    if ((await import('../services/store-p4.js')).storeP4Enabled()) {
+      const { retireLegacyIndex } = await import('../memory/legacy-index.js');
+      setImmediate(() => {
+        retireLegacyIndex().then((r) => { if (r.state !== 'none') console.log(`[Store P4] old memory index: ${r.state}${r.state === 'retired' ? ` (backup ${r.backupId})` : r.state === 'kept' ? ` (${r.reason})` : ''}`); })
+          .catch((err) => console.warn('[Store P4] old memory index not retired:', (err as Error)?.message));
       });
     }
 

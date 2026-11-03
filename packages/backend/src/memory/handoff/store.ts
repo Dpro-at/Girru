@@ -147,7 +147,8 @@ export async function handoffHistory(scope: Omit<HandoffScope, 'projectId'>): Pr
 
 /** The newest version of every scope of the owner (optionally one agent / kind), newest first. */
 export async function listHandoffs(ownerId: string, filter: { agentId?: string; kind?: HandoffKind; projectId?: string; limit?: number } = {}): Promise<Handoff[]> {
-  const where = ['h.owner_id = ?'];
+  // Coding-app notes (P4: scope 'project' in this table) are listed by the bridge store.
+  const where = ['h.owner_id = ?', "h.scope_kind <> 'project'"];
   const args: string[] = [ownerId];
   if (filter.agentId) { where.push('h.agent_id = ?'); args.push(filter.agentId); }
   if (filter.projectId) { where.push('h.project_id = ?'); args.push(filter.projectId); }

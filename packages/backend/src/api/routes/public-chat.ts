@@ -21,6 +21,8 @@ import { orderedId } from '../../repositories/ordered-id.js';
 import { getUserIdFromRequest } from '../../auth/jwt.js';
 import { randomUUID } from 'crypto';
 import { readPersonality, readMemory } from '../../services/agent-files.js';
+import { storeP4Enabled } from '../../services/store-p4.js';
+import { personalityTextFor } from '../../services/personality-record.js';
 import { outsiderAgentMemoryEnabled } from '../../services/outsider-memory.js';
 import { handleError } from '../error-handler.js';
 import { DEFAULT_OLLAMA_MODEL, OLLAMA_URL } from '../../llm/ollama.js';
@@ -622,11 +624,20 @@ export async function registerPublicChatRoutes(fastify: FastifyInstance) {
       }
     }
 
+    // STORE-MAP-01 P4 (D16): the room's prompt first, then the agent's clean personality text from
+    // its one record (never the raw file with its generated part). A visitor never gets the owner's
+    // rules, instructions, team or skills: only how the agent talks.
+    let agentContext = '';
+    if (storeP4Enabled() && room.agent_id) {
+      const text = await personalityTextFor(room.agent_id).catch(() => '');
+      agentContext = text ? `## Your personality\n${text}` : '';
+    }
     // Build system prompt (priority: room > agent PERSONALITY.md > default)
-    const systemPrompt =
-      room.system_prompt ||
-      personalityContent ||
-      'You are a helpful AI assistant in a public chat room.';
+    const systemPrompt = agentContext
+      ? (room.system_prompt ? `${room.system_prompt}\n\n${agentContext}` : agentContext)
+      : room.system_prompt ||
+        personalityContent ||
+        'You are a helpful AI assistant in a public chat room.';
 
     // Add memory if available
     let fullSystemPrompt = systemPrompt;

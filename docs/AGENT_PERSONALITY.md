@@ -1,22 +1,54 @@
 # Agent Personality System
 
-Each agent has its own identity defined by files and learned knowledge.
+Each agent has a personality (how it talks), a job (what it does), owner rules,
+its own notes and knowledge files.
 
-**Location:** `.data/agents/{agentId}/`
+**Folder:** `.data/agents/{agentId}/`
 
 ---
 
-## Agent Files Structure
+## Where each part lives
 
-```
-.data/agents/{agentId}/
-├── PERSONALITY.md          # Agent's core identity
-├── MEMORY.md               # Accumulated knowledge
-└── knowledge/              # Additional context files
-    ├── guidelines.md
-    ├── faq.md
-    └── ...
-```
+| Part | The one place it is edited | Copies (views) |
+|---|---|---|
+| Personality: its text and its adjustments (traits, dialect, lock) | The personality record: one versioned history in the database | `PERSONALITY.md` (with `GIRRU_STORE_P4` on) |
+| Job | The agent's specialty links (Agent › Specialties) | none |
+| Owner's extra instructions | Agent › General (`agents_config.system_prompt`) | none |
+| Own notes | `MEMORY.md` | none |
+| Reference files | `knowledge/` (Files › Knowledge) | none |
+
+A personality changes how an agent talks. It never changes its job, skills or
+permissions.
+
+### The personality record (`GIRRU_STORE_P4`, off by default)
+
+With the switch on:
+
+- **One history.** Every change of the text or of an adjustment is a new
+  version (`agent_personality_versions`; the text is stored once by its
+  sha256 in `personality_texts`). Restoring an older version makes a new
+  version again, so nothing is rewritten.
+- **Edits in Girru save at once.** Files › Who it is and the Personality tab
+  save a new version straight away; Undo restores the version before. A lock
+  stops suggestions, not your own edits.
+- **`PERSONALITY.md` is a view.** Girru writes it from the record: the text,
+  then a generated settings part between markers (edits inside the markers are
+  ignored).
+- **Outside edits wait for review.** If a coding app or a text editor changes
+  `PERSONALITY.md`, the change is not used. It appears in Personality review
+  as before → after; *Agree* makes it a version, *No* writes the record back
+  into the file.
+- **Suggestions wait for review.** Evolution and agents suggest text changes
+  in Personality review; nothing changes until you agree.
+- **Start-up import.** The first start with the switch on copies each agent's
+  current `PERSONALITY.md` text into its record once (the untouched template
+  counts as no text). Older trait versions are kept.
+- **Job from the specialty link.** Hiring from a linked specialty, and team
+  hiring with a specialty from the library, link the specialty instead of
+  copying its text into the instructions. A copy hire keeps its frozen copy.
+- **Duplicate** gives the copy the original's current record as its version 1.
+
+With the switch off, `PERSONALITY.md` is read as before.
 
 ---
 
@@ -61,10 +93,10 @@ You are a friendly technical support agent specializing in software troubleshoot
 
 ### How to Use
 
-1. **Go to:** `/dashboard/agents/{id}/files`
-2. **Click:** "Personality" tab
-3. **Edit:** Markdown content
-4. **Save:** Changes apply immediately
+1. Open the agent, then **Files › Who it is** (or the **Personality** tab).
+2. Edit the text. With `GIRRU_STORE_P4` on it is saved as a new version at
+   once (Undo restores); the generated settings part is read only.
+3. Earlier versions are listed under **Earlier versions**.
 
 ---
 
@@ -132,24 +164,25 @@ knowledge/
 
 ---
 
-## Priority System
+## What an agent reads when it answers
 
-When agent responds, content is loaded in this order:
+With the one context (`GIRRU_STORE_P2` or `GIRRU_STORE_P4` on) chat, task
+runs, coding apps, public rooms and the heartbeat read the same parts, in this
+order. The order is for prompt caching; precedence is a rule: owner rules come
+before everything, and data never overrides instructions.
 
-1. **PERSONALITY.md** (if exists)
-2. **Database system_prompt** (fallback)
-3. **MEMORY.md** (accumulated knowledge)
-4. **Knowledge files** (additional context)
-5. **Session context** (current conversation)
+1. Identity (`You are <name>.`)
+2. Owner rules
+3. Your instructions (the owner's extra instructions)
+4. Your personality (the record's text)
+5. Working style (from the adjustments)
+6. Specialties and skills (the job)
+7. Team (names only)
+8. Knowledge files the owner marked as read
+9. Memory, framed as data (`MEMORY.md`, pinned facts, the newest handoff)
 
-**Final prompt structure:**
-```
-[Base System Prompt]
-[Agent Personality from PERSONALITY.md]
-[Agent Memory from MEMORY.md]
-[Session Context]
-[User Message]
-```
+A public room puts the room's prompt first and never gets owner memory. The
+heartbeat reads no owner memory.
 
 ---
 
@@ -321,43 +354,42 @@ Create clear, concise technical documentation
 
 ## API Access
 
-### Get Agent Files
+All routes are owner only.
+
 ```bash
-GET /api/agents/:id/files
+# The record (personality text + adjustments)
+GET  /api/agents/:id/personality/current          # adds "text" with GIRRU_STORE_P4 on
+GET  /api/agents/:id/personality/versions
+PUT  /api/agents/:id/personality/text             # { text, expectedVersion } (GIRRU_STORE_P4)
+POST /api/agents/:id/personality/versions         # adjustments
+POST /api/agents/:id/personality/rollback         # { version } -> a new version
+GET  /api/agents/:id/personality/proposals        # suggestions and outside edits
+POST /api/agents/:id/personality/proposals/:pid/approve   # { expectedReviewHash }
+POST /api/agents/:id/personality/proposals/:pid/reject    # { expectedReviewHash, note? }
+
+# Files (Who it is, MEMORY.md, knowledge/)
+GET  /api/agents/:id/library
+GET  /api/agents/:id/library/file?name=PERSONALITY.md
+PUT  /api/agents/:id/library/file                 # { name, content, expectedHash }
+GET  /api/agents/:id/library/versions?name=...
+
+# Older file route
+GET  /api/agents/:id/personality                  # the PERSONALITY.md file
+PUT  /api/agents/:id/personality                  # { content } ; with GIRRU_STORE_P4: { content, expectedVersion }
 ```
 
-### Update Personality
-```bash
-PUT /api/agents/:id/files/personality
-Content-Type: text/plain
-
-# New PERSONALITY.md content
-```
-
-### Update Memory
-```bash
-PUT /api/agents/:id/files/memory
-Content-Type: text/plain
-
-# New MEMORY.md content
-```
-
-### Upload Knowledge File
-```bash
-POST /api/agents/:id/files/knowledge
-Content-Type: multipart/form-data
-
-file: guidelines.md
-```
+A save with an old `expectedVersion` or `expectedHash` answers `409`
+(`changed`): open the latest and try again.
 
 ---
 
 ## File Limits
 
-- **PERSONALITY.md:** Max 10 KB (~2000 words)
-- **MEMORY.md:** Max 50 KB (~10,000 words)
-- **Knowledge files:** Max 1 MB each
-- **Total knowledge folder:** Max 10 MB
+- **Personality text / PERSONALITY.md:** 1 MB
+- **MEMORY.md:** 32 KB (secrets are hidden before saving)
+- **Knowledge files:** 1 MB each, up to 200 files (`.md`, `.txt`, `.csv`, `.json`)
+- Who it is and Knowledge keep their last 20 saved file versions; with
+  `GIRRU_STORE_P4` on, Who it is also lists every version of the record.
 
 ---
 

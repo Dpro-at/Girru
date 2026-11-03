@@ -57,6 +57,8 @@ import { checkOwnerPersonalityInput, seedPersonalityForNewAgent, type SaveInput 
 import { seedNewAgentPermissionsStep } from '../tools/agent-permissions.js';
 import { releaseReportsStep } from '../services/agent-org.js';
 import { storeP3Enabled } from '../services/store-p3.js';
+import { storeP4Enabled } from '../services/store-p4.js';
+import { copyPersonalityStep, writePersonalityView } from '../services/personality-record.js';
 import { companyOwnerStep, departmentKey, linkAgentDepartment, renameDepartmentEverywhere, syncDepartments } from '../services/departments.js';
 
 export interface AgentConfigRow {
@@ -407,7 +409,10 @@ export const agentConfigs: AgentConfigsRepository = {
         original.role ?? null,
         original.department ?? null,
       );
+      // STORE-MAP-01 P4 (G3): the copy starts with the original's personality record (text + adjustments).
+      yield* copyPersonalityStep(id, newId, a.userId ?? 'system');
     });
+    if (storeP4Enabled()) await writePersonalityView(newId).catch(() => {});
     return (await row(newId)) as AgentConfigRow;
   },
 

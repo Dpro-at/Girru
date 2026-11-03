@@ -20,6 +20,7 @@
  * Errors: { error, code } with 400 / 401 / 403 / 404 / 409 / 422.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { storeP4Enabled } from '../../services/store-p4.js';
 import { authorizeActiveRole } from '../../auth/route-guards.js';
 import {
   activity, backflowNow, BridgeError, bridgeStatus, filesApply, filesPreview, mcpCall, openSession, registrationApply, registrationPreview,
@@ -69,7 +70,7 @@ export async function memoryBridgeRoutes(fastify: FastifyInstance) {
   })));
 
   // STORE-MAP-01 P2: which storage switches are on (the app shows the matching words).
-  fastify.get('/api/store-switches', { config }, asOwner(async () => ({ p2: storeP2Enabled(), p3: storeP3Enabled() })));
+  fastify.get('/api/store-switches', { config }, asOwner(async () => ({ p2: storeP2Enabled(), p3: storeP3Enabled(), p4: storeP4Enabled() })));
 
   // --- STORE-MAP-01 pilot: session capabilities and the brief projection (owner only) ---
   const pilotProject = async (o: string, id: string) => {

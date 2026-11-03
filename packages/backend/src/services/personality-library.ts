@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import {all,one,run,sql,lockName,type Step} from '../repositories/sql-steps.js';
-import {appendVersion,currentPersonalityStep,type PersonalityVersion} from './personality-store.js';
+import {appendVersion,currentPersonalityStep,putPersonalityTextStep,type PersonalityVersion} from './personality-store.js';
+import {storeP4Enabled} from './store-p4.js';
 import {TRAIT_NAMES,traitsToBehavior,type Traits} from './personality.js';
 import {LibraryError,STARTERS,validateProfile,profileInstructions,type Profile} from './personality-library-profile.js';
 export {LibraryError};
@@ -113,7 +114,7 @@ function* writeLink(agentId:string,e:LibraryEntry,version:number,linked:boolean)
 export function* seedLibraryPersonality(agentId:string,actor:string,raw:unknown):Step<void>{
  const input=check(raw);only(input,['id','revision']);yield* lockName('personality-library');yield* seedLibraryStep();const e=yield* readStep(input.id);if(input.revision!==e.revision)throw new LibraryError('version_conflict',409);
  const current=yield* currentPersonalityStep(agentId,{lock:true});if(!current||current.version!==0)throw new LibraryError('version_conflict',409);
- const v=yield* appendVersion(agentId,actor,{traits:e.profile.traits,dialect:e.profile.dialect,preset:null,locked:false,lockedTraits:[],source:'seed',basedOnVersion:null,note:`Library: ${e.profile.name}`});yield* writeLink(agentId,e,v.version,true);
+ const v=yield* appendVersion(agentId,actor,{traits:e.profile.traits,dialect:e.profile.dialect,preset:null,locked:false,lockedTraits:[],source:'seed',basedOnVersion:null,note:`Library: ${e.profile.name}`,textHash:storeP4Enabled()?yield* putPersonalityTextStep(''):undefined});yield* writeLink(agentId,e,v.version,true);
 }
 /** The snapshot supplies style; current per-agent traits always remain authoritative. */
 export async function libraryBehavior(agentId:string){

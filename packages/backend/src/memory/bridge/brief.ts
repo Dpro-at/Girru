@@ -66,7 +66,7 @@ export async function projectHandoff(ownerId: string, projectId: string): Promis
   const own = await q.one<{ agent_id: string; created_at: string; done: string; remaining: string; next_steps: string; open_questions: string; name: string | null }>(
     `SELECT h.agent_id, h.created_at, h.done, h.remaining, h.next_steps, h.open_questions, a.name
      FROM agent_handoffs h LEFT JOIN agents_config a ON a.id = h.agent_id
-     WHERE h.owner_id = ? AND h.project_id = ? ORDER BY h.created_at DESC, h.version DESC LIMIT 1`, ownerId, projectId);
+     WHERE h.owner_id = ? AND h.project_id = ? AND h.scope_kind <> 'project' ORDER BY h.created_at DESC, h.version DESC LIMIT 1`, ownerId, projectId);
   const outside = await latestBridgeHandoff(ownerId, projectId);
   const a: BriefHandoff | null = own ? { from: `Girru agent ${clean(own.name || own.agent_id, 60)}`, createdAt: own.created_at, done: items(own.done), left: items(own.remaining), next: items(own.next_steps), questions: items(own.open_questions) } : null;
   const b: BriefHandoff | null = outside ? { from: CLIENT_NAMES[outside.client as BridgeClient] ?? outside.client, createdAt: outside.createdAt, done: items(outside.done), left: items(outside.left), next: items(outside.next), questions: items(outside.questions) } : null;
