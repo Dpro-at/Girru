@@ -14,6 +14,7 @@ import {securityCoverageRoutes} from './routes/security-coverage.js';
 import {chatAddonsRoutes} from './routes/chat-addons.js';
 import {storeRoutes} from './routes/store.js';
 import { mcpImportRoutes } from './routes/mcp-import.js';
+import { sshKeysRoutes } from './routes/ssh-keys.js';
 /**
  * Girru Fastify app factory.
  *
@@ -387,6 +388,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await fastify.register(skillsRoutes);
   await fastify.register(skillInstallRoutes);
   await fastify.register(mcpImportRoutes);
+  await fastify.register(sshKeysRoutes); // SSH-KEYS-01: Settings › Security › SSH keys
   await fastify.register(skillLibraryRoutes);
   await fastify.register(specialtyTemplateRoutes); // 🛠️ Skills System
   await fastify.register(schedulerDefinitionRoutes);

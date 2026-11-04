@@ -228,6 +228,7 @@ export const TIER_RULES: readonly Rule[] = [
   { methods: '*', prefix: '/api/handoffs', access: 'owner' },      // the agents' handoff notes (CORE-MEM-HANDOFF)
   { methods: '*', prefix: '/api/memory-bridge', access: 'owner' }, // CLI configs, project files, back-flow, kill switch (MEM-BRIDGE-01)
   { methods: '*', prefix: '/api/mcp', access: 'owner' },           // MCP client servers: start processes / reach URLs for agents (M1)
+  { methods: '*', prefix: '/api/security/ssh-keys', access: 'owner' }, // SSH keys on this computer: public facts, copy the public key only (SSH-KEYS-01)
   { methods: '*', prefix: '/api/phone', access: 'owner' },         // pair, rename and forget phones; relay address (MOB-PAIR-01)
 
   // --- owner or admin: configuration, outbound requests, money, other users' data ---

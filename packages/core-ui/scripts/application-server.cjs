@@ -26,6 +26,7 @@ const {approvalRoute,allowedApproval,approvalResponse}=require('../src/approvals
 const { allowedConnections, connectionsRoute, connectionsResponse } = require('../src/connections-contract.js');
 const {allowedTemplates,templatePath,templatesResponse}=require('../src/specialty-contract.js');
 const { allowedMcpImport, mcpImportPath, mcpImportResponse } = require('../src/mcp-import-contract.js');
+const { allowedSshKeys, sshKeysRoute, sshKeysResponse } = require('../src/ssh-keys-contract.js');
 const { allowedSkillLibrary, skillLibraryPath, skillLibraryResponse } = require('../src/skill-library-contract.js');
 const { createGenVRAssets } = require('./genvr-assets.cjs');
 const { createChatVoice } = require('./chat-voice-host.cjs');
@@ -141,6 +142,7 @@ function allowed(method, target, body) {
   if (approvalRoute(target)) return allowedApproval(method,target,body);
   if (connectionsRoute(target)) return allowedConnections(method,target,body);
   if (mcpImportPath(target)) return allowedMcpImport(method,target,body);
+  if (sshKeysRoute(target)) return allowedSshKeys(method,target,body);
   if (libraryPath(target)) return allowedLibrary(method,target,body);
   if (templatePath(target)) return allowedTemplates(method,target,body);
   if (skillLibraryPath(target)) return allowedSkillLibrary(method,target,body);
@@ -259,6 +261,7 @@ function project(target, status, body) {
   if (sessionsRoute(target) || updatesRoute(target)) return accountSettingsResponse(target, status, body);
   if (connectionsRoute(target)) return connectionsResponse(target,status,body);
   if (mcpImportPath(target)) return mcpImportResponse(target,status,body);
+  if (sshKeysRoute(target)) return sshKeysResponse(target,status,body);
   if (libraryPath(target)) return libraryResponse(target,status,body);
   if (templatePath(target)) return templatesResponse(target,status,body);
   if (skillLibraryPath(target)) return skillLibraryResponse(target,status,body);

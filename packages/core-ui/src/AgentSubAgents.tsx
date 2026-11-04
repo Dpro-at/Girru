@@ -12,7 +12,7 @@ type GrantsView={version:number;grants:{tool:string}[];available?:{name:string;d
 type Work={id:string;kind:'helper'|'quick';agentId:string|null;status:'running'|'waiting'|'finished'|'failed';summary:string|null;sessionId:string|null;createdAt:string|null};
 const QUICK=['quick_helper','quick_helper_result'],TEAM=['team_list','team_delegate','team_results'];
 /** A tool name in plain words ("memory_search" → "Memory search"). */
-export const toolWords=(name:string)=>{const t=name.replace(/^mcp:[^:]+:/,'').replace(/[_:.-]+/g,' ').trim();return t?t[0].toUpperCase()+t.slice(1):name;};
+export const toolWords=(name:string)=>{const t=name.replace(/^mcp(?::[^:]+:|__[a-z0-9-]+__)/,'').replace(/[_:.-]+/g,' ').trim();return t?t[0].toUpperCase()+t.slice(1):name;};
 const when=(iso:string|null)=>{if(!iso)return '';const d=new Date(iso);if(Number.isNaN(d.getTime()))return '';const today=new Date().toDateString()===d.toDateString();return today?d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):d.toLocaleDateString([],{month:'short',day:'numeric'});};
 const STATE:Record<Work['status'],{word:string;icon:UiIconName;tone:string}>={running:{word:'Working',icon:'play',tone:'sa-run'},waiting:{word:'Waits for you',icon:'alert',tone:'sa-wait'},finished:{word:'Finished',icon:'check',tone:'sa-done'},failed:{word:'Did not finish',icon:'close',tone:'sa-fail'}};
 
