@@ -57,9 +57,17 @@ export function isToolExecClass(tool: { name: string; execClass?: boolean }): bo
   return isExecClassTool(tool.name) || tool.execClass === true;
 }
 
+/**
+ * The exact tool objects of GenVR's bundled MCP server (mcp-client/bundled-genvr.ts). They stay
+ * exec-class for everything else (approvals, channels, grants); only the AGENT_EXEC_TOOLS switch
+ * lets them through. A WeakSet of the objects themselves, so a copied or look-alike tool is not trusted.
+ */
+const trustedBundledTools = new WeakSet<object>();
+export function markTrustedBundledTool<T extends object>(tool: T): T { trustedBundledTools.add(tool); return tool; }
+
 /** Like isToolAllowedByExecPolicy, but also honours the tool's own exec flag. */
 export function isToolObjectAllowedByExecPolicy(tool: { name: string; execClass?: boolean }): boolean {
-  return !isToolExecClass(tool) || isExecToolsEnabled();
+  return !isToolExecClass(tool) || isExecToolsEnabled() || trustedBundledTools.has(tool);
 }
 
 export function execToolRefusal(name: string): ToolResult {

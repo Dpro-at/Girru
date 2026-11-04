@@ -53,6 +53,12 @@ if (!app.requestSingleInstanceLock()) {
 /** Data for "this computer": <userData>/data (DPRO_DESKTOP_DATA_DIR overrides, e.g. for tests). */
 const dataDir = () => selectedData || (process.env.DPRO_DESKTOP_DATA_DIR ? path.resolve(process.env.DPRO_DESKTOP_DATA_DIR) : path.join(app.getPath('userData'), 'data'));
 const settingsDir = () => app.getPath('userData');
+/**
+ * Working folders of local (stdio) MCP servers, e.g. GenVR's worlds. The backend refuses a folder inside
+ * the data folder, and its default is inside it, so without this every local MCP server stayed "blocked".
+ * One folder per workspace, beside the data (never inside it).
+ */
+const mcpServersDir = () => path.join(settingsDir(), 'mcp-servers', path.basename(dataDir()));
 /** CODE-STORE-01: Girru's per-computer app folder; the Code app from the Girru Store is unpacked here. */
 const appRuntimesDir = () => process.env.GIRRU_APP_RUNTIMES_DIR ? path.resolve(process.env.GIRRU_APP_RUNTIMES_DIR) : path.join(settingsDir(), 'app-runtimes');
 const codeRuntime = () => require('./code-runtime.cjs').resolveCodeRuntime({ bundled: process.env.DPRO_NABU_ROOT || path.join(process.resourcesPath, 'nabu-runtime'), runtimesDir: appRuntimesDir() });
@@ -150,7 +156,7 @@ async function startLocal() {
       args: backendArgs(payload.backendDir),
       cwd: path.basename(dataDir()) === '.data' ? path.dirname(dataDir()) : dataDir(),
       dataDir: dataDir(),
-      extraEnv: { DPRO_BROWSER_CONNECTION_FILE:browserRuntime.connectionFile, AGENT_TERMINAL: 'true', DPRO_SUBSCRIPTION_CHAT: '1', GIRRU_APP_RUNTIMES_DIR: appRuntimesDir(), GIRRU_CODE_RUNTIME_BUNDLED: codeRuntime()?.source === 'bundled' ? '1' : '0', ...(path.basename(dataDir()) === '.data' ? { AGENT_PLAYER_DATA_DIR: undefined } : {}) },
+      extraEnv: { MCP_SERVERS_DIR: mcpServersDir(), DPRO_BROWSER_CONNECTION_FILE:browserRuntime.connectionFile, AGENT_TERMINAL: 'true', DPRO_SUBSCRIPTION_CHAT: '1', GIRRU_APP_RUNTIMES_DIR: appRuntimesDir(), GIRRU_CODE_RUNTIME_BUNDLED: codeRuntime()?.source === 'bundled' ? '1' : '0', ...(path.basename(dataDir()) === '.data' ? { AGENT_PLAYER_DATA_DIR: undefined } : {}) },
       createBridge: ({ upstreamPort, launchToken }) => createApplicationServer({ packageRoot: payload.coreUiDir, channel: 'candidate', upstreamPort, launchToken, browserController:browserRuntime }),
       onLog: line => log.write(line),
       onBackendExit: ({ code, signal }) => {

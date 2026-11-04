@@ -34,11 +34,15 @@ test('source changes, unsupported settings and symlinks fail closed',async()=>{
 
 // The bundled GenVR package is fetched into core-ui/vendor (not in git); without it there is nothing to prepare.
 const genvrBundled=(await fs.stat(path.resolve('../core-ui/vendor/genvr/package/dist/mcp.js')).catch(()=>null))!==null;
-test('bundled GenVR prepares once, connects automatically under operator policy and respects disable',{skip:genvrBundled?false:'bundled GenVR package not present (core-ui/vendor/genvr)'},async()=>{
- const {ensureGenvrMcp}=await import('../src/mcp-client/genvr-local.ts');
- assert.equal((await ensureGenvrMcp('owner')).status,'blocked');let row=await mcp.getServerRowByName('genvr-local');assert.ok(row);assert.equal(row.enabled,0);assert.equal(row.approved_launch_hash,null);
- process.env.AGENT_EXEC_TOOLS='true';try{
-  assert.equal((await ensureGenvrMcp('owner')).status,'ready');assert.equal((await ensureGenvrMcp('owner')).status,'ready');row=await mcp.getServerRowByName('genvr-local');assert.equal(row.enabled,1);assert.ok((await mcp.listToolRows(row.id)).length>0);assert.equal(db.prepare("select count(*) n from mcp_servers where name='genvr-local'").get().n,1);assert.equal(db.prepare("select count(*) n from agent_tool_grants where tool_name like 'mcp__genvr-local__%'").get().n,0);
-  await mcp.disableServer(row.id);assert.equal((await ensureGenvrMcp('owner')).status,'disabled');assert.equal((await mcp.getServerRowByName('genvr-local')).enabled,0);
- }finally{delete process.env.AGENT_EXEC_TOOLS;await mcp.closeAllConnections();}
+test('bundled GenVR is standard and enabled without AGENT_EXEC_TOOLS, still respects disable, grants and the switch for others',{skip:genvrBundled?false:'bundled GenVR package not present (core-ui/vendor/genvr)'},async()=>{
+ const {ensureGenvrMcp}=await import('../src/mcp-client/genvr-local.ts');const {isExecToolsEnabled,isToolObjectAllowedByExecPolicy}=await import('../src/tools/exec-policy.ts');const {getMcpTools}=await import('../src/mcp-client/tools.ts');
+ assert.equal(isExecToolsEnabled(),false,'the general switch stays off');
+ assert.equal((await ensureGenvrMcp('owner')).status,'ready');assert.equal((await ensureGenvrMcp('owner')).status,'ready');let row=await mcp.getServerRowByName('genvr-local');assert.equal(row.enabled,1);assert.equal(row.approved_launch_hash,row.launch_hash);assert.ok((await mcp.listToolRows(row.id)).length>0);assert.equal(db.prepare("select count(*) n from mcp_servers where name='genvr-local'").get().n,1);
+ assert.equal(db.prepare("select count(*) n from agent_tool_grants where tool_name like 'mcp__genvr-local__%'").get().n,0,'no agent gets its tools without a grant');
+ const all=await getMcpTools();const genvr=all.filter(t=>t.mcp?.serverName==='genvr-local');assert.ok(genvr.length>0);
+ assert.ok(genvr.every(t=>t.execClass===true&&isToolObjectAllowedByExecPolicy(t)),'GenVR tools pass the switch but stay exec-class for approvals and channels');
+ assert.ok(genvr.every(t=>!isToolObjectAllowedByExecPolicy({...t})),'a copy of a GenVR tool object is not trusted');
+ const other=all.filter(t=>t.execClass&&t.mcp?.serverName!=='genvr-local');assert.ok(other.every(t=>!isToolObjectAllowedByExecPolicy(t)),'other stdio servers stay behind the switch');
+ await mcp.disableServer(row.id);assert.equal((await ensureGenvrMcp('owner')).status,'disabled');assert.equal((await mcp.getServerRowByName('genvr-local')).enabled,0);
+ await mcp.closeAllConnections();
 });
