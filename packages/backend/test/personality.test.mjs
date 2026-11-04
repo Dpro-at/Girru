@@ -7,6 +7,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { offeredNames, expectedNumCtx, expectedNumPredict, p2bOn } from './helpers/p2b.mjs';
 
 const backendDir = process.cwd();
 const dir = mkdtempSync(join(tmpdir(), 'ap-personality-'));
@@ -261,7 +262,7 @@ test('traits change the parameters sent to the model, never the tools', async ()
   assert.equal(callA.options.temperature, 0.1);
   assert.equal(callA.options.num_predict, 512);
   assert.equal(callB.options.temperature, 1);
-  assert.equal(callB.options.num_predict, 4096);
+  assert.equal(callB.options.num_predict, expectedNumPredict(4096));
   const sysA = callA.messages[0].content;
   const sysB = callB.messages[0].content;
   assert.match(sysA, /Hand-written notes stay\./);

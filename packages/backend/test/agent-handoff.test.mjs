@@ -13,6 +13,7 @@ import { mkdtempSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { offeredNames, expectedNumCtx, expectedNumPredict, p2bOn } from './helpers/p2b.mjs';
 
 const backendDir = process.cwd();
 const dir = mkdtempSync(join(tmpdir(), 'ap-handoff-'));
@@ -86,7 +87,7 @@ async function turn(user, conv, message, { agentId, lines = [] } = {}) {
   assert.equal(r.statusCode, 202, r.body);
   await ended(runId);
   const first = bodies[from];
-  return { runId, system: String(first?.messages?.find((m) => m.role === 'system')?.content ?? ''), tools: (first?.tools ?? []).map((t) => t.function?.name ?? t.name) };
+  return { runId, system: String(first?.messages?.find((m) => m.role === 'system')?.content ?? ''), tools: offeredNames(first) };
 }
 const toolCall = (name, args) => [{ message: { content: '', tool_calls: [{ function: { name, arguments: args } }] } }, { done: true }];
 const say = (text) => [{ message: { content: text } }, { done: true }];

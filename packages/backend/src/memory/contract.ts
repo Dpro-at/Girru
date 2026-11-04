@@ -21,6 +21,7 @@
 
 import { normalizeTopicKey, TopicKeyError } from './topic-key.js';
 import { storeP8Enabled } from '../services/store-p8.js';
+import { asMcp, asNative, type ToolDef } from '../tools/tool-doors.js';
 
 export const MEMORY_VERBS = ['recall', 'save', 'supersede', 'handoff', 'propose'] as const;
 export type MemoryVerb = (typeof MEMORY_VERBS)[number];
@@ -68,14 +69,19 @@ export function contractDefinitions(): readonly VerbDefinition[] {
 
 const schemaOf = (d: VerbDefinition) => ({ type: 'object', properties: d.properties, required: d.required, additionalProperties: false });
 
+/** XP1: the verbs as the one tool definition every door renders (tools/tool-doors.ts). */
+export function contractToolDefs(): ToolDef[] {
+  return contractDefinitions().map((d) => ({ name: `memory_${d.verb}`, description: d.description, input_schema: schemaOf(d) }));
+}
+
 /** XP1, door 1: the MCP tools (dpro-memory), named memory_<verb>. */
 export function mcpContractTools(): Array<{ name: string; description: string; inputSchema: ReturnType<typeof schemaOf> }> {
-  return contractDefinitions().map((d) => ({ name: `memory_${d.verb}`, description: d.description, inputSchema: schemaOf(d) }));
+  return contractToolDefs().map(asMcp);
 }
 
 /** XP1, door 2: the same verbs as native tool definitions (loaded on demand, never in every turn). */
 export function nativeContractTools(): Array<{ name: string; description: string; input_schema: ReturnType<typeof schemaOf> }> {
-  return contractDefinitions().map((d) => ({ name: `memory_${d.verb}`, description: d.description, input_schema: schemaOf(d) }));
+  return contractToolDefs().map(asNative);
 }
 
 export const verbOfTool = (name: string): MemoryVerb | null => {

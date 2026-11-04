@@ -41,6 +41,10 @@ import { UNKNOWN_PRINCIPAL } from '../tools/grants.js';
 import { logActivity } from './activity-logger.js';
 import { resolveProviderApiKey } from '../credentials/authority.js';
 import { ollamaToolChat } from '../llm/ollama-tool-chat.js';
+import { storeP2bEnabled } from './store-p2b.js';
+import { fitSystem, localModelWindow } from './local-turn.js';
+import { planLocalBudget, toolOutputChars } from '../memory/context/local-budget.js';
+import { OnDemandTools } from '../tools/on-demand.js';
 import { DEFAULT_OLLAMA_MODEL } from '../llm/ollama.js';
 import { resolveLocalModel } from '../llm/local-models.js';
 import { SMALL_AGENT_ID, smallAgentCard, smallAgentRunScope, smallAgentSystemPrompt } from './small-agent.js';
@@ -232,20 +236,23 @@ function claudeDriver(claude: ClaudeClient, agent: AgentRow, systemPrompt: strin
 }
 
 /** MCP-01: local Ollama model of the small agent (non-streaming, tools in function format). */
-function ollamaDriver(agent: AgentRow, systemPrompt: string, tools: any[]): ModelDriver {
+function ollamaDriver(agent: AgentRow, systemPrompt: string, tools: any[] | (() => any[]), numCtx?: number, toolChars?: number): ModelDriver {
+  // STORE-MAP-01 P2b: tools on demand give the list of each step (the memory verbs, tool_load, what was loaded).
+  const toolsNow = () => (typeof tools === 'function' ? tools() : tools);
   return {
     provider: 'ollama',
     model: agent.model,
     maxTokens: agent.max_tokens || 1024,
-    overhead: { systemPrompt, tools },
+    overhead: { systemPrompt, tools: toolsNow() },
     async call(messages) {
       const r = await ollamaToolChat({
         model: agent.model,
         systemPrompt,
         messages: messages as any,
-        tools,
+        tools: toolsNow(),
         temperature: agent.temperature,
         maxTokens: agent.max_tokens,
+        ...(numCtx ? { numCtx } : {}),
       });
       return { content: r.content, toolCalls: r.toolCalls, assistant: r.assistant, ...(r.usage ? { usage: r.usage } : {}) };
     },
@@ -253,7 +260,7 @@ function ollamaDriver(agent: AgentRow, systemPrompt: string, tools: any[]): Mode
     toolResultMessages: (results) => results.map(({ tool, result, text }) => ({
       role: 'tool',
       tool_name: tool,
-      content: result?.error ? `Error: ${text}` : text,
+      content: (result?.error ? `Error: ${text}` : text).slice(0, toolChars ?? Number.MAX_SAFE_INTEGER),
     })),
   };
 }
@@ -446,6 +453,18 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
         : claudeDriver(claudeClient!, agent, systemPrompt, tools);
     }
 
+    // STORE-MAP-01 P2b (LOCAL-ONLY-01): a local model's run gets tools on demand, its own window, the reply
+    // room and the memory rule; calls are checked against the full schema (XP2). Off: nothing changes.
+    let taskTools: OnDemandTools | null = null;
+    if (storeP2bEnabled() && driver.provider === 'ollama') {
+      const window = await localModelWindow('ollama', driver.model);
+      const budget = planLocalBudget(window.tokens);
+      const onDemand = new OnDemandTools(registry.getToolsForAPI(), budget.tier, { fitTokens: budget.tools });
+      taskTools = onDemand;
+      const system = fitSystem(systemPrompt, onDemand.index(), '', budget.system);
+      driver = ollamaDriver({ ...agent, model: driver.model, ...(isSmall ? { temperature: smallTemp! } : {}), max_tokens: Math.min(driver.maxTokens, budget.replyTokens) }, system, () => onDemand.definitions(), budget.window, toolOutputChars(budget));
+    }
+
     const loopMessages: LoopMessage[] = [{ role: 'user', content: prompt }];
     let stepIndex = 0;
     let finalContent = '';
@@ -486,7 +505,9 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
             run: async (key, index) => {
               registry.updateContext({ taskRun: { runId, stepIndex: index, idempotencyKey: key } });
               try {
-                return await registry.execute(toolCall.tool, toolCall.arguments ?? {});
+                return taskTools
+                  ? await taskTools.execute(toolCall.tool, toolCall.arguments ?? {}, (name, args) => registry.execute(name, args))
+                  : await registry.execute(toolCall.tool, toolCall.arguments ?? {});
               } finally {
                 registry.updateContext({ taskRun: undefined });
               }

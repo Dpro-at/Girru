@@ -15,6 +15,7 @@ import { mkdtempSync, mkdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { offeredNames, expectedNumCtx, expectedNumPredict, p2bOn } from './helpers/p2b.mjs';
 
 const backendDir = process.cwd();
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-context-contract-')));
@@ -102,7 +103,7 @@ async function chatPrompt(channel = false) {
       payload: { stream: false, sessionId: conv.id, ...(channel ? {} : { agentId: 'cc-agent', memoryScope: { project: projectKeyOf(project) } }), messages: [{ role: 'user', content: QUESTION }] } });
     assert.ok(bodies.length, `no model call: ${res.statusCode} ${res.body.slice(0, 200)}`);
     const body = bodies[0];
-    return { system: body.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n'), tools: (body.tools ?? []).map((t) => t.function?.name ?? t.name) };
+    return { system: body.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n'), tools: offeredNames(body) };
   } finally { turn?.end(); }
 }
 const withP2 = async (fn) => { process.env.GIRRU_STORE_P2 = '1'; try { return await fn(); } finally { delete process.env.GIRRU_STORE_P2; } };

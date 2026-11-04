@@ -195,6 +195,23 @@ report.entryPoints.taskRun = { reconstructed: 'task-run-executor.ts:369-400', to
   includes: { hired: true, rules: taskSystem.includes(MARK.rules), pinned: taskSystem.includes(MARK.pinned) },
   ...(await measure({ system: taskSystem, conversation: `user: Task: ${QUESTION}`, toolSchemas: JSON.stringify(taskRegistry.getToolsForAPI()) })) };
 
+// 3a. STORE-MAP-01 P2b: the same task run on the local model as the executor builds it with P2b on
+// (tools on demand, the model's window from the local Ollama capped by CHAT_NUM_CTX, the memory rule).
+const { storeP2bEnabled } = await import(join(backendDir, 'src/services/store-p2b.ts'));
+if (storeP2bEnabled()) {
+  const { localModelWindow, NO_INVENTED_MEMORY } = await import(join(backendDir, 'src/services/local-turn.ts'));
+  const { planLocalBudget } = await import(join(backendDir, 'src/memory/context/local-budget.ts'));
+  const { OnDemandTools } = await import(join(backendDir, 'src/tools/on-demand.ts'));
+  const { capTokens: cap } = await import(join(backendDir, 'src/services/agent-context/budget.ts'));
+  const w = await localModelWindow('ollama', 'qwen3:4b');
+  const b = planLocalBudget(w.tokens);
+  const od = new OnDemandTools(taskRegistry.getToolsForAPI(), b.tier, { fitTokens: b.tools });
+  const sys = cap([taskSystem, od.index(), NO_INVENTED_MEMORY].join('\n\n---\n\n'), b.system);
+  report.window = { tokens: w.tokens, source: w.source, tier: b.tier, replyTokens: b.replyTokens, promptTokens: b.promptTokens };
+  report.entryPoints.taskRunLocalP2b = { tools: od.definitions().length, includes: { rules: sys.includes(MARK.rules), pinned: sys.includes(MARK.pinned) },
+    ...(await measure({ system: sys, conversation: `user: Task: ${QUESTION}`, toolSchemas: JSON.stringify(od.definitions()) })) };
+}
+
 // 3b. Task run of the storage pilot agent (resolved context, CX6): same tools, the one resolved
 // context instead of the old builder, plus the executor's handoff note and narrowed pinned facts.
 const { renderSystemPrompt } = await import(join(backendDir, 'src/services/agent-context/render.ts'));
@@ -224,12 +241,17 @@ const history = turnMessages.map((m) => `${m.role}: ${m.content}`).join('\n\n');
 const replyPrompt = subscriptionReplyPrompt(context, `${memoryPart}\n\n${history}`);
 const subRegistry = await quietly(() => createAgentToolsRegistry({ userId: OWNER, sessionId: 'p0-session-sub', agentId: AGENT, workspaceDir: dataRoot, fileReadRoot: dataRoot, memoryDrawers: drawers, chatPlan: true }));
 let firstPrompt = '';
-await subscriptionToolLoop({ prompt: replyPrompt, signal: AbortSignal.timeout(10_000),
-  tools: subRegistry.getAll().map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema })),
+// STORE-MAP-01 P2b (XP1): as chat.ts does, tools on demand for the coding app too (index in the context).
+const subAll = subRegistry.getAll().map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema }));
+const { OnDemandTools: SubOD } = await import(join(backendDir, 'src/tools/on-demand.ts'));
+const subOd = storeP2bEnabled() ? new SubOD(subAll, 'large') : null;
+const subPrompt = subOd ? subscriptionReplyPrompt(`${context}\n\n${subOd.index()}`, `${memoryPart}\n\n${history}`) : replyPrompt;
+await subscriptionToolLoop({ prompt: subPrompt, signal: AbortSignal.timeout(10_000),
+  tools: subOd ? subOd.definitions() : subAll,
   reply: async (p) => { firstPrompt ||= p; return 'ok'; }, execute: async () => ({ content: [] }), onTool: () => {} });
 report.entryPoints.codingApp = { tools: subRegistry.getAll().length,
   includes: { hired: firstPrompt.includes(MARK.hired), rules: firstPrompt.includes(MARK.rules), pinned: firstPrompt.includes(MARK.pinned) }, ...(await measure({
-  agentContext: context, memoryPack: memoryPart, conversation: history, toolProtocol: firstPrompt.slice(replyPrompt.length) })),
+  agentContext: subOd ? `${context}\n\n${subOd.index()}` : context, memoryPack: memoryPart, conversation: history, toolProtocol: firstPrompt.slice(subPrompt.length) })),
   note: 'the app itself only records estimateTokens(replyPrompt) and no CLI usage (SUB5)' };
 
 // 5. MCP (dpro-memory) for a coding tool working in the alpha folder.

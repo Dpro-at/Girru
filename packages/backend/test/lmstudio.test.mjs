@@ -16,6 +16,7 @@ import { mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { offeredNames, expectedNumCtx, expectedNumPredict, p2bOn } from './helpers/p2b.mjs';
 
 // --- stub LM Studio: /v1/models + streamed /v1/chat/completions ---------------
 const replies = []; // each: list of delta objects for one streamed answer
@@ -176,7 +177,7 @@ test('a chat turn with an LM Studio model runs there, with the agent tools', asy
   assert.equal(ev.at(-1).status, 'complete');
   assert.deepEqual(echoed, ['from lm']);
   assert.equal(bodies[0].model, 'llama-3.2-3b-instruct@q4_k_m');
-  assert.ok(bodies[0].tools.some((t) => t.function.name === 'x_echo'), 'the agent granted tools are offered');
+  assert.ok(offeredNames(bodies[0]).includes('x_echo'), 'the agent granted tools are offered');
   const m = (await call('GET', `/api/chat/conversations/${c.id}/messages`)).json();
   assert.equal(m.messages.at(-1).content, 'Echoed.');
 });

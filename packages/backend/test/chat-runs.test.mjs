@@ -13,6 +13,7 @@ import { mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { offeredNames, expectedNumCtx, expectedNumPredict, p2bOn } from './helpers/p2b.mjs';
 
 const backendDir = process.cwd();
 const dir = mkdtempSync(join(tmpdir(), 'ap-chat-runs-'));
@@ -332,7 +333,7 @@ test('task plan: every agent may call plan_steps (no grant); the steps travel in
   const runId = rid();
   await call('r-owner', 'POST', `/api/chat/conversations/${c.id}/runs`, { runId, message: 'summarise the notes in three steps' });
   await ended(runId);
-  assert.ok(bodies[0].tools.some((t) => t.function?.name === 'plan_steps'), 'the model is offered plan_steps');
+  assert.ok(offeredNames(bodies[0]).includes('plan_steps'), 'the model is offered plan_steps');
   assert.match(bodies[0].messages[0].content, /call plan_steps/);
   assert.match(bodies[0].messages[0].content, /## Rich answers/, 'the new chat gets the display-only set');
   assert.doesNotMatch(bodies[0].messages[0].content, /```notify|InputField|SupportChatBlock/, 'no forms or simulated notifications');

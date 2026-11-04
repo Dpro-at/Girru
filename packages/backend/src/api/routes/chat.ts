@@ -64,6 +64,14 @@ import { budgetHistory, type BudgetedHistory, type HistoryTurn } from '../../mem
 import { saveTrace, setTraceTtft } from '../../memory/context/trace.js';
 import { contextBudget, estimateTokens, keepAliveValue } from '../../memory/context/budget.js';
 import { recordTtft } from '../../memory/context/metrics.js';
+import { storeP2bEnabled } from '../../services/store-p2b.js';
+import { isLocalTurnProvider, localModelWindow, localTurnLog, p2bLocalTurn, prepareLocalTurn } from '../../services/local-turn.js';
+import { planLocalBudget } from '../../memory/context/local-budget.js';
+import type { ModelWindow } from '../../llm/model-window.js';
+import { beginLocalReply } from '../../llm/local-scheduler.js';
+import { isOpenAiLocalModelId, openAiLocalModelName, openAiLocalNotRunningMessage, openAiLocalUrl } from '../../llm/openai-local.js';
+import type { ToolDef } from '../../tools/tool-doors.js';
+import { OnDemandTools } from '../../tools/on-demand.js';
 
 const DEFAULT_MODEL = DEFAULT_OLLAMA_MODEL;
 
@@ -505,13 +513,18 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
         // stream-json message); Gemini cannot take images on its stream-json input, so it is told the names and the chat says so.
         const seen=await chatImagesSeenBy(subscriptionSource,input.images?.map(i=>i.file));
         if(input.images?.length&&!seen.length){currentChatRun()?.notice?.('images_not_seen',`${subscriptionSource?.includes('codex')?'Codex':subscriptionSource?.includes('gemini')?'Gemini':'Claude Code'} cannot see ${input.images.length===1?'this image':'these images'} (Gemini takes text only; Claude Code takes images up to 3.75 MB). Pick Claude Code, Codex or Claude, or a local model that can see.`);history+=`\n\n(The owner attached ${input.images.length} image${input.images.length===1?'':'s'}: ${input.images.map(i=>i.name??'image').join(', ')}. You cannot see them; say so if they matter.)`;}
-        const replyPrompt=subscriptionReplyPrompt(context+(systemPromptAppend?`\n\n${systemPromptAppend}`:''),history);
+        // STORE-MAP-01 P2b (XP1): the same tools on demand as a local model (the memory verbs, tool_load, an index).
+        const allTools=registry.getAll().map(t=>({name:t.name,description:t.description,input_schema:t.input_schema}));
+        const onDemand=storeP2bEnabled()?new OnDemandTools(allTools,'large'):null;
+        const toolIndex=onDemand?.index()??'';
+        const replyPrompt=subscriptionReplyPrompt(context+(toolIndex?`\n\n${toolIndex}`:'')+(systemPromptAppend?`\n\n${systemPromptAppend}`:''),history);
         {const run=currentChatRun();if(run)run.usage={model:subscriptionSource!,tokensIn:estimateTokens(replyPrompt)};}
         const answer=await subscriptionToolLoop({prompt:replyPrompt,signal:abort.signal,
-          tools:registry.getAll().map(t=>({name:t.name,description:t.description,input_schema:t.input_schema})),
+          tools:onDemand?onDemand.definitions():allTools,
+          ...(onDemand?{isOffered:(name:string)=>onDemand.has(name)}:{}),
           // CHAT-BUILD-01 stage 3: "Accept edits" lets the coding app edit files in the chat's folders (its write folders too).
           reply:prompt=>runSubscription(subscriptionSource,input.fileReadRoot!,prompt,abort.signal,{...(currentChatRun()?.chatMode==='accept_edits'?{editsOnly:true,addDirs:input.writeFolders??[]}:{appToolsOnly:true}),images:seen,thinking:currentChatRun()?.thinking,agentId:selectedAgent?.id??null}),
-          execute:(name,args)=>{toolStep++;if(!reply.raw.writableEnded)reply.raw.write(`data: ${JSON.stringify({type:'tool_start',step:toolStep,tools:[{id:`subscription-${toolStep}`,name,input:JSON.stringify(args)}]})}\n\n`);return registry.execute(name,args);},
+          execute:(name,args)=>{toolStep++;if(!reply.raw.writableEnded)reply.raw.write(`data: ${JSON.stringify({type:'tool_start',step:toolStep,tools:[{id:`subscription-${toolStep}`,name,input:JSON.stringify(args)}]})}\n\n`);return onDemand?onDemand.execute(name,args,(n,a)=>registry.execute(n,a)):registry.execute(name,args);},
           onTool:(name,result)=>{if(!reply.raw.writableEnded)reply.raw.write(`data: ${JSON.stringify({type:'tool_result',step:toolStep,results:[{id:`subscription-${toolStep}`,name,output:result.content.filter(b=>b.type==='text').map(b=>b.text??'').join('\n').slice(0,2000),isError:!!result.error}]})}\n\n`);},
         });
         for(const content of chunkText(answer,ANSWER_FRAME_BYTES))if(!reply.raw.writableEnded)reply.raw.write(`data: ${JSON.stringify({content,done:false})}\n\n`);
@@ -700,8 +713,11 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
       console.log('[Chat] No Claude key set; using the local model', { model: resolvedModel });
       notices.push(noticeFrame('claude_key_missing', { model: resolvedModel }));
     }
+    // STORE-MAP-01 P2b: a generic OpenAI-compatible server on this computer (`openai-local:<model>`); off, it is never used.
+    if (storeP2bEnabled() && !localModelOnly() && (resolvedProvider === 'openai-local' || isOpenAiLocalModelId(resolvedModel)) && openAiLocalModelName(resolvedModel) && openAiLocalUrl()) resolvedProvider = 'openai-local';
+    else if (resolvedProvider === 'openai-local') { resolvedProvider = 'ollama'; resolvedModel = DEFAULT_MODEL; }
     // A Claude model name never goes to the local model server.
-    if (resolvedProvider === 'ollama' && /^(claude-|lmstudio:)/.test(resolvedModel)) resolvedModel = DEFAULT_MODEL;
+    if (resolvedProvider === 'ollama' && /^(claude-|lmstudio:|openai-local:)/.test(resolvedModel)) resolvedModel = DEFAULT_MODEL;
     // CORE-MODEL-01: a local model that is no longer installed (or an embedding
     // model) is replaced by an installed chat model, the default one first.
     if (resolvedProvider === 'ollama') {
@@ -716,11 +732,15 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
     // MEM-CACHE-01: a saved conversation keeps its newest turns in full and
     // gives older ones as rolling summaries, within the context budget.
     const budget = contextBudget();
+    // STORE-MAP-01 P2b (LOCAL-ONLY-01): a local model's real window sets this turn's budget.
+    const p2bWindow: ModelWindow | null = p2bLocalTurn(resolvedProvider) ? await localModelWindow(resolvedProvider, resolvedModel) : null;
+    const p2bBudget = p2bWindow ? planLocalBudget(p2bWindow.tokens) : null;
+    if (p2bBudget) { budget.promptTokens = p2bBudget.promptTokens; budget.numCtx = p2bBudget.window; budget.summaryTokens = Math.min(budget.summaryTokens, Math.floor(p2bBudget.promptTokens / 8)); }
     let turnMessages: ChatMessage[] = messages;
     let history: BudgetedHistory | null = null;
     if (input.conversation?.turns.length) {
-      const fixed = estimateTokens(resolvedSystemPrompt) + estimateTokens(systemPromptAppend ?? '') + estimateTokens(uiSpecPrompt(input.uiSet ?? 'full'))
-        + estimateTokens(recall.text) + TOOLS_RESERVE_TOKENS + 200;
+      const fixed = estimateTokens(resolvedSystemPrompt) + estimateTokens(systemPromptAppend ?? '') + estimateTokens(uiSpecPrompt(p2bBudget?.tier === 'small' ? 'chat' : input.uiSet ?? 'full'))
+        + estimateTokens(recall.text) + (p2bBudget ? p2bBudget.tools : TOOLS_RESERVE_TOKENS) + 200;
       try {
         history = await budgetHistory({
           sessionId, userId, turns: input.conversation.turns,
@@ -788,6 +808,7 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
     });
     // CHAT-PRO-02 G: an LM Studio turn needs an LM Studio model id (`lmstudio:<name>`).
     if (resolvedProvider === 'lmstudio' && !lmStudioModelName(resolvedModel)) return reply.status(400).send({ error: 'Pick an LM Studio model', code: 'invalid_model' });
+    if (resolvedProvider === 'openai-local' && !openAiLocalModelName(resolvedModel)) return reply.status(400).send({ error: 'Pick a local model', code: 'invalid_model' });
 
     safeConsole.log('[Chat] Agent:', agentConfig?.name || 'none (fallback)', '| Provider:', resolvedProvider, '| Model:', resolvedModel);
     if (memoryContext) console.log('[Chat] Memory context injected', { chars: String(memoryContext).length });
@@ -804,9 +825,9 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
 
     try {
       if (stream) {
-        return await streamChat(reply, resolvedModel, resolvedProvider, resolvedApiKey, turnMessages, resolvedTemp, resolvedMaxTokens, sessionId, resolvedSystemPrompt, systemPromptAppend, userId, chatContext, toolPolicy, agentConfig?.id, memoryDrawers, input.fileReadRoot, input.uiSet, autoModel);
+        return await streamChat(reply, resolvedModel, resolvedProvider, resolvedApiKey, turnMessages, resolvedTemp, resolvedMaxTokens, sessionId, resolvedSystemPrompt, systemPromptAppend, userId, chatContext, toolPolicy, agentConfig?.id, memoryDrawers, input.fileReadRoot, input.uiSet, autoModel, p2bWindow);
       } else {
-        const out = await nonStreamChat(reply, resolvedModel, resolvedProvider, resolvedApiKey, turnMessages, resolvedTemp, resolvedMaxTokens, sessionId, resolvedSystemPrompt, systemPromptAppend, userId, chatContext, toolPolicy, agentConfig?.id, memoryDrawers);
+        const out = await nonStreamChat(reply, resolvedModel, resolvedProvider, resolvedApiKey, turnMessages, resolvedTemp, resolvedMaxTokens, sessionId, resolvedSystemPrompt, systemPromptAppend, userId, chatContext, toolPolicy, agentConfig?.id, memoryDrawers, p2bWindow);
         // A plain result object goes through reply.send so it gets the turn ids.
         return (out as unknown) === reply ? reply : reply.send(out);
       }
@@ -864,6 +885,19 @@ function localModelMissing(reply: FastifyReply): FastifyReply {
 }
 
 /** LM Studio could not be reached or refused: one typed error that says what to do (no upstream text). */
+/** STORE-MAP-01 P2b: the local OpenAI-compatible server did not answer. */
+function openAiLocalNotRunning(reply: FastifyReply): FastifyReply {
+  const error = openAiLocalNotRunningMessage();
+  if (reply.raw.headersSent) {
+    if (!reply.raw.writableEnded) {
+      reply.raw.write(`data: ${JSON.stringify({ type: 'error', error, code: 'local_server_not_running' })}\n\n`);
+      reply.raw.end();
+    }
+    return reply;
+  }
+  return reply.status(502).send({ error, code: 'local_server_not_running' });
+}
+
 function lmStudioNotRunning(reply: FastifyReply): FastifyReply {
   const error = lmStudioNotRunningMessage();
   if (reply.raw.headersSent) {
@@ -895,7 +929,8 @@ async function streamChat(
   memoryDrawers?: DrawerRef[],
   fileReadRoot?: string,
   uiSet: 'full' | 'chat' = 'full',
-  autoModel = false
+  autoModel = false,
+  p2bWindow: ModelWindow | null = null
 ) {
   console.log('[Chat] 🚀 Starting stream chat');
   safeConsole.log('[Chat]   📦 Model:', model);
@@ -968,6 +1003,18 @@ async function streamChat(
   // STORE-MAP-01 P8: only a turn on the Claude API gets the P8 tool variants; a local model's list never grows (LOCAL-ONLY-01).
   if (provider === 'claude' && apiKey && !toolPolicy) useRemoteModelTools(toolsRegistry);
   const tools = localModelOnly() && !localModelTools() ? [] : toolsRegistry.getToolsForAPI();
+  // STORE-MAP-01 P2b (LOCAL-ONLY-01): a local model gets the memory verbs, tool_load and a short index,
+  // in a turn fitted to its real window; calls are checked (XP2) and run a few at a time.
+  const p2b = p2bWindow && isLocalTurnProvider(provider) ? prepareLocalTurn({
+    window: p2bWindow, tools: tools as ToolDef[], systemHead: resolvedSmartPrompt ?? '',
+    systemTail: uiSpecPrompt(planLocalBudget(p2bWindow.tokens).tier === 'small' ? 'chat' : uiSet),
+    messages: ollamaMessages.filter((m) => m.role !== 'system'), maxTokens, run: (name, args) => toolsRegistry.execute(name, args),
+  }) : null;
+  if (p2b) {
+    ollamaMessages.length = 0;
+    ollamaMessages.push({ role: 'system', content: p2b.system }, ...p2b.messages);
+    console.log('[Chat] P2b local turn', localTurnLog(p2b));
+  }
 
   console.log('[Chat] 🔧 Available tools:', tools.length);
   if (tools.length > 0) {
@@ -975,7 +1022,7 @@ async function streamChat(
   }
 
   // Build tool usage instructions for Ollama (explicit instructions required)
-  const toolInstructions = tools.length > 0 ? `
+  const toolInstructions = tools.length > 0 && !p2b ? `
 
 ## CRITICAL: Tool Usage Instructions
 
@@ -1003,7 +1050,7 @@ You: [Present results with \`\`\`spec blocks showing temperature, conditions, et
     : resolvedSmartPrompt;
 
   // Update ollamaMessages system prompt to include JSON render instructions (for non-Claude providers)
-  if (provider !== 'claude' && ollamaMessages.length > 0 && ollamaMessages[0].role === 'system') {
+  if (!p2b && provider !== 'claude' && ollamaMessages.length > 0 && ollamaMessages[0].role === 'system') {
     ollamaMessages[0].content = finalSystemPrompt ?? '';
   }
 
@@ -1136,29 +1183,35 @@ You: [Present results with \`\`\`spec blocks showing temperature, conditions, et
   }
 
   // CHAT-PRO-02 G: LM Studio on this computer, same loop and frames as the local Ollama model.
-  if (provider === 'lmstudio') {
-    console.log('[Chat] 🤖 Using LM Studio (local) agent loop');
+  // STORE-MAP-01 P2b: a generic OpenAI-compatible server on this computer runs the same loop.
+  if (provider === 'lmstudio' || (provider === 'openai-local' && p2b)) {
+    const generic = provider === 'openai-local';
+    console.log(`[Chat] 🤖 Using ${generic ? 'the local OpenAI-compatible server' : 'LM Studio (local)'} agent loop`);
     openSseStream(reply.raw);
     const lmAbort = new AbortController();
     reply.raw.once?.('close', () => { if (!reply.raw.writableEnded) lmAbort.abort(); });
     const lmStarted = Date.now();
+    const ended = p2b ? beginLocalReply(model) : () => {};
     try {
       const result = await runLmStudioAgentLoop({
-        url: lmStudioApiUrl(),
-        model: lmStudioModelName(model),
+        url: generic ? openAiLocalUrl() : lmStudioApiUrl(),
+        model: generic ? openAiLocalModelName(model) : lmStudioModelName(model),
         messages: ollamaMessages.map((m) => ({ role: m.role === 'system' ? 'system' as const : m.role === 'assistant' ? 'assistant' as const : 'user' as const, content: messageText(m.content), ...(m.images?.length ? { images: m.images } : {}) })),
         tools,
-        execute: (name, args) => toolsRegistry.execute(name, args),
+        execute: p2b ? p2b.execute : (name, args) => toolsRegistry.execute(name, args),
         write: (frame) => { if (!reply.raw.writableEnded) reply.raw.write(`data: ${JSON.stringify(frame)}\n\n`); },
         signal: lmAbort.signal,
         temperature,
-        maxTokens,
+        maxTokens: p2b ? p2b.maxTokens : maxTokens,
+        ...(p2b ? { toolSet: p2b.toolSet, callCap: p2b.callCap, maxSteps: p2b.maxSteps, toolOutputChars: p2b.toolOutputChars, beforeStep: p2b.beforeStep } : {}),
       });
       console.log('[Chat] ✅ LM Studio turn ended', { steps: result.steps, chars: result.answer.length, aborted: result.aborted, ms: Date.now() - lmStarted });
     } catch (err) {
       if (lmAbort.signal.aborted) { reply.raw.end(); return reply; }
       console.error('[Chat] ❌ LM Studio unreachable', safeErrorFields(err, lmStarted));
-      return lmStudioNotRunning(reply);
+      return generic ? openAiLocalNotRunning(reply) : lmStudioNotRunning(reply);
+    } finally {
+      ended();
     }
     reply.raw.end();
     return reply;
@@ -1178,20 +1231,26 @@ You: [Present results with \`\`\`spec blocks showing temperature, conditions, et
   // CH3: the installed model's capabilities decide whether a Thinking level is sent at all.
   const thinking = currentChatRun()?.thinking;
   const thinkCaps = thinking && thinking !== 'normal' ? (await listLocalModels().catch(() => [])).find((m) => m.name === model)?.capabilities : undefined;
+  const ended = p2b ? beginLocalReply(model) : () => {};
   try {
     const result = await runOllamaAgentLoop({
       url: OLLAMA_URL,
       model,
       messages: ollamaMessages.map((m) => ({ role: m.role, content: messageText(m.content), ...(m.images?.length ? { images: m.images.map((i) => i.data) } : {}) })),
       tools,
-      execute: (name, args) => toolsRegistry.execute(name, args),
+      execute: p2b ? p2b.execute : (name, args) => toolsRegistry.execute(name, args),
+      ...(p2b ? { toolSet: p2b.toolSet, callCap: p2b.callCap, maxSteps: p2b.maxSteps, toolOutputChars: p2b.toolOutputChars, beforeStep: p2b.beforeStep } : {}),
       write: (frame) => { if (!reply.raw.writableEnded) reply.raw.write(`data: ${JSON.stringify(frame)}\n\n`); },
       signal: upstreamAbort.signal,
       temperature,
-      maxTokens,
+      maxTokens: p2b ? p2b.maxTokens : maxTokens,
       ...chatThinkFor(thinking, thinkCaps),
+      // STORE-MAP-01 P2b: a small window has no room for long thinking (live: qwen3:4b spent the whole reply on it);
+      // a small model answers without it unless the owner picked a Thinking level (thinkOptional: a model that cannot think is fine).
+      ...(p2b?.budget.tier === 'small' && (!thinking || thinking === 'normal') && !process.env.OLLAMA_THINK ? { think: false, thinkOptional: true } : {}),
       // MEM-CACHE-01: a fixed window and a kept-loaded model let Ollama reuse the prompt prefix.
-      numCtx: contextBudget().numCtx,
+      // STORE-MAP-01 P2b: the window is the model's own (fixed per model, so the prefix cache still works).
+      numCtx: p2b ? p2b.numCtx : contextBudget().numCtx,
       keepAlive: keepAliveValue(),
     });
     console.log('[Chat] ✅ Local turn ended', { steps: result.steps, chars: result.answer.length, aborted: result.aborted, ms: Date.now() - startedAt });
@@ -1203,6 +1262,8 @@ You: [Present results with \`\`\`spec blocks showing temperature, conditions, et
     if (upstreamAbort.signal.aborted) { reply.raw.end(); return reply; }
     console.error('[Chat] ❌ Ollama unreachable', safeErrorFields(err, startedAt));
     return modelUnavailable(reply);
+  } finally {
+    ended();
   }
   reply.raw.end();
   return reply;
@@ -1224,7 +1285,8 @@ async function nonStreamChat(
   chatContext?: any,
   toolPolicy?: ChannelToolPolicy,
   agentId?: string,
-  memoryDrawers?: DrawerRef[]
+  memoryDrawers?: DrawerRef[],
+  p2bWindow: ModelWindow | null = null
 ) {
   console.log('[Chat] 🚀 Starting non-stream chat');
   safeConsole.log('[Chat]   📦 Model:', model);
@@ -1291,6 +1353,30 @@ async function nonStreamChat(
   // Get real tools from the tools registry
   const toolsRegistryNS = await createAgentToolsRegistry({ userId, sessionId, workspaceDir: process.cwd(), toolPolicy, agentId, memoryDrawers });
   const tools = localModelOnly() ? [] : toolsRegistryNS.getToolsForAPI();
+  // STORE-MAP-01 P2b (LOCAL-ONLY-01): a local model answers with its own loop here too (tools on demand,
+  // fitted to its window, calls checked and run a few at a time); the answer comes back in one piece.
+  if (p2bWindow && isLocalTurnProvider(provider)) {
+    const p2b = prepareLocalTurn({
+      window: p2bWindow, tools: tools as ToolDef[], systemHead: finalSystemPromptNS ?? '',
+      messages: ollamaMessages.filter((m) => m.role !== 'system'), maxTokens, run: (name, args) => toolsRegistryNS.execute(name, args),
+    });
+    console.log('[Chat] P2b local turn (one piece)', localTurnLog(p2b));
+    const msgs = [{ role: 'system' as const, content: p2b.system }, ...p2b.messages.map((m) => ({ role: m.role === 'assistant' ? 'assistant' as const : 'user' as const, content: messageText(m.content) }))];
+    const common = { execute: p2b.execute, write: () => {}, signal: AbortSignal.timeout(180_000), temperature, maxTokens: p2b.maxTokens, tools: [], toolSet: p2b.toolSet, callCap: p2b.callCap, maxSteps: p2b.maxSteps, toolOutputChars: p2b.toolOutputChars, beforeStep: p2b.beforeStep };
+    const ended = beginLocalReply(model);
+    try {
+      const result = provider === 'ollama'
+        ? await runOllamaAgentLoop({ ...common, url: OLLAMA_URL, model, messages: msgs, ...(p2b.budget.tier === 'small' && !process.env.OLLAMA_THINK ? { think: false, thinkOptional: true } : ollamaThinkOption()), numCtx: p2b.numCtx, keepAlive: keepAliveValue() })
+        : await runLmStudioAgentLoop({ ...common, url: provider === 'openai-local' ? openAiLocalUrl() : lmStudioApiUrl(), model: provider === 'openai-local' ? openAiLocalModelName(model) : lmStudioModelName(model), messages: msgs });
+      return { message: { role: 'assistant', content: result.answer }, steps: result.steps };
+    } catch (err) {
+      if (err instanceof ModelUnavailable && provider === 'ollama') return err.status === 404 ? localModelMissing(reply) : reply.status(502).send({ error: 'Model unavailable', code: 'model_unavailable' });
+      if (provider === 'ollama') return reply.status(502).send({ error: 'Model unavailable', code: 'model_unavailable' });
+      return provider === 'openai-local' ? openAiLocalNotRunning(reply) : lmStudioNotRunning(reply);
+    } finally {
+      ended();
+    }
+  }
   if (provider === 'claude' && apiKey) {
     console.log('[Chat] 🤖 Using Claude API (non-stream)');
     return streamChatClaude(reply, apiKey, model || (await getSettingsManager().getSettings()).claude?.model || 'claude-sonnet-4-5-20250929', ollamaMessages, finalSystemPromptNS, tools, temperature, userId, sessionId, chatContext, toolPolicy, agentId, maxTokens, memoryDrawers);

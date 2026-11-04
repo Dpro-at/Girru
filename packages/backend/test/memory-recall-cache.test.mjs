@@ -16,6 +16,7 @@ import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { offeredNames, expectedNumCtx, expectedNumPredict, p2bOn } from './helpers/p2b.mjs';
 
 const backendDir = process.cwd();
 const dir = mkdtempSync(join(tmpdir(), 'ap-recall-cache-'));
@@ -163,8 +164,8 @@ test('pack + recall: the trace names pinned, topic, keyword, graph and handoff i
   assert.equal(typeof t.context.ttftMs, 'number', 'time to first word stored');
 
   const b = contextBudget();
-  assert.equal(first.body.options.num_ctx, b.numCtx);
-  assert.equal(first.body.options.num_ctx, 32768);
+  if (!p2bOn()) assert.equal(first.body.options.num_ctx, b.numCtx); // P2b: the model's own window (expectedNumCtx below)
+  assert.equal(first.body.options.num_ctx, expectedNumCtx());
   assert.equal(first.body.keep_alive, '30m');
   // The same trace by run id (while a reply is running the page only knows the run).
   const byRun = await call('rc-owner', 'GET', `/api/memory/recall/runs/${first.runId}`);
@@ -273,7 +274,8 @@ test('a 200-turn conversation answers about turn 3 through its summaries, within
   const chars = msgs.reduce((n, m) => n + m.content.length, 0);
   assert.ok(chars / 3 <= contextBudget().promptTokens, `prompt within the budget (${Math.round(chars / 3)} tokens)`);
   const ctx = asked.trace.context;
-  assert.ok(ctx.summarisedTurns > 300 && ctx.keptTurns > 2, JSON.stringify(ctx));
+  // P2b: a stub that reports no window gives the safe 8k, which keeps fewer turns in full.
+  assert.ok(ctx.summarisedTurns > 300 && ctx.keptTurns > (p2bOn() ? 0 : 2), JSON.stringify(ctx));
   assert.equal(ctx.summarisedTurns + ctx.keptTurns + ctx.droppedTurns, 401);
   assert.ok(ctx.summaries.length > 1 && ctx.summaries.every((s) => s.source === 'fallback' || s.source === 'inline'));
 
@@ -391,7 +393,7 @@ test('wire contract: the UI allow-list and projections match the real responses'
   const view = C.memoryRecallResponse(path, res.statusCode, res.json());
   assert.equal(view.trace.messageId, first.message.id);
   assert.deepEqual(view.trace.items.map((i) => i.why).sort(), first.trace.items.map((i) => i.why).sort());
-  assert.equal(view.trace.context.numCtx, 32768);
+  assert.equal(view.trace.context.numCtx, expectedNumCtx());
   const forgotten = (await call('rc-owner', 'GET', C.recallMessagePath(first.message.id))).json();
   assert.equal(C.memoryRecallResponse(path, 200, forgotten).trace.items.find((i) => i.id === pinned.id).preview, undefined);
 
