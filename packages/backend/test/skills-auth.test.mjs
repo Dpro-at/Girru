@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
+import { switchValueOn } from './helpers/switches.mjs';
 const dir = mkdtempSync(join(tmpdir(), 'ap-skills-auth-'));
 const backendDir = process.cwd();
 process.chdir(dir);
@@ -70,7 +71,7 @@ const call = (method, url, who, payload) => app.inject({
 });
 
 // STORE-MAP-01 P4 (G1): with GIRRU_STORE_P4 on the old marketplace answers 410 retired, after sign-in is checked.
-const P4_ON = /^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P4 ?? '');
+const P4_ON = switchValueOn(process.env.GIRRU_STORE_P4 ?? '');
 const retired = (url) => P4_ON && url.startsWith('/api/skills/marketplace');
 
 const READ_ROUTES = [

@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
+import { switchValueOn } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const dir = mkdtempSync(join(tmpdir(), 'ap-grants-'));
 mkdirSync(join(dir, '.data'), { recursive: true });
@@ -85,7 +86,7 @@ test.after(async () => {
 });
 
 // STORE-MAP-01 P2 (AG1): an agent may read its own guides (guide_read) wherever it runs; it is prompt text on demand, not a grant.
-const P2_ON = /^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P2 ?? '');
+const P2_ON = switchValueOn(process.env.GIRRU_STORE_P2 ?? '');
 const noGuide = (list) => list.filter((n) => n !== 'guide_read');
 const addAgent = (id) => db.prepare(`INSERT INTO agents_config (id, name, provider, model) VALUES (?, ?, 'claude', 'claude-test')`).run(id, id);
 const registryFor = (agentId, extra = {}) => tools.createToolsRegistry({ userId: 'gr-owner', workspaceDir: dir, agentId, ...extra });

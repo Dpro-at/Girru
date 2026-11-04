@@ -22,8 +22,8 @@ process.env.DATABASE_PATH = join(dir, '.data', 'agent-player.db');
 process.env.JWT_SECRET = randomBytes(64).toString('hex'); // throwaway, test only
 process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway, test only
 process.env.NODE_ENV = 'test';
-delete process.env.GIRRU_STORE_P4;
-delete process.env.GIRRU_STORE_P2;
+process.env.GIRRU_STORE_P4 = '0';
+process.env.GIRRU_STORE_P2 = '0';
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 console.log = () => {}; console.info = () => {}; console.warn = () => {};
 
@@ -182,6 +182,6 @@ test('security: a rollback to a version from before the import keeps the text; t
 });
 
 test('switch off again: the file (a view) still reads as the personality', async () => {
-  delete process.env.GIRRU_STORE_P4;
+  process.env.GIRRU_STORE_P4 = '0';
   assert.match(await record.personalityTextFor('pp-rafid'), /under ten lines/);
 });

@@ -18,13 +18,15 @@
  *    warm (llm/local-scheduler.ts, LAT);
  *  - a generic OpenAI-compatible endpoint on this computer
  *    (llama.cpp / vLLM style; llm/openai-local.ts).
- * Off (the default), nothing changes.
+ * On by default; GIRRU_STORE_P2B=0 turns it off, and then nothing changes.
  *
- *   GIRRU_STORE_P2B=1
+ *   GIRRU_STORE_P2B=0   turns it off (on by default; services/memory-switches.ts)
  */
+
+import { memorySwitchOn } from './memory-switches.js';
 
 export const STORE_P2B_ENV = 'GIRRU_STORE_P2B';
 
 export function storeP2bEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return /^(1|true|yes|on)$/i.test(String(env[STORE_P2B_ENV] ?? '').trim());
+  return memorySwitchOn(STORE_P2B_ENV, env);
 }

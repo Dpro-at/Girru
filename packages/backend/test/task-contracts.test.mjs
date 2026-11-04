@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
+import { switchValueOn } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const runnerPath = join(backendDir, 'test', 'fixtures', 'task-run-runner.mjs');
 const dir = mkdtempSync(join(tmpdir(), 'ap-task-contracts-'));
@@ -374,7 +375,7 @@ test('kill during a retry round: the resumed run replays the stored verdict and 
 });
 
 // STORE-MAP-01 P2 (AG1): an agent may read its own guides (guide_read) wherever it runs; it is prompt text on demand, not a grant.
-const P2_ON = /^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P2 ?? '');
+const P2_ON = switchValueOn(process.env.GIRRU_STORE_P2 ?? '');
 const noGuide = (list) => list.filter((n) => n !== 'guide_read');
 test('allowedTools narrows the run: only those tools are offered, others are refused', async () => {
   const { run } = await runScenario('N', { goal: 'GOOD N', allowedTools: ['idem_lookup'] });

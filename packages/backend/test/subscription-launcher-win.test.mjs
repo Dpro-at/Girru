@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 const backendDir = process.cwd();
 const win = await import(join(backendDir, 'src/services/subscription-launcher-win.ts'));
 const onWindows = process.platform === 'win32';
-const withP7 = async (fn) => { process.env.GIRRU_STORE_P7 = '1'; try { return await fn(); } finally { delete process.env.GIRRU_STORE_P7; } };
+const withP7 = async (fn) => { process.env.GIRRU_STORE_P7 = '1'; try { return await fn(); } finally { process.env.GIRRU_STORE_P7 = '0'; } };
 
 /** CommandLineToArgvW's rules (arguments after the program name). */
 function parseWindows(line) {
@@ -58,7 +58,7 @@ test('leader: joins a kill-on-close job before the CLI starts; the spec never re
 
 test('refused: P7 off, not Windows, not an absolute .exe, a NUL in an argument', async () => {
   const opts = { cwd: 'C:\\work', env: {}, platform: 'win32' };
-  const before = process.env.GIRRU_STORE_P7; delete process.env.GIRRU_STORE_P7;
+  const before = process.env.GIRRU_STORE_P7; process.env.GIRRU_STORE_P7 = '0';
   try { await assert.rejects(win.launchWindowsSubscription('C:\\bin\\claude.exe', [], opts), /subscription_launch_invalid/); }
   finally { if (before !== undefined) process.env.GIRRU_STORE_P7 = before; }
   await withP7(async () => {

@@ -20,7 +20,7 @@ its own notes and knowledge files.
 A personality changes how an agent talks. It never changes its job, skills or
 permissions.
 
-### The personality record (`GIRRU_STORE_P4`, off by default)
+### The personality record (`GIRRU_STORE_P4`, on by default)
 
 With the switch on:
 

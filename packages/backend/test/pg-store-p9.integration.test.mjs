@@ -29,7 +29,7 @@ if (URL_) {
   process.env.OLLAMA_URL = 'http://127.0.0.1:9';
   process.env.AGENT_PLAYER_DB = 'postgres';
   process.env.AGENT_PLAYER_PG_URL = URL_;
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
   const quiet = { log: console.log, warn: console.warn };
   console.log = () => {}; console.warn = () => {};
   const { getDatabase, closeDatabase } = await import('../src/db/database.ts');
@@ -103,7 +103,7 @@ test('P9 drawer index, recall index parity and the forget ledger (PostgreSQL)', 
   const shape = (rs) => rs.map((r) => [r.memory.id, r.similarity, r.scoreBreakdown.vectorScore, r.scoreBreakdown.keywordScore]);
   for (const query of ['deploy server', 'فاتورة العميل', 'backup login', 'item 17', 'nothing matches this']) {
     for (const extra of [{}, { limit: 30 }, { layer: 'working' }]) {
-      delete process.env.GIRRU_STORE_P9;
+      process.env.GIRRU_STORE_P9 = '0';
       const off = shape(await m.storage.search({ query, userId: owner, drawers: OPEN, limit: 10, ...extra }));
       process.env.GIRRU_STORE_P9 = '1';
       const on = shape(await m.storage.search({ query, userId: owner, drawers: OPEN, limit: 10, ...extra }));
@@ -124,7 +124,7 @@ test('P9 drawer index, recall index parity and the forget ledger (PostgreSQL)', 
   assert.equal(m.index.recallIndexStats().users, 0);
   const after = await m.storage.search({ query: 'item 1', userId: owner, drawers: OPEN, limit: 50 });
   assert.ok(!after.some((r) => r.memory.id === id));
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
 });
 
 test('P9 one person, people-fact retention and stays-local (PostgreSQL)', { skip }, async () => {
@@ -148,7 +148,7 @@ test('P9 one person, people-fact retention and stays-local (PostgreSQL)', { skip
   assert.deepEqual(f, { drawer: 2, mentions: 1, graph: 1 });
   assert.equal((await m.q.all('SELECT id FROM memories WHERE id LIKE ?', `pp-${tag}-%`)).length, 0);
   assert.equal((await m.q.all('SELECT id FROM memory_graph_entities WHERE id = ?', `e-${tag}`)).length, 0);
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
 });
 
 test('P9 health counts on PostgreSQL (migration 180)', { skip }, async () => {
@@ -164,7 +164,7 @@ test('P9 health counts on PostgreSQL (migration 180)', { skip }, async () => {
   assert.equal(Number(n[0].n), 1);
   const b = await m.health.supportBundle(owner);
   assert.equal(b.database.driver, 'postgres');
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
 });
 
 test('P9 quality on PostgreSQL: supersede, lesson proposals, project summary, agent profile', { skip }, async () => {
@@ -210,5 +210,5 @@ test('P9 quality on PostgreSQL: supersede, lesson proposals, project summary, ag
   const profile = await m.relevance.agentProfile(`pq-${tag}-a`);
   assert.ok(profile.terms.has('databas') || profile.terms.size > 0);
   assert.ok(profile.team.has(`pq-${tag}-b`));
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
 });

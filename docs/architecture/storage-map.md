@@ -140,9 +140,9 @@ Today the generated copies are refreshed every 60 seconds. **Planned:** every ch
 
 Open coding-tool sessions keep the copy they loaded, so the brief asks them to call `project_brief` or `latest_handoff` when work resumes.
 
-### Pilot (one project, off by default)
+### Pilot (one project, opt-in)
 
-A first version of the change log, the session capability and the shared agent context runs for one project and one agent when these backend environment variables are set:
+A first version of the change log, the session capability and the shared agent context runs for one project and one agent when these backend environment variables are set. `GIRRU_STORE_P2` (every agent) and `GIRRU_STORE_P6` (every project) now do the same for everyone and are on by default, so the pilot adds nothing; it stays opt-in until it is removed:
 
 | Variable | Effect |
 |---|---|
@@ -153,18 +153,18 @@ A first version of the change log, the session capability and the shared agent c
 - **Sync status:** `GET /api/memory-bridge/projects/:projectId/sync`; `POST` with `{"action":"rebuild"}` re-renders from the current records, `{"action":"use_girru_version"}` resolves a conflict by keeping the outside file next to the brief and writing Girru's version.
 - Lines removed from `brief.md`, or the whole file, are never read back: the file is regenerated and no memory is forgotten.
 
-### Foundations (off by default)
+### Foundations (on by default)
 
-`GIRRU_STORE_P3=1` turns on:
+`GIRRU_STORE_P3` (on by default; `GIRRU_STORE_P3=0` turns it off) turns on:
 
 - **One list of departments** for agents and projects (`departments`). Renaming or merging a department follows into agents, boards, cards, specialty templates, hire items, meeting decisions and rule targets; a merge can be undone; deleting one lets its agents and rules go (a rule left without a department is paused). Owner routes: `GET/POST /api/departments`, `PATCH /api/departments/:id`, `POST /api/departments/:id/merge`, `POST /api/departments/merges/:mergeId/undo`, `POST /api/departments/questions/:id`.
 - **Projects by id in memory:** at start-up every project key moves from the slug to the project's id; a key with no project becomes a real project. Deleting a project keeps its memory under its own id, so a new project with the same name starts empty. Links that name a project by its slug keep working for one release. With the switch off again, the keys move back.
 - **Source, trust and replaced facts:** new memories record where they came from (owner, agent, coding app, import, channel) and how far to trust them (checked, unchecked, imported); a background job fills older rows. A new fact on a known topic replaces the old one, which stays in History and is never recalled. `PUT /api/memory/scopes/memories/:id/checked` marks a memory as checked or undoes it.
 - **Start-up after an update:** Girru stops before writing anything when the data was written by a newer Girru, and a failed update step is named with an error id; the desktop start page explains both.
 
-### One store per piece (off by default)
+### One store per piece (on by default)
 
-`GIRRU_STORE_P4=1` turns on:
+`GIRRU_STORE_P4` (on by default; `GIRRU_STORE_P4=0` turns it off) turns on:
 
 - **One personality record:** an agent's personality text and its adjustments share one versioned history. Edits in Girru save at once (Undo restores the version before); `PERSONALITY.md` is written from the record; a change made to the file outside Girru, and every Evolution text suggestion, waits in Personality review. At start-up each agent's current file text is imported once.
 - **The job from the specialty link:** `system_prompt` keeps only the owner's extra instructions. Chat, task runs, coding apps and the heartbeat use the one agent context, so a hired agent's job reaches chat. A public room gets its own prompt and then only the agent's personality text.

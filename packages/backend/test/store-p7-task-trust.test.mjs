@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
+import { clearEnv } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const dir = mkdtempSync(join(tmpdir(), 'ap-store-p7-trust-'));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });
@@ -29,7 +30,7 @@ process.env.JWT_SECRET = randomBytes(64).toString('hex'); // throwaway, test onl
 process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway, test only
 process.env.NODE_ENV = 'test';
 process.env.OLLAMA_URL = 'http://127.0.0.1:11434';
-for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_P6', 'GIRRU_STORE_P7', 'GIRRU_STORE_PILOT', 'AGENT_EXEC_TOOLS', 'OLLAMA_THINK', 'DEFAULT_MODEL']) delete process.env[k];
+for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_P6', 'GIRRU_STORE_P7', 'GIRRU_STORE_PILOT', 'AGENT_EXEC_TOOLS', 'OLLAMA_THINK', 'DEFAULT_MODEL']) clearEnv(k);
 const bodies = [];
 globalThis.fetch = async (url, init = {}) => {
   if (String(url) !== 'http://127.0.0.1:11434/api/chat') throw new Error(`unexpected network call in test: ${url}`);
@@ -63,7 +64,7 @@ const { createCard } = await import(join(backendDir, 'src/services/task-board.ts
 process.env.GIRRU_STORE_P7 = '1';
 const app = await buildServer({ logger: false });
 await app.ready();
-delete process.env.GIRRU_STORE_P7;
+process.env.GIRRU_STORE_P7 = '0';
 // The memory bridge routes alone, built with the switch off.
 const { default: Fastify } = await import('fastify');
 const { registerAuthGate } = await import(join(backendDir, 'src/auth/auth-gate.ts'));
@@ -72,7 +73,7 @@ const appOff = Fastify(); registerAuthGate(appOff); await appOff.register(memory
 const as = (a) => (user, method, url, payload) => a.inject({ method, url, headers: { authorization: `Bearer ${generateToken(user, 1)}` }, ...(payload ? { payload } : {}) });
 const call = as(app), callOff = as(appOff);
 const tasksPath = join(folder, '.girru/tasks.md');
-const p7 = async (fn) => { process.env.GIRRU_STORE_P7 = '1'; try { return await fn(); } finally { delete process.env.GIRRU_STORE_P7; } };
+const p7 = async (fn) => { process.env.GIRRU_STORE_P7 = '1'; try { return await fn(); } finally { process.env.GIRRU_STORE_P7 = '0'; } };
 const link = (no) => db.prepare('SELECT * FROM task_file_cards WHERE project_id = ? AND task_no = ?').get('p-k', no);
 const boardOf = (cardId) => db.prepare('SELECT board_id FROM board_cards WHERE id = ?').get(cardId).board_id;
 const ended = async (runId) => { for (let i = 0; i < 100 && chatRuns.get(runId)?.status === 'running'; i++) await new Promise((r) => setTimeout(r, 20)); };

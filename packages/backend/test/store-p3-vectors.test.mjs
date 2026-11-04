@@ -23,7 +23,7 @@ process.env.NODE_ENV = 'test';
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-delete process.env.GIRRU_STORE_P3;
+process.env.GIRRU_STORE_P3 = '0';
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 console.log = () => {}; console.info = () => {}; console.warn = () => {};
 
@@ -68,7 +68,7 @@ test('switch on: recall reads the packed vector and finds the same memory', asyn
   assert.ok(vec(fresh.id), 'a save writes the packed copy');
   const hits = await storage.search({ userId: OWNER, query: 'Alpha ships', drawers: [drawer], limit: 3 });
   assert.equal(hits[0].memory.id, fresh.id);
-  delete process.env.GIRRU_STORE_P3;
+  process.env.GIRRU_STORE_P3 = '0';
   const same = await storage.search({ userId: OWNER, query: 'Alpha ships', drawers: [drawer], limit: 3 });
   assert.deepEqual(same.map((h) => h.memory.id), hits.map((h) => h.memory.id), 'the same order with the switch off');
 });

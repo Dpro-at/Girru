@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
+import { switchValueOn } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const dir = mkdtempSync(join(tmpdir(), 'ap-memscale-'));
 mkdirSync(join(dir, '.data'), { recursive: true });
@@ -86,7 +87,7 @@ const save = (content, drawer, topicKey = null, userId = OWNER) =>
 const project = (key) => ({ kind: 'project', key });
 // STORE-MAP-01 P3 (D3): memory keys a chat project by its id. The memories here are written by key, so with
 // P3 on each chat project's id is its slug and the same keys name it (store-p3-project-keys.test.mjs covers slug -> id).
-const P3 = /^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P3 ?? '');
+const P3 = switchValueOn(process.env.GIRRU_STORE_P3 ?? '');
 const cp = (id, slug) => (P3 ? slug : id);
 const chatProject = (id, slug, name) => db.prepare('INSERT INTO chat_projects (id, user_id, name, slug) VALUES (?, ?, ?, ?)').run(cp(id, slug), OWNER, name, slug);
 const searchIds = async (query, drawers) => (await quietly(() => memoryRecall.search(owner, { query, limit: 20, ...(drawers ? { drawers } : {}) }))).map((r) => r.memory.id);

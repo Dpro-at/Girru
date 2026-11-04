@@ -67,7 +67,7 @@ test.before(async () => {
 
 test.after(async () => {
   if (!URL_) return;
-  delete process.env.GIRRU_STORE_P8;
+  process.env.GIRRU_STORE_P8 = '0';
   for (const [t, c] of [['run_notes', 'owner_id'], ['agent_handoffs', 'owner_id'], ['memory_file_proposals', 'user_id'], ['boards', 'owner_id'], ['chat_sessions', 'user_id'], ['chat_projects', 'user_id']]) {
     await m.pool.pgRun(`DELETE FROM ${t} WHERE ${c} = ?`, S.owner).catch(() => {});
   }

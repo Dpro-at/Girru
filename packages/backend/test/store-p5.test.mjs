@@ -23,7 +23,7 @@ process.env.JWT_SECRET = randomBytes(64).toString('hex'); // throwaway, test onl
 process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway, test only
 process.env.NODE_ENV = 'test';
 process.env.MEMORY_EMBEDDINGS = 'hash';
-delete process.env.GIRRU_STORE_P5; delete process.env.GIRRU_STORE_P4;
+process.env.GIRRU_STORE_P5 = '0'; process.env.GIRRU_STORE_P4 = '0';
 let fetches = 0;
 const offline = async (url) => { fetches++; throw new Error(`offline: ${url}`); };
 globalThis.fetch = offline;
@@ -168,11 +168,11 @@ test('with the personality record on, the import carries the text into version 1
   const { agentId } = await pack.importAgentPackage(pkg, O, { expectedPackageHash: plan.packageHash, again: true });
   const { recordText } = await import(join(backendDir, 'src/services/personality-record.ts'));
   assert.equal((await recordText(agentId)).text, 'Calm and exact.');
-  delete process.env.GIRRU_STORE_P4;
+  process.env.GIRRU_STORE_P4 = '0';
 });
 
 test('switch off again: the prompt reads the file', async () => {
-  delete process.env.GIRRU_STORE_P5;
+  process.env.GIRRU_STORE_P5 = '0';
   assert.equal(await drawer.agentMemoryForPrompt('p5-noor'), 'Edited by a coding app.');
 });
 
@@ -182,11 +182,11 @@ test('security: an agent’s notes are never opened by id through the shared mem
   const storage = getMemoryStorage();
   assert.equal(await storage.get(id), null);
   assert.equal(await storage.getOwned(O, id), null);
-  delete process.env.GIRRU_STORE_P5;
+  process.env.GIRRU_STORE_P5 = '0';
 });
 
 test('P5a/P5b screens: history of the notes; MEMORY.md changed outside Girru waits for the owner (Use it / Keep Girru’s)', async () => {
-  delete process.env.GIRRU_STORE_P5;
+  process.env.GIRRU_STORE_P5 = '0';
   assert.equal(await drawer.agentNotesHistory('p5-noor'), null, 'off: no history route');
   assert.equal(await drawer.agentNotesOutside('p5-noor'), null);
   process.env.GIRRU_STORE_P5 = '1';
@@ -213,7 +213,7 @@ test('P5a/P5b screens: history of the notes; MEMORY.md changed outside Girru wai
   assert.doesNotMatch(now.content, /sk-live-abcdefghijklmnopqrstuvwx/, 'secrets hidden');
   assert.equal((await drawer.agentNotesHistory('p5-noor')).length, before + 1, 'one new version (Undo = the one before)');
   assert.equal((await drawer.agentMemoryStatus('p5-noor')).outsideChange, false);
-  delete process.env.GIRRU_STORE_P5;
+  process.env.GIRRU_STORE_P5 = '0';
 });
 
 test('the Memory window scope lists never show an agent’s own notes (they have their own row on the agent page)', async () => {
@@ -225,5 +225,5 @@ test('the Memory window scope lists never show an agent’s own notes (they have
   }
   const tree = await scopeTree(O, { fresh: true });
   assert.doesNotMatch(JSON.stringify(tree), /"agent:p5-noor"/);
-  delete process.env.GIRRU_STORE_P5;
+  process.env.GIRRU_STORE_P5 = '0';
 });

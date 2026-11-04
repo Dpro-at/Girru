@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
+import { clearEnv } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const load = (rel) => import(pathToFileURL(join(backendDir, rel)).href);
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-store-p9-screens-')));
@@ -29,7 +30,7 @@ process.env.NODE_ENV = 'test';
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_P3', 'GIRRU_STORE_P9', 'GIRRU_STORE_PILOT']) delete process.env[k];
+for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_P3', 'GIRRU_STORE_P9', 'GIRRU_STORE_PILOT']) clearEnv(k);
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
@@ -53,7 +54,7 @@ const { DEFAULT_AGENT_TOOLS } = await load('src/tools/grants.ts');
 
 const add = (id, content, kind, key) => db.prepare(`INSERT INTO memories (id, user_id, type, content, memory_layer, status, metadata, importance_score, created_at, access_count, drawer_kind, drawer_key)
   VALUES (?, ?, 'fact', ?, 'factual', 'active', '{}', 0.5, ?, 0, ?, ?)`).run(id, OWNER, content, new Date().toISOString(), kind, key);
-const on = async (fn) => { process.env.GIRRU_STORE_P9 = '1'; try { return await fn(); } finally { delete process.env.GIRRU_STORE_P9; } };
+const on = async (fn) => { process.env.GIRRU_STORE_P9 = '1'; try { return await fn(); } finally { process.env.GIRRU_STORE_P9 = '0'; } };
 
 test('topics name the same words as specialCategory', () => {
   const cases = [['Lena takes medication for her depression', ['health']], ['Rami votes for the Green party', ['politics']], ['يصلي في المسجد', ['religion']],

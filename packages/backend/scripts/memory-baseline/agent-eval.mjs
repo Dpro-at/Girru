@@ -26,7 +26,7 @@ const mode = argValue('mode', 'hash');
 const distractors = Number(argValue('distractors', '5000'));
 const out = argValue('out', null);
 const p9b = process.argv.includes('--p9b');
-if (p9b) process.env.GIRRU_STORE_P9B = '1'; else delete process.env.GIRRU_STORE_P9B;
+if (p9b) process.env.GIRRU_STORE_P9B = '1'; else process.env.GIRRU_STORE_P9B = '0';
 if (mode === 'ollama' && !(await ollamaHas('qwen3-embedding:0.6b'))) { console.error('qwen3-embedding:0.6b is not on the local Ollama'); process.exit(2); }
 process.env.MEMORY_EMBEDDINGS = mode;
 process.env.OLLAMA_URL = OLLAMA;

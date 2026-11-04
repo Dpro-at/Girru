@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
+import { clearEnv } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const load = (rel) => import(pathToFileURL(join(backendDir, rel)).href);
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-store-p9-quality-')));
@@ -32,7 +33,7 @@ process.env.NODE_ENV = 'test';
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-for (const k of ['GIRRU_STORE_P9', 'GIRRU_STORE_P3', 'GIRRU_STORE_P2']) delete process.env[k];
+for (const k of ['GIRRU_STORE_P9', 'GIRRU_STORE_P3', 'GIRRU_STORE_P2']) clearEnv(k);
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
@@ -59,7 +60,7 @@ const storage = getMemoryStorage();
 await storage.initialize();
 
 const on = () => { process.env.GIRRU_STORE_P9 = '1'; };
-const off = () => { delete process.env.GIRRU_STORE_P9; };
+const off = () => { process.env.GIRRU_STORE_P9 = '0'; };
 const row = (id) => db.prepare('SELECT id, content, status, valid_to, superseded_by, topic_key, importance_score FROM memories WHERE id = ?').get(id);
 const extraction = (content, importance = 5) => ({ content, type: 'fact', importance, origin: 'extraction' });
 let n = 0;
@@ -193,7 +194,7 @@ test('M3: recall ranks the same memories by specialty, department and team', asy
   off();
   // P9b's re-rank (MD6) uses the agent's relevance too: "off" here means both off.
   const p9b = process.env.GIRRU_STORE_P9B;
-  delete process.env.GIRRU_STORE_P9B;
+  process.env.GIRRU_STORE_P9B = '0';
   const offBack = await recallFor('q-back');
   const offMkt = await recallFor('q-mkt');
   if (p9b !== undefined) process.env.GIRRU_STORE_P9B = p9b;

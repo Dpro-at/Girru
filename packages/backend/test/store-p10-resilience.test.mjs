@@ -20,6 +20,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { randomBytes } from 'node:crypto';
 
+import { clearEnv } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-store-p10-res-')));
 const home = join(dir, 'home');
@@ -36,7 +37,7 @@ process.env.NODE_ENV = 'test';
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-for (const k of ['CODEX_HOME', 'AGENT_EXEC_TOOLS', 'DEFAULT_MODEL', 'GIRRU_STORE_PILOT_AGENT']) delete process.env[k];
+for (const k of ['CODEX_HOME', 'AGENT_EXEC_TOOLS', 'DEFAULT_MODEL', 'GIRRU_STORE_PILOT_AGENT']) clearEnv(k);
 const SWITCHES = ['GIRRU_STORE_PILOT', 'GIRRU_STORE_P2', 'GIRRU_STORE_P3', 'GIRRU_STORE_P4', 'GIRRU_STORE_P5', 'GIRRU_STORE_P6', 'GIRRU_STORE_P7', 'GIRRU_STORE_P8', 'GIRRU_STORE_P9', 'GIRRU_STORE_P9B'];
 for (const k of SWITCHES) process.env[k] = '1';
 

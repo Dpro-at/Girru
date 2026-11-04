@@ -22,6 +22,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
+import { switchValueOn, clearEnv } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-store-pilot-')));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });
@@ -35,7 +36,7 @@ process.env.NODE_ENV = 'test';
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-for (const k of ['CODEX_HOME', 'AGENT_PLAYER_DATA_DIR', 'AGENT_EXEC_TOOLS', 'DEFAULT_MODEL', 'OUTSIDER_AGENT_MEMORY', 'GIRRU_STORE_PILOT', 'GIRRU_STORE_PILOT_AGENT']) delete process.env[k];
+for (const k of ['CODEX_HOME', 'AGENT_PLAYER_DATA_DIR', 'AGENT_EXEC_TOOLS', 'DEFAULT_MODEL', 'OUTSIDER_AGENT_MEMORY', 'GIRRU_STORE_PILOT', 'GIRRU_STORE_PILOT_AGENT']) clearEnv(k);
 
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 const quiet = () => {};
@@ -278,7 +279,7 @@ test('capability: expired and revoked capabilities are refused', async () => {
 test('capability: the pilot project needs one; other projects work as before', async () => {
   const tok = await ensureToken(OWNER, 'claude-code');
   // P6 rolls the capability out to every project: then no project opens without one.
-  const p6 = /^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P6 ?? '');
+  const p6 = switchValueOn(process.env.GIRRU_STORE_P6 ?? '');
   const required = (e) => e.code === 'capability_required';
   if (p6) await assert.rejects(mcpCall('claude-code', tok, folder, 'project_brief'), required);
   else assert.match((await mcpCall('claude-code', tok, folder, 'project_brief')).text, /Alpha/, 'pilot off: unchanged');
@@ -300,7 +301,7 @@ test('resolved context: chat, task run and coding app share identity, hired inst
     ctx[entry] = await resolveAgentContext({ agentId: 'sp-agent', entry, ownerId: OWNER, projectId: project.id });
   }
   // P2 (AG6): the rules come in precedence groups.
-  const rules = await (/^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P2 ?? '') ? rulesByPrecedence('sp-agent', project.id) : rulesContext('sp-agent', { projectId: project.id }));
+  const rules = await (switchValueOn(process.env.GIRRU_STORE_P2 ?? '') ? rulesByPrecedence('sp-agent', project.id) : rulesContext('sp-agent', { projectId: project.id }));
   assert.ok(rules, 'the agent has owner rules');
   for (const entry of ['chat', 'task', 'coding_app', 'channel']) {
     assert.equal(ctx[entry].agent.name, 'Rafid');
@@ -350,7 +351,7 @@ test('routes: owner only; capability issue and revoke; sync status and rebuild o
     assert.equal((await call(OWNER, 'DELETE', `/api/memory-bridge/capabilities/${capability.id}`)).statusCode, 200);
     assert.equal((await call(OWNER, 'DELETE', `/api/memory-bridge/capabilities/${capability.id}`)).statusCode, 404);
     // P6 rolls the change log and brief projection out to every project.
-    if (!/^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P6 ?? '')) assert.equal((await call(OWNER, 'GET', `${url}/sync`)).statusCode, 409, 'not the pilot project');
+    if (!switchValueOn(process.env.GIRRU_STORE_P6 ?? '')) assert.equal((await call(OWNER, 'GET', `${url}/sync`)).statusCode, 409, 'not the pilot project');
     process.env.GIRRU_STORE_PILOT = project.id;
     try {
       const s = await call(OWNER, 'GET', `${url}/sync`);

@@ -17,6 +17,7 @@
  *    counts of its report; fixes still need the owner's confirm.
  */
 
+import { memorySwitchStates } from '../services/memory-switches.js';
 import os from 'node:os';
 import { v4 as uuidv4 } from 'uuid';
 import { all, one, run, sql } from '../repositories/sql-steps.js';
@@ -132,7 +133,8 @@ export async function supportBundle(ownerId: string, now: Date = new Date()): Pr
     kind: 'girru-support-bundle', version: 1, createdAt: now.toISOString(),
     app: { version: process.env.GIRRU_APP_VERSION ?? null, node: process.version, platform: process.platform, arch: process.arch, osRelease: os.release() },
     database: { driver: dbDriver(), migration: migration?.id ?? null },
-    switches: Object.fromEntries(Object.keys(process.env).filter((k) => /^GIRRU_STORE_[A-Z0-9]+$/.test(k)).sort().map((k) => [k, process.env[k] === '1'])),
+    // The real state of every memory switch (on by default; OPS9 removal dates).
+    switches: Object.fromEntries(memorySwitchStates(process.env, now).map((s) => [s.env, { on: s.on, removeBy: s.removeBy, expired: s.expired }])),
     memory: { byKind: Object.fromEntries(drawers.map((d) => [d.kind, Number(d.n)])) },
     health,
     events: events.map((e) => ({ kind: e.kind, ref: e.ref, at: e.at })),

@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
+import { clearEnv } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-store-p6-')));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });
@@ -28,7 +29,7 @@ process.env.NODE_ENV = 'test';
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-for (const k of ['CODEX_HOME', 'AGENT_PLAYER_DATA_DIR', 'AGENT_EXEC_TOOLS', 'DEFAULT_MODEL', 'GIRRU_STORE_PILOT', 'GIRRU_STORE_PILOT_AGENT', 'GIRRU_STORE_P6']) delete process.env[k];
+for (const k of ['CODEX_HOME', 'AGENT_PLAYER_DATA_DIR', 'AGENT_EXEC_TOOLS', 'DEFAULT_MODEL', 'GIRRU_STORE_PILOT', 'GIRRU_STORE_PILOT_AGENT', 'GIRRU_STORE_P6']) clearEnv(k);
 
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 const quiet = () => {};
@@ -64,7 +65,7 @@ await addPinnedFact(OWNER, parsePinnedScope(`project:${projectKeyOf(project)}`),
 await B.setClient(OWNER, 'claude-code', true);
 const tok = await ensureToken(OWNER, 'claude-code');
 const on = () => { process.env.GIRRU_STORE_P6 = '1'; };
-const off = () => { delete process.env.GIRRU_STORE_P6; };
+const off = () => { process.env.GIRRU_STORE_P6 = '0'; };
 
 test.after(() => { off(); rmSync(dir, { recursive: true, force: true }); });
 

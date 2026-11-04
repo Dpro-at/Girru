@@ -94,7 +94,7 @@ test('AI tools: installed and signed-in states come from the tools\' own files, 
   for (const name of ['claude', 'codex', 'npm']) { writeFileSync(join(bin, name), '#!/bin/sh\n'); chmodSync(join(bin, name), 0o755); }
   writeFileSync(join(home, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'x@example.test' } }));
   // The Gemini CLI entry as it is with GIRRU_STORE_P7 off (SUB1 below covers it on).
-  const p7 = process.env.GIRRU_STORE_P7; delete process.env.GIRRU_STORE_P7;
+  const p7 = process.env.GIRRU_STORE_P7; process.env.GIRRU_STORE_P7 = '0';
   const tools = await aiTools({ home, platform: 'darwin', dirs: [bin] }).finally(() => { if (p7 !== undefined) process.env.GIRRU_STORE_P7 = p7; });
   const byId = Object.fromEntries(tools.map(t => [t.id, t]));
   assert.deepEqual([byId.claude.installed, byId.claude.signedIn, byId.claude.install], [true, true, null]);
@@ -122,7 +122,7 @@ test('SUB1 (GIRRU_STORE_P7): the Google app is Antigravity (agy), signed in by i
     g = tools.find(t => t.id === 'gemini');
     assert.deepEqual([g.installed, g.signedIn, g.install], [true, true, null]);
     assert.ok(!JSON.stringify(tools).includes('x@example.test'), 'no account detail is returned');
-  } finally { delete process.env.GIRRU_STORE_P7; }
+  } finally { process.env.GIRRU_STORE_P7 = '0'; }
   assert.equal((await aiTools({ home, platform: 'darwin', dirs: [bin] })).find(t => t.id === 'gemini').name, 'Gemini CLI', 'P7 off: unchanged');
   process.env.GIRRU_STORE_P7 = p7Before ?? ''; if (p7Before === undefined) delete process.env.GIRRU_STORE_P7;
 });
