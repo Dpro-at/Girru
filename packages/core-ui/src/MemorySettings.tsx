@@ -18,6 +18,7 @@ import { DiscoveryView, FolderTree } from './Discovery';
 import { LocalImport } from './LocalImport';
 import { FilesView } from './MemoryPlaces';
 import { UiIcon } from './ui-icons';
+import { MemoryHelperRow } from './MemoryHelper';
 import { Tile, useMenu, ContextMenu } from './desktop-ui';
 import type { ProjectGroup } from './memory-desktop-contract.js';
 import type { ScopeRules } from './memory-pages-contract.js';
@@ -53,7 +54,7 @@ export function MemorySettings({ client, pane, onOpenMemory }: { client: Session
     {pane === 'projects' && scopes && disc && <ProjectsPane client={client} scopes={scopes} disc={disc}/>}
     {pane === 'access' && <AccessPane client={client} tree={ss?.tree ?? null}/>}
     {pane === 'health' && health && <>{files ? <><button type="button" className="link-button" onClick={() => setFiles(false)}>Back to Health and backup</button><FilesView client={client} agents={ss?.agents ?? {}} drawers={[{ id: 'owner', name: 'About you' }, { id: 'experience', name: 'Lessons' }, ...(ss?.tree?.projects ?? []).filter(p => !p.archived && !p.mergedInto && !p.trashedAt).map(p => ({ id: `project:${p.slug}`, name: p.name }))]}/></>
-      : <><DataJobs client={client}/><HealthLoader c={health} part="health" onReview={onOpenMemory} onFiles={() => setFiles(true)}/></>}</>}
+      : <><DataJobs client={client}/><MemoryHelperRow client={client}/><HealthLoader c={health} part="health" onReview={onOpenMemory} onFiles={() => setFiles(true)}/></>}</>}
     {pane === 'schedule' && disc && health && <SchedulePane client={client} disc={disc} health={health}/>}
   </section>;
 }

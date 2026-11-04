@@ -51,6 +51,7 @@ import { allowedDiscovery, discoveryRoute, discoveryResponse } from './discovery
 import { allowedMemoryDesktop, memoryDesktopRoute, memoryDesktopResponse } from './memory-desktop-contract.js';
 import { allowedTerminal, terminalPath, terminalRoute, terminalResponse, TerminalEventParser, TERMINAL_STREAM_MS } from './terminal-contract.js';
 import { allowedFooter, footerRoute, footerResponse } from './footer-contract.js';
+import { allowedMemoryHelper, memoryHelperRoute, memoryHelperResponse } from './memory-helper-contract.js';
 import { allowedStoreSwitches, storeSwitchesResponse, storeSwitchesRoute } from './store-switches-contract.js';
 import { allowedBackups, backupsRoute, backupsResponse } from './backups-contract.js';
 import { allowedChartPrefs, chartPrefsRoute, chartPrefsResponse } from './chart-prefs-contract.js';
@@ -141,6 +142,7 @@ export function allowedRequest(method: string, path: string, body?: unknown): bo
   if (templatePath(path)) return allowedTemplates(method,path,body);
   if (skillLibraryPath(path)) return allowedSkillLibrary(method,path,body);
   if (footerRoute(path)) return allowedFooter(method, path, body);
+  if (memoryHelperRoute(path)) return allowedMemoryHelper(method, path, body);
   if (storeSwitchesRoute(path)) return allowedStoreSwitches(method, path, body);
   if (backupsRoute(path)) return allowedBackups(method, path, body);
   if (chartPrefsRoute(path)) return allowedChartPrefs(method, path, body);
@@ -247,6 +249,7 @@ function projectResponse(path: string, response: WireResponse): WireResponse {
   if (cardRoute(path)) return { status: response.status, body: agentCardResponse(path, response.status, response.body) };
   if (terminalRoute(path)) return { status: response.status, body: terminalResponse(path, response.status, response.body) };
   if (footerRoute(path)) return { status: response.status, body: footerResponse(response.status, response.body) };
+  if (memoryHelperRoute(path)) return { status: response.status, body: memoryHelperResponse(path, response.status, response.body) };
   if (storeSwitchesRoute(path)) return { status: response.status, body: storeSwitchesResponse(response.status, response.body) };
   if (backupsRoute(path)) return { status: response.status, body: backupsResponse(path, response.status, response.body) };
   if (chartPrefsRoute(path)) return { status: response.status, body: chartPrefsResponse(response.status, response.body) };
