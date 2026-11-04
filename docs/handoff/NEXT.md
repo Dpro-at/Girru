@@ -16,6 +16,26 @@ canvas (ask the owner for the link).
   shows it without an app update. Only native parts (lock, pairing, push,
   widget, share, permissions) live in the apps.
 
+## Test round 2 (4 November 2026): what changed since the Task 5 report
+
+The findings in `RESULT.md` › "Test round: Task 5" are fixed on the main
+computer, and `main` (memory P0–P10, Code Store, footer) is merged in. Pull
+first; the phone migration is now **183** (it was 164, which `main` also used).
+
+| Finding | Fix |
+|---|---|
+| 1. Page files over ~600 KiB never arrive (blank chat) | Parts are 512 KiB (a sealed part is ~910 KiB); the computer checks the sealed size. |
+| 3. `/api/approvals?status=pending…` refused | Allowed on the phone (read only, the badge count). `/api/health` stays refused: nothing in this page asks for it, and the computer's own gate refuses it too. If you still see it, note which screen. |
+| 4. Terminal fails after `npm ci` (spawn-helper) | The backend gives node-pty's `spawn-helper` its run permission before the first shell. No `chmod` by hand any more. |
+| 5. Terminal "Lost the connection" on the first command | Both apps now read the terminal's output as a stream (it went through `api.call`, which refuses streams). |
+| 6. Keyboard bar over the lock screen | Locking closes the keyboard in both apps. |
+
+Test again, on the **real desktop app** this time (see "Notes for the next
+test round" in `RESULT.md`): the chat page loads (not blank) and a reply
+streams in; the terminal runs `echo hi; date`, then `sleep 30` and ^C, Ctrl
+then `l`, the paste check, lock while typing (no keyboard bar over the lock);
+Approvals, Team, dark mode; then the Android app on an emulator.
+
 ## Now: test only (owner's decision, 3 November 2026)
 
 **All the code is written on the main computer. This computer builds, runs and
