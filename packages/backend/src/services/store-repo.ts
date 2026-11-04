@@ -37,13 +37,17 @@ export const RUNTIME_PLATFORMS = ['darwin-arm64', 'darwin-x64', 'win32-x64', 'li
 export type RuntimePlatform = typeof RUNTIME_PLATFORMS[number];
 const VERSION = /^\d{1,6}\.\d{1,6}\.\d{1,6}(?:-[0-9A-Za-z.-]{1,40})?$/;
 const MAX_ARCHIVE = 4 * 1024 ** 3;
-/** Release downloads of the Girru Store repository only (D-CODE-STORE-HOST); tests: http on 127.0.0.1. */
+/**
+ * Release downloads of the two repositories that publish Girru runtimes only: the Girru Store
+ * and nabu-code (the Code editor, public since 2026-11-04). Tests: http on 127.0.0.1. Every
+ * download is still checked against the size and SHA-256 the reviewed index lists.
+ */
 export function runtimeUrlAllowed(value: string): boolean {
   let u: URL;
   try { u = new URL(value); } catch { return false; }
   if (u.username || u.password || u.search || u.hash) return false;
   if (u.protocol === 'http:' && u.hostname === '127.0.0.1' && (process.env.GIRRU_STORE_URL ?? '').startsWith('http://127.0.0.1:')) return /\.tar\.gz$/.test(u.pathname);
-  return u.protocol === 'https:' && u.hostname === 'github.com' && !u.port && /^\/Dpro-at\/girru-store\/releases\/download\/[A-Za-z0-9_.+-]+\/[A-Za-z0-9_.+-]+\.tar\.gz$/.test(u.pathname);
+  return u.protocol === 'https:' && u.hostname === 'github.com' && !u.port && /^\/(?:Dpro-at\/girru-store|9mtm\/nabu-code)\/releases\/download\/[A-Za-z0-9_.+-]+\/[A-Za-z0-9_.+-]+\.tar\.gz$/.test(u.pathname);
 }
 /** A runtime as the repository lists it; anything outside these rules is refused. */
 export function parseRuntime(raw: unknown): StoreRuntime {
