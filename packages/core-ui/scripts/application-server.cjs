@@ -47,6 +47,7 @@ const { allowedChatSecrets, chatSecretsRoute, chatSecretsResponse } = require('.
 const { allowedTerminal, terminalPath, terminalRoute, terminalResponse, TerminalEventParser, TERMINAL_STREAM_MS } = require('../src/terminal-contract.js');
 const { allowedFooter, footerRoute, footerResponse } = require('../src/footer-contract.js');
 const { allowedMemoryHelper, memoryHelperRoute, memoryHelperResponse } = require('../src/memory-helper-contract.js');
+const { allowedDocIndex, docIndexResponse, docIndexRoute, READ_PDF_BASE64 } = require('../src/doc-index-contract.js');
 const { allowedStoreSwitches, storeSwitchesResponse, storeSwitchesRoute } = require('../src/store-switches-contract.js');
 const { allowedBackups, backupsRoute, backupsResponse } = require('../src/backups-contract.js');
 const { allowedChartPrefs, chartPrefsRoute, chartPrefsResponse } = require('../src/chart-prefs-contract.js');
@@ -146,6 +147,7 @@ function allowed(method, target, body) {
   if (skillLibraryPath(target)) return allowedSkillLibrary(method,target,body);
   if (footerRoute(target)) return allowedFooter(method, target, body);
   if (memoryHelperRoute(target)) return allowedMemoryHelper(method, target, body);
+  if (docIndexRoute(target)) return allowedDocIndex(method, target, body);
   if (storeSwitchesRoute(target)) return allowedStoreSwitches(method, target, body);
   if (backupsRoute(target)) return allowedBackups(method, target, body);
   if (chartPrefsRoute(target)) return allowedChartPrefs(method, target, body);
@@ -245,6 +247,7 @@ function project(target, status, body) {
   if (terminalRoute(target)) return terminalResponse(target, status, body);
   if (footerRoute(target)) return footerResponse(status, body);
   if (memoryHelperRoute(target)) return memoryHelperResponse(target, status, body);
+  if (docIndexRoute(target)) return docIndexResponse(target, status, body);
   if (storeSwitchesRoute(target)) return storeSwitchesResponse(status, body);
   if (backupsRoute(target)) return backupsResponse(target, status, body);
   if (chartPrefsRoute(target)) return chartPrefsResponse(status, body);
@@ -413,7 +416,8 @@ function createApplicationServer({ browserController = null, packageRoot = root,
     const length = Number(req.headers['content-length'] || 0);
     const audio = req.method === 'POST' && raw === '/api/chat/transcribe';
     // Agent files are up to 1 MB of text; JSON escaping can double it.
-    const limit = raw===VOICE_LIBRARY_PATH ? 4_200_000 : meetingsRoute(raw) ? 512 * 1024 : agentLibraryRoute(raw) ? 2_400_000 : notesRoute(raw) ? 4_300_000 : packRoute(raw) ? 2_100_000 : genvrRoute(raw) ? GENVR_BYTES + 65536 : audio ? AUDIO_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/images$/.test(raw) ? IMAGE_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/runs$/.test(raw) ? RUN_LIMIT : LIMIT;
+    // KNOW-INDEX-01: a Knowledge PDF or a chat's PDF comes as base64 (10 MB of PDF).
+    const limit = raw===VOICE_LIBRARY_PATH ? 4_200_000 : (req.method === 'POST' && (/^\/api\/agents\/[^/?#]+\/library\/file$/.test(raw) || raw === '/api/memory/documents/read-pdf')) ? READ_PDF_BASE64 + 65536 : meetingsRoute(raw) ? 512 * 1024 : agentLibraryRoute(raw) ? 2_400_000 : notesRoute(raw) ? 4_300_000 : packRoute(raw) ? 2_100_000 : genvrRoute(raw) ? GENVR_BYTES + 65536 : audio ? AUDIO_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/images$/.test(raw) ? IMAGE_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/runs$/.test(raw) ? RUN_LIMIT : LIMIT;
     if (!Number.isSafeInteger(length) || length < 0 || length > limit) return send(413);
     if (req.headers['content-type'] && !/^application\/json(?:;\s*charset=utf-8)?$/i.test(req.headers['content-type'])) return send(415);
     try {

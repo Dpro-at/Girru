@@ -31,6 +31,7 @@
 
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { realpathSync } from 'node:fs';
 import { all, one, run, sql, num, type Step } from '../../repositories/sql-steps.js';
 import { EmbeddingService } from '../embedding.js';
 import { packVector } from '../vectors.js';
@@ -111,6 +112,38 @@ export async function ensureAgentSource(ownerId: string, agentId: string): Promi
   await sql().read(run(`INSERT ${d === 'postgres' ? '' : 'OR IGNORE '}INTO doc_index_sources (id, owner_id, kind, ref_id, enabled, state, updated_at) VALUES (?, ?, 'agent', ?, 1, 'pending', ?)${conflict}`,
     id, ownerId, agentId, now()));
   return id;
+}
+
+/**
+ * Every project with a folder is read by default (owner's decision,
+ * 2026-11-04): a source is created ON for each project that has none yet.
+ * A project the owner turned off keeps its row (enabled 0) and stays off.
+ * Folders may hold repositories cloned from others: their text stays
+ * untrusted data in recall, and secrets are skipped as everywhere.
+ */
+export async function ensureProjectSources(ownerId: string): Promise<string[]> {
+  const rows = await sql().read(all<{ id: string }>(`
+    SELECT p.id FROM chat_projects p
+     WHERE p.user_id = ? AND p.folder IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM doc_index_sources s WHERE s.owner_id = p.user_id AND s.kind = 'project' AND s.ref_id = p.id)`, ownerId)).catch(() => []);
+  const made: string[] = [];
+  for (const r of rows) {
+    const id = sourceIdOf(ownerId, 'project', r.id);
+    const d = sql().dialect;
+    await sql().read(run(`INSERT ${d === 'postgres' ? '' : 'OR IGNORE '}INTO doc_index_sources (id, owner_id, kind, ref_id, enabled, state, updated_at) VALUES (?, ?, 'project', ?, 1, 'pending', ?)${d === 'postgres' ? ' ON CONFLICT (id) DO NOTHING' : ''}`, id, ownerId, r.id, now()));
+    made.push(id);
+  }
+  return made;
+}
+
+/** A Knowledge file of this agent changed (Agent › Files): its sources look again soon. */
+export async function agentKnowledgeChanged(agentId: string): Promise<void> {
+  if (!docIndexEnabled() || !validAgentFileId(agentId)) return;
+  const rows = await sql().read(all<{ id: string }>(`SELECT id FROM doc_index_sources WHERE kind = 'agent' AND ref_id = ? AND enabled = 1`, agentId));
+  for (const r of rows) {
+    await sql().read(run(`UPDATE doc_index_sources SET state = 'pending' WHERE id = ?`, r.id));
+    queueDocIndex(r.id);
+  }
 }
 
 /** The folders of a source, main folder first. */
@@ -203,6 +236,10 @@ export async function indexSource(sourceId: string, opts: { embedder?: Embedding
   const embedder = opts.embedder ?? new EmbeddingService();
   try {
     const roots = await sourceRoots(source);
+    // A Knowledge file that goes whole into the agent's instructions is not indexed too (never in both places).
+    const whole = source.kind === 'agent'
+      ? (await (await import('../../services/agent-file-library.js')).knowledgePlan(source.ref_id).catch(() => null))?.included ?? new Set<string>()
+      : new Set<string>();
     const existing = new Map((await sql().read(all<FileRow>('SELECT id, root, rel_path, file_hash, revision, bytes, mtime_ms, status, chunks FROM doc_index_files WHERE source_id = ?', sourceId)))
       .map((r) => [r.id, { ...r, revision: num<number>(r.revision), bytes: num<number>(r.bytes), mtime_ms: num<number>(r.mtime_ms), chunks: num<number>(r.chunks) }]));
     const seen = new Set<string>();
@@ -219,6 +256,7 @@ export async function indexSource(sourceId: string, opts: { embedder?: Embedding
       if (scan.root) scannedRoots.add(scan.root);
       if (scan.root && !scan.limited) completeRoots.add(scan.root);
       for (const found of scan.files.slice(0, filesLeft)) {
+        if (whole.has(found.rel)) continue;
         filesLeft--;
         const fileId = fileIdOf(sourceId, found.root, found.rel);
         seen.add(fileId);
@@ -320,6 +358,7 @@ export async function docIndexIdle(): Promise<void> {
 /** Every enabled source of an owner, one after another (the scheduled job; resumes an interrupted run). */
 export async function indexOwner(ownerId: string): Promise<IndexReport[]> {
   if (!docIndexEnabled()) return [];
+  await ensureProjectSources(ownerId);
   const rows = await sql().read(all<{ id: string }>('SELECT id FROM doc_index_sources WHERE owner_id = ? AND enabled = 1 ORDER BY id', ownerId));
   const out: IndexReport[] = [];
   for (const r of rows) out.push(await indexSource(r.id));
@@ -343,4 +382,50 @@ export async function docIndexStatus(ownerId: string): Promise<SourceStatus[]> {
     unreadable: bad.filter((b) => b.source_id === s.id).map((b) => ({ file: b.display_path, reason: b.reason ?? 'unreadable' })),
     limited: !!s.limited, note: s.note, scannedAt: s.scanned_at,
   }));
+}
+
+export interface ProjectDocs {
+  id: string; name: string; colour: string | null; mine: boolean; hasFolder: boolean;
+  /** null: never turned on (read by default only when mine). */
+  source: SourceStatus | null;
+  /** The folders read, main first, with how many files each holds in the index. */
+  folders: Array<{ path: string; name: string; main: boolean; files: number }>;
+}
+
+/**
+ * Settings › Memory › Documents (board K1): every project of the owner with
+ * its switch and status, and the agents' knowledge folders together. Paths
+ * are the owner's own folders; no file text.
+ */
+export async function documentsView(ownerId: string): Promise<{ projects: ProjectDocs[]; agents: { sources: number; files: number; unreadable: Array<{ file: string; reason: string }>; state: string | null } }> {
+  for (const id of await ensureProjectSources(ownerId)) queueDocIndex(id);
+  const status = await docIndexStatus(ownerId);
+  const projects = await sql().read(all<{ id: string; name: string; folder: string | null; extra_folders: string | null; mine: number | null }>(`
+    SELECT p.id, p.name, p.folder, p.extra_folders, b.files_enabled AS mine FROM chat_projects p
+      LEFT JOIN memory_bridge_folders b ON b.owner_id = p.user_id AND b.project_id = p.id
+     WHERE p.user_id = ? ORDER BY LOWER(p.name), p.id`, ownerId));
+  const perRoot = await sql().read(all<{ source_id: string; root: string; n: number }>(
+    `SELECT source_id, root, COUNT(*) AS n FROM doc_index_files WHERE owner_id = ? GROUP BY source_id, root`, ownerId));
+  const real = (p: string) => { try { return realpathSync.native(p); } catch { return p; } };
+  const out: ProjectDocs[] = projects.map((p) => {
+    const source = status.find((s) => s.kind === 'project' && s.refId === p.id) ?? null;
+    const folders: ProjectDocs['folders'] = [];
+    if (p.folder) folders.push({ path: p.folder, name: path.basename(p.folder), main: true, files: 0 });
+    try {
+      const extra = JSON.parse(p.extra_folders ?? '[]');
+      if (Array.isArray(extra)) for (const f of extra.slice(0, 8)) if (f && typeof f.path === 'string') folders.push({ path: f.path, name: path.basename(f.path), main: false, files: 0 });
+    } catch { /* none */ }
+    if (source) for (const f of folders) f.files = perRoot.filter((r) => r.source_id === source.id && (r.root === f.path || r.root === real(f.path))).reduce((n, r) => n + Number(r.n), 0);
+    return { id: p.id, name: p.name, colour: null, mine: Number(p.mine) === 1, hasFolder: !!p.folder, source, folders };
+  });
+  const agentSources = status.filter((s) => s.kind === 'agent' && s.enabled);
+  return {
+    projects: out,
+    agents: {
+      sources: agentSources.length,
+      files: agentSources.reduce((n, s) => n + s.files, 0),
+      unreadable: agentSources.flatMap((s) => s.unreadable.map((u) => ({ file: `${s.refId} › ${u.file}`, reason: u.reason }))).slice(0, 50),
+      state: agentSources.some((s) => s.state === 'running' || s.state === 'pending') ? 'running' : agentSources.length ? 'ready' : null,
+    },
+  };
 }

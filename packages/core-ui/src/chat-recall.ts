@@ -32,6 +32,9 @@ export class ChatRecallController extends Store<RecallState> {
     super({ conversationId: null, traces: {}, open: null, correcting: null, confirmForget: null, trashed: null, busy: false, notes: {}, handoff: null, handoffPhase: 'idle', draft: null, summaries: null, showSummaries: false, metrics: null }, client);
   }
 
+  /** KNOW-INDEX-01: the requester the document chips use to open or show a cited file. */
+  get requester(): Requester { return this.client; }
+
   setConversation(id: string | null) {
     if (id === this.getSnapshot().conversationId) return;
     this.#pending.clear();

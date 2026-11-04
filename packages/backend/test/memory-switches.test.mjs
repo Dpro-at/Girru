@@ -15,6 +15,7 @@ import { storeP8Enabled } from '../src/services/store-p8.ts';
 import { storeP9Enabled } from '../src/services/store-p9.ts';
 import { storeP9bEnabled } from '../src/services/store-p9b.ts';
 import { memoryHelperEnabled } from '../src/services/memory-helper-switch.ts';
+import { docIndexEnabled } from '../src/services/doc-index-switch.ts';
 
 const require = createRequire(import.meta.url);
 const { backendEnv } = require('../../desktop/src/backend-process.cjs');
@@ -23,7 +24,7 @@ const CHECKS = {
   GIRRU_STORE_P2: storeP2Enabled, GIRRU_STORE_P2B: storeP2bEnabled, GIRRU_STORE_P3: storeP3Enabled,
   GIRRU_STORE_P4: storeP4Enabled, GIRRU_STORE_P5: storeP5Enabled, GIRRU_STORE_P6: storeP6Enabled,
   GIRRU_STORE_P7: storeP7Enabled, GIRRU_STORE_P8: storeP8Enabled, GIRRU_STORE_P9: storeP9Enabled,
-  GIRRU_STORE_P9B: storeP9bEnabled, GIRRU_MEMORY_HELPER: memoryHelperEnabled,
+  GIRRU_STORE_P9B: storeP9bEnabled, GIRRU_MEMORY_HELPER: memoryHelperEnabled, GIRRU_DOC_INDEX: docIndexEnabled,
 };
 
 test('every memory switch is listed once, with a removal date after the day it went on', () => {

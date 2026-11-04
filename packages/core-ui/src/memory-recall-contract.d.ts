@@ -1,5 +1,5 @@
 export const MAX_CORRECTION: number;
-export type RecallReason = 'pinned' | 'topic' | 'graph' | 'meaning' | 'keyword' | 'handoff';
+export type RecallReason = 'pinned' | 'topic' | 'graph' | 'meaning' | 'keyword' | 'handoff' | 'document';
 export const RECALL_REASONS: readonly RecallReason[];
 export type RecallState = 'active' | 'changed' | 'moved' | 'deleted' | 'forgotten';
 export const RECALL_STATES: readonly RecallState[];
@@ -10,8 +10,10 @@ export const NOT_LOADED_WHY: readonly NotLoadedWhy[];
 export const CACHE_METRICS_PATH: string;
 export type RecallItem = {
   /** fact = an owner-pinned scope fact; its drawer is 'company', 'department:<id>' or 'project:<slug>'. */
-  kind: 'memory' | 'handoff' | 'fact'; id: string; drawer: string | null; why: RecallReason; state: RecallState;
+  kind: 'memory' | 'handoff' | 'fact' | 'document'; id: string; drawer: string | null; why: RecallReason; state: RecallState;
   score?: number; type?: string; preview?: string; nowIn?: string;
+  /** KNOW-INDEX-01: a document line's file (relative to its folder), PDF page or Markdown heading. */
+  cite?: { file: string; page: number | null; heading: string | null; path?: string };
 };
 export type RecallTrace = {
   runId: string; messageId: string | null; agentId: string | null; createdAt: string; items: RecallItem[];

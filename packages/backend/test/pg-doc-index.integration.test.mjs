@@ -128,6 +128,8 @@ test('the agent knowledge folder, for that agent only (PostgreSQL)', { skip }, a
   const k = join(m.agents.getAgentDir(agent), 'knowledge');
   mkdirSync(k, { recursive: true });
   writeFileSync(join(k, 'pricing.md'), '# Pricing\n\nThe team plan costs 19 euro per seat each month.\n');
+  // Not marked "It reads this file": found when it helps (indexed) instead of whole in the instructions.
+  writeFileSync(join(m.agents.getAgentDir(agent), 'files.json'), JSON.stringify({ notRead: ['pricing.md'], removed: [] }));
   await ask('How much does the team plan cost per seat?', agent);
   await m.ix.docIndexIdle();
   assert.match((await ask('How much does the team plan cost per seat?', agent)).text, /knowledge\/pricing\.md › Pricing\) .*19 euro/);
@@ -138,4 +140,19 @@ test('turning the project off forgets its index (PostgreSQL)', { skip }, async (
   await m.ix.setDocSource(S.owner, 'project', S.project.id, false);
   assert.equal(Number((await one('SELECT COUNT(*) AS n FROM doc_index_chunks WHERE source_id = ?', S.source.id)).n), 0);
   assert.ok(!(await ask('On which day does a release ship?')).text.includes('guide.md'));
+});
+
+test('every project with a folder is read by default; the Documents view (PostgreSQL)', { skip }, async () => {
+  const folder = join(dir, 'mine');
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, 'notes.md'), '# Notes\n\nThe staging server restarts every Sunday at 04:00.\n');
+  const one = await m.projects.createProject(S.owner, { name: `One ${tag}`, folder });
+  const view = await m.ix.documentsView(S.owner);
+  await m.ix.docIndexIdle();
+  assert.equal(view.projects.find((p) => p.id === one.id).source.enabled, true);
+  // The project turned off earlier stays off.
+  assert.equal(view.projects.find((p) => p.id === S.project.id).source.enabled, false);
+  const after = (await m.ix.documentsView(S.owner)).projects.find((p) => p.id === one.id);
+  assert.equal(after.source.files, 1);
+  assert.equal(after.folders[0].files, 1);
 });

@@ -20,11 +20,13 @@ const memoryId = x => typeof x === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.@-]{0,12
 const drawerId = x => typeof x === 'string' && /^(owner|experience|(project|task|people):[A-Za-z0-9][A-Za-z0-9_.@-]{0,127})$/.test(x);
 const handoffScope = x => typeof x === 'string' && /^(conversation|task):[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(x);
 // MEM-SCALE-01: the scope of an owner-pinned fact.
+// KNOW-INDEX-01: a document chunk belongs to a project or to one agent's knowledge folder.
+const docScope = x => typeof x === 'string' && /^(project|agent):[A-Za-z0-9_][A-Za-z0-9_.:@-]{0,127}$/.test(x);
 const factScope = x => typeof x === 'string' && /^(company|department:[A-Za-z0-9][A-Za-z0-9_-]{0,63}|project:[A-Za-z0-9][A-Za-z0-9_.@-]{0,127})$/.test(x);
 // eslint-disable-next-line no-control-regex
 const badChars = /[\u0000-\u0008\u000B-\u001F\u007F‪-‮⁦-⁩]/u;
 export const MAX_CORRECTION = 50000;
-export const RECALL_REASONS = ['pinned', 'topic', 'graph', 'meaning', 'keyword', 'handoff'];
+export const RECALL_REASONS = ['pinned', 'topic', 'graph', 'meaning', 'keyword', 'handoff', 'document'];
 export const RECALL_STATES = ['active', 'changed', 'moved', 'deleted', 'forgotten'];
 export const SUMMARY_SOURCES = ['model', 'fallback', 'inline'];
 /** Why a drawer of the owner was not loaded into a reply (MEM-GAPS-02). */
@@ -78,8 +80,14 @@ const num = x => (typeof x === 'number' && Number.isFinite(x) && x >= 0 ? x : nu
 const rate = x => (typeof x === 'number' && x >= 0 && x <= 1 ? x : null);
 
 function item(i) {
-  if (!record(i) || !['memory', 'handoff', 'fact'].includes(i.kind) || !memoryId(i.id) || !RECALL_REASONS.includes(i.why) || !RECALL_STATES.includes(i.state)) fail();
-  const valid = i.kind === 'handoff' ? handoffScope : i.kind === 'fact' ? factScope : drawerId;
+  if (!record(i) || !['memory', 'handoff', 'fact', 'document'].includes(i.kind) || !memoryId(i.id) || !RECALL_REASONS.includes(i.why) || !RECALL_STATES.includes(i.state)) fail();
+  const valid = i.kind === 'handoff' ? handoffScope : i.kind === 'fact' ? factScope : i.kind === 'document' ? docScope : drawerId;
+  // KNOW-INDEX-01: where a document line came from (a path relative to its folder; page of a PDF, heading of a Markdown file).
+  const cite = i.kind === 'document' && record(i.cite) && typeof i.cite.file === 'string' && !badChars.test(i.cite.file)
+    ? { file: clip(i.cite.file, 300), page: Number.isSafeInteger(i.cite.page) && i.cite.page > 0 ? i.cite.page : null, heading: typeof i.cite.heading === 'string' && !badChars.test(i.cite.heading) ? clip(i.cite.heading, 200) : null,
+      // The file on this computer (opening it is checked again by the Code-open route).
+      ...(typeof i.cite.path === 'string' && i.cite.path.length <= 4096 && /^(\/|[A-Za-z]:\\)/.test(i.cite.path) && !badChars.test(i.cite.path) ? { path: i.cite.path } : {}) }
+    : null;
   const drawer = valid(i.drawer) ? i.drawer : null;
   return {
     kind: i.kind, id: i.id, drawer, why: i.why, state: i.state,
@@ -88,6 +96,7 @@ function item(i) {
     // A forgotten or deleted memory never shows text.
     ...(i.kind !== 'handoff' && ['active', 'changed', 'moved'].includes(i.state) && typeof i.preview === 'string' ? { preview: clip(i.preview, 300) } : {}),
     ...(i.state === 'moved' && drawerId(i.nowIn) ? { nowIn: i.nowIn } : {}),
+    ...(cite ? { cite } : {}),
   };
 }
 

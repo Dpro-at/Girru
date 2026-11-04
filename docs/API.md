@@ -201,6 +201,15 @@ Each answers `404 not_found` while the switch is off. Agents never mark a memory
 | `GET /api/memory/helper` | `{ status, row }`: the helper's phase (`waiting`, `checking`, `starting_runtime`, `downloading`, `verifying`, `reembedding`, `ready` or `fallback`), download progress and the fallback reason; codes and counts only, never memory text or paths. `row` is its Memory › Health row |
 | `POST /api/memory/helper/retry` | try again now after a failure; answers at once |
 
+### Document memory (owner only, `GIRRU_DOC_INDEX`)
+
+| Route | Body / answer |
+|---|---|
+| `GET /api/memory/documents` | `{ projects, agents }`: each project with its folders (with files read), and `source` (on, state, files, files that cannot be read with a reason code); the agents' Knowledge folders together. No file text |
+| `PUT /api/memory/documents/sources` | `{ kind: "project", refId, enabled }` turns a project's documents on or off; off forgets its index (the files are not touched) |
+| `POST /api/memory/documents/sources/:id/reindex` | look at the files again now (background; `202`) |
+| `POST /api/memory/documents/read-pdf` | `{ data }` (base64, 10 MB at most) → `{ text }` with `--- page N ---` markers, or `{ reason }`; nothing is kept (chat attachments) |
+
 ### The Code app (owner only)
 
 | Route | Body / answer |

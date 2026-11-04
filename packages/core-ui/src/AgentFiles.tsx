@@ -9,18 +9,20 @@ import type {UiIconName} from './ui-icons';
 import {DocumentEditor} from './DocumentEditor';
 import {NotesOutsideChip} from './AgentNotes';
 import {LIBRARY_BYTES,fileName as validFileName,libraryPath} from './agent-library-contract.js';
+import {pdfBase64,PDF_BYTES,PDF_UNREADABLE} from './doc-index';
 
 type Kind='who'|'mind'|'knowledge';
 type Entry={name:string;kind:Kind;size:number;read:boolean};
 type Removed={id:string;name:string;removedAt:string|null};
 // STORE-MAP-01 P4 (T7a): Who it is is the personality record; `version` is the record's version shown.
-type Open={name:string;kind:Kind;content:string;hash:string|null;managed:string|null;redacted:boolean;read:boolean;version?:number};
+type Open={name:string;kind:Kind;content:string;hash:string|null;managed:string|null;redacted:boolean;read:boolean;version?:number;readOnly?:boolean;unreadable?:string};
+const isPdf=(n:string)=>/\.pdf$/i.test(n);
 type Version={id:string;savedAt:string|null;size:number};
 const WORDS:Record<Kind,string>={who:'Who it is',mind:'What it keeps in mind',knowledge:''};
 const titleOf=(e:{name:string;kind:Kind})=>e.kind==='knowledge'?e.name:WORDS[e.kind];
 const iconOf=(e:{name:string;kind:Kind}):UiIconName=>e.kind==='who'?'smile':e.kind==='mind'?'brain':/\.(csv|json)$/i.test(e.name)?'database':'file';
 const kb=(n:number)=>n<1024?`${n} B`:`${Math.max(1,Math.round(n/1024))} KB`;
-const SAY:Record<string,string>={changed:'This file changed while you were writing. Your text is kept.',too_large:'Files up to 1 MB can be saved.',name_taken:'A file with this name is already there.',invalid_name:'Use a name ending in .md, .txt, .csv or .json (letters, numbers, spaces, - _ . ( )).',not_found:'This file is no longer there.',too_many:'This agent already has 200 files.',forbidden:'Only the owner changes these files.'};
+const SAY:Record<string,string>={changed:'This file changed while you were writing. Your text is kept.',too_large:'Text files up to 1 MB and PDFs up to 10 MB can be added.',not_pdf:'This file is not a PDF.',read_only:'A PDF is read here, not changed.',name_taken:'A file with this name is already there.',invalid_name:'Use a name ending in .md, .txt, .csv, .json or .pdf (letters, numbers, spaces, - _ . ( )).',not_found:'This file is no longer there.',too_many:'This agent already has 200 files.',forbidden:'Only the owner changes these files.'};
 const say=(code?:string)=>SAY[code??'']??'Nothing was saved. Try again.';
 
 /**
@@ -55,7 +57,7 @@ export function AgentFiles({client,agentId,name,onDone,onPersonality}:{client:Se
   }catch{setState('error');setProblem(say());return false;}
  }
  async function flush(){if(timer.current){clearTimeout(timer.current);timer.current=null;const {open:f,draft:d}=latest.current;if(f&&d!==f.content)await save(d,f);}}
- function edit(text:string){setDraft(text);if(!open||state==='changed')return;if(timer.current)clearTimeout(timer.current);timer.current=setTimeout(()=>{timer.current=null;const {open:f,draft:d}=latest.current;if(f&&d!==f.content)void save(d,f);},900);}
+ function edit(text:string){if(open?.readOnly)return;setDraft(text);if(!open||state==='changed')return;if(timer.current)clearTimeout(timer.current);timer.current=setTimeout(()=>{timer.current=null;const {open:f,draft:d}=latest.current;if(f&&d!==f.content)void save(d,f);},900);}
  async function loadLatest(keepMine:boolean){
   if(!open)return;const mine=draft;
   const r=await req('GET',libraryPath(agentId,'/file',{name:open.name}));if(r.status!==200){setProblem(say());return;}
@@ -76,8 +78,10 @@ export function AgentFiles({client,agentId,name,onDone,onPersonality}:{client:Se
  async function addFiles(items:File[]){
   for(const file of items.slice(0,20)){
    if(!validFileName(file.name)||['PERSONALITY.md','MEMORY.md'].includes(file.name)){setProblem(`${file.name}: ${SAY.invalid_name}`);continue;}
-   if(file.size>LIBRARY_BYTES){setProblem(`${file.name} is ${kb(file.size)}. Files up to 1 MB can be added.`);continue;}
-   const r=await req('POST',libraryPath(agentId,'/file'),{name:file.name,content:await file.text()});
+   const pdf=isPdf(file.name);
+   if(file.size>(pdf?PDF_BYTES:LIBRARY_BYTES)){setProblem(`${file.name} is ${kb(file.size)}. ${pdf?'PDFs up to 10 MB':'Text files up to 1 MB'} can be added.`);continue;}
+   // KNOW-INDEX-01: a PDF is kept as it is; its text is read with Girru's own reader.
+   const r=await req('POST',libraryPath(agentId,'/file'),{name:file.name,content:pdf?await pdfBase64(file):await file.text()});
    if(r.status!==201){setProblem(`${file.name}: ${say((r.body as {code?:string})?.code)}`);continue;}
    if((r.body as {redacted?:boolean}).redacted)setProblem(`${file.name}: values that looked like passwords or keys were hidden.`);
    onDone(`${file.name} added`);
@@ -94,7 +98,7 @@ export function AgentFiles({client,agentId,name,onDone,onPersonality}:{client:Se
  const always=list.files.filter(f=>f.kind!=='knowledge'),knowledge=list.files.filter(f=>f.kind==='knowledge');
  const row=(e:Entry)=><button type="button" role="option" key={e.name} aria-selected={open?.name===e.name} className="af-row" onClick={()=>void pick(e.name)} onContextMenu={(ev:ReactMouseEvent)=>{ev.preventDefault();menu.at(ev,items(e));}} onKeyDown={ev=>{if((ev.key==='Delete'||ev.key==='Backspace')&&e.kind==='knowledge'){ev.preventDefault();void remove(e);}}}>
   <span className={`af-tile af-${e.kind}${e.kind==='knowledge'&&!e.read?' af-off':''}`}><UiIcon name={iconOf(e)} size={13}/></span>
-  <span className="af-row-text"><span>{titleOf(e)}</span><small>{e.kind==='who'?'PERSONALITY.md · part from Personality':e.kind==='mind'?'MEMORY.md · its own notes':`${e.read?'Read when it answers':'Not read (kept only)'} · ${kb(e.size)}`}</small></span></button>;
+  <span className="af-row-text"><span>{titleOf(e)}</span><small>{e.kind==='who'?'PERSONALITY.md · part from Personality':e.kind==='mind'?'MEMORY.md · its own notes':`${e.read?'Read when it answers':'Found when it helps'}${isPdf(e.name)?' · PDF':''} · ${kb(e.size)}`}</small></span></button>;
  return <section className={`ag-part af-part${dropping?' af-dropping':''}`} aria-label="Files" onDragOver={e=>{if([...e.dataTransfer.types].includes('Files')){e.preventDefault();setDropping(true);}}} onDragLeave={e=>{if(!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node))setDropping(false);}} onDrop={drop}>
   <div className="af-grid">
    <div className="af-list">
@@ -106,7 +110,7 @@ export function AgentFiles({client,agentId,name,onDone,onPersonality}:{client:Se
      {list.removed.length>0&&<button type="button" className="af-row af-removed" aria-expanded={showRemoved} onClick={()=>setShowRemoved(v=>!v)}><span className="af-tile af-off"><UiIcon name="trash" size={13}/></span><span className="af-row-text"><span>Removed files</span><small>{list.removed.length} · restore within 30 days</small></span></button>}
      {showRemoved&&list.removed.map(x=><div key={x.id} className="af-removed-row"><span>{x.name}</span><button type="button" onClick={()=>void restore(x)}>Restore</button></div>)}
     </div>
-    <p className="af-drop">Drop files here to add them to Knowledge<br/>Text files: .md .txt .csv .json, up to 1 MB</p>
+    <p className="af-drop">Drop files here to add them to Knowledge<br/>Text files (.md .txt .csv .json) up to 1 MB, PDFs up to 10 MB</p>
    </div>
    <div className="af-doc">
     {problem&&<p className="ag-alert" role="alert">{problem}<button type="button" className="link-button" onClick={()=>setProblem('')}>Close</button></p>}
@@ -118,8 +122,10 @@ export function AgentFiles({client,agentId,name,onDone,onPersonality}:{client:Se
      {state==='changed'&&<p className="ag-alert af-changed" role="alert"><UiIcon name="alert" size={14}/>{SAY.changed}<button type="button" onClick={()=>void loadLatest(false)}>Load latest</button><button type="button" onClick={()=>void loadLatest(true)}>Keep mine</button></p>}
      {open.kind==='who'&&open.managed&&<details className="af-managed"><summary><UiIcon name="smile" size={14}/><b>Written by Personality</b><small>Show the settings it wrote</small></summary>{onPersonality&&<button type="button" className="link-button" onClick={onPersonality}>Change it in Personality</button>}<pre>{open.managed}</pre></details>}
      {open.kind==='mind'&&<NotesOutsideChip client={client} agentId={agentId} onDone={onDone} onSettled={()=>void pick('MEMORY.md')}/>}
+     {open.unreadable&&<p className="ag-alert" role="status"><UiIcon name="alert" size={14}/>{PDF_UNREADABLE[open.unreadable]??'This PDF cannot be read.'} Nothing is guessed from it.</p>}
+     {open.readOnly&&!open.unreadable&&<p className="af-note"><UiIcon name="file" size={14}/>The text of this PDF, read only.{open.read?'':' It finds the part that answers a question and says which page.'}</p>}
      {open.redacted&&<p className="af-note"><UiIcon name="lock" size={14}/>Values that looked like passwords or keys are hidden in this file.</p>}
-     <DocumentEditor key={open.name+(open.hash??'')} inline title={`${name} · ${titleOf(open)}`} files={[{id:open.name,name:open.name,content:draft}]} maxLength={open.kind==='mind'?32768:LIBRARY_BYTES} onChange={(_,text)=>edit(text)} onClose={()=>{}}/>
+     <DocumentEditor key={open.name+(open.hash??'')} inline title={`${name} · ${titleOf(open)}`} files={[{id:open.name,name:open.name,content:draft,...(open.readOnly?{readOnly:true}:{})}]} maxLength={open.kind==='mind'?32768:LIBRARY_BYTES} onChange={(_,text)=>edit(text)} onClose={()=>{}}/>
      <p className="af-status" role="status">{state==='saving'?'Saving…':state==='saved'?(open.kind==='who'&&open.version?`Saved as version ${open.version} of its personality · ⌘Z undoes`:'Saved · ⌘Z undoes'):state==='error'?'Not saved':' '}{open.kind==='who'&&open.managed?<span>The part written by Personality is not saved from here</span>:null}</p>
     </>:<div className="ag-empty"><UiIcon name="file" size={28}/><p>Select a file to read or change it.</p></div>}
    </div>
@@ -133,17 +139,17 @@ export function AgentFiles({client,agentId,name,onDone,onPersonality}:{client:Se
 function AddFileSheet({onClose,onAdd}:{onClose:()=>void;onAdd:(file:{name:string;content:string;files:File[]}|{name:string;content?:undefined;files:File[]},read:boolean)=>void}){
  const [how,setHow]=useState<'new'|'computer'>('new'),[name,setName]=useState('notes.md'),[read,setRead]=useState(true),[picked,setPicked]=useState<File[]>([]);
  const pickRef=useRef<HTMLInputElement>(null);
- const ok=how==='new'?validFileName(name)&&!['PERSONALITY.md','MEMORY.md'].includes(name):picked.length>0;
+ const ok=how==='new'?validFileName(name)&&!isPdf(name)&&!['PERSONALITY.md','MEMORY.md'].includes(name):picked.length>0;
  return <Sheet title="A file for this agent to read" onClose={onClose} actions={<><button type="button" onClick={onClose}>Cancel</button><button type="button" className="primary" disabled={!ok} onClick={()=>how==='new'?onAdd({name:name.trim(),content:'',files:[]},read):onAdd({name:'',files:picked},read)}>Add file</button></>}>
   <div className="sa-sheet">
    <div className="sa-starts af-starts" role="radiogroup" aria-label="Where it comes from">
     <button type="button" role="radio" aria-checked={how==='new'} className="sa-start" onClick={()=>setHow('new')}><UiIcon name="file" size={16}/><b>New empty file</b><small>Write it here</small></button>
     <button type="button" role="radio" aria-checked={how==='computer'} className="sa-start" onClick={()=>{setHow('computer');pickRef.current?.click();}}><UiIcon name="download" size={16}/><b>From this computer…</b><small>{picked.length?picked.map(f=>f.name).join(', '):'Pick one or more'}</small></button>
    </div>
-   <input ref={pickRef} type="file" multiple accept=".md,.txt,.csv,.json,text/plain,text/markdown,text/csv,application/json" hidden onChange={e=>setPicked([...(e.target.files??[])])}/>
+   <input ref={pickRef} type="file" multiple accept=".md,.txt,.csv,.json,.pdf,text/plain,text/markdown,text/csv,application/json,application/pdf" hidden onChange={e=>setPicked([...(e.target.files??[])])}/>
    {how==='new'&&<label className="ag-field">Name<input value={name} maxLength={82} onChange={e=>setName(e.target.value)}/></label>}
    {how==='new'&&<label className="sa-tool"><input type="checkbox" checked={read} onChange={e=>setRead(e.target.checked)}/><span>It reads this file when it answers</span></label>}
-   <p className="ag-muted">Text files only (.md .txt .csv .json), up to 1 MB each. Values that look like passwords or keys are hidden before it is saved.</p>
+   <p className="ag-muted">Text files (.md .txt .csv .json) up to 1 MB, PDFs up to 10 MB. Values that look like passwords or keys are hidden before an agent reads them.</p>
   </div>
  </Sheet>;
 }

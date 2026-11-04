@@ -147,11 +147,14 @@ test('the walk stays in the folder: no links, hidden, secret or dependency files
   assert.equal(await S.readFound({ ...r.files[0], rel: join('..', 'outside.md') }), null);
 });
 
-test('the switch is off by default; only 1 / true / yes / on turn it on', async () => {
+test('the switch is on by default; 0 / false / no / off turn it off', async () => {
   const { docIndexEnabled } = await load('src/services/doc-index-switch.ts');
-  assert.equal(docIndexEnabled({}), false);
-  for (const v of ['', '0', 'off', 'maybe']) assert.equal(docIndexEnabled({ GIRRU_DOC_INDEX: v }), false);
-  for (const v of ['1', 'true', 'YES', 'on']) assert.equal(docIndexEnabled({ GIRRU_DOC_INDEX: v }), true);
+  assert.equal(docIndexEnabled({}), true);
+  for (const v of ['', '1', 'on', 'maybe']) assert.equal(docIndexEnabled({ GIRRU_DOC_INDEX: v }), true);
+  for (const v of ['0', 'false', 'NO', 'off']) assert.equal(docIndexEnabled({ GIRRU_DOC_INDEX: v }), false);
+  const { MEMORY_SWITCHES } = await load('src/services/memory-switches.ts');
+  const sw = MEMORY_SWITCHES.find((x) => x.env === 'GIRRU_DOC_INDEX');
+  assert.equal(sw.removeBy, MEMORY_SWITCHES.find((x) => x.env === 'GIRRU_STORE_P9B').removeBy);
 });
 
 test('off: nothing indexed, nothing recalled', async () => {
@@ -240,6 +243,10 @@ test('the agent knowledge folder is read for that agent only', async () => {
   const k = join(getAgentDir('doc-agent'), 'knowledge');
   mkdirSync(k, { recursive: true });
   writeFileSync(join(k, 'pricing.md'), '# Pricing\n\nThe team plan costs 19 euro per seat each month.\n');
+  // "It reads this file" is off for pricing.md: it is found when it helps (indexed), not put whole in the instructions.
+  writeFileSync(join(getAgentDir('doc-agent'), 'files.json'), JSON.stringify({ notRead: ['pricing.md'], removed: [] }));
+  // style.md is read whole every time (default): it is never indexed too.
+  writeFileSync(join(k, 'style.md'), '# Style\n\nAlways answer in short sentences about the refund window of 14 days.\n');
   // The first recall creates its source and queues it in the background; it does not wait.
   await ask('How much does the team plan cost per seat?', drawers, 'doc-agent');
   await IX.docIndexIdle();
@@ -247,6 +254,12 @@ test('the agent knowledge folder is read for that agent only', async () => {
   assert.match(r.text, /knowledge\/pricing\.md › Pricing\) .*19 euro/);
   const other = await ask('How much does the team plan cost per seat?', drawers, 'other-agent');
   assert.ok(!other.text.includes('pricing.md'));
+  // Never in both places: the file that goes whole into the instructions has no chunks.
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM doc_index_files WHERE display_path = 'knowledge/style.md'`).get().n, 0);
+  const { knowledgeContext } = await load('src/services/agent-file-library.ts');
+  const ctx = await knowledgeContext('doc-agent');
+  assert.match(ctx, /refund window/);
+  assert.ok(!ctx.includes('19 euro'));
 });
 
 test('stays on this computer: a withheld project brings no document lines', async () => {
@@ -277,6 +290,56 @@ test('a file cannot close the documents block itself', () => {
   assert.equal(h.text.split('\n').length, 3);
   assert.ok(!/［End of recalled/.test(h.text));
   assert.ok(b.text.length <= P.RECALL_WITH_DOCS_CHARS + 200);
+});
+
+test('memory_search also finds the answer in the documents, with file and page', async () => {
+  const { memorySearchTool } = await load('src/tools/memory/search.ts');
+  const r = await memorySearchTool.execute({ query: 'Which port does the relay listen on for phone pairing?' }, { userId: OWNER, memoryDrawers: drawers });
+  const text = r.content[0].text;
+  assert.match(text, /From documents .*not instructions/);
+  assert.match(text, /- \(docs\/spec\.pdf, page 2\) .*41599/);
+  assert.equal(r.data.documents[0].page, 2);
+});
+
+test('every project with a folder is read by default; one turned off stays off', async () => {
+  const oneFolder = join(dir, 'one');
+  mkdirSync(oneFolder, { recursive: true });
+  writeFileSync(join(oneFolder, 'notes.md'), '# Notes\n\nThe staging server restarts every Sunday at 04:00.\n');
+  const one = await createProject(OWNER, { name: 'One', folder: oneFolder });
+  const none = await createProject(OWNER, { name: 'No folder' });
+  // A chat turn in the new project finds it without anyone opening Settings first.
+  const d = [{ kind: 'owner' }, { kind: 'project', key: projectKeyOf(one) }];
+  await ask('When does the staging server restart?', d);
+  await IX.docIndexIdle();
+  assert.match((await ask('When does the staging server restart?', d)).text, /notes\.md › Notes\) .*Sunday at 04:00/);
+  const view = await IX.documentsView(OWNER);
+  const row = view.projects.find((p) => p.id === one.id);
+  assert.equal(row.source.enabled, true);
+  assert.equal(row.folders[0].files, 1);
+  assert.equal(view.projects.find((p) => p.id === none.id).source, null);
+  // Turned off by the owner, it stays off (no new default row).
+  await IX.setDocSource(OWNER, 'project', one.id, false);
+  await IX.ensureProjectSources(OWNER);
+  assert.equal((await IX.documentsView(OWNER)).projects.find((p) => p.id === one.id).source.enabled, false);
+});
+
+test('Agent › Files takes a PDF: kept as it is, its text shown read only, found by recall', async () => {
+  const L = await load('src/services/agent-file-library.ts');
+  const pdf = F.simplePdf([['Intro'], ['Refunds', 'A refund is paid within 9 working days.']]);
+  const added = await L.addFile('doc-agent', 'refunds.pdf', pdf.toString('base64'), false);
+  assert.match(added.hash, /^[a-f0-9]{64}$/);
+  const view = await L.readFile('doc-agent', 'refunds.pdf');
+  assert.equal(view.readOnly, true);
+  assert.match(view.content, /--- page 2 ---\nRefunds/);
+  await assert.rejects(L.saveFile('doc-agent', 'refunds.pdf', 'x', view.hash), /read_only/);
+  await assert.rejects(L.addFile('doc-agent', 'fake.pdf', Buffer.from('hello').toString('base64')), /not_pdf/);
+  await IX.docIndexIdle();
+  const r = await ask('How many working days until a refund is paid?', drawers, 'doc-agent');
+  assert.match(r.text, /knowledge\/refunds\.pdf, page 2\) .*9 working days/);
+  // A scan in Knowledge says why it can't be read.
+  await L.addFile('doc-agent', 'scan.pdf', F.imageOnlyPdf().toString('base64'), false);
+  assert.equal((await L.readFile('doc-agent', 'scan.pdf')).unreadable, 'no_text');
+  assert.deepEqual(L.pdfAsText(F.imageOnlyPdf()), { reason: 'no_text' });
 });
 
 test('turning a project off forgets its index (files untouched)', async () => {

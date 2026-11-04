@@ -52,6 +52,7 @@ import { allowedMemoryDesktop, memoryDesktopRoute, memoryDesktopResponse } from 
 import { allowedTerminal, terminalPath, terminalRoute, terminalResponse, TerminalEventParser, TERMINAL_STREAM_MS } from './terminal-contract.js';
 import { allowedFooter, footerRoute, footerResponse } from './footer-contract.js';
 import { allowedMemoryHelper, memoryHelperRoute, memoryHelperResponse } from './memory-helper-contract.js';
+import { allowedDocIndex, docIndexResponse, docIndexRoute } from './doc-index-contract.js';
 import { allowedStoreSwitches, storeSwitchesResponse, storeSwitchesRoute } from './store-switches-contract.js';
 import { allowedBackups, backupsRoute, backupsResponse } from './backups-contract.js';
 import { allowedChartPrefs, chartPrefsRoute, chartPrefsResponse } from './chart-prefs-contract.js';
@@ -143,6 +144,7 @@ export function allowedRequest(method: string, path: string, body?: unknown): bo
   if (skillLibraryPath(path)) return allowedSkillLibrary(method,path,body);
   if (footerRoute(path)) return allowedFooter(method, path, body);
   if (memoryHelperRoute(path)) return allowedMemoryHelper(method, path, body);
+  if (docIndexRoute(path)) return allowedDocIndex(method, path, body);
   if (storeSwitchesRoute(path)) return allowedStoreSwitches(method, path, body);
   if (backupsRoute(path)) return allowedBackups(method, path, body);
   if (chartPrefsRoute(path)) return allowedChartPrefs(method, path, body);
@@ -250,6 +252,7 @@ function projectResponse(path: string, response: WireResponse): WireResponse {
   if (terminalRoute(path)) return { status: response.status, body: terminalResponse(path, response.status, response.body) };
   if (footerRoute(path)) return { status: response.status, body: footerResponse(response.status, response.body) };
   if (memoryHelperRoute(path)) return { status: response.status, body: memoryHelperResponse(path, response.status, response.body) };
+  if (docIndexRoute(path)) return { status: response.status, body: docIndexResponse(path, response.status, response.body) };
   if (storeSwitchesRoute(path)) return { status: response.status, body: storeSwitchesResponse(response.status, response.body) };
   if (backupsRoute(path)) return { status: response.status, body: backupsResponse(path, response.status, response.body) };
   if (chartPrefsRoute(path)) return { status: response.status, body: chartPrefsResponse(response.status, response.body) };
@@ -589,7 +592,7 @@ export class SessionClient {
     if ((conversationRoute(request.path) || chatSearchRoute(request.path) || chatExportRoute(request.path) || chatSecretsRoute(request.path)) && this.#state.user?.role === 'guest') throw new SessionFailure('blocked');
     if (request.path === CLEANUP_PATH && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if ((meetingsRoute(request.path) || marketRoute(request.path) || practiceRoute(request.path) || packRoute(request.path) || workspaceAppsRoute(request.path) || sourceCatalogueRoute(request.path) || appsCatalogueRoute(request.path) || storeRoute(request.path) || chatAddonsRoute(request.path) || request.path === '/api/chat/project-folders' || approvalRoute(request.path) || connectionsRoute(request.path) || libraryPath(request.path) || templatePath(request.path) || mcpImportPath(request.path) || channelRoute(request.path) || connectorRoute(request.path) || localImportRoute(request.path) || chatBoardRoute(request.path) || chatMemoryRoute(request.path)) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
-    if ((memoryDesktopRoute(request.path) || memoryPagesRoute(request.path) || memoryRecallRoute(request.path) || memoryBridgeRoute(request.path) || projectFilesRoute(request.path) || taskLinksRoute(request.path) || personRoute(request.path) || trustRoute(request.path) || codeOpenRoute(request.path) || discoveryRoute(request.path)) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
+    if ((memoryDesktopRoute(request.path) || memoryPagesRoute(request.path) || memoryRecallRoute(request.path) || memoryBridgeRoute(request.path) || projectFilesRoute(request.path) || taskLinksRoute(request.path) || personRoute(request.path) || trustRoute(request.path) || docIndexRoute(request.path) || codeOpenRoute(request.path) || discoveryRoute(request.path)) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if (terminalRoute(request.path) && (this.#state.user?.role !== 'owner' || terminalPath(request.path)?.kind === 'stream')) throw new SessionFailure('blocked');
     if (request.method === 'PUT' && !conversationRoute(request.path) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if (request.method === 'POST' && request.path.startsWith('/api/memory/') && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');

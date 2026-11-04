@@ -17,6 +17,7 @@
  * drawers that were not loaded and why (no access, archived, not open).
  */
 
+import path from 'node:path';
 import { all, columnExists, one, run, sql, tableExists, type Step } from '../../repositories/sql-steps.js';
 import { percentile } from './metrics.js';
 import type { TraceItem } from './pack.js';
@@ -229,13 +230,15 @@ async function view(row: TraceRow): Promise<TraceView> {
     .map((f) => [f.id, f])) : new Map<string, { id: string; text: string; updated_at: string }>();
   // KNOW-INDEX-01: a document chunk of this owner; gone when its file changed or was removed since.
   const docIds = items.filter((i) => i.kind === 'document' && ID.test(i.id)).map((i) => i.id);
-  const chunks = docIds.length ? new Map((await sql().read(all<{ id: string; content: string }>(
-    `SELECT id, content FROM doc_index_chunks WHERE owner_id = ? AND id IN (${docIds.map(() => '?').join(', ')})`, row.user_id, ...docIds)).catch(() => []))
-    .map((c) => [c.id, c])) : new Map<string, { id: string; content: string }>();
+  const chunks = docIds.length ? new Map((await sql().read(all<{ id: string; content: string; root: string; rel_path: string }>(
+    `SELECT c.id, c.content, f.root, f.rel_path FROM doc_index_chunks c JOIN doc_index_files f ON f.id = c.file_id
+      WHERE c.owner_id = ? AND c.id IN (${docIds.map(() => '?').join(', ')})`, row.user_id, ...docIds)).catch(() => []))
+    .map((c) => [c.id, c])) : new Map<string, { id: string; content: string; root: string; rel_path: string }>();
   const out: TraceView['items'] = items.map((i) => {
     if (i.kind === 'document') {
       const c = chunks.get(i.id);
-      return c ? { ...i, preview: oneLine(c.content, 300), state: 'active' } : { ...i, state: 'changed' };
+      // The file on this computer (the owner's own folder), so the chat can open it or show it in Finder.
+      return c ? { ...i, preview: oneLine(c.content, 300), state: 'active', ...(i.cite ? { cite: { ...i.cite, path: path.join(c.root, c.rel_path) } } : {}) } : { ...i, state: 'changed' };
     }
     if (i.kind === 'fact') {
       const f = facts.get(i.id);

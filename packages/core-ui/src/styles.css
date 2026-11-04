@@ -3781,3 +3781,26 @@ label.setup-kind { display:flex; align-items:center; justify-content:flex-start;
 .app-shell .phone-term-sheet-actions button { block-size:50px; border-radius:12px; border:1px solid color-mix(in srgb, var(--term-fg) 22%, transparent); background:transparent; color:inherit; font:inherit; font-size:16px; font-weight:600; }
 .app-shell .phone-term-sheet-actions .primary { background:var(--accent); border-color:var(--accent); color:#fff; }
 .app-shell .phone-term-sheet small { text-align:center; font-size:13px; opacity:.7; }
+
+/* KNOW-INDEX-01 (board K1): Settings › Memory › Documents; a reply's documents show in its details. */
+.doc-list { list-style:none; margin:0; padding:0; display:grid; }
+.doc-row { display:flex; align-items:center; gap:10px; padding:6px 4px; border-block-end:1px solid var(--border); }
+.doc-row:hover { background:var(--row-hover); }
+.doc-row-main, .app-shell .doc-row button.doc-row-main { flex:1; min-inline-size:0; min-block-size:0; display:flex; align-items:center; justify-content:flex-start; gap:10px; padding:2px 0; border:0; border-radius:0; box-shadow:none; background:transparent; color:inherit; text-align:start; font:inherit; cursor:pointer; }
+.app-shell .doc-row button.doc-row-main:hover, .app-shell .doc-row button.doc-row-main:active { background:transparent; box-shadow:none; }
+.app-shell .doc-row button.ag-switch { flex:none; position:relative; inline-size:34px; min-inline-size:34px; block-size:20px; min-block-size:20px; padding:0; border:0; border-radius:10px; box-shadow:none; background:var(--subtle); }
+.app-shell .doc-row .ag-switch i { position:absolute; inset-block-start:2px; inset-inline-start:2px; inline-size:16px; block-size:16px; border-radius:50%; background:#fff; box-shadow:0 1px 2px #0004; transition:inset-inline-start .15s; }
+.app-shell .doc-row button.ag-switch[aria-checked="true"] { background:var(--accent); }
+.app-shell .doc-row .ag-switch[aria-checked="true"] i { inset-inline-start:16px; }
+.app-shell .doc-row button.ag-switch:disabled { opacity:.45; }
+.doc-row-main:disabled { cursor:default; opacity:.7; }
+.doc-row-static { cursor:default; }
+.doc-row-text { display:grid; gap:1px; min-inline-size:0; }
+.doc-row-name { display:flex; align-items:center; gap:8px; min-inline-size:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.doc-row-text .fine-print { display:flex; align-items:center; gap:5px; margin:0; }
+.doc-badge { padding:0 7px; border-radius:999px; font-size:10.5px; line-height:17px; background:var(--mem-link-bg); color:var(--mem-link); white-space:nowrap; }
+.doc-badge[data-tone="warn"] { background:var(--mem-warn-bg); color:var(--mem-warn); }
+.doc-person { inline-size:20px; block-size:20px; border-radius:50%; display:grid; place-items:center; background:var(--subtle); color:var(--control); flex:none; }
+.doc-sheet { display:grid; gap:8px; min-inline-size:0; }
+.doc-sheet .fine-print { overflow-wrap:anywhere; }
+.recall-why[data-why="document"] { background:var(--mem-link-bg); color:var(--mem-link); }

@@ -492,6 +492,7 @@ switch covers.
 | `GIRRU_STORE_P9` | Memory hardening, privacy and health | 2027-01-31 |
 | `GIRRU_STORE_P9B` | The memory quality engine | 2027-01-31 |
 | `GIRRU_MEMORY_HELPER` | The memory helper (local embedding model) installs itself | 2027-01-31 |
+| `GIRRU_DOC_INDEX` | Document memory: project and knowledge files (.md, .txt, .pdf) found by recall with file and page | 2027-01-31 |
 
 After that date (one release after they went on) the off path is removed from
 the code; the start-up log warns about a switch past its date.
@@ -527,6 +528,8 @@ What start-up does for each switch:
 | `GIRRU_STORE_P9` | Migration 179 (always, with or without the switch) adds an index on the drawer of each memory, and migration 180 adds the empty `memory_health_events` table; nothing is copied. With the switch on, a nightly read-only memory doctor job is added for each owner. With the switch on, recall keeps an in-memory index (never on disk), each new backup is restored into a scratch folder and checked before it is signed, and each forget is written to `forget-ledger.jsonl` in the data folder (ids and keyed hashes only), which a restore keeps and applies again on the next start. "Stays on this computer" is enforced (People on by default), so an online model or coding app no longer gets People memories; turning People's switch off restores the earlier behaviour | Everything; with the switch off the ledger file stays, and a restore still keeps it and applies it again |
 | `GIRRU_STORE_P9B` | Migration 181 adds `memory_trust`, `memory_trust_sources` and `memory_open_questions` (always, empty). With the switch on, new memories get a trust record and details are added in the background; older memories are not rewritten | Everything |
 | `GIRRU_MEMORY_HELPER` | A background job (never blocking start-up) starts the local runtime if it is installed, downloads the embedding model (about 640 MB) and then re-computes memories saved with the offline fallback. Its state is in `memory-helper.json` in the data folder | Everything; the offline fallback stays available |
+
+| `GIRRU_DOC_INDEX` | Migration 184 adds `doc_index_sources`, `doc_index_files` and `doc_index_chunks` (always, empty). With the switch on, every project with a folder and each agent's Knowledge folder are read in the background (a 20-minute job looks again); files stay where they are, only their text pieces and vectors are kept. Turning a project off forgets its index | Everything; the index is built again from the files |
 
 Migration 182 (always) records the file Girru is about to write for each project's brief, so a crash during the write is not mistaken for an outside edit; a project rename now reaches the brief file.
 

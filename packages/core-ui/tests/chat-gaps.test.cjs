@@ -266,7 +266,7 @@ test('CH3 + CH8: chips inside the box, a red chip per file that cannot be read; 
   const view = src('ChatView.tsx'), css = src('styles.css');
   assert.ok(view.indexOf('className="chat-attachments"') > view.indexOf('<form className="chat-composer"'), 'files sit inside the box');
   assert.match(view, /className="attach-chip bad" role="alert"/);
-  assert.match(view, /const errors = files\.map\(f => controller\.attach\(\[f\]\)\)/);
+  assert.match(view, /const errors = \[\.\.\.pdfErrors, \.\.\.files\.map\(f => controller\.attach\(\[f\]\)\)/);
   assert.doesNotMatch(view, /className="fine-print">Uses your signed-in coding app/);
   assert.match(view, /<section className="git-rows"/);
   assert.match(css, /\.app-shell \.chat-composer \.round-button \{ inline-size:30px; block-size:30px;/);
