@@ -130,6 +130,10 @@ class Aborted extends Error {}
  * last step) or rejects on a model/transport failure; resolves early with
  * `aborted: true` when the signal fires.
  */
+/** Sent once when the model ended with no text (after tools, or on its first answer). */
+export const EMPTY_ANSWER_NUDGE = 'Reply to me now in one or two short sentences, using the tool results above.';
+export const EMPTY_ANSWER_NUDGE_FIRST = 'Reply to me now in one or two short sentences.';
+
 export async function runOllamaAgentLoop(o: OllamaLoopOptions): Promise<{ steps: number; answer: string; aborted: boolean }> {
   const fetchImpl = o.fetchImpl ?? fetch;
   const now = o.now ?? Date.now;
@@ -139,6 +143,7 @@ export async function runOllamaAgentLoop(o: OllamaLoopOptions): Promise<{ steps:
   let step = 0;
   let answer = '';
   let callSeq = 0;
+  let nudged = false;
   try {
     while (true) {
       if (o.signal.aborted) throw new Aborted();
@@ -147,6 +152,14 @@ export async function runOllamaAgentLoop(o: OllamaLoopOptions): Promise<{ steps:
       for (const text of currentChatRun()?.takeSteers?.() ?? []) messages.push({ role: 'user', content: text });
       o.beforeStep?.(messages as { role: string; content: unknown }[]);
       const { content, thinking, calls: asked } = await streamOne();
+      // A small local model sometimes ends with no text at all: right after its tools (seen on
+      // qwen3:4b after memory_save) or after thinking only. Ask once for the short answer, so the
+      // owner never gets an empty reply; a second empty answer stays as it is.
+      if (!asked.length && !content.trim() && !nudged) {
+        nudged = true;
+        messages.push({ role: 'assistant', content: '' }, { role: 'user', content: step > 1 ? EMPTY_ANSWER_NUDGE : EMPTY_ANSWER_NUDGE_FIRST });
+        continue;
+      }
       if (!asked.length) { answer = content; break; }
       const calls = o.callCap ? planCalls(asked, o.callCap).run : asked;
       messages.push({ role: 'assistant', content, ...(thinking ? { thinking } : {}), tool_calls: calls.map((c) => ({ function: { name: c.name, arguments: c.args } })) });
