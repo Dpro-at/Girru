@@ -106,7 +106,8 @@ test('security surfaces remain read-only and make no identity or connectivity cl
 function assertEntryBinding(source) {
   assert.match(source, /if \(enabled === false\) return undefined;/);
   assert.match(source, /const origin = browser\.location\.origin;/);
-  assert.match(source, /if \(enabled !== true \|\| !isAppOrigin\(origin\)\) \{\s*throw new Error\('Live candidate requires its loopback application origin'\);\s*\}/);
+  // The loopback app origin, or the phone app's own origin with its shell object (session.ts › isShellOrigin).
+  assert.match(source, /if \(enabled !== true \|\| \(!isAppOrigin\(origin\) && !isShellOrigin\(origin\)\)\) \{\s*throw new Error\('Live candidate requires its loopback application origin'\);\s*\}/);
   assert.match(source, /return new SessionClient\(\{ live: createSameOriginTransport\(origin, browser\.fetch\.bind\(browser\)\) \}\);/);
   assert.doesNotMatch(source, /\bfetch\s*(?:\?\.)?\s*\(|\bfetch\s*\.\s*(?:call|apply)\s*\(/);
   // Only the declared fetch capability and this exact binding may mention fetch.
@@ -125,6 +126,9 @@ test('entry source exception rejects direct calls, alternate origins, missing gu
     source + '\nconst send = browser.fetch;',
     source.replace('browser.fetch.bind(browser)', 'browser.fetch.bind(window)'),
     source.replace('!isAppOrigin(origin)', 'false'),
+    source.replace('!isShellOrigin(origin)', 'false'),
+    source.replace(' && !isShellOrigin(origin)', ''),
+    source.replace('!isAppOrigin(origin) && !isShellOrigin(origin)', '!isAppOrigin(origin) || !isShellOrigin(origin)'),
     source.replace('createSameOriginTransport(origin,', 'createSameOriginTransport(String(browser.location),'),
     source.replace('enabled !== true || ', ''),
     source.replace('throw new Error', 'return new Error'),
