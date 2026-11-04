@@ -72,4 +72,8 @@ test('the editor bridge says Code is missing, then opens it once the Store has i
   assert.equal((await ipc.handlers.get(CHANNELS.status)(event)).runtime, 'store');
   const opened = await ipc.handlers.get(CHANNELS.select)(event, { mode: 'code', top: 48, bottom: 32 });
   assert.equal(opened.mode, 'code'); assert.equal(opened.available, true);
+  // Removed from the Store while its editor runs: the editor stops and Code reads as missing again.
+  fs.rmSync(path.join(runtimes, 'code'), { recursive: true, force: true });
+  const after = await ipc.handlers.get(CHANNELS.status)(event);
+  assert.equal(after.runtime, 'missing'); assert.equal(after.available, false); assert.equal(after.mode, 'chat');
 });

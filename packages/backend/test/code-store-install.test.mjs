@@ -171,7 +171,7 @@ test('update: a newer Store version shows as the update and replaces the old fol
   const j = await install();
   assert.equal(j.ok, true, j.message);
   assert.equal(current().version, '1.1.0');
-  assert.ok(!existsSync(join(runtimes, 'code', old)), 'the old version is removed');
+  assert.ok(existsSync(join(runtimes, 'code', old)), 'the replaced version stays while an editor may still use it');
   assert.equal((await codeRuntimeStatus()).update, null);
 });
 
@@ -297,9 +297,11 @@ test('an archive made by the release packer installs (its .bin links left out, o
   put('editor/node_modules/tool/cli.js', '#!/usr/bin/env node\n');
   mkdirSync(join(staged, 'editor/node_modules/.bin'), { recursive: true });
   symlinkSync('../tool/cli.js', join(staged, 'editor/node_modules/.bin/tool'));
+  put('editor/lib/libx.1.dylib', 'native');
+  symlinkSync('libx.1.dylib', join(staged, 'editor/lib/libx.dylib'));
   const out = join(dir, 'packed');
   const info = await packCodeRuntime({ runtime: staged, version: '3.0.0', platform: runtimePlatform(), out });
-  assert.equal(info.skippedLinks, 1);
+  assert.equal(info.skippedLinks, 1); assert.equal(info.copiedLinks, 1);
   const bytes = readFileSync(join(out, info.name));
   assert.equal(bytes.length, info.size); assert.equal(sha(bytes), info.sha256);
   assert.deepEqual(JSON.parse(readFileSync(join(out, info.name.replace('.tar.gz', '.json')), 'utf8')).sha256, info.sha256);
@@ -308,11 +310,14 @@ test('an archive made by the release packer installs (its .bin links left out, o
   assert.equal(j.ok, true, j.message);
   const root = join(runtimes, 'code', current().dir);
   assert.equal(JSON.parse(readFileSync(join(root, 'nabu/runtime.json'), 'utf8')).version, '3.0.0');
+  assert.ok(readdirSync(join(runtimes, 'code')).filter((n) => /^\d/.test(n)).length <= 2, 'at most the current and the one it replaced');
   assert.ok(existsSync(join(root, `editor/extensions/${'long-extension-name-'.repeat(6)}/package.json`)));
   assert.ok(!existsSync(join(root, 'editor/node_modules/.bin/tool')));
+  const { lstatSync } = await import('node:fs');
+  assert.equal(readFileSync(join(root, 'editor/lib/libx.dylib'), 'utf8'), 'native'); assert.ok(!lstatSync(join(root, 'editor/lib/libx.dylib')).isSymbolicLink());
   assert.equal(statSync(join(root, 'editor/out/server-main.js')).size, '// server\n'.length * 2000);
   symlinkSync('/etc/hosts', join(staged, 'editor/hosts-link'));
-  await assert.rejects(packCodeRuntime({ runtime: staged, version: '3.0.1', platform: runtimePlatform(), out }), /link outside node_modules\/\.bin/);
+  await assert.rejects(packCodeRuntime({ runtime: staged, version: '3.0.1', platform: runtimePlatform(), out }), /link that is not a file inside it/);
 });
 
 

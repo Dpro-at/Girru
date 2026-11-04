@@ -91,11 +91,11 @@ export type LocalCatalogue=CatalogueSource&{limited:()=>string[];have:()=>Have;a
  * has it inside or it is installed (with the Store's newer version as its update), as
  * available when the Store has it for this computer, and as elsewhere when it has none.
  */
-function codeState(runtime:StoreRuntime|null):{state:StoreState;update:string|null}{
+function codeState(runtime:StoreRuntime|null):{state:StoreState;update:string|null;version?:string}{
  if(!codeStoreActive()||codeBundled())return {state:'included',update:null};
  const platform=runtimePlatform(),archive=runtime&&platform?runtime.archives[platform]:undefined,installed=installedCodeRuntime();
  // Added from the Store: "installed" (it opens like an app that comes with Girru, and it can be removed).
- if(installed)return {state:'installed',update:archive&&runtime!.version!==installed.version?runtime!.version:null};
+ if(installed)return {state:'installed',version:installed.version,update:archive&&runtime!.version!==installed.version?runtime!.version:null};
  return {state:archive?'available':'elsewhere',update:null};
 }
 
@@ -115,7 +115,7 @@ export async function readStore(ownerId:string,source:LocalCatalogue=localCatalo
  const {installed:registry,present}=source.have();
  const items:StoreEntry[]=index.items.map(x=>{
   const state:StoreState=x.id.startsWith('girru:')?'included':x.id.startsWith('registry:')?(registry.has(x.id)?'installed':'available'):x.id.startsWith('store:')?(registry.has(x.id)?'installed':source.addable?.().has(x.id)?'available':'elsewhere'):'elsewhere';
-  if(x.id===CODE_ITEM){const c=codeState(source.codeRuntime?.()??null);return {...x,state:c.state,present:c.state==='included'||c.state==='installed',update:c.update,hash:consentHash(x)};}
+  if(x.id===CODE_ITEM){const c=codeState(source.codeRuntime?.()??null);return {...x,...(c.version?{version:c.version}:{}),state:c.state,present:c.state==='included'||c.state==='installed',update:c.update,hash:consentHash(x)};}
   const update=updates.find(u=>'registry:'+u.extension_id===x.id)?.latest_version??null;
   return {...x,state,present:state==='included'||state==='installed'||present.has(x.id),update:state==='installed'?update:null,hash:consentHash(x)};
  });

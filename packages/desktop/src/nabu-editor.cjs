@@ -33,7 +33,17 @@ function installNabuEditor({ win, electron, getOrigin, runtimeRoot, resolveRunti
   // again whenever no editor is running (an update takes effect when the editor starts again).
   const lookup = () => createHost ? { root: runtimeRoot, source: 'test' } : resolveRuntime ? resolveRuntime() : (compatibleRuntime(runtimeRoot) ? { root: runtimeRoot, source: 'bundled' } : null);
   let found = lookup();
-  const refresh = () => { if (!host && !starting) found = lookup(); };
+  // A Code removed from the Store while its editor ran: stop that editor (the owner removed it in the Store,
+  // so the editor is not on screen) and report Code as missing.
+  const removed = () => !createHost && found?.source === 'store' && !fs.existsSync(path.join(found.root, 'nabu', 'runtime.json'));
+  const refresh = () => {
+    if (removed() && (host || starting) && !disposed) {
+      const old = host; host = null; starting = null; address = null; editorOrigin = null; hide();
+      if (view?.webContents && !view.webContents.isDestroyed()) { try { win.contentView.removeChildView(view); view.webContents.close(); } catch { /* already gone */ } }
+      view = null; void old?.stop().catch(() => {}); onLog('Editor stopped: Code was removed.');
+    }
+    if (!host && !starting) found = lookup();
+  };
   let pendingTarget = null, targetSequence = 0, pendingReview = null;
   let mode = 'chat', desired = 'chat', busy = false, error = null, top = 48, bottom = 32, right = 0;
   let view = null, host = null, starting = null, address = null, editorOrigin = null;

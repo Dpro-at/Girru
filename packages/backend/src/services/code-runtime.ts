@@ -12,7 +12,8 @@
  *   setting-up  unpack into a new folder (own tar reader: plain files and folders only,
  *               every path inside the folder, no links, size and count limits) and
  *               check it is a protocol-1 Code runtime
- *   adding      point `current.json` at the new folder (one rename) and remove older ones
+ *   adding      point `current.json` at the new folder (one rename); the folder it replaced
+ *               stays (a running editor may use it) until the next update
  *
  * The folder is Girru's per-computer app folder the desktop passes in
  * (GIRRU_APP_RUNTIMES_DIR), so every workspace shares one copy; the desktop bridge
@@ -135,7 +136,8 @@ async function installRuntime(job: AddJob, version: string, archive: RuntimeArch
   const root = codeRoot();
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });
   if (fs.lstatSync(root).isSymbolicLink()) throw new Error('the app folder is a link');
-  sweep(root, installedCodeRuntime(root)?.dir ?? null, true);
+  const previous = installedCodeRuntime(root)?.dir ?? null;
+  sweep(root, [], true);
   await enoughSpace(root, archive.size);
   const tag = randomBytes(4).toString('hex');
   const download = path.join(root, `.download-${tag}.tar.gz`);
@@ -161,7 +163,8 @@ async function installRuntime(job: AddJob, version: string, archive: RuntimeArch
     const tmp = path.join(root, `.current-${tag}.json`);
     fs.writeFileSync(tmp, JSON.stringify({ version, dir: name, sha256: archive.sha256, installedAt: new Date().toISOString() }), { mode: 0o600 });
     fs.renameSync(tmp, path.join(root, 'current.json'));
-    sweep(root, name, false);
+    // The version a running editor may still use stays until the next update.
+    sweep(root, [name, ...(previous ? [path.basename(previous)] : [])], false);
     Object.assign(job, { done: true, ok: true, restart: 'none', message: `Code ${version} is installed.` });
   } finally {
     fs.rmSync(download, { force: true });
@@ -169,13 +172,13 @@ async function installRuntime(job: AddJob, version: string, archive: RuntimeArch
   }
 }
 
-/** Remove leftovers: half-finished downloads always; older versions after a new one is current. */
-function sweep(root: string, keep: string | null, leftoversOnly: boolean) {
+/** Remove leftovers: half-finished downloads always; after an update, versions older than the one it replaced. */
+function sweep(root: string, keep: string[], leftoversOnly: boolean) {
   let names: string[] = [];
   try { names = fs.readdirSync(root); } catch { return; }
   for (const n of names) {
     const leftover = /^\.(download|incoming|current)-[a-f0-9]{8}/.test(n);
-    if (leftover || (!leftoversOnly && DIR_NAME.test(n) && n !== keep)) { try { fs.rmSync(path.join(root, n), { recursive: true, force: true }); } catch { /* in use (Windows): next time */ } }
+    if (leftover || (!leftoversOnly && DIR_NAME.test(n) && !keep.includes(n))) { try { fs.rmSync(path.join(root, n), { recursive: true, force: true }); } catch { /* in use (Windows): next time */ } }
   }
 }
 

@@ -6,7 +6,8 @@
  *
  *   - a gzip'd ustar archive whose root IS the runtime root (nabu/, editor/ …)
  *   - plain files and folders only: links inside node_modules/.bin are left out (Girru never
- *     runs them), any other link stops the pack
+ *     runs them); a link to a file inside the runtime (a versioned library such as
+ *     libx.dylib -> libx.1.dylib) is stored as a copy of that file; any other link stops the pack
  *   - nabu/runtime.json gains "version", so Girru can check it got the version it asked for
  *   - <name>.tar.gz plus <name>.json with its size and SHA-256 (for the Store's index)
  *
@@ -44,20 +45,27 @@ function paxPath(name) {
   return Buffer.from(`${len}${rest}`);
 }
 
-/** Every entry under root, folders first, sorted; links in .bin folders are skipped, any other link throws. */
+/** Every entry under root, folders first, sorted; links in .bin folders are skipped, links to a file inside root become copies, any other link throws. */
 function entries(root) {
-  const out = [], skipped = [];
+  const out = [], skipped = [], copied = [];
   const walk = rel => {
     for (const d of fs.readdirSync(path.join(root, rel), { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
       const r = rel ? `${rel}/${d.name}` : d.name;
-      if (d.isSymbolicLink()) { if (path.basename(rel) === '.bin') { skipped.push(r); continue; } throw Error(`Code runtime has a link outside node_modules/.bin: ${r}`); }
+      if (d.isSymbolicLink()) {
+        if (path.basename(rel) === '.bin') { skipped.push(r); continue; }
+        let target = null;
+        try { target = fs.realpathSync(path.join(root, ...r.split('/'))); } catch { /* broken link */ }
+        const inside = target && target.startsWith(root + path.sep) && fs.statSync(target).isFile();
+        if (!inside) throw Error(`Code runtime has a link that is not a file inside it: ${r}`);
+        out.push({ rel: r, dir: false, from: target }); copied.push(r); continue;
+      }
       if (d.isDirectory()) { out.push({ rel: r, dir: true }); walk(r); }
       else if (d.isFile()) out.push({ rel: r, dir: false });
       else throw Error(`Code runtime has a special file: ${r}`);
     }
   };
   walk('');
-  return { list: out, skipped };
+  return { list: out, skipped, copied };
 }
 
 async function packCodeRuntime({ runtime, version, platform, out }) {
@@ -68,7 +76,7 @@ async function packCodeRuntime({ runtime, version, platform, out }) {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'nabu', 'runtime.json'), 'utf8'));
   if (manifest.protocolVersion !== 1 || manifest.entry !== 'dpro/editor-runtime.mjs') throw Error('Code runtime is not protocol 1');
   const runtimeJson = Buffer.from(JSON.stringify({ ...manifest, version }, null, 2) + '\n');
-  const { list, skipped } = entries(root);
+  const { list, skipped, copied } = entries(root);
   fs.mkdirSync(out, { recursive: true });
   const name = `girru-code-${version}-${platform}.tar.gz`;
   const file = path.join(out, name);
@@ -90,7 +98,7 @@ async function packCodeRuntime({ runtime, version, platform, out }) {
   };
   for (const e of list) {
     if (e.dir) { await entryHeader(`${e.rel}/`, 0, '5', 0o755); continue; }
-    const full = path.join(root, ...e.rel.split('/'));
+    const full = e.from || path.join(root, ...e.rel.split('/'));
     const mode = fs.statSync(full).mode & 0o111 ? 0o755 : 0o644;
     if (e.rel === 'nabu/runtime.json') { await entryHeader(e.rel, runtimeJson.length, '0', 0o644); await write(runtimeJson); await write(padding(runtimeJson.length)); continue; }
     const bytes = fs.statSync(full).size;
@@ -104,7 +112,7 @@ async function packCodeRuntime({ runtime, version, platform, out }) {
   gz.end();
   await once(sink, 'close');
   const sha256 = hash.digest('hex');
-  const info = { name, platform, version, size, sha256, files: list.filter(e => !e.dir).length, skippedLinks: skipped.length };
+  const info = { name, platform, version, size, sha256, files: list.filter(e => !e.dir).length, skippedLinks: skipped.length, copiedLinks: copied.length };
   fs.writeFileSync(path.join(out, name.replace(/\.tar\.gz$/, '.json')), JSON.stringify(info, null, 2) + '\n');
   return info;
 }
@@ -114,7 +122,7 @@ if (require.main === module) {
   const argv = process.argv.slice(2);
   for (let i = 0; i < argv.length; i += 2) args[argv[i].replace(/^--/, '')] = argv[i + 1];
   packCodeRuntime({ runtime: args.runtime, version: args.version, platform: args.platform, out: args.out })
-    .then(info => console.log(`${info.name}  ${info.size} bytes  sha256 ${info.sha256}  (${info.files} files, ${info.skippedLinks} .bin links left out)`))
+    .then(info => console.log(`${info.name}  ${info.size} bytes  sha256 ${info.sha256}  (${info.files} files, ${info.skippedLinks} .bin links left out, ${info.copiedLinks} file links stored as copies)`))
     .catch(error => { console.error(`Pack stopped: ${error.message}`); process.exitCode = 1; });
 }
 

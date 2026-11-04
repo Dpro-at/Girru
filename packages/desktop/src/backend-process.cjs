@@ -26,7 +26,9 @@ const newLaunchToken = () => randomBytes(32).toString('base64url');
 const PASS_THROUGH = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR', 'TEMP', 'TMP',
   'SystemRoot', 'SYSTEMROOT', 'windir', 'WINDIR', 'ComSpec', 'COMSPEC', 'PATHEXT', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'ProgramData', 'ProgramFiles',
   // Test runs of the app on a copy of the data: background work off, backups kept apart.
-  'AGENT_PLAYER_BACKGROUND', 'GIRRU_BACKUPS_DIR'];
+  'AGENT_PLAYER_BACKGROUND', 'GIRRU_BACKUPS_DIR',
+  // A test copy of the Girru Store (the backend accepts only https, or http on 127.0.0.1).
+  'GIRRU_STORE_URL'];
 
 function backendEnv({ base = process.env, dataDir, token, allowedOrigin, extra = {} }) {
   const env = {};
