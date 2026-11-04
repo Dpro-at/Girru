@@ -31,6 +31,9 @@
 import { ClaudeClient } from './claude-client.js';
 import { DEFAULT_OLLAMA_MODEL, OLLAMA_URL, ollamaThinkOption } from './ollama.js';
 import { resolveLocalModel } from './local-models.js';
+import { backgroundKeepAlive, backgroundSlot, chatModelInUse } from './local-scheduler.js';
+import { storeP2bEnabled } from '../services/store-p2b.js';
+import { keepAliveValue } from '../memory/context/budget.js';
 import { run, sql } from '../repositories/sql-steps.js';
 import {
   CostBudgetError,
@@ -183,6 +186,9 @@ export async function modelCall(ctx: ModelCallContext, req: ModelCallRequest): P
     return { ok: false, text: '', provider: 'ollama', model, paid: false, usage: null, costCents: 0, ...(refused ? { refused } : {}), error: 'local model skipped' };
   }
   const chat = !!req.messages?.length;
+  // STORE-MAP-01 P2b (LAT): background local work waits while a local reply runs, one job at a time,
+  // and keeps the chat model warm (P2b off: no wait, no keep_alive sent, as before).
+  const release = await backgroundSlot();
   try {
     const res = await fetch(`${OLLAMA_URL}/api/${chat ? 'chat' : 'generate'}`, {
       method: 'POST',
@@ -195,6 +201,7 @@ export async function modelCall(ctx: ModelCallContext, req: ModelCallRequest): P
         stream: false,
         ...ollamaThinkOption(),
         ...(req.temperature !== undefined ? { options: { temperature: req.temperature } } : {}),
+        ...(storeP2bEnabled() ? { keep_alive: backgroundKeepAlive(model, chatModelInUse() ?? DEFAULT_OLLAMA_MODEL, keepAliveValue()) } : {}),
       }),
       signal: AbortSignal.timeout(req.timeoutMs ?? 120_000),
     });
@@ -208,6 +215,8 @@ export async function modelCall(ctx: ModelCallContext, req: ModelCallRequest): P
     return { ok: true, text: typeof text === 'string' ? text : '', provider: 'ollama', model, paid: false, usage, costCents: 0, ...(refused ? { refused } : {}) };
   } catch (err) {
     return { ok: false, text: '', provider: 'ollama', model, paid: false, usage: null, costCents: 0, ...(refused ? { refused } : {}), error: (err as Error).message };
+  } finally {
+    release();
   }
 }
 

@@ -16,6 +16,7 @@
  * not local, whatever its name or a request says.
  */
 
+import { openAiLocalUrl } from '../llm/openai-local.js';
 import { isLoopbackUrl } from './embedding.js';
 import { OLLAMA_URL } from '../llm/ollama.js';
 import { localOnlyPlaces, placeOfDrawer } from './place-settings.js';
@@ -27,6 +28,8 @@ const OLLAMA_CLOUD_MODEL = /(^|[:-])cloud$/i;
 /** True only for a model that runs on this computer (`model` given: also that it is not a cloud model). */
 export function providerIsLocal(provider: string | null | undefined, model?: string | null): boolean {
   if (provider === 'lmstudio') return true;
+  // STORE-MAP-01 P2b: the generic OpenAI-compatible server is used only on a loopback address.
+  if (provider === 'openai-local') return !!openAiLocalUrl();
   if (provider === 'ollama') return isLoopbackUrl(OLLAMA_URL) && !(typeof model === 'string' && OLLAMA_CLOUD_MODEL.test(model.trim()));
   return false;
 }
