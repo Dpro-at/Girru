@@ -1,4 +1,5 @@
 import { discoveryFs, isolatedReadRegularFile } from '../services/discovery-fs.js';
+import { publicKeyInfo } from '../services/ssh-keys.js';
 /**
  * "Found on this computer" (DISCOVER-01, board M17): one scan finds what coding
  * agents left on this computer, grouped by project folder and kind, and hands
@@ -313,15 +314,13 @@ export async function sshHosts(home: string): Promise<Found[]> {
   let entries; try { entries = await discoveryFs.readdir(directory, { withFileTypes: true }); } catch { return found; }
   for (const entry of entries.filter(entry => entry.isFile() && !entry.isSymbolicLink() && entry.name.endsWith('.pub')).slice(0, 200)) {
     const publicFile = path.join(directory, entry.name), publicText = await readText(publicFile, 16 * 1024);
-    const match = publicText && /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)|sk-ssh-ed25519@openssh.com|sk-ecdsa-sha2-nistp256@openssh.com) ([A-Za-z0-9+/]+={0,2})(?:[ \t].*)?\r?\n?$/.exec(publicText.text);
-    if (!match) continue;
-    const bytes = Buffer.from(match[2], 'base64');
-    if (bytes.length < 20 || bytes.readUInt32BE(0) > bytes.length - 4 || bytes.subarray(4, 4 + bytes.readUInt32BE(0)).toString('ascii') !== match[1]) continue;
-    const fingerprint = 'SHA256:' + createHash('sha256').update(bytes).digest('base64').replace(/=+$/, '');
+    const info = publicText ? publicKeyInfo(publicText.text) : null;
+    if (!info) continue;
+    const fingerprint = info.fingerprint, [keyType, keyData] = info.line.split(' ');
     const privateName = entry.name.slice(0, -4), privateFile = path.join(directory, privateName);
     // Metadata only: never open, hash, copy or parse the private key.
     const privateExists = (await discoveryFs.lstat(privateFile).catch(() => null))?.isFile() === true;
-    found.push({ id: itemId('ssh', path.relative(home, publicFile)), kind: 'ssh', name: entry.name, from: `${homeRel(home, publicFile)} · ${fingerprint}${privateExists ? ` · private file ${privateName} (name only)` : ''}`, root: null, file: publicFile, hash: sha(`${match[1]} ${match[2]} ${privateExists}`), updatedAt: publicText!.mtime,
+    found.push({ id: itemId('ssh', path.relative(home, publicFile)), kind: 'ssh', name: entry.name, from: `${homeRel(home, publicFile)} · ${fingerprint}${privateExists ? ` · private file ${privateName} (name only)` : ''}`, root: null, file: publicFile, hash: sha(`${keyType} ${keyData} ${privateExists}`), updatedAt: publicText!.mtime,
       ssh: { alias: privateName, host: null, user: null, port: null, key: privateExists ? homeRel(home, privateFile) : null, identity: true } });
   }
   for (const entry of entries.filter(entry => entry.isFile() && !entry.isSymbolicLink() && /^id_(?:rsa|dsa|ecdsa|ed25519|ecdsa_sk|ed25519_sk)$/.test(entry.name)).slice(0, 200)) {
