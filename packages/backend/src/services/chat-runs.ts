@@ -415,7 +415,7 @@ export class ChatRunRegistry {
       const status: TurnStatus = run.error ? 'error' : run.stopping ? 'stopped' : 'complete';
       let durableStatus = status;
       try {
-        await this.persist(run.sessionId, { runId: run.id, content: run.answer, parts: run.parts, status, durationMs: this.now() - run.startedAt, agentId: input.agentId ?? null });
+        await this.persist(run.sessionId, { runId: run.id, content: run.answer, parts: run.parts, status, durationMs: this.now() - run.startedAt, agentId: input.agentId ?? null, ...(run.error ? { errorCode: run.error } : {}) });
         await input.onPersisted?.(status);
       } catch (err) {
         durableStatus = 'error';

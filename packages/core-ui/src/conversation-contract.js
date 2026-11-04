@@ -196,7 +196,7 @@ function message(x) {
   return { id: str(x.id, 64), role: x.role, content: x.content.slice(0, 1000000), parts,
     status: ['complete', 'stopped', 'error'].includes(x.status) ? x.status : 'complete',
     runId: validRunId(x.runId) ? x.runId : null, durationMs: num(x.durationMs) ?? null, createdAt: str(x.createdAt, 40),
-    ...(x.code === 'run_interrupted' ? { code: 'run_interrupted' } : {}),
+    ...(['run_interrupted', 'model_unavailable', 'local_model_missing', 'lmstudio_not_running', 'subscription_org_blocked'].includes(x.code) ? { code: x.code } : {}),
     ...(agentId(x.agentId) ? { agentId: x.agentId } : {}),
     ...(record(x.changes) && num(x.changes.files) ? { changes: { files: num(x.changes.files), undone: x.changes.undone === true, ...(Number.isSafeInteger(x.changes.added) && x.changes.added >= 0 && Number.isSafeInteger(x.changes.removed) && x.changes.removed >= 0 ? { added: x.changes.added, removed: x.changes.removed } : {}) } } : record(x.changes) && x.changes.unavailable === true ? { changes: { files: 0, undone: false, unavailable: true } } : {}) };
 }

@@ -517,7 +517,9 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
         const allTools=registry.getAll().map(t=>({name:t.name,description:t.description,input_schema:t.input_schema}));
         const onDemand=storeP2bEnabled()?new OnDemandTools(allTools,'large'):null;
         const toolIndex=onDemand?.index()??'';
-        const replyPrompt=subscriptionReplyPrompt(context+(toolIndex?`\n\n${toolIndex}`:'')+(systemPromptAppend?`\n\n${systemPromptAppend}`:''),history);
+        // CHAT-LIVE-01 (LW6): outside "Accept edits" the coding app's own file access is read-only; file changes go through Girru's edit/write (the owner approves each).
+        const fileNote=currentChatRun()?.chatMode!=='accept_edits'&&input.fileReadRoot?'Your own file access in this chat is read-only. To change a file in this folder, call the Girru tool edit (part of an existing file; read it first) or write (a whole file), loading it with tool_load first when it is not listed; the owner approves the change, then it is made in the real file. Do not say the change is impossible.':'';
+        const replyPrompt=subscriptionReplyPrompt(context+(toolIndex?`\n\n${toolIndex}`:'')+(systemPromptAppend?`\n\n${systemPromptAppend}`:'')+(fileNote?`\n\n${fileNote}`:''),history);
         {const run=currentChatRun();if(run)run.usage={model:subscriptionSource!,tokensIn:estimateTokens(replyPrompt)};}
         const answer=await subscriptionToolLoop({prompt:replyPrompt,signal:abort.signal,
           tools:onDemand?onDemand.definitions():allTools,

@@ -42,7 +42,9 @@ test('the plan panel shows sub-steps live and goes away for the next task', () =
   const plan = { id: 'p', name: 'plan_steps', input: JSON.stringify({ steps: [{ title: 'A', status: 'done' }] }), running: false, output: 'ok' };
   const done = { key: 'b', role: 'assistant', content: 'x', parts: [{ kind: 'tools', step: 1, calls: [plan] }], status: 'complete', runId: null, durationMs: 1, lastSeq: 0 };
   const next = { key: 'c', role: 'assistant', content: 'Node is 26', parts: [{ kind: 'text', text: 'Node is 26' }], status: 'complete', runId: null, durationMs: 1, lastSeq: 0 };
-  assert.match(renderToStaticMarkup(React.createElement(TaskList, { turns: [done] })), /1 of 1 done/);
+  assert.equal(renderToStaticMarkup(React.createElement(TaskList, { turns: [done] })), '', 'a finished plan leaves the box (the reply keeps its line)');
+  const left = { ...done, parts: [{ kind: 'tools', step: 1, calls: [{ ...plan, input: JSON.stringify({ steps: [{ title: 'A', status: 'done' }, { title: 'B', status: 'pending' }] }) }] }] };
+  assert.match(renderToStaticMarkup(React.createElement(TaskList, { turns: [left] })), /1 of 2 done/, 'a plan with steps left stays');
   assert.equal(renderToStaticMarkup(React.createElement(TaskList, { turns: [done, next] })), '', 'a finished plan does not stay for an unrelated reply');
 });
 
@@ -76,4 +78,15 @@ test('started sessions show with their live state and Open; a sub-session says w
   assert.match(html, /data-state="working".*Slogan.*Milo · Working.*Open/s);
   assert.match(html, /data-state="needs".*Logo.*Needs you/s);
   assert.match(renderToStaticMarkup(React.createElement(MomentsContext.Provider, { value: ctx }, React.createElement(StartedByLine, { parentId: id, parentTitle: 'Coffee shop launch' }))), /Started from <button[^>]*>Coffee shop launch<\/button> · reports back there/);
+});
+
+test('LW6: search hits read as plain text; a saved failed reply keeps its reason', () => {
+  const { plainSnippet } = require('../src/ChatSearch.tsx');
+  assert.equal(plainSnippet('2. **Write:** I replaced `Name: TBD` with [the file](x.md)'), '2. Write: I replaced Name: TBD with the file');
+  assert.equal(plainSnippet('## Plan\n> quote'), 'Plan\nquote');
+  const { conversationResponse: res } = require('../src/conversation-contract.js');
+  const CID = '3f0c2b6e-1d2a-4f4e-9b1a-6c7d8e9f0a1b';
+  const m = res(`/api/chat/conversations/${CID}/messages`, 200, { conversation: { id: CID, title: 't', agentId: null, projectId: null, pinned: false, preview: '', createdAt: '', updatedAt: '' }, activeRunId: null,
+    messages: [{ id: 'm-1', role: 'assistant', content: '', status: 'error', runId: null, durationMs: 1, createdAt: '', code: 'model_unavailable', parts: [] }, { id: 'm-2', role: 'assistant', content: '', status: 'error', runId: null, durationMs: 1, createdAt: '', code: 'made_up', parts: [] }] }).messages;
+  assert.equal(m[0].code, 'model_unavailable'); assert.equal(m[1].code, undefined);
 });

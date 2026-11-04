@@ -22,7 +22,9 @@ export const READ_OUTPUT_CHARS = 16_000;
 export const DEFAULT_LINES = 300;
 const MAX_LIST = 300;
 const MAX_HITS = 60;
-const MAX_SCAN_FILES = 4000;
+const MAX_SCAN_ENTRIES = 4000;
+/** A folder search reads at most this much text in total, files up to SEARCH_FILE_BYTES each, for at most SEARCH_MS. */
+const SEARCH_BYTES = 64 * 1024 * 1024, SEARCH_FILE_BYTES = 4 * 1024 * 1024, SEARCH_MS = 5000;
 const SKIP_DIRS = new Set(['.git', 'node_modules', '.next', 'dist', 'build', '.cache', '__pycache__', '.venv', 'venv']);
 
 const cut = (text: string): { text: string; cut: boolean } => text.length > READ_OUTPUT_CHARS ? { text: text.slice(0, READ_OUTPUT_CHARS), cut: true } : { text, cut: false };
@@ -51,11 +53,15 @@ function listFolder(real: string, rel: string): ToolResult {
 function searchText(pattern: string, real: string, rel: string, isDir: boolean): ToolResult {
   const needle = pattern.toLowerCase();
   const hits: string[] = [];
-  let files = 0, matches = 0, stopped = false;
-  const scanFile = (abs: string, r: string) => {
+  const started = Date.now();
+  let files = 0, entries = 0, bytes = 0, matches = 0, stopped: string | null = null;
+  const scanFile = (abs: string, r: string, size: number) => {
+    // Size first: a big or binary file is skipped before it is read (one named file may be up to the read limit).
+    if (isDir && size > SEARCH_FILE_BYTES) return;
+    if (bytes + size > SEARCH_BYTES) { stopped = 'the size budget'; return; }
     let text: string;
     try { text = sandboxedReadText(abs); } catch { return; }
-    files++;
+    bytes += size; files++;
     const lines = text.split('\n');
     for (let i = 0; i < lines.length; i++) {
       if (!lines[i].toLowerCase().includes(needle)) continue;
@@ -63,24 +69,27 @@ function searchText(pattern: string, real: string, rel: string, isDir: boolean):
       if (hits.length < MAX_HITS) hits.push(`${r}:${i + 1}: ${lines[i].trim().slice(0, 200)}`);
     }
   };
-  if (!isDir) scanFile(real, rel);
+  if (!isDir) { let size = 0; try { size = fs.statSync(real).size; } catch { /* gone */ } scanFile(real, rel, size); }
   else {
     const walk = (abs: string, r: string) => {
       if (stopped) return;
-      let entries: fs.Dirent[];
-      try { entries = fs.readdirSync(abs, { withFileTypes: true }); } catch { return; }
-      for (const e of entries) {
-        if (files >= MAX_SCAN_FILES) { stopped = true; return; }
+      let list: fs.Dirent[];
+      try { list = fs.readdirSync(abs, { withFileTypes: true }); } catch { return; }
+      for (const e of list) {
+        // Every entry counts against the limits, folders and skipped ones too.
+        if (++entries > MAX_SCAN_ENTRIES) { stopped = `${MAX_SCAN_ENTRIES} entries`; return; }
+        if (Date.now() - started > SEARCH_MS) { stopped = 'the time limit'; return; }
+        if (stopped) return;
         const childRel = r ? path.join(r, e.name) : e.name, childAbs = path.join(abs, e.name);
         if (denyReason(childRel, childAbs)) continue;
         if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) walk(childAbs, childRel); }
-        else if (e.isFile()) scanFile(childAbs, childRel);
+        else if (e.isFile()) { let size = 0; try { size = fs.lstatSync(childAbs).size; } catch { continue; } scanFile(childAbs, childRel, size); }
       }
     };
     walk(real, rel);
   }
   const more = matches > hits.length ? `\n… ${matches - hits.length} more matches not shown; search a smaller folder or a longer pattern` : '';
-  const note = stopped ? `\n(stopped after ${MAX_SCAN_FILES} files)` : '';
+  const note = stopped ? `\n(stopped at ${stopped}; search a smaller folder)` : '';
   const head = matches ? `${matches} matches for "${pattern}" in ${rel || '.'} (${files} files searched):` : `No match for "${pattern}" in ${rel || '.'} (${files} files searched).`;
   return { content: [{ type: 'text', text: cut(`${head}\n${hits.join('\n')}${more}${note}`).text }], details: { path: rel || '.', kind: 'search', matches, files } };
 }

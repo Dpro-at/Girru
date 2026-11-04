@@ -57,6 +57,7 @@ test('a start makes a chat under this one with the agent and the task; list, rea
   const id = r.details.session.id;
   const child = await findConversation('owner', id);
   assert.equal(child.parentId, parent.id); assert.equal(child.agentId, 'milo'); assert.equal(child.title, 'Slogans');
+  assert.equal(child.mode, 'ask', 'a sub-session never gets a looser mode than Ask me');
   await settle();
   const list = await s.sessionListTool.execute({}, ctx());
   assert.equal(list.details.sessions.length, 1);
@@ -64,6 +65,8 @@ test('a start makes a chat under this one with the agent and the task; list, rea
   assert.ok(['done', 'failed'].includes(list.details.sessions[0].state), list.details.sessions[0].state);
   const read = await s.sessionReadTool.execute({ session_id: id }, ctx());
   assert.match(text(read), /Slogans/);
+  const asked = await (await createAgentToolsRegistry(ctx())).execute('session_message', { session_id: id, text: 'Also one in Arabic' });
+  assert.equal(asked.details?.status, 'pending_approval', 'a message to a session asks the owner first');
   const msg = await s.sessionMessageTool.execute({ session_id: id, text: 'Also one in Arabic' }, ctx());
   assert.equal(msg.error, undefined, text(msg));
   await settle();

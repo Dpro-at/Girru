@@ -32,7 +32,7 @@ export type Moments = {
   /** CHAT-LIVE-01 (LW2): send the owner's answer to a choice as the next message. */
   onAnswer?: (text: string) => void;
   /** CHAT-ORCH-01 (LW4): open a chat (a sub-session), and a chat's live state from the sidebar list. */
-  onOpenChat?: (id: string) => void; chatState?: (id: string) => { running: boolean; waiting: number; title?: string } | undefined;
+  onOpenChat?: (id: string) => void; onStopChat?: (id: string) => void; chatState?: (id: string) => { running: boolean; waiting: number; title?: string } | undefined;
 };
 export const MomentsContext = createContext<Moments>({});
 
@@ -340,7 +340,8 @@ export function TaskList({ turns, who, waits = 0 }: { turns: readonly Turn[]; wh
   const steps = last ? planOf(last) : null;
   if (!steps?.length || !last) return null;
   const finished = steps.every(s => s.status === 'done' || s.status === 'skipped');
-  if (last !== lastReply && finished) return null;
+  // A finished plan leaves the box; the reply keeps its one line ("Plan · 3 of 3 done").
+  if (finished && last.status !== 'running') return null;
   const main = steps.filter(s => !s.parent);
   const done = main.filter(s => s.status === 'done').length;
   const running = last.status === 'running';
@@ -394,7 +395,7 @@ export function ChoiceCard({ choice, open, answered }: { choice: ChoiceAsk; open
 
 /** CHAT-ORCH-01 (LW4): the sessions a reply started, each with its live state and Open. */
 export function SessionsCard({ sessions }: { sessions: readonly StartedSession[] }) {
-  const { onOpenChat, chatState, agentName } = useContext(MomentsContext);
+  const { onOpenChat, onStopChat, chatState, agentName } = useContext(MomentsContext);
   if (!sessions.length) return null;
   const rows = sessions.map(x => ({ ...x, st: chatState?.(x.id) }));
   const working = rows.filter(r => r.st?.running && !r.st.waiting).length, needs = rows.filter(r => (r.st?.waiting ?? 0) > 0).length;
@@ -403,7 +404,8 @@ export function SessionsCard({ sessions }: { sessions: readonly StartedSession[]
     {rows.map(r => <div key={r.id} className="session-row" data-state={r.st?.waiting ? 'needs' : r.st?.running ? 'working' : 'idle'}>
       <span className="avatar" aria-hidden="true">{(agentName?.(r.agentId) ?? '?').slice(0, 1).toUpperCase()}</span>
       <span className="session-text"><b dir="auto">{r.st?.title || r.title}</b><small>{agentName?.(r.agentId) ?? r.agentId} · {r.st?.waiting ? 'Needs you' : r.st?.running ? 'Working' : r.st ? 'Done' : 'Not in the list'}</small></span>
-      {onOpenChat && <button type="button" className="ghost-action" title="Open the session" onClick={() => onOpenChat(r.id)}>Open</button>}
+      <span className="session-actions">{onOpenChat && <button type="button" className="ghost-action" title="Open the session (Enter)" onClick={() => onOpenChat(r.id)}>Open</button>}
+        {onStopChat && r.st?.running && <button type="button" className="ghost-action" aria-label={`Stop ${r.title}`} title="Stop — what it did so far is kept" onClick={() => onStopChat(r.id)}><UiIcon name="stop" size={12}/></button>}</span>
     </div>)}
   </section>;
 }

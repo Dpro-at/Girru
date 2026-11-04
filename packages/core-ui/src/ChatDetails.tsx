@@ -76,7 +76,7 @@ export function modelsUsed(people: readonly { name: string; model: string }[], u
 }
 
 /** The chat's live data for the panel (usage, delegations, schedule, connections); quiet on failure. */
-function useLive(client: SessionClient | undefined, chatId: string | null, owner: boolean, tick: number, agentId: string | null): Live {
+function useLive(client: SessionClient | undefined, chatId: string | null, owner: boolean, tick: number, agentId: string | null, pulse = 0): Live {
   const [live, setLive] = useState<Live>({ usage: [], team: [], apps: [], schedule: null, connections: null });
   useEffect(() => {
     if (!client || !chatId) { setLive({ usage: [], team: [], apps: [], schedule: null, connections: null }); return; }
@@ -98,13 +98,21 @@ function useLive(client: SessionClient | undefined, chatId: string | null, owner
     })();
     return () => { on = false; };
   }, [client, chatId, owner, tick, agentId]);
+  // CHAT-LIVE-01 (LW6): while a reply runs only Team is read again (coding apps an agent starts); usage, schedule and connections wait for the next turn.
+  useEffect(() => {
+    if (!client || !chatId || !pulse) return;
+    let on = true;
+    void (async () => { try { const r = await client.request({ method: 'GET', path: `/api/chat/conversations/${chatId}/team` } as never); const t = r.status === 200 ? r.body as Record<string, unknown> : null;
+      if (on && t) setLive(l => ({ ...l, team: Array.isArray(t.team) ? t.team as Delegation[] : l.team, apps: Array.isArray(t.apps) ? t.apps as CodingApp[] : l.apps })); } catch { /* the next pulse tries again */ } })();
+    return () => { on = false; };
+  }, [client, chatId, pulse]);
   return live;
 }
 
 export function ChatDetails({ controller, client, recall, memoryCard, placeExtra, resultsExtra, onOpenPane, onSettings, onClose, onStop, onSchedule, onAddFolder, onContinue, onSignIn, focusPart, switcher }: {
   switcher?: ReactNode; onSignIn?: () => void; onContinue?: () => void; focusPart?: { id: PanelPart; n: number } | null;
   controller: ConversationsController; client?: SessionClient; recall?: ChatRecallController | null; memoryCard?: ReactNode; placeExtra?: ReactNode; resultsExtra?: ReactNode;
-  onOpenPane: (pane: 'changes' | 'files' | 'terminal') => void; onSettings?: () => void; onClose: () => void; onStop: () => void;
+  onOpenPane: (pane: 'changes' | 'files' | 'terminal', file?: string) => void; onSettings?: () => void; onClose: () => void; onStop: () => void;
   onSchedule: () => void; onAddFolder: () => void;
 }) {
   const s = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
@@ -119,7 +127,8 @@ export function ChatDetails({ controller, client, recall, memoryCard, placeExtra
   const [pulse, setPulse] = useState(0);
   useEffect(() => { if (!s.runId) return; const t = setInterval(() => setPulse(p => p + 1), 4000); return () => clearInterval(t); }, [s.runId]);
   const chatAgent = s.conversations.find(c => c.id === s.activeId)?.agentId ?? s.agentId ?? s.agents.find(a => a.primary)?.id ?? null;
-  const live = useLive(client, s.activeId, owner, s.turns.length + (s.runId ? 1 : 0) + pulse * 2, chatAgent);
+  const live = useLive(client, s.activeId, owner, s.turns.length + (s.runId ? 1 : 0), chatAgent, pulse);
+  const subs = s.activeId ? (s.conversations as readonly (typeof s.conversations[number] & { running?: boolean; waiting?: number })[]).filter(c => c.parentId === s.activeId) : [];
   const stopApp = (id: string) => { if (!s.activeId) return; void client?.request({ method: 'POST', path: `/api/chat/conversations/${s.activeId}/apps/${id}/stop` } as never).catch(() => undefined).finally(() => setPulse(p => p + 1)); };
   useEffect(() => { void (async () => { try { const r = await client?.request({ method: 'GET', path: PANEL_PATH } as never); if (r?.status === 200) setPrefsState(readPanel((r.body as any)?.panel)); } catch { /* the usual order */ } })(); }, [client]);
   const setPrefs = (p: PanelPrefs) => { setPrefsState(p); void client?.request({ method: 'PUT', path: PANEL_PATH, body: p } as never).catch(() => undefined); };
@@ -160,7 +169,7 @@ export function ChatDetails({ controller, client, recall, memoryCard, placeExtra
           end={owner ? <button type="button" className="link-button" onClick={onSchedule}>Change</button> : undefined}/>
           : owner && s.activeId ? <button type="button" className="link-button panel-add" onClick={onSchedule}><UiIcon name="clock" size={12}/>Run this chat on a schedule…</button> : null}
       </>, more: placeExtra },
-    team: { has: writers.length > 0 || !!running || live.team.length > 0 || live.apps.length > 0, summary: working.length ? `${working.length} working` : waits ? `${waits} waits for you` : teamTitle, tone: working.length ? 'work' : waits ? 'needs' : undefined,
+    team: { has: writers.length > 0 || !!running || live.team.length > 0 || live.apps.length > 0 || subs.length > 0, summary: working.length ? `${working.length} working` : waits ? `${waits} waits for you` : teamTitle, tone: working.length ? 'work' : waits ? 'needs' : undefined,
       side: <small className="details-sum">{teamTitle}</small>,
       body: <>
         <Row face={lead} badge={modelApp(leadModel)} name={lead} sub={<>Leads · {answers(leadModel)}{leadModel === s.model ? answersLabel(s.model, s.models, s.thinking).slice(answersLabel(s.model, s.models, 'normal').length) : ''}</>} end={running && !running.agentId ? <StopButton onStop={onStop}/> : <span className="panel-end">{running ? 'Working' : 'Ready'}</span>}/>
@@ -169,12 +178,16 @@ export function ChatDetails({ controller, client, recall, memoryCard, placeExtra
           end={d.status === 'started' ? <StopButton onStop={onStop}/> : signedOut(d.model) && onSignIn ? <button type="button" className="link-button" title="Sign in to this app in Settings › Replies" onClick={onSignIn}>Sign in…</button> : <span className="panel-end" data-tone={d.status === 'waiting_approval' ? 'needs' : d.status === 'failed' ? 'error' : undefined}>{d.status === 'waiting_approval' && <span className="details-needs-dot" aria-hidden="true"/>}{d.status === 'answered' ? 'Done' : d.status === 'waiting_approval' ? 'Waits for you' : d.status === 'failed' ? 'Failed' : ''}</span>}/>)}
         {live.apps.map(a => <Row key={a.id} icon="terminal" name={a.app} indent sub={[a.agentName ? `Working for ${a.agentName}` : 'Working', a.about].filter(Boolean).join(' · ')}
           end={<button type="button" className="row-tool details-stop" aria-label={`Stop ${a.app}`} title={`Stop ${a.app} (only this part)`} onClick={() => stopApp(a.id)}><UiIcon name="stop" size={10}/></button>}/>)}
+        {/* CHAT-ORCH-01 (LW4 §5): this chat's sub-sessions, live; select one to open it. */}
+        {subs.length > 0 && <p className="fine-print details-subs">Sessions · {subs.length}</p>}
+        {subs.slice(0, 8).map(c => <Row key={c.id} face={nameOf(c.agentId ?? '')} name={c.title || 'Session'} indent sub={`${nameOf(c.agentId ?? '')} · ${c.waiting ? 'Needs you' : c.running ? 'Working' : 'Done'}`} tone={c.waiting ? 'needs' : undefined} onClick={() => void controller.open(c.id)}
+          end={c.running ? <button type="button" className="row-tool details-stop" aria-label={`Stop ${c.title || 'the session'}`} title="Stop this session (what it did is kept)" onClick={e => { e.stopPropagation(); void controller.stopChat(c.id); }}><UiIcon name="stop" size={10}/></button> : undefined}/>)}
       </>, more: live.team.length > 3 && !more.has('team') ? <ShowMore n={live.team.length - 3} onClick={() => setMore(new Set([...more, 'team']))}/> : undefined },
     results: { has: changed > 0 || outputs.length > 0 || !!resultsExtra, summary: changed ? `+${s.git?.added ?? 0} −${s.git?.removed ?? 0}` : `${outputs.length} ${outputs.length === 1 ? 'file' : 'files'}`,
       side: changed ? <button type="button" className="link-button" onClick={() => onOpenPane('changes')}>Review</button> : undefined,
       body: <>
         {changed > 0 && <Row icon="diff" name={`${changed} ${changed === 1 ? 'file' : 'files'} changed`} sub={`${s.git?.branch ?? 'Working folder'} · not committed`} end={<span className="panel-end"><span className="plus">+{s.git?.added ?? 0}</span> <span className="minus">−{s.git?.removed ?? 0}</span></span>} onClick={() => onOpenPane('changes')}/>}
-        {outputs.slice(-(more.has('results') ? 50 : 3)).reverse().map(o => <Row key={o.path} icon={o.kind === 'edit' ? 'pencil' : 'file'} name={o.path.split('/').at(-1) ?? o.path} sub={o.kind === 'edit' ? 'Changed here' : 'Made in this chat'} onClick={() => onOpenPane('files')}/>)}
+        {outputs.slice(-(more.has('results') ? 50 : 3)).reverse().map(o => <Row key={o.path} icon={o.kind === 'edit' ? 'pencil' : 'file'} name={o.path.split('/').at(-1) ?? o.path} sub={o.kind === 'edit' ? 'Changed here' : 'Made in this chat'} onClick={() => onOpenPane('files', o.path)}/>)}
         {resultsExtra}
       </>, more: outputs.length > 3 && !more.has('results') ? <ShowMore n={outputs.length - 3} onClick={() => setMore(new Set([...more, 'results']))}/> : undefined },
     memory: { has: !!memoryCard || !!trace, summary: trace?.items?.length ? `${trace.items.length} used` : 'Saved from this chat', side: undefined,

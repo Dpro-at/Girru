@@ -6,11 +6,12 @@
  */
 
 import type { Tool, ToolResult } from '../types.js';
+import { projectRoot } from './edit.js';
 import { FileSandboxError, MAX_WRITE_BYTES, sandboxedWriteFile, writeRootFor } from './file-sandbox.js';
 
 export const writeTool: Tool = {
   name: 'write',
-  description: `Save a text file in your own private drafts folder (paths are relative to it; parent folders are created; max ${MAX_WRITE_BYTES} bytes). It never changes a project's files: in a project chat, change project files with the edit tool when you have it; otherwise say the change is not made.`,
+  description: `Write a whole text file (a new file, or replace one). In the owner's chat with a folder it writes that folder's real file (paths relative to it; parent folders are created; max ${MAX_WRITE_BYTES} bytes; the owner approves it unless the chat is in "Accept edits"); to change part of an existing file prefer edit. Elsewhere it saves in your own private drafts folder. Protected files (keys, environment files, databases, .git) are never written.`,
   input_schema: {
     type: 'object',
     properties: {
@@ -41,8 +42,11 @@ export const writeTool: Tool = {
   async execute(params, context): Promise<ToolResult> {
     const { path: filePath, content } = params ?? {};
     try {
-      const root = writeRootFor(context);
+      // CHAT-LIVE-01 (LW6): in the owner's chat with a folder, the real file in that folder (same owner and folder check as edit).
+      const folder = context?.fileReadRoot ? await projectRoot(context).catch(() => null) : null;
+      const root = folder ?? writeRootFor(context);
       const r = sandboxedWriteFile(root, filePath, content);
+      if (folder) return { content: [{ type: 'text', text: `Wrote ${r.rel} in the project folder (${r.size} bytes).` }], details: { path: r.rel, size: r.size, modified: r.modified, projectFile: true } };
       // CHAT-LIVE-01: in a project chat the read root is the project; say plainly that this is not the project file.
       const project = !!context?.fileReadRoot;
       const text = project

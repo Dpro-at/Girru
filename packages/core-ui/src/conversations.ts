@@ -240,6 +240,8 @@ export class ConversationsController {
       const models = r.body.models as ModelOption[];
       // A picked model that is gone (its server stopped) stays picked: the reply then says why it failed.
       this.publish({ modelsLoaded: true, models: this.#state.model && !models.some(m => m.id === this.#state.model) ? [...models, ...this.#state.models.filter(m => m.id === this.#state.model)] : models });
+      // A blank new chat picks up the last chosen model once the list is known.
+      if (!this.#state.activeId && this.#state.model === 'auto' && !this.#state.turns.length) { const m = this.lastModelOr('auto'); if (m !== 'auto') this.publish({ model: m }); }
     } catch { /* the picker stays as it was */ }
   }
   async loadProjects() {
@@ -385,8 +387,15 @@ export class ConversationsController {
     if(m[3]&&!this.#state.model.startsWith(m[1]+m[3]))return false;
     return !m[4]||!!app.variants?.some(v=>v.id===m[4]);
   }
+  /** CHAT-LIVE-01 (LW6): the model the owner picked last (or the open chat's); a new chat starts with it instead of Auto. Kept while the app is open (no browser storage). */
+  #lastModel: string | null = null;
+  private lastModelOr(fallback: string): string {
+    const m = this.#lastModel;
+    return m && (m === 'auto' || this.#state.models.some(x => x.id === m) || this.#appModel(m)) ? m : fallback;
+  }
   selectModel(model: string) {
     if(!this.live() || !(model===''||model==='auto'||this.#state.models.some(m=>m.id===model)||this.#appModel(model)))return;
+    if (model) this.#lastModel = model;
     this.publish({model});const id=this.#state.activeId;if(!id)return;
     this.#pendingModelWrites++;
     this.#modelWrites=this.#modelWrites.then(async()=>{
@@ -428,7 +437,7 @@ export class ConversationsController {
   newChat() {
     this.#follow?.abort(); this.#openSeq++;
     this.rememberLast(null);
-    this.publish({ ...this.codeDraftFor('_new'), activeId: null, model: 'auto', turns: [], threadPhase: 'empty', runId: null, starting: false, stopping: false, reconnecting: false, queue: [], queuePaused: false, elsewhere: false, notice: undefined, agentId: '', replyAgent: '', git: null, focus: null, hasEarlier: false, loadingEarlier: false, mode: 'auto', thinking: 'normal' });
+    this.publish({ ...this.codeDraftFor('_new'), activeId: null, model: this.lastModelOr('auto'), turns: [], threadPhase: 'empty', runId: null, starting: false, stopping: false, reconnecting: false, queue: [], queuePaused: false, elsewhere: false, notice: undefined, agentId: '', replyAgent: '', git: null, focus: null, hasEarlier: false, loadingEarlier: false, mode: 'auto', thinking: 'normal' });
     void this.loadGit();
   }
 
@@ -457,6 +466,8 @@ export class ConversationsController {
       const conversation=r.body.conversation as Conversation;this.replace(conversation);
       // CHAT-BUILD-01 stage 3: messages that waited when the window closed wait again (Send now sends them).
       const waiting = conversation.queued ?? [];
+      // The open chat's model is also what a new chat starts with (unless 'default' / the agent's own).
+      if (conversation.model && conversation.model !== 'default') this.#lastModel = conversation.model;
       this.publish({ turns, threadPhase: 'ready', runId: active, model: conversation.model ?? '', hasEarlier: r.body.hasMore === true,
         mode: conversation.mode ?? 'auto', thinking: conversation.thinking ?? 'normal', queue: waiting, queuePaused: waiting.length > 0 && !active, elsewhere: !!active });
       void this.loadGit();
@@ -758,6 +769,11 @@ export class ConversationsController {
       const r = await this.call('GET', '/api/chat/conversations');
       if (this.live() && r.status === 200 && record(r.body) && Array.isArray(r.body.conversations)) this.publish({ conversations: r.body.conversations as Conversation[] });
     } catch { /* the list refreshes on the next load */ }
+  }
+
+  /** CHAT-ORCH-01 (LW4): stop another chat's work (a sub-session) from the sessions card; what it did is kept. */
+  async stopChat(id: string): Promise<boolean> {
+    try { const r = await this.call('POST', `/api/chat/conversations/${id}/stop`); void this.refreshList(); return r.status === 200 || r.status === 202 || r.status === 204; } catch { return false; }
   }
 
   /** Stops the running reply; what it wrote so far is kept. Queued messages stay queued until sent. */

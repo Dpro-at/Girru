@@ -48,6 +48,15 @@ async function family(context: ToolExecutionContext): Promise<Family | null> {
   return { me, all: chats, children: out, depth };
 }
 
+/** Sub-sessions of this chat's whole family (from its top chat down) that are working now. */
+function familyWorking(f: Family): number {
+  const byId = new Map(f.all.map(x => [x.id, x]));
+  let root = f.me;
+  for (let i = 0; i < 10 && root.parentId && byId.get(root.parentId); i++) root = byId.get(root.parentId)!;
+  const under = (c: Conversation) => { for (let p: Conversation | undefined = c, i = 0; p && i < 10; p = p.parentId ? byId.get(p.parentId) : undefined, i++) if (p.id === root.id) return c.id !== root.id; return false; };
+  return f.all.filter(c => under(c) && chatRuns.activeFor(c.id)).length;
+}
+
 /** The chat a session tool may act on: one of this chat's descendants. */
 function target(f: Family, id: unknown): Conversation | null {
   return typeof id === 'string' ? f.children.find(c => c.id === id) ?? null : null;
@@ -99,12 +108,11 @@ export const sessionStartTool: Tool = {
     if (!task || task.length > TASK_CHARS) return refused(`give the task in 1 to ${TASK_CHARS} characters`);
     if (!agentId || agentId === context!.agentId || !mayDelegate(context!.agentId!, agentId, rows)) return refused('pick an agent you may give work to (see team_list)');
     if (f.depth + 1 > MAX_DEPTH) return refused('a sub-session cannot start more sessions this deep');
-    const root = (() => { let c = f.me; const byId = new Map(f.all.map(x => [x.id, x])); for (let i = 0; i < 10 && c.parentId && byId.get(c.parentId); i++) c = byId.get(c.parentId)!; return c; })();
-    const tree = f.all.filter(c => { for (let p: Conversation | undefined = c, i = 0; p && i < 10; p = p.parentId ? f.all.find(x => x.id === p!.parentId) : undefined, i++) if (p.id === root.id) return c.id !== root.id; return false; });
-    if (tree.filter(c => chatRuns.activeFor(c.id)).length >= MAX_SESSIONS) return refused(`${MAX_SESSIONS} sessions of this chat are already working; wait for one to finish`);
+    if (familyWorking(f) >= MAX_SESSIONS) return refused(`${MAX_SESSIONS} sessions of this chat are already working; wait for one to finish`);
     const owner = await sql().read(one<{ role: string }>('SELECT role FROM users WHERE id = ?', context!.userId!));
     const title = (typeof params?.title === 'string' && params.title.trim() ? params.title : task).replace(/\s+/g, ' ').trim().slice(0, 80);
-    const made = await createConversation(context!.userId!, { title, agentId, projectId: f.me.projectId ?? null, parentId: f.me.id, ...(f.me.mode ? { mode: f.me.mode } : {}) });
+    // A sub-session never gets a looser mode than "Ask me": what it changes asks the owner (Plan first stays Plan first).
+    const made = await createConversation(context!.userId!, { title, agentId, projectId: f.me.projectId ?? null, parentId: f.me.id, mode: f.me.mode === 'plan' ? 'plan' : 'ask' });
     const c = await findConversation(context!.userId!, made.id);
     if (!c) return refused('the session could not be made');
     const by = await agentName(context!.agentId ?? null);
@@ -149,8 +157,9 @@ export const sessionReadTool: Tool = {
 
 export const sessionMessageTool: Tool = {
   name: 'session_message',
+  requiresApproval: true,
   selfOnly: true,
-  description: 'Send a message to one sub-session: while it works it sees it at its next step (Steer); otherwise it answers it as a new message.',
+  description: 'Send a message to one sub-session (the owner approves each message): while it works it sees it at its next step (Steer); otherwise it answers it as a new message. It reads as a message from you, the agent, not from the owner.',
   input_schema: { type: 'object', properties: { session_id: { type: 'string' }, text: { type: 'string' } }, required: ['session_id', 'text'] },
   async execute(params, context) {
     const g = await gate(context);
@@ -160,11 +169,13 @@ export const sessionMessageTool: Tool = {
     if (!c) return refused('that is not a sub-session of this chat');
     if (!t || t.length > 4000) return refused('give the message in 1 to 4000 characters');
     const by = await agentName(context!.agentId ?? null);
+    const from = `(A message from ${by}, the agent that started this session; not from the owner.)\n${t}`;
     const run = chatRuns.activeFor(c.id);
-    if (run) return run.steer(`${by}: ${t}`) ? text('Sent; the session sees it at its next step.') : refused('the session cannot take more messages right now');
+    if (run) return run.steer(from) ? text('Sent; the session sees it at its next step.') : refused('the session cannot take more messages right now');
+    if (familyWorking(g.f) >= MAX_SESSIONS) return refused(`${MAX_SESSIONS} sessions of this chat are already working; wait for one to finish`);
     const owner = await sql().read(one<{ role: string }>('SELECT role FROM users WHERE id = ?', context!.userId!));
     const { startTurn } = await import('../../api/routes/chat-conversations.js');
-    const out = await startTurn({ userId: context!.userId!, role: owner?.role ?? 'owner', c, runId: `session-${randomUUID()}`, message: `${by}: ${t}`, displayMessage: t });
+    const out = await startTurn({ userId: context!.userId!, role: owner?.role ?? 'owner', c, runId: `session-${randomUUID()}`, message: from, displayMessage: t });
     return out.code === 202 ? text('Sent; the session is answering.') : refused(`the session could not answer (${String((out.body as { code?: string }).code ?? out.code)})`);
   },
 };

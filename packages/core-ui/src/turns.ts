@@ -190,7 +190,8 @@ export function workSegments(parts: readonly Part[]): WorkSegment[] {
   const secs = Math.round(timed.reduce((n, p) => n + (p.endedAt! - p.startedAt!), 0) / 1000);
   const out: WorkSegment[] = thoughts.length ? [{ kind: 'thought', label: !timed.length ? 'Thought' : secs < 1 ? 'Thought briefly' : `Thought for ${duration(secs * 1000)}`, failed: 0 }] : [];
   const counts = new Map<ToolKind, { n: number; failed: number }>();
-  for (const p of parts) if (p.kind === 'tools') for (const c of p.calls) { const k = kindOf(c); const e = counts.get(k) ?? { n: 0, failed: 0 }; e.n++; if (c.isError) e.failed++; counts.set(k, e); }
+  // CHAT-LIVE-01 (LW6): a call that waits for the owner is not counted as done ("Edited 1 file"); its card says it waits.
+  for (const p of parts) if (p.kind === 'tools') for (const c of p.calls) { if (c.approvalId || /^Waiting for owner approval/.test(c.output ?? '')) continue; const k = kindOf(c); const e = counts.get(k) ?? { n: 0, failed: 0 }; e.n++; if (c.isError) e.failed++; counts.set(k, e); }
   for (const [k, e] of counts) out.push({ kind: k, label: groupLabel(k, e.n), failed: e.failed });
   return out;
 }
@@ -234,6 +235,8 @@ export function turnOutputs(turns: readonly Turn[]): { path: string; kind: 'writ
     if (c.isError || c.running) continue;
     const v = toolView({ ...c, running: false });
     if (v.kind !== 'write' && v.kind !== 'edit') continue;
+    // CHAT-LIVE-01 (LW6): only real files of the folder: not a private draft, not a call that waits for the owner.
+    if (/private draft|^Waiting for owner approval/.test(c.output ?? '')) continue;
     const path = ['path', 'file', 'file_path', 'filename'].map(k => v.args[k]).find(x => typeof x === 'string') as string | undefined;
     if (path) { out.delete(path); out.set(path, v.kind); }
   }

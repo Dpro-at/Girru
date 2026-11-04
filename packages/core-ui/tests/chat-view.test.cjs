@@ -87,7 +87,7 @@ test('Stop keeps what was written; a failed run shows the error card with Try ag
   const failed = c.getSnapshot().turns.at(-1);
   assert.equal(failed.status, 'error');
   assert.equal(failed.code, 'model_unavailable');
-  assert.match(view(c), /The model could not be reached/);
+  assert.match(view(c), /The model did not answer/); // CHAT-LIVE-01: one plain text, live and after reopening
   assert.match(view(c), /Try again/);
 });
 
@@ -270,7 +270,7 @@ test('task plan: the latest plan_steps call shows as a live checklist, not as to
   // CHAT-BUILD-01 stage 5 (CH2): the steps live in Tasks above the box; the thread keeps one quiet line.
   assert.match(html, /aria-label="Tasks"/);
   assert.match(html, /2 of 3 done/);
-  assert.match(html, /Plan: 3 steps, 2 done · the steps are in Tasks above the box/);
+  assert.match(html, /Plan · 2 of 3 done/); // CHAT-LIVE-01: one line in the finished reply, opens to the steps
   assert.doesNotMatch(html, /plan steps/i, 'the plan call is not listed as a tool');
 });
 
