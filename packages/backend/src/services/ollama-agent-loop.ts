@@ -99,6 +99,12 @@ export async function runStepCalls<C extends { id: string; name: string; args: R
   return { run: plan.run, results, skippedNote: plan.skipped.length ? SKIPPED_NOTE(plan.skipped.length) : null };
 }
 
+/** STORE-MAP-01 P2b: the tools of this step (asked once), in the function format; undefined when none. */
+export function stepTools(set: { definitions(): ApiTool[] }) {
+  const defs = set.definitions();
+  return defs.length ? toOllamaTools(defs) : undefined;
+}
+
 /** The registry's tool list in the local model's function format. */
 export function toOllamaTools(tools: readonly ApiTool[]) {
   return tools.map((t) => ({ type: 'function' as const, function: { name: t.name, description: t.description, parameters: t.input_schema } }));
@@ -174,7 +180,7 @@ export async function runOllamaAgentLoop(o: OllamaLoopOptions): Promise<{ steps:
       signal: guard.signal,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: o.model, messages, stream: true, tools: o.toolSet ? (o.toolSet.definitions().length ? toOllamaTools(o.toolSet.definitions()) : undefined) : tools,
+        model: o.model, messages, stream: true, tools: o.toolSet ? stepTools(o.toolSet) : tools,
         ...(o.think === undefined ? {} : { think: o.think }),
         ...(o.keepAlive === undefined ? {} : { keep_alive: o.keepAlive }),
         options: { ...(o.temperature === undefined ? {} : { temperature: o.temperature }), ...(o.maxTokens ? { num_predict: o.maxTokens } : {}), ...(o.numCtx ? { num_ctx: o.numCtx } : {}) },

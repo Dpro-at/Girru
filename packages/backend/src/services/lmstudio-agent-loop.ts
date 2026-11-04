@@ -17,7 +17,7 @@ import { stallGuard, type StallGuard } from './model-stall.js';
 import { currentChatRun } from './chat-run-context.js';
 import {
   LOCAL_MAX_STEPS, TOOL_INPUT_CHARS, TOOL_OUTPUT_CHARS, TOOL_OUTPUT_MODEL_CHARS,
-  ModelUnavailable, runStepCalls, toOllamaTools,
+  ModelUnavailable, runStepCalls, stepTools, toOllamaTools,
   type ApiTool, type LoopFrame,
 } from './ollama-agent-loop.js';
 import type { ToolResult } from '../tools/types.js';
@@ -125,7 +125,7 @@ export async function runLmStudioAgentLoop(o: LmStudioLoopOptions): Promise<{ st
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: o.model, messages, stream: true,
-          ...(o.toolSet ? (o.toolSet.definitions().length ? { tools: toOllamaTools(o.toolSet.definitions()) } : {}) : tools ? { tools } : {}),
+          ...(o.toolSet ? ((t) => (t ? { tools: t } : {}))(stepTools(o.toolSet)) : tools ? { tools } : {}),
           ...(o.temperature === undefined ? {} : { temperature: o.temperature }),
           ...(o.maxTokens ? { max_tokens: o.maxTokens } : {}),
         }),
