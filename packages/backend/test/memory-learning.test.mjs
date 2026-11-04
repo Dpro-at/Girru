@@ -338,7 +338,9 @@ test('weekly summary job: in-process, owner-scoped, created once per owner', asy
   // STORE-MAP-01 P9: with GIRRU_STORE_P9 on, the nightly read-only memory doctor and the weekly quality job are scheduled too.
   assert.deepEqual(created.map((j) => j.name), ['memory-weekly-summary-ml-owner', 'memory-retention-ml-owner', 'memory-trash-ml-owner', ...(switchValueOn(process.env.GIRRU_STORE_P9) ? ['memory-doctor-ml-owner', 'memory-quality-ml-owner'] : []),
     // P9b: the weekly "learn from use" job.
-    ...(switchValueOn(process.env.GIRRU_STORE_P9B) ? ['memory-usage-ml-owner'] : [])]);
+    ...(switchValueOn(process.env.GIRRU_STORE_P9B) ? ['memory-usage-ml-owner'] : []),
+    // KNOW-INDEX-01: the documents job (every 20 minutes) while document memory is on.
+    ...(switchValueOn(process.env.GIRRU_DOC_INDEX) ? ['memory-documents-ml-owner'] : [])]);
   assert.deepEqual(await J.ensureMemoryJobs(), [], 'idempotent');
   const row = db.prepare(`SELECT action_type, action_data, cron_expression FROM cron_jobs WHERE name = 'memory-weekly-summary-ml-owner'`).get();
   assert.equal(row.action_type, 'memory-job');
