@@ -77,3 +77,16 @@ test('switch off again: an edit clears the packed copy so it never goes stale', 
   await updateVersioned(OWNER, older[1].id, { content: 'The office opens at ten.' }, OWNER, 'test');
   assert.equal(vec(older[1].id), null);
 });
+
+test('a re-embed (the memory helper) writes the new packed copy while on, and clears it while off', async () => {
+  const m = await save('Builds run on the second Mac.');
+  const next = Array.from({ length: 8 }, (_, i) => (i + 1) / 10);
+  process.env.GIRRU_STORE_P3 = '1';
+  assert.equal(await storage.setEmbedding(OWNER, m.id, 'Builds run on the second Mac.', next, 'test-model'), true);
+  const packed = V.unpackVector(vec(m.id));
+  assert.equal(packed.length, 8, 'the start-up backfill has already run, so the re-embed packs it');
+  packed.forEach((x, i) => assert.ok(Math.abs(x - next[i]) < 1e-6));
+  process.env.GIRRU_STORE_P3 = '0';
+  assert.equal(await storage.setEmbedding(OWNER, m.id, 'Builds run on the second Mac.', next, 'test-model'), true);
+  assert.equal(vec(m.id), null, 'off: no packed copy that could go stale');
+});
