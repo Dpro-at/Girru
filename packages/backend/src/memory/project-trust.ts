@@ -13,11 +13,13 @@
  *     the project's main folder, read through the real path, no links, small
  *     size cap; `config` is parsed for `[remote "<name>"] url = …`
  *   - the remote judged is `origin`, else the first one; its owner is the
- *     first path part (github.com/<owner>/repo, git@host:<owner>/repo,
- *     ssh://git@host/<owner>/repo); local paths and file:// remotes are the
- *     owner's own
- *   - owners counted as the owner's own: BUILT_IN (9mtm, Dpro-at) plus the
- *     ones he adds (project_trust_owners), any letter case
+ *     whole namespace before the repository name (github.com/<owner>/repo,
+ *     git@host:<owner>/repo, gitlab.com/<group>/<sub>/repo); local paths and
+ *     file:// remotes are the owner's own
+ *   - owners counted as the owner's own: BUILT_IN (9mtm and Dpro-at on
+ *     github.com) plus the ones he adds (project_trust_owners, github.com
+ *     unless he names another host); host and namespace must match exactly
+ *     (any letter case)
  *   - no `.git`, no remote, or an own owner → trusted
  * The owner's own choice (put on the list / take off it) is kept until he
  * changes it; an automatic verdict is checked again when the folder's git
@@ -30,7 +32,8 @@ import { all, one, run, sql, type Step } from '../repositories/sql-steps.js';
 import { readRegularFile } from '../services/read-regular-file.js';
 import { repoTrustEnabled } from '../services/repo-trust-switch.js';
 
-export const BUILT_IN_OWNERS: readonly string[] = Object.freeze(['9mtm', 'Dpro-at']);
+/** The owner's own accounts, pinned to their host (a same-named account elsewhere is someone else). */
+export const BUILT_IN_OWNERS: ReadonlyArray<{ name: string; host: string }> = Object.freeze([{ name: '9mtm', host: 'github.com' }, { name: 'Dpro-at', host: 'github.com' }]);
 const MAX_GIT_CONFIG = 256 * 1024;
 
 export class ProjectTrustError extends Error {
@@ -61,16 +64,18 @@ export function remoteOwner(url: string): RemoteOwner | null {
   const u = url.trim();
   if (!u || u.startsWith('/') || u.startsWith('.') || /^file:/i.test(u) || /^[A-Za-z]:[\\/]/.test(u)) return null;
   // scp-like: [user@]host:owner/repo
-  const scp = /^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)([^/\s]+)\/[^\s]*$/.exec(u);
-  if (scp) return { host: scp[1].toLowerCase(), owner: scp[2] };
+  const scp = /^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)(\S+)$/.exec(u);
+  if (scp) {
+    const parts = scp[2].split('/').filter(Boolean);
+    return parts.length >= 2 ? { host: scp[1].toLowerCase(), owner: parts.slice(0, -1).join('/') } : null;
+  }
   try {
     const p = new URL(u);
     if (!/^(https?|ssh|git|git\+ssh|ssh\+git):$/i.test(p.protocol)) return null;
-    const parts = p.pathname.split('/').filter(Boolean);
-    if (!parts.length) return null;
-    // Some hosts put a path prefix (e.g. /scm/<owner>/<repo>): the owner is the part before the repo name.
-    const owner = parts.length >= 2 ? parts[parts.length - 2] : parts[0];
-    return { host: p.hostname.toLowerCase(), owner: decodeURIComponent(owner) };
+    const parts = p.pathname.split('/').filter(Boolean).map((x) => decodeURIComponent(x));
+    // The owner is the whole namespace before the repository name (nested groups included), compared exactly.
+    if (parts.length < 2) return null;
+    return { host: p.hostname.toLowerCase(), owner: parts.slice(0, -1).join('/') };
   } catch { return null; }
 }
 
@@ -115,11 +120,11 @@ export function decidingRemote(remotes: GitRemote[]): GitRemote | null {
 
 export async function ownOwners(ownerId: string): Promise<Array<{ name: string; host: string }>> {
   const extra = await sql().read(all<{ name: string; host: string }>('SELECT name, host FROM project_trust_owners WHERE owner_id = ? ORDER BY name, host', ownerId)).catch(() => []);
-  return [...BUILT_IN_OWNERS.map((name) => ({ name, host: '' })), ...extra];
+  return [...BUILT_IN_OWNERS, ...extra];
 }
 
 export function isOwnOwner(r: RemoteOwner, own: ReadonlyArray<{ name: string; host: string }>): boolean {
-  return own.some((o) => o.name.toLowerCase() === r.owner.toLowerCase() && (!o.host || o.host.toLowerCase() === r.host));
+  return own.some((o) => o.name.toLowerCase() === r.owner.toLowerCase() && o.host.toLowerCase() === r.host);
 }
 
 export interface TrustVerdict {
@@ -213,12 +218,15 @@ export async function resetProjectTrust(ownerId: string, projectId: string): Pro
   return checkProjectTrust(ownerId, projectId);
 }
 
-const OWNER_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
-const HOST_NAME = /^$|^[a-z0-9][a-z0-9.-]{0,252}$/;
+/** An account or group path (`org` or `group/sub`), no `..`. */
+const OWNER_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,99}){0,4}$/;
+const HOST_NAME = /^[a-z0-9][a-z0-9.-]{0,252}$/;
 
 /** Count a remote owner (e.g. a GitHub organisation) as the owner's own; projects judged automatically are looked at again. */
 export async function addOwnOwner(ownerId: string, name: unknown, host: unknown = ''): Promise<void> {
-  if (typeof name !== 'string' || !OWNER_NAME.test(name) || typeof host !== 'string' || !HOST_NAME.test(host.toLowerCase())) throw new ProjectTrustError(400, 'invalid_owner');
+  // No host given: github.com (an account name alone never trusts the same name on every host).
+  if (typeof host === 'string' && !host.trim()) host = 'github.com';
+  if (typeof name !== 'string' || !OWNER_NAME.test(name) || name.includes('..') || typeof host !== 'string' || !HOST_NAME.test(host.toLowerCase())) throw new ProjectTrustError(400, 'invalid_owner');
   const d = sql().dialect;
   await sql().read(run(`INSERT ${d === 'postgres' ? '' : 'OR IGNORE '}INTO project_trust_owners (owner_id, name, host, created_at) VALUES (?, ?, ?, ?)${d === 'postgres' ? ' ON CONFLICT DO NOTHING' : ''}`,
     ownerId, name, host.toLowerCase(), new Date().toISOString()));
@@ -227,7 +235,8 @@ export async function addOwnOwner(ownerId: string, name: unknown, host: unknown 
 
 export async function removeOwnOwner(ownerId: string, name: unknown, host: unknown = ''): Promise<void> {
   if (typeof name !== 'string' || typeof host !== 'string') throw new ProjectTrustError(400, 'invalid_owner');
-  await sql().read(run('DELETE FROM project_trust_owners WHERE owner_id = ? AND name = ? AND host = ?', ownerId, name, host.toLowerCase()));
+  const h = host.trim() ? host.toLowerCase() : 'github.com';
+  await sql().read(run('DELETE FROM project_trust_owners WHERE owner_id = ? AND name = ? AND host = ?', ownerId, name, h));
   await forgetAutoVerdicts(ownerId);
 }
 
@@ -248,7 +257,7 @@ export async function projectTrustView(ownerId: string): Promise<{ projects: Arr
     if (v) projects.push({ ...v, name: r.name });
   }
   const own = await ownOwners(ownerId);
-  return { projects, owners: own.map((o) => ({ ...o, builtIn: BUILT_IN_OWNERS.includes(o.name) && !o.host })) };
+  return { projects, owners: own.map((o, i) => ({ ...o, builtIn: i < BUILT_IN_OWNERS.length })) };
 }
 
 /**
