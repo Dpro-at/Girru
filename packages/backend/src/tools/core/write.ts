@@ -43,7 +43,10 @@ export const writeTool: Tool = {
     const { path: filePath, content } = params ?? {};
     try {
       // CHAT-LIVE-01 (LW6): in the owner's chat with a folder, the real file in that folder (same owner and folder check as edit).
-      const folder = context?.fileReadRoot ? await projectRoot(context).catch(() => null) : null;
+      // Only where the registry offers it as a chat-folder file tool (owner's own chat turn, not a channel,
+      // a hand-off or a task run), so it always went through that gate and its approval rule.
+      const chatFolder = !!context?.fileReadRoot && context.chatPlan === true && !context.toolPolicy && !context.delegatedFrom?.length && !context.taskId;
+      const folder = chatFolder ? await projectRoot(context!).catch(() => null) : null;
       const root = folder ?? writeRootFor(context);
       const r = sandboxedWriteFile(root, filePath, content);
       if (folder) return { content: [{ type: 'text', text: `Wrote ${r.rel} in the project folder (${r.size} bytes).` }], details: { path: r.rel, size: r.size, modified: r.modified, projectFile: true } };

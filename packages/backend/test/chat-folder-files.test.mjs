@@ -67,3 +67,11 @@ test('a member\'s chat keeps the private draft and says the project is not chang
   assert.match(text(w), /private draft/);
   assert.equal(readFileSync(join(project, 'notes', 'shop.md'), 'utf8'), '# Shop\nName: Little Ember\n');
 });
+
+test('outside the owner\'s chat turn (a task run, a hand-off, a channel) write stays a private draft', async () => {
+  for (const extra of [{ taskId: 'task-1' }, { delegatedFrom: ['main'] }, { toolPolicy: { channel: 'telegram' } }, { chatPlan: false }]) {
+    const w = await writeTool.execute({ path: 'notes/shop.md', content: 'not here' }, ctx(extra));
+    assert.match(text(w), /private draft/, JSON.stringify(extra));
+  }
+  assert.equal(readFileSync(join(project, 'notes', 'shop.md'), 'utf8'), '# Shop\nName: Little Ember\n');
+});
