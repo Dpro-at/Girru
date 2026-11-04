@@ -13,6 +13,7 @@ import { AgentsController } from './agents';
 import { WorkspaceTypeStep, type WorkspaceType } from './WorkspaceTypeStep';
 import { useAppTheme } from './app-navigation';
 import { PhoneSetupStep } from './PhonePairing';
+import { SetupHelperPill } from './MemoryHelper';
 
 /** FIRSTRUN-01 (boards FR2–FR3): the steps after the owner account, in the one setup window. */
 export type FirstRunStep = 'discovery' | 'tools' | 'model' | 'team' | 'phone';
@@ -114,6 +115,8 @@ export function FirstRunSetup({ client, initialStep, workspaceType: initialType,
     {step === 'team' && <TeamStep client={client} workspaceType={workspaceType} ready={teamReady} onReady={() => setTeamReady(true)} onBack={() => go('model')} onDone={() => setStep('phone')}/>}
     {step === 'phone' && <PhoneSetupStep client={client} onBack={() => { setTeamReady(true); setStep('team'); }} onDone={finish}/>}
     </>}
+    {/* MODELS-01-INSTALL (M1–M2): the memory helper installs itself; one quiet pill in the step's bottom bar, no step and no choice. */}
+    <SetupHelperPill client={client}/>
   </main></div>;
 }
 
