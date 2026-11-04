@@ -7,7 +7,7 @@ This page answers four questions for every piece of information Girru keeps:
 - which copies exist and how they stay in step;
 - what leaves this computer, how long it is kept, and how to export or forget it.
 
-Each row is marked **Today** (how the current source behaves) or **Planned** (agreed, not built yet). Contributors who change a store, add a copy or add a new kind of data update this page in the same change.
+Each row is marked **Today** (how the current source behaves with its switches off), **With `GIRRU_STORE_…`** (built, behind that [memory switch](#memory-switches)) or **Planned** (agreed, not built yet). Contributors who change a store, add a copy or add a new kind of data update this page in the same change.
 
 ## Rules
 
@@ -140,7 +140,28 @@ Today the generated copies are refreshed every 60 seconds. **Planned:** every ch
 
 Open coding-tool sessions keep the copy they loaded, so the brief asks them to call `project_brief` or `latest_handoff` when work resumes.
 
-### Pilot (one project, off by default)
+## Memory switches
+
+The memory work is built and in the source. Each part sits behind one backend switch, so it can be turned on and off as a unit. A switch is on when its environment variable is `1`, `true`, `yes` or `on`. In the current source every switch is off unless it is set; turning them on by default together is the last step before the next release, and this page is updated in that same change.
+
+| Switch | Part | Section |
+|---|---|---|
+| `GIRRU_STORE_PILOT`, `GIRRU_STORE_PILOT_AGENT` | Change log and sync status for one project and one agent | [Pilot](#pilot-one-project) |
+| `GIRRU_STORE_P2` | One agent context and one Girru section | [One agent context](#one-agent-context-and-one-girru-section) |
+| `GIRRU_STORE_P2B` | Local models only: tools on demand and a budget from the model's real window | [Local models only](#local-models-only) |
+| `GIRRU_STORE_P3` | Departments, projects by id, source and trust, replaced facts | [Foundations](#foundations) |
+| `GIRRU_STORE_P4` | One personality record, one handoff table | [One store per piece](#one-store-per-piece) |
+| `GIRRU_STORE_P5` | Agent notes in the database, agent packages | [Agent notes](#agent-notes-and-agent-packages) |
+| `GIRRU_STORE_P6` | Sessions, ids in files, one memory contract | [Ids in files](#ids-in-files-and-proven-sync) |
+| `GIRRU_STORE_P7` | One safe file writer, project layout in one step | [One safe file writer](#one-safe-file-writer) |
+| `GIRRU_STORE_P8` | Task links and run notes | [Task links](#task-links-and-run-notes) |
+| `GIRRU_STORE_P9` | Faster recall, privacy enforcement, health, forget ledger | [Hardening](#hardening-privacy-and-quality) |
+| `GIRRU_STORE_P9B` | One write pipeline, confidence, careful recall | [Memory quality](#memory-quality) |
+| `GIRRU_MEMORY_HELPER` | The memory helper gets itself ready | [Memory helper](#memory-helper) |
+
+All switches were tested together: the full backend test suite passes with every switch on and with every switch off, on SQLite and on PostgreSQL. See [Measured on this computer](#measured-on-this-computer).
+
+### Pilot (one project)
 
 A first version of the change log, the session capability and the shared agent context runs for one project and one agent when these backend environment variables are set:
 
@@ -153,7 +174,7 @@ A first version of the change log, the session capability and the shared agent c
 - **Sync status:** `GET /api/memory-bridge/projects/:projectId/sync`; `POST` with `{"action":"rebuild"}` re-renders from the current records, `{"action":"use_girru_version"}` resolves a conflict by keeping the outside file next to the brief and writing Girru's version.
 - Lines removed from `brief.md`, or the whole file, are never read back: the file is regenerated and no memory is forgotten.
 
-### Foundations (off by default)
+### Foundations
 
 `GIRRU_STORE_P3=1` turns on:
 
@@ -162,7 +183,7 @@ A first version of the change log, the session capability and the shared agent c
 - **Source, trust and replaced facts:** new memories record where they came from (owner, agent, coding app, import, channel) and how far to trust them (checked, unchecked, imported); a background job fills older rows. A new fact on a known topic replaces the old one, which stays in History and is never recalled. `PUT /api/memory/scopes/memories/:id/checked` marks a memory as checked or undoes it.
 - **Start-up after an update:** Girru stops before writing anything when the data was written by a newer Girru, and a failed update step is named with an error id; the desktop start page explains both.
 
-### One store per piece (off by default)
+### One store per piece
 
 `GIRRU_STORE_P4=1` turns on:
 
@@ -171,14 +192,14 @@ A first version of the change log, the session capability and the shared agent c
 - **One handoff table** for agents' and coding tools' notes.
 - **The old memory index file** `.data/memory/memory.db` is retired after a verified full backup, and the old skill marketplace routes answer `410`.
 
-### Agent notes and agent packages (off by default)
+### Agent notes and agent packages
 
 `GIRRU_STORE_P5=1` turns on:
 
 - **Agent notes in the database:** at start-up each agent's `MEMORY.md` is imported once into its own drawer, with the file's earlier versions as history. Prompts read the drawer; the owner saves with the hash of the text read; `MEMORY.md` is written from the drawer, and a file changed outside Girru is kept until the owner decides.
 - **Agent packages:** one JSON document per agent with `schemaVersion` and a content hash. Import is untrusted: permissions, tool grants, credentials, hooks and private history are never imported, a secret refuses the package, specialties and skills are linked only when this computer has the same content, and nothing is downloaded. Each import is recorded with its hash.
 
-### Ids in files and proven sync (off by default)
+### Ids in files and proven sync
 
 `GIRRU_STORE_P6=1` turns on:
 
@@ -193,7 +214,7 @@ A first version of the change log, the session capability and the shared agent c
 - **Task-number problems in Needs you:** a number used twice or a hidden id Girru does not know waits for the owner (new task, add as a task, or leave). Left items are remembered per owner (`task_number_dismissals`).
 - **Places that stay on this computer:** the owner marks Memory places (owner, people, experience, tasks, company, each project) as staying on this computer (`memory_place_settings`; People by default). The switch is stored and shown; replies do not yet read it.
 
-### One safe file writer (off by default)
+### One safe file writer
 
 `GIRRU_STORE_P7=1` turns on, for every file Girru writes into a project folder (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `DESIGN.md`, `.girru/` files and `.git/info/exclude`):
 
@@ -218,7 +239,7 @@ With the same switch:
 - **Antigravity:** first-run setup looks for the Antigravity CLI (`agy`) instead of the Gemini CLI.
 - **Claude Code's own auto memory** is untrusted input: runs that Girru starts switch it off, and what Claude Code writes there reaches Girru only as review proposals.
 
-### Task links and run notes (off by default)
+### Task links and run notes
 
 `GIRRU_STORE_P8=1` turns on:
 
@@ -227,7 +248,7 @@ With the same switch:
 - **Run notes:** a run's short working notes stay with the run, read only, and are cleared 14 days after its last note. At the run's end lines starting `Done:`, `Left:`, `Next:`, `Blocked:` and `File:` become its handoff when it wrote none, and `Lesson:` lines go to the owner as suggestions. No model is called for this.
 - **Local models unchanged:** the new tool arguments and `run_note` are offered only to models that are not on this computer, so a local model's prompt and tool list stay the same size.
 
-### Hardening, privacy and quality (off by default)
+### Hardening, privacy and quality
 
 `GIRRU_STORE_P9=1` turns on:
 
@@ -244,7 +265,7 @@ With the same switch:
 - **Every provider, the same memory:** each provider's tool format (Claude API, Ollama and LM Studio, OpenAI API, Gemini API, MCP) must pass the same five-verb scenario (save, recall, supersede, handoff, propose, a refused wrong argument, and a last recall that returns the new fact and not the old one) on synthetic tool calls before it counts as supported; a provider that has not passed is "memory limited". No live provider is called for this.
 - **The forget ledger:** each forget adds a line to `forget-ledger.jsonl` in the data folder (owner-only) with the memory and user ids and a keyed hash of the text, never the text. A backup carries a copy. A restore keeps the current ledger and adds the backup's lines, and the next start forgets every line again, including the same text saved under another id, so a restored backup never brings forgotten memory back.
 
-### One agent context and one Girru section (off by default)
+### One agent context and one Girru section
 
 `GIRRU_STORE_P2=1` turns on, for every agent:
 
@@ -254,6 +275,80 @@ With the same switch:
 - **Coding-app memory budget:** the memory sent with a coding-app reply has a token budget instead of a character cap.
 - **One Girru section:** `AGENTS.md` gets one section between `<!-- girru:start … -->` and `<!-- girru:end -->` with the memory brief (where memory files are on), the owner's rules and the task-file pointer; `CLAUDE.md` and `GEMINI.md` only point to `AGENTS.md`. The two older sections (`dpro-memory`, `girru:rules`) are replaced in place. With the switch off again, the next write restores the earlier layout.
 
+### Local models only
+
+`GIRRU_STORE_P2B=1` makes "local models only, no subscription" a full path:
+
+- **Tools on demand:** a turn sends the memory verbs in full, a `tool_load` tool and a short index of the agent's other tools (name and one line). The full form of another tool comes with `tool_load` or when it is called. One definition feeds the native tools, the subscription protocol and MCP. `tool_load` describes only tools the agent already has; grants, policies and approvals are unchanged.
+- **A budget from the real window:** Girru reads the model's context size (Ollama, LM Studio, or the setting of a generic OpenAI-compatible server on this computer) and splits it between instructions, memory, history and tools, so a turn fits an 8k model with room for the reply. Tool results inside a turn are clipped to fit.
+- **Weak tool calling:** the server checks every argument and tells a wrong call what the tool takes; small models (window of 16k or less) get fewer and simpler tools; many calls in one reply run one at a time, with a cap.
+- **Sharing the computer:** background memory work waits while a local reply runs, and the chat model stays loaded.
+- **A generic local server:** an OpenAI-compatible endpoint on this computer (llama.cpp or vLLM style) can be used as a provider, set with `GIRRU_LOCAL_OPENAI_URL`.
+- **Memory limited:** a local model that misses a step of the memory check is recorded as "memory limited" (`<data>/local-model-conformance.json`). It still works; it is just not trusted with memory in the same way. The screens for this (a "Local models only" choice in first-run setup and the "memory limited" mark) are **Planned**.
+
+On this path the model runs on this computer, so a turn sends nothing to a provider.
+
+### Memory quality
+
+`GIRRU_STORE_P9B=1` turns on:
+
+- **One write pipeline:** every way a memory arrives (chat, an agent's tool, a coding app over MCP, an import, a channel, the owner) goes through one pipeline that stores where it came from and a trust record in the same write. Further details are added in the background.
+- **Confidence from agreement:** how sure Girru is of a memory comes from how many independent sources agree with it and whether the owner verified it, not from the model's opinion.
+- **Careful recall:** recall for a reply is routed by what the message asks, re-ranked on this computer within a fixed time budget (300 ms), and answers "no reliable memory" instead of guessing.
+- **Use teaches the order:** memories that turn out useful rank higher next time. Only verified facts are taught this way.
+- **When filters hide everything:** if a model adds filters that hide every match, the same words are searched again without them and the answer says so.
+- **Screens:** the Memory inspector shows "How sure" with the reasons and where the memory was heard; the owner can mark a memory as verified (with Undo). Needs you shows memories corrected after use and open questions; a question can be answered in place, which saves the owner's answer as a verified fact.
+- **Tools:** `memory_trust_review` (read only, the owner's own turns, open drawers only), `memory_corrected_checked`, `memory_question_answer` and `memory_question_forget`.
+
+### Memory helper
+
+The memory helper is the small local model that turns memory into vectors for search, so recall finds meaning across words and languages. It runs only on this computer and never chats; it is not in any model picker. It is separate from the local chat model the owner may pick in first-run setup.
+
+`GIRRU_MEMORY_HELPER=1` makes it ready without the owner doing anything:
+
+- **Background only:** start-up never waits for it, and a reply never waits for it.
+- **Loopback only:** it works only with a local runtime on `127.0.0.1`, `::1` or `localhost`; a runtime it starts is bound to `127.0.0.1`. Any other address leaves memory on the offline fallback.
+- **Steps:** find the local runtime (Ollama), start it if it is installed but not running, download the embedding model (`qwen3-embedding:0.6b`, about 640 MB) with progress, check that it answers, then re-compute the memories that were saved with the fallback.
+- **Resumable:** the state is kept in `<data>/memory-helper.json` (codes, counts and model names only, never memory text or paths). A failed download is tried again later and goes on from where it stopped.
+- **Fallback:** until it is ready, or when it cannot be, memory uses an offline hash search. It works with no download, but it is weaker in meaning and across languages (see the numbers below).
+- **The runtime itself is not installed yet:** when Ollama is missing, the helper reports it and stays on the fallback. Installing the runtime for the owner in first-run setup is **Planned**.
+
+The memory helper's status is one row in Memory › Health.
+
+## Code as a Store app
+
+Code, the project editor, is not part of the Girru download. It is an app from the Store (`girru:code`) for the desktop app, installed the same way as other Store apps:
+
+- **Where it comes from:** the archive for this computer's platform is downloaded from a public GitHub release named in the Store index. Only GitHub release addresses of the Code project and the Store repository are accepted.
+- **Checked before use:** the archive's size and SHA-256 must match the Store index. It is unpacked by Girru's own reader: plain files and folders only, no links, nothing outside its folder, with size and count limits.
+- **Where it lives:** in the desktop app's per-computer app folder (`app-runtimes/code/`), one folder per version, with a small `current.json` that points to the version in use. All workspaces on the computer share one copy. An update unpacks next to the old version and switches in one step; a failed download or check changes nothing, and the folder it replaced stays until the next update, because a running editor may still use it. Removing Code deletes its folders.
+- **What leaves this computer:** only the download request to GitHub. Code sends none of the owner's data to Girru's servers.
+- **Opening files in Code:** project files, task-number lines, rule files and changed files can be opened in Code at their line. An agent's `open_in_code` needs the owner's approval each time and only opens files inside a project or the data folder.
+
+Measured on one Apple silicon Mac: the install downloaded and unpacked about 421 MB in about 30 seconds on that network.
+
+## Measured on this computer
+
+These numbers are local measurements made by the project on one development Mac, on generated test data, with every memory switch on. They are not guarantees; your numbers depend on your computer, your models and your data.
+
+| Measure | Before the memory work | With every switch on |
+|---|---|---|
+| Recall finds the right memory in the top 5, same language (local embedding model) | 0.958 | 0.958 |
+| The same, across languages | 0.714 | 0.714 |
+| The same with the offline fallback, same / across languages | 0.917 / 0.286 | 0.917 / 0.357 |
+| Questions with no answer in memory that get "nothing reliable" (of 8) | 0 | 3 |
+| Leaks between projects, people, tasks and accounts (of 5 checks) | 0 | 0 |
+| The current fact comes first after a change (of 5) | 1 | 4 |
+| Prompt tokens per chat turn | 12,958 | 10,294 |
+| Prompt tokens at the start of a coding tool's memory session | 3,476 | 1,537 |
+| Recall time, 10,000 memories, local embedding (median) | 276 ms | 44 ms |
+| Recall time, 100,000 memories, local embedding (median) | 3.4 s | 0.28 s |
+| SQLite and PostgreSQL schemas compared | 226 of 226 tables match | 250 of 250 tables match |
+
+With local models only (`GIRRU_STORE_P2B`), a chat turn for a model with an 8k window measured 2,562 prompt tokens instead of 10,805.
+
+Every installed provider passed the same memory scenario (save, recall, replace, handoff, propose, a refused wrong argument, and a last recall that returns the new fact) through each way it connects: subscriptions through their command-line tools, the `dpro-memory` MCP server, and a local model through Ollama. One small local model held to an 8k window is recorded as "memory limited": it missed one recall and invented nothing.
+
 ## Privacy
 
 ### What leaves this computer
@@ -262,9 +357,13 @@ With the same switch:
 |---|---|---|
 | The prompt of a turn: agent definition, rules, recalled memory, conversation | the model provider chosen for that agent or chat | Only for that turn. With a local model (Ollama or LM Studio) nothing leaves the computer. |
 | Memory extraction and summaries | the local model | Always local unless the owner explicitly allows a paid provider for that job |
-| Embeddings | the local embedding model on this computer, or an offline hash | Never a remote address |
+| Embeddings | the [memory helper](#memory-helper) on this computer, or an offline hash | Never a remote address |
 | Channel messages (Telegram, Discord and others) | the channel's service, and the model provider | A channel sender gets no owner memory |
 | Facts about people | the local model only, unless the owner turns off "Stays on this computer" for People | With `GIRRU_STORE_P9`: enforced in chat, coding apps, task runs and the coding tools' memory |
+| Memory sent to a coding tool | the coding tool on this computer through the `dpro-memory` MCP server, and from there to that tool's own provider | Only the project's own memory, pinned facts and handoffs, for a project folder Girru knows. Owner, People and other projects' memory never go into project files or MCP answers |
+| Nothing (local models only) | — | With only local models (Ollama, LM Studio or a generic server on this computer), a turn sends nothing to a provider |
+| Downloads Girru asks for | the memory helper's model from the local runtime's model library; Code and other Store apps from public GitHub releases; the Store index and updates from the public repository | Only the download request. No memory, chat or file content is sent |
+| A support file | nowhere by itself | `GET /api/memory/health/support` holds versions, counts, ids and timings, never memory text, names, keys or home-folder paths; the owner decides whether to share it |
 
 ### How long it is kept
 
@@ -285,6 +384,14 @@ With the same switch:
 - **Forget** cannot be undone. It removes the memory, the text of all its versions (one tombstone without text remains), its index rows, its Markdown copies and exports, its text in proposals and its lines in stored summaries.
 - **Forget ledger** (`GIRRU_STORE_P9`): every forget is recorded with ids and a keyed hash only, and applied again after a backup is restored, so forgotten data does not come back. Backups made before a forget still hold the memory until they expire (14 days, 4 Sundays, 30 days for before-update and before-restore backups).
 - **Decided and tested:** in a workspace with members, the owner sees shared scopes only, never a member's private memory.
+- **Agent packages** (`GIRRU_STORE_P5`): one agent can be exported as one JSON file; permissions, tool grants, credentials and private history are never part of it.
+- **Coding tools:** with `GIRRU_STORE_P7`, a clean-up before uninstalling takes Girru's entry out of every coding tool's settings file and keeps the rest of that file.
+
+### Planned
+
+- **Optional encryption** of all memory on disk, with a log of every read.
+- **Backups the owner controls:** what is saved, how often, how long it is kept and where, always encrypted.
+- **Screens** for the "Local models only" first-run choice, the "memory limited" mark and installing the memory helper's runtime.
 
 ## Related pages
 

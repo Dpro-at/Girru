@@ -20,7 +20,12 @@ its own notes and knowledge files.
 A personality changes how an agent talks. It never changes its job, skills or
 permissions.
 
-### The personality record (`GIRRU_STORE_P4`, off by default)
+The `GIRRU_STORE_…` switches named on this page are listed, with their
+current default, in the [storage map](architecture/storage-map.md#memory-switches).
+That page also says what is stored where, what leaves the computer and how to
+export or forget it.
+
+### The personality record (`GIRRU_STORE_P4`)
 
 With the switch on:
 
@@ -134,10 +139,10 @@ Stores learned knowledge and patterns from conversations.
 
 ### How Memory Works
 
-1. **Automatic:** Agent can update memory during conversations
-2. **Manual:** Edit via `/dashboard/agents/{id}/files` → "Memory" tab
-3. **Tools:** Agent uses `memory_save` tool to record patterns
-4. **Retrieval:** Agent references memory in future conversations
+- **The agent's own notes.** `MEMORY.md` holds what this agent learned for itself. With `GIRRU_STORE_P5` on, the notes live in the agent's own drawer in the database and `MEMORY.md` is written from it; a file changed outside Girru is kept until the owner decides. Only the agent's own prompt and the owner read these notes.
+- **Shared memory.** Facts about the owner, projects, tasks, people and lessons live in Girru's memory drawers, not in `MEMORY.md`. The agent reaches them with the memory tools, within the drawers it is allowed to open.
+- **Edit by hand** in the agent's Files › Memory tab. Every save keeps the earlier version.
+- **Memory is data.** Notes and recalled memory reach the agent framed as data; they never override the owner's rules.
 
 ---
 
@@ -189,40 +194,21 @@ skills). The heartbeat reads no owner memory.
 
 ## Memory Tools
 
-Agents can manage their own memory using these tools:
+Every agent, every model and every coding tool uses the same memory contract. The server checks every argument; a write sent twice with the same request id is saved once.
 
-### memory_save
-Save new knowledge pattern
-```javascript
-{
-  "category": "troubleshooting",
-  "pattern": "Database timeout usually means firewall blocking port",
-  "context": "Solved 5 similar issues this week"
-}
-```
+| Verb | Native tool | What it does |
+|---|---|---|
+| recall | `memory_search` | Search the memory this agent may read. Results show when each memory was saved and its drawer. |
+| save | `memory_save` | Save a lasting fact; with a topic key, one fact per topic is kept up to date. |
+| supersede | `memory_edit` | Replace one memory with a new text; the old one stays in History and is no longer recalled. |
+| handoff | `handoff_save` | Leave done, left, next and questions for the next agent. |
+| propose | `memory_save` in a reviewed place | A fact the owner reviews before it counts. |
 
-### memory_search
-Search existing memory
-```javascript
-{
-  "query": "database connection issues"
-}
-```
+Coding tools reach the same memory through the `dpro-memory` MCP server and can only propose memories and write handoffs; the owner approves proposals. See the [tools reference](../packages/backend/src/tools/README.md).
 
-### memory_reflect
-Analyze patterns and insights
-```javascript
-{
-  "period": "last_week",
-  "focus": "common_problems"
-}
-```
+When memory cannot be read, the agent goes on without it and says memory was unavailable when that matters. It never invents memory. With `GIRRU_STORE_P9B` on, recall answers "no reliable memory" instead of guessing.
 
-### memory_stats
-Get memory statistics
-```javascript
-{}
-```
+Memories about health, religion, politics, sexuality, origin, union membership or genetic and biometric data are never saved by an agent on its own; the owner decides (`GIRRU_STORE_P9`).
 
 ---
 
