@@ -1,7 +1,8 @@
 import {createHash} from 'node:crypto';
 import {addonCatalogue} from './addon-catalogue.js';
 import {searchMarketplace,checkForUpdates,installExtension,uninstallExtension,getExtensionDetails} from './extension-marketplace.js';
-import {readStoreRepo,type RepoRead} from './store-repo.js';
+import {readStoreRepo,type RepoRead,type StoreRuntime} from './store-repo.js';
+import {CODE_ITEM,codeStoreActive,codeBundled,installedCodeRuntime,runtimePlatform,startCodeInstall,type RuntimeFetch} from './code-runtime.js';
 import {existsSync} from 'node:fs';
 import {backendPath} from '../config/backend-root.js';
 import {COMPANY_SPECIALTIES} from './company-specialties.js';
@@ -39,9 +40,10 @@ const category=(x:unknown):StoreCategoryId=>{const v=typeof x==='string'?x.trim(
 
 /** Today's source: the local catalogues on this computer. Reading never downloads or installs. */
 export function localCatalogue(options:{home?:string;repo?:()=>Promise<RepoRead>}={}):LocalCatalogue{
- let limited:string[]=[],have:Have={installed:new Set(),present:new Set()},asOf:string|null=null,addable=new Set<string>();
+ let limited:string[]=[],have:Have={installed:new Set(),present:new Set()},asOf:string|null=null,addable=new Set<string>(),code:StoreRuntime|null=null;
  return {
   addable:()=>addable,
+  codeRuntime:()=>code,
   limited:()=>limited,
   have:()=>have,
   asOf:()=>asOf,
@@ -52,12 +54,13 @@ export function localCatalogue(options:{home?:string;repo?:()=>Promise<RepoRead>
    // anything else it lists is shown as "store:<id>" (adding those comes with real installs).
    const repo=await (options.repo??readStoreRepo)().catch(():RepoRead=>({index:null,asOf:null,fresh:false}));
    asOf=repo.asOf;if(!repo.fresh)limited.push('store');
+   code=repo.runtimes?.[CODE_ITEM]??null;
    const added=await installedApps();
    for(const [id,x] of Object.entries(added))if(x.source==='store')have.installed.add('store:'+id);
    addable=new Set(Object.keys(repo.packages??{}).map(k=>'store:'+k.slice(6)));
    for(const r of repo.index?.items??[]){
     const at=items.findIndex(x=>x.id===r.id);
-    if(at>=0)items[at]={...items[at],summary:r.summary||items[at].summary,description:r.description||items[at].description,icon:r.icon??items[at].icon,version:r.version,updated:r.updated,category:r.category,permissions:r.permissions.length?r.permissions:items[at].permissions,worksWith:r.worksWith,languages:r.languages};
+    if(at>=0)items[at]={...items[at],summary:r.summary||items[at].summary,description:r.description||items[at].description,icon:r.icon??items[at].icon,version:r.id===CODE_ITEM&&code?code.version:r.version,updated:r.updated,category:r.category,permissions:r.permissions.length?r.permissions:items[at].permissions,worksWith:r.worksWith,languages:r.languages};
     // Skills and specialties that come with Girru are already here; anything else waits for its package.
     else items.push(comesWithGirru(r)?r:{...r,id:'store:'+r.id.slice(6)});
    }
@@ -81,7 +84,19 @@ export function localCatalogue(options:{home?:string;repo?:()=>Promise<RepoRead>
 
 type Have={installed:Set<string>;present:Set<string>};
 /** A source that also knows what this owner already has (installed registry apps, add-ons present on this computer). */
-export type LocalCatalogue=CatalogueSource&{limited:()=>string[];have:()=>Have;asOf?:()=>string|null;addable?:()=>Set<string>};
+export type LocalCatalogue=CatalogueSource&{limited:()=>string[];have:()=>Have;asOf?:()=>string|null;addable?:()=>Set<string>;codeRuntime?:()=>StoreRuntime|null};
+
+/**
+ * CODE-STORE-01: in the desktop app Code is a Store app. It reads as included when the app
+ * has it inside or it is installed (with the Store's newer version as its update), as
+ * available when the Store has it for this computer, and as elsewhere when it has none.
+ */
+function codeState(runtime:StoreRuntime|null):{state:StoreState;update:string|null}{
+ if(!codeStoreActive()||codeBundled())return {state:'included',update:null};
+ const platform=runtimePlatform(),archive=runtime&&platform?runtime.archives[platform]:undefined,installed=installedCodeRuntime();
+ if(installed)return {state:'included',update:archive&&runtime!.version!==installed.version?runtime!.version:null};
+ return {state:archive?'available':'elsewhere',update:null};
+}
 
 export type StoreState='included'|'installed'|'available'|'elsewhere';
 export type StoreEntry=StoreManifest&{state:StoreState;present:boolean;update:string|null;hash:string};
@@ -99,6 +114,7 @@ export async function readStore(ownerId:string,source:LocalCatalogue=localCatalo
  const {installed:registry,present}=source.have();
  const items:StoreEntry[]=index.items.map(x=>{
   const state:StoreState=x.id.startsWith('girru:')?'included':x.id.startsWith('registry:')?(registry.has(x.id)?'installed':'available'):x.id.startsWith('store:')?(registry.has(x.id)?'installed':source.addable?.().has(x.id)?'available':'elsewhere'):'elsewhere';
+  if(x.id===CODE_ITEM){const c=codeState(source.codeRuntime?.()??null);return {...x,state:c.state,present:c.state==='included',update:c.update,hash:consentHash(x)};}
   const update=updates.find(u=>'registry:'+u.extension_id===x.id)?.latest_version??null;
   return {...x,state,present:state==='included'||state==='installed'||present.has(x.id),update:state==='installed'?update:null,hash:consentHash(x)};
  });
@@ -111,7 +127,17 @@ const registryId=(id:string)=>id.startsWith('registry:')?id.slice(9):null;
 const refuseOther=(id:string):StoreChange=>({ok:false,code:'not_installable',message:id.startsWith('girru:')?'It comes with Girru. It is already in My apps.':id.startsWith('store:')?'This app has nothing to add yet.':'Add it in that coding app itself. Girru does not copy its keys.'});
 
 /** Add one registry app, only with the hash of exactly what the owner was shown. */
-export async function installFromStore(ownerId:string,id:string,hash:string,options:{restart?:()=>boolean;repo?:()=>Promise<RepoRead>}={}):Promise<StoreChange>{
+export async function installFromStore(ownerId:string,id:string,hash:string,options:{restart?:()=>boolean;repo?:()=>Promise<RepoRead>;fetch?:RuntimeFetch}={}):Promise<StoreChange>{
+ // CODE-STORE-01: Code (add or update) is a job that downloads its runtime for this computer.
+ if(id===CODE_ITEM&&codeStoreActive()&&!codeBundled()){
+  const read=options.repo??readStoreRepo,repo=await read();
+  const runtime=repo.runtimes?.[CODE_ITEM];
+  if(!runtime)return {ok:false,code:'not_found',message:'The Girru Store has no Code for this computer yet.'};
+  const item=repo.index?.items.find(i=>i.id===CODE_ITEM),shown=INCLUDED.find(i=>i.id===CODE_ITEM)!;
+  if(consentHash({id,version:runtime.version,permissions:item?.permissions.length?item.permissions:shown.permissions})!==hash)return {ok:false,code:'changed',message:'Code changed since you saw it. Read what it asks for again.'};
+  const r=await startCodeInstall({repo:async()=>repo,fetch:options.fetch});
+  return r.ok?{ok:true,state:'adding',job:r.job.id}:{ok:false,code:r.code,message:r.message};
+ }
  // APPS-06: an app from the Girru Store is added by a job the window follows.
  if(id.startsWith('store:')){
   const app=id.slice(6),repo=await (options.repo??readStoreRepo)();
