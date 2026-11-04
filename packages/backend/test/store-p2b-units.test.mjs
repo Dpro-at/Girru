@@ -104,9 +104,9 @@ test('tools on demand: the memory verbs and tool_load in full, the rest as a sho
   await t.execute('tool_load', { group: 'board' }, async () => {});
   assert.deepEqual(t.loaded(), ['web_fetch', 'board_move', 'board_comment', 'board_check', 'board_my_cards']);
   // An unknown tool: similar names; a wrong argument: what the tool takes; extras dropped and said.
-  const unknown = await t.execute('board_delete', {}, async (name) => ({ content: [{ type: 'text', text: `Error: Tool "${name}" not found` }], error: 'not found' }));
-  assert.match(unknown.content[0].text, /Tool "board_delete" not found/, 'the registry gives its own refusal');
-  assert.match(unknown.content[1].text, /Similar tools you have: board_move/);
+  const unknown = await t.execute('board_delete', {}, async () => assert.fail('a tool that was not offered never runs'));
+  assert.equal(unknown.error, 'tool_not_offered');
+  assert.match(unknown.content[0].text, /Tool "board_delete" was not run: it is not one of your tools\. Similar tools you have: board_move/);
   const bad = await t.execute('web_fetch', {}, async () => assert.fail('not run'));
   assert.equal(bad.error, 'invalid_arguments');
   assert.match(bad.content[0].text, /web_fetch was not run: url is required\. Its arguments: \{"type":"object"/);
@@ -171,7 +171,7 @@ test('adaptive budget: a full turn fits an 8k model with room for the reply, the
 });
 
 test('prepareLocalTurn: index and the memory rule in the system text, the reply room, caps per tier', () => {
-  const BIG = ALL.map((d) => ({ ...d, description: `${d.description} ${'More detail. '.repeat(40)}` })); // more than the tools share
+  const BIG = [...ALL, ...Array.from({ length: 80 }, (_, i) => tool(`extra_tool_${i}`, `Extra tool number ${i} that does one more thing`))]; // more than the tools share
   const lt = prepareLocalTurn({ window: { tokens: 8192, reported: 8192, source: 'ollama_show' }, tools: BIG, systemHead: 'Rules.', systemTail: 'UI.', messages: [{ role: 'user', content: 'hi' }], maxTokens: 9000, run: async () => ({ content: [] }) });
   assert.match(lt.system, /^Rules\.\n\n---\n\n## Tool index\n/);
   assert.ok(lt.system.includes(NO_INVENTED_MEMORY) && lt.system.endsWith('UI.'));
@@ -275,9 +275,22 @@ test('adaptive budget inside a turn: older tool results shrink so every step fit
 test('tools on demand only when needed: a few tools that fit the share go in full, as before', async () => {
   const few = new OD.OnDemandTools(ALL.slice(0, 5), 'small', { fitTokens: 10_000 });
   assert.equal(few.allInFull, true);
-  assert.deepEqual(few.definitions(), ALL.slice(0, 5));
+  assert.deepEqual(few.definitions().map((d) => d.name), ALL.slice(0, 5).map((d) => d.name));
+  assert.equal(few.definitions()[0].description, 'Search memory', 'a small model still gets the simpler form');
   assert.equal(few.index(), '');
   const many = new OD.OnDemandTools(ALL, 'small', { fitTokens: 50 });
   assert.equal(many.allInFull, false);
   assert.equal(many.definitions()[0].name, 'tool_load');
+});
+
+test('the system text is cut by section: pinned facts, owner rules, the summary and the model stay whole', async () => {
+  const { capSystemText } = await import('../src/memory/context/local-budget.ts');
+  const text = [`Your name is Rafid.\n${'Persona words. '.repeat(400)}`, `## Owner rules\n- Never send client data out.`, `## Skills\n${'Skill line. '.repeat(400)}`,
+    `## Pinned facts\n- We are Girru.`, `## Earlier in this conversation\n- Turn 3: the locker code is PINEAPPLE-4242.`, `## Your model\nqwen3:4b on this computer.`].join('\n');
+  const out = capSystemText(text, 900);
+  assert.ok(estimateTokens(out) <= 900);
+  for (const keep of ['## Owner rules\n- Never send client data out.', '## Pinned facts\n- We are Girru.', 'PINEAPPLE-4242', '## Your model\nqwen3:4b on this computer.']) assert.ok(out.includes(keep), keep);
+  assert.ok(out.startsWith('Your name is Rafid.'));
+  assert.equal(capSystemText(text, 900), out);
+  assert.equal(capSystemText('short', 900), 'short');
 });

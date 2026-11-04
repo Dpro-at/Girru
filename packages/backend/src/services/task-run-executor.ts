@@ -42,10 +42,9 @@ import { logActivity } from './activity-logger.js';
 import { resolveProviderApiKey } from '../credentials/authority.js';
 import { ollamaToolChat } from '../llm/ollama-tool-chat.js';
 import { storeP2bEnabled } from './store-p2b.js';
-import { localModelWindow, NO_INVENTED_MEMORY } from './local-turn.js';
+import { fitSystem, localModelWindow } from './local-turn.js';
 import { planLocalBudget, toolOutputChars } from '../memory/context/local-budget.js';
 import { OnDemandTools } from '../tools/on-demand.js';
-import { capTokens } from './agent-context/budget.js';
 import { DEFAULT_OLLAMA_MODEL } from '../llm/ollama.js';
 import { resolveLocalModel } from '../llm/local-models.js';
 import { SMALL_AGENT_ID, smallAgentCard, smallAgentRunScope, smallAgentSystemPrompt } from './small-agent.js';
@@ -462,7 +461,7 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
       const budget = planLocalBudget(window.tokens);
       const onDemand = new OnDemandTools(registry.getToolsForAPI(), budget.tier, { fitTokens: budget.tools });
       taskTools = onDemand;
-      const system = capTokens([systemPrompt, onDemand.index(), NO_INVENTED_MEMORY].filter(Boolean).join('\n\n---\n\n'), budget.system);
+      const system = fitSystem(systemPrompt, onDemand.index(), '', budget.system);
       driver = ollamaDriver({ ...agent, model: driver.model, ...(isSmall ? { temperature: smallTemp! } : {}), max_tokens: Math.min(driver.maxTokens, budget.replyTokens) }, system, () => onDemand.definitions(), budget.window, toolOutputChars(budget));
     }
 

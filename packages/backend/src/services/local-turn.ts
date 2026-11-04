@@ -9,9 +9,8 @@ import { OLLAMA_URL } from '../llm/ollama.js';
 import { lmStudioApiUrl, lmStudioModelName } from '../llm/lmstudio.js';
 import { openAiLocalModelName, openAiLocalUrl } from '../llm/openai-local.js';
 import { lmStudioWindow, ollamaWindow, openAiCompatWindow, FALLBACK_WINDOW, type ModelWindow } from '../llm/model-window.js';
-import { fitLocalTurn, planLocalBudget, shrinkStep, toolOutputChars, toolTokens, type FitMessage, type FitResult, type LocalBudget } from '../memory/context/local-budget.js';
+import { capSystemText, fitLocalTurn, planLocalBudget, shrinkStep, toolOutputChars, toolTokens, type FitMessage, type FitResult, type LocalBudget } from '../memory/context/local-budget.js';
 import { estimateTokens } from '../memory/context/budget.js';
-import { capTokens } from './agent-context/budget.js';
 import { CALLS_PER_STEP, OnDemandTools, STEPS_PER_TURN } from '../tools/on-demand.js';
 import type { ToolDef } from '../tools/tool-doors.js';
 import type { ToolResult } from '../tools/types.js';
@@ -110,7 +109,7 @@ export function fitSystem(head: string, index: string, tail: string, tokens: num
   text = join(head, shortIndex, '');
   if (estimateTokens(text) <= tokens) return text;
   const rest = estimateTokens(join('', shortIndex, '')) + 8;
-  return join(capTokens(head, Math.max(256, tokens - rest)), shortIndex, '');
+  return join(capSystemText(head, Math.max(256, tokens - rest)), shortIndex, '');
 }
 
 /** Numbers only, for the log (no prompt text). */

@@ -99,7 +99,7 @@ export function fitLocalTurn<M extends FitMessage>(input: { system: string; mess
   const toolsT = toolTokens(input.tools);
   let system = input.system;
   const before = estimateTokens(system);
-  if (before > budget.system) system = capTokens(system, budget.system);
+  if (before > budget.system) system = capSystemText(system, budget.system);
   const systemT = estimateTokens(system);
 
   const msgs = [...input.messages];
@@ -159,3 +159,29 @@ export function shrinkStep(messages: { role: string; content: unknown }[], token
 
 /** Characters of one tool result given back to a model of this budget (its memory share). */
 export const toolOutputChars = (b: LocalBudget): number => Math.max(1200, b.memory * 3);
+
+/** Sections of the system text that are never shortened (they are small and matter most). */
+const KEEP_WHOLE = /^## (Pinned facts|Earlier in this conversation|Owner rules|Your model)\b/;
+
+/**
+ * The system text within `tokens`, cut by section: the sections in KEEP_WHOLE
+ * stay whole; the others are shortened (their start and end kept), the largest
+ * first, each down to at least 60 tokens. Only if that is not enough is the
+ * whole text cut in the middle. The same input gives the same output.
+ */
+export function capSystemText(text: string, tokens: number): string {
+  if (estimateTokens(text) <= tokens) return text;
+  const parts = text.split(/\n(?=## )/);
+  let over = estimateTokens(text) - tokens;
+  const order = parts.map((p, i) => ({ i, t: estimateTokens(p) })).filter(({ i }) => !KEEP_WHOLE.test(parts[i])).sort((a, b) => b.t - a.t || a.i - b.i);
+  for (const { i, t } of order) {
+    if (over <= 0) break;
+    const allowed = Math.max(60, t - over);
+    if (allowed >= t) continue;
+    const cut = capTokens(parts[i], allowed);
+    over -= t - estimateTokens(cut);
+    parts[i] = cut;
+  }
+  const joined = parts.join('\n');
+  return estimateTokens(joined) <= tokens ? joined : capTokens(joined, tokens);
+}

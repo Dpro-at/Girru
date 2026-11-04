@@ -61,7 +61,8 @@ export class OnDemandTools {
   constructor(all: readonly ToolDef[], readonly tier: ModelTier, opts: { fitTokens?: number } = {}) {
     for (const d of all) if (d.name !== TOOL_LOAD && !this.byName.has(d.name)) { this.byName.set(d.name, d); this.order.push(d.name); }
     this.limits = LIMITS[tier];
-    const defs = this.order.map((n) => this.byName.get(n)!);
+    // A small model gets the simpler form of each tool, so that is what has to fit.
+    const defs = this.order.map((n) => (tier === 'small' ? simpleDef(this.byName.get(n)!) : this.byName.get(n)!));
     this.allInFull = opts.fitTokens !== undefined && Math.ceil(JSON.stringify(defs).length / 3) <= opts.fitTokens;
   }
 
@@ -94,7 +95,7 @@ export class OnDemandTools {
   /** The tools sent in full on this step: tool_load, the memory verbs, then what was loaded (in load order). */
   definitions(): ToolDef[] {
     if (!this.order.length) return [];
-    if (this.allInFull) return this.order.map((n) => this.byName.get(n)!);
+    if (this.allInFull) return this.order.map((n) => this.full(n));
     return [this.loadDef(), ...this.always().map((n) => this.full(n)), ...this.loadedNames.map((n) => this.full(n))];
   }
 
@@ -149,11 +150,9 @@ export class OnDemandTools {
     }
     const def = this.byName.get(name);
     if (!def) {
-      // Not one of this agent's offered tools: the registry answers with its own refusal (exec policy, grants,
-      // channel rules, "not found"); the model also gets similar names it does have.
-      const refused = await run(name, (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {}) as Record<string, unknown>);
+      // Fail closed: a tool that was not offered to this agent is never run (nothing reaches the registry).
       const near = this.similar(name);
-      return near.length && refused.error ? { ...refused, content: [...(refused.content ?? []), { type: 'text', text: `Similar tools you have: ${near.join(', ')}.` }] } : refused;
+      return text(`Error: Tool "${name}" was not run: it is not one of your tools.${near.length ? ` Similar tools you have: ${near.join(', ')}.` : ''} Use a name from the tool index.`, 'tool_not_offered');
     }
     const checked = checkToolArgs(def.input_schema, rawArgs);
     if (!checked.ok) {
