@@ -16,6 +16,9 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { skillsScenario } from './fixtures/skills-scenario.mjs';
 
+// The legacy marketplace code path, reachable while GIRRU_STORE_P4 is off (as in skills-marketplace.test.mjs);
+// with P4 on the routes answer 410 (store-p4-marketplace.test.mjs).
+process.env.GIRRU_STORE_P4 = '0';
 const URL_ = process.env.AGENT_PLAYER_PG_TEST_URL;
 const skip = URL_ ? false : 'AGENT_PLAYER_PG_TEST_URL is not set (PostgreSQL integration test)';
 const sqliteHits = [];

@@ -242,7 +242,10 @@ test('a proposal is approved atomically: two concurrent approvals give one versi
   assert.deepEqual(r2.map((r) => r.status).sort(), ['fulfilled', 'rejected']);
 });
 
-test('Evolution proposals: approve applies once, rollback restores (PostgreSQL)', { skip }, async () => {
+test('Evolution proposals: approve applies once, rollback restores (PostgreSQL)', { skip }, async (t) => {
+  // The prompt_append path of Evolution (GIRRU_STORE_P4 off); with P4 on it becomes a personality proposal.
+  const p4 = process.env.GIRRU_STORE_P4; process.env.GIRRU_STORE_P4 = '0';
+  t.after(() => { if (p4 === undefined) delete process.env.GIRRU_STORE_P4; else process.env.GIRRU_STORE_P4 = p4; });
   const out = await m.evolution.createEvolutionProposal(ids.agent, { kind: 'prompt_append', title: 't', proposedText: '\nPG line', reason: 'r' });
   assert.equal(out.status, 'proposed');
   const dup = await m.evolution.createEvolutionProposal(ids.agent, { kind: 'prompt_append', title: 't', proposedText: '\nPG line', reason: 'r' });
