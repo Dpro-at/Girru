@@ -106,7 +106,7 @@ test('tools on demand: the memory verbs and tool_load in full, the rest as a sho
   // An unknown tool: similar names; a wrong argument: what the tool takes; extras dropped and said.
   const unknown = await t.execute('board_delete', {}, async () => assert.fail('a tool that was not offered never runs'));
   assert.equal(unknown.error, 'tool_not_offered');
-  assert.match(unknown.content[0].text, /Tool "board_delete" was not run: it is not one of your tools\. Similar tools you have: board_move/);
+  assert.match(unknown.content[0].text, /Tool "board_delete" was not run: it is not allowed for you \(not one of your tools\)\. Similar tools you have: board_move/);
   const bad = await t.execute('web_fetch', {}, async () => assert.fail('not run'));
   assert.equal(bad.error, 'invalid_arguments');
   assert.match(bad.content[0].text, /web_fetch was not run: url is required\. Its arguments: \{"type":"object"/);
@@ -293,4 +293,19 @@ test('the system text is cut by section: pinned facts, owner rules, the summary 
   assert.ok(out.startsWith('Your name is Rafid.'));
   assert.equal(capSystemText(text, 900), out);
   assert.equal(capSystemText('short', 900), 'short');
+});
+
+test('a tight system share keeps every tool in the index by name before it drops any', async () => {
+  const { fitSystem } = await import('../src/services/local-turn.ts');
+  const { indexNames } = await import('./helpers/p2b.mjs');
+  const t = new OD.OnDemandTools([...ALL, ...Array.from({ length: 40 }, (_, i) => tool(`extra_tool_${i}`, `Extra tool ${i} with a long description of what it does for the owner`))], 'medium');
+  const head = `Rules.\n${'Persona. '.repeat(150)}`;
+  const out = fitSystem(head, t.index(), 'UI spec', 1000);
+  assert.ok(estimateTokens(out) <= 1000);
+  assert.ok(out.includes('UI spec') && out.includes('Persona. '.repeat(150)), 'descriptions go before the UI text and the core text');
+  const tight = fitSystem(`Rules.\n${'Persona. '.repeat(600)}`, t.index(), 'UI spec', 1000);
+  assert.ok(estimateTokens(tight) <= 1000);
+  assert.equal(indexNames(tight).length, indexNames(t.index()).length, 'still every tool by name when the core text is cut');
+  assert.match(out, /- Also: .*extra_tool_39/);
+  assert.equal(indexNames(out).length, indexNames(t.index()).length, 'no tool vanished from the index');
 });

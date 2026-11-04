@@ -152,7 +152,7 @@ export class OnDemandTools {
     if (!def) {
       // Fail closed: a tool that was not offered to this agent is never run (nothing reaches the registry).
       const near = this.similar(name);
-      return text(`Error: Tool "${name}" was not run: it is not one of your tools.${near.length ? ` Similar tools you have: ${near.join(', ')}.` : ''} Use a name from the tool index.`, 'tool_not_offered');
+      return text(`Error: Tool "${name}" was not run: it is not allowed for you (not one of your tools).${near.length ? ` Similar tools you have: ${near.join(', ')}.` : ''} Use a name from the tool index.`, 'tool_not_offered');
     }
     const checked = checkToolArgs(def.input_schema, rawArgs);
     if (!checked.ok) {

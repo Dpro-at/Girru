@@ -97,19 +97,28 @@ export function prepareLocalTurn<M extends FitMessage>(input: {
  */
 export function fitSystem(head: string, index: string, tail: string, tokens: number): string {
   const join = (h: string, i: string, t: string) => [h, i, NO_INVENTED_MEMORY, t].filter((p) => p && p.trim()).join('\n\n---\n\n');
-  let text = join(head, index, tail);
-  if (estimateTokens(text) <= tokens) return text;
-  text = join(head, index, '');
-  if (estimateTokens(text) <= tokens) return text;
-  const lines = index.split('\n');
+  const fits = (text: string) => estimateTokens(text) <= tokens;
+  if (fits(join(head, index, tail))) return join(head, index, tail);
+  // The index shrinks by losing descriptions first (the last tools keep only their names); every tool stays listed.
+  const lines = index ? index.split('\n') : [];
   const intro = lines.slice(0, 2);
-  let items = lines.slice(2);
-  while (items.length && estimateTokens(join(head, [...intro, ...items].join('\n'), '')) > tokens) items = items.slice(0, -1);
-  const shortIndex = items.length ? [...intro, ...items].join('\n') : '';
-  text = join(head, shortIndex, '');
-  if (estimateTokens(text) <= tokens) return text;
-  const rest = estimateTokens(join('', shortIndex, '')) + 8;
-  return join(capSystemText(head, Math.max(256, tokens - rest)), shortIndex, '');
+  const items = lines.slice(2);
+  const nameOf = (l: string) => l.slice(2).split(':')[0];
+  const build = (full: number, named = items.length - full) => {
+    const rest = items.slice(full, full + named).map(nameOf);
+    const body = [...items.slice(0, full), ...(rest.length ? [`- Also: ${rest.join(', ')}`] : [])];
+    return body.length ? [...intro, ...body].join('\n') : '';
+  };
+  for (const t of [tail, '']) {
+    for (let full = items.length; full >= 0; full--) if (fits(join(head, build(full), t))) return join(head, build(full), t);
+  }
+  // Then the core text is cut by section (pinned facts, owner rules, the summary and the model stay whole),
+  // leaving room for the names-only index; only if even that cannot fit do the last names go.
+  let named = items.length;
+  while (named > 0 && estimateTokens(join('', build(0, named), '')) > tokens / 2) named--;
+  const idx = build(0, named);
+  const room = Math.max(256, tokens - estimateTokens(join('', idx, '')) - 8);
+  return join(capSystemText(head, room), idx, '');
 }
 
 /** Numbers only, for the log (no prompt text). */
