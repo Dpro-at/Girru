@@ -475,7 +475,9 @@ Every memory switch is on by default. Each data move runs at start-up (long
 ones in the background), is safe to run again, and keeps the old data. To turn
 one off, start Girru with the switch set to `0` (also `false`, `no` or `off`),
 for example `GIRRU_STORE_P9=0`; the desktop app passes these variables on to its
-backend. The start-up log names every switch that is turned off.
+backend. The start-up log names every switch that is turned off. The
+[storage map](architecture/storage-map.md#memory-switches) lists what each
+switch covers.
 
 | Switch | Covers | Off path removed after |
 |---|---|---|
@@ -510,15 +512,23 @@ What to expect on the first start after this update:
   it again so it reads the restored files. From this release on, an older
   Girru refuses newer data and changes nothing.
 
-What start-up does for the switches that move data:
+What start-up does for each switch:
 
 | Switch | What start-up does | What stays |
 |---|---|---|
+| `GIRRU_STORE_P2` | Nothing is copied. `AGENTS.md` gets one Girru section in place of the two older ones on the next write; `CLAUDE.md` and `GEMINI.md` only point to it | Everything; with the switch off the next write restores the earlier layout |
+| `GIRRU_STORE_P2B` | Nothing is copied and no migration runs. Local turns use tools on demand and a budget from the model's window; a local model's memory check result is kept in `local-model-conformance.json` in the data folder | Everything |
 | `GIRRU_STORE_P3` | Fills department ids, memory source and trust, project ids, packed vectors (background jobs) | Old columns, until a later release |
 | `GIRRU_STORE_P4` | Makes a full backup and checks it, then retires `.data/memory/memory.db`; copies coding-app handoff notes into the one handoff table; copies each agent's `PERSONALITY.md` text into its personality record once, then rewrites `PERSONALITY.md` from the record | The backup with `memory.db`; `memory_bridge_handoffs` (dropped one release later); older personality versions |
+| `GIRRU_STORE_P5` | Imports each agent's `MEMORY.md` once into the agent's own drawer, with the file's earlier versions as history (`agent_memory_imports`) | The `MEMORY.md` files; a file changed outside Girru is kept until the owner decides |
 | `GIRRU_STORE_P6` | Nothing is copied: new columns start off. Coding apps started outside Girru lose memory access (every memory call needs a session Girru issued); projects with memory files on get a change log and a debounced `.girru/brief.md`; linked tasks in `.girru/tasks.md` get a hidden id line | Everything; turning the switch off again leaves the hidden id lines, which still read |
 | `GIRRU_STORE_P7` | Migration 176 rebuilds `memory_bridge_clients` so Cursor and GitHub Copilot CLI can be switched on (rows kept). Migration 175 adds `task_file_cards.from_file` (existing tasks count as from the file) and `task_file_approvals` (empty: tasks from a project's file wait for the owner's approval once). Every file Girru writes into a project folder goes through the safe file writer, which refuses links, junctions, hard links, case collisions, paths outside the folder and non-text content | Everything; the earlier writers take over again |
+| `GIRRU_STORE_P8` | Migration 178 adds task links to `agent_handoffs` (old rows keep empty values) and the `run_notes` table; nothing is copied | Everything |
 | `GIRRU_STORE_P9` | Migration 179 (always, with or without the switch) adds an index on the drawer of each memory, and migration 180 adds the empty `memory_health_events` table; nothing is copied. With the switch on, a nightly read-only memory doctor job is added for each owner. With the switch on, recall keeps an in-memory index (never on disk), each new backup is restored into a scratch folder and checked before it is signed, and each forget is written to `forget-ledger.jsonl` in the data folder (ids and keyed hashes only), which a restore keeps and applies again on the next start. "Stays on this computer" is enforced (People on by default), so an online model or coding app no longer gets People memories; turning People's switch off restores the earlier behaviour | Everything; with the switch off the ledger file stays, and a restore still keeps it and applies it again |
+| `GIRRU_STORE_P9B` | Migration 181 adds `memory_trust`, `memory_trust_sources` and `memory_open_questions` (always, empty). With the switch on, new memories get a trust record and details are added in the background; older memories are not rewritten | Everything |
+| `GIRRU_MEMORY_HELPER` | A background job (never blocking start-up) starts the local runtime if it is installed, downloads the embedding model (about 640 MB) and then re-computes memories saved with the offline fallback. Its state is in `memory-helper.json` in the data folder | Everything; the offline fallback stays available |
+
+Migration 182 (always) records the file Girru is about to write for each project's brief, so a crash during the write is not mistaken for an outside edit; a project rename now reaches the brief file.
 
 After the first start with `GIRRU_STORE_P4` on (the default):
 
