@@ -8,6 +8,7 @@ import {editReview} from './edit-review';
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { SessionClient } from './session';
+import { ChatOrb } from './ChatOrb';
 import type { ChoiceAsk, Part, PlanStep, StartedSession, ToolCall, Turn } from './turns';
 import { duration, planOf, toolView } from './turns';
 import { UiIcon } from './ui-icons';
@@ -353,7 +354,7 @@ export function TaskList({ turns, who, waits = 0 }: { turns: readonly Turn[]; wh
       {/* CH1: approvals of this chat that wait for the owner, in amber. */}
       {waits > 0 && <span className="task-waits">· {waits} {waits === 1 ? 'waits' : 'wait'} for you</span>}
       {running && <span className="task-bar" aria-hidden="true"><span style={{ width: `${main.length ? Math.round(done / main.length * 100) : 0}%` }}/></span>}</button>
-    {open && <ol>{steps.map((s: PlanStep, i) => <li key={i} data-state={s.status} data-sub={s.parent ? true : undefined}><span className="task-dot" aria-hidden="true">{s.status === 'done' ? <UiIcon name="check" size={10}/> : null}</span><span dir="auto">{s.title}</span>{who && !s.parent && (s === working || s.status === 'done') && <small>{who}</small>}</li>)}</ol>}
+    {open && <ol>{steps.map((s: PlanStep, i) => <li key={i} data-state={s.status} data-sub={s.parent ? true : undefined}>{running && s === working ? <ChatOrb state="work" size={14}/> : <span className="task-dot" aria-hidden="true">{s.status === 'done' ? <UiIcon name="check" size={10}/> : null}</span>}<span dir="auto">{s.title}</span>{who && !s.parent && (s === working || s.status === 'done') && <small>{who}</small>}</li>)}</ol>}
   </section>;
 }
 
