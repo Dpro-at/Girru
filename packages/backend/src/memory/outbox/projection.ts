@@ -22,9 +22,11 @@ import { createHash, randomBytes } from 'node:crypto';
 import { q } from '../../repositories/sql-steps.js';
 import { nowText } from '../../db/pg/dialect.js';
 import { findProject, type Project } from '../../repositories/chat-conversations.js';
-import { briefMarkdown, projectBrief } from '../bridge/brief.js';
+import { assertProjectFilesOnly, briefMarkdown, projectBrief } from '../bridge/brief.js';
 import { redactImportText } from '../import/redact.js';
 import { latestSeq, scopeInfo, enabledScopes } from './events.js';
+import { safeWriteFile, SafeFileError } from '../../services/safe-file.js';
+import { storeP7Enabled } from '../../services/store-p7.js';
 
 export const BRIEF_CONSUMER = 'brief-file';
 export const BRIEF_FILE = path.join('.girru', 'brief.md');
@@ -39,6 +41,8 @@ export interface ProjectionState {
   watermark: number;
   projectionVersion: number;
   contentHash: string | null;
+  /** P10: the hash of the file Girru is writing (set before the write, cleared after it). */
+  pendingHash: string | null;
   status: ProjectionStatus;
   attempts: number;
   lastError: string | null;
@@ -58,6 +62,8 @@ export interface RunOptions {
   force?: boolean;
   /** The owner chose Girru's version in a conflict: the outside file is kept beside it, then replaced. */
   overwrite?: boolean;
+  /** P6 screens: false = the caller kept the outside text itself (a memory proposal); no copy beside the file. */
+  keepOutsideFile?: boolean;
   /** Test hook: runs after the new file is staged and before the destination is re-checked. */
   beforeRename?: () => Promise<void> | void;
 }
@@ -108,7 +114,7 @@ function toState(r: any): ProjectionState {
   return {
     consumer: r.consumer, scope: r.scope, target: r.target ?? null,
     watermark: Number(r.watermark) || 0, projectionVersion: Number(r.projection_version) || 0,
-    contentHash: r.content_hash ?? null, status: r.status, attempts: Number(r.attempts) || 0,
+    contentHash: r.content_hash ?? null, pendingHash: r.pending_hash ?? null, status: r.status, attempts: Number(r.attempts) || 0,
     lastError: r.last_error ?? null, updatedAt: String(r.updated_at),
   };
 }
@@ -194,14 +200,24 @@ async function runOnce(scope: string, opts: RunOptions): Promise<RunResult> {
   try {
     const max = await latestSeq(scope);
     const current = fileHash(target);
-    const outside = current !== null && current !== s.contentHash;
+    // P10: a file with the hash Girru was writing when it stopped (a crash between the write and the
+    // state update) is Girru's own write, not an outside edit; it is written again from the database.
+    const interrupted = current !== null && current !== s.contentHash && current === s.pendingHash;
+    const outside = current !== null && current !== s.contentHash && !interrupted;
     if (outside && !opts.overwrite) {
       return result(await setStatus(s, 'conflict', 'The file was changed outside Girru', false), false);
     }
-    if (!opts.force && !outside && s.status === 'up_to_date' && max <= s.watermark && current !== null) return result(s, false);
+    if (!opts.force && !outside && !interrupted && s.status === 'up_to_date' && max <= s.watermark && current !== null) return result(s, false);
 
     const nextVersion = s.projectionVersion + 1;
-    const body = briefMarkdown(await projectBrief(ownerId, project));
+    const brief = await projectBrief(ownerId, project);
+    // S4 (P7): owner, people and personal drawers never reach a project file.
+    if (storeP7Enabled()) {
+      try { assertProjectFilesOnly(brief); } catch (err) {
+        return result(await setStatus(s, 'conflict', `${(err as Error).message}; nothing was written`, false), false);
+      }
+    }
+    const body = briefMarkdown(brief);
     // The brief is redacted already (brief.ts); a text that still looks like a secret is never written.
     if (Object.values(redactImportText(body).counts).some((n) => Number(n) > 0)) {
       return result(await setStatus(s, 'conflict', 'The brief still contains something that looks like a secret; nothing was written', false), false);
@@ -209,7 +225,9 @@ async function runOnce(scope: string, opts: RunOptions): Promise<RunResult> {
     const text = `<!-- girru:brief scope=${scope} seq=${max} projection=${nextVersion} · generated from Girru's database; edits here are not read back -->\n\n${body}\n`;
 
     removeStaged(dir);
-    if (outside && opts.overwrite) {
+    await q.run('UPDATE projection_state SET pending_hash = ? WHERE consumer = ? AND scope = ?', sha(text), BRIEF_CONSUMER, scope);
+    if (storeP7Enabled()) return await writeSafely(scope, folder, target, text, current, max, nextVersion, s, !!(outside && opts.overwrite && opts.keepOutsideFile !== false), opts, result);
+    if (outside && opts.overwrite && opts.keepOutsideFile !== false) {
       // The outside version is kept beside it, copied from the file itself (never through a link).
       const kept = readNoFollow(target);
       if (kept) fs.writeFileSync(path.join(dir, `brief.outside-${nextVersion}.md`), kept, { flag: 'wx', mode: 0o644 });
@@ -235,7 +253,7 @@ async function runOnce(scope: string, opts: RunOptions): Promise<RunResult> {
       throw err;
     }
     const done = await q.run(`UPDATE projection_state SET target = ?, watermark = ?, projection_version = ?, content_hash = ?, status = 'up_to_date',
-      attempts = 0, last_error = NULL, updated_at = ${nowText(q.dialect)} WHERE consumer = ? AND scope = ? AND projection_version = ?`,
+      attempts = 0, last_error = NULL, pending_hash = NULL, updated_at = ${nowText(q.dialect)} WHERE consumer = ? AND scope = ? AND projection_version = ?`,
       target, max, nextVersion, hash, BRIEF_CONSUMER, scope, s.projectionVersion);
     s = (await getState(BRIEF_CONSUMER, scope))!;
     return result(s, done.changes === 1, done.changes === 1 ? undefined : 'state moved on during the write');
@@ -243,6 +261,39 @@ async function runOnce(scope: string, opts: RunOptions): Promise<RunResult> {
     if (err instanceof UnsafeEntryError) return result(await setStatus(s, 'conflict', err.message, false), false);
     s = await setStatus(s, 'waiting', (err as Error)?.message ?? String(err), true);
     return result(s, false, s.lastError ?? undefined);
+  }
+}
+
+/**
+ * STORE-MAP-01 P7 (SEC2-6): the same write through the one safe file writer.
+ * The projection's own re-check (a newer run wins) happens first; the writer
+ * then re-checks the file itself (compare-and-set on the hash Girru read)
+ * right before the rename, so an outside edit in between is still refused.
+ */
+async function writeSafely(scope: string, folder: string, target: string, text: string, current: string | null, max: number, nextVersion: number,
+  s: ProjectionState, keepOutside: boolean, opts: RunOptions, result: (st: ProjectionState, wrote: boolean, reason?: string) => RunResult): Promise<RunResult> {
+  const rel = BRIEF_FILE.split(path.sep).join('/');
+  try {
+    if (keepOutside) {
+      const kept = readNoFollow(target);
+      if (kept) safeWriteFile(folder, `.girru/brief.outside-${nextVersion}.md`, kept, { expectSha256: null });
+    }
+    await opts.beforeRename?.();
+    const fresh = (await getState(BRIEF_CONSUMER, scope))!;
+    if (fresh.watermark > max || fresh.projectionVersion >= nextVersion) return result(fresh, false, 'superseded by a newer projection');
+    const w = safeWriteFile(folder, rel, text, { expectSha256: current });
+    const done = await q.run(`UPDATE projection_state SET target = ?, watermark = ?, projection_version = ?, content_hash = ?, status = 'up_to_date',
+      attempts = 0, last_error = NULL, pending_hash = NULL, updated_at = ${nowText(q.dialect)} WHERE consumer = ? AND scope = ? AND projection_version = ?`,
+      target, max, nextVersion, w.sha256, BRIEF_CONSUMER, scope, s.projectionVersion);
+    const after = (await getState(BRIEF_CONSUMER, scope))!;
+    return result(after, done.changes === 1, done.changes === 1 ? undefined : 'state moved on during the write');
+  } catch (err) {
+    if (err instanceof SafeFileError) {
+      const fresh = (await getState(BRIEF_CONSUMER, scope))!;
+      const why = err.code === 'changed' ? 'The file changed while Girru was writing it' : err.message;
+      return result(await setStatus(fresh, err.code === 'locked' ? 'waiting' : 'conflict', why, err.code === 'locked'), false);
+    }
+    throw err;
   }
 }
 
@@ -256,21 +307,45 @@ function missing(file: string): boolean {
 let timer: NodeJS.Timeout | null = null;
 let busy = false;
 
-/** One pass over every enabled scope (also what the timer runs). */
-export async function projectionTick(): Promise<void> {
+/**
+ * STORE-MAP-01 P6 (T6): instant sync is debounced per project. A scope with
+ * new events is written once it has been quiet for DEBOUNCE_MS, or at the
+ * latest MAX_WAIT_MS after its first unwritten event, so many changes give one
+ * write. Without a debounce (the pilot) every tick writes at once.
+ */
+export const DEBOUNCE_MS = 1200;
+export const MAX_WAIT_MS = 5000;
+const pending = new Map<string, { seq: number; changedAt: number; since: number }>();
+let debounceOn = false;
+export function setProjectionDebounce(on: boolean): void { debounceOn = on; if (!on) pending.clear(); }
+
+/** Debounce: true when the scope may be written now (always true while the debounce is off). */
+function settled(scope: string, seq: number, now: number): boolean {
+  if (!debounceOn) return true;
+  const p = pending.get(scope);
+  if (!p) { pending.set(scope, { seq, changedAt: now, since: now }); return false; }
+  if (seq !== p.seq) { p.seq = seq; p.changedAt = now; }
+  return now - p.changedAt >= DEBOUNCE_MS || now - p.since >= MAX_WAIT_MS;
+}
+
+/** One pass over every enabled scope (also what the timer runs). `now` is a test seam. */
+export async function projectionTick(now = Date.now()): Promise<void> {
   if (busy) return;
   busy = true;
   try {
     for (const scope of await enabledScopes()) {
       const s = await syncStatus(scope);
-      if (s.status === 'waiting' || s.status === 'unreachable' || (s.status === 'up_to_date' && s.target && missing(s.target))) {
-        await runBriefProjection(scope).catch((err) => console.warn('[Store pilot] projection failed:', (err as Error)?.message));
-      }
+      const due = s.status === 'waiting' || s.status === 'unreachable' || (s.status === 'up_to_date' && s.target && missing(s.target));
+      if (!due) { pending.delete(scope); continue; }
+      if (s.status === 'waiting' && !settled(scope, s.latestSeq, now)) continue;
+      pending.delete(scope);
+      await runBriefProjection(scope).catch((err) => console.warn('[Store pilot] projection failed:', (err as Error)?.message));
     }
   } finally { busy = false; }
 }
 
 export function startProjectionWorker(everyMs = 1500): void {
+  // P6 polls faster; the debounce decides when a scope is written.
   if (timer) return;
   timer = setInterval(() => { void projectionTick(); }, everyMs);
   timer.unref?.();

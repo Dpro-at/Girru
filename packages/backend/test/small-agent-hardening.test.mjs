@@ -13,6 +13,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { offeredNames, expectedNumCtx, expectedNumPredict, p2bOn } from './helpers/p2b.mjs';
 
 const backendDir = process.cwd();
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-small-harden-')));
@@ -262,7 +263,9 @@ test('agents_config edits: admins are refused; owner edits are ignored by the ex
     const callBody = modelCalls.filter((m) => m.sc === 'plain').at(-1).body;
     assert.equal(callBody.model, 'qwen3.5:9b');
     assert.equal(callBody.messages[0].role, 'system');
-    assert.equal(callBody.messages[0].content, small.SYSTEM_PROMPT);
+    // P2b: the memory rule follows the fixed prompt (its few tools fit the window, so there is no tool index).
+    if (p2bOn()) assert.match(callBody.messages[0].content, /^[\s\S]*\n\n---\n\nMemory rule: [^\n]*$/) && assert.ok(callBody.messages[0].content.startsWith(small.SYSTEM_PROMPT));
+    else assert.equal(callBody.messages[0].content, small.SYSTEM_PROMPT);
     assert.equal(c.needs_review, true);
     assert.ok(c.warnings.some((w) => /settings were edited \(system_prompt, model\)/.test(w)), JSON.stringify(c.warnings));
   } finally {

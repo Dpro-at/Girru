@@ -72,6 +72,10 @@ const quietly = async (fn) => { const l = console.log; const w = console.warn; c
 const call = (method, url, who = 'mq-owner', payload) => quietly(() => app.inject({ method, url, headers: auth(who), payload }));
 const reviewHashOf = async (id) => (await call('GET', `/api/memory/proposals/${id}`)).json().reviewHash;
 const mem = (id) => db.prepare('SELECT * FROM memories WHERE id = ?').get(id);
+// STORE-MAP-01 P9 (M4): keep new supersedes; the current fact is at the end of superseded_by.
+const P9 = process.env.GIRRU_STORE_P9 === '1';
+const P3 = process.env.GIRRU_STORE_P3 === '1'; // a topic update replaces the row (new id, the old one superseded)
+const current = (id) => { let r = mem(id); while (r?.superseded_by) r = mem(r.superseded_by); return r; };
 const byTopic = (key, kind = 'owner', dkey = '') => db.prepare('SELECT * FROM memories WHERE user_id = ? AND drawer_kind = ? AND drawer_key = ? AND topic_key = ?').all('mq-owner', kind, dkey, key);
 const versions = (id) => db.prepare('SELECT version, change, content, reason FROM memory_versions WHERE memory_id = ? ORDER BY version').all(id).map((r) => ({ ...r }));
 const run = (tool, params, ctx) => quietly(() => tool.execute(params, ctx));
@@ -147,18 +151,26 @@ test('memory_save with a topic key: same topic twice -> one memory, two versions
   assert.equal(r1.data.topicKey, 'main-editor');
   const r2 = await run(memorySaveTool, { content: 'Main editor is Zed', type: 'fact', topic_key: 'main-editor' }, ownerCtx);
   assert.equal(r2.data.updatedExisting, true, r2.content[0].text);
-  assert.equal(r2.data.memoryId, r1.data.memoryId);
-  const rows = byTopic('main-editor');
+  const rows = byTopic('main-editor').filter((r) => !r.superseded_by); // P3 keeps the replaced row in History
   assert.equal(rows.length, 1);
   assert.equal(rows[0].content, 'Main editor is Zed');
-  assert.deepEqual(versions(r1.data.memoryId).map((v) => [v.change, v.content, v.reason]), [
-    ['create', 'Main editor is VS Code', 'learning:routine'],
-    ['update', 'Main editor is Zed', 'learning:topic'],
-  ]);
+  if (P3) {
+    // STORE-MAP-01 P3: the new fact is a new row that replaces the old one (kept in History, superseded_by).
+    assert.notEqual(r2.data.memoryId, r1.data.memoryId);
+    assert.equal(current(r1.data.memoryId).id, r2.data.memoryId);
+    assert.deepEqual(versions(r1.data.memoryId).map((v) => [v.change, v.content, v.reason]), [['create', 'Main editor is VS Code', 'learning:routine']]);
+    assert.deepEqual(versions(r2.data.memoryId).map((v) => [v.change, v.content, v.reason]), [['create', 'Main editor is Zed', `learning:topic replaces ${r1.data.memoryId}`]]);
+  } else {
+    assert.equal(r2.data.memoryId, r1.data.memoryId);
+    assert.deepEqual(versions(r1.data.memoryId).map((v) => [v.change, v.content, v.reason]), [
+      ['create', 'Main editor is VS Code', 'learning:routine'],
+      ['update', 'Main editor is Zed', 'learning:topic'],
+    ]);
+  }
   // The same text again: nothing new.
   const r3 = await run(memorySaveTool, { content: 'Main editor is Zed', type: 'fact', topic_key: 'main-editor' }, ownerCtx);
   assert.equal(r3.data.duplicate, true);
-  assert.equal(versions(r1.data.memoryId).length, 2);
+  assert.equal(versions(r1.data.memoryId).length + versions(r2.data.memoryId).length - (P3 ? 0 : 2), 2);
 
   // A different topic is a separate memory; the same topic in another drawer too.
   const other = await run(memorySaveTool, { content: 'Terminal is Ghostty', type: 'fact', topic_key: 'main-terminal' }, ownerCtx);
@@ -166,7 +178,7 @@ test('memory_save with a topic key: same topic twice -> one memory, two versions
   const proj = await run(memorySaveTool, { content: 'Alpha editor is Vim', type: 'fact', topic_key: 'main-editor', drawer: 'project:alpha' }, ownerCtx);
   assert.ok(proj.data.memoryId && proj.data.memoryId !== r1.data.memoryId, proj.content[0].text);
   assert.equal(byTopic('main-editor', 'project', 'alpha').length, 1);
-  assert.equal(mem(r1.data.memoryId).content, 'Main editor is Zed', 'owner drawer untouched by the project save');
+  assert.equal(current(r1.data.memoryId).content, 'Main editor is Zed', 'owner drawer untouched by the project save');
 
   // Drawer rules unchanged: a closed drawer is refused, an invalid key is skipped.
   const closed = await run(memorySaveTool, { content: 'Beta editor is Emacs', type: 'fact', topic_key: 'main-editor', drawer: 'project:beta' }, ownerCtx);
@@ -239,8 +251,8 @@ test('memory_edit sets a topic key; a later memory_save with it updates that mem
   assert.equal(e.data?.success, true, e.content[0].text);
   assert.equal(mem(r.data.memoryId).topic_key, 'node-version');
   const s = await run(memorySaveTool, { content: 'Build runs on node 24', type: 'fact', topic_key: 'node-version' }, ownerCtx);
-  assert.equal(s.data.memoryId, r.data.memoryId);
-  assert.equal(mem(r.data.memoryId).content, 'Build runs on node 24');
+  assert.equal(current(r.data.memoryId).id, s.data.memoryId, 'the same memory, or (P3) the row that replaced it');
+  assert.equal(current(r.data.memoryId).content, 'Build runs on node 24');
   const taken = await run(memoryEditTool, { id: (await run(memorySaveTool, { content: 'Lint with biome', type: 'fact' }, ownerCtx)).data.memoryId, topic_key: 'node-version' }, ownerCtx);
   assert.match(taken.error, /already used/);
 });
@@ -285,7 +297,7 @@ test('conflict: "is now" / "صار" replacing a saved value -> flagged proposal;
   assert.equal(p.conflictWith, oldId);
   assert.ok(p.reasons.includes('conflict'));
   assert.equal((await decideConflict(proposalId, 'keep_new')).statusCode, 200);
-  assert.equal(mem(oldId).content, 'My favourite morning drink is now green tea with honey');
+  assert.equal(current(oldId).content, 'My favourite morning drink is now green tea with honey');
   const ar = await conflictPair('مشروب محمد المفضل في الصباح قهوة بالهيل بدون سكر', 'صار مشروبي المفضل الصبح شاي أخضر مع عسل');
   assert.equal((await call('GET', `/api/memory/proposals/${ar.proposalId}`)).json().conflictWith, ar.oldId);
 });
@@ -295,9 +307,16 @@ test('conflict: keep new -> the existing memory gets the new text as a new versi
   const r = await decideConflict(proposalId, 'keep_new');
   assert.equal(r.statusCode, 200, r.body);
   assert.equal(r.json().proposal.decision, 'keep_new');
-  assert.deepEqual(r.json().applied.updated, [oldId]);
-  assert.equal(mem(oldId).content, 'Garage door is closed');
-  assert.deepEqual(versions(oldId).map((v) => v.change), ['create', 'update']);
+  if (P9) {
+    // STORE-MAP-01 P9 (M4): the old fact is superseded (kept for History); the new row is current.
+    assert.deepEqual(r.json().applied.replaced, [oldId]);
+    assert.equal(mem(oldId).content, 'Garage door is open');
+    assert.equal(current(oldId).content, 'Garage door is closed');
+  } else {
+    assert.deepEqual(r.json().applied.updated, [oldId]);
+    assert.equal(mem(oldId).content, 'Garage door is closed');
+    assert.deepEqual(versions(oldId).map((v) => v.change), ['create', 'update']);
+  }
 });
 
 test('conflict: keep both -> the new text is its own memory, the old one stays', async () => {
@@ -320,9 +339,9 @@ test('conflict on a topic key: negation is flagged, a plain value change is a ne
   assert.equal(c.data.updatedExisting, true, c.content[0].text);
   // The pending conflict was made against the old text: it went stale and cannot overwrite.
   const r = await decideConflict(b.data.proposalId, 'keep_new');
-  assert.equal(r.statusCode, 409);
+  assert.equal(r.statusCode, 409, r.body);
   assert.equal(r.json().code, 'stale');
-  assert.equal(mem(a.data.memoryId).content, 'User likes oat milk and soy milk');
+  assert.equal(current(a.data.memoryId).content, 'User likes oat milk and soy milk');
 });
 
 test('conflict decisions: owner only, review hash required, valid decision, conflict proposals only, one winner', async () => {
@@ -346,7 +365,7 @@ test('conflict decisions: owner only, review hash required, valid decision, conf
   const winner = results.find((r) => r.statusCode === 200).json().decision;
   const copies = db.prepare(`SELECT COUNT(*) AS n FROM memories WHERE user_id = 'mq-owner' AND content = 'Printer is off'`).get().n;
   assert.equal(copies, 1, `one memory with the new text (${winner})`);
-  assert.equal(mem(oldId).content, winner === 'keep_new' ? 'Printer is off' : 'Printer is on');
+  assert.equal(current(oldId).content, winner === 'keep_new' ? 'Printer is off' : 'Printer is on');
 });
 
 // ---------------------------------------------------------------------------

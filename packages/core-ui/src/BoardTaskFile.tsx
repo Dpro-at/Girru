@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { UiIcon } from './ui-icons';
 import { AppMark } from './ChatDetails';
 import type { ModelApp } from './ChatDetails';
-import type { TaskMark } from './board';
+import type { TaskDetail, TaskMark } from './board';
 
 /** The mark of an app as the file names it (Claude Code, Codex, Gemini or Antigravity; Girru's own agents sign as Girru). */
 export function appOf(name: string): ModelApp | null {
@@ -25,6 +25,38 @@ export function TaskFileMark({ mark }: { mark: TaskMark }) {
   return <span className={`task-file-mark${mark.problem ? ' needs-you' : ''}`} title={mark.problem ? `${mark.no} in the task file of ${mark.projectName}: ${mark.problem}. Fix that line in .girru/tasks.md.` : `${mark.no} in the task file of ${mark.projectName} (.girru/tasks.md)`}>
     <UiIcon name={mark.problem ? 'alert' : 'file'} size={11}/>{mark.no}
     {mark.apps.length > 0 && <span className="task-apps">{mark.apps.slice(0, 4).map(a => <AppLogo key={a} name={a} size={11}/>)}</span>}
+  </span>;
+}
+
+/** STORE-MAP-01 P8 (board P8b1, D29): the handoff mark with its count and an amber "Blocked", only when they say something. */
+export function TaskHandoffMark({ count, blocked }: { count?: number; blocked?: boolean }) {
+  if (!count && !blocked) return null;
+  return <>
+    {!!count && <span className="task-handoff-mark" title={`${count} ${count === 1 ? 'handoff' : 'handoffs'}`} aria-label={`${count} ${count === 1 ? 'handoff' : 'handoffs'}`}><UiIcon name="handoff" size={11}/>{count}</span>}
+    {blocked && <span className="task-handoff-mark blocked" title="Blocked: the newest handoff lists blockers"><i aria-hidden="true"/>Blocked</span>}
+  </>;
+}
+
+/** "today 14:05", "yesterday", "3 Nov": when an app last worked on the task. */
+export function workedWhen(date: string, at: string | null, now = new Date()): string {
+  const day = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const y = new Date(now); y.setDate(y.getDate() - 1);
+  const time = at?.match(/\d{1,2}:\d{2}/)?.[0] ?? '';
+  if (date === day(now)) return time ? `today ${time}` : 'today';
+  if (date === day(y)) return 'yesterday';
+  const t = Date.parse(`${date}T00:00:00`);
+  return Number.isFinite(t) ? new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : date;
+}
+const who = (w: TaskDetail['workedOn'][number]) => w.agent && w.agent !== w.app ? `${w.app} (${w.agent})` : w.app;
+
+/** STORE-MAP-01 P6 (board P6b2): the task's number, who works on it now and who did before. Only with a number (P6 on). */
+export function TaskWorkedOn({ detail, now }: { detail: TaskDetail; now?: Date }) {
+  if (!detail.number) return null;
+  const last = detail.workedOn.at(-1), earlier = detail.workedOn.length > 1 ? detail.workedOn.at(-2) : undefined;
+  return <span className="task-worked">
+    <span><span className="task-number">{detail.number}</span>{detail.task.title && <b>{detail.task.title}</b>}</span>
+    {last && <span><AppLogo name={last.app}/>Worked on by <b>{who(last)}</b>{last.date ? ` · ${workedWhen(last.date, last.at, now)}` : ''}</span>}
+    {earlier && <span className="fine-print"><AppLogo name={earlier.app}/>Earlier: {who(earlier)}{earlier.date ? ` · ${workedWhen(earlier.date, earlier.at, now)}` : ''}</span>}
   </span>;
 }
 

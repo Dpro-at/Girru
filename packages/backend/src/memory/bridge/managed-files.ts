@@ -23,8 +23,10 @@ import { readRegularFile } from './regular-file.js';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { redactImportText } from '../import/redact.js';
-import { briefMarkdown, type ProjectBrief } from './brief.js';
+import { assertProjectFilesOnly, briefMarkdown, ProjectFilesScopeError, type ProjectBrief } from './brief.js';
 import { SERVER_NAME } from './clients.js';
+import { safeWriteFile, SafeFileError } from '../../services/safe-file.js';
+import { storeP7Enabled } from '../../services/store-p7.js';
 
 export const MARK_START = '<!-- dpro-memory:start — managed by Dpro: the text between these two markers is replaced on every sync; write your own notes outside them -->';
 export const MARK_END = '<!-- dpro-memory:end -->';
@@ -147,9 +149,9 @@ export interface FilePlan {
 export interface FilesPreview { projectId: string; folder: string; files: FilePlan[]; previewHash: string; conflicts: number; changes: number }
 type Planned = FilePlan & { abs: string; after: string | null; mode: number | null };
 
-function readExisting(abs: string): { text: string | null; mode: number | null; problem?: string } {
+function readExisting(folder: string, relative: string): { text: string | null; mode: number | null; problem?: string } {
   try {
-    const { bytes, mode } = readRegularFile(abs, MAX_MANAGED_FILE_BYTES);
+    const { bytes, mode } = readRegularFile(folder, relative, MAX_MANAGED_FILE_BYTES);
     const text = bytes.toString('utf8');
     if (text.includes('\0')) return { text: null, mode: null, problem: 'is not a text file' };
     return { text, mode };
@@ -167,7 +169,7 @@ function blockDiff(oldBlock: string | null, newBlock: string): string {
 
 function planFile(folder: string, relative: string, block: string, marks: Marks = MEMORY_MARKS, legacy: readonly Marks[] = PRE_P2_LEGACY): Planned {
   const abs = path.join(folder, relative);
-  const cur = readExisting(abs);
+  const cur = readExisting(folder, relative);
   const base = { name: path.basename(relative), relative, abs, mode: cur.mode };
   if (cur.problem) return { ...base, action: 'conflict', reason: `${relative} ${cur.problem}`, beforeSha256: null, afterSha256: null, diff: '', after: null };
   const broken = { ...base, action: 'conflict' as const, reason: `${relative} has broken Girru markers; fix or remove them by hand`, beforeSha256: cur.text === null ? null : sha(cur.text), afterSha256: null, diff: '', after: null };
@@ -195,7 +197,7 @@ function planGitExclude(folder: string, created: string[]): Planned | null {
   try { if (!fs.lstatSync(gitDir).isDirectory()) return null; } catch { return null; }
   const relative = path.join('.git', 'info', 'exclude');
   const abs = path.join(folder, relative);
-  const cur = readExisting(abs);
+  const cur = readExisting(folder, relative);
   const base = { name: 'exclude', relative, abs, mode: cur.mode };
   if (cur.problem) return { ...base, action: 'conflict', reason: `${relative} ${cur.problem}`, beforeSha256: null, afterSha256: null, diff: '', after: null };
   const text = cur.text ?? '';
@@ -229,6 +231,13 @@ function plan(brief: ProjectBrief | null, folderRaw: string | null, gitExclude: 
   const canonical = extras ? unifiedBlock(brief, extras) : briefMarkdown(brief!);
   // The memory part is secret-checked (brief.ts redacted it already); the owner's rules are the owner's own words.
   if (brief) assertNoSecret(briefMarkdown(brief));
+  // S4 (P7): owner, people and personal drawers never reach a project file.
+  if (brief && storeP7Enabled()) {
+    try { assertProjectFilesOnly(brief); } catch (err) {
+      if (err instanceof ProjectFilesScopeError) throw new ManagedFileError(`${err.message}; nothing was written`, 422, err.code);
+      throw err;
+    }
+  }
   const files: Planned[] = MANAGED_FILES.map((name) => planFile(folder, name, name === 'AGENTS.md' ? canonical : adapterBlock(name),
     extras ? GIRRU_MARKS : MEMORY_MARKS, extras ? P2_LEGACY : PRE_P2_LEGACY));
   if (gitExclude) {
@@ -248,7 +257,31 @@ export function previewFiles(projectId: string, brief: ProjectBrief | null, fold
   return { projectId, folder: p.folder, files, previewHash: hashOf(p.folder, files), conflicts: files.filter((f) => f.action === 'conflict').length, changes: files.filter((f) => f.action === 'create' || f.action === 'update').length };
 }
 
-function writeAtomic(abs: string, text: string, mode: number | null): void {
+/**
+ * STORE-MAP-01 P6 screens: Girru's part of one managed file, what Girru would
+ * write between its markers and what the file holds there now (`current` null:
+ * no file, or no Girru part in it). `problem` when the file cannot be read or
+ * its markers are broken. Reads only.
+ */
+export interface ManagedPart { folder: string; marks: Marks; girru: string; current: string | null; whole: string | null; problem: string | null }
+export function managedPart(brief: ProjectBrief, folderRaw: string | null, name: ManagedName, extras?: SectionExtras): ManagedPart {
+  const folder = checkFolder(folderRaw);
+  const marks = extras ? GIRRU_MARKS : MEMORY_MARKS;
+  const girru = (name === 'AGENTS.md' ? (extras ? unifiedBlock(brief, extras) : briefMarkdown(brief)) : adapterBlock(name)).trim();
+  const cur = readExisting(folder, name);
+  if (cur.problem) return { folder, marks, girru, current: null, whole: null, problem: `${name} ${cur.problem}` };
+  const split = cur.text === null ? null : splitManaged(cur.text, marks);
+  if (split === 'broken') return { folder, marks, girru, current: null, whole: cur.text, problem: `${name} has broken Girru markers; fix or remove them by hand` };
+  return { folder, marks, girru, current: split ? split.inside.trim() : null, whole: cur.text, problem: null };
+}
+
+function writeAtomic(folder: string, relative: string, abs: string, text: string, mode: number | null): void {
+  // STORE-MAP-01 P7 (SEC2-6): the one safe file writer.
+  if (storeP7Enabled()) {
+    try { safeWriteFile(folder, relative.split(path.sep).join('/'), text, { mode: mode ?? 0o644, maxBytes: MAX_MANAGED_FILE_BYTES }); }
+    catch (e) { if (e instanceof SafeFileError) throw new ManagedFileError(`Nothing written to ${relative}: ${e.message}`, 409, e.code === 'locked' ? 'locked' : 'unsafe_path'); throw e; }
+    return;
+  }
   fs.mkdirSync(path.dirname(abs), { recursive: true });
   const tmp = path.join(path.dirname(abs), `.${path.basename(abs)}.${randomUUID()}.tmp`);
   fs.writeFileSync(tmp, text, { flag: 'wx', mode: mode ?? 0o644 });
@@ -267,7 +300,7 @@ export function applyFiles(projectId: string, brief: ProjectBrief | null, folder
   if (expectedHash !== null && hash !== expectedHash) throw new ManagedFileError('The files or the memory changed since the preview; preview again', 409, 'preview_stale');
   const conflicts = p.files.filter((f) => f.action === 'conflict');
   if (conflicts.length) throw new ManagedFileError(`Nothing written: ${conflicts.map((c) => c.reason).join('; ')}`, 409, 'conflict');
-  for (const f of p.files) if ((f.action === 'create' || f.action === 'update') && f.after !== null) writeAtomic(f.abs, f.after, f.mode);
+  for (const f of p.files) if ((f.action === 'create' || f.action === 'update') && f.after !== null) writeAtomic(p.folder, f.relative, f.abs, f.after, f.mode);
   return { projectId, folder: p.folder, files, previewHash: hash, conflicts: 0, changes: files.filter((f) => f.action === 'create' || f.action === 'update').length };
 }
 
@@ -281,11 +314,11 @@ export function writeSection(folderRaw: string | null, relative: string, block: 
   const folder = checkFolder(folderRaw);
   assertNoSecret(block);
   const abs = path.join(folder, relative);
-  const cur = readExisting(abs);
+  const cur = readExisting(folder, relative);
   if (cur.problem) throw new ManagedFileError(`${relative} ${cur.problem}`, 409, 'conflict');
   if (cur.text !== null && splitManaged(cur.text, marks) === 'broken') throw new ManagedFileError(`${relative} has broken Girru markers; fix or remove them by hand`, 409, 'markers_broken');
   const after = replaceManaged(cur.text ?? '', block, marks);
   if (cur.text === after) return { action: 'unchanged', file: abs };
-  writeAtomic(abs, after, cur.mode);
+  writeAtomic(folder, relative, abs, after, cur.mode);
   return { action: cur.text === null ? 'create' : 'update', file: abs };
 }

@@ -264,7 +264,7 @@ export function checkFolder(raw: string, home = process.env.HOME ?? ''): string 
 const repoOk = (u: string) => /^(https:\/\/|git@)[A-Za-z0-9.@:/_~%+-]{3,300}$/.test(u);
 
 export async function listProjects(userId: string): Promise<Project[]> {
-  return (await q.all<ProjectRow>('SELECT * FROM chat_projects WHERE user_id = ? ORDER BY name COLLATE NOCASE, id', userId)).map(toProject);
+  return (await q.all<ProjectRow>('SELECT * FROM chat_projects WHERE user_id = ? ORDER BY LOWER(name), id', userId)).map(toProject);
 }
 
 export async function findProject(userId: string, id: string): Promise<Project | undefined> {

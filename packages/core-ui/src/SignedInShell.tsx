@@ -1,7 +1,7 @@
 import {BrowserWorkspace} from './BrowserWorkspace';
 import {useBrowserApp} from './browser-app';
 import {PersonalityLibrary} from './PersonalityLibrary';
-import {WorkspaceModes,editorBounds,useNabuAvailability} from './WorkspaceModes';
+import {WorkspaceModes,editorBounds,useNabuRuntime} from './WorkspaceModes';
 import {TradingWorkspace} from './TradingWorkspace';
 import {footerToolItem} from './AppsWorkspace';
 import {StoreWorkspace} from './StoreView';
@@ -46,6 +46,7 @@ import { ChatSearchController } from './chat-search';
 import { chatFromLink } from './chat-actions';
 import type { Command } from './CommandPalette';
 import { accountRoleLabel, isDeveloperBuild } from './developer-build';
+import { setCodeHost, setCodeInstall } from './code-open';
 
 type Page = 'browser' | 'rules' | 'code' | 'trading' | 'library' | 'apps' | 'store' | 'approvals' | 'chat' | 'genvr' | 'agents' | 'board' | 'runs' | 'memory' | 'skills' | 'mcp' | 'terminal' | 'account' | 'settings' | 'about' | 'specialties' | 'personalities';
 /** The section a page is a place of: its "← back" on top of the sidebar goes there. */
@@ -93,11 +94,16 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
   useEffect(() => { void window.dproApp?.setSetupWindow?.(false).catch(() => {}); }, []);
   const state = useSyncExternalStore(client.subscribe, client.getSnapshot, client.getSnapshot);
   const [page, setPage] = useState<Page>('chat');
-  const nativeEditor=useNabuAvailability();
+  // CODE-STORE-01: Code comes from the Store; while the desktop app has none, every way to Code opens its Store page.
+  const {available:nativeEditor,missing:codeMissing}=useNabuRuntime();
   useEffect(()=>{if(page!=='code'){const {top,bottom}=editorBounds();void window.dproApp?.nabu?.select('chat',top,bottom).catch(()=>{});}},[page]);
   useEffect(()=>()=>{void window.dproApp?.nabu?.select('chat',48,32).catch(()=>{});},[]);
   const openCode=async()=>{if(!chat||!await chat.ensureCodeConversation())return;const folder=await chat.editorDirectory();if(folder)openProjectCode(folder);};
   const openProjectCode=(folder:string,file?:string)=>{const {top,bottom,right}=editorBounds();void window.dproApp?.nabu?.open(folder,file??null,top,bottom,right).then(result=>{if(result?.mode==='code')setPage('code');}).catch(()=>{});};
+  // CODE-OPEN-01: every "Open in Code" in the app opens here (the file at its line), only for the owner.
+  const codeOwner=state.user?.role==='owner';
+  useEffect(()=>{if(!codeOwner){setCodeHost(null,false);return;}setCodeHost(async(t,o)=>{const {top,bottom,right}=editorBounds();const result=await window.dproApp?.nabu?.open(t.folder,t.file,top,bottom,right,{...(t.line?{line:t.line}:{}),...(t.generated?{note:true}:{}),...(o.readOnly?{readOnly:true}:{})});if(result?.mode==='code'){setPage('code');return true;}return false;},nativeEditor);return()=>setCodeHost(null,false);},[codeOwner,nativeEditor]);
+  useEffect(()=>{setCodeInstall(codeOwner&&codeMissing?()=>openCodeInStore():null);return()=>setCodeInstall(null);},[codeOwner,codeMissing]);
   const appearance = useAppTheme();
   const theme = appearance.theme;
   // The title-bar switch goes back to "system" when it lands on the system's own theme.
@@ -140,7 +146,8 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
   const openSettings=(tab:SettingsTab)=>{setSettingsTab(tab);setSettingsVisit(n=>n+1);setPage('settings');};
   const [runsRequest,setRunsRequest]=useState<{place:RunsPlace;n:number}|null>(null);
   const openRuns=(place:RunsPlace)=>{setRunsRequest(r=>({place,n:(r?.n??0)+1}));setPage('runs');};
-  const [storeRequest,setStoreRequest]=useState<{updates:boolean;n:number;local?:'claude-code'|'codex';mine?:boolean}>();
+  const [storeRequest,setStoreRequest]=useState<{updates:boolean;n:number;local?:'claude-code'|'codex';mine?:boolean;item?:string}>();
+  const openCodeInStore=()=>{setStoreRequest(r=>({updates:false,item:'girru:code',n:(r?.n??0)+1}));setPage('store');};
   const openStore=(updates=false,local?:'claude-code'|'codex',mine=false)=>{setStoreRequest(r=>({updates,local,mine,n:(r?.n??0)+1}));setPage('store');};
   // SA6: Apps is Store › My apps now; every way that opened Apps opens it.
   const openMyApps=()=>openStore(false,undefined,true);
@@ -152,8 +159,8 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
   const tools=[
     {id:'genvr',label:'GenVR',icon:<Icon name="dice"/>,run:()=>setPage('genvr')},
     ...(user.role==='owner'?[
-      {id:'terminal',label:'Terminal',icon:<UiIcon name="terminal" size={14}/>,run:()=>setPage('terminal')},
-      ...(nativeEditor?[{id:'code',label:'Code',icon:<UiIcon name="code" size={14}/>,run:openCode}]:[]),
+      {id:'terminal',label:'Terminal',icon:<UiIcon name="terminal" size={14}/>,run:openTerminal},
+      ...(nativeEditor||codeMissing?[{id:'code',label:'Code',icon:<UiIcon name="code" size={14}/>,run:nativeEditor?openCode:openCodeInStore}]:[]),
     ]:[]),
   ];
   // Library places and Settings › MCP connections in ⌘K (owner only, like their pages).
@@ -162,6 +169,8 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
     {id:'tool-specialties',group:'Library',label:'Library › Specialties',keywords:'agent templates jobs coming soon',icon:<UiIcon name="layers" size={14}/>,run:()=>setPage('specialties')},
     {id:'tool-skills',group:'Library',label:'Library › Skills',keywords:'skill abilities guides',icon:<UiIcon name="star" size={14}/>,run:()=>setPage('skills')},
     {id:'tool-rules',group:'Library',label:'Library › Rules',keywords:'rules instructions policies',icon:<UiIcon name="scale" size={14}/>,run:()=>setPage('rules')},
+    // The Terminal opens beside the chat in one click (footer, ⌘K, My apps); its saved SSH hosts stay one command away.
+    {id:'tool-ssh-hosts',group:'Tools',label:'Terminal › Saved SSH hosts',keywords:'ssh hosts servers terminal sessions',icon:<UiIcon name="terminal" size={14}/>,run:()=>setPage('terminal')},
     {id:'tool-mcp',group:'Settings',label:'Settings › MCP connections',keywords:'connectors mcp servers tools',icon:<UiIcon name="tool" size={14}/>,run:()=>setPage('mcp')},
   ]:[];
   const [mcpOpen,setMcpOpen]=useState<string>();
@@ -205,7 +214,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
   const owner=user.role==='owner',go=(p:Page)=>()=>setPage(p);
   const entry=(id:Page,available=true,run=go(id),badge?:string,parent?:FooterSection):FooterEntry=>({available,current:page===id,run,badge,parent});
   const footerEntries:Record<FooterSection,FooterEntry>={chat:entry('chat'),agents:entry('agents'),library:{...entry('library',owner),current:page==='library'||page==='rules'},board:entry('board'),runs:entry('runs',user.role!=='guest'),memory:entry('memory'),approvals:entry('approvals',user.role!=='guest',go('approvals'),pendingApprovals.count?(pendingApprovals.count===100?'100+':String(pendingApprovals.count)):undefined),store:entry('store',true,go('store')),genvr:entry('genvr',true,go('genvr'),undefined,'store'),
-    browser:{available:owner&&browser.available,current:page==='browser',run:go('browser'),parent:'store'},terminal:entry('terminal',owner,go('terminal'),undefined,'store'),code:entry('code',owner&&nativeEditor,openCode,undefined,'store'),skills:entry('skills',owner,go('skills'),undefined,'library'),personalities:entry('personalities',owner,go('personalities'),undefined,'library'),specialties:entry('specialties',owner,go('specialties'),undefined,'library')};
+    browser:{available:owner&&browser.available,current:page==='browser',run:go('browser'),parent:'store'},terminal:entry('terminal',owner,openTerminal,undefined,'store'),code:entry('code',owner&&(nativeEditor||codeMissing),nativeEditor?openCode:openCodeInStore,undefined,'store'),skills:entry('skills',owner,go('skills'),undefined,'library'),personalities:entry('personalities',owner,go('personalities'),undefined,'library'),specialties:entry('specialties',owner,go('specialties'),undefined,'library')};
 
   const sidebarShown = rail && (page === 'chat' || ownSidebar);
   return <div className="shell app-shell" data-theme={theme} data-rail={sidebarShown ? 'open' : 'closed'} data-section={page} lang="en" dir="ltr">
@@ -243,10 +252,10 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
           onOpenMemory={(drawerId, memoryId) => { setMemoryFocus(f => ({ drawerId, memoryId, n: (f?.n ?? 0) + 1 })); setPage('memory'); }}/> : null}
       </section>
       <section className="page page-agents" hidden={page !== 'agents'}><AgentsDestination client={client} active={page === 'agents'} onPersonalities={()=>setPage('personalities')} onSpecialties={()=>setPage('specialties')} onSkills={()=>setPage('skills')} sidebarSlot={slot} onOpenMcp={()=>setPage('mcp')} onOpenApprovals={()=>setPage('approvals')} focusAgent={agentFocus} onChat={agentId => { if (chat) { chat.newChat(); chat.selectAgent(agentId); } setPage('chat'); }} onOpenMemory={agentId => { if (agentId) setMemoryFocus(f => ({ scope: `agent:${agentId}`, n: (f?.n ?? 0) + 1 })); setPage('memory'); }}/></section>
-      <section className="page page-board" hidden={page !== 'board'}>{board && <TaskBoard controller={board} sidebarSlot={slot} active={page === 'board'} onOpenChat={id => { void chat?.open(id); setPage('chat'); }}/>}</section>
+      <section className="page page-board" hidden={page !== 'board'}>{board && <TaskBoard controller={board} sidebarSlot={slot} active={page === 'board'} onOpenChat={id => { void chat?.open(id); setPage('chat'); }} onOpenMemory={to => { setMemoryFocus(f => ('handoffs' in to ? { handoffs: true as const, n: (f?.n ?? 0) + 1 } : { scope: to.scope, n: (f?.n ?? 0) + 1 })); setPage('memory'); }}/>}</section>
       {user.role!=='guest'&&<section className="page page-runs" hidden={page!=='runs'}><RunsDestination client={client} active={page==='runs'} sidebarSlot={slot} request={runsRequest} agents={chatState?.agents??[]} projects={chatState?.projects??[]} models={chatState?.models??[]} onOpenChat={id=>{void chat?.open(id);setPage('chat');}} onOpenCard={(boardId,cardId)=>{setPage('board');void board?.reveal(boardId,cardId);}} onOpenAgent={id=>{setAgentFocus(f=>({id,n:(f?.n??0)+1}));setPage('agents');}} onOpenApprovals={()=>setPage('approvals')} onOpenConnections={()=>openSettings('channels')}/></section>}
       {user.role!=='guest'&&<section className="page page-approvals" hidden={page!=='approvals'}><ApprovalsWorkspace client={client} active={page==='approvals'} placeRequest={approvalsPlace} slot={slot} onDecision={decided} onAccount={()=>openSettings('account')} pendingCount={pendingApprovals.count} onAgent={id=>{setAgentFocus(f=>({id,n:(f?.n??0)+1}));setPage('agents');}}/></section>}
-      <section className="page page-ui mem-desk" hidden={page !== 'memory'}><MemoryWindow client={client} active={page === 'memory'} focus={memoryFocus} sidebarSlot={slot} onOpenChat={id => { void chat?.open(id); setPage('chat'); }} onOpenSettings={openMemorySettings}/></section>
+      <section className="page page-ui mem-desk" hidden={page !== 'memory'}><MemoryWindow client={client} active={page === 'memory'} focus={memoryFocus} sidebarSlot={slot} onOpenChat={id => { void chat?.open(id); setPage('chat'); }} onOpenCard={(boardId, cardId) => { setPage('board'); void board?.reveal(boardId, cardId); }} onOpenSettings={openMemorySettings}/></section>
       {user.role === 'owner' && <>
         <section className="page page-library" hidden={page !== 'library'}><LibrarySection canManageRules={owner} active={page==='library'} sidebarSlot={slot} onOpen={place=>setPage(place)}/></section>
         <section className="page page-ui page-rules" hidden={page!=='rules'}><RulesLibrary client={client} active={page==='rules'} sidebarSlot={slot} agents={(chatState?.agents??[]).map(a=>({id:a.id,name:a.name??'Agent',department:a.department??null}))} onOpen={place=>setPage(place)}/></section>
@@ -257,7 +266,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
       </>}
       <section className="page page-ui" hidden={page!=='code'||!!chat}><p role="status" className="fine-print">Select Code in the bottom bar to open or reconnect the project editor.</p></section>
       <section className="page page-browser" hidden={page!=='browser'}><BrowserWorkspace client={client} active={page==='browser'}/></section>
-      <section className="page page-store" hidden={page!=='store'}><StoreWorkspace client={client} active={page==='store'} sidebarSlot={slot} request={storeRequest} canBrowser={browser.available&&owner} canCode={nativeEditor&&owner} onOpenApp={id=>{if(id==='browser')setPage('browser');else if(id==='code')openCode();else setPage(id);}} onAccounts={()=>openSettings('accounts')} footerItem={owner?id=>footerToolItem(footerPrefsNow,id,x=>footer.toggle(x)):undefined} onPermissions={()=>{if(user.role!=='owner'){setPage('agents');return;}setApprovalsPlace(r=>({place:'perms',n:(r?.n??0)+1}));setPage('approvals');}}/></section>
+      <section className="page page-store" hidden={page!=='store'}><StoreWorkspace client={client} active={page==='store'} sidebarSlot={slot} request={storeRequest} canBrowser={browser.available&&owner} canCode={nativeEditor&&owner} codeMissing={codeMissing&&owner} onOpenApp={id=>{if(id==='browser')setPage('browser');else if(id==='code')void (nativeEditor?openCode():openCodeInStore());else if(id==='terminal')openTerminal();else setPage(id);}} onAccounts={()=>openSettings('accounts')} footerItem={owner?id=>footerToolItem(footerPrefsNow,id,x=>footer.toggle(x)):undefined} onPermissions={()=>{if(user.role!=='owner'){setPage('agents');return;}setApprovalsPlace(r=>({place:'perms',n:(r?.n??0)+1}));setPage('approvals');}}/></section>
       {user.role==='owner'&&<section className="page page-trading" hidden={page!=='trading'}><TradingWorkspace client={client} active={page==='trading'} sidebarSlot={slot} onBack={openMyApps}/></section>}
       <section className="page page-genvr" hidden={page !== 'genvr'}><GenVRPage key={user.id} client={client} active={page === 'genvr'}/></section>
       {page === 'settings' && <section className="page page-settings"><AppSettings key={settingsVisit} mcpOpenId={mcpOpen} onOpenStore={local=>openStore(false,local)} initialTab={settingsTab} initialMemoryPane={memoryPane} sidebarSlot={slot} active signedIn client={client} preference={appearance.preference} onTheme={appearance.setPreference} onAccount={() => openSettings('account')} onAgents={() => setPage('agents')} onOpenMemory={() => setPage('memory')} onOpenChat={() => setPage('chat')} onOpenApps={openMyApps} onOpenTool={tool => setPage(tool)} onOpenGenvr={() => setPage('genvr')} onApprovals={() => setPage('approvals')} onBoard={() => setPage('board')} onAgent={id => { setAgentFocus(f => ({ id, n: (f?.n ?? 0) + 1 })); setPage('agents'); }}/></section>}

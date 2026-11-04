@@ -27,6 +27,10 @@
  *                   never auto-saved into the owner's drawers
  *   chat            proposed by an agent in a saved chat conversation (CHAT-PRO-02 E):
  *                   the owner accepts or rejects it in the chat, never saved by itself
+ *   special-category  (GIRRU_STORE_P9, PRIV7) health, religion, politics, sexuality, origin,
+ *                   union, genetic or biometric data: always asks, never saved by itself
+ *   personal-data   (GIRRU_STORE_P9, PRIV3) other people's contact or identity data in
+ *                   imported or channel text (personal-data.ts; kinds only)
  *
  * Proposals are reviewed by the owner account only (owner-only API). For a
  * non-owner account an important item is not saved (reported as skipped).
@@ -57,7 +61,14 @@ import { textSimilarity } from './embedding.js';
 import { detectContradiction, detectReplacement } from './contradiction.js';
 import { TopicKeyError, normalizeTopicKey } from './topic-key.js';
 import { TopicKeyTakenError } from './storage.js';
+import { currentVersionStep, replaceStep, stampProvenanceStep } from './validity.js';
+import { storeP3Enabled } from '../services/store-p3.js';
+import { storeP9Enabled } from '../services/store-p9.js';
+import { personalDataKinds, specialCategory } from './personal-data.js';
+import { calibratedImportance, nearDuplicate, splitFacts } from './write-quality.js';
 import { ALWAYS_ASK, rulesForDrawer, type EffectiveRules } from './scopes/rules.js';
+import { storeP9bEnabled } from '../services/store-p9b.js';
+import { corroborated, sourceOfCapture, stored } from './quality/pipeline.js';
 
 export const MAX_LEARNED_CONTENT = 50_000;
 /** CHAT-BUILD-01 (M1): importance an agent may give by itself; above it the owner decides. */
@@ -76,7 +87,15 @@ export type LearningReason =
   | 'money' | 'credentials' | 'health' | 'legal' | 'permissions' | 'decision'
   | 'conflict' | 'overwrite' | 'low-confidence' | 'outsider' | 'chat' | 'high-importance'
   /** MEM-GAPS-02: the scope's review rules ask for routine facts too. */
-  | 'scope-rule';
+  | 'scope-rule'
+  /** STORE-MAP-01 P6 (SEC2-5): text read from a file inside a project folder (attacker-controlled in a cloned repo). */
+  | 'repository-file'
+  /** STORE-MAP-01 P8 (D27): a lesson an agent marked in its run's working notes. */
+  | 'run-notes'
+  /** STORE-MAP-01 P9 (PRIV7): health, religion, politics, sexuality, origin, union, genetic or biometric data. */
+  | 'special-category'
+  /** STORE-MAP-01 P9 (PRIV3): other people's contact or identity data in imported or channel text. */
+  | 'personal-data';
 
 export interface LearningCandidate {
   content: string;
@@ -91,6 +110,8 @@ export interface LearningCandidate {
   replaces?: { id: string; content: string; type: string; important?: boolean } | null;
   /** A safe reference to a secret saved in the credential store. */
   credentialRef?: boolean;
+  /** STORE-MAP-01 P9 (PRIV3): the text comes from an import (checked for personal data). */
+  imported?: boolean;
   /** Stable topic key (CORE-MEM-TOPIC); normalized by learn(). */
   topicKey?: string | null;
 }
@@ -106,6 +127,8 @@ export interface LearningClassification {
   reasons: LearningReason[];
   /** Existing memories the candidate may contradict. */
   conflictsWith: string[];
+  /** A duplicate: the known memory it repeats (P9b: the repeat corroborates it). */
+  duplicateOf?: string;
 }
 
 // Word lists (lower-case; Arabic and German included). Kept short and explicit.
@@ -135,9 +158,11 @@ export function classifyLearning(c: LearningCandidate, ctx: LearningContext = {}
   const conflictsWith: string[] = [];
   const norm = normText(text);
 
-  // Already known, word for word: nothing to save.
-  if (!c.replaces && (ctx.similar || []).some((s) => normText(s.content) === norm)) {
-    return { kind: 'duplicate', drawer, reasons: [], conflictsWith: [] };
+  // Already known, word for word (P9, M1: an extraction with the same words in another order or form): nothing to save.
+  const p9 = storeP9Enabled();
+  const known = c.replaces ? undefined : (ctx.similar || []).find((s) => normText(s.content) === norm || (p9 && c.origin === 'extraction' && nearDuplicate(s.content, text)));
+  if (known) {
+    return { kind: 'duplicate', drawer, reasons: [], conflictsWith: [], ...(storeP9bEnabled() ? { duplicateOf: known.id } : {}) };
   }
 
   if (c.origin === 'outsider') reasons.add('outsider');
@@ -146,6 +171,11 @@ export function classifyLearning(c: LearningCandidate, ctx: LearningContext = {}
   if (drawer.kind === 'people' || c.type === 'relationship') reasons.add('people');
   if (c.credentialRef || c.type === 'credential') reasons.add('credentials');
   for (const [reason, re] of TOPICS) if (re.test(text)) reasons.add(reason);
+  // STORE-MAP-01 P9: special categories always ask (PRIV7); personal data in imported or channel text is flagged (PRIV3).
+  if (p9) {
+    if (specialCategory(text)) reasons.add('special-category');
+    if ((c.imported || c.origin === 'outsider') && personalDataKinds(text).length) reasons.add('personal-data');
+  }
   if (typeof c.confidence === 'number' && Number.isFinite(c.confidence) && c.confidence < LOW_CONFIDENCE) reasons.add('low-confidence');
 
   if (c.replaces) {
@@ -220,16 +250,61 @@ export async function saveVersioned(memory: Memory, actor: string, reason: strin
   await sql().tx(function* () {
     yield* storage.writeRowStep(memory);
     yield* recordVersionStep({ memoryId: memory.id, userId: memory.userId, drawer: memory.drawer!, change: 'create', entry: versionEntryOf(memory), actor, reason });
+    if (storeP3Enabled()) yield* stampProvenanceStep(memory, actor);
   });
   await storage.writeMarkdownCopy(memory);
   return memory;
 }
 
+/**
+ * STORE-MAP-01 P3: a new fact on a known topic replaces the old memory instead
+ * of overwriting it. One transaction: the old row stops being true (kept for
+ * History), the new row takes the topic and gets its `create` version.
+ */
+export async function replaceVersioned(older: Memory, newer: Memory, actor: string, reason: string): Promise<Memory> {
+  const storage = getMemoryStorage();
+  await storage.ensureEmbedding(newer);
+  await sql().tx(function* () {
+    yield* replaceStep(older.userId, older.id, newer.id);
+    yield* storage.writeRowStep(newer);
+    yield* recordVersionStep({ memoryId: newer.id, userId: newer.userId, drawer: newer.drawer!, change: 'create', entry: versionEntryOf(newer), actor, reason: `${reason} replaces ${older.id}` });
+    yield* stampProvenanceStep(newer, actor);
+  });
+  await storage.writeMarkdownCopy(newer);
+  return newer;
+}
+
+/** An edit based on an older version than the stored one (STORE-MAP-01 P3, FD3e). Nothing was written. */
+export class MemoryVersionConflictError extends Error {
+  readonly status = 409;
+  constructor(readonly current: { id: string; content: string; type: string; importance: number; version: number }) { super('This memory changed while you were editing'); }
+}
+
+// STORE-MAP-01 P10: edits of one memory run one after another, so the version check and the write
+// below cannot interleave with another edit (two edits on the same version: one wins, one is refused).
+const editQueue = new Map<string, Promise<unknown>>();
+function oneEditAtATime<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  const prev = editQueue.get(id) ?? Promise.resolve();
+  const next = prev.catch(() => undefined).then(fn);
+  editQueue.set(id, next);
+  void next.finally(() => { if (editQueue.get(id) === next) editQueue.delete(id); }).catch(() => undefined);
+  return next;
+}
+
 /** Update a memory (allowlisted fields) with baseline + `update` version. */
-export async function updateVersioned(userId: string, id: string, updates: Partial<Memory>, actor: string, reason: string): Promise<Memory | null> {
+export function updateVersioned(userId: string, id: string, updates: Partial<Memory>, actor: string, reason: string, expectedVersion?: number): Promise<Memory | null> {
+  return oneEditAtATime(id, () => updateVersionedNow(userId, id, updates, actor, reason, expectedVersion));
+}
+
+async function updateVersionedNow(userId: string, id: string, updates: Partial<Memory>, actor: string, reason: string, expectedVersion?: number): Promise<Memory | null> {
   const storage = getMemoryStorage();
   const old = await storage.getOwned(userId, id);
   if (!old) return null;
+  if (expectedVersion !== undefined) {
+    // Compare-and-set: refuse an edit made on an older version (the editor keeps its text).
+    const v = await sql().read(currentVersionStep(id));
+    if (v !== expectedVersion) throw new MemoryVersionConflictError({ id, content: old.content, type: old.type, importance: versionEntryOf(old).importance, version: v });
+  }
   await recordBaselineIfMissing(old, actor);
   await storage.update(id, updates);
   const updated = (await storage.getOwned(userId, id))!;
@@ -337,7 +412,18 @@ export async function learn(input: LearnInput): Promise<LearnOutcome> {
   const out: LearnOutcome = { saved: [], proposed: [], skipped: [], classified: [], updated: [] };
   const storage = getMemoryStorage();
   const ownerReview = (await userRole(input.userId)) === 'owner';
-  for (const c of input.candidates) {
+  // STORE-MAP-01 P9 (M1): one fact per memory; an extraction with several clear facts becomes one candidate each.
+  const candidates = storeP9Enabled()
+    ? input.candidates.flatMap((c) => {
+      const parts = c?.origin === 'extraction' && typeof c.content === 'string' ? splitFacts(c.content) : [];
+      return parts.length > 1 ? parts.map((content) => ({ ...c, content })) : [c];
+    })
+    : input.candidates;
+  // STORE-MAP-01 P9b (MD1): what each candidate stored or repeated, recorded with its source after the loop.
+  const spans: Array<{ c: LearningCandidate; saved: number; updated: number; known: string[] }> = [];
+  for (const c of candidates) {
+    const span = { c, saved: out.saved.length, updated: out.updated.length, known: [] as string[] };
+    spans.push(span);
     const content = typeof c?.content === 'string' ? c.content.trim() : '';
     if (!content || content.length > MAX_LEARNED_CONTENT) { out.skipped.push({ content: preview(content), reason: 'invalid content' }); continue; }
     const type = typeof c.type === 'string' && TYPE.test(c.type) ? c.type : 'fact';
@@ -358,7 +444,7 @@ export async function learn(input: LearnInput): Promise<LearnOutcome> {
       // CORE-MEM-TOPIC: the topic is known in this drawer -> a new version of it.
       const existing = await storage.getByTopicKey(input.userId, drawer, topicKey);
       if (existing) {
-        await learnTopicUpdate(input, out, existing, entry, c, ownerReview);
+        await learnTopicUpdate(input, out, existing, entry, c, ownerReview, span.known);
         continue;
       }
     }
@@ -368,17 +454,24 @@ export async function learn(input: LearnInput): Promise<LearnOutcome> {
       .map((r) => ({ id: r.memory.id, content: r.memory.content, similarity: textSimilarity(content, r.memory.content) }));
     const cls = classifyLearning({ ...c, content, type, drawer }, { similar });
     if (input.review && cls.kind === 'routine') { cls.kind = 'important'; cls.reasons.push(input.reviewReason ?? 'chat'); }
+    // SEC2-5: text from a repository file always carries its label, whatever else it is about.
+    else if (input.review && input.reviewReason === 'repository-file' && !cls.reasons.includes('repository-file')) cls.reasons.push('repository-file');
+    // P8 (D27): a lesson from a run's working notes keeps its label too (Needs you: "From a run's working notes").
+    else if (input.review && input.reviewReason === 'run-notes' && !cls.reasons.includes('run-notes')) cls.reasons.push('run-notes');
     // MEM-GAPS-02: the scope's review rules (owner accounts; a chat the owner reviews always asks).
     const rules = ownerReview && !input.review ? await rulesForDrawer(input.userId, drawer) : null;
     if (rules && cls.kind === 'routine' && rules.routine === 'ask') { cls.kind = 'important'; cls.reasons.push('scope-rule'); }
     else if (rules && cls.kind === 'important' && !cls.conflictsWith.length && rules.important === 'save' && cls.reasons.every((r) => !ALWAYS_ASK.has(r))) cls.kind = 'routine';
 
     if (cls.kind === 'duplicate') {
+      if (cls.duplicateOf) span.known.push(cls.duplicateOf);
       out.skipped.push({ content: preview(content), reason: 'already known' });
       out.classified.push({ kind: cls.kind, reasons: [] });
       continue;
     }
     if (cls.kind === 'routine') {
+      // P9 (M1): an extraction never gives itself a pinned importance.
+      if (storeP9Enabled()) entry.importance = calibratedImportance(c.origin, entry.importance);
       const mem = newMemory(input.userId, drawer, entry, { ...(input.metadata || {}), source: c.origin, learned: 'routine' }, topicKey);
       // MEM-GAPS-02: who saved it (an agent run; never an outsider-facing turn's claim).
       if (c.origin === 'agent' && input.agentId) mem.sourceAgentId = input.agentId;
@@ -389,7 +482,7 @@ export async function learn(input: LearnInput): Promise<LearnOutcome> {
         if (!(err instanceof TopicKeyTakenError)) throw err;
         const holder = await storage.getOwned(input.userId, err.holderId);
         if (!holder) throw err;
-        await learnTopicUpdate(input, out, holder, entry, c, ownerReview);
+        await learnTopicUpdate(input, out, holder, entry, c, ownerReview, span.known);
         continue;
       }
       out.saved.push(mem);
@@ -406,7 +499,12 @@ export async function learn(input: LearnInput): Promise<LearnOutcome> {
       // CORE-MEM-CONFLICT: never written over the existing memory; the proposal
       // updates the first contradicted one only if the owner keeps the new text.
       const old = cls.conflictsWith.length ? await storage.getOwned(input.userId, cls.conflictsWith[0]) : null;
-      const change: MemoryChange = old
+      // STORE-MAP-01 P10 (XP3): a candidate that names the memory it replaces (memory_supersede) proposes
+      // an update of that memory, so approving it retires the old text instead of adding a second fact.
+      const replaced = !old && c.replaces ? await storage.getOwned(input.userId, c.replaces.id) : null;
+      const change: MemoryChange = replaced && replaced.drawer && sameDrawer(replaced.drawer, drawer)
+        ? { op: 'update', id: replaced.id, before: versionEntryOf(replaced), after: entry }
+        : old
         ? { op: 'update', id: old.id, before: versionEntryOf(old), after: entry }
         : { op: 'add', after: entry, ...(topicKey ? { topicKey } : {}) };
       const proposal = await createChangeProposal({
@@ -421,7 +519,24 @@ export async function learn(input: LearnInput): Promise<LearnOutcome> {
       out.skipped.push({ content: preview(content), reason: err.message });
     }
   }
+  if (storeP9bEnabled()) await recordCaptures(input, out, spans);
   return out;
+}
+
+/** P9b (MD1 step 7, MD3): each stored or repeated memory gets its source (quality/pipeline.ts). */
+async function recordCaptures(input: LearnInput, out: LearnOutcome, spans: ReadonlyArray<{ c: LearningCandidate; saved: number; updated: number; known: string[] }>): Promise<void> {
+  const at = new Date().toISOString();
+  const sessionId = typeof input.metadata?.sessionId === 'string' ? input.metadata.sessionId : null;
+  for (const [i, sp] of spans.entries()) {
+    const next = spans[i + 1];
+    const source = sourceOfCapture({
+      origin: sp.c.origin, actor: input.actor, agentId: input.agentId ?? null, sessionId,
+      reviewReason: input.review ? (input.reviewReason ?? 'chat') : null,
+    }, at);
+    const mems = [...out.saved.slice(sp.saved, next?.saved ?? out.saved.length), ...out.updated.slice(sp.updated, next?.updated ?? out.updated.length)];
+    await stored(mems, [source]).catch(() => undefined);
+    for (const id of sp.known) await corroborated(input.userId, id, source).catch(() => undefined);
+  }
 }
 
 /**
@@ -438,9 +553,11 @@ async function ruleDecides(userId: string, out: LearnOutcome, proposal: MemoryPr
     const r = await decideConflict(userId, proposal.id, rules.contradiction, `rule:${rules.from.contradiction}`, proposal.reviewHash, 'decided by the scope rule');
     const storage = getMemoryStorage();
     if (r.decision === 'keep_new') {
-      const m = await storage.getOwned(userId, proposal.conflictWith);
+      // P9 (M4): the old fact was superseded; the new row is the current one.
+      const id = r.applied?.replaced?.length ? r.applied.added[0] : proposal.conflictWith;
+      const m = await storage.getOwned(userId, id);
       if (m) out.updated.push(m);
-      out.classified.push({ kind: 'important', reasons: [...reasons] as LearningReason[], memoryId: proposal.conflictWith });
+      out.classified.push({ kind: 'important', reasons: [...reasons] as LearningReason[], memoryId: id });
     } else {
       const id = r.applied?.added[0];
       const m = id ? await storage.getOwned(userId, id) : null;
@@ -461,9 +578,10 @@ async function ruleDecides(userId: string, out: LearnOutcome, proposal: MemoryPr
  * applied as a new version, important ones (overwrite rules of agentChange)
  * become an update proposal.
  */
-async function learnTopicUpdate(input: LearnInput, out: LearnOutcome, existing: Memory, entry: VersionEntry, c: LearningCandidate, ownerReview: boolean): Promise<void> {
+async function learnTopicUpdate(input: LearnInput, out: LearnOutcome, existing: Memory, entry: VersionEntry, c: LearningCandidate, ownerReview: boolean, known: string[] = []): Promise<void> {
   const before = versionEntryOf(existing);
   if (normText(before.content) === normText(entry.content) && before.type === entry.type) {
+    known.push(existing.id);
     out.skipped.push({ content: preview(entry.content), reason: 'already known' });
     out.classified.push({ kind: 'duplicate', reasons: [] });
     return;
@@ -476,6 +594,14 @@ async function learnTopicUpdate(input: LearnInput, out: LearnOutcome, existing: 
   });
   const reasons: LearningReason[] = contradiction ? [...new Set<LearningReason>(['conflict', ...cls.reasons])] : cls.reasons;
   if (input.review && !reasons.length) reasons.push('chat');
+  if (!reasons.length && storeP3Enabled()) {
+    // P3: the new fact replaces the old one; the old row stays in History.
+    const mem = newMemory(input.userId, drawer, entry, { ...(input.metadata || {}), source: c.origin, learned: 'topic' }, existing.topicKey ?? null);
+    if (c.origin === 'agent' && input.agentId) mem.sourceAgentId = input.agentId;
+    out.updated.push(await replaceVersioned(existing, mem, input.actor, 'learning:topic'));
+    out.classified.push({ kind: 'routine', reasons: [], memoryId: mem.id });
+    return;
+  }
   if (!reasons.length) {
     const updated = await updateVersioned(input.userId, existing.id, {
       content: entry.content, type: entry.type as MemoryType,

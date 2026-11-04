@@ -3,7 +3,7 @@ import type {SessionClient} from './session';
 import {UiIcon} from './ui-icons';
 import {PreferenceGroup,PreferenceRow} from './Preferences';
 import {footerFor,footerSections} from './footer-prefs';
-import {useNabuAvailability} from './WorkspaceModes';
+import {useNabuRuntime} from './WorkspaceModes';
 import type {FooterSection} from './footer-prefs';
 
 const ownerOnly:ReadonlyArray<FooterSection>=['library','terminal','code','skills','personalities','specialties'];
@@ -13,7 +13,7 @@ export function FooterSettings({client}:{client:SessionClient}){
  const controller=footerFor(client),{prefs}=useSyncExternalStore(controller.subscribe,controller.getSnapshot,controller.getSnapshot),[dragging,setDragging]=useState<FooterSection|null>(null);
  useEffect(()=>{void controller.load();},[controller]);
  const owner=client.getSnapshot().user?.role==='owner',guest=client.getSnapshot().user?.role==='guest';
- const editor=useNabuAvailability();
+ const nabu=useNabuRuntime(),editor=nabu.available||nabu.missing; // CODE-STORE-01: a missing Code is still offered (it opens the Store)
  const rows=prefs.order.filter(id=>(owner||!ownerOnly.includes(id))&&!(guest&&id==='approvals')&&(id!=='code'||editor));
  return <PreferenceGroup title="Footer" note="Hidden sections stay in ⌘K. Settings always stays in the footer.">
   <div className="footer-settings">

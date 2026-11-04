@@ -17,10 +17,11 @@ import { stallGuard, type StallGuard } from './model-stall.js';
 import { currentChatRun } from './chat-run-context.js';
 import {
   LOCAL_MAX_STEPS, TOOL_INPUT_CHARS, TOOL_OUTPUT_CHARS, TOOL_OUTPUT_MODEL_CHARS,
-  ModelUnavailable, toOllamaTools, toolResultText,
+  ModelUnavailable, runStepCalls, stepTools, toOllamaTools,
   type ApiTool, type LoopFrame,
 } from './ollama-agent-loop.js';
 import type { ToolResult } from '../tools/types.js';
+import { planCalls } from '../tools/on-demand.js';
 
 export interface CompatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -45,6 +46,14 @@ export interface LmStudioLoopOptions {
   now?: () => number;
   /** CHAT-BUILD-01: how long the model may send nothing (first piece / between pieces). */
   stallMs?: { first?: number; idle?: number };
+  /** STORE-MAP-01 P2b (tools on demand): the tools to send, asked again before every step. */
+  toolSet?: { definitions(): ApiTool[] };
+  /** STORE-MAP-01 P2b (weak tool calling): at most this many calls of one reply run, one after another. */
+  callCap?: number;
+  /** STORE-MAP-01 P2b (adaptive budget): characters of one tool result given back to the model. */
+  toolOutputChars?: number;
+  /** STORE-MAP-01 P2b (adaptive budget): called with the messages before every model call (shortens them to fit). */
+  beforeStep?: (messages: { role: string; content: unknown }[]) => void;
 }
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}\n… ${s.length - n} more characters` : s);
@@ -78,20 +87,16 @@ export async function runLmStudioAgentLoop(o: LmStudioLoopOptions): Promise<{ st
       step++;
       // CHAT-BUILD-01 stage 5 (Steer now): the owner's messages sent while it works go in before this step.
       for (const text of currentChatRun()?.takeSteers?.() ?? []) messages.push({ role: 'user', content: text });
-      const { content, calls } = await streamOne();
-      if (!calls.length) { answer = content; break; }
+      o.beforeStep?.(messages as { role: string; content: unknown }[]);
+      const { content, calls: asked } = await streamOne();
+      if (!asked.length) { answer = content; break; }
+      const calls = o.callCap ? planCalls(asked, o.callCap).run : asked;
       messages.push({ role: 'assistant', content, tool_calls: calls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.args) } })) });
       o.write({ type: 'tool_start', step, tools: calls.map((c) => ({ id: c.id, name: c.name, input: clip(JSON.stringify(c.args), TOOL_INPUT_CHARS) })) });
-      const results = await Promise.all(calls.map(async (c) => {
-        const started = now();
-        let out: { text: string; isError: boolean };
-        try { out = toolResultText(await o.execute(c.name, c.args)); }
-        catch (err) { out = { text: `Error: ${err instanceof Error ? err.message : 'tool failed'}`, isError: true }; }
-        return { ...c, ...out, ms: Math.max(0, now() - started) };
-      }));
+      const { results, skippedNote } = await runStepCalls(asked, o.execute, now, o.callCap);
       if (o.signal.aborted) throw new Aborted();
       o.write({ type: 'tool_result', step, results: results.map((r) => ({ id: r.id, name: r.name, output: clip(r.text, TOOL_OUTPUT_CHARS), isError: r.isError, ms: r.ms })) });
-      for (const r of results) messages.push({ role: 'tool', tool_call_id: r.id, content: clip(r.text, TOOL_OUTPUT_MODEL_CHARS) });
+      for (const [i, r] of results.entries()) messages.push({ role: 'tool', tool_call_id: r.id, content: clip(r.text, o.toolOutputChars ?? TOOL_OUTPUT_MODEL_CHARS) + (skippedNote && i === results.length - 1 ? `\n\n${skippedNote}` : '') });
       if (step >= maxSteps) {
         const note = `\n\nI used ${maxSteps} steps on this task. Tell me to continue and I will pick up from here.`;
         o.write({ type: 'text', content: note });
@@ -125,7 +130,7 @@ export async function runLmStudioAgentLoop(o: LmStudioLoopOptions): Promise<{ st
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: o.model, messages, stream: true,
-          ...(tools ? { tools } : {}),
+          ...(o.toolSet ? ((t) => (t ? { tools: t } : {}))(stepTools(o.toolSet)) : tools ? { tools } : {}),
           ...(o.temperature === undefined ? {} : { temperature: o.temperature }),
           ...(o.maxTokens ? { max_tokens: o.maxTokens } : {}),
         }),

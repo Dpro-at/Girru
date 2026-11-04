@@ -1,5 +1,5 @@
 /**
- * Phone link storage (MOB-PAIR-01, migration 164): paired phones, the
+ * Phone link storage (MOB-PAIR-01, Migration 183): paired phones, the
  * computer's identity (private key encrypted at rest), settings and which
  * approvals each phone was shown. Both drivers through sql-steps.
  *

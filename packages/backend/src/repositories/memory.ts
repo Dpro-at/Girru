@@ -53,6 +53,17 @@ import {
   type MemoryProposal,
 } from '../memory/memory-files.js';
 import type { Memory } from '../memory/types.js';
+import { storeP9bEnabled } from '../services/store-p9b.js';
+import { stored } from '../memory/quality/pipeline.js';
+import type { TrustSource } from '../memory/quality/trust.js';
+
+/** P9b (MD3): the writer of a direct save: the owner's own words, or an agent's (never more than agent trust). */
+function writerSource(a: { kind: string; agentId?: string | null; channel?: unknown }): TrustSource & { label: string } {
+  if (a.kind === 'user') return { kind: 'owner', key: 'owner', label: 'owner' };
+  if (a.kind === 'service') return { kind: 'channel', key: `channel:${String(a.channel ?? 'unknown').slice(0, 60)}`, label: 'channel' };
+  if (a.kind !== 'agent') return { kind: 'system', key: 'system', label: 'system' };
+  return a.channel ? { kind: 'channel', key: `channel:${a.agentId ?? 'unknown'}`, label: 'channel' } : { kind: 'agent', key: `agent:${a.agentId ?? 'unknown'}`, label: 'agent' };
+}
 
 const NOT_FOUND = 'Memory not found';
 const PROPOSAL_NOT_FOUND = 'Proposal not found';
@@ -68,7 +79,7 @@ export interface MemoryRepository extends MemoryRecallRepository, MemoryOwnerRep
   /** Throws like get() when the memory is out of scope; no access-count side effect. */
   assertAccess(actor: Actor | null | undefined, id: string): Promise<void>;
   create(actor: Actor | null | undefined, memory: Omit<Memory, 'userId'>, reason: string): Promise<Memory>;
-  update(actor: Actor | null | undefined, id: string, updates: Partial<Memory>, reason: string): Promise<Memory>;
+  update(actor: Actor | null | undefined, id: string, updates: Partial<Memory>, reason: string, expectedVersion?: number): Promise<Memory>;
   /**
    * CORE-MEM-TOPIC: create, or when `memory.topicKey` already names a memory
    * of the drawer, update that one as a new version (`updated: true`).
@@ -124,7 +135,7 @@ function doctorScope(actor: Actor | null | undefined): { userId: string; drawers
 
 async function memoryRowOwner(id: string): Promise<string | null> {
   if (typeof id !== 'string' || !id) return null;
-  const row = await sql().read(one<{ user_id: string }>('SELECT user_id FROM memories WHERE id = ?', id));
+  const row = await sql().read(one<{ user_id: string }>("SELECT user_id FROM memories WHERE id = ? AND COALESCE(drawer_kind, '') <> 'agent'", id));
   return row?.user_id ?? null;
 }
 
@@ -179,15 +190,19 @@ export const memoryRepository: MemoryRepository = {
     const { a, userId } = memoryUser(actor);
     const drawer = memory.drawer ? normalizeDrawer(memory.drawer) : defaultDrawerForType(memory.type);
     if (!drawerWritable(a, drawer)) throw new ScopeError(403, DRAWER_CLOSED);
-    return saveVersioned({ ...memory, userId } as Memory, versionActor(a), reason);
+    const saved = await saveVersioned({ ...memory, userId } as Memory, versionActor(a), reason);
+    // STORE-MAP-01 P9b (MD1): the owner's (or the agent's) own save goes through the same last step.
+    if (storeP9bEnabled()) await stored([saved], [writerSource(a)]).catch(() => undefined);
+    return saved;
   },
 
-  async update(actor, id, updates, reason) {
+  async update(actor, id, updates, reason, expectedVersion) {
     const { a, userId } = memoryUser(actor);
     await ownMemory(a, userId, id, true);
     if (a.kind === 'agent' && updates.drawer && !drawerWritable(a, normalizeDrawer(updates.drawer))) throw new ScopeError(403, DRAWER_CLOSED);
-    const updated = await updateVersioned(userId, id, updates, versionActor(a), reason);
+    const updated = await updateVersioned(userId, id, updates, versionActor(a), reason, expectedVersion);
     if (!updated) throw new ScopeError(404, NOT_FOUND);
+    if (storeP9bEnabled() && updates.content !== undefined) await stored([updated], [writerSource(a)]).catch(() => undefined);
     return updated;
   },
 

@@ -33,6 +33,7 @@ const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
 
 const { getDatabase } = await import(join(backendDir, 'src/db/database.ts'));
+const { projectKeyOf } = await import(join(backendDir, 'src/memory/project-keys.ts')); // project memory key (id while GIRRU_STORE_P3 is on)
 const db = getDatabase();
 await db.initialize();
 const OWNER = 'os-owner';
@@ -48,7 +49,7 @@ const folder = join(dir, 'alpha');
 mkdirSync(folder, { recursive: true });
 const project = await createProject(OWNER, { name: 'Alpha', folder });
 await createRule({ text: 'In Alpha, release only on Tuesdays.', when: null, projectId: project.id, who: 'all', targets: [], paused: false }, OWNER);
-await saveVersioned(newMemory(OWNER, { kind: 'project', key: project.slug }, { type: 'fact', importance: 7, content: 'Alpha deploys with scripts/release.sh.' }, {}), 'test', 'test');
+await saveVersioned(newMemory(OWNER, { kind: 'project', key: projectKeyOf(project) }, { type: 'fact', importance: 7, content: 'Alpha deploys with scripts/release.sh.' }, {}), 'test', 'test');
 
 const OWNER_TOP = '# Alpha\n\nMy own notes: tabs, not spaces.\n\n';
 const OWNER_END = '\n## Owner footer\nKeep this.\n';

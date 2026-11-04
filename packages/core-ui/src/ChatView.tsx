@@ -50,6 +50,8 @@ import type { MenuItem } from './desktop-ui';
 import { ContinueElsewhere, openChatWindow } from './chat-actions';
 import { secretLabel, splitSecrets } from './chat-secrets';
 import { SavedKeys } from './SavedKeys';
+import { useStoreP8 } from './store-switches';
+import { ChatRunNotes } from './RunNotes';
 import type { Part, ToolCall, ToolKind, Turn } from './turns';
 
 /** Pixels from the bottom within which the thread keeps following new text. */
@@ -252,6 +254,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
   const [maximized, setMaximized] = useState(false);
   useEffect(() => { if (!client) return; const p = new PanesController(client); setPanes(p); const t = { tabs: new TerminalTabs(client), prefs: new TerminalPrefsController(client) }; setTerminal(t); return () => { p.dispose(); t.tabs.dispose(); t.prefs.dispose(); }; }, [client]);
   const owner = client?.getSnapshot().user?.role === 'owner';
+  const p8 = useStoreP8(client);
   useEffect(()=>{if(terminalRequest>0&&owner)setTermOpen(true);},[terminalRequest,owner]);
   // The phone app opens the terminal with #terminal (after its own fingerprint check): full size, then the hash is dropped.
   useEffect(()=>{
@@ -537,7 +540,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
   </div>
   {pane === 'details' ? <ChatDetails controller={controller} client={client} recall={recallCtl} onSettings={onAddConnector} onSignIn={onSetUpModel} onClose={() => setPane(null)}
       memoryCard={s.activeId ? <>{recallCtl && <HandoffCard c={recallCtl} agentId={convAgentId || s.agentId || s.agents[0]?.id || ''} agentName={convAgentName}/>}{memCtl && <ChatMemoryCard controller={memCtl} onOpen={onOpenMemory}/>}</> : undefined}
-      resultsExtra={project?.folder && s.git?.branch ? <GitHubCard git={s.git} pr={owner && client ? { client, projectId: project.id } : undefined} onRefresh={() => void controller.refreshGit()}/> : undefined}
+      resultsExtra={withRunNotes(project?.folder && s.git?.branch ? <GitHubCard git={s.git} pr={owner && client ? { client, projectId: project.id } : undefined} onRefresh={() => void controller.refreshGit()}/> : undefined, p8 && owner && client && s.runId ? <ChatRunNotes client={client} runId={s.runId}/> : undefined)}
       placeExtra={client && owner && project?.folder ? <details className="details-more"><summary>Coding sessions in this folder</summary><CodingSessions key={project.id + ':' + project.folder} client={client} controller={controller} folder={project.folder}/></details> : undefined}
       onOpenPane={p => (p === 'terminal' ? setTermOpen(true) : setPane(p))} onStop={() => void controller.stopAll()}
       onSchedule={() => setScheduleOpen(true)} onAddFolder={() => project && setProjectSheet({ id: project.id })} onContinue={() => setChatSheet('continue')} focusPart={focusPart}
@@ -545,7 +548,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
     : pane === null && !embeddedCode && <DetailsRail controller={controller} onOpen={openPart}/>}
   {scheduleOpen && client && s.activeId && <ScheduleSheet client={client} chatId={s.activeId} onClose={() => setScheduleOpen(false)}/>}
   {panes && (pane === 'changes' || pane === 'files') && <aside className="chat-panel chat-pane" aria-label={pane === 'changes' ? 'Changes' : 'Files'} onKeyDown={e => { if (e.key === 'Escape') setPane(null); }}><PaneSwitch items={paneButtons} pane={pane} onPane={setPane}/>
-    {pane === 'changes' ? <ChangesPane panes={panes}/> : <FilesPane panes={panes} onOpenCode={onOpenCode&&project?.folder?file=>onOpenCode(project.folder!,file):undefined}/>}
+    {pane === 'changes' ? <ChangesPane panes={panes} client={client} folder={project?.folder ?? null}/> : <FilesPane panes={panes} onOpenCode={onOpenCode&&project?.folder?file=>onOpenCode(project.folder!,file):undefined}/>}
   </aside>}
 
   </div></MomentsContext.Provider>;
@@ -1170,3 +1173,6 @@ const avatarShown = (() => {
   let on = false; const listeners = new Set<() => void>();
   return { get: () => on, subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; }, toggle: () => { on = !on; listeners.forEach(listener => listener()); } };
 })();
+
+/** STORE-MAP-01 P8c: a running reply's working notes join Details › Results (nothing changes while the switch is off). */
+function withRunNotes(git: ReactNode, notes: ReactNode): ReactNode { return notes ? <>{git}{notes}</> : git; }

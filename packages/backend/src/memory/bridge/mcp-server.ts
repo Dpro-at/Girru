@@ -17,11 +17,12 @@
  * Light on purpose: no database, no credential store, no model.
  */
 import { readRegularFile } from './regular-file.js';
-import path from 'node:path';
 import { randomBytes, timingSafeEqual, createHmac } from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { sessionProof } from './proof.js';
+import { mcpContractTools } from '../contract.js';
+import { storeP8Enabled } from '../../services/store-p8.js';
 
 export const MCP_SERVER_NAME = 'dpro-memory';
 const VERSION = '0.1.0';
@@ -57,9 +58,8 @@ export function checkLoopback(raw: string): string {
 type Instance = { id: string; secret: string };
 /** instance.json next to the CLI token (0600, written by the backend at start). */
 export function readInstance(configDir: string): Instance {
-  const file = path.join(configDir, 'instance.json');
   let contents: ReturnType<typeof readRegularFile>;
-  try { contents = readRegularFile(file, 64 * 1024); }
+  try { contents = readRegularFile(configDir, 'instance.json', 64 * 1024); }
   catch { throw new BridgeClientError('Girru instance.json is missing, unreadable or not a regular file. Restart Girru.'); }
   if (process.platform !== 'win32' && (contents.mode & 0o077) !== 0) throw new BridgeClientError('Girru instance.json is readable by other users; restart Girru to fix it.');
   const d = JSON.parse(contents.bytes.toString('utf8'));
@@ -114,12 +114,45 @@ export function httpBackend(o: HttpBackendOptions): BridgeBackend {
   };
 }
 
-export function createBridgeMcpServer(backend: BridgeBackend): Server {
+/**
+ * The tools this server lists. With a session Girru started (STORE-MAP-01 P6)
+ * the five verbs of the one memory contract are listed, generated from the
+ * same definition as the native tools (XP1), in place of the three older
+ * tools they replace (still callable by name).
+ */
+export function bridgeTools(verbs: boolean): Array<{ name: string; description: string; inputSchema: unknown }> {
+  const defs = storeP8Enabled() ? p8Definitions() : BRIDGE_TOOL_DEFINITIONS.map((t) => ({ ...t }));
+  if (!verbs) return defs;
+  // The verbs replace memory_search, handoff_write and memory_propose in the list (the old names still work).
+  const replaced = new Set(['memory_search', 'handoff_write', 'memory_propose']);
+  return [...defs.filter((t) => !replaced.has(t.name)), ...mcpContractTools()];
+}
+
+/**
+ * STORE-MAP-01 P8 (D28): with GIRRU_STORE_P8 on (in this process's environment)
+ * project_brief and latest_handoff take an optional task number, and
+ * handoff_write also takes blockers, files touched and the task.
+ */
+const TASK_ARG = { type: 'string', description: 'Optional task number in the project\'s task file, like T-12: that task\'s newest handoff and links.' };
+function p8Definitions(): Array<{ name: string; description: string; inputSchema: unknown }> {
+  return BRIDGE_TOOL_DEFINITIONS.map((t) => {
+    if (t.name === 'project_brief' || t.name === 'latest_handoff') return { ...t, inputSchema: { type: 'object', properties: { task: TASK_ARG } } };
+    if (t.name === 'handoff_write') {
+      return { ...t, description: `${t.description} Name what blocks the work in blockers, the files you changed in files, and the task (T-12) when you worked on one.`,
+        inputSchema: { type: 'object', properties: { ...t.inputSchema.properties, blockers: list('What blocks the work now'), files: { type: 'array', items: { type: 'string' }, description: 'Files you changed, as paths in the project (up to 30)' },
+          task: { type: 'string', description: 'Optional task number you worked on, like T-12' } } } };
+    }
+    return { ...t };
+  });
+}
+
+export function createBridgeMcpServer(backend: BridgeBackend, opts: { verbs?: boolean } = {}): Server {
   const server = new Server({ name: MCP_SERVER_NAME, version: VERSION }, { capabilities: { tools: {} }, instructions: INSTRUCTIONS });
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: BRIDGE_TOOL_DEFINITIONS.map((t) => ({ ...t })) as any }));
+  const tools = bridgeTools(!!opts.verbs);
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: tools as any }));
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const name = request.params.name;
-    if (!BRIDGE_TOOL_DEFINITIONS.some((t) => t.name === name)) return { content: [{ type: 'text', text: `Unknown tool ${name}` }], isError: true } as any;
+    if (!tools.some((t) => t.name === name)) return { content: [{ type: 'text', text: `Unknown tool ${name}` }], isError: true } as any;
     const args = request.params.arguments && typeof request.params.arguments === 'object' ? request.params.arguments as Record<string, unknown> : {};
     try {
       const r = await backend.call(name, args);

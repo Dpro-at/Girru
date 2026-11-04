@@ -3,9 +3,11 @@ import { HANDOFF_NOTE } from '../memory/handoff/store.js';
 import { isPilotAgent } from '../memory/outbox/pilot.js';
 import { resolveAgentContext } from './agent-context/resolve.js';
 import { renderSystemPrompt } from './agent-context/render.js';
-import { storeP2Enabled } from './agent-context/switch.js';
+import { oneContextEnabled } from './agent-context/switch.js';
 import { taskHandoffText, taskRunOwner } from '../memory/handoff/scope.js';
 import { taskRunPinnedFacts } from '../memory/scopes/task-facts.js';
+import { storeP9Enabled } from './store-p9.js';
+import { cloudSafeDrawers, providerIsLocal } from '../memory/stays-local.js';
 /**
  * Durable task-run executor + startup recovery (CORE-08, R2).
  *
@@ -31,13 +33,18 @@ import { one, sql } from '../repositories/sql-steps.js';
 import { outsidePgTransaction } from '../db/pg/pool.js';
 import { getOrchestrator } from '../multi-agent/index.js';
 import { ClaudeClient } from '../llm/claude-client.js';
-import { createAgentToolsRegistry } from '../tools/index.js';
+import { createAgentToolsRegistry, useRemoteModelTools } from '../tools/index.js';
+import { storeP8Enabled } from './store-p8.js';
 import { approvalCategory } from '../tools/approvals.js';
 import type { ToolResult } from '../tools/types.js';
 import { UNKNOWN_PRINCIPAL } from '../tools/grants.js';
 import { logActivity } from './activity-logger.js';
 import { resolveProviderApiKey } from '../credentials/authority.js';
 import { ollamaToolChat } from '../llm/ollama-tool-chat.js';
+import { storeP2bEnabled } from './store-p2b.js';
+import { fitSystem, localModelWindow } from './local-turn.js';
+import { planLocalBudget, toolOutputChars } from '../memory/context/local-budget.js';
+import { OnDemandTools } from '../tools/on-demand.js';
 import { DEFAULT_OLLAMA_MODEL } from '../llm/ollama.js';
 import { resolveLocalModel } from '../llm/local-models.js';
 import { SMALL_AGENT_ID, smallAgentCard, smallAgentRunScope, smallAgentSystemPrompt } from './small-agent.js';
@@ -229,20 +236,23 @@ function claudeDriver(claude: ClaudeClient, agent: AgentRow, systemPrompt: strin
 }
 
 /** MCP-01: local Ollama model of the small agent (non-streaming, tools in function format). */
-function ollamaDriver(agent: AgentRow, systemPrompt: string, tools: any[]): ModelDriver {
+function ollamaDriver(agent: AgentRow, systemPrompt: string, tools: any[] | (() => any[]), numCtx?: number, toolChars?: number): ModelDriver {
+  // STORE-MAP-01 P2b: tools on demand give the list of each step (the memory verbs, tool_load, what was loaded).
+  const toolsNow = () => (typeof tools === 'function' ? tools() : tools);
   return {
     provider: 'ollama',
     model: agent.model,
     maxTokens: agent.max_tokens || 1024,
-    overhead: { systemPrompt, tools },
+    overhead: { systemPrompt, tools: toolsNow() },
     async call(messages) {
       const r = await ollamaToolChat({
         model: agent.model,
         systemPrompt,
         messages: messages as any,
-        tools,
+        tools: toolsNow(),
         temperature: agent.temperature,
         maxTokens: agent.max_tokens,
+        ...(numCtx ? { numCtx } : {}),
       });
       return { content: r.content, toolCalls: r.toolCalls, assistant: r.assistant, ...(r.usage ? { usage: r.usage } : {}) };
     },
@@ -250,7 +260,7 @@ function ollamaDriver(agent: AgentRow, systemPrompt: string, tools: any[]): Mode
     toolResultMessages: (results) => results.map(({ tool, result, text }) => ({
       role: 'tool',
       tool_name: tool,
-      content: result?.error ? `Error: ${text}` : text,
+      content: (result?.error ? `Error: ${text}` : text).slice(0, toolChars ?? Number.MAX_SAFE_INTEGER),
     })),
   };
 }
@@ -298,11 +308,23 @@ async function gatedStepCall(driver: ModelDriver, messages: LoopMessage[], runId
  * resolved context (owner rules, instructions, personality, team, knowledge);
  * otherwise today's prompt (instructions and skills only).
  */
-export async function taskRunBasePrompt(agent: Pick<AgentRow, 'id' | 'name' | 'system_prompt'>, run: { user_id: string | null }): Promise<string> {
-  if (storeP2Enabled() || isPilotAgent(agent.id)) {
-    return renderSystemPrompt(await resolveAgentContext({ agentId: agent.id, entry: 'task', ownerId: await taskRunOwner(run.user_id).catch(() => null), projectId: null }));
+export async function taskRunBasePrompt(agent: Pick<AgentRow, 'id' | 'name' | 'system_prompt'>, run: { user_id: string | null }, cloud = false): Promise<string> {
+  if (oneContextEnabled() || isPilotAgent(agent.id)) {
+    return renderSystemPrompt(await resolveAgentContext({ agentId: agent.id, entry: 'task', ownerId: await taskRunOwner(run.user_id).catch(() => null), projectId: null, cloud }));
   }
   return (agent.system_prompt ?? `You are ${agent.name}, an AI agent.`) + await agentSkillsPrompt(agent.id);
+}
+
+/** STORE-MAP-01 P8 (D27): distill a finished task run's working notes (no model call). Never fails the run. */
+async function distillTaskRun(runId: string): Promise<void> {
+  try {
+    const row = await sql().read(one<{ task_id: string; agent_id: string; user_id: string | null }>('SELECT task_id, agent_id, user_id FROM task_runs WHERE id = ?', runId));
+    const ownerId = row ? await taskRunOwner(row.user_id) : undefined;
+    if (!row || !ownerId) return;
+    const { distillRun } = await import('../memory/handoff/run-notes.js');
+    const { taskRunScope } = await import('../memory/handoff/scope.js');
+    await distillRun({ ownerId, runKind: 'task', runId }, { scope: await taskRunScope(row), agentId: row.agent_id });
+  } catch (err) { console.warn('[TaskRun] working notes not distilled', { runId, error: (err as Error)?.message }); }
 }
 
 export async function executeTaskRun(runId: string, owner: string = WORKER_ID): Promise<AttemptResult> {
@@ -323,6 +345,7 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
 
   const fail = async (reason: string, agentId: string, noRetry = false): Promise<AttemptResult> => {
     if (!(await finishAttempt(lease, 'failed', reason))) return { status: 'lease_lost' };
+    if (storeP8Enabled()) await distillTaskRun(runId);
     // A cost refusal would only be refused again: never auto-retry it.
     orchestrator.failTask(taskId, reason, { noRetry: noRetry || (await hasToolSteps(runId)) });
     await logActivity({ agentId, taskId, actionType: 'task_failed', summary: reason.slice(0, 200) });
@@ -383,7 +406,7 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
         localModel = await resolveLocalModel(wanted, DEFAULT_OLLAMA_MODEL);
         console.log('[TaskRun] No Claude key for this agent; using the local model', { agentId: agent.id, model: localModel });
       }
-      systemPrompt = await taskRunBasePrompt(agent, run);
+      systemPrompt = await taskRunBasePrompt(agent, run, storeP9Enabled() && (!localModel || !providerIsLocal('ollama', localModel)));
       // CORE-MEM-HANDOFF: the agent's newest note for this board task, and how to leave the next one.
       // A contract that names its tools, or a delegated task, leaves the handoff tools out, so the note on using them too.
       const handoff = await taskHandoffText(run).catch(() => '');
@@ -394,6 +417,8 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
       if (localModel) driver = ollamaDriver({ ...agent, model: localModel }, systemPrompt, registry.getToolsForAPI());
       else {
         claudeClient = new ClaudeClient(apiKey, agent.model);
+        // STORE-MAP-01 P8: the Claude API is not a local model (run_note, handoff_save with blockers; nothing with P8 off).
+        useRemoteModelTools(registry);
         driver = claudeDriver(claudeClient, agent, systemPrompt, registry.getToolsForAPI());
       }
     }
@@ -408,11 +433,15 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
       // ones, or the audience default when none are set); never widen.
       registry.updateContext({ memoryDrawers: contractRunDrawers(contract, toolMemoryDrawers(registry.getContext())) });
     }
+    // STORE-MAP-01 P9 (PRIV2): the Claude API (or an Ollama that is not on loopback) is not on this
+    // computer; places that stay here leave the run.
+    const p9Cloud = !!factsOwner && storeP9Enabled() && (!!claudeClient || !providerIsLocal('ollama', driver.model));
+    if (p9Cloud) registry.updateContext({ memoryDrawers: (await cloudSafeDrawers(factsOwner!, toolMemoryDrawers(registry.getContext()))).drawers });
     // MEM-SCALE-01: the owner's pinned facts of the task's scope (company /
     // department / project), only what this agent may read in this run.
     const facts = await taskRunPinnedFacts({
       ownerId: factsOwner, agentId: agent.id, taskId, delegatedFrom: delegatingAgents(taskId),
-      drawers: toolMemoryDrawers(registry.getContext()), drawersNarrowed: !!contract?.allowedDrawers,
+      drawers: toolMemoryDrawers(registry.getContext()), drawersNarrowed: !!contract?.allowedDrawers, cloud: p9Cloud,
     });
     if (facts) systemPrompt += `\n\n${facts}`;
     if (contract?.allowedTools || contract?.allowedDrawers || facts) {
@@ -422,6 +451,18 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
         ? ollamaDriver({ ...agent, model: driver.model, temperature: smallTemp!, max_tokens: driver.maxTokens }, systemPrompt, tools)
         : localModel ? ollamaDriver({ ...agent, model: localModel }, systemPrompt, tools)
         : claudeDriver(claudeClient!, agent, systemPrompt, tools);
+    }
+
+    // STORE-MAP-01 P2b (LOCAL-ONLY-01): a local model's run gets tools on demand, its own window, the reply
+    // room and the memory rule; calls are checked against the full schema (XP2). Off: nothing changes.
+    let taskTools: OnDemandTools | null = null;
+    if (storeP2bEnabled() && driver.provider === 'ollama') {
+      const window = await localModelWindow('ollama', driver.model);
+      const budget = planLocalBudget(window.tokens);
+      const onDemand = new OnDemandTools(registry.getToolsForAPI(), budget.tier, { fitTokens: budget.tools });
+      taskTools = onDemand;
+      const system = fitSystem(systemPrompt, onDemand.index(), '', budget.system);
+      driver = ollamaDriver({ ...agent, model: driver.model, ...(isSmall ? { temperature: smallTemp! } : {}), max_tokens: Math.min(driver.maxTokens, budget.replyTokens) }, system, () => onDemand.definitions(), budget.window, toolOutputChars(budget));
     }
 
     const loopMessages: LoopMessage[] = [{ role: 'user', content: prompt }];
@@ -464,7 +505,9 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
             run: async (key, index) => {
               registry.updateContext({ taskRun: { runId, stepIndex: index, idempotencyKey: key } });
               try {
-                return await registry.execute(toolCall.tool, toolCall.arguments ?? {});
+                return taskTools
+                  ? await taskTools.execute(toolCall.tool, toolCall.arguments ?? {}, (name, args) => registry.execute(name, args))
+                  : await registry.execute(toolCall.tool, toolCall.arguments ?? {});
               } finally {
                 registry.updateContext({ taskRun: undefined });
               }
@@ -505,6 +548,8 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
     // The run is recorded completed first (fenced): a crash after this point
     // never runs the task again.
     if (!(await finishAttempt(lease, 'completed', null, finalContent.slice(0, 500)))) return { status: 'lease_lost' };
+    // STORE-MAP-01 P8 (D27): the run's working notes become its handoff (when it wrote none) and lesson suggestions.
+    if (storeP8Enabled()) await distillTaskRun(runId);
     if (verdict?.status === 'failed_verification') {
       const reason = `verification failed: ${verdict.reasons.join('; ')}`.slice(0, 500);
       orchestrator.failTask(taskId, reason, { noRetry: true });

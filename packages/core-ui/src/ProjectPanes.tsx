@@ -2,6 +2,10 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { diffLines, splitRows, SPLIT_MIN_WIDTH } from './panes';
 import type { DiffView as DiffViewName, PanesController } from './panes';
 import { UiIcon } from './ui-icons';
+import { ContextMenu, useMenu } from './desktop-ui';
+import { OpenInCodeIcon, fileMenu } from './CodeOpen';
+import { joinPath } from './code-open';
+type CodeRequester = Parameters<typeof fileMenu>[0];
 
 /** Names that usually hold secrets: shown locked; Girru does not open them (the server checks again). */
 const SECRET = /^\.env(\..*)?$|\.(pem|key|p12|pfx)$|^id_(rsa|ed25519|ecdsa)/i;
@@ -9,8 +13,12 @@ const STATUS: Record<string, string> = { modified: 'M', added: 'A', deleted: 'D'
 const size = (b: number | null) => b === null ? '' : b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(b < 10240 ? 1 : 0)} KB` : `${(b / 1048576).toFixed(1)} MB`;
 
 /** Uncommitted changes per file; a file opens its diff in place. */
-export function ChangesPane({ panes }: { panes: PanesController }) {
+export function ChangesPane({ panes, client, folder }: { panes: PanesController; client?: CodeRequester; folder?: string | null }) {
   const s = useSyncExternalStore(panes.subscribe, panes.getSnapshot, panes.getSnapshot);
+  // CODE-OPEN-01: each changed file opens in Code at its first changed line (when its diff is loaded); right-click for the same.
+  const [said, say] = useState<string | null>(null);
+  const fm = useMenu();
+  const firstLine = (p: string) => { const d = s.diffs[p]; if (d?.phase !== 'ready' || !d.data.diff) return null; return diffLines(d.data.diff).find(l => l.kind === 'add' || l.kind === 'del')?.new ?? diffLines(d.data.diff).find(l => l.kind === 'del')?.old ?? null; };
   useEffect(() => { if (s.projectId && !s.changes) void panes.loadChanges(); }, [panes, s.projectId, s.changes]);
   useEffect(() => { void panes.loadDiffView(); }, [panes]);
   // Side by side needs room: a narrow pane shows one column and keeps the choice.
@@ -37,7 +45,8 @@ export function ChangesPane({ panes }: { panes: PanesController }) {
       : !c.data.changes.length ? <p className="pane-empty">No uncommitted changes.</p>
       : <ul className="change-list">{c.data.changes.map(f => {
         const d = s.diffs[f.path]; const slash = f.path.lastIndexOf('/');
-        return <li key={f.path} data-open={d ? true : undefined}>
+        const abs = client && folder && f.status !== 'deleted' ? joinPath(folder, f.path) : null;
+        return <li key={f.path} data-open={d ? true : undefined} className="dk-file-row" onContextMenu={abs ? e => fm.at(e, fileMenu(client!, abs, firstLine(f.path), say)) : undefined}>
           <button type="button" className="change-row" aria-expanded={!!d} onClick={() => void panes.toggleDiff(f.path)} title={f.from ? `${f.from} → ${f.path}` : f.path}>
             <UiIcon name="chevron" size={11}/>
             <span className="change-status" data-status={f.status} aria-label={f.status}>{STATUS[f.status]}</span>
@@ -45,10 +54,13 @@ export function ChangesPane({ panes }: { panes: PanesController }) {
             <span className="change-dir" dir="ltr">{slash > 0 ? f.path.slice(0, slash) : ''}</span>
             <span className="change-count">{f.added !== null && <span className="plus">+{f.added}</span>}{f.removed !== null && <span className="minus">−{f.removed}</span>}</span>
           </button>
+          {abs && <OpenInCodeIcon client={client!} path={abs} line={firstLine(f.path)} say={say}/>}
           {d && <DiffView load={d} view={view}/>}
         </li>;
       })}</ul>}
     {data?.truncated && <p className="pane-empty">Only the first 1000 files are listed.</p>}
+    {said && <p className="pane-empty" role="status">{said}</p>}
+    <ContextMenu menu={fm.menu} onClose={fm.close}/>
   </div>;
 }
 

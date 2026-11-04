@@ -27,9 +27,23 @@ function loopbackOrigin(value) {
 }
 
 /** Optional desktop adapter. The editor implementation stays in the shared Nabu runtime. */
-function installNabuEditor({ win, electron, getOrigin, runtimeRoot, node, dataDir, createHost, onLog = () => {} }) {
+function installNabuEditor({ win, electron, getOrigin, runtimeRoot, resolveRuntime, node, dataDir, createHost, onLog = () => {} }) {
   const { ipcMain, WebContentsView, dialog } = electron;
-  const installed = createHost ? true : compatibleRuntime(runtimeRoot);
+  // CODE-STORE-01: Code may arrive from the Store while Girru runs, so the runtime is looked up
+  // again whenever no editor is running (an update takes effect when the editor starts again).
+  const lookup = () => createHost ? { root: runtimeRoot, source: 'test' } : resolveRuntime ? resolveRuntime() : (compatibleRuntime(runtimeRoot) ? { root: runtimeRoot, source: 'bundled' } : null);
+  let found = lookup();
+  // A Code removed from the Store while its editor ran: stop that editor (the owner removed it in the Store,
+  // so the editor is not on screen) and report Code as missing.
+  const removed = () => !createHost && found?.source === 'store' && !fs.existsSync(path.join(found.root, 'nabu', 'runtime.json'));
+  const refresh = () => {
+    if (removed() && (host || starting) && !disposed) {
+      const old = host; host = null; starting = null; address = null; editorOrigin = null; hide();
+      if (view?.webContents && !view.webContents.isDestroyed()) { try { win.contentView.removeChildView(view); view.webContents.close(); } catch { /* already gone */ } }
+      view = null; void old?.stop().catch(() => {}); onLog('Editor stopped: Code was removed.');
+    }
+    if (!host && !starting) found = lookup();
+  };
   let pendingTarget = null, targetSequence = 0, pendingReview = null;
   let mode = 'chat', desired = 'chat', busy = false, error = null, top = 48, bottom = 32, right = 0;
   let view = null, host = null, starting = null, address = null, editorOrigin = null;
@@ -37,12 +51,17 @@ function installNabuEditor({ win, electron, getOrigin, runtimeRoot, node, dataDi
   let generation = 0, disposed = false, closePromise = null, stopPromise = null, approvedClose = false;
   const cleanup = [];
   const listen = (target, name, callback) => { target.on(name, callback); cleanup.push(() => target.removeListener(name, callback)); };
-  const available = () => installed && loopbackOrigin(getOrigin());
-  const state = () => ({ available: available(), mode, busy, error });
+  const available = () => !!found && loopbackOrigin(getOrigin());
+  const state = () => ({ available: available(), runtime: found ? (found.source === 'store' ? 'store' : 'bundled') : 'missing', mode, busy, error });
   const notify = () => { if (!disposed && !win.webContents.isDestroyed()) win.webContents.send(CHANNELS.state, state()); };
-  const allowed = event => !disposed && available() && event.sender === win.webContents && event.senderFrame === win.webContents.mainFrame && (() => { try { return new URL(event.senderFrame.url).origin === getOrigin(); } catch { return false; } })();
+  // The Girru window itself (main frame, its own loopback origin); status answers it even while Code is missing.
+  const trusted = event => !disposed && loopbackOrigin(getOrigin()) && event.sender === win.webContents && event.senderFrame === win.webContents.mainFrame && (() => { try { return new URL(event.senderFrame.url).origin === getOrigin(); } catch { return false; } })();
+  const allowed = event => available() && trusted(event);
   const validBottom = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 96;
   const validRight = value => value === undefined || (Number.isFinite(value) && value >= 0 && value <= 1600);
+  // CODE-OPEN-01: { line?, note?, readOnly? } for one file (never for a folder alone).
+  const validOptions = (value, file) => value === undefined || (file !== null && !!value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0 && Object.keys(value).every(k => ['line', 'note', 'readOnly'].includes(k))
+    && (value.line === undefined || (Number.isSafeInteger(value.line) && value.line >= 1 && value.line <= 10000000)) && (value.note === undefined || value.note === true) && (value.readOnly === undefined || value.readOnly === true));
   const validTop = value => typeof value === 'number' && Number.isFinite(value) && value >= 32 && value <= 160;
   const layout = () => {
     if (!view || disposed || win.isDestroyed()) return;
@@ -58,7 +77,9 @@ function installNabuEditor({ win, electron, getOrigin, runtimeRoot, node, dataDi
     if (address) return address;
     if (starting) return starting;
     starting = (async () => {
-      const factory = createHost || (await import(pathToFileURL(path.join(runtimeRoot, 'nabu/dpro/editor-runtime.mjs')).href));
+      const root = found?.root;
+      if (!createHost && !root) throw Error('No editor runtime');
+      const factory = createHost || (await import(pathToFileURL(path.join(root, 'nabu/dpro/editor-runtime.mjs')).href));
       if (disposed) throw Error('Stopped');
       if (!createHost && factory.protocolVersion !== 1) throw Error('Unsupported editor runtime');
       host = (createHost || factory.createEditorHost)({ node, dataDir, onLog, onExit: runtimeExited });
@@ -179,7 +200,8 @@ function installNabuEditor({ win, electron, getOrigin, runtimeRoot, node, dataDi
   });
   cleanup.push(() => { for (const name of ['dpro:nabu-review','dpro:nabu-review-clear','girru:code-review','girru:code-review-decide']) ipcMain.removeHandler(name); });
   const openHandler = async (event, value) => {
-    if (!allowed(event) || !value || !['bottom,file,folder,top','bottom,file,folder,right,top'].includes(Object.keys(value).sort().join(',')) || !validRight(value.right) || !validTop(value.top) || !validBottom(value.bottom) || typeof value.folder !== 'string' || value.folder.length > 4096 || !path.isAbsolute(value.folder) || value.folder.includes('\0') || !(value.file === null || (typeof value.file === 'string' && value.file.length <= 4096 && value.file && !value.file.includes('\0') && !path.isAbsolute(value.file) && !/^[a-z]:/i.test(value.file) && !value.file.split(/[\\/]/).some(x => x === '..' || /^\.env(?:\.|$)|\.(?:pem|key|p12|pfx)$|^id_(?:rsa|ed25519|ecdsa)/i.test(x))))) return null;
+    refresh();
+    if (!allowed(event) || !value || !['bottom,file,folder,top','bottom,file,folder,right,top','bottom,file,folder,options,top','bottom,file,folder,options,right,top'].includes(Object.keys(value).sort().join(',')) || !validOptions(value.options, value.file) || !validRight(value.right) || !validTop(value.top) || !validBottom(value.bottom) || typeof value.folder !== 'string' || value.folder.length > 4096 || !path.isAbsolute(value.folder) || value.folder.includes('\0') || !(value.file === null || (typeof value.file === 'string' && value.file.length <= 4096 && value.file && !value.file.includes('\0') && !path.isAbsolute(value.file) && !/^[a-z]:/i.test(value.file) && !value.file.split(/[\\/]/).some(x => x === '..' || /^\.env(?:\.|$)|\.(?:pem|key|p12|pfx)$|^id_(?:rsa|ed25519|ecdsa)/i.test(x))))) return null;
     const sequence = ++targetSequence;
     try {
       const folder = await fs.promises.realpath(value.folder);
@@ -191,7 +213,7 @@ function installNabuEditor({ win, electron, getOrigin, runtimeRoot, node, dataDi
         if (!relative || relative.startsWith('..' + path.sep) || relative === '..' || path.isAbsolute(relative) || !(await fs.promises.stat(file)).isFile()) return null;
       }
       if (!allowed(event) || sequence !== targetSequence) return null;
-      pendingTarget = { id: sequence, folder, file };
+      pendingTarget = { id: sequence, folder, file, ...(value.options?.line ? { line: value.options.line } : {}), ...(value.options?.note ? { note: true } : {}), ...(value.options?.readOnly ? { readOnly: true } : {}) };
       top = value.top; bottom = value.bottom; right = value.right ?? 0; activated = true;
       const result = await select('code');
       if (result.mode === 'code' && pendingTarget) view.webContents.send('girru:code-target-changed');
@@ -208,8 +230,9 @@ function installNabuEditor({ win, electron, getOrigin, runtimeRoot, node, dataDi
     return true;
   });
   cleanup.push(() => ipcMain.removeHandler('dpro:nabu-commands'));
-  const statusHandler = event => allowed(event) ? state() : null;
+  const statusHandler = event => { refresh(); return trusted(event) ? state() : null; };
   const selectHandler = (event, message) => {
+    refresh();
     if (!allowed(event) || !message || !['bottom,mode,top','bottom,mode,right,top'].includes(Object.keys(message).sort().join(',')) || !['code', 'chat'].includes(message.mode) || !validRight(message.right) || !validTop(message.top) || !validBottom(message.bottom)) return null;
     top = message.top; bottom = message.bottom; right = message.right ?? 0; if(message.mode==='code')activated=true; return select(message.mode);
   };
@@ -245,6 +268,6 @@ function installNabuEditor({ win, electron, getOrigin, runtimeRoot, node, dataDi
     return stopPromise;
   };
   listen(win, 'closed', () => { void stop(); });
-  return { requestClose, stop, state };
+  return { requestClose, stop, state, refresh };
 }
 module.exports = { installNabuEditor, compatibleRuntime, loopbackOrigin, CHANNELS };

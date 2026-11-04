@@ -15,6 +15,7 @@ import { mkdtempSync, mkdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { offeredNames, expectedNumCtx, expectedNumPredict, p2bOn } from './helpers/p2b.mjs';
 
 const backendDir = process.cwd();
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-context-contract-')));
@@ -29,7 +30,7 @@ process.env.NODE_ENV = 'test';
 process.env.OLLAMA_URL = 'http://127.0.0.1:11434';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-for (const k of ['AGENT_EXEC_TOOLS', 'OLLAMA_THINK', 'DEFAULT_MODEL', 'OUTSIDER_AGENT_MEMORY', 'GIRRU_STORE_P2', 'GIRRU_STORE_PILOT', 'GIRRU_STORE_PILOT_AGENT']) delete process.env[k];
+for (const k of ['AGENT_EXEC_TOOLS', 'OLLAMA_THINK', 'DEFAULT_MODEL', 'OUTSIDER_AGENT_MEMORY', 'GIRRU_STORE_P2', 'GIRRU_STORE_P8', 'GIRRU_STORE_P9B', 'GIRRU_STORE_PILOT', 'GIRRU_STORE_PILOT_AGENT']) delete process.env[k];
 
 const bodies = [];
 globalThis.fetch = async (url, init = {}) => {
@@ -46,6 +47,7 @@ const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
 
 const { getDatabase } = await import(join(backendDir, 'src/db/database.ts'));
+const { projectKeyOf } = await import(join(backendDir, 'src/memory/project-keys.ts')); // project memory key (id while GIRRU_STORE_P3 is on)
 const db = getDatabase();
 await db.initialize();
 const { getCredentialStorage } = await import(join(backendDir, 'src/credentials/storage.ts'));
@@ -80,7 +82,7 @@ const conv = await createConversation(OWNER, { title: 'Release', agentId: 'cc-ag
 await addStarterRules(OWNER);
 await createRule({ text: 'In Alpha, release only on Tuesdays.', when: null, projectId: project.id, who: 'all', targets: [], paused: false }, OWNER);
 await createRule({ text: 'Engineering writes tests first.', when: null, projectId: null, who: 'departments', targets: ['engineering'], paused: false }, OWNER);
-await addPinnedFact(OWNER, parsePinnedScope(`project:${project.slug}`), 'Alpha is for Al-Zawraa Trading.', OWNER);
+await addPinnedFact(OWNER, parsePinnedScope(`project:${projectKeyOf(project)}`), 'Alpha is for Al-Zawraa Trading.', OWNER);
 const STEP = 'Keep each release step reversible and write the decision down with its reason.';
 const skill = await centralSkills().installMarkdown(`---\nname: release-check\ndescription: How we check a release before it ships.\n---\n\n# Release check\n\n${STEP}\n`, 'release-check', 'contract-test');
 const skillId = skill.id ?? skill.skill?.id;
@@ -98,15 +100,22 @@ async function chatPrompt(channel = false) {
   }
   try {
     const res = await app.inject({ method: 'POST', url: '/api/chat', headers,
-      payload: { stream: false, sessionId: conv.id, ...(channel ? {} : { agentId: 'cc-agent', memoryScope: { project: project.slug } }), messages: [{ role: 'user', content: QUESTION }] } });
+      payload: { stream: false, sessionId: conv.id, ...(channel ? {} : { agentId: 'cc-agent', memoryScope: { project: projectKeyOf(project) } }), messages: [{ role: 'user', content: QUESTION }] } });
     assert.ok(bodies.length, `no model call: ${res.statusCode} ${res.body.slice(0, 200)}`);
     const body = bodies[0];
-    return { system: body.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n'), tools: (body.tools ?? []).map((t) => t.function?.name ?? t.name) };
+    return { system: body.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n'), tools: offeredNames(body) };
   } finally { turn?.end(); }
 }
 const withP2 = async (fn) => { process.env.GIRRU_STORE_P2 = '1'; try { return await fn(); } finally { delete process.env.GIRRU_STORE_P2; } };
 
 test('switch off: every entry point is unchanged (known gaps pinned)', async () => {
+  // P4 also turns the one context on (oneContextEnabled); this test pins the state with both off.
+  const p4 = process.env.GIRRU_STORE_P4;
+  delete process.env.GIRRU_STORE_P4;
+  try { await knownGaps(); } finally { if (p4 !== undefined) process.env.GIRRU_STORE_P4 = p4; }
+});
+
+async function knownGaps() {
   const chat = await chatPrompt();
   assert.ok(!chat.system.includes(HIRED), 'today chat drops the hired instructions');
   assert.ok(chat.system.includes(STEP), 'today the full skill text goes into chat');
@@ -114,7 +123,7 @@ test('switch off: every entry point is unchanged (known gaps pinned)', async () 
   const task = await taskRunBasePrompt({ id: 'cc-agent', name: 'Rafid', system_prompt: HIRED }, { user_id: OWNER });
   assert.ok(task.includes(HIRED));
   assert.ok(!task.includes('release only on Tuesdays'), 'today task runs drop the owner rules');
-});
+}
 
 test('switch on: chat, task run and coding app carry the name, hired instructions and owner rules, rules first', async () => {
   await withP2(async () => {
@@ -179,27 +188,31 @@ test('MD4 and MD9: save criteria lead memory_save and the brief; recalled memori
   const { newMemory, saveVersioned } = await import(join(backendDir, 'src/memory/learning.ts'));
   assert.ok(!memorySaveTool.description.startsWith(SAVE_CRITERIA), 'off: unchanged');
   assert.ok(!standingRules().includes(SAVE_CRITERIA));
-  await saveVersioned(newMemory(OWNER, { kind: 'project', key: project.slug }, { type: 'fact', importance: 6, content: 'Alpha staging is restored every Sunday night.' }, {}), 'test', 'test');
-  const drawers = [{ kind: 'project', key: project.slug }];
+  await saveVersioned(newMemory(OWNER, { kind: 'project', key: projectKeyOf(project) }, { type: 'fact', importance: 6, content: 'Alpha staging is restored every Sunday night.' }, {}), 'test', 'test');
+  const drawers = [{ kind: 'project', key: projectKeyOf(project) }];
   const pack = { key: 'contract', text: '', memoryChars: 0, items: [], hit: false, memoryIds: [] };
   const off = await messageRecall({ userId: OWNER, drawers, query: 'When is alpha staging restored?', pack });
-  assert.match(off.text, /restored every Sunday night\.\n/);
+  // P9b (MD3): the line also carries its confidence.
+  assert.match(off.text, process.env.GIRRU_STORE_P9B === '1' ? /restored every Sunday night\. \(confidence \w+\)\n/ : /restored every Sunday night\.\n/);
   await withP2(async () => {
     assert.ok(memorySaveTool.description.startsWith(SAVE_CRITERIA));
     assert.equal(standingRules()[0], SAVE_CRITERIA);
     const on = await messageRecall({ userId: OWNER, drawers, query: 'When is the alpha staging data restored on Sunday?', pack });
-    assert.match(on.text, new RegExp(`restored every Sunday night\\. \\(as of \\d{4}-\\d{2}-\\d{2} · project:${project.slug}\\)`));
+    assert.match(on.text, new RegExp(`restored every Sunday night\\. \\(as of \\d{4}-\\d{2}-\\d{2} · project:${projectKeyOf(project)}${process.env.GIRRU_STORE_P9B === '1' ? ' · confidence \\w+' : ''}\\)`));
   });
 });
 
 test('routes for the app: the switch, and the eye list strongest group first with groups', async () => {
   const get = (url) => app.inject({ method: 'GET', url, headers: auth });
-  assert.deepEqual((await get('/api/store-switches')).json(), { p2: false });
+  // The route lists p6, p8 and p9 only while they are on.
+  const switches = (p2) => ({ p2, p3: process.env.GIRRU_STORE_P3 === '1', p4: process.env.GIRRU_STORE_P4 === '1',
+    ...Object.fromEntries(['p6', 'p8', 'p9'].filter((k) => /^(1|true|yes|on)$/i.test(process.env[`GIRRU_STORE_${k.toUpperCase()}`] ?? '')).map((k) => [k, true])) });
+  assert.deepEqual((await get('/api/store-switches')).json(), switches(false));
   assert.equal((await get('/api/agent-rules')).json().precedence, false);
   const before = (await get(`/api/agent-rules/effective?agentId=cc-agent&projectId=${project.id}`)).json();
   assert.ok(!('precedence' in before) && before.rules.every((r) => !('group' in r)), 'off: unchanged');
   await withP2(async () => {
-    assert.deepEqual((await get('/api/store-switches')).json(), { p2: true });
+    assert.deepEqual((await get('/api/store-switches')).json(), switches(true));
     assert.equal((await get('/api/agent-rules')).json().precedence, true);
     const eye = (await get(`/api/agent-rules/effective?agentId=cc-agent&projectId=${project.id}`)).json();
     assert.equal(eye.precedence, true);

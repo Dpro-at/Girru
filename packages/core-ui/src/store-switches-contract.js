@@ -1,6 +1,7 @@
-// Wire contract for the storage switches (STORE-MAP-01 P2), shared by the
+// Wire contract for the storage switches (STORE-MAP-01 P2, P3), shared by the
 // browser client (session.ts) and the local bridge (application-server.cjs).
 // Read only: the page shows the words that match what the backend does.
+// P6 (project files), P8 (task links, handoffs, run notes) and P9 (one person, personal-data review) are sent only while on, so with them off the answer is unchanged.
 
 export const STORE_SWITCHES_PATH = '/api/store-switches';
 
@@ -11,5 +12,6 @@ export function allowedStoreSwitches(method, path, body) {
 /** Only the known switches pass back; anything else is off. */
 export function storeSwitchesResponse(status, body) {
   if (status !== 200) return { code: status === 403 ? 'forbidden' : 'unavailable' };
-  return { p2: typeof body === 'object' && body !== null && body.p2 === true };
+  const on = k => typeof body === 'object' && body !== null && body[k] === true;
+  return { p2: on('p2'), p3: on('p3'), p4: on('p4'), ...(on('p6') ? { p6: true } : {}), ...(on('p8') ? { p8: true } : {}), ...(on('p9') ? { p9: true } : {}), ...(on('p9b') ? { p9b: true } : {}) };
 }

@@ -6,6 +6,7 @@
  * re-embeds all of one user's memories at once.
  */
 
+import { backgroundSlot } from '../llm/local-scheduler.js';
 import { all, sql } from '../repositories/sql-steps.js';
 import { LEGACY_HASH_MODEL, getEmbeddingService } from './embedding.js';
 import { getMemoryStorage } from './storage.js';
@@ -51,7 +52,10 @@ export async function reembedUserMemories(userId: string, options: { limit?: num
   let error: string | undefined;
   for (let i = 0; i < stale.length; i += BATCH) {
     const batch = stale.slice(i, i + BATCH);
-    const vectors = await service.embedManyDetailed(batch.map((r) => r.content));
+    // STORE-MAP-01 P2b (LAT): a batch never runs while a local reply runs (P2b off: no wait).
+    const release = await backgroundSlot();
+    let vectors: Awaited<ReturnType<typeof service.embedManyDetailed>>;
+    try { vectors = await service.embedManyDetailed(batch.map((r) => r.content)); } finally { release(); }
     if (vectors.some((v) => v.model !== target)) { error = `embedding model ${target} is not available`; break; }
     for (const [j, r] of batch.entries()) {
       if (await storage.setEmbedding(userId, r.id, r.content, vectors[j].vector, vectors[j].model)) reembedded++;

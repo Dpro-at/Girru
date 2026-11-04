@@ -21,6 +21,8 @@ import { addAssistantMessage, type ToolCallPart, type TurnPart, type TurnStatus 
 import { vaultRunSecrets } from './chat-secrets.js';
 import { chunkText } from './chat-sse.js';
 import { redactImportText } from '../memory/import/redact.js';
+import { q } from '../repositories/sql-steps.js';
+import { storeP8Enabled } from './store-p8.js';
 
 /** CHAT-BUILD-01 stage 5: how often a running reply sends its live preview. */
 export const PREVIEW_MS = 250;
@@ -388,6 +390,8 @@ export class ChatRunRegistry {
       }
       run.raw.end();
       run.finish(status, this.now());
+      // STORE-MAP-01 P8 (D27): the reply's working notes become its handoff (when it wrote none) and lesson suggestions.
+      if (storeP8Enabled()) await distillChatRun(run.id, input.userId, input.sessionId, input.agentId ?? null).catch(() => console.warn('[ChatRuns] Working notes not distilled', { runId: run.id }));
       try { await input.onFinished?.(durableStatus); }
       catch { console.error('[ChatRuns] Follow-up paused', { runId: run.id }); }
     })();
@@ -399,6 +403,17 @@ export class ChatRunRegistry {
     const t = this.now();
     for (const [id, r] of this.runs) if (r.endedAt !== undefined && t - r.endedAt > FINISHED_TTL_MS) this.runs.delete(id);
   }
+}
+
+/** P8: a chat reply's working notes, distilled without a model (memory/handoff/run-notes.ts). */
+async function distillChatRun(runId: string, userId: string, sessionId: string, agentId: string | null): Promise<void> {
+  const { distillRun } = await import('../memory/handoff/run-notes.js');
+  if (!(await q.one('SELECT 1 AS x FROM run_notes WHERE owner_id = ? AND run_kind = ? AND run_id = ? LIMIT 1', userId, 'chat', runId))) return;
+  const { conversationScope } = await import('../memory/handoff/scope.js');
+  const scope = await conversationScope(userId, sessionId, agentId);
+  const project = scope?.projectId ? await q.one<{ id: string; slug: string }>('SELECT id, slug FROM chat_projects WHERE id = ? AND user_id = ?', scope.projectId, userId) : undefined;
+  const { projectDrawer } = await import('../memory/bridge/brief.js');
+  await distillRun({ ownerId: userId, runKind: 'chat', runId }, { scope, agentId: scope?.agentId ?? agentId ?? '_main', drawer: project ? projectDrawer(project) : null });
 }
 
 export const chatRuns = new ChatRunRegistry();

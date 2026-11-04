@@ -54,6 +54,16 @@ function refuseDevAccounts(coreUi, buildDir) {
   }
 }
 
+/** The prepared, pinned GenVR SDK folder; refuses a missing or different one instead of building without GenVR. */
+function requireGenVR(coreUi) {
+  const { VERSION, SHA256 } = require(path.join(coreUi, 'scripts', 'prepare-genvr.cjs'));
+  const genvr = path.join(coreUi, 'vendor', 'genvr');
+  let manifest = null;
+  try { manifest = JSON.parse(fs.readFileSync(path.join(genvr, 'manifest.json'), 'utf8')); } catch { /* not prepared */ }
+  if (!manifest || manifest.version !== VERSION || manifest.archiveSha256 !== SHA256) throw new Error(`GenVR SDK ${VERSION} is not prepared in core-ui/vendor/genvr (run: node packages/core-ui/scripts/prepare-genvr.cjs <3d-world-sdk-${VERSION}.tgz>)`);
+  return genvr;
+}
+
 /** Dependencies of the backend's package.json that none of the module folders holds. */
 function missingPackages(backendDir, moduleDirs) {
   const deps = Object.keys(JSON.parse(fs.readFileSync(path.join(backendDir, 'package.json'), 'utf8')).dependencies || {});
@@ -106,8 +116,8 @@ function stage(options) {
   fs.mkdirSync(path.join(ui, 'dist'));
   fs.copyFileSync(path.join(options.coreUiDist, 'candidate.json'), path.join(ui, 'dist', 'candidate.json'));
   copy(path.join(options.coreUiDist, pointer.buildId), path.join(ui, 'dist', pointer.buildId));
-  const genvr = path.join(coreUi, 'vendor', 'genvr');
-  if (fs.existsSync(path.join(genvr, 'manifest.json'))) copy(genvr, path.join(ui, 'vendor', 'genvr'), noSecrets);
+  // GenVR (Studio, worlds, account link) runs from the pinned SDK: an app without it opens a broken GenVR page.
+  copy(requireGenVR(coreUi), path.join(ui, 'vendor', 'genvr'), noSecrets);
   refuseDevAccounts(coreUi, path.join(ui, 'dist', pointer.buildId));
   return out;
 }
@@ -121,4 +131,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { stage, parseArgs, BACKEND_PARTS, refuseDevAccounts, missingPackages, stageUiBridge };
+module.exports = { stage, parseArgs, BACKEND_PARTS, refuseDevAccounts, missingPackages, stageUiBridge, requireGenVR };

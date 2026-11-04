@@ -16,6 +16,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { createLocalRuntime, openLog } = require('./local-runtime.cjs');
+const { startProblemOf, failedParams } = require('./start-problem.cjs');
 const { resolvePayload, backendArgs, checkPayload } = require('./payload.cjs');
 const { loadSettings, saveSettings, remoteOrigin } = require('./settings.cjs');
 const { installNabuEditor } = require('./nabu-editor.cjs');
@@ -52,6 +53,9 @@ if (!app.requestSingleInstanceLock()) {
 /** Data for "this computer": <userData>/data (DPRO_DESKTOP_DATA_DIR overrides, e.g. for tests). */
 const dataDir = () => selectedData || (process.env.DPRO_DESKTOP_DATA_DIR ? path.resolve(process.env.DPRO_DESKTOP_DATA_DIR) : path.join(app.getPath('userData'), 'data'));
 const settingsDir = () => app.getPath('userData');
+/** CODE-STORE-01: Girru's per-computer app folder; the Code app from the Girru Store is unpacked here. */
+const appRuntimesDir = () => process.env.GIRRU_APP_RUNTIMES_DIR ? path.resolve(process.env.GIRRU_APP_RUNTIMES_DIR) : path.join(settingsDir(), 'app-runtimes');
+const codeRuntime = () => require('./code-runtime.cjs').resolveCodeRuntime({ bundled: process.env.DPRO_NABU_ROOT || path.join(process.resourcesPath, 'nabu-runtime'), runtimesDir: appRuntimesDir() });
 
 function hardenSession() {
   require('./meeting-screen.cjs').installMeetingScreenCapture({ electron, session: session.defaultSession, getOrigin: () => appOrigin, getWindows: () => [mainWindow, ...chatWindows].filter(Boolean) });
@@ -146,7 +150,7 @@ async function startLocal() {
       args: backendArgs(payload.backendDir),
       cwd: path.basename(dataDir()) === '.data' ? path.dirname(dataDir()) : dataDir(),
       dataDir: dataDir(),
-      extraEnv: { DPRO_BROWSER_CONNECTION_FILE:browserRuntime.connectionFile, AGENT_TERMINAL: 'true', DPRO_SUBSCRIPTION_CHAT: '1', ...(path.basename(dataDir()) === '.data' ? { AGENT_PLAYER_DATA_DIR: undefined } : {}) },
+      extraEnv: { DPRO_BROWSER_CONNECTION_FILE:browserRuntime.connectionFile, AGENT_TERMINAL: 'true', DPRO_SUBSCRIPTION_CHAT: '1', GIRRU_APP_RUNTIMES_DIR: appRuntimesDir(), GIRRU_CODE_RUNTIME_BUNDLED: codeRuntime()?.source === 'bundled' ? '1' : '0', ...(path.basename(dataDir()) === '.data' ? { AGENT_PLAYER_DATA_DIR: undefined } : {}) },
       createBridge: ({ upstreamPort, launchToken }) => createApplicationServer({ packageRoot: payload.coreUiDir, channel: 'candidate', upstreamPort, launchToken, browserController:browserRuntime }),
       onLog: line => log.write(line),
       onBackendExit: ({ code, signal }) => {
@@ -162,11 +166,15 @@ async function startLocal() {
     appOrigin = started.origin;
     startupStatus('Opening your workspace…');
     await mainWindow.loadURL(started.url);
+    updater?.startedFine(); // STORE-MAP-01 P3: this version works, the one it replaced can go
   } catch (error) {
     runtime = null;
     log?.write(`start failed: ${error.message}`);
     for (const line of error.logTail || []) log?.write(`  ${line}`);
-    await showPage('failed.html', { reason: error.message });
+    // STORE-MAP-01 P3: an update step that failed, or data from a newer Girru, gets its own page.
+    const problem = startProblemOf(error.logTail || []);
+    const earlier = problem?.kind === 'migration_failed' ? updater?.previous() : null;
+    await showPage('failed.html', problem ? { ...failedParams(problem), ...(earlier ? { previous: earlier.version } : {}) } : { reason: error.message });
   }
 }
 
@@ -295,6 +303,18 @@ ipcMain.handle('dpro:reveal-folder', async (event, folder) => {
   shell.showItemInFolder(path.join(folder, '.'));
   return true;
 });
+// CODE-OPEN-01: one file in Finder / Explorer. The page checked it with the backend (inside a project or the data
+// folder); here again: an absolute path to a regular file whose real path is the path itself (no links).
+ipcMain.handle('dpro:reveal-file', async (event, file) => {
+  const sender = BrowserWindow.fromWebContents(event.sender);
+  if (!appOrigin || !sender || (sender !== mainWindow && !chatWindows.has(sender)) || event.senderFrame !== sender.webContents.mainFrame) return false;
+  let origin = null;
+  try { origin = new URL(event.senderFrame.url).origin; } catch { /* invalid */ }
+  if (origin !== appOrigin || typeof file !== 'string' || file.length > 4096 || !path.isAbsolute(file) || /[\x00-\x1f]/.test(file)) return false;
+  try { if (fs.realpathSync.native(file) !== path.resolve(file) || !fs.lstatSync(file).isFile()) return false; } catch { return false; }
+  shell.showItemInFolder(file);
+  return true;
+});
 ipcMain.handle('dpro:find-data', async event => {
   if (!fromWelcome(event)) return { ok: false };
   const result = await dialog.showOpenDialog(mainWindow, { title: 'Choose the folder containing agent-player.db', properties: ['openDirectory', 'showHiddenFiles'] });
@@ -360,6 +380,26 @@ ipcMain.handle('dpro:use-local', async event => {
 ipcMain.handle('dpro:retry', async event => {
   if (!(mainWindow && event.sender === mainWindow.webContents && !appOrigin)) return { ok: false };
   await applyMode();
+  return { ok: true };
+});
+
+// STORE-MAP-01 P3 (FD4b): from the start page of a workspace a newer Girru wrote.
+ipcMain.handle('dpro:failed-update', async event => {
+  if (!fromFailed(event)) return { ok: false };
+  const view = updater ? await updater.check().catch(() => null) : null;
+  await shell.openExternal(view?.update?.page || 'https://github.com/Dpro-at/Girru/releases');
+  return { ok: true };
+});
+// STORE-MAP-01 P3 (FD4a): restore the backup from before the update and open the version that made it.
+ipcMain.handle('dpro:failed-restore', async event => {
+  if (!fromFailed(event) || !updater?.previous()) return { ok: false };
+  await showPage('starting.html', { status: 'Putting your data back…' });
+  try { await stopLocal(); updater.restorePrevious(dataDir()); return { ok: true }; }
+  catch (error) { log?.write(`restore failed: ${error.message}`); await showPage('failed.html', { reason: `The earlier version could not be opened: ${error.message}` }); return { ok: false }; }
+});
+ipcMain.handle('dpro:failed-workspace', async event => {
+  if (!fromFailed(event)) return { ok: false };
+  await chooseWorkspace();
   return { ok: true };
 });
 
@@ -445,15 +485,16 @@ async function boot() {
   const payload = resolvePayload({ packaged: app.isPackaged, resourcesPath: process.resourcesPath });
   nabuEditor = installNabuEditor({
     win: mainWindow, electron, getOrigin: () => appOrigin,
-    runtimeRoot: process.env.DPRO_NABU_ROOT || path.join(process.resourcesPath, 'nabu-runtime'),
+    resolveRuntime: codeRuntime,
     node: process.env.DPRO_DESKTOP_NODE || payload.node, dataDir: path.join(settingsDir(), 'nabu-editor'),
     onLog: line => { editorLog ||= openLog(path.join(settingsDir(), 'logs', 'editor.log')); editorLog.write(line); },
   });
   const permissions = permissionStatus(electron.systemPreferences, process.platform);
   const firstMacLaunch = process.platform === 'darwin' && (!fs.existsSync(path.join(settingsDir(), 'permissions-reviewed-v3.json')));
+  // Before the first start: a start that fails after an update can offer the version it replaced (FD4a).
+  startUpdater();
   if (firstMacLaunch || (process.platform === 'win32' && permissions.microphone === 'denied' && !fs.existsSync(path.join(settingsDir(), 'permissions-reviewed-v3.json')))) await showPage('permissions.html');
   else await applyMode();
-  startUpdater();
 }
 
 // The app lives in one window: closing it quits (and stops the backend) on every OS.

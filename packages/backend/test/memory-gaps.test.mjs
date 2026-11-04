@@ -50,6 +50,7 @@ const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
 
 const { getDatabase, closeDatabase } = await import(join(backendDir, 'src/db/database.ts'));
+const { projectKeyOf } = await import(join(backendDir, 'src/memory/project-keys.ts')); // project memory key (id while GIRRU_STORE_P3 is on)
 const db = getDatabase();
 await db.initialize();
 const { getCredentialStorage } = await import(join(backendDir, 'src/credentials/storage.ts'));
@@ -111,11 +112,11 @@ const dept = (await ok('POST', '/api/memory/scopes/departments', { name: 'Engine
 const facts = {};
 
 test('1. one source of pinned facts: scope facts are in the cached pack and in the reply trace', async () => {
-  await ok('POST', `/api/memory/scopes/projects/${project.slug}/preview`, { action: 'move', departmentId: dept.id }).then((p) =>
-    ok('POST', `/api/memory/scopes/projects/${project.slug}/apply`, { action: 'move', departmentId: dept.id, expectedPreviewHash: p.previewHash, confirm: true }));
+  await ok('POST', `/api/memory/scopes/projects/${projectKeyOf(project)}/preview`, { action: 'move', departmentId: dept.id }).then((p) =>
+    ok('POST', `/api/memory/scopes/projects/${projectKeyOf(project)}/apply`, { action: 'move', departmentId: dept.id, expectedPreviewHash: p.previewHash, confirm: true }));
   facts.company = (await ok('POST', '/api/memory/scopes/pinned', { scope: 'company', text: 'We are Girru.' }, 201)).fact;
   facts.dept = (await ok('POST', '/api/memory/scopes/pinned', { scope: `department:${dept.id}`, text: 'Engineering ships on Fridays.' }, 201)).fact;
-  facts.project = (await ok('POST', '/api/memory/scopes/pinned', { scope: `project:${project.slug}`, text: 'Alpha runs on PostgreSQL 16.' }, 201)).fact;
+  facts.project = (await ok('POST', '/api/memory/scopes/pinned', { scope: `project:${projectKeyOf(project)}`, text: 'Alpha runs on PostgreSQL 16.' }, 201)).fact;
   const important = await remember({ content: 'The owner likes short answers.', importance: 10 });
 
   const first = await turn(conv.id, 'Which database does Alpha use?');
@@ -124,7 +125,7 @@ test('1. one source of pinned facts: scope facts are in the cached pack and in t
   assert.match(sys, /## Pinned facts[\s\S]*Company:\n- We are Girru\.[\s\S]*Department "Engineering":\n- Engineering ships on Fridays\.[\s\S]*Project "Alpha":\n- Alpha runs on PostgreSQL 16\./);
   assert.match(sys, /Important memories:\n- The owner likes short answers\./);
   const byId = (t, id) => t.items.find((i) => i.id === id);
-  for (const [f, scope] of [[facts.company, 'company'], [facts.dept, `department:${dept.id}`], [facts.project, `project:${project.slug}`]]) {
+  for (const [f, scope] of [[facts.company, 'company'], [facts.dept, `department:${dept.id}`], [facts.project, `project:${projectKeyOf(project)}`]]) {
     const item = byId(first.trace, f.id);
     assert.ok(item, `fact ${f.text} in the trace`);
     assert.deepEqual([item.kind, item.why, item.drawer, item.state], ['fact', 'pinned', scope, 'active']);
@@ -134,7 +135,7 @@ test('1. one source of pinned facts: scope facts are in the cached pack and in t
   // The UI contract keeps fact items (scope, preview) and drops nothing it should show.
   const projected = contract.memoryRecallResponse(`/api/memory/recall/messages/${first.message.id}`, 200, { trace: first.trace });
   assert.equal(projected.trace.items.filter((i) => i.kind === 'fact').length, 3);
-  assert.equal(projected.trace.items.find((i) => i.id === facts.project.id).drawer, `project:${project.slug}`);
+  assert.equal(projected.trace.items.find((i) => i.id === facts.project.id).drawer, `project:${projectKeyOf(project)}`);
 
   // Same facts -> the pack comes from the cache; a fact edit -> a fresh pack and 'changed' in the old trace.
   const second = await turn(conv.id, 'And which day do we ship?');
@@ -175,10 +176,10 @@ test('3. board task runs get the pinned facts of their scope, with the same acce
     return calls[0].messages[0].content;
   };
   // A run in the project: company, department and project facts.
-  const inProject = await runWith(['owner', `project:${project.slug}`]);
+  const inProject = await runWith(['owner', `project:${projectKeyOf(project)}`]);
   assert.match(inProject, /## Pinned facts[\s\S]*We are Girru\.[\s\S]*Engineering ships on Fridays\.[\s\S]*Alpha runs on PostgreSQL 17\./);
   // Only the project drawer open: no company facts (they follow the owner drawer).
-  const projectOnly = await runWith([`project:${project.slug}`]);
+  const projectOnly = await runWith([`project:${projectKeyOf(project)}`]);
   assert.doesNotMatch(projectOnly, /We are Girru\./);
   assert.match(projectOnly, /Alpha runs on PostgreSQL 17\./);
   // No drawers at all: no facts.
@@ -203,18 +204,18 @@ test('3. board task runs get the pinned facts of their scope, with the same acce
   assert.equal(await taskRunPinnedFacts({ ...base, ownerId: 'mg-user', drawers: [{ kind: 'owner' }] }), '');
   db.prepare(`INSERT INTO agent_permissions (agent_id, memory_read, memory_write, shared_memory, modes, version) VALUES ('mg-main', '["owner"]', '[]', 0, '{}', 1)
     ON CONFLICT (agent_id) DO UPDATE SET memory_read = excluded.memory_read`).run();
-  const noProject = await taskRunPinnedFacts({ ...base, drawers: [{ kind: 'owner' }, { kind: 'project', key: project.slug }] });
+  const noProject = await taskRunPinnedFacts({ ...base, drawers: [{ kind: 'owner' }, { kind: 'project', key: projectKeyOf(project) }] });
   assert.match(noProject, /We are Girru\./);
   assert.doesNotMatch(noProject, /PostgreSQL|Fridays/);
   db.prepare("DELETE FROM agent_permissions WHERE agent_id = 'mg-main'").run();
   // An archived project adds nothing; the company still applies.
-  const pv = await ok('POST', `/api/memory/scopes/projects/${project.slug}/preview`, { action: 'archive' });
-  await ok('POST', `/api/memory/scopes/projects/${project.slug}/apply`, { action: 'archive', expectedPreviewHash: pv.previewHash, confirm: true });
+  const pv = await ok('POST', `/api/memory/scopes/projects/${projectKeyOf(project)}/preview`, { action: 'archive' });
+  await ok('POST', `/api/memory/scopes/projects/${projectKeyOf(project)}/apply`, { action: 'archive', expectedPreviewHash: pv.previewHash, confirm: true });
   const archived = await taskRunPinnedFacts({ ...base, drawers: [{ kind: 'owner' }] });
   assert.match(archived, /We are Girru\./);
   assert.doesNotMatch(archived, /PostgreSQL/);
-  const pu = await ok('POST', `/api/memory/scopes/projects/${project.slug}/preview`, { action: 'unarchive' });
-  await ok('POST', `/api/memory/scopes/projects/${project.slug}/apply`, { action: 'unarchive', expectedPreviewHash: pu.previewHash, confirm: true });
+  const pu = await ok('POST', `/api/memory/scopes/projects/${projectKeyOf(project)}/preview`, { action: 'unarchive' });
+  await ok('POST', `/api/memory/scopes/projects/${projectKeyOf(project)}/apply`, { action: 'unarchive', expectedPreviewHash: pu.previewHash, confirm: true });
 });
 
 test('4. agent tools: decide a conflict, review a pending link, read its own reply trace; owner gates and approvals', async () => {
@@ -222,7 +223,7 @@ test('4. agent tools: decide a conflict, review a pending link, read its own rep
   const T = await import(join(backendDir, 'src/tools/memory/index.ts'));
   const { approvalCategory } = await import(join(backendDir, 'src/tools/approvals.ts'));
   const { DEFAULT_AGENT_TOOLS } = await import(join(backendDir, 'src/tools/grants.ts'));
-  const ctx = { workspaceDir: dir, userId: OWNER, agentId: 'mg-main', sessionId: conv.id, memoryDrawers: D.selectDrawers({ audience: 'owner', project: project.slug }) };
+  const ctx = { workspaceDir: dir, userId: OWNER, agentId: 'mg-main', sessionId: conv.id, memoryDrawers: D.selectDrawers({ audience: 'owner', project: projectKeyOf(project) }) };
   const member = { ...ctx, userId: 'mg-user' };
   const outsider = { ...ctx, toolPolicy: { channel: 'telegram', allowedTools: [] } };
   for (const name of ['memory_review_decide', 'memory_graph_review']) assert.ok(approvalCategory({ name }), `${name} needs owner approval`);
@@ -230,8 +231,8 @@ test('4. agent tools: decide a conflict, review a pending link, read its own rep
   for (const name of ['memory_review', 'memory_review_decide', 'memory_graph_review', 'memory_recall']) assert.ok(DEFAULT_AGENT_TOOLS.includes(name));
 
   // Conflicts: list (read only) -> decide with the review hash.
-  const a = await T.memorySaveTool.execute({ content: 'The staging server is online', type: 'fact', drawer: `project:${project.slug}` }, ctx);
-  const b = await T.memorySaveTool.execute({ content: 'The staging server is not online', type: 'fact', drawer: `project:${project.slug}` }, ctx);
+  const a = await T.memorySaveTool.execute({ content: 'The staging server is online', type: 'fact', drawer: `project:${projectKeyOf(project)}` }, ctx);
+  const b = await T.memorySaveTool.execute({ content: 'The staging server is not online', type: 'fact', drawer: `project:${projectKeyOf(project)}` }, ctx);
   assert.equal(b.data?.conflict, true, b.content?.[0]?.text);
   const list = await T.memoryReviewTool.execute({}, ctx);
   const c = list.data.conflicts.find((x) => x.id === b.data.proposalId);
@@ -251,12 +252,14 @@ test('4. agent tools: decide a conflict, review a pending link, read its own rep
   assert.ok((await T.memoryReviewDecideTool.execute({ proposal_id: c.id, decision: 'maybe', review_hash: c.reviewHash }, ctx)).error);
   const decided = await T.memoryReviewDecideTool.execute({ proposal_id: c.id, decision: 'keep_new', review_hash: c.reviewHash }, ctx);
   assert.ok(decided.data?.success, decided.error);
-  assert.equal(db.prepare('SELECT content FROM memories WHERE id = ?').get(a.data.memoryId).content, 'The staging server is not online');
+  // STORE-MAP-01 P9 (M4): keep new supersedes the old row; the current fact holds the new text.
+  const cur = (id) => { let r = db.prepare('SELECT content, superseded_by FROM memories WHERE id = ?').get(id); while (r?.superseded_by) r = db.prepare('SELECT content, superseded_by FROM memories WHERE id = ?').get(r.superseded_by); return r; };
+  assert.equal(cur(a.data.memoryId).content, 'The staging server is not online');
   assert.equal(db.prepare('SELECT decision FROM memory_file_proposals WHERE id = ?').get(c.id).decision, 'keep_new');
   assert.ok((await T.memoryReviewDecideTool.execute({ proposal_id: c.id, decision: 'keep_old', review_hash: c.reviewHash }, ctx)).error, 'decided once');
 
   // Graph: an important link learned by an agent waits; listed by memory_graph op pending; reviewed with approval.
-  const saved = await T.memorySaveTool.execute({ content: 'The Ledger Service replaces the Legacy Router.', type: 'fact', importance: 5, drawer: `project:${project.slug}` }, ctx);
+  const saved = await T.memorySaveTool.execute({ content: 'The Ledger Service replaces the Legacy Router.', type: 'fact', importance: 5, drawer: `project:${projectKeyOf(project)}` }, ctx);
   assert.ok(!saved.error, saved.error);
   await G.graphIdle();
   const pending = await T.memoryGraphTool.execute({ op: 'pending' }, ctx);
@@ -307,7 +310,7 @@ test('6. bridge: activity log and "hide managed files from Git" through the API 
   const D = await import(join(backendDir, 'src/memory/drawers.ts'));
   const T = await import(join(backendDir, 'src/tools/memory/index.ts'));
   const { approvalCategory } = await import(join(backendDir, 'src/tools/approvals.ts'));
-  const ctx = { workspaceDir: dir, userId: OWNER, agentId: 'mg-main', sessionId: conv.id, memoryDrawers: D.selectDrawers({ audience: 'owner', project: project.slug }) };
+  const ctx = { workspaceDir: dir, userId: OWNER, agentId: 'mg-main', sessionId: conv.id, memoryDrawers: D.selectDrawers({ audience: 'owner', project: projectKeyOf(project) }) };
   mkdirSync(join(folder, '.git', 'info'), { recursive: true });
   assert.equal(approvalCategory({ name: 'memory_bridge_apply' }), 'settings');
   assert.equal(approvalCategory({ name: 'memory_bridge' }), null);

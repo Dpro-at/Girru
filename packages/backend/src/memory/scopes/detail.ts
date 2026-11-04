@@ -14,6 +14,7 @@ import { memoryEntities, type MemoryEntities } from '../graph/read.js';
 import { memoryUsage, type MemoryUsage } from '../context/trace.js';
 import { agentsWithAccess } from './access.js';
 import { ScopeInputError, projectStep } from './store.js';
+import { validityOf, type Validity } from '../validity.js';
 
 export interface MemoryDetail {
   id: string;
@@ -28,6 +29,8 @@ export interface MemoryDetail {
   source: string | null;
   usage: MemoryUsage;
   graph: Pick<MemoryEntities, 'entities' | 'links'>;
+  /** STORE-MAP-01 P3 (FD3): source, trust, still true, what it replaced, its version (for the edit check). */
+  validity: Validity | null;
   /** Agents that may read it now: count of all agents (`all` when every agent may). */
   readers: { scope: string; count: number; total: number; all: boolean; archived: boolean };
 }
@@ -43,7 +46,7 @@ export async function memoryDetail(ownerId: string, memoryId: string): Promise<M
   if (!MEMORY_ID.test(memoryId)) throw new ScopeInputError('Memory not found', 404, 'not_found');
   const r = await sql().read(one<Row>(`
     SELECT id, type, content, drawer_kind, drawer_key, topic_key, importance_score, memory_layer, created_at, source_agent_id, metadata
-      FROM memories WHERE id = ? AND user_id = ?`, memoryId, ownerId));
+      FROM memories WHERE id = ? AND user_id = ? AND COALESCE(drawer_kind, '') <> 'agent'`, memoryId, ownerId));
   if (!r) throw new ScopeInputError('Memory not found', 404, 'not_found');
   const kind = (r.drawer_kind || 'owner') as DrawerKind;
   const key = r.drawer_key || '';
@@ -68,6 +71,7 @@ export async function memoryDetail(ownerId: string, memoryId: string): Promise<M
     sourceAgentId: r.source_agent_id ?? null, source,
     usage: await memoryUsage(ownerId, memoryId),
     graph: graph ? { entities: graph.entities, links: graph.links } : { entities: [], links: [] },
+    validity: await validityOf(ownerId, memoryId),
     readers,
   };
 }

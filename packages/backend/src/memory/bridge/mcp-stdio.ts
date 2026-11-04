@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Entry of the dpro-memory MCP server (MEM-BRIDGE-01), started by a CLI:
- *   node mcp-stdio.js --client claude-code|codex|gemini-cli|antigravity
+ *   node mcp-stdio.js --client claude-code|codex|gemini-cli|antigravity|cursor|copilot
  * Environment (set by Girru's registration: paths only, never a secret; plus, from Girru's launcher only):
  *   AGENT_PLAYER_CONFIG_DIR  folder of instance.json;  AGENT_PLAYER_URL  the local backend
  *   GIRRU_SESSION_CAPABILITY  only in a process Girru's launcher started (STORE-MAP-01 pilot): its session
@@ -11,19 +11,25 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { cliConfigDir } from '../../services/instance-identity.js';
 import { createBridgeMcpServer, httpBackend } from './mcp-server.js';
+import { queueingBackend } from './handoff-queue.js';
+import { storeP9Enabled } from '../../services/store-p9.js';
 
-const CLIENTS = new Set(['claude-code', 'codex', 'gemini-cli', 'antigravity']);
+// cursor and copilot are registered only while GIRRU_STORE_P7 is on (the backend checks the switch).
+const CLIENTS = new Set(['claude-code', 'codex', 'gemini-cli', 'antigravity', 'cursor', 'copilot']);
 
 async function main(): Promise<void> {
   const i = process.argv.indexOf('--client');
   const client = i >= 0 ? process.argv[i + 1] : '';
-  if (!CLIENTS.has(client)) throw new Error('--client must be claude-code, codex, gemini-cli or antigravity');
-  const backend = httpBackend({
+  if (!CLIENTS.has(client)) throw new Error('--client must be claude-code, codex, gemini-cli, antigravity, cursor or copilot');
+  const http = httpBackend({
     client, cwd: process.cwd(), configDir: cliConfigDir(),
     backendUrl: process.env.AGENT_PLAYER_URL || 'http://127.0.0.1:41522',
     capability: process.env.GIRRU_SESSION_CAPABILITY || null,
   });
-  await createBridgeMcpServer(backend).connect(new StdioServerTransport());
+  // STORE-MAP-01 P9 (FAIL5): a handoff written while Girru is away waits in a small local queue.
+  const backend = storeP9Enabled() ? queueingBackend(http, { configDir: cliConfigDir(), cwd: process.cwd() }) : http;
+  // A session Girru started (P6) also gets the five verbs of the one memory contract.
+  await createBridgeMcpServer(backend, { verbs: !!process.env.GIRRU_SESSION_CAPABILITY }).connect(new StdioServerTransport());
 }
 
 main().catch((err) => {

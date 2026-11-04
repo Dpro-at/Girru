@@ -24,6 +24,7 @@ import { SessionsRepository } from './repositories/sessions.js';
 import { SkillsRepository } from './repositories/skills.js';
 import type { ChatMessage, ChatSession } from './repositories/sessions.js';
 import * as chatSessions from '../repositories/chat-sessions.js';
+import { storeP3Enabled } from '../services/store-p3.js';
 
 export interface Repositories {
   users: UsersRepository;
@@ -60,7 +61,10 @@ export async function initializeDatabase(): Promise<void> {
   // and server startup calls it again.
   // B2.2d-17: nothing to do on PostgreSQL (no SQLite file; its schema comes
   // from the PostgreSQL migrations, scripts/pg/migrate-pg.mjs).
-  if (dbDriver() === 'postgres') return;
+  if (dbDriver() === 'postgres') {
+    if (storeP3Enabled()) await checkPgLayout();
+    return;
+  }
   if (!initializing) {
     initializing = getDatabase().initialize().catch((err) => {
       initializing = null;
@@ -68,6 +72,26 @@ export async function initializeDatabase(): Promise<void> {
     });
   }
   return initializing;
+}
+
+/**
+ * STORE-MAP-01 P3 (OPS2) on PostgreSQL: the same guard as SQLite's. The
+ * migrations are applied outside the app (scripts/pg/migrate-pg.mjs), so this
+ * only refuses newer data and records the version that opened it.
+ */
+async function checkPgLayout(): Promise<void> {
+  const { q } = await import('../repositories/sql-steps.js');
+  const { listPgMigrations } = await import('./pg/migrate.js');
+  const { appVersion, newerLayout, unknownMigrations } = await import('./layout.js');
+  const known = listPgMigrations().map((m) => m.id);
+  const applied = (await q.all<{ id: string }>('SELECT id FROM migrations')).map((r) => String(r.id));
+  const unknown = unknownMigrations(applied, known);
+  if (unknown.length) {
+    const row = await q.one<{ written_by: string | null }>('SELECT written_by FROM schema_layout WHERE id = 1').catch(() => undefined);
+    throw newerLayout(unknown, row?.written_by ?? null);
+  }
+  await q.run(`INSERT INTO schema_layout (id, level, written_by, updated_at) VALUES (1, ?, ?, ?)
+    ON CONFLICT (id) DO UPDATE SET level = excluded.level, written_by = excluded.written_by, updated_at = excluded.updated_at`, [...known].sort().pop() ?? '', appVersion(), new Date().toISOString());
 }
 
 // Backward compatibility: Legacy API for sessions and messages.

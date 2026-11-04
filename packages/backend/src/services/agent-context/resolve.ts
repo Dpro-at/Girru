@@ -12,8 +12,7 @@
 
 import { one, sql } from '../../repositories/sql-steps.js';
 import { findProject } from '../../repositories/chat-conversations.js';
-import { readPersonality, getDefaultPersonality } from '../agent-files.js';
-import { stripPersonalityExport } from '../personality.js';
+import { personalityTextFor } from '../personality-record.js';
 import { libraryBehavior } from '../personality-library.js';
 import { agentSkillsPrompt } from '../../skills/central-store.js';
 import { teamContext } from '../agent-org.js';
@@ -26,8 +25,11 @@ import { loadRunPermissions } from '../../tools/agent-permissions.js';
 import { narrowProjectMemory } from '../../tools/memory/project-access.js';
 import { handoffText, projectHandoff } from '../../memory/bridge/brief.js';
 import { selectDrawers, type DrawerRef } from '../../memory/drawers.js';
+import { storeP9Enabled } from '../store-p9.js';
+import { cloudSafeDrawers, cloudSafePinnedAllow } from '../../memory/stays-local.js';
 import { outsiderAgentMemoryEnabled } from '../outsider-memory.js';
 import { evaluateContextPolicy, type ContextPolicy, type EntryPoint } from './policy.js';
+import { projectKeyOf } from '../../memory/project-keys.js';
 
 export interface ResolvedAgentContext {
   entry: EntryPoint;
@@ -36,9 +38,9 @@ export interface ResolvedAgentContext {
   ownerId: string | null;
   project: { id: string; slug: string; name: string } | null;
   definition: {
-    /** The instructions the agent was hired with (agents_config.system_prompt). */
+    /** The owner's extra instructions (agents_config.system_prompt; with P4 on the job itself comes from the specialty links). */
     hired: string;
-    /** PERSONALITY.md written for this agent ('' for the untouched template). */
+    /** The personality text: P4 on, from the one personality record; off, PERSONALITY.md ('' for the untouched template). */
     personality: string;
     /** The owner-set behaviour profile. */
     behavior: string;
@@ -65,6 +67,11 @@ export interface ResolveInput {
   sessionId?: string | null;
   /** Chat only: instructions sent with the request replace the hired instructions and personality text (as before). */
   instructionsOverride?: string | null;
+  /**
+   * STORE-MAP-01 P9 (PRIV2): the model of this context is not on this computer, so places that
+   * stay on this computer are left out. A coding app (entry 'coding_app') always counts as not local.
+   */
+  cloud?: boolean;
 }
 
 /** Longest instructions or personality text kept (the middle is cut, like chat did). */
@@ -88,27 +95,29 @@ export async function resolveAgentContext(input: ResolveInput): Promise<Resolved
   const project = projectId && ownerId ? await findProject(ownerId, projectId) : undefined;
 
   const override = input.instructionsOverride?.trim() || '';
-  const file = override ? '' : await readPersonality(agent.id).catch(() => '');
-  const personality = file && file.trim() !== getDefaultPersonality().trim() ? stripPersonalityExport(file).trim() : '';
+  const personality = override ? '' : await personalityTextFor(agent.id).catch(() => '');
   // P2 (AG1, AG6): guides by name with the full text on demand; owner rules in precedence order.
   const p2 = storeP2Enabled();
   const behavior = (await libraryBehavior(agent.id).catch(() => null))?.promptBlock ?? '';
 
   // What THIS agent may read here (CORE-PERMS-01, MEM-SCALE-01), applied before anything is loaded,
   // as chat does: pinned facts by its fact access, the handoff and the drawers by its memory access.
-  const slug = project?.slug ?? null;
+  const slug = project ? projectKeyOf(project) : null; // the project's memory key (P3: its id)
   const perms = ownerId && policy.memory
     ? await loadRunPermissions(agent.id, [], { userId: ownerId, project: slug }).catch(() => null)
     : null;
   const memoryRead: readonly string[] = perms?.memoryRead ?? [];
   const openDrawers = policy.memory ? selectDrawers({ audience: 'owner', project: slug }) : [];
-  const drawers = perms && ownerId
+  let drawers = perms && ownerId
     ? ((await narrowProjectMemory({ agentId: agent.id, userId: ownerId, memoryDrawers: openDrawers }).catch(() => [])) ?? []).filter((d) => memoryRead.includes(d.kind))
     : [];
+  const cloud = !!ownerId && storeP9Enabled() && (input.cloud ?? input.entry === 'coding_app');
+  if (cloud) drawers = (await cloudSafeDrawers(ownerId!, drawers)).drawers;
 
   const data = { pinnedFacts: '', handoff: '' };
   if (ownerId && perms && policy.pinnedFacts) {
-    const allow = scopeFactAccess(perms, openDrawers.some((d) => d.kind === 'owner'));
+    let allow = scopeFactAccess(perms, openDrawers.some((d) => d.kind === 'owner'));
+    if (cloud) allow = await cloudSafePinnedAllow(ownerId, slug, allow);
     if (allow.company || allow.project) data.pinnedFacts = await pinnedFactsBlock(ownerId, slug, allow).catch(() => '');
   }
   if (ownerId && perms && project && policy.handoff && drawers.some((d) => d.kind === 'project')) {

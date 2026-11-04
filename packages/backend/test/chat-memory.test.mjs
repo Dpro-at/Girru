@@ -39,6 +39,7 @@ const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
 
 const { getDatabase } = await import(join(backendDir, 'src/db/database.ts'));
+const { projectKeyOf } = await import(join(backendDir, 'src/memory/project-keys.ts')); // project memory key (id while GIRRU_STORE_P3 is on)
 const db = getDatabase();
 await db.initialize();
 const { getCredentialStorage } = await import(join(backendDir, 'src/credentials/storage.ts'));
@@ -126,7 +127,7 @@ test('the project drawer only for a project conversation; bad requests are refus
   const pm = await addAssistantMessage(pc.id, { runId: 'run-cm-0003', content: 'Use the blue logo.', parts: [], status: 'complete', durationMs: 1 });
   const r = await call('cm-owner', 'POST', `/api/chat/conversations/${pc.id}/memories`, { messageId: pm.id, content: 'Use the blue logo.', drawer: 'project', type: 'preference', importance: 9 });
   assert.equal(r.statusCode, 201, r.body);
-  assert.equal(r.json().memory.drawerId, `project:${project.slug}`);
+  assert.equal(r.json().memory.drawerId, `project:${projectKeyOf(project)}`);
 });
 
 test('an agent proposes a memory in the chat; nothing is saved until the owner accepts (review hash)', async () => {
@@ -187,7 +188,8 @@ test('a conflict proposed in the chat and kept new shows as saved with the new t
   assert.equal(d.statusCode, 200, d.body);
   const after = (await call('cm-owner', 'GET', url)).json().memories.find((x) => x.id === p.id);
   assert.equal(after.status, 'saved');
-  assert.equal(after.memoryId, full.conflictWith);
+  // STORE-MAP-01 P9 (M4): keep new supersedes; the link shows the new current memory.
+  assert.equal(after.memoryId, process.env.GIRRU_STORE_P9 === '1' ? db.prepare('SELECT superseded_by FROM memories WHERE id = ?').get(full.conflictWith).superseded_by : full.conflictWith);
   assert.equal(after.text, 'The team does not meet every Monday at 9');
 });
 

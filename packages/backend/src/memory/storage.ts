@@ -16,9 +16,14 @@ import { v4 as uuidv4 } from 'uuid';
 import { all, columnExists, dialect, lockName, one, run, sql, type Step } from '../repositories/sql-steps.js';
 import { LEGACY_HASH_MODEL, getEmbeddingService } from './embedding.js';
 import { lexicalTokens } from './text-normalize.js';
-import { MIN_RECALL_SCORE, WORKING_LAYER_BOOST, bm25Scores, hybridScore, vectorScore } from './hybrid.js';
+import { MIN_RECALL_SCORE, WORKING_LAYER_BOOST, bm25FromCounts, bm25Scores, hybridScore, vectorScore } from './hybrid.js';
 import { onMemorySaved } from './graph/store.js';
 import { NOT_ARCHIVED_SQL } from './scopes/store.js';
+import { NOT_REPLACED_SQL } from './validity.js';
+import { unpackVector, writeVectorStep } from './vectors.js';
+import { storeP3Enabled } from '../services/store-p3.js';
+import { storeP9Enabled } from '../services/store-p9.js';
+import { LIGHT_COLUMNS, entriesFor, entryCosine, type LightRow } from './recall-index.js';
 import {
   DRAWER_KEY_SQL,
   DRAWER_KIND_SQL,
@@ -87,13 +92,25 @@ const SQLITE_MEMORIES_COLUMNS: Array<[string, string]> = [
   ['topic_key', 'TEXT'],
   // Saving agent (normally added by migration 047)
   ['source_agent_id', 'TEXT'],
+  // STORE-MAP-01 P3 provenance and validity (normally added by migration 165)
+  ['source', 'TEXT'],
+  ['source_ref', 'TEXT'],
+  ['trust', 'TEXT'],
+  ['valid_from', 'TEXT'],
+  ['valid_to', 'TEXT'],
+  ['superseded_by', 'TEXT'],
+  // STORE-MAP-01 P3 packed vectors (normally added by migration 168)
+  ['embedding_vec', 'BLOB'],
 ];
 
 const SQLITE_MEMORIES_INDEXES = [
   'CREATE INDEX IF NOT EXISTS idx_memories_layer ON memories(memory_layer)',
   'CREATE INDEX IF NOT EXISTS idx_memories_expiry ON memories(expiry_timestamp) WHERE expiry_timestamp IS NOT NULL',
   "CREATE INDEX IF NOT EXISTS idx_memories_consolidation ON memories(consolidation_status) WHERE memory_layer = 'experiential'",
-  'CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_topic_key ON memories(user_id, drawer_kind, drawer_key, topic_key) WHERE topic_key IS NOT NULL',
+  // A replaced memory keeps its topic key; the key is unique among the others (migration 165).
+  'DROP INDEX IF EXISTS idx_memories_topic_key',
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_topic_current ON memories(user_id, drawer_kind, drawer_key, topic_key) WHERE topic_key IS NOT NULL AND COALESCE(status, 'active') <> 'replaced'",
+  'CREATE INDEX IF NOT EXISTS idx_memories_superseded_by ON memories(superseded_by) WHERE superseded_by IS NOT NULL',
 ];
 
 const UPSERT_COLUMNS = [
@@ -247,6 +264,9 @@ export class MemoryStorage implements IMemoryStorage {
       memory.sourceAgentId || null,
     );
     if (res.changes !== 1) throw new Error('Memory id belongs to another user');
+    // STORE-MAP-01 P3: the packed vector beside the JSON text (or cleared, so it never goes stale).
+    if (storeP3Enabled()) yield* writeVectorStep(memory.id, memory.embedding);
+    else yield* run('UPDATE memories SET embedding_vec = NULL WHERE id = ? AND embedding_vec IS NOT NULL', memory.id);
   }
 
   /** Write the per-memory markdown copy (human-readable, not canonical). */
@@ -299,7 +319,7 @@ export class MemoryStorage implements IMemoryStorage {
     const dl = yield* dialect();
     if (lock) yield* lockName(`memory-topic:${userId}:${d.kind}:${d.key || ''}:${topicKey}`);
     const row = yield* one(
-      `SELECT * FROM memories WHERE user_id = ? AND drawer_kind = ? AND drawer_key = ? AND topic_key = ?${lock && dl === 'postgres' ? ' FOR UPDATE' : ''}`,
+      `SELECT * FROM memories WHERE user_id = ? AND drawer_kind = ? AND drawer_key = ? AND topic_key = ? AND ${NOT_REPLACED_SQL}${lock && dl === 'postgres' ? ' FOR UPDATE' : ''}`,
       userId, d.kind, d.key || '', topicKey,
     );
     return row ? this.rowToMemory(row) : null;
@@ -335,7 +355,8 @@ export class MemoryStorage implements IMemoryStorage {
   *getOwnedStep(userId: string, id: string, lock = false): Step<Memory | null> {
     if (typeof id !== 'string' || !id) return null;
     const d = yield* dialect();
-    const row = yield* one(`SELECT * FROM memories WHERE id = ? AND user_id = ?${lock && d === 'postgres' ? ' FOR UPDATE' : ''}`, id, userId);
+    // STORE-MAP-01 P5: an agent's own notes are never opened by id here (only memory/agent-drawer.ts reads them).
+    const row = yield* one(`SELECT * FROM memories WHERE id = ? AND user_id = ? AND ${NOT_AGENT_NOTES_SQL}${lock && d === 'postgres' ? ' FOR UPDATE' : ''}`, id, userId);
     return row ? this.rowToMemory(row) : null;
   }
 
@@ -343,7 +364,7 @@ export class MemoryStorage implements IMemoryStorage {
    * Get a memory by ID
    */
   async get(id: string): Promise<Memory | null> {
-    const row = await sql().read(one('SELECT * FROM memories WHERE id = ?', id));
+    const row = await sql().read(one(`SELECT * FROM memories WHERE id = ? AND ${NOT_AGENT_NOTES_SQL}`, id));
 
     if (!row) return null;
 
@@ -454,8 +475,9 @@ export class MemoryStorage implements IMemoryStorage {
       where += ` AND ${filter.sql}`;
       params.push(...filter.params);
     }
-    // MEM-SCALE-01: an archived project is kept but never recalled.
-    where += ` AND ${NOT_ARCHIVED_SQL}`;
+    // MEM-SCALE-01: an archived project is kept but never recalled; P3: nor is a replaced fact.
+    // STORE-MAP-01 P5: an agent's own notes are read only by that agent's prompt, never by a search.
+    where += ` AND ${NOT_ARCHIVED_SQL} AND ${NOT_REPLACED_SQL} AND ${NOT_AGENT_NOTES_SQL}`;
 
     // Support both legacy minImportance (1-10) and new minImportanceScore (0-1)
     if (query.minImportanceScore !== undefined) {
@@ -466,6 +488,8 @@ export class MemoryStorage implements IMemoryStorage {
       where += ' AND importance_score >= ?';
       params.push(query.minImportance / 10);
     }
+
+    if (storeP9Enabled()) return this.searchIndexed(query, q, where, params);
 
     const rows = await sql().read(all(`${where} ORDER BY created_at ASC, id ASC`, ...params));
     const memories = rows.map((row) => this.rowToMemory(row));
@@ -493,10 +517,67 @@ export class MemoryStorage implements IMemoryStorage {
     return results.slice(0, query.limit || 10);
   }
 
+  /**
+   * STORE-MAP-01 P9 (D9): the same search over the recall index
+   * (recall-index.ts). Reads light columns only, scores with the kept word
+   * counts and vectors, and loads full rows for the results alone. Same
+   * filter, same numbers and same order as the full-row path above.
+   */
+  private async searchIndexed(
+    query: MemorySearchQuery,
+    q: Awaited<ReturnType<ReturnType<typeof getEmbeddingService>['embedQuery']>>,
+    where: string,
+    params: any[],
+  ): Promise<MemorySearchResult[]> {
+    const light = where.replace(/^SELECT \* FROM memories/, `SELECT ${LIGHT_COLUMNS}, ${DRAWER_KIND_SQL} AS dk, ${DRAWER_KEY_SQL} AS dkey FROM memories`);
+    let rows = await sql().read(all<LightRow>(`${light} ORDER BY created_at ASC, id ASC`, ...params));
+    if (q.model === this.embeddingService.targetModel()) {
+      const stale = rows.filter((r) => (r.has_json ? (r.embedding_model || LEGACY_HASH_MODEL) : undefined) !== q.model);
+      const fakes = stale.map((r) => ({ id: r.id, userId: query.userId, content: r.content } as Memory));
+      if (stale.length && await this.reembedStale(fakes, q.model) > 0) {
+        rows = await sql().read(all<LightRow>(`${light} ORDER BY created_at ASC, id ASC`, ...params));
+      }
+    }
+    // Only a plain drawer search sees every current row of its drawers (and may drop gone entries).
+    const plain = query.drawers && !query.type && !query.layer && query.minImportanceScore === undefined && query.minImportance === undefined;
+    const entries = await entriesFor(query.userId, rows, plain ? { drawers: query.drawers!.map((d) => normalizeDrawer(d)).map((d) => ({ kind: d.kind, key: d.key || '' })) } : null);
+
+    const lexical = bm25FromCounts(lexicalTokens(query.query), entries);
+    const scored: Array<{ i: number; similarity: number; vector: number | null }> = [];
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      const comparable = e.vec && e.model === q.model && e.vec.length === q.dims;
+      const vector = comparable && (q.semantic || lexical[i] > 0) ? vectorScore(entryCosine(q.vector, e), q.semantic) : null;
+      let similarity = hybridScore(vector, lexical[i], q.semantic);
+      if (similarity >= MIN_RECALL_SCORE && e.layer === 'working') similarity += WORKING_LAYER_BOOST;
+      if (similarity >= MIN_RECALL_SCORE) scored.push({ i, similarity, vector });
+    }
+    scored.sort((a, b) => b.similarity - a.similarity);
+    const top = scored.slice(0, query.limit || 10);
+    if (top.length === 0) return [];
+
+    const ids = top.map((t) => entries[t.i].id);
+    // By primary key; the owner is checked here (with `user_id = ?` the planner may scan by user).
+    const full = await sql().read(all(`SELECT * FROM memories WHERE id IN (${ids.map(() => '?').join(', ')})`, ...ids));
+    const byId = new Map(full.filter((row: any) => row.user_id === query.userId).map((row: any) => [row.id, this.rowToMemory(row)]));
+    const results: MemorySearchResult[] = [];
+    for (const t of top) {
+      const memory = byId.get(entries[t.i].id);
+      if (!memory) continue; // deleted between the two reads
+      results.push({
+        memory,
+        similarity: t.similarity,
+        scoreBreakdown: { vectorScore: t.vector ?? 0, keywordScore: lexical[t.i], recencyScore: 0, importanceScore: memory.importanceScore ?? 0.5 },
+      });
+    }
+    return results;
+  }
+
   /** Re-embed up to LAZY_REEMBED_PER_SEARCH memories whose vector is not of `model`. */
-  private async reembedStale(memories: Memory[], model: string): Promise<void> {
+  private async reembedStale(memories: Memory[], model: string): Promise<number> {
     const stale = memories.filter((m) => m.embeddingModel !== model).slice(0, LAZY_REEMBED_PER_SEARCH);
-    if (stale.length === 0) return;
+    if (stale.length === 0) return 0;
+    let written = 0;
     const fresh = await this.embeddingService.embedManyDetailed(stale.map((m) => m.content));
     for (const [i, m] of stale.entries()) {
       const e = fresh[i];
@@ -504,8 +585,10 @@ export class MemoryStorage implements IMemoryStorage {
       if (await this.setEmbedding(m.userId, m.id, m.content, e.vector, e.model)) {
         m.embedding = e.vector;
         m.embeddingModel = e.model;
+        written++;
       }
     }
+    return written;
   }
 
   /**
@@ -514,7 +597,8 @@ export class MemoryStorage implements IMemoryStorage {
    */
   async setEmbedding(userId: string, id: string, content: string, vector: number[], model: string): Promise<boolean> {
     const res = await sql().read(run(
-      'UPDATE memories SET embedding = ?, embedding_model = ?, embedding_dims = ? WHERE id = ? AND user_id = ? AND content = ?',
+      // The packed copy (P3) is cleared with it: it would still hold the old model's numbers.
+      'UPDATE memories SET embedding = ?, embedding_model = ?, embedding_dims = ?, embedding_vec = NULL WHERE id = ? AND user_id = ? AND content = ?',
       JSON.stringify(vector), model, vector.length, id, userId, content,
     ));
     return res.changes === 1;
@@ -599,7 +683,8 @@ ${JSON.stringify(memory.metadata, null, 2)}
       userId: row.user_id,
       type: row.type as MemoryType,
       content: row.content,
-      embedding: row.embedding ? JSON.parse(row.embedding) : undefined,
+      // STORE-MAP-01 P3: the packed Float32 vector when there is one, else the JSON text.
+      embedding: (row.embedding_vec ? unpackVector(row.embedding_vec) : null) ?? (row.embedding ? JSON.parse(row.embedding) : undefined),
       embeddingModel: row.embedding ? (row.embedding_model || LEGACY_HASH_MODEL) : undefined,
       memoryLayer: row.memory_layer || 'factual',
       importanceScore: row.importance_score ?? 0.5,
@@ -640,6 +725,9 @@ function* sqliteColumnsStep(): Step<void> {
   }
   yield* sqliteDdlStep(SQLITE_MEMORIES_INDEXES);
 }
+
+/** STORE-MAP-01 P5: rows of an agent's own drawer (read only through memory/agent-drawer.ts). */
+export const NOT_AGENT_NOTES_SQL = "COALESCE(drawer_kind, '') <> 'agent'";
 
 function rowDrawer(row: any): DrawerRef {
   if (row.drawer_kind) {

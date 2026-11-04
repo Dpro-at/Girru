@@ -38,6 +38,15 @@ low-level `Server` + `StdioServerTransport`).
 The handoff tools use the owner-only `/api/handoffs` routes: a session that is
 not the owner account is refused.
 
+Handoff notes live in one table (`agent_handoffs`). A note has `kind`
+(`conversation`, `task`, or `project` for a note a coding app wrote for a
+project), `source` (`agent`, `model`, `fallback`, `owner` or `coding_app`) and,
+for a coding-app note, `client` (which app) with `agent_id` `app:<client>`.
+With `GIRRU_STORE_P4` on, coding-app notes are written there too and read from
+there; `list_handoffs` keeps listing agent notes only (`conversation` and
+`task`), so a coding-app note never shows twice. The project brief's "latest
+handoff" is the newest note of agents and coding apps together.
+
 Each tool answers with a short Markdown text, the same data as JSON text, and
 `structuredContent`.
 

@@ -22,6 +22,9 @@ import { all, dialect, one, run, sql, type Step } from '../repositories/sql-step
 import { forUpdate, nowIsoText } from '../db/pg/dialect.js';
 import { orderedId } from '../repositories/ordered-id.js';
 import { getAgentDir } from './agent-files.js';
+import { storeP4Enabled } from './store-p4.js';
+import { appendVersion, createPersonalityTextProposal, currentPersonalityStep, personalityTextStep, putPersonalityTextStep, PersonalityProposalError } from './personality-store.js';
+import { writePersonalityView } from './personality-record.js';
 
 export const EVOLUTION_PROPOSAL_KINDS = ['prompt_append', 'personality_text'] as const;
 export type EvolutionProposalKind = (typeof EVOLUTION_PROPOSAL_KINDS)[number];
@@ -133,7 +136,19 @@ function* targetContent(agentId: string, kind: EvolutionProposalKind): Step<stri
   const d = yield* dialect();
   const agent = yield* one<{ system_prompt: string | null }>(`SELECT system_prompt FROM agents_config WHERE id = ?${forUpdate(d)}`, agentId);
   if (!agent) return null;
+  // STORE-MAP-01 P4 (G3): both kinds change the personality record's text; system_prompt is the owner's alone.
+  if (storeP4Enabled()) return yield* personalityTextStep((yield* currentPersonalityStep(agentId))?.textHash ?? null);
   return kind === 'prompt_append' ? (agent.system_prompt ?? '') : readPersonalitySync(agentId);
+}
+
+/** P4: the new text becomes a version of the personality record (source 'evolution'), in the caller's transaction. */
+function* setRecordText(agentId: string, text: string, by: string, note: string): Step<void> {
+  const current = yield* currentPersonalityStep(agentId, { lock: true });
+  if (!current) throw new EvolutionProposalError(404, 'Agent not found', 'not_found');
+  yield* appendVersion(agentId, by, {
+    traits: current.traits, preset: current.preset, dialect: current.dialect, locked: current.locked, lockedTraits: current.lockedTraits,
+    source: 'evolution', basedOnVersion: current.version || null, note, textHash: yield* putPersonalityTextStep(text),
+  });
 }
 
 // --- validation -------------------------------------------------------------
@@ -186,7 +201,8 @@ export interface NewEvolutionProposal {
 
 export type CreateOutcome =
   | { status: 'proposed'; proposal: EvolutionProposal }
-  | { status: 'skipped'; reason: 'agent_not_found' | 'pending_exists' | 'too_many_pending'; proposalId?: string };
+  | { status: 'personality_proposed'; proposalId: string }
+  | { status: 'skipped'; reason: 'agent_not_found' | 'pending_exists' | 'too_many_pending' | 'owner_instructions_only'; proposalId?: string };
 
 /**
  * File a pending proposal. Nothing about the agent changes. The same text
@@ -200,6 +216,20 @@ export async function createEvolutionProposal(agentId: string, input: NewEvoluti
   const confidence = typeof input.confidence === 'number' && Number.isFinite(input.confidence) ? input.confidence : null;
   const insightType = typeof input.insightType === 'string' ? input.insightType.slice(0, 40) : null;
   const id = orderedId(); // sorts in creation order (list ties on created_at)
+  // STORE-MAP-01 P4 (G3, T7d): Evolution suggests a personality text change in Personality review
+  // (applied as a version only when the owner agrees); it never adds to the owner's instructions.
+  if (storeP4Enabled()) {
+    if (input.kind === 'prompt_append') return { status: 'skipped', reason: 'owner_instructions_only' };
+    const base = await sql().read((function* () { const c = yield* currentPersonalityStep(agentId); return c ? yield* personalityTextStep(c.textHash) : null; })());
+    if (base === null) return { status: 'skipped', reason: 'agent_not_found' };
+    try {
+      const p = await createPersonalityTextProposal(agentId, { text: base + proposedText, reason: `${title}: ${reason}`.slice(0, 1000), evidence: insightType ? [`insight:${insightType}`] : [] }, 'evolution', createdBy, 'evolution_text');
+      return { status: 'personality_proposed', proposalId: p.id };
+    } catch (err) {
+      if (err instanceof PersonalityProposalError) return { status: 'skipped', reason: err.code === 'too_many_pending' ? 'too_many_pending' : 'pending_exists' };
+      throw err;
+    }
+  }
   return sql().tx(function* (): Step<CreateOutcome> {
     // The agent row is locked (PostgreSQL): the dedup and the pending limit
     // are decided by one writer at a time.
@@ -279,7 +309,9 @@ export async function approveEvolutionProposal(
     `, historyId, agentId, HISTORY_TYPE[p.kind], `Approved proposal: ${p.title}`.slice(0, 300), before, after, p.reason,
       JSON.stringify([]));
     yield* run('UPDATE evolution_proposals SET applied_history_id = ? WHERE id = ? AND agent_id = ?', historyId, id, agentId);
-    if (p.kind === 'prompt_append') {
+    if (storeP4Enabled()) {
+      yield* setRecordText(agentId, after, decidedBy, `Evolution: ${p.title}`.slice(0, 300));
+    } else if (p.kind === 'prompt_append') {
       yield* run('UPDATE agents_config SET system_prompt = ?, updated_at = ? WHERE id = ?', after, new Date().toISOString(), agentId);
     } else {
       writePersonalitySync(agentId, after); // last step: a throw rolls everything back
@@ -287,6 +319,7 @@ export async function approveEvolutionProposal(
     return (yield* proposalStep(agentId, id))!;
   });
   if (!proposal) throw new EvolutionProposalError(409, 'The target changed after this proposal was made; it was marked stale', 'stale');
+  if (storeP4Enabled()) await writePersonalityView(agentId).catch(() => {});
   return { proposal, historyId };
 }
 
@@ -341,12 +374,15 @@ export async function rollbackEvolutionHistory(agentId: string, evolutionId: str
     const res = yield* run(`UPDATE agent_evolution_history SET status = 'rolled_back', rolled_back_at = ? WHERE id = ? AND status != 'rolled_back'`,
       new Date().toISOString(), evolutionId);
     if (res.changes !== 1) throw new EvolutionProposalError(409, 'Evolution already rolled back', 'already_rolled_back');
-    if (kind === 'prompt_append') {
+    if (storeP4Enabled()) {
+      yield* setRecordText(agentId, h.before_value ?? '', 'owner', `Evolution rolled back: ${evolutionId}`);
+    } else if (kind === 'prompt_append') {
       yield* run('UPDATE agents_config SET system_prompt = ?, updated_at = ? WHERE id = ?', h.before_value ?? '', new Date().toISOString(), agentId);
     } else {
       writePersonalitySync(agentId, h.before_value ?? '');
     }
     return type;
   });
+  if (storeP4Enabled()) await writePersonalityView(agentId).catch(() => {});
   return { evolutionId, type };
 }

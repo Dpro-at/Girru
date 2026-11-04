@@ -45,8 +45,13 @@ import { purgePgIndexStep } from './indexer-pg.js';
 import { forgetMemoryGraphStep } from './graph/store.js';
 import { dropContextCache } from './context/cache.js';
 import { clearEmbeddingCache } from './embedding.js';
+import { forgetRecallIndex } from './recall-index.js';
+import { recordMemoryForget } from './forget-ledger.js';
+import { storeP9Enabled } from '../services/store-p9.js';
+import { PROJECT_SUMMARY_TOPIC } from './project-summary.js';
 import { DEFAULT_MEMORY_CONFIG, type Memory, type MemoryType } from './types.js';
 import { v4 as uuidv4 } from 'uuid';
+import { forgetTrustStep } from './quality/trust.js';
 
 export interface ForgetResult {
   memoryId: string;
@@ -118,13 +123,18 @@ function* scrubProposals(userId: string, id: string, texts: string[], actor: str
   const d = yield* dialect();
   const cancelled: string[] = [];
   // Locked (PostgreSQL): a decision on one of them waits, or has already won.
-  const rows = yield* all<{ id: string; status: string; changes: string }>(
-    `SELECT id, status, changes FROM memory_file_proposals WHERE user_id = ? ORDER BY id${forUpdate(d)}`, userId);
+  const rows = yield* all<{ id: string; status: string; changes: string; reasons: string | null }>(
+    `SELECT id, status, changes, reasons FROM memory_file_proposals WHERE user_id = ? ORDER BY id${forUpdate(d)}`, userId);
   for (const row of rows) {
-    if (!mentions(row.changes, id, texts)) continue;
+    // P9 (M2): a lesson proposal made from this memory (its text may be another one's wording).
+    const fromLesson = typeof row.reasons === 'string' && row.reasons.includes(`lesson-from:${id}`);
+    if (!fromLesson && !mentions(row.changes, id, texts)) continue;
     let changes: any[];
     try { changes = JSON.parse(row.changes); } catch { changes = []; }
-    const r = redactChanges(Array.isArray(changes) ? changes : [], id, texts);
+    const list = Array.isArray(changes) ? changes : [];
+    const r = fromLesson
+      ? { changes: list.map((c: any) => ({ op: c?.op, ...(c?.id ? { id: c.id } : {}), redacted: true })), touched: true }
+      : redactChanges(list, id, texts);
     if (!r.touched) continue;
     if (row.status === 'pending') {
       yield* run(`UPDATE memory_file_proposals SET changes = ?, status = 'cancelled', decided_by = ?, decided_at = ${nowIsoText(d)}, note = 'cancelled: a memory it touched was forgotten' WHERE id = ?`,
@@ -150,6 +160,30 @@ function* scrubSummaries(userId: string, id: string, texts: string[]): Step<void
     }
     yield* run('UPDATE memory_weekly_summaries SET digest = ?, text = ?, model_text = NULL, model = NULL WHERE id = ?',
       JSON.stringify(digest), renderDigest(digest), row.id);
+  }
+}
+
+/**
+ * STORE-MAP-01 P9 (M2, M7): what was built from the forgotten memory goes too.
+ *  - a suggested or dismissed rule made from it as a repeated lesson (an
+ *    accepted rule is the owner's own and stays);
+ *  - every version of its project's summary, current and replaced (they quote
+ *    memories); the weekly job writes a new one from what is left.
+ * Runs whatever the switch says, so rows written while P9 was on never outlive a forget.
+ */
+function* scrubQualityStep(userId: string, id: string, drawer: DrawerRef, texts: readonly string[]): Step<void> {
+  if (yield* tableExists('agent_rules')) {
+    const lesson = `source = 'agent' AND suggested_by IS NULL AND status IN ('suggested', 'dismissed') AND reason LIKE '%lesson:%'`;
+    yield* run(`DELETE FROM agent_rules WHERE ${lesson} AND reason LIKE ?`, `%${id}%`);
+    for (const t of texts) yield* run(`DELETE FROM agent_rules WHERE ${lesson} AND text = ?`, t.replace(/\s+/g, ' ').trim());
+  }
+  if (drawer.kind !== 'project') return;
+  const rows = yield* all<{ id: string }>(
+    'SELECT id FROM memories WHERE user_id = ? AND drawer_kind = ? AND drawer_key = ? AND topic_key = ? AND id <> ?',
+    userId, drawer.kind, drawer.key || '', PROJECT_SUMMARY_TOPIC, id);
+  for (const r of rows) {
+    yield* run('DELETE FROM memory_versions WHERE memory_id = ? AND user_id = ?', r.id, userId);
+    yield* run('DELETE FROM memories WHERE id = ? AND user_id = ?', r.id, userId);
   }
 }
 
@@ -203,7 +237,7 @@ export async function forgetMemory(userId: string, memoryId: string, actor: stri
 
   // Freed pages are zeroed so deleted text does not linger in the file (SQLite).
   await sqlitePragma('secure_delete = ON');
-  const done = await sql().tx(function* (): Step<{ drawer: DrawerRef; types: string[]; cancelled: string[] } | null> {
+  const done = await sql().tx(function* (): Step<{ drawer: DrawerRef; types: string[]; cancelled: string[]; texts: string[] } | null> {
     const live = yield* storage.getOwnedStep(userId, memoryId);
     const history = yield* all<{ drawer_kind: string; drawer_key: string; type: string | null; content: string | null; change: string }>(
       `SELECT drawer_kind, drawer_key, type, content, change FROM memory_versions WHERE user_id = ? AND memory_id = ? ORDER BY version`, userId, memoryId);
@@ -231,12 +265,19 @@ export async function forgetMemory(userId: string, memoryId: string, actor: stri
     yield* removeRelated(memoryId);
     yield* forgetMemoryGraphStep(userId, memoryId); // CORE-MEM-GRAPH: attachments + orphan links
     yield* scrubSummaries(userId, memoryId, texts);
-    return { drawer, types, cancelled };
+    yield* scrubQualityStep(userId, memoryId, drawer, texts);
+    yield* forgetTrustStep(userId, memoryId); // P9b: trust, sources and the question it answered
+    return { drawer, types, cancelled, texts };
   });
   if (!done) return null;
+  // P9 (PRIV4): ids and keyed hashes only, outside the database, re-applied after a restore.
+  if (storeP9Enabled()) {
+    try { recordMemoryForget(userId, memoryId, done.texts); } catch (err) { console.warn('[Memory] Forget ledger write failed:', (err as Error).message); }
+  }
   // MEM-CACHE-01: no cached context or vector keeps the forgotten text in RAM.
   dropContextCache(userId);
   clearEmbeddingCache();
+  forgetRecallIndex(userId); // P9: nor does the recall index
 
   // Outside the database, after the commit: index file (SQLite), readable
   // copies, exports (best effort, but each is attempted; the DB no longer
@@ -275,5 +316,24 @@ export async function forgetAll(userId: string, actor: string, drawer?: DrawerRe
     const r = await forgetMemory(userId, id, actor);
     if (r) results.push(r);
   }
+  // P9b (MD8): forgetting everything also forgets the questions the agents asked.
+  if (!drawer && await sql().read(tableExists('memory_open_questions')).catch(() => false)) {
+    await sql().read(run('DELETE FROM memory_open_questions WHERE user_id = ?', userId));
+  }
   return { forgotten: results.length, results };
+}
+
+/**
+ * STORE-MAP-01 P9 (PRIV6): forget a person's drawer of this user (every
+ * memory in it and their history). With P9 on the forget ledger gets one
+ * 'person' line, so a restore forgets the drawer again.
+ */
+export async function forgetPersonMemories(userId: string, personKey: string, actor: string): Promise<{ forgotten: number; results: ForgetResult[] }> {
+  if (typeof personKey !== 'string' || !ID.test(personKey)) return { forgotten: 0, results: [] };
+  const out = await forgetAll(userId, actor, { kind: 'people', key: personKey });
+  if (storeP9Enabled()) {
+    const { recordForgets } = await import('./forget-ledger.js');
+    try { recordForgets([{ userId, memoryId: personKey, kind: 'person' }]); } catch (err) { console.warn('[Memory] Forget ledger write failed:', (err as Error).message); }
+  }
+  return out;
 }

@@ -7,13 +7,22 @@ import {actorOf} from '../../auth/auth-gate.js';
 import {requireOwner,ScopeError} from '../../repositories/scope.js';
 import {PersonalityLibrary,LibraryError} from '../../services/personality-library.js';
 import {blend,validateProfile} from '../../services/personality-library-profile.js';
+import {storeP4Enabled} from '../../services/store-p4.js';
+import {writePersonalityView} from '../../services/personality-record.js';
+/** STORE-MAP-01 P4 (T7): after a library change the PERSONALITY.md view follows the record (it did not before). */
+async function refreshViews(r:any,url:string){
+ if(!storeP4Enabled())return;
+ const agentId=(r.params as {agentId?:string}).agentId;
+ const ids=agentId?[agentId]:url==='/api/personality-library/:id'?(await sql().read(all<{agent_id:string}>('SELECT agent_id FROM agent_personality_links WHERE personality_id=?',(r.params as {id:string}).id))).map(x=>x.agent_id):[];
+ for(const id of ids)await writePersonalityView(id).catch(()=>{});
+}
 export async function personalityLibraryRoutes(app:FastifyInstance){
  const store=new PersonalityLibrary();
  const previews=new Set<string>();
  const owner=(r:any)=>{const a=requireOwner(actorOf(r));if(a.kind!=='user'||!a.userId)throw new ScopeError(403,'Forbidden');return a.userId;};
  const opts={config:{access:'owner' as const},bodyLimit:48000}; // a blend body carries two full profiles
  const fail=(reply:any,e:unknown)=>reply.code(e instanceof ScopeError?e.status:e instanceof LibraryError?e.status:503).send({code:e instanceof ScopeError?'forbidden':e instanceof LibraryError?e.code:'library_unavailable'});
- const route=(method:'GET'|'POST'|'PUT',url:string,action:(r:any,actor:string)=>Promise<unknown>)=>app.route({method,url,...opts,handler:async(r,reply)=>{try{const actor=owner(r);const result=await action(r,actor);if(method!=='GET')logAudit({event_type:'data.update',event_category:'data_modification',severity:'info',user_id:actor,resource_type:'personality',resource_id:(r.params as {id?:string;agentId?:string}).id??(r.params as {agentId?:string}).agentId??'library',action:url,success:true});return result;}catch(e){return fail(reply,e);}}});
+ const route=(method:'GET'|'POST'|'PUT',url:string,action:(r:any,actor:string)=>Promise<unknown>)=>app.route({method,url,...opts,handler:async(r,reply)=>{try{const actor=owner(r);const result=await action(r,actor);if(method!=='GET')await refreshViews(r,url);if(method!=='GET')logAudit({event_type:'data.update',event_category:'data_modification',severity:'info',user_id:actor,resource_type:'personality',resource_id:(r.params as {id?:string;agentId?:string}).id??(r.params as {agentId?:string}).agentId??'library',action:url,success:true});return result;}catch(e){return fail(reply,e);}}});
  route('GET','/api/personality-library',async()=>{await store.initialize();return {personalities:await store.list()};});
  route('GET','/api/personality-library/team',async()=>store.team());
  route('POST','/api/personality-library/blend',async r=>{const b=r.body;if(!b||Object.keys(b).some(k=>!['a','b','weight'].includes(k)))throw new LibraryError('invalid_input');return {profile:blend(validateProfile(b.a),validateProfile(b.b),b.weight)};});

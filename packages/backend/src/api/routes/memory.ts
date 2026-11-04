@@ -17,6 +17,7 @@ import { ScopeError, sendScopeError } from '../../repositories/scope.js';
 import { MemoryCursorError } from '../../memory/display-page.js';
 import { TopicKeyError, normalizeTopicKey, suggestTopicKey } from '../../memory/topic-key.js';
 import { TopicKeyTakenError } from '../../memory/storage.js';
+import { MemoryVersionConflictError } from '../../memory/learning.js';
 
 const MAX_CONTENT = 50_000;
 const MAX_METADATA_JSON = 64 * 1024;
@@ -302,15 +303,19 @@ export async function memoryRoutes(fastify: FastifyInstance) {
         }
       }
 
+      // STORE-MAP-01 P3 (FD3e): `expectedVersion` refuses an edit made on an older version.
+      const rawVersion = isPlainObject(request.body) ? request.body.expectedVersion : undefined;
+      if (rawVersion !== undefined && !(Number.isInteger(rawVersion) && (rawVersion as number) >= 0)) return reply.code(400).send({ error: 'expectedVersion must be a whole number' });
       try {
         // CORE-05: baseline + new version, actor = the caller.
-        const updated = await memoryRepo.update(actorOf(request), id, updates, 'api');
+        const updated = await memoryRepo.update(actorOf(request), id, updates, 'api', rawVersion as number | undefined);
 
         return {
           success: true,
           memory: updated
         };
       } catch (err: any) {
+        if (err instanceof MemoryVersionConflictError) return reply.code(409).send({ error: err.message, code: 'version_conflict', current: err.current });
         return reply.code(404).send({ error: 'Memory not found' });
       }
     }

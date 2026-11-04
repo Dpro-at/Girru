@@ -6,7 +6,7 @@ import type { ChatSearchController, ChatSearchState } from './chat-search';
 import { validQuery } from './chat-search-contract.js';
 import { SearchResults } from './ChatSearch';
 import { UiIcon } from './ui-icons';
-import { ContextMenu, Notice, useMenu } from './desktop-ui';
+import { ContextMenu, Notice, Sheet, useMenu } from './desktop-ui';
 import type { MenuItem } from './desktop-ui';
 import { ContinueElsewhere, canRevealFolder, openChatWindow, revealFolder } from './chat-actions';
 import { CHAT_SECTIONS, DEFAULT_PREFS, moveSection, shortTime } from './chat-sidebar-prefs';
@@ -182,6 +182,11 @@ export function ConversationList({ controller, onOpen, search, onNewChat, onAddT
     {header}
     {continueFrom && <ContinueElsewhere controller={controller} chatId={continueFrom} onDone={() => { setContinueFrom(null); onOpen(); }}/>}
     {projectForm && <ProjectSheet controller={controller} id={projectForm.id} onClose={() => setProjectForm(null)}/>}
+    {!projectForm && s.adoptOffer && <Sheet title={`Start ${s.adoptOffer.name} empty?`} onClose={() => void controller.answerAdoptOffer(false)}
+      actions={<><button type="button" onClick={() => void controller.answerAdoptOffer(true)}>Use its memory</button><button type="button" className="primary" autoFocus onClick={() => void controller.answerAdoptOffer(false)}>Start empty</button></>}>
+      <p>A project called {s.adoptOffer.name} was deleted earlier. Its memory ({s.adoptOffer.memories === 1 ? '1 memory' : `${s.adoptOffer.memories} memories`}) is still kept.</p>
+      <p className="fine-print">Start empty keeps the old memory apart (you find it in Memory). Use its memory moves it to this project.</p>
+    </Sheet>}
     {editing ? <SidebarEditor prefs={prefs} onDone={p => { setPrefs(p); setEditing(false); }} onCancel={() => setEditing(false)}/>
       : searching ? <SearchResults state={found} projectName={projectName} onOpen={openHit}/>
       : !s.conversations.length ? <p className="session-empty">No chats yet. Start one with New chat.</p>

@@ -7,12 +7,14 @@ import type {MenuItem} from './desktop-ui';
 import {UiIcon} from './ui-icons';
 import type {UiIconName} from './ui-icons';
 import {DocumentEditor} from './DocumentEditor';
+import {NotesOutsideChip} from './AgentNotes';
 import {LIBRARY_BYTES,fileName as validFileName,libraryPath} from './agent-library-contract.js';
 
 type Kind='who'|'mind'|'knowledge';
 type Entry={name:string;kind:Kind;size:number;read:boolean};
 type Removed={id:string;name:string;removedAt:string|null};
-type Open={name:string;kind:Kind;content:string;hash:string|null;managed:string|null;redacted:boolean;read:boolean};
+// STORE-MAP-01 P4 (T7a): Who it is is the personality record; `version` is the record's version shown.
+type Open={name:string;kind:Kind;content:string;hash:string|null;managed:string|null;redacted:boolean;read:boolean;version?:number};
 type Version={id:string;savedAt:string|null;size:number};
 const WORDS:Record<Kind,string>={who:'Who it is',mind:'What it keeps in mind',knowledge:''};
 const titleOf=(e:{name:string;kind:Kind})=>e.kind==='knowledge'?e.name:WORDS[e.kind];
@@ -43,9 +45,9 @@ export function AgentFiles({client,agentId,name,onDone,onPersonality}:{client:Se
   setState('saving');
   try{
    const r=await req('PUT',libraryPath(agentId,'/file'),{name:f.name,content:text,expectedHash:f.hash});
-   const b=r.body as {hash?:string|null;redacted?:boolean;code?:string};
+   const b=r.body as {hash?:string|null;redacted?:boolean;code?:string;version?:number};
    if(r.status!==200){setState(b?.code==='changed'?'changed':'error');if(b?.code!=='changed')setProblem(say(b?.code));return false;}
-   const before=f.content;const next={...f,content:text,hash:b.hash??null,redacted:!!b.redacted};setOpen(next);setState('saved');
+   const before=f.content;const next={...f,content:text,hash:b.hash??null,redacted:!!b.redacted,version:b.version??f.version};setOpen(next);setState('saved');
    // The saved text differs from the draft: show what was kept, then say why.
    if(b.redacted)void pick(f.name).then(()=>{setState('saved');setProblem('Values that looked like passwords or keys were hidden.');});
    if(undoable)onDone(`${titleOf(f)} saved`,async()=>{const cur=latest.current.open;if(cur?.name!==f.name)return;if(await save(before,cur,false)){setDraft(before);onDone('Change undone');}});
@@ -115,9 +117,10 @@ export function AgentFiles({client,agentId,name,onDone,onPersonality}:{client:Se
       <IconButton icon="more" label="More for this file" onClick={e=>{const entry=list.files.find(f=>f.name===open.name);if(entry)menu.at(e,items(entry));}}/></div>
      {state==='changed'&&<p className="ag-alert af-changed" role="alert"><UiIcon name="alert" size={14}/>{SAY.changed}<button type="button" onClick={()=>void loadLatest(false)}>Load latest</button><button type="button" onClick={()=>void loadLatest(true)}>Keep mine</button></p>}
      {open.kind==='who'&&open.managed&&<details className="af-managed"><summary><UiIcon name="smile" size={14}/><b>Written by Personality</b><small>Show the settings it wrote</small></summary>{onPersonality&&<button type="button" className="link-button" onClick={onPersonality}>Change it in Personality</button>}<pre>{open.managed}</pre></details>}
+     {open.kind==='mind'&&<NotesOutsideChip client={client} agentId={agentId} onDone={onDone} onSettled={()=>void pick('MEMORY.md')}/>}
      {open.redacted&&<p className="af-note"><UiIcon name="lock" size={14}/>Values that looked like passwords or keys are hidden in this file.</p>}
      <DocumentEditor key={open.name+(open.hash??'')} inline title={`${name} · ${titleOf(open)}`} files={[{id:open.name,name:open.name,content:draft}]} maxLength={open.kind==='mind'?32768:LIBRARY_BYTES} onChange={(_,text)=>edit(text)} onClose={()=>{}}/>
-     <p className="af-status" role="status">{state==='saving'?'Saving…':state==='saved'?'Saved · ⌘Z undoes':state==='error'?'Not saved':' '}{open.kind==='who'&&open.managed?<span>The part written by Personality is not saved from here</span>:null}</p>
+     <p className="af-status" role="status">{state==='saving'?'Saving…':state==='saved'?(open.kind==='who'&&open.version?`Saved as version ${open.version} of its personality · ⌘Z undoes`:'Saved · ⌘Z undoes'):state==='error'?'Not saved':' '}{open.kind==='who'&&open.managed?<span>The part written by Personality is not saved from here</span>:null}</p>
     </>:<div className="ag-empty"><UiIcon name="file" size={28}/><p>Select a file to read or change it.</p></div>}
    </div>
   </div>

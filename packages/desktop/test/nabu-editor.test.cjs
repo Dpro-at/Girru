@@ -182,6 +182,11 @@ test('opening a chat project confines files, rejects escapes and reserves the ac
  const target=await f.ipc.handlers.get('girru:code-target')(event);assert.equal(target.folder,fs.realpathSync.native(root));assert.equal(target.file,fs.realpathSync.native(path.join(root,'review.txt')));
  assert.equal(f.ipc.handlers.get('girru:code-target-done')(event,target.id+1),false);assert.equal(f.ipc.handlers.get('girru:code-target-done')(event,target.id),true);
  assert.equal(f.ipc.handlers.get('girru:code-target')(event),null);
+ // CODE-OPEN-01: a line, the review note and read-only travel with one file; odd options are refused.
+ for(const options of [{},{line:0},{line:1.5},{note:false},{other:1},{line:3,readOnly:'yes'}])assert.equal(await open(f.event(),{...body,options}),null,JSON.stringify(options));
+ assert.equal(await open(f.event(),{...body,file:null,options:{line:3}}),null,'a folder alone has no line');
+ assert.equal((await open(f.event(),{...body,options:{line:42,note:true,readOnly:true}})).mode,'code');
+ const at=await f.ipc.handlers.get('girru:code-target')(event);assert.equal(at.line,42);assert.equal(at.note,true);assert.equal(at.readOnly,true);
  await f.controller.stop();
 });
 

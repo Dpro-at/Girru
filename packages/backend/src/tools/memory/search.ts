@@ -11,6 +11,8 @@ import type { ToolExecutionContext } from '../types.js';
 import { toolMemoryUser } from './scope.js';
 import { repositories } from '../../repositories/index.js';
 import { toolMemoryActor } from '../../repositories/actor.js';
+import { storeP9bEnabled } from '../../services/store-p9b.js';
+import { bandOf, confidenceOf, trustRows } from '../../memory/quality/trust.js';
 
 interface MemorySearchParams {
   /** Search query */
@@ -161,9 +163,14 @@ Returns:
       // CORE-03: the run's own user and only the drawers selected for this turn
       // (B1.6: enforced by the memory repository from the tool call's actor).
       if (!toolMemoryUser(context)) throw new Error('No user for this memory search');
+      // STORE-MAP-01 P10 (XP2 on the native door): a call without a query is refused and says what to fix.
+      if (typeof params.query !== 'string' || !params.query.trim()) {
+        return { content: [{ type: 'text', text: 'Error: query is required (the words to look for)' }], error: 'query is required' };
+      }
 
       // Search memories using new Multi-Tier Memory API
-      const results = await repositories.memory.search(await toolMemoryActor(context), {
+      const actor = await toolMemoryActor(context);
+      const results = await repositories.memory.search(actor, {
         query: params.query,
         type: params.type,
         layer: params.layer,
@@ -184,6 +191,15 @@ Returns:
           const memoryTags = Array.isArray(m.metadata?.tags) ? (m.metadata!.tags as unknown[]) : [];
           return params.tags!.some((tag) => memoryTags.includes(tag));
         });
+      }
+
+      // STORE-MAP-01 P10 live (XP3): a model often adds a guessed filter (type "fact" for a memory saved as
+      // "conversation"); when the filters hide every match, the words are searched again without them, and the
+      // answer says so.
+      let widened = false;
+      if (filtered.length === 0 && storeP9bEnabled() && (params.type || params.layer || params.minImportance || params.tags?.length)) {
+        filtered = (await repositories.memory.search(actor, { query: params.query, limit: params.limit || 5 })).map((r) => r.memory);
+        widened = filtered.length > 0;
       }
 
       if (filtered.length === 0) {
@@ -208,8 +224,13 @@ Returns:
         };
       }
 
+      // STORE-MAP-01 P9b (MD3): recall output shows how far each memory can be trusted.
+      const trust = storeP9bEnabled() && actor.userId ? await trustRows(actor.userId, filtered).catch(() => null) : null;
+      const confidence = (m: (typeof filtered)[number]) => (trust ? confidenceOf(m, trust) : null);
+
       // Format response text
-      let responseText = `Found ${filtered.length} relevant ${filtered.length === 1 ? 'memory' : 'memories'} for: "${params.query}"\n\n`;
+      let responseText = widened ? 'No memory matched the filters; these match the words without them.\n' : '';
+      responseText += `Found ${filtered.length} relevant ${filtered.length === 1 ? 'memory' : 'memories'} for: "${params.query}"\n\n`;
 
       filtered.forEach((memory, index) => {
         const savedDate = new Date(memory.createdAt).toLocaleDateString();
@@ -235,7 +256,8 @@ Returns:
           : 'Private';
 
         responseText += `${index + 1}. ${memory.content}\n`;
-        responseText += `   Type: ${memory.type} | Importance: ${importance}/10 | Layer: ${layerDisplay}\n`;
+        const c = confidence(memory);
+        responseText += `   Type: ${memory.type} | Importance: ${importance}/10 | Layer: ${layerDisplay}${c ? ` | Confidence: ${bandOf(c.confidence)}${c.verified ? ' (verified)' : ''}` : ''}\n`;
         responseText += `   Visibility: ${visibilityDisplay}`;
 
         // Show team-critical flag
@@ -260,7 +282,7 @@ Returns:
       });
 
       // Include helpful tips if filters were applied
-      if (params.type || params.layer || params.minImportance || params.tags || params.visibility || params.teamCriticalOnly || params.sourceAgentId) {
+      if (!widened && (params.type || params.layer || params.minImportance || params.tags || params.visibility || params.teamCriticalOnly || params.sourceAgentId)) {
         responseText += '---\n';
         responseText += 'Filters applied:\n';
         if (params.type) responseText += `- Type: ${params.type}\n`;
@@ -284,6 +306,7 @@ Returns:
           success: true,
           count: filtered.length,
           query: params.query,
+          ...(widened ? { widened: true } : {}),
           memories: filtered.map((m: any) => ({
             id: m.id,
             content: m.content,
@@ -298,6 +321,7 @@ Returns:
             createdAt: m.createdAt,
             accessCount: m.accessCount,
             tags: m.metadata?.tags || [],
+            ...(trust ? { confidence: confidence(m)!.confidence, verified: confidence(m)!.verified } : {}),
           })),
         },
       };

@@ -28,11 +28,10 @@ tools/
 │   ├── interact.ts
 │   └── index.ts
 │
-├── memory/                     # 4 tools: save, search, reflect, stats
-│   ├── save.ts
-│   ├── search.ts
-│   ├── memory-reflect.tool.ts
-│   ├── memory-stats.tool.ts
+├── memory/                     # the agent's memory tools (see "Memory Tools" below)
+│   ├── save.ts, search.ts, recall.ts, edit.ts, forget.ts, move.ts
+│   ├── review.ts, scopes.ts, graph.ts, doctor.ts, desktop.ts
+│   ├── bridge.ts, project-tech.ts, project-access.ts
 │   └── index.ts
 │
 ├── desktop/                    # 1 tool: desktop_control
@@ -104,14 +103,32 @@ return weather.join('\n');
 | `browser_extract` | browser/extract.ts | Extract structured data from pages | 3 examples |
 | `browser_interact` | browser/interact.ts | Click, type, fill forms | 2 examples |
 
-### Memory Tools (4)
+### Memory Tools — one memory contract
 
-| Tool | File | Description | Examples |
-|------|------|-------------|----------|
-| `memory_save` | memory/save.ts | Persist facts to agent memory | 3 examples |
-| `memory_search` | memory/search.ts | Search stored memories | 3 examples |
-| `memory_reflect` | memory/memory-reflect.tool.ts | Analyze patterns in memories | 2 examples |
-| `memory_stats` | memory/memory-stats.tool.ts | Show memory usage statistics | 1 example |
+Every caller (Girru's own agents, API and local models, and coding apps over MCP) uses the
+same five verbs, defined once in [`memory/contract.ts`](../memory/contract.ts). Both doors are
+generated from that one definition, and the server checks every argument itself:
+
+| Verb | Tool name | Meaning |
+|------|-----------|---------|
+| recall | `memory_recall` | Search the memory this caller may read |
+| save | `memory_save` | A lasting fact, with an optional topic key (one fact per topic) |
+| supersede | `memory_supersede` | A new text that replaces one memory; the old one stays as history |
+| handoff | `memory_handoff` | Done / left / next / questions for the next agent |
+| propose | `memory_propose` | A fact, decision or correction the owner reviews first |
+
+- **Coding apps (MCP, `dpro-memory`):** the five verbs plus the read tools `project_brief`,
+  `pinned_facts`, `latest_handoff`, `memory_search` and `project_design`, and the write tools
+  `memory_propose` and `handoff_write`. See [`memory/bridge/mcp-server.ts`](../memory/bridge/mcp-server.ts).
+- **Native tools:** the contract's native definitions are not added to every turn (that would
+  grow the prompt of local models); they load on demand.
+- **The project brief** (`.girru/brief.md`, the Girru section of `AGENTS.md`, the `project_brief`
+  answer) explains the task file, when to resume with `project_brief` / `latest_handoff`, when to
+  call `handoff_write`, and lists the project's topics by title only; details come from
+  `memory_search`.
+- **Owner tools** in `memory/` (review, scopes, graph, doctor, trash, move, edit, forget) manage the
+  memory from the Memory window and stay owner-only or ask for approval.
+- Owner, people and personal memory never go into project files.
 
 ### Desktop Tool (1) — requires pyautogui
 
@@ -242,4 +259,4 @@ export const myTool: Tool = {
 
 - Full tool reference: [docs/TOOLS.md](../../../../docs/TOOLS.md)
 - Tool template: [TOOL_TEMPLATE.ts](./TOOL_TEMPLATE.ts)
-- System architecture: [MEMORY.md](../../../../../../.claude/projects/c--MAMP-htdocs-agent/memory/MEMORY.md)
+- Storage map: [docs/architecture/storage-map.md](../../../../docs/architecture/storage-map.md)

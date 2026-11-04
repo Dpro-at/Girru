@@ -36,12 +36,13 @@ npm start
 ## Local app build
 
 ```sh
-npm run stage      # copies Node, backend + modules, UI build into payload/
-npm run stage:code # copies the Code editor (Nabu, ../../../nabu-code) into nabu-runtime/; optional
+node ../core-ui/scripts/prepare-genvr.cjs <3d-world-sdk-<version>.tgz>  # once: the pinned GenVR SDK (version in core-ui/genvr-sdk.json)
+npm run stage      # copies Node, backend + modules, UI build and the GenVR SDK into payload/
+npm run stage:code # optional: bundles the Code editor (Nabu, ../../../nabu-code) into nabu-runtime/
 npm run dist:mac   # DMG + ZIP in release/  (dist:win = NSIS, dist:linux = AppImage)
 ```
 
-Without `nabu-runtime/` the app builds without the Code editor. `stage:code` copies only what the editor needs at run time (~1.6 GB of a several-GB checkout): its production packages, and the built-in extensions minus the ones Girru does not use (assistant, account sign-ins, the editor's own tests).
+Every `dist:*` build first runs `scripts/check-bundle-inputs.cjs`. It stops the build when the payload has no pinned GenVR SDK, because electron-builder skips a missing folder silently and the app would open with a broken GenVR page. The Code editor is a Store app: a release builds without `nabu-runtime/`, and Girru installs Code from the Girru Store (download for this platform, SHA-256 checked, unpacked into Girru's own app folder). A developer build may still bundle it with `npm run stage:code`; the check then stops a build whose `nabu-runtime/` is only partly staged. `npm run stage` also refuses to stage without the GenVR SDK. `stage:code` copies only what the editor needs at run time (~1.6 GB of a several-GB checkout): its production packages, and the built-in extensions minus the ones Girru does not use (assistant, account sign-ins, the editor's own tests).
 
 The local payload copies every installed module (large). Release bundles with
 a pinned, checksummed Node and production-only modules come later. macOS builds

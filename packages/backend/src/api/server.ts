@@ -31,11 +31,13 @@ import { bindPhoneApi } from '../phone/ui-bridge.js';
 import { resumePendingImports, stopLocalImports } from '../memory/import/local-import.js';
 import {recoverSubscriptionProcesses,stopSubscriptionProcesses} from '../services/subscription-chat.js';
 import { getOrchestrator } from '../multi-agent/orchestrator.js';
+import { START_PROBLEM_EXIT, reportStartProblem } from '../db/layout.js';
 
 const PORT = config.port;
 const HOST = config.host;
 
-const fastify = await buildServer();
+// STORE-MAP-01 P3: the database opens inside buildServer; a start-up problem is reported for the desktop.
+const fastify = await buildServer().catch((err) => { if (reportStartProblem(err)) process.exit(START_PROBLEM_EXIT); throw err; });
 
 /** Python availability for audio features (a startup probe: skipped with background off). */
 async function probePython(): Promise<string> {
@@ -125,6 +127,8 @@ ${storageLines()}
     `);
   } catch (err) {
     fastify.log.error(err);
+    // STORE-MAP-01 P3: a start-up problem the desktop's start page can explain.
+    if (reportStartProblem(err)) process.exit(START_PROBLEM_EXIT);
     process.exit(1);
   }
 }
@@ -133,8 +137,14 @@ let shuttingDown = false;
 async function shutdown(code = 0): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
-  const deadline = setTimeout(() => process.exit(1), 20000);
+  // A restart (Store add/remove, BACKUP-01 restore) must come back as a restart even when a stream
+  // (an open chat, a live view) keeps a connection open: those are closed after 5 s, and a
+  // stop that still runs out of time keeps the restart code, so the desktop starts Girru again
+  // instead of showing "Girru could not start" (Mohamed's Store test, 2026-11-04).
+  const deadline = setTimeout(() => process.exit(code === RESTART_EXIT_CODE ? code : 1), 20000);
   deadline.unref();
+  const force = setTimeout(() => { try { (fastify.server as { closeAllConnections?: () => void }).closeAllConnections?.(); } catch { /* already closed */ } }, 5000);
+  force.unref();
   try {
     await stopSubscriptionProcesses();
     // Closing Fastify runs channel transport shutdown hooks before process exit.
@@ -142,6 +152,8 @@ async function shutdown(code = 0): Promise<void> {
     stopDiscoveryWatch();
     await stopPhoneLink();
     await stopLocalImports();
+    // MODELS-01-INSTALL: a download in progress stops; it goes on at the next start.
+    await import('../memory/helper.js').then((m) => m.stopMemoryHelper()).catch(() => undefined);
     await fastify.close();
     // B2.2b-2: audit rows still being written (PostgreSQL inserts are not
     // awaited by the request) get a short, bounded chance to land.
@@ -166,8 +178,9 @@ if (process.env[LAUNCH_TOKEN_ENV] && typeof process.send === 'function') {
     if (message && typeof message === 'object' && (message as { type?: unknown }).type === 'shutdown') void shutdown();
     // MACAPP-01: the app asks for a backup before it replaces itself with a new version.
     if (message && typeof message === 'object' && (message as { type?: unknown }).type === 'backup') {
-      void import('../services/backups.js').then(({ backUpNow }) => backUpNow('before-update'))
-        .then((b) => process.send?.({ type: 'backup-done', ok: b.checked, id: b.id, ...(b.checked ? {} : { error: 'a part did not pass its check' }) }))
+      // STORE-MAP-01 P3 (FD4a): the folder too, so the app can ask for this backup back if the update cannot finish.
+      void import('../services/backups.js').then(async ({ backUpNow, workspaceBackupsDir }) => ({ b: await backUpNow('before-update'), folder: workspaceBackupsDir() }))
+        .then(({ b, folder }) => process.send?.({ type: 'backup-done', ok: b.checked, id: b.id, folder, ...(b.checked ? {} : { error: 'a part did not pass its check' }) }))
         .catch((error: unknown) => process.send?.({ type: 'backup-done', ok: false, error: error instanceof Error ? error.message.slice(0, 200) : 'failed' }));
     }
   });

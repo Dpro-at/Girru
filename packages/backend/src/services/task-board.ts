@@ -18,6 +18,8 @@ import { orderedId } from '../repositories/ordered-id.js';
 import { all, dialect, one, run, sql, type Step } from '../repositories/sql-steps.js';
 import { nowText } from '../db/pg/dialect.js';
 import { normalizeDepartment } from './personality.js';
+import { departmentTable, storeP3Enabled } from './store-p3.js';
+import { syncDepartmentsStep } from './departments.js';
 import { BOARD_COLORS, BOARD_TEMPLATES, DEFAULT_TEMPLATE, boardTemplate, templateForDepartment } from './board-templates.js';
 
 export const PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const;
@@ -739,7 +741,8 @@ function boardDepartmentName(raw:string,key:string){
 export function syncDepartmentBoards(ownerId:string){
  return sql().tx(function*(){
   const sources=new Map<string,{key:string;name:string;display:string}>();
-  const registered=yield* all<{id:string;name:string}>('SELECT id,name FROM memory_departments WHERE owner_id = ? ORDER BY id',ownerId);
+  if(storeP3Enabled())yield* syncDepartmentsStep(ownerId); // P3: the one list first (memory's and the agents' departments)
+  const registered=yield* all<{id:string;name:string}>(`SELECT id,name FROM ${departmentTable()} WHERE owner_id = ? ORDER BY id`,ownerId);
   for(const d of registered){const key='registry:'+d.id;let name=boardDepartmentName(d.name,key);if(sources.has(name))name=name.slice(0,48)+'-'+createHash('sha256').update(key).digest('hex').slice(0,8);sources.set(name,{key,name,display:d.name});}
   // Agent configuration is the installation's company-wide team catalogue.
   const assigned=yield* all<{department:string}>('SELECT DISTINCT department FROM agents_config WHERE department IS NOT NULL AND department <> ? ORDER BY department','');

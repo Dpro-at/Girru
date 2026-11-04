@@ -3654,6 +3654,96 @@ label.setup-kind { display:flex; align-items:center; justify-content:flex-start;
 .setup-discovery-lane>.setup-discovery-particle small{flex:1;min-width:0;max-width:none;font-size:12px;line-height:1.5}
 @keyframes discovery-lane-rise{0%{opacity:0;transform:translate3d(0,18px,0)}17%{opacity:.85}42%{opacity:1;transform:translate3d(calc(var(--particle-drift)*-.5),-62px,0)}72%{opacity:.75;transform:translate3d(var(--particle-drift),-130px,0);filter:blur(0)}100%{opacity:0;transform:translate3d(calc(var(--particle-drift)*.3),-205px,0);filter:blur(2px)}}
 @media(prefers-reduced-motion:reduce){.setup-discovery-lane>.setup-discovery-particle{animation:none;opacity:.8;top:38px;bottom:auto;transform:none}}
+/* STORE-MAP-01 P3 (FD2a): Settings › Departments as the one list (reuses the specialty list and inspector). */
+.dept-one{min-height:520px}.dept-toolbar-one{min-height:52px}.dept-toolbar-note{margin-inline-end:auto;color:var(--muted);font-size:12px}.dept-look{display:inline-grid;place-items:center;border-radius:6px;background:var(--secondary);color:#fff;font-weight:650;font-size:11px;flex-shrink:0}.specialty-title-line .dept-look{font-size:18px;border-radius:10px}
+.dept-projects{display:flex;gap:4px}.dept-insp-tools{display:flex;gap:4px;margin-inline-start:auto}.dept-rename{display:flex;gap:8px;flex:1;min-width:0}.dept-rename input{flex:1;min-width:0}
+.dept-swatches{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.dept-swatch{inline-size:22px;block-size:22px;border-radius:6px;border:2px solid transparent;padding:0}.dept-swatch[aria-checked=true]{border-color:var(--text)}
+.dept-question{gap:10px;flex-wrap:wrap}.dept-question select{max-width:220px}.dept-pick{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:3px}
+/* STORE-MAP-01 P3 (FD3): replaced facts muted; trust words. */
+.dk-row[data-replaced] .dk-row-main{color:var(--muted);text-decoration:line-through;text-decoration-color:color-mix(in srgb,var(--muted) 50%,transparent)}
+.dk-trust{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.dk-trust[data-trust=imported]{color:var(--warning,#c8952a)}.dk-replaced p{display:flex;gap:6px;align-items:center}.dk-check{display:flex!important;align-items:center;gap:8px}
+/* STORE-MAP-01 P3 (FD4d): data jobs after an update. */
+.mem-jobs{border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:14px}.mem-jobs h4{margin:0 0 8px;font-size:12px}.mem-jobs ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}.mem-jobs li{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:8px;align-items:center;font-size:12px}
+/* STORE-MAP-01 P6: project files for coding apps (state chips, files in the inspector), task number + who worked on it. */
+.dk-state{white-space:nowrap;flex:none;align-self:center;background:transparent;box-shadow:inset 0 0 0 1px currentColor}.dk-state[data-tone=ok]{color:var(--mem-ok)}.dk-state[data-tone=warn]{color:var(--mem-warn)}.dk-state[data-tone=bad]{color:var(--mem-bad)}.dk-state[data-tone=mute]{color:var(--text-3)}
+.dk-question h3 .dk-state{margin-inline-start:6px;font-weight:400}
+.dk-pf-files{list-style:none;margin:0;padding:0;display:grid;gap:2px}.dk-pf-files li{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:4px 8px;align-items:start;padding:6px 4px;border-radius:6px}.dk-pf-files .dk-row-text{display:grid;gap:2px;min-inline-size:0;font-size:12.5px}.dk-pf-files .dk-row-sub{font-size:11px;color:var(--text-3)}
+.dk-pf-actions{grid-column:2/-1;display:flex;gap:6px;justify-content:flex-end}
+.dk-pf-switches{display:grid;gap:8px}.dk-insp-head .dk-icon{flex:none}
+.dk-pf-insp-head,.dk-pf-head{min-inline-size:0}.dk-pf-head{flex:1}.dk-pf-head .fine-print{display:grid;min-inline-size:0}
+.dk-pf-text{margin:0;max-block-size:280px;overflow:auto;white-space:pre-wrap;font:12px/1.5 ui-monospace,Menlo,monospace}
+.task-worked{display:grid;gap:4px;font-size:12px;color:var(--muted)}.task-worked>span{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.task-worked b{color:var(--text)}.task-number{font:12px ui-monospace,Menlo,monospace;color:var(--text-3)}
+/* STORE-MAP-01 P8 (boards P8a–P8c): T-n as the link hub, the latest handoff, the card's handoff mark, run working notes. */
+.tp-hub-wrap{position:relative;display:inline-flex}
+.tp-hub{border:0;background:var(--secondary);border-radius:5px;padding:0 6px;font:11.5px/18px ui-monospace,Menlo,monospace;color:var(--text);cursor:pointer;box-shadow:inset 0 0 0 1px var(--border)}
+.tp-hub:hover,.tp-hub[aria-expanded=true]{box-shadow:inset 0 0 0 1px var(--mem-link)}
+.tp-meta .tp-hub{color:var(--muted)}
+.tp-linked-list{position:absolute;inset-block-start:26px;inset-inline-start:0;z-index:6;width:min(420px,80vw);display:grid;gap:2px;padding:8px;border-radius:10px;background:var(--surface);border:1px solid var(--border);box-shadow:0 14px 34px #0005}
+.tp-linked-list>.fine-print{margin:0;padding:2px 8px 6px}
+.tp-linked-list [role=menuitem]{display:flex;align-items:center;gap:9px;min-height:30px;padding:0 8px;border:0;border-radius:6px;background:transparent;color:var(--text);font-size:12.5px;text-align:start}
+.tp-linked-list [role=menuitem]>svg{color:var(--muted);flex:none}.tp-linked-list [role=menuitem]>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tp-linked-list [role=menuitem] small{margin-inline-start:auto;color:var(--muted);font-size:11.5px;white-space:nowrap}
+.tp-linked-list [role=menuitem]:hover,.tp-linked-list [role=menuitem]:focus-visible{background:var(--row-hover);outline:none}
+.tp-link-button{border:0;background:transparent;padding:0;width:100%;text-align:start;cursor:pointer}.tp-link-button:disabled{cursor:default}
+.tp-linked .tp-link-end .tool{padding:2px}.tp-linked .task-number{font-size:11px;text-transform:none;letter-spacing:0}
+.tp-linked-chat{padding-inline-start:22px;min-width:0}.tp-linked-chat>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tp-linked-chat small{margin-inline-start:auto;color:var(--muted);font-size:11px;white-space:nowrap}
+.tp-linked-more{justify-self:start;padding-inline-start:22px;font-size:12px}
+.tp-handoff{display:grid;gap:6px}
+.tp-handoff-meta{display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:12px;color:var(--muted)}.tp-handoff-meta i{font-style:normal;opacity:.5}.tp-handoff-meta b{color:var(--text);font-weight:600}
+.tp-handoff-who{display:inline-flex;align-items:center;gap:5px}.tp-handoff-who b{color:var(--text);font-weight:600}
+.tp-handoff-field{display:grid;grid-template-columns:96px minmax(0,1fr);gap:8px;font-size:12.5px;line-height:1.5}
+.tp-handoff-field>span:first-child{font-size:11.5px;font-weight:600;color:var(--muted)}.tp-handoff-field>span:first-child[data-tone=ok]{color:var(--mem-ok)}.tp-handoff-field>span:first-child[data-tone=warn]{color:var(--mem-warn)}.tp-handoff-field>span:first-child[data-tone=bad]{color:var(--mem-bad)}
+.tp-handoff-field>span:last-child,.tp-handoff-field>form{display:grid;gap:2px;min-width:0;overflow-wrap:anywhere}
+.tp-handoff-files{font:11.5px/1.5 ui-monospace,Menlo,monospace;color:var(--muted)}
+.tp-handoff-blockers{display:flex!important;flex-wrap:wrap;align-items:flex-start;gap:4px 8px}.tp-handoff-blockers>span{flex-basis:100%}.tp-handoff-blockers>.tool{margin-inline-start:auto;opacity:.6}.tp-handoff-blockers>.tool:hover{opacity:1}
+.tp-handoff-edit textarea{width:100%;resize:vertical;font:inherit;font-size:12.5px}.tp-handoff-edit-end{display:flex;justify-content:flex-end;gap:6px}
+.tp-handoff-fold[aria-expanded=true] svg{transform:rotate(180deg)}
+.tp-handoff-older{list-style:none;margin:0;padding:0;display:grid}
+.tp-handoff-older li>button,.tp-handoff-older-file{display:flex;align-items:center;gap:8px;width:100%;min-height:30px;border:0;border-top:1px solid var(--border);background:transparent;padding:0;font-size:12px;color:var(--text);text-align:start}
+.tp-handoff-older li>button>svg,.tp-handoff-older-file>svg{color:var(--muted);flex:none}.tp-handoff-older span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tp-handoff-older time{margin-inline-start:auto;color:var(--muted);font-size:11.5px;white-space:nowrap}
+.task-handoff-mark{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:var(--muted)}
+.task-handoff-mark.blocked{gap:4px;color:var(--mem-warn)}.task-handoff-mark.blocked i{inline-size:6px;block-size:6px;border-radius:999px;background:currentColor}
+.mem-handoff-files{font:12px/1.5 ui-monospace,Menlo,monospace!important}
+.run-notes-line>summary{display:flex;align-items:center;gap:6px}.run-notes-line>summary small{margin-inline-start:auto}
+/* STORE-MAP-01 P9 (boards P9c, P9d): one person, personal data and sensitive chips */
+.dk-privacy{display:inline-flex;align-items:center;gap:4px}
+.dk-privacy[data-tone="data"]{background:var(--mem-link-bg);color:var(--mem-link)}
+.dk-privacy[data-tone="sensitive"]{background:var(--mem-warn-bg);color:var(--mem-warn)}
+.dk-row-sub+.dk-chips{margin-block-start:3px}
+.dk-who-line{display:flex;align-items:center;gap:8px;margin:0;font-size:12px;color:var(--text-2)}
+.dk-person-forget{display:grid;gap:14px}
+.dk-person-forget h4{display:flex;align-items:center;gap:8px;margin:0 0 6px;font-size:11.5px;font-weight:600;color:var(--text-2)}
+.dk-person-forget h4 .fine-print{margin-inline-start:auto;font-weight:400}
+.dk-person-always{display:grid;gap:4px;margin:0;padding:0;list-style:none;font-size:12.5px}
+.dk-person-always li{display:flex;align-items:center;gap:8px}
+.dk-person-mentions{display:grid;gap:8px}
+.dk-person-mentions .dk-check{align-items:flex-start!important}
+.dk-person-mentions .dk-check>span{display:grid;gap:1px;font-size:12.5px;color:var(--text)}
+.dk-facts dd .ui-icon,.dk-facts dd svg{flex:none}
+.dk-title-person{display:inline-flex;align-items:center;gap:6px;padding:2px 4px;align-self:center}
+/* STORE-MAP-01 P9b: how sure a memory is (three bars, one chip; never a number) */
+.dk-sure{display:inline-flex;align-items:flex-end;gap:2px;block-size:12px;margin-inline-end:6px;vertical-align:middle}
+.dk-sure>span{inline-size:4px;border-radius:1px;background:var(--border)}
+.dk-sure>span:nth-child(1){block-size:5px}.dk-sure>span:nth-child(2){block-size:8px}.dk-sure>span:nth-child(3){block-size:12px}
+.dk-sure[data-level="verified"]>span[data-on]{background:var(--mem-ok)}
+.dk-sure[data-level="heard-once"]>span[data-on]{background:var(--accent)}
+.dk-sure[data-level="not-checked"]>span[data-on]{background:var(--mem-warn)}
+.dk-sure-row{display:flex;align-items:center;gap:6px}
+.dk-sure-chip{display:inline-flex;align-items:center;gap:4px;flex:none;align-self:center}
+.dk-sure-chip[data-level="verified"]{background:var(--mem-ok-bg,color-mix(in srgb,var(--mem-ok) 14%,transparent));color:var(--mem-ok)}
+.dk-sure-chip[data-level="not-checked"]{background:var(--mem-warn-bg);color:var(--mem-warn)}
+.dk-row[data-done] .dk-row-main{color:var(--text-3)}
+.dk-was{color:var(--text-3);text-decoration:line-through}
+/* CODE-OPEN-01: the Open in Code icon shows on hover and on the selected row only */
+.dk-open-code{opacity:0;flex:none}
+.dk-row:hover .dk-open-code,.dk-row[aria-selected="true"] .dk-open-code,.dk-open-code:focus-visible,.dk-file-row:hover .dk-open-code,.dk-file-row:focus-within .dk-open-code{opacity:1}
+.dk-pf-files li:has(.dk-open-code){grid-template-columns:20px minmax(0,1fr) auto auto}
+.dk-pf-files li .dk-open-code{align-self:center}
+.dk-pf-files li[aria-selected]{background:var(--row-active,color-mix(in srgb,var(--accent) 10%,transparent))}
+.change-list li.dk-file-row{position:relative}
+.change-list li.dk-file-row>.dk-open-code{position:absolute;inset-inline-end:64px;top:2px}
+.file-edit-review header.dk-file-row .dk-open-code{margin-inline-start:auto}
 
 /* Terminal inside the Girru phone app (boards P24–P26). Only there: .phone-terminal renders only with window.girruShell. */
 .app-shell:has(.phone-terminal) { grid-template-columns:minmax(0,1fr) !important; grid-template-rows:minmax(0,1fr) !important; }

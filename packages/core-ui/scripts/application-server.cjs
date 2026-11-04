@@ -55,6 +55,7 @@ const { allowedPhone, phoneRoute, phoneResponse } = require('../src/phone-contra
 const { allowedAgentRules, agentRulesRoute, agentRulesResponse } = require('../src/agent-rules-contract.js');
 const { allowedOrg, orgRoute, orgResponse, orgFields } = require('../src/org-contract.js');
 const { allowedLibrary: allowedAgentLibrary, libraryRoute: agentLibraryRoute, libraryResponse: agentLibraryResponse } = require('../src/agent-library-contract.js');
+const { allowedNotes, notesRoute, notesResponse } = require('../src/agent-notes-contract.js');
 const { allowedAccountSettings, accountSettingsResponse, sessionsRoute, updatesRoute, deviceLabel, DEVICE_LABEL_HEADER } = require('../src/account-settings-contract.js');
 const { allowedConversation, conversationPath, conversationRoute, conversationResponse, RunEventParser, RUN_STREAM_MS, RUN_IDLE_MS } = require('../src/conversation-contract.js');
 const { validDeviceToken, validLoginBody, loginContinuation } = require('../src/login-contract.js');
@@ -64,6 +65,11 @@ const { memoryResponse } = require('./memory-response.cjs');
 const { allowedMemoryPages, memoryPagesRoute, memoryPagesResponse } = require('../src/memory-pages-contract.js');
 const { allowedMemoryRecall, memoryRecallRoute, memoryRecallResponse } = require('../src/memory-recall-contract.js');
 const { allowedMemoryBridge, memoryBridgeRoute, memoryBridgeResponse } = require('../src/memory-bridge-contract.js');
+const { allowedProjectFiles, projectFilesRoute, projectFilesResponse } = require('../src/project-files-contract.js');
+const { allowedTaskLinks, taskLinksPathResponse, taskLinksRoute } = require('../src/task-links-contract.js');
+const { allowedPerson, personPathResponse, personRoute } = require('../src/memory-people-contract.js');
+const { allowedTrust, trustPathResponse, trustRoute } = require('../src/memory-trust-contract.js');
+const { allowedCodeOpen, codeOpenResponse, codeOpenRoute } = require('../src/code-open-contract.js');
 const { allowedDiscovery, discoveryRoute, discoveryResponse } = require('../src/discovery-contract.js');
 const { allowedMemoryDesktop, memoryDesktopRoute, memoryDesktopResponse } = require('../src/memory-desktop-contract.js');
 const { validChatBody, validKey, validId, chatError, SSEParser, CHAT_BYTES, CHAT_DEADLINE_MS, CHAT_IDLE_MS } = require('../src/chat-protocol.js');
@@ -148,11 +154,17 @@ function allowed(method, target, body) {
   if (agentRulesRoute(target)) return allowedAgentRules(method, target, body);
   if (orgRoute(target)) return allowedOrg(method, target, body);
   if (agentLibraryRoute(target)) return allowedAgentLibrary(method, target, body);
+  if (notesRoute(target)) return allowedNotes(method, target, body);
   if (sessionsRoute(target) || updatesRoute(target)) return allowedAccountSettings(method, target, body);
   if (memoryDesktopRoute(target)) return allowedMemoryDesktop(method, target, body);
   if (memoryPagesRoute(target)) return allowedMemoryPages(method, target, body);
   if (memoryRecallRoute(target)) return allowedMemoryRecall(method, target, body);
   if (memoryBridgeRoute(target)) return allowedMemoryBridge(method, target, body);
+  if (projectFilesRoute(target)) return allowedProjectFiles(method, target, body);
+  if (taskLinksRoute(target)) return allowedTaskLinks(method, target, body);
+  if (personRoute(target)) return allowedPerson(method, target, body);
+  if (trustRoute(target)) return allowedTrust(method, target, body);
+  if (codeOpenRoute(target)) return allowedCodeOpen(method, target, body);
   if (discoveryRoute(target)) return allowedDiscovery(method, target, body);
   if (allowedGenVR(method, target, body) || allowedChannel(method, target, body) || allowedPersonality(method, target, body) || allowedHire(method, target, body) || allowedBoard(method, target, body) || allowedConversation(method, target, body) || allowedAgentCard(method, target, body) || allowedTerminal(method, target, body) || allowedConnector(method, target, body) || allowedLocalImport(method, target, body) || allowedChatBoard(method, target, body) || allowedChatMemory(method, target, body) || allowedChatSearch(method, target, body) || allowedChatExport(method, target, body) || allowedChatSecrets(method, target, body)) return true;
   const id = /^\/api\/agents\/([^/?#]+)$/.exec(target)?.[1];
@@ -233,13 +245,14 @@ function project(target, status, body) {
   if (storeSwitchesRoute(target)) return storeSwitchesResponse(status, body);
   if (backupsRoute(target)) return backupsResponse(target, status, body);
   if (chartPrefsRoute(target)) return chartPrefsResponse(status, body);
-  if (departmentsRoute(target)) return departmentsResponse(status, body);
+  if (departmentsRoute(target)) return departmentsResponse(status, body, target);
   if (meetingsRoute(target)) return meetingsResponse(target,status,body);
   if (firstRunRoute(target)) return firstRunResponse(target, status, body);
   if (phoneRoute(target)) return phoneResponse(target, status, body);
   if (agentRulesRoute(target)) return agentRulesResponse(target, status, body);
   if (orgRoute(target)) return orgResponse(target, status, body);
   if (agentLibraryRoute(target)) return agentLibraryResponse(target, status, body);
+  if (notesRoute(target)) return notesResponse(target, status, body);
   if (sessionsRoute(target) || updatesRoute(target)) return accountSettingsResponse(target, status, body);
   if (connectionsRoute(target)) return connectionsResponse(target,status,body);
   if (mcpImportPath(target)) return mcpImportResponse(target,status,body);
@@ -260,6 +273,11 @@ function project(target, status, body) {
   if (memoryPagesRoute(target)) return memoryPagesResponse(target, status, body);
   if (memoryRecallRoute(target)) return memoryRecallResponse(target, status, body);
   if (memoryBridgeRoute(target)) return memoryBridgeResponse(target, status, body);
+  if (projectFilesRoute(target)) return projectFilesResponse(target, status, body);
+  if (taskLinksRoute(target)) return taskLinksPathResponse(target, status, body);
+  if (personRoute(target)) return personPathResponse(target, status, body);
+  if (trustRoute(target)) return trustPathResponse(target, status, body);
+  if (codeOpenRoute(target)) return codeOpenResponse(status, body);
   if (discoveryRoute(target)) return discoveryResponse(target, status, body);
   if (target === '/api/agents' || (target.startsWith('/api/agents/') && target !== '/api/agents/name-suggestion')) {
     if (status === 200 && target === '/api/agents') {
@@ -392,7 +410,7 @@ function createApplicationServer({ browserController = null, packageRoot = root,
     const length = Number(req.headers['content-length'] || 0);
     const audio = req.method === 'POST' && raw === '/api/chat/transcribe';
     // Agent files are up to 1 MB of text; JSON escaping can double it.
-    const limit = raw===VOICE_LIBRARY_PATH ? 4_200_000 : meetingsRoute(raw) ? 512 * 1024 : agentLibraryRoute(raw) ? 2_400_000 : packRoute(raw) ? 2_100_000 : genvrRoute(raw) ? GENVR_BYTES + 65536 : audio ? AUDIO_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/images$/.test(raw) ? IMAGE_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/runs$/.test(raw) ? RUN_LIMIT : LIMIT;
+    const limit = raw===VOICE_LIBRARY_PATH ? 4_200_000 : meetingsRoute(raw) ? 512 * 1024 : agentLibraryRoute(raw) ? 2_400_000 : notesRoute(raw) ? 4_300_000 : packRoute(raw) ? 2_100_000 : genvrRoute(raw) ? GENVR_BYTES + 65536 : audio ? AUDIO_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/images$/.test(raw) ? IMAGE_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/runs$/.test(raw) ? RUN_LIMIT : LIMIT;
     if (!Number.isSafeInteger(length) || length < 0 || length > limit) return send(413);
     if (req.headers['content-type'] && !/^application\/json(?:;\s*charset=utf-8)?$/i.test(req.headers['content-type'])) return send(415);
     try {

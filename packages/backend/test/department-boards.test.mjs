@@ -10,6 +10,7 @@ const app=Fastify();registerAuthGate(app);await app.register(taskBoardRoutes);aw
 const call=(method,url,payload,who='dept-owner')=>app.inject({method,url,headers:{authorization:'Bearer '+generateToken(who,1)},...(payload===undefined?{}:{payload})});
 const list=async()=> (await call('GET','/api/boards')).json().boards;
 let education,hr,company,task,shared;
+const p3=/^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P3??'');
 test.after(async()=>{await app.close();closeDatabase();await fs.rm(root,{recursive:true,force:true});});
 test('owner-only idempotent sync provisions actual departments and adopts existing work',async()=>{
  assert.equal((await app.inject({method:'POST',url:'/api/boards/sync-departments',payload:{}})).statusCode,401);
@@ -43,14 +44,16 @@ test('company and department overviews reference a single canonical task and dis
 test('department rename retains board, customised stages, task IDs and archive choice',async()=>{
  const b=(await call('GET','/api/boards/'+education.id)).json();
  await call('PUT',`/api/boards/${education.id}/columns/${b.columns[0].id}`,{name:'Custom intake'});
- db.prepare('UPDATE memory_departments SET name=?,norm_name=? WHERE id=?').run('Language education','language education','education-dept');
- db.prepare('UPDATE agents_config SET department=? WHERE id=?').run('language education','education-agent');
+ // GIRRU_STORE_P3: the one department list is renamed with every copy (agents, boards, sources); off: memory's list and the agent.
+ if(p3){await (await import('../src/services/departments.ts')).renameDepartmentEverywhere('dept-owner','education-dept','Language education');}
+ else{db.prepare('UPDATE memory_departments SET name=?,norm_name=? WHERE id=?').run('Language education','language education','education-dept');db.prepare('UPDATE agents_config SET department=? WHERE id=?').run('language education','education-agent');}
  assert.equal((await call('POST','/api/boards/sync-departments',{})).statusCode,200);
  const next=(await call('GET','/api/boards/'+education.id)).json();assert.deepEqual(next.departments,['language education']);assert.equal(next.columns[0].name,'Custom intake');assert.equal(next.cards[0].id,task.id);assert.deepEqual(next.cards[0].departments,['language education']);assert.equal(next.departmentActive,true);
  assert.equal((await list()).length,3);
  const currentHr=(await call('GET','/api/boards/'+hr.id)).json();await call('PUT','/api/boards/'+hr.id,{expectedVersion:currentHr.version,archived:true});
  assert.equal((await call('POST','/api/boards/sync-departments',{})).json().created,0);assert.ok(!(await list()).some(b=>b.id===hr.id));
- db.prepare('DELETE FROM memory_departments WHERE id=?').run('education-dept');db.prepare('UPDATE agents_config SET department=NULL WHERE id=?').run('education-agent');
+ if(p3){const L=await import('../src/memory/scopes/lifecycle.ts');const pv=await L.previewDeleteDepartment('dept-owner','education-dept');await L.deleteDepartment('dept-owner','education-dept',pv.previewHash);}
+ else{db.prepare('DELETE FROM memory_departments WHERE id=?').run('education-dept');db.prepare('UPDATE agents_config SET department=NULL WHERE id=?').run('education-agent');}
  await call('POST','/api/boards/sync-departments',{});const old=(await list()).find(b=>b.id===education.id);assert.equal(old.departmentActive,false);assert.equal(old.managedDepartment,true);
 });
 test('registered department display names with punctuation are provisioned safely',async()=>{

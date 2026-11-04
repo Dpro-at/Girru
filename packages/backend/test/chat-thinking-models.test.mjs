@@ -61,7 +61,7 @@ test('a bad thinking value never reaches the command line', () => {
     assert.ok(['low', 'high', 'model_reasoning_effort="low"', 'model_reasoning_effort="high"'].includes(vals[0]), `${kind} ${t}`);
   }
   const src = readFileSync(new URL('../src/api/routes/chat.ts', import.meta.url), 'utf8');
-  assert.match(src, /images:seen,thinking:currentChatRun\(\)\?\.thinking\}/, 'the chat passes its saved level, not user text');
+  assert.match(src, /images:seen,thinking:currentChatRun\(\)\?\.thinking(,agentId:selectedAgent\?\.id\?\?null)?\}/, 'the chat passes its saved level, not user text');
 });
 
 test('Claude API: Deep turns use bounded extended thinking; Quick and Normal send none', () => {
@@ -86,6 +86,6 @@ test('the chat\'s thinking level also goes with a hand-off and with ask_coding_a
   const team = readFileSync(new URL('../src/tools/tasks/team.ts', import.meta.url), 'utf8');
   const ask = readFileSync(new URL('../src/tools/cli/ask-coding-app.ts', import.meta.url), 'utf8');
   assert.match(team, /const thinking = currentChatRun\(\)\?\.thinking;/);
-  assert.match(team, /runSubscription\(target\.model, folder, prompt, signal, \{ appToolsOnly: true, thinking \}\)/);
-  assert.match(ask, /readOnly: app === 'codex', thinking: currentChatRun\(\)\?\.thinking \}/);
+  assert.match(team, /runSubscription\(target\.model, folder, prompt, signal, \{ appToolsOnly: true, thinking(, agentId: target\.id)? \}\)/);
+  assert.match(ask, /readOnly: app === 'codex', thinking: currentChatRun\(\)\?\.thinking(, agentId: context\?\.agentId \?\? null)? \}/);
 });

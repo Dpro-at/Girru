@@ -4,6 +4,7 @@ import { runTeamAssignment } from '../../services/team-delegation.js';
 import { subscriptionModel } from '../../services/subscription-chat.js';
 import { currentChatRun } from '../../services/chat-run-context.js';
 import { mayDelegate, orgRows, placeAgents, teamRole, type OrgRow } from '../../services/agent-org.js';
+import { storeP8Enabled } from '../../services/store-p8.js';
 
 type Agent = { id: string; name: string; model: string; provider: string; temperature: number; max_tokens: number };
 /** CH6/CH10: why a hand-off did not finish, so the chat can offer the owner's next step (it never re-runs by itself). */
@@ -107,6 +108,10 @@ export const teamDelegateTool: Tool = {
     const rows = await coordinator(context);
     if (!rows || typeof params.agent_id !== 'string' || !mayDelegate(context!.agentId!, params.agent_id, rows) || typeof params.request !== 'string' || !params.request.trim() || params.request.length > 12000 || params.agent_id === context!.agentId) return fail();
     if (params.reply_source !== undefined && !['subscription:claude', 'subscription:codex', 'subscription:gemini'].includes(params.reply_source)) return fail();
+    // STORE-MAP-01 P8 (D26): an optional structured handoff and task number for the specialist.
+    const p8 = storeP8Enabled();
+    const handover = p8 ? await (await import('../../services/team-handover.js')).handoverOf(params, context!.userId!, context!.sessionId!) : null;
+    if (typeof handover === 'string') return { content: [{ type: 'text', text: `Team request not sent: ${handover}.` }], error: 'team_request_refused' };
     const key = context!.userId!;
     if (active.has(key)) return fail();
     active.add(key);
@@ -138,7 +143,7 @@ export const teamDelegateTool: Tool = {
       const thinking = currentChatRun()?.thinking;
       const reply = async (prompt: string): Promise<string> => {
         if (signal.aborted) throw Error('cancelled');
-        if (subscriptionModel(target.model)) return runSubscription(target.model, folder, prompt, signal, { appToolsOnly: true, thinking });
+        if (subscriptionModel(target.model)) return runSubscription(target.model, folder, prompt, signal, { appToolsOnly: true, thinking, agentId: target.id });
         if (target.provider === 'ollama' || target.provider === 'local') {
           const { ollamaToolChat } = await import('../../llm/ollama-tool-chat.js');
           const result = await ollamaToolChat({ model: target.model, messages: [{ role: 'user', content: prompt }], tools: [], temperature: target.temperature, maxTokens: Math.min(target.max_tokens || 2048, 8192), timeoutMs: CHILD_CALL_MS, signal });
@@ -153,11 +158,25 @@ export const teamDelegateTool: Tool = {
         return result.text;
       };
       resultId = await startTeamResult({ owner: key, session: context!.sessionId!, coordinator: context!.agentId!, agent: target.id, model: target.model });
+      let brief = '';
+      if (handover) {
+        // P8: the lead's note becomes the specialist's handoff (naming the lead); the specialist's run knows its task and
+        // keeps its own note and working notes under this hand-off. Only a model not on this computer gets the new tools.
+        const h = await import('../../services/team-handover.js');
+        await h.saveLeadHandoff(key, context!.agentId!, target.id, handover);
+        const lead = await sql().read(one<{ name: string }>('SELECT name FROM agents_config WHERE id=?', context!.agentId!));
+        brief = h.handoverBlock(lead?.name ?? 'the lead agent', handover);
+        const remote = !!subscriptionModel(target.model) || target.provider === 'claude';
+        registry.updateContext({ delegation: { leadAgentId: context!.agentId!, runId: resultId, cardId: handover.cardId, taskNo: handover.taskNo, conversationId: handover.conversationId } });
+        // A local model keeps exactly today's tools (no handoff tools for a delegated part, LOCAL-ONLY-01).
+        if (remote) { registry.updateContext({ handoffTools: undefined }); (await import('../index.js')).useRemoteModelTools(registry); }
+      }
       setStep(session, target.id, 'thinking');
-      const result = await runTeamAssignment({ agentId: target.id, agentName: target.name, model: target.model, request: params.request.trim(), instructions }, {
+      const result = await runTeamAssignment({ agentId: target.id, agentName: target.name, model: target.model, request: params.request.trim(), instructions: brief ? `${instructions}\n\n${brief}` : instructions }, {
         signal, tools: registry.getAll(), reply, execute: async (name, args) => { setStep(session, target.id, name); try { return await registry.execute(name, args); } finally { setStep(session, target.id, 'thinking'); } },
       });
       await finishTeamResult(resultId, result);
+      if (handover) await (await import('../../services/team-handover.js')).afterHandover(key, resultId, context!.agentId!, target.id, handover).catch(() => undefined);
       return result;
     } catch (err) {
       const out = fail(teamFailure(err, limit.aborted, stopper.signal.aborted));
@@ -166,4 +185,24 @@ export const teamDelegateTool: Tool = {
     }
     finally { active.delete(key); setStep(session, params.agent_id as string, null); const set = delegations.get(session); set?.delete(stopper); if (set && !set.size) delegations.delete(session); }
   },
+};
+
+/**
+ * STORE-MAP-01 P8 (D26): team_delegate with a structured handoff and the task
+ * number. Offered in place of team_delegate only to models that are not on this
+ * computer (tools/index.ts useRemoteModelTools), so a local model's list stays
+ * as it was (LOCAL-ONLY-01). The same execute reads both only while P8 is on.
+ */
+const handoverList = (what: string, max = 8) => ({ type: 'array', items: { type: 'string' }, description: `${what} (up to ${max} short lines)` });
+export const teamDelegateToolP8: Tool = {
+  ...teamDelegateTool,
+  description: `${teamDelegateTool.description} To hand over part of a task, give task (its number, like T-12) and handoff: what is done, what is left, the next steps, blockers and the files touched; the agent starts from it.`,
+  input_schema: { type: 'object', properties: {
+    ...teamDelegateTool.input_schema.properties,
+    task: { type: 'string', description: 'Optional task number in this chat\'s project, like T-12.' },
+    handoff: { type: 'object', description: 'Optional handoff for the agent: where the task stands.', properties: {
+      done: handoverList('What is finished'), left: handoverList('What is still open'), next: handoverList('The next steps'),
+      blockers: handoverList('What blocks the work'), files: handoverList('Files changed so far', 30),
+    } },
+  }, required: ['agent_id', 'request'] },
 };

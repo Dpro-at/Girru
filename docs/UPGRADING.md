@@ -95,7 +95,7 @@ sc stop AgentPlayerFrontend
 1. **Database:** `.data/agent-player.db`
 2. **Environment:** `.env` files (both frontend and backend)
 3. **User Files:** `public/storage/` directory
-4. **Agent Memories:** `.data/memory/` directory
+4. **Agent Memories:** `.data/memory/` directory (with `GIRRU_STORE_P4` on, the old `.data/memory/memory.db` index is retired after a verified backup; see [Storage map switches](#storage-map-switches))
 5. **Agent Files:** `.data/agents/` directory
 6. **Extensions:** `packages/backend/extensions/` (custom extensions only)
 
@@ -468,6 +468,27 @@ sqlite3 .data/agent-player.db "SELECT * FROM schema_migrations ORDER BY version 
 cd packages/backend
 npx node dist/db/migrate.js
 ```
+
+### Storage map switches
+
+Some data moves happen only when their switch is on (all are off by default).
+Each one runs at start-up, is safe to run again, and keeps the old data.
+
+| Switch | What start-up does | What stays |
+|---|---|---|
+| `GIRRU_STORE_P3=1` | Fills department ids, memory source and trust, project ids, packed vectors (background jobs) | Old columns, until a later release |
+| `GIRRU_STORE_P4=1` | Makes a full backup and checks it, then retires `.data/memory/memory.db`; copies coding-app handoff notes into the one handoff table; copies each agent's `PERSONALITY.md` text into its personality record once, then rewrites `PERSONALITY.md` from the record | The backup with `memory.db`; `memory_bridge_handoffs` (dropped one release later); older personality versions |
+| `GIRRU_STORE_P6=1` | Nothing is copied: new columns start off. Coding apps started outside Girru lose memory access (every memory call needs a session Girru issued); projects with memory files on get a change log and a debounced `.girru/brief.md`; linked tasks in `.girru/tasks.md` get a hidden id line | Everything; turning the switch off again leaves the hidden id lines, which still read |
+| `GIRRU_STORE_P7=1` | Migration 176 rebuilds `memory_bridge_clients` so Cursor and GitHub Copilot CLI can be switched on (rows kept). Migration 175 adds `task_file_cards.from_file` (existing tasks count as from the file) and `task_file_approvals` (empty: tasks from a project's file wait for the owner's approval once). Every file Girru writes into a project folder goes through the safe file writer, which refuses links, junctions, hard links, case collisions, paths outside the folder and non-text content | Everything; the earlier writers take over again |
+| `GIRRU_STORE_P9=1` | Migration 179 (always, with or without the switch) adds an index on the drawer of each memory, and migration 180 adds the empty `memory_health_events` table; nothing is copied. With the switch on, a nightly read-only memory doctor job is added for each owner. With the switch on, recall keeps an in-memory index (never on disk), each new backup is restored into a scratch folder and checked before it is signed, and each forget is written to `forget-ledger.jsonl` in the data folder (ids and keyed hashes only), which a restore keeps and applies again on the next start. "Stays on this computer" is enforced (People on by default), so an online model or coding app no longer gets People memories; turning People's switch off restores the earlier behaviour | Everything; with the switch off the ledger file stays, and a restore still keeps it and applies it again |
+
+After the first start with `GIRRU_STORE_P4` on:
+
+- `PERSONALITY.md` is a view. A change made to it outside Girru is not used;
+  it waits in the agent's Personality review.
+- The start-up log line `[Store P4] personality texts imported: N, still
+  without a text: 0` confirms the import. A number above 0 means an agent's
+  file could not be read safely; it is tried again at the next start.
 
 ### Custom Extensions
 

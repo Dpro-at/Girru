@@ -21,6 +21,7 @@ import { OrgError, orgRows, placeAgents } from './agent-org.js';
 import { currentPersonalityStep } from './personality-store.js';
 import { createAgentToolsRegistry } from '../tools/index.js';
 import { GrantValidationError, loadAgentGrants } from '../tools/grants.js';
+import { copyPersonalityStep, writePersonalityView } from './personality-record.js';
 
 const KEYS = new Set(['name', 'startsAs', 'specialtyId', 'description', 'tools', 'model', 'provider']);
 const PROVIDERS = new Set(['claude', 'openai', 'gemini', 'ollama', 'lmstudio', 'local']);
@@ -76,7 +77,10 @@ export async function createSubAgent(actor: Actor | null | undefined, parentId: 
     await sql().tx(function* () {
       if (specialty) yield* run('INSERT INTO agent_specialties(agent_id, template_id, linked_by) VALUES(?, ?, ?)', created.id, specialty.id, actor!.userId!);
       if (copy) yield* run('INSERT INTO agent_specialties(agent_id, template_id, linked_by) SELECT ?, template_id, ? FROM agent_specialties WHERE agent_id = ?', created.id, actor!.userId!, parentId);
+      // STORE-MAP-01 P4 (G3): a copy also takes its agent's personality text.
+      if (copy) yield* copyPersonalityStep(parentId, created.id, actor!.userId!);
     });
+    if (copy) await writePersonalityView(created.id).catch(() => {});
   } catch (err) {
     await repositories.agents.deleteConfig(actor, created.id).catch(() => {});
     if (err instanceof GrantValidationError) throw new OrgError(400, 'invalid_tools', err.message);

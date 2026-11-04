@@ -1070,12 +1070,21 @@ async function workspaceRulesTool(args:Record<string,unknown>,{backend}:HandlerD
  }
 }
 
+/** STORE-MAP-01 P8: a task's links (T-n with its handoffs, chats, task notes and task file line), or null when Girru does not offer them. */
+async function taskLinks(backend:BackendClient,boardId:string,cardId:string):Promise<Record<string,unknown>|null>{
+ try{const l=obj(await backend.request('GET',`/api/boards/${boardId}/cards/${cardId}/links`));return Array.isArray(l.handoffs)?l:null;}catch{return null;}
+}
+
 async function workspaceTasksTool(args:Record<string,unknown>,{backend}:HandlerDeps):Promise<ToolCallResult>{
  const op=args.operation as string;
  const id=(k:string)=>{const v=args[k];if(typeof v!=='string'||!/^[A-Za-z0-9_-]{1,64}$/.test(v))throw new InputError(`${k} must be an id from list`);return v;};
  switch(op){
   case 'list':{only(args,['operation','projectId']);const qs=args.projectId!==undefined?`?projectId=${id('projectId')}`:'';const r=obj(await backend.request('GET',`/api/boards/tasks${qs}`));const tasks=(r.tasks as any[])??[];return ok(`${tasks.filter(t=>!t.finished).length} open tasks, ${tasks.filter(t=>t.finished).length} finished${(r.problems as any[])?.length?`, ${(r.problems as any[]).length} lines to fix`:''}.`,{tasks,problems:r.problems??[]});}
-  case 'get':{only(args,['operation','boardId','cardId']);const t=obj(await backend.request('GET',`/api/boards/${id('boardId')}/cards/${id('cardId')}/task`)).task;if(!t)throw new InputError('That card has no task in a project task file');return ok('The task as the project\u2019s task file has it.',{task:t});}
+  case 'get':{only(args,['operation','boardId','cardId']);const t=obj(await backend.request('GET',`/api/boards/${id('boardId')}/cards/${id('cardId')}/task`)).task;if(!t)throw new InputError('That card has no task in a project task file');
+   // STORE-MAP-01 P8: what is linked to the task (its handoffs, chats, task notes), only when Girru has it on; otherwise the answer is as before.
+   const links=await taskLinks(backend,id('boardId'),id('cardId'));
+   if(links)return ok(`The task as the project\u2019s task file has it, with ${(links.handoffs as any[])?.length??0} handoffs and ${(links.chats as any[])?.length??0} chats linked to it${links.blocked?' (blocked: see the newest handoff)':''}.`,{task:t,links});
+   return ok('The task as the project\u2019s task file has it.',{task:t});}
   case 'continue':{only(args,['operation','boardId','cardId','agentId','model']);const body:Record<string,unknown>={boardId:id('boardId'),cardId:id('cardId')};if(args.agentId!==undefined){if(typeof args.agentId!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(args.agentId))throw new InputError('agentId must be an agent id');body.agentId=args.agentId;}if(args.model!==undefined){if(typeof args.model!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_.:@\/-]{0,99}$/.test(args.model))throw new InputError('model must be a model id');body.model=args.model;}const r=obj(await backend.request('POST','/api/chat/task-continue',body));return ok('A chat in the project continues the task now.',{conversation:r.conversation??null});}
   case 'activity':{only(args,['operation','boardId','cardId']);const base=`/api/boards/${id('boardId')}/cards/${id('cardId')}`;const page=obj(await backend.request('GET',`${base}/page`)).page;const a=obj(await backend.request('GET',`${base}/activity`));return ok(`The task page: ${((a.items as any[])??[]).length} things happened${a.more?' (older ones too)':''}.`,{page,items:a.items??[],more:a.more===true});}
   case 'people':{only(args,['operation','boardId','cardId','kind','id','role']);if(args.kind!=='user'&&args.kind!=='agent')throw new InputError('kind is user or agent');if(typeof args.id!=='string'||!/^[A-Za-z0-9_.-]{1,128}$/.test(args.id))throw new InputError('id must be a person or agent id');if(!('role' in args)||(args.role!==null&&!['asked','does','checks','tests'].includes(args.role as string)))throw new InputError('role is asked, does, checks, tests, or null to take them off');const r=obj(await backend.request('PUT',`/api/boards/${id('boardId')}/cards/${id('cardId')}/people`,{kind:args.kind,id:args.id,role:args.role}));return ok(args.role===null?'Taken off the task.':'On the task.',{people:r.people??[]});}

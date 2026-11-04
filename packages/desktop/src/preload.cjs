@@ -19,6 +19,9 @@ if (window.location.protocol === 'file:') {
     connect: url => ipcRenderer.invoke('dpro:connect', String(url)),
     useLocal: () => ipcRenderer.invoke('dpro:use-local'),
     retry: () => ipcRenderer.invoke('dpro:retry'),
+    updateFromFailed: () => ipcRenderer.invoke('dpro:failed-update'),
+    restoreFromFailed: () => ipcRenderer.invoke('dpro:failed-restore'),
+    otherWorkspace: () => ipcRenderer.invoke('dpro:failed-workspace'),
     openConnect: () => ipcRenderer.invoke('dpro:open-connect'),
     showLogs: () => ipcRenderer.invoke('dpro:show-log-folder'),
     onStartupStatus: callback => {
@@ -38,7 +41,8 @@ contextBridge.exposeInMainWorld('dproApp', {
     onReviewDecision: callback => { const listener = (_event,value) => callback(value); ipcRenderer.on('dpro:nabu-review-decision',listener); return () => ipcRenderer.removeListener('dpro:nabu-review-decision',listener); },
     status: () => ipcRenderer.invoke('dpro:nabu-status'),
     showCommands: () => ipcRenderer.invoke('dpro:nabu-commands'),
-    open: (folder, file, top, bottom, right = 0) => ipcRenderer.invoke('dpro:nabu-open', { folder, file: file ?? null, top, bottom, right }),
+    // CODE-OPEN-01: options { line?, note?, readOnly? } (sent only when given).
+    open: (folder, file, top, bottom, right = 0, options) => ipcRenderer.invoke('dpro:nabu-open', options && typeof options === 'object' && Object.keys(options).length ? { folder, file: file ?? null, top, bottom, right, options } : { folder, file: file ?? null, top, bottom, right }),
     select: (mode, top, bottom, right = 0) => ipcRenderer.invoke('dpro:nabu-select', { mode, top, bottom, right }),
     layout: (top, bottom, right = 0) => ipcRenderer.send('dpro:nabu-layout', { top, bottom, right }),
     onState: callback => {
@@ -51,6 +55,8 @@ contextBridge.exposeInMainWorld('dproApp', {
   openChatWindow: id => ipcRenderer.invoke('dpro:open-chat-window', String(id)),
   setSetupWindow: compact => ipcRenderer.invoke('dpro:setup-window', compact === true),
   revealFolder: folder => ipcRenderer.invoke('dpro:reveal-folder', String(folder)),
+  // CODE-OPEN-01: one file in Finder / Explorer (the fallback when Code is not installed).
+  revealFile: file => ipcRenderer.invoke('dpro:reveal-file', String(file)),
   info: () => ipcRenderer.invoke('dpro:app-info'),
   // MACAPP-01: updates of the installed app. The page reads and asks; installing is confirmed by the app itself.
   appUpdate: {

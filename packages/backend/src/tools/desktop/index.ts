@@ -4,3 +4,4 @@
  */
 
 export { desktopControlTool } from './desktop.js';
+export { openInCodeTool } from './open-in-code.js'; // CODE-OPEN-01

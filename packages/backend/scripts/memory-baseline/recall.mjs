@@ -6,7 +6,9 @@
 // Reports hit@5, rank and MRR per language, no-answer behaviour, leaks and
 // stale facts.
 // Run from packages/backend:
-//   node --import tsx scripts/memory-baseline/recall.mjs --mode hash|ollama [--distractors 5000] [--out file.json]
+//   node --import tsx scripts/memory-baseline/recall.mjs --mode hash|ollama [--distractors 5000] [--out file.json] [--p9b]
+// P9b: --p9b searches with the reply recall of the quality engine instead
+// (memory/quality/recall.ts: intent, re-rank, "no reliable memory" = empty).
 import { backendDir, addUser, argValue, cleanup, ollamaHas, openDb, quietly } from './env.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -15,6 +17,8 @@ import { syntheticMemories } from './corpus.mjs';
 const mode = argValue('mode', 'hash');
 const distractors = Number(argValue('distractors', '5000'));
 const out = argValue('out', null);
+const p9b = process.argv.includes('--p9b');
+if (p9b) process.env.GIRRU_STORE_P9B = '1';
 if (mode === 'ollama' && !(await ollamaHas('qwen3-embedding:0.6b'))) {
   console.error('qwen3-embedding:0.6b is not available on the local Ollama; nothing measured');
   process.exit(2);
@@ -75,9 +79,18 @@ for (const s of SET.stale) {
 
 const OPEN = D.selectDrawers({ audience: 'owner', project: 'alpha' });
 const timings = [];
+const bests = [];
+const engine = p9b ? await import(join(backendDir, 'src/memory/quality/recall.ts')) : null;
 async function search(q, limit = 50) {
   const t = performance.now();
-  const res = await quietly(() => storage.search({ query: q, userId: OWNER, drawers: OPEN, limit }));
+  let res;
+  if (engine) {
+    const r = await quietly(() => engine.qualityRecall({ userId: OWNER, drawers: OPEN, query: q, limit }));
+    bests.push({ q, best: +r.best.toFixed(3), reliable: r.reliable, intent: r.intent, fellBack: r.fellBack, rerankMs: r.rerankMs });
+    res = r.items.map((x) => ({ memory: x.memory, similarity: x.score }));
+  } else {
+    res = await quietly(() => storage.search({ query: q, userId: OWNER, drawers: OPEN, limit }));
+  }
   timings.push(performance.now() - t);
   return res;
 }
@@ -140,13 +153,14 @@ try {
 
 const sorted = [...timings].sort((a, b) => a - b);
 const report = {
-  set: SET.version, mode, embeddingModel: emb.targetModel(), distractors, seedMs,
+  set: SET.version, mode, engine: p9b ? 'p9b quality recall' : 'storage.search', embeddingModel: emb.targetModel(), distractors, seedMs,
   context: 'owner chat, drawers owner + experience + project:alpha',
-  hits: { sameLanguage: sameLang, crossLanguage: crossLang, byQueryLanguage: byQueryLang, misses: hits.filter((x) => !(x.rank > 0 && x.rank <= 5)) },
+  hits: { sameLanguage: sameLang, crossLanguage: crossLang, byQueryLanguage: byQueryLang, misses: hits.filter((x) => !(x.rank > 0 && x.rank <= 5)), ranks: hits.map((x) => `${x.id}:${x.qLang}:${x.rank}`) },
   noAnswer: { n: noAnswer.length, correctEmpty: noAnswer.filter((x) => x.returned === 0).length, rows: noAnswer },
   leaks: { n: leaks.length, leaked: leaks.filter((x) => x.leaked).length, rows: leaks },
   stale: { n: stale.length, currentWins: stale.filter((x) => x.currentWins).length, oldStillInTop5: stale.filter((x) => x.oldInTop5).length, rows: stale },
   codingAppPack,
+  ...(p9b ? { p9b: { fellBack: bests.filter((b) => b.fellBack).length, rerankMsMax: Math.max(...bests.map((b) => b.rerankMs)), bests } } : {}),
   searchMs: { queries: sorted.length, p50: +sorted[Math.floor(sorted.length * 0.5)].toFixed(1), p95: +sorted[Math.ceil(sorted.length * 0.95) - 1].toFixed(1) },
 };
 console.log(JSON.stringify(report, null, 2));

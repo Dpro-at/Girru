@@ -5,18 +5,30 @@
 // A keep new, O keep old, B keep both.
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { KeyboardEvent } from 'react';
-import { FILTERS, KIND_WORD, MemoryReviewController, plainReasons } from './memory-review';
+import { FILTERS, KIND_WORD, MemoryReviewController, OUTSIDER, PERSONAL_DATA, REPOSITORY_FILE, RUN_NOTES, SPECIAL_CATEGORY, isSensitive, plainReasons } from './memory-review';
 import type { ReviewItem } from './memory-review';
-import { ago, drawerName } from './memory-store';
+import { ago, agentLabel, drawerName } from './memory-store';
+import type { PrivacyFlags } from './memory-people-contract.js';
+import { personName } from './memory-people';
 import { UiIcon } from './ui-icons';
 import type { UiIconName } from './ui-icons';
-import { IconButton, Popover, WithSwatches } from './desktop-ui';
+import { Avatar, IconButton, Popover, WithSwatches } from './desktop-ui';
 import type { MemoryDesktopController } from './memory-desktop';
+import type { ProjectFilesController } from './project-files';
+import { TaskProblems } from './MemoryProjectFiles';
+
+const noSubscribe = () => () => {};
+const noSnapshot = () => null;
 
 const KIND_ICON: Record<ReviewItem['kind'], UiIconName> = { conflict: 'diff', important: 'alert', agent: 'sparkle', imported: 'download', file: 'file', link: 'link' };
 
-export function NeedsYou({ c, mode, onOpenChat, design }: { c: MemoryReviewController; mode: 'one' | 'list'; onOpenChat?: (id: string) => void; design?: MemoryDesktopController }) {
+export function NeedsYou({ c, mode, onOpenChat, design, files, client }: { c: MemoryReviewController; mode: 'one' | 'list'; onOpenChat?: (id: string) => void; design?: MemoryDesktopController; files?: ProjectFilesController;
+  /** CODE-OPEN-01: a task-number question opens tasks.md at its line. */ client?: Parameters<typeof TaskProblems>[0]['client'] }) {
+  const say = design ? (t: string) => design.say(t) : undefined;
   const s = useSyncExternalStore(c.subscribe, c.getSnapshot, c.getSnapshot);
+  // P6: a task-number question waits too, so the "Nothing needs you" line would be wrong beside it.
+  const fp = useSyncExternalStore(files ? files.subscribe : noSubscribe, files ? files.getSnapshot : noSnapshot, files ? files.getSnapshot : noSnapshot);
+  const taskQuestions = Array.isArray(fp?.problems) && fp.problems.length > 0;
   const ref = useRef<HTMLDivElement>(null);
   const visible = s.phase === 'ready' ? c.visible() : [];
   // Open the first question when there is none open.
@@ -24,7 +36,8 @@ export function NeedsYou({ c, mode, onOpenChat, design }: { c: MemoryReviewContr
   useEffect(() => { ref.current?.focus(); }, [mode]);
   if (s.phase === 'error') return <div className="dk-empty"><p>{s.notice}</p><button type="button" onClick={() => void c.load()}>Try again</button></div>;
   if (s.phase !== 'ready') return <p className="dk-empty" role="status">Reading what waits for you…</p>;
-  if (!s.items.length) return <>{design && <DesignQuestions d={design}/>}<div className="dk-empty"><UiIcon name="check" size={20}/><p>Nothing needs you. Girru saves routine facts on its own and asks only when something matters or disagrees.</p>{s.result && <p className="fine-print">{s.result}</p>}</div></>;
+  if (!s.items.length && taskQuestions && files) return <div className="dk-needs">{design && <DesignQuestions d={design}/>}<TaskProblems c={files} client={client} say={say}/></div>;
+  if (!s.items.length) return <>{design && <DesignQuestions d={design}/>}{files && <TaskProblems c={files} client={client} say={say}/>}<div className="dk-empty"><UiIcon name="check" size={20}/><p>Nothing needs you. Girru saves routine facts on its own and asks only when something matters or disagrees.</p>{s.result && <p className="fine-print">{s.result}</p>}</div></>;
   function keys(e: KeyboardEvent<HTMLElement>) {
     if ((e.target as HTMLElement).closest('input, textarea, select')) return;
     const k = e.key.toLowerCase();
@@ -44,6 +57,7 @@ export function NeedsYou({ c, mode, onOpenChat, design }: { c: MemoryReviewContr
     {s.result && <p className="dk-inline-ok" role="status">{s.result}</p>}
     {s.notice && <p className="dk-inline-notice" role="alert">{s.notice}</p>}
     {design && <DesignQuestions d={design}/>}
+    {files && <TaskProblems c={files} client={client} say={say}/>}
     <Question c={c} onOpenChat={onOpenChat}/>
     <p className="fine-print dk-needs-foot">Other questions here, one at a time: an agent wants to remember something important, a new link on the map, memories found on this computer, a change to a memory file.</p>
   </div>;
@@ -91,9 +105,28 @@ function Question({ c, onOpenChat }: { c: MemoryReviewController; onOpenChat?: (
         <p className="fine-print">The agent wrote this text. It is information only: it cannot change permissions or give instructions.</p></section>
     </article>;
   }
+  // STORE-MAP-01 P9 (board P9d1): personal data or a sensitive topic: Forget it / Keep, never saved by itself.
+  if (isFlagged(d.reasons) && d.changes.length === 1 && d.changes[0].op === 'add') {
+    const sensitive = d.reasons.includes(SPECIAL_CATEGORY), channel = d.reasons.includes(OUTSIDER);
+    const who = item.agent ? agentLabel(item.agent, s.agents) : '';
+    return <article className="dk-question" data-flagged>
+      <p className="dk-big dk-quote" dir="auto"><WithSwatches text={d.changes[0].after.content}/></p>
+      <p className="dk-chips"><PrivacyChips reasons={d.reasons} privacy={d.privacy}/>{channel && <span className="dk-chip"><UiIcon name="message" size={11}/>From a channel</span>}</p>
+      {sensitive && <p className="dk-who-line">{who && <Avatar name={who}/>}<span>{who ? `${who} wanted to remember this` : 'Waits for you'} · never saved by itself</span></p>}
+      {channel && <p className="fine-print">A message to one of your channels. Its data stays in this review until you decide.</p>}
+      {d.note && <p className="fine-print" dir="auto">{d.note}</p>}
+      <div className="actions"><button type="button" onClick={() => void c.approve('reject')} disabled={s.busy}>Forget it</button>
+        <button type="button" className="primary" onClick={() => void c.approve('approve')} disabled={s.busy}>{keepIn(d.drawerId)}</button></div>
+      <p className="fine-print">The agent wrote this text. It is information only: it cannot change permissions or give instructions.</p>
+    </article>;
+  }
   const kindWord = KIND_WORD[item.kind];
+  // STORE-MAP-01 P6 (D21): text written into Girru's part of a project file by someone outside Girru.
+  const fromFile = d.reasons.includes(REPOSITORY_FILE) ? <span className="dk-chip dk-state" data-tone="warn">From a file in the project</span>
+    // STORE-MAP-01 P8 (D27): a lesson the agent noted while a run worked; never added by itself.
+    : d.reasons.includes(RUN_NOTES) ? <span className="dk-chip dk-state" data-tone="warn">From a run’s working notes</span> : null;
   return <article className="dk-question">
-    <h3><UiIcon name={KIND_ICON[item.kind]} size={15}/>{d.changes.length === 1 ? (d.changes[0].op === 'add' ? 'Remember this?' : d.changes[0].op === 'update' ? 'Change this memory?' : 'Forget this memory?') : `${d.changes.length} changes`} <span className="fine-print">{kindWord} · {c.label(item)}</span></h3>
+    <h3><UiIcon name={KIND_ICON[item.kind]} size={15}/>{d.changes.length === 1 ? (d.changes[0].op === 'add' ? 'Remember this?' : d.changes[0].op === 'update' ? 'Change this memory?' : 'Forget this memory?') : `${d.changes.length} changes`} <span className="fine-print">{kindWord} · {c.label(item)}</span>{fromFile}</h3>
     {d.changes.length === 1 && d.changes[0].op === 'add' ? <p className="dk-big dk-quote" dir="auto"><WithSwatches text={d.changes[0].after.content}/></p> : <ol className="dk-changes">{d.changes.map((ch, i) => <li key={i}>
       {'before' in ch && <p className="dk-del" dir="auto">− <WithSwatches text={ch.before.content}/></p>}
       {'after' in ch && <p className="dk-add" dir="auto">+ <WithSwatches text={ch.after.content}/></p>}
@@ -115,7 +148,7 @@ function NeedsList({ c, keys }: { c: MemoryReviewController; keys: (e: KeyboardE
   const filterLabel = s.groupBy === 'kind' ? (FILTERS.find(f => f[0] === s.filter)?.[1] ?? 'All') : s.group ? c.groupName(s.group) : 'All';
   return <div className="dk-needs-list" tabIndex={-1} onKeyDown={keys}>
     <div className="dk-list-bar">
-      <label className="dk-check"><input type="checkbox" aria-label="Select all" checked={visible.length > 0 && visible.every(i => s.checked.includes(i.key))} onChange={e => c.checkAll(e.target.checked)}/>{visible.length} {visible.length === 1 ? 'question' : 'questions'}</label>
+      <label className="dk-check"><input type="checkbox" aria-label="Select all" checked={visible.some(i => !isSensitive(i.summary)) && visible.every(i => isSensitive(i.summary) || s.checked.includes(i.key))} onChange={e => c.checkAll(e.target.checked)}/>{visible.length} {visible.length === 1 ? 'question' : 'questions'}</label>
       <span className="dk-anchor" data-popover-anchor><button type="button" className="dk-pill" onClick={() => setShow(v => !v)}><UiIcon name="filter" size={12}/>Show: {filterLabel}</button>
         <Popover open={show} onClose={() => setShow(false)} label="Show" wide><div className="dk-filter">
           <h4>Show</h4>
@@ -141,7 +174,7 @@ function NeedsList({ c, keys }: { c: MemoryReviewController; keys: (e: KeyboardE
       <div className="dk-list" role="listbox" aria-label="Questions">{visible.map(i => <div key={i.key} className="dk-row" role="option" aria-selected={s.open === i.key} data-checked={s.checked.includes(i.key) || undefined} onClick={() => void c.openItem(i.key)}>
         <input type="checkbox" aria-label="Select" checked={s.checked.includes(i.key)} onClick={e => e.stopPropagation()} onChange={() => c.toggleCheck(i.key)}/>
         <span className="dk-row-icon"><UiIcon name={KIND_ICON[i.kind]} size={14}/></span>
-        <span className="dk-row-text"><span className="dk-row-main" dir="auto">{s.texts[i.key] ?? (i.link ? `${i.link.from.name} → ${i.link.to.name}` : '…')}</span><span className="dk-row-sub">{KIND_WORD[i.kind]} · {c.label(i)}</span></span>
+        <span className="dk-row-text"><span className="dk-row-main" dir="auto">{s.texts[i.key] ?? (i.link ? `${i.link.from.name} → ${i.link.to.name}` : '…')}</span><span className="dk-row-sub">{KIND_WORD[i.kind]} · {c.label(i)}</span>{i.summary && isFlagged(i.summary.reasons) && <span className="dk-chips"><PrivacyChips reasons={i.summary.reasons} privacy={i.summary.privacy}/></span>}</span>
       </div>)}</div>
       <div className="dk-split-detail"><Question c={c}/></div>
     </div>
@@ -175,4 +208,23 @@ function DesignQuestions({ d }: { d: MemoryDesktopController }) {
     </div>)}</div>
     <p className="fine-print">Only a real disagreement asks you. Everything else is added on its own.</p>
   </article>;
+}
+
+// ---------------------------------------------------------------- P9d chips
+const DATA_WORD: Record<PrivacyFlags['personalData'][number], string> = { email: 'e-mail', phone: 'phone', 'bank-account': 'bank account', card: 'card', address: 'address', 'id-number': 'ID number' };
+const isFlagged = (reasons: readonly string[]) => reasons.includes(PERSONAL_DATA) || reasons.includes(SPECIAL_CATEGORY);
+/** "Keep in People › Lena", "Keep in About you". */
+function keepIn(drawerId: string) {
+  const i = drawerId.indexOf(':');
+  if (i < 0) return `Keep in ${drawerName(drawerId)}`;
+  const kind = drawerId.slice(0, i), key = drawerId.slice(i + 1);
+  return kind === 'people' ? `Keep in People › ${personName(key)}` : `Keep in ${drawerName(drawerId).replace(' · ', ' › ')}`;
+}
+/** Board P9d: two chips only, the kinds and topics, never the values. */
+export function PrivacyChips({ reasons, privacy }: { reasons: readonly string[]; privacy?: PrivacyFlags }) {
+  const data = reasons.includes(PERSONAL_DATA), sensitive = reasons.includes(SPECIAL_CATEGORY);
+  return <>
+    {sensitive && <span className="dk-chip dk-privacy" data-tone="sensitive"><UiIcon name="shield" size={11}/>Sensitive{privacy?.sensitive.length ? ` · ${privacy.sensitive.join(', ')}` : ''}</span>}
+    {data && <span className="dk-chip dk-privacy" data-tone="data"><UiIcon name="contact" size={11}/>Personal data{privacy?.personalData.length ? ` · ${privacy.personalData.map(k => DATA_WORD[k]).join(', ')}` : ''}</span>}
+  </>;
 }

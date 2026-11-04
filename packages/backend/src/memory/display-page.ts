@@ -28,10 +28,11 @@ function display(row: any) {
 export function memoryDisplayPage(userId: string, token?: string) {
   const cursor = decode(token);
   return sql().read((function* (): Step<{ memories: ReturnType<typeof display>[]; nextCursor: string | null; total: number }> {
-    const upper = cursor?.upper ?? (yield* one<{ at: string | Date; id: string }>('SELECT created_at AS at, id FROM memories WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 1', userId));
+    const upper = cursor?.upper ?? (yield* one<{ at: string | Date; id: string }>("SELECT created_at AS at, id FROM memories WHERE user_id = ? AND COALESCE(drawer_kind, '') <> 'agent' ORDER BY created_at DESC, id DESC LIMIT 1", userId));
     if (!upper) return { memories: [], nextCursor: null, total: 0 };
     const upperAt = upper.at instanceof Date ? upper.at.toISOString() : upper.at;
-    const bound = 'user_id = ? AND (created_at < ? OR (created_at = ? AND id <= ?))';
+    // STORE-MAP-01 P5: an agent's own notes are not listed with the owner's memories (they have their own place).
+    const bound = "user_id = ? AND COALESCE(drawer_kind, '') <> 'agent' AND (created_at < ? OR (created_at = ? AND id <= ?))";
     const args = [userId, upperAt, upperAt, upper.id];
     const count = yield* one<{ n: number }>(`SELECT COUNT(*) AS n FROM memories WHERE ${bound}`, ...args);
     const after = cursor?.after;

@@ -45,7 +45,7 @@ export type ScopeTree = {
 };
 export type ScopeHit = { kind: 'department' | 'project' | 'people' | 'agent'; id: string; name: string; departmentId?: string; archived: boolean; memories: number };
 export type AgentScope = { id: string; name: string; department: string | null; template: { id: string; name: string } | null; exceptions: number };
-export type ExplorerItem = { id: string; type: string; preview: string; drawerId: string; topicKey: string | null; importance: number; layer: string; createdAt: string; sourceAgentId: string | null; source?: string | null; usedIn?: number };
+export type ExplorerItem = { id: string; type: string; preview: string; drawerId: string; topicKey: string | null; importance: number; layer: string; createdAt: string; sourceAgentId: string | null; source?: string | null; usedIn?: number; trust?: 'checked' | 'unchecked' | 'imported' | null; supersededBy?: string | null; validTo?: string | null };
 export type ExplorerPage = { scope: string; items: ExplorerItem[]; nextCursor: string | null; total: number; facets: { type: Record<string, number>; layer: Record<string, number>; drawer: Record<string, number>; source?: Record<string, number> } };
 export type PinnedFact = { id: string; scope: string; text: string; position: number; createdAt: string; updatedAt: string };
 export type AgentSample = { agentId: string; agentName: string; project: string | null; before: { read: AccessColumn[]; write: AccessColumn[] }; after: { read: AccessColumn[]; write: AccessColumn[] } };
@@ -76,7 +76,9 @@ export type GraphEntity = { id: string; kind: EntityKind; name: string; aliases:
 export type GraphLink = { id: string; type: string; status: LinkStatus; from: { id: string; name: string; kind: EntityKind }; to: { id: string; name: string; kind: EntityKind }; memoryIds: string[]; createdAt: string };
 export type TimelineEntry = { memoryId: string; createdAt: string; drawer: string; type: string; preview: string };
 export type EntityDetail = { entity: GraphEntity; links: GraphLink[]; timeline: TimelineEntry[] };
-export type Handoff = { id: string; agentId: string; kind: HandoffKind; scopeId: string; projectId: string | null; version: number; source: 'agent' | 'model' | 'fallback' | 'owner'; createdAt: string; done: string[]; left: string[]; next: string[]; questions: string[]; /** The chat or board card name (list only). */ title?: string | null };
+export type Handoff = { id: string; agentId: string; kind: HandoffKind; scopeId: string; projectId: string | null; version: number; source: 'agent' | 'model' | 'fallback' | 'owner'; createdAt: string; done: string[]; left: string[]; next: string[]; questions: string[]; /** The chat or board card name (list only). */ title?: string | null;
+  /** STORE-MAP-01 P8 (only while its switch is on): the board task, its blockers (editable) and the files touched (read only). */
+  cardId?: string; taskNo?: string; boardId?: string; blockers?: string[]; files?: string[] };
 export type CodingHandoff = { id: string; projectId: string; client: 'claude-code' | 'codex' | 'gemini-cli' | 'antigravity'; done: string[]; left: string[]; next: string[]; questions: string[]; createdAt: string };
 export type OwnRules = { routine: RoutineRule | null; important: ImportantRule | null; contradiction: ContradictionRule | null; reviewerAgentId: string | null; weeklyDay: number | null; weeklyHour: number | null; updatedAt: string | null };
 export type ScopeRules = { scope: string; own: OwnRules; effective: { routine: RoutineRule; important: ImportantRule; contradiction: ContradictionRule; from: { routine: string; important: string; contradiction: string }; reviewerAgentId: string | null; weekly: { day: number; hour: number }; trashDays: number } };
@@ -86,7 +88,10 @@ export type MemoryDetail = {
   usage: { usedIn: number; lastUsedAt: string | null; recent: Array<{ runId: string; sessionId: string | null; agentId: string | null; at: string }> };
   graph: { entities: Array<{ id: string; kind: EntityKind; name: string }>; links: GraphLink[] };
   readers: { scope: string; count: number; total: number; all: boolean; archived: boolean };
+  /** STORE-MAP-01 P3: null while the switch is off or before the backfill. */
+  validity?: MemoryValidity | null;
 };
+export type MemoryValidity = { source: 'owner' | 'agent' | 'coding_app' | 'import' | 'channel' | 'system' | null; sourceRef: string | null; trust: 'checked' | 'unchecked' | 'imported' | null; validFrom: string | null; validTo: string | null; supersededBy: string | null; replaces: string[]; version: number };
 export type ScopeAgents = { scope: string; column: AccessColumn; mode: 'read' | 'write'; count: number; total: number; agents: Array<{ id: string; name: string; read: boolean; write: boolean; template: string | null; exception: boolean }>; nextCursor: string | null };
 export type AccessCounts = { column: AccessColumn; mode: 'read' | 'write'; total: number; company: number; departments: Record<string, number>; projects: Record<string, number> };
 export type TemplateDetail = { template: RoleTemplate; agents: Array<{ id: string; name: string }>; nextCursor: string | null };

@@ -19,6 +19,10 @@ export type Card = Readonly<{
   taskFile?: TaskMark | null;
   /** TASKPAGE-03: how the task repeats (null = it does not). */
   repeat?: Repeat | null;
+  /** STORE-MAP-01 P8 (D29): how many handoffs the task has (only when there is one, P8 on). */
+  handoffCount?: number;
+  /** STORE-MAP-01 P8 (D29): the newest handoff lists blockers (only then, P8 on). */
+  blocked?: true;
 }>;
 export type Every = 'hourly' | 'daily' | 'weekly';
 export type Repeat = Readonly<{ every: Every; at: string; weekday: number | null; nextRun: string; paused: boolean; lastResult: 'started' | 'busy' | 'failed' | null; lastRun?: string | null; agentId?: string | null; model?: string }>;
@@ -29,6 +33,8 @@ export const repeatWords = (r: Pick<Repeat, 'every' | 'at' | 'weekday'>) => r.ev
 export type TaskMark = Readonly<{ no: string; projectId: string; projectName: string; problem: string | null; apps: readonly string[]; finished: boolean }>;
 export type TaskDetail = TaskMark & Readonly<{
   file: string; text: string;
+  /** STORE-MAP-01 P6: the task's number (only while the backend's P6 switch is on). */
+  number?: string;
   task: Readonly<{ no: string; title: string; state: string; department: string; agent: string; priority: string; done: readonly string[]; left: readonly string[]; next: readonly string[] }>;
   workedOn: ReadonlyArray<Readonly<{ app: string; agent: string; date: string; at: string | null; what: string | null }>>;
   log: ReadonlyArray<Readonly<{ at: string; app: string; what: string }>>;

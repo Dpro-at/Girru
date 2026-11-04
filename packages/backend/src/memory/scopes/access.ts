@@ -36,6 +36,7 @@ import { all, one, run, sql, sqliteSync, type Step } from '../../repositories/sq
 import { DRAWER_KINDS, isValidDrawerKey, type DrawerKind } from '../drawers.js';
 import { GENERAL_DEPARTMENT, ScopeInputError, cleanName, departmentStep, listProjectsStep, normName } from './store.js';
 import type { AgentPermissions } from '../../tools/agent-permissions.js';
+import { departmentTable } from '../../services/store-p3.js';
 
 export const ACCESS_MODES = ['allow', 'deny', 'inherit'] as const;
 export type AccessMode = (typeof ACCESS_MODES)[number];
@@ -788,7 +789,7 @@ export async function accessCounts(ownerId: string, input: { column?: unknown; m
   if (mode !== 'read' && mode !== 'write') throw new ScopeInputError('mode must be read or write');
   const bit = mode === 'read' ? READ_BIT(column) : WRITE_BIT(column);
   const { agents, snap, departments, projects } = await sql().read((function* () {
-    const ds = yield* all<{ id: string }>('SELECT id FROM memory_departments WHERE owner_id = ? ORDER BY id', ownerId);
+    const ds = yield* all<{ id: string }>(`SELECT id FROM ${departmentTable()} WHERE owner_id = ? ORDER BY id`, ownerId);
     return {
       agents: yield* agentCapsStep(), snap: yield* loadSnapshotStep(ownerId),
       departments: [GENERAL_DEPARTMENT, ...ds.map((d) => d.id)],
