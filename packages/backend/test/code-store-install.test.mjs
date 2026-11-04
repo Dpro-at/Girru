@@ -233,13 +233,15 @@ test('the unpacker keeps to its limits', async () => {
   await assert.rejects(unpackTarGz(file, to(4)), /damaged/);
 });
 
-test('the Add is bound to what the owner saw; the Store lists only girru-store release archives', async () => {
+test('the Add is bound to what the owner saw; the Store lists only girru-store and nabu-code release archives', async () => {
   forget(); publish('1.5.0');
   const r = await installFromStore('owner-1', 'girru:code', 'f'.repeat(64));
   assert.equal(r.ok, false); assert.equal(r.code, 'changed');
   const ok = { version: '1.0.0', protocolVersion: 1, archives: { 'darwin-arm64': { url: `${URL_BASE}/v1/a.tar.gz`, sha256: 'a'.repeat(64), size: 10 } } };
   assert.equal(parseRuntime(ok).version, '1.0.0');
-  for (const url of ['https://github.com/someone/else/releases/download/v1/a.tar.gz', 'http://github.com/a/b/releases/download/v1/a.tar.gz', 'https://example.com/a/b/releases/download/v1/a.tar.gz', 'https://github.com/a/b/raw/main/a.tar.gz', 'https://github.com/a/b/releases/download/v1/a.zip', 'https://user:pw@github.com/a/b/releases/download/v1/a.tar.gz', `${URL_BASE}/v1/a.tar.gz?x=1`]) {
+  // nabu-code publishes the Code archives as its own releases (public since 2026-11-04).
+  assert.equal(parseRuntime({ ...ok, archives: { 'darwin-arm64': { ...ok.archives['darwin-arm64'], url: 'https://github.com/9mtm/nabu-code/releases/download/code-v1.0.0/girru-code-1.0.0-darwin-arm64.tar.gz' } } }).version, '1.0.0');
+  for (const url of ['https://github.com/someone/else/releases/download/v1/a.tar.gz', 'https://github.com/9mtm/nabu-code/archive/main.tar.gz', 'https://github.com/9mtm/other/releases/download/v1/a.tar.gz', 'https://github.com/9mtm/nabu-code/releases/download/v1/a.zip', 'http://github.com/a/b/releases/download/v1/a.tar.gz', 'https://example.com/a/b/releases/download/v1/a.tar.gz', 'https://github.com/a/b/raw/main/a.tar.gz', 'https://github.com/a/b/releases/download/v1/a.zip', 'https://user:pw@github.com/a/b/releases/download/v1/a.tar.gz', `${URL_BASE}/v1/a.tar.gz?x=1`]) {
     assert.throws(() => parseRuntime({ ...ok, archives: { 'darwin-arm64': { ...ok.archives['darwin-arm64'], url } } }), /store runtime/, url);
   }
   assert.throws(() => parseRuntime({ ...ok, archives: { 'beos-ppc': ok.archives['darwin-arm64'] } }), /store runtime/);
