@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Lock first, always; then pairing or the computer's screens. Content is
 /// covered whenever the scene is not active, so the app switcher shows nothing.
@@ -35,6 +36,8 @@ struct RootView: View {
             }
         }
         .onChange(of: lock.state) { _, state in
+            // Locking closes the keyboard, so its bar never shows over the lock screen.
+            if state != .unlocked { UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil) }
             guard state == .unlocked else { return }
             hasUnlocked = true
             Task { await model.sendPendingDecision() }

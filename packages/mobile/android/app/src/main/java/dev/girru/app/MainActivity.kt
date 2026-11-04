@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.InputMethodManager
 import android.webkit.WebView
 import android.widget.Button
 import android.widget.EditText
@@ -163,8 +164,12 @@ class MainActivity : AppCompatActivity(), NativeBridge.Handler {
 
     private fun render() {
         val screen = currentScreen()
-        // Locking forgets every terminal: the next use asks for the check again.
-        if (screen == Screen.LOCKED) app.content.terminal.forget()
+        // Locking forgets every terminal (the next use asks for the check again) and closes the keyboard.
+        if (screen == Screen.LOCKED) {
+            app.content.terminal.forget()
+            webView?.clearFocus()
+            ContextCompat.getSystemService(this, InputMethodManager::class.java)?.hideSoftInputFromWindow(root.windowToken, 0)
+        }
         lockScreen.isVisible = screen == Screen.LOCKED
         screenLockNeeded.isVisible = screen == Screen.NEEDS_SCREEN_LOCK
         pairScreen.isVisible = screen == Screen.PAIR
