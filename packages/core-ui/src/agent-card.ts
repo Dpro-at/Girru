@@ -32,7 +32,7 @@ export const TOOL_GROUPS = ['Memory', 'Board', 'Files', 'Internet and browser', 
 export type ToolGroup = (typeof TOOL_GROUPS)[number];
 /** Which group a tool belongs to, by its name. */
 export function toolGroup(name: string): ToolGroup {
-  if (/^mcp:/.test(name)) return 'Connectors';
+  if (/^mcp(?::|__)/.test(name)) return 'Connectors';
   if (/^memory_/.test(name)) return 'Memory';
   if (/^board_/.test(name)) return 'Board';
   if (/^(read|write|storage_)/.test(name)) return 'Files';

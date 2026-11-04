@@ -7,6 +7,7 @@ import {PreferenceGroup,PreferenceRow} from './Preferences';
 import {AccountSettings} from './SettingsAccount';
 import {ReplyAppsSettings} from './ReplyAppsSettings';
 import {SavedKeys} from './SavedKeys';
+import {SshKeysSettings} from './SshKeysSettings';
 import {AgentPermissionsGrid} from './AgentPermissionsGrid';
 import {PermissionsSettings,VerificationSettings as SignInAndReviewers} from './SecuritySettings';
 import {ReviewerPoliciesSettings} from './ReviewerPoliciesSettings';
@@ -30,7 +31,7 @@ import { McpSection } from './ToolSections';
 import type { UiIconName } from './ui-icons';
 /** Places that are sections of their own; their Settings rows open them. MCP connections stays in Settings with its places nested, like Memory. */
 type Tool='mcp'|'library';
-type Place='voice'|'general'|'account'|'replies'|'move'|'permissions'|'verification'|'approval-rules'|'keys'|'accounts'|'channels'|'phone'|'memory'|'departments'|'apps'|Tool|'backups'|'about';
+type Place='voice'|'general'|'account'|'replies'|'move'|'permissions'|'verification'|'approval-rules'|'keys'|'ssh-keys'|'accounts'|'channels'|'phone'|'memory'|'departments'|'apps'|Tool|'backups'|'about';
 /** Old names ('models', 'sharing', 'connections') still open their places. */
 export type SettingsTab=Place|'models'|'sharing'|'connections';
 type Row={value:Place;label:string;icon:UiIconName;words:string;note?:string;jump?:boolean};
@@ -44,6 +45,7 @@ const ROWS:Record<Place,Row>={
  permissions:{value:'permissions',label:'Permissions',icon:'sliders',words:'what agents may do actions tools memory allow ask never browser internet messages delete install money coverage',note:'What each agent may do, use and remember.'},
  verification:{value:'verification',label:'Verification',icon:'check',words:'sign-in methods password passkeys reviewers who can authorize two-person',note:'Sign-in methods and review responsibilities.'},
  'approval-rules':{value:'approval-rules',label:'Approval rules',icon:'shield',words:'rules people must agree quorum activate withdraw',note:'When several people must agree before an action runs.'},
+ 'ssh-keys':{value:'ssh-keys',label:'SSH keys',icon:'key',words:'ssh keys public key fingerprint ed25519 rsa ecdsa id_ed25519 ~/.ssh config hosts copy',note:'SSH keys on this computer. Only the public key can be copied; the private key stays in its file.'},
  keys:{value:'keys',label:'Saved keys',icon:'key',words:'secrets tokens passwords key store older chats',note:'Keys you pasted in chats, kept encrypted on this computer.'},
  accounts:{value:'accounts',label:'Accounts',icon:'contact',words:'connections accounts genvr world account connect disconnect test publication',note:'Accounts connected to this workspace.'},
  channels:{value:'channels',label:'Channels',icon:'message',words:'messaging services telegram discord whatsapp trusted senders conversations automatic replies',note:'Messaging services and trusted senders.'},
@@ -80,7 +82,7 @@ export function AppSettings({ onOpenStore, signedIn, preference, onTheme, onAcco
   const ownerOnly=(keys:Place[])=>owner?keys:[];
   const groups:{name:string;keys:Place[]}[]=live?[
     {name:'Application',keys:['general','account','replies',...ownerOnly(['voice','move'])]},
-    {name:'Security',keys:[...ownerOnly(['permissions']),...(user?.role!=='guest'?['verification' as const]:[]),...ownerOnly(['approval-rules']),'keys']},
+    {name:'Security',keys:[...ownerOnly(['permissions']),...(user?.role!=='guest'?['verification' as const]:[]),...ownerOnly(['approval-rules']),'keys',...ownerOnly(['ssh-keys'])]},
     {name:'Connections',keys:ownerOnly(['accounts','channels','phone',...(client?['mcp' as const]:[]),'memory'])},
     {name:'Workspace',keys:[...ownerOnly(['departments']),...(onOpenApps?['apps' as const]:[]),...(onOpenTool?ownerOnly(['library']):[])]},
     {name:'',keys:[...ownerOnly(['backups']),'about']},
@@ -93,7 +95,7 @@ export function AppSettings({ onOpenStore, signedIn, preference, onTheme, onAcco
   useEffect(()=>{if(!active||aboutOnly)return;const onKey=(e:KeyboardEvent)=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='f'&&!document.querySelector('dialog[open]')&&!e.defaultPrevented){e.preventDefault();search.current?.focus();}};window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);},[active,aboutOnly]);
   const sidebar=<nav className="dk-sidebar settings-sidebar" aria-label="Settings sections">
     <div className="dk-side-top"><label className="dk-search"><UiIcon name="search" size={13}/><input ref={search} type="search" aria-label="Search settings" placeholder="Search settings" value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{if(e.key==='Escape')setQuery('');}}/></label></div>
-    {groups.map(group=>{const rows=group.keys.map(k=>ROWS[k]).filter(found);return rows.length?<div key={group.name||'end'} className="settings-nav-group">{group.name&&<p className="section-label dk-label">{group.name}</p>}{rows.map(t=><div key={t.value} className="dk-group"><button type="button" className="nav-item dk-place" title={t.jump?`Open ${t.label}`:undefined} aria-current={active_===t.value?'page':undefined} aria-expanded={t.value==='memory'||t.value==='mcp'?active_===t.value:undefined} onClick={()=>choose(t.value)}><UiIcon name={t.icon} size={15}/><span className="dk-place-name">{t.label}</span>{t.jump&&<UiIcon name="chevron" size={11}/>}</button>{t.value==='memory'&&active_==='memory'&&MEMORY_PANES.map(p=><button key={p.key} type="button" className="nav-item dk-place" data-nested aria-current={pane===p.key?'page':undefined} onClick={()=>setPane(p.key)}><span className="dk-place-name">{p.label}</span></button>)}{t.value==='mcp'&&active_==='mcp'&&<div ref={setMcpNav} className="mcp-settings-nav"/>}</div>)}</div>:null;})}
+    {groups.map(group=>{const rows=group.keys.map(k=>ROWS[k]).filter(found);return rows.length?<div key={group.name||'end'} className="settings-nav-group">{group.name&&<p className="section-label dk-label">{group.name}</p>}{rows.map(t=><div key={t.value} className="dk-group"><button type="button" className="nav-item dk-place" title={t.jump?`Open ${t.label}`:undefined} aria-current={active_===t.value?'page':undefined} aria-expanded={t.value==='memory'||t.value==='mcp'?active_===t.value:undefined} onClick={()=>choose(t.value)}><UiIcon name={t.icon} size={15}/><span className="dk-place-name">{t.label}</span>{t.jump&&<UiIcon name="chevron" size={11}/>}</button>{t.value==='memory'&&active_==='memory'&&MEMORY_PANES.map(p=><button key={p.key} type="button" className="nav-item dk-place" data-nested aria-current={pane===p.key?'page':undefined} onClick={()=>setPane(p.key)}><span className="dk-place-name">{p.label}</span></button>)}{t.value==='mcp'&&active_==='mcp'&&<div ref={setMcpNav} className="mcp-settings-nav"/>}</div>)}{group.name==='Security'&&owner&&!q&&<div className="dk-group"><button type="button" className="nav-item dk-place settings-later" disabled title="Coming later"><UiIcon name="shield" size={15}/><span className="dk-place-name">Security check</span><small>later</small></button></div>}</div>:null;})}
     {q&&!groups.some(g=>g.keys.some(k=>found(ROWS[k])))&&<p className="settings-search-empty">No setting matches “{query.trim()}”.</p>}
     {!signedIn&&<div className="settings-signin-note"><p>Sign in to see your account, keys and workspace settings.</p><button type="button" onClick={onAccount}>Sign in</button></div>}
   </nav>;
@@ -124,6 +126,7 @@ export function AppSettings({ onOpenStore, signedIn, preference, onTheme, onAcco
       {active_==='verification'&&live&&<SignInAndReviewers client={client!} onApprovals={onApprovals??(()=>{})} onBoard={onBoard??(()=>{})} onAgent={onAgent??(()=>onAgents?.())} onAccount={()=>setTab('account')}/>}
       {active_==='approval-rules'&&owner&&<ReviewerPoliciesSettings client={client!} onAccount={()=>setTab('account')}/>}
       {active_==='keys'&&live&&<SavedKeys client={client!} owner={owner} page/>}
+      {active_==='ssh-keys'&&owner&&<SshKeysSettings client={client!} active={active}/>}
       {active_==='accounts'&&owner&&<ConnectionsSettings client={client!} onOpenGenvr={onOpenGenvr}/>}
       {active_==='departments'&&owner&&<DepartmentsSettings client={client!} onAgent={onAgent}/>}
       {active_==='channels'&&owner&&<AgentConnectSettings client={client!}/>}
