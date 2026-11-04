@@ -39,6 +39,8 @@ const MAX_TOTAL_OUT = 96 * 1024 * 1024;
 const MAX_FORM_DEPTH = 4;
 /** Share of shown characters with no known letter above which the PDF is refused (fonts). */
 const MAX_UNKNOWN_SHARE = 0.3;
+/** Entries of one font's ToUnicode map at most (a crafted bfrange cannot fill memory). */
+const MAX_CMAP_ENTRIES = 65_536;
 
 export type PdfFailure = 'not_pdf' | 'encrypted' | 'no_text' | 'fonts' | 'damaged' | 'too_large';
 export interface PdfPage { page: number; text: string }
@@ -473,6 +475,7 @@ function ascii85(data: Uint8Array): Uint8Array {
     const c = data[i];
     if (c === 0x7e) break;
     if (WS[c]) continue;
+    if (out.length > MAX_STREAM_OUT) throw new PdfError('too_large');
     if (c === 0x7a && group.length === 0) { out.push(0, 0, 0, 0); continue; }
     if (c < 0x21 || c > 0x75) continue;
     group.push(c - 0x21);
@@ -618,6 +621,7 @@ function parseCMap(data: Uint8Array, font: Font): void {
           const a = lx.token();
           if (a === undefined || (a instanceof Op && a.op === 'endbfchar')) break;
           const b = lx.token();
+          if (font.map.size >= MAX_CMAP_ENTRIES) continue;
           if (a instanceof Str && b instanceof Str) font.map.set(codeKey(a.b.length, bytesNum(a.b)), utf16be(b.b));
           else if (a instanceof Str && b instanceof Name) { const g = glyphToUnicode(b.n); if (g !== null) font.map.set(codeKey(a.b.length, bytesNum(a.b)), g); }
         }
@@ -629,7 +633,7 @@ function parseCMap(data: Uint8Array, font: Font): void {
           const c = parseValue(lx);
           if (!(a instanceof Str) || !(b instanceof Str)) continue;
           const lo = bytesNum(a.b), hi = bytesNum(b.b), len = a.b.length;
-          if (hi < lo || hi - lo > 65535) continue;
+          if (hi < lo || hi - lo > 65535 || font.map.size + (hi - lo) > MAX_CMAP_ENTRIES) continue;
           if (c instanceof Str) {
             const base = c.b;
             for (let code = lo; code <= hi; code++) {
