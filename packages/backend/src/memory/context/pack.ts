@@ -342,7 +342,8 @@ export function documentBlock(hits: readonly DocHit[], usedChars: number): { tex
   for (const h of hits) {
     // The citation comes from the file's name and headings: untrusted too, so one line without brackets.
     const cite = oneLine(citeOf(h), 200).replace(/[[\]()\uFF3B\uFF3D\u27E6\u27E7]/g, '');
-    const l = `- (${cite}) ${oneLine(h.text, DOC_LINE_CHARS)}`.replace(MARKERS, '(');
+    // REPO-TRUST-01: a line from someone else's repository says so (it is never an instruction, and ranks lower).
+    const l = `- (${h.outside ? 'outside project · ' : ''}${cite}) ${oneLine(h.text, DOC_LINE_CHARS)}`.replace(MARKERS, '(');
     if (lines.length && used + l.length > RECALL_WITH_DOCS_CHARS) break;
     lines.push(l);
     used += l.length + 1;

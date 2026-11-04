@@ -14,6 +14,7 @@
  * refuses when anything changed since, or when any file is a conflict: then
  * nothing is written. Every write goes through the one safe file writer.
  */
+import { isOutsideProject } from '../project-trust.js';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { findProject, type Project } from '../../repositories/chat-conversations.js';
@@ -124,6 +125,8 @@ export async function layoutApply(ownerId: string, projectId: unknown, input: { 
   if (input?.confirm !== true) throw new BridgeError('Send confirm: true after reviewing the preview', 400, 'confirm_required');
   if (typeof input.previewHash !== 'string') throw new BridgeError('previewHash is required');
   const p = await plan(ownerId, projectId);
+  // REPO-TRUST-01: Girru's layout is not written into someone else's repository until the owner trusts the project.
+  if (await isOutsideProject(ownerId, p.project.id)) throw new BridgeError('This project is on the Outside projects list. Trust it first to add Girru\'s files to its folder.', 409, 'outside_project');
   const before = summary(p.project.id, p.folder, p.files);
   if (before.previewHash !== input.previewHash) throw new BridgeError('The files or the memory changed since the preview; preview again', 409, 'preview_stale');
   if (before.conflicts) throw new BridgeError(`Nothing written: ${p.files.filter((f) => f.action === 'conflict').map((f) => f.reason).join('; ')}`, 409, 'conflict');

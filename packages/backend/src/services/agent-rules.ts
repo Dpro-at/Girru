@@ -13,6 +13,7 @@
  * deleted rules are never sent. Agents may only suggest a rule; the owner
  * accepts, changes or dismisses it.
  */
+import { isOutsideProject } from '../memory/project-trust.js';
 import { randomUUID } from 'node:crypto';
 import { q } from '../repositories/sql-steps.js';
 
@@ -165,6 +166,11 @@ export async function undoDelete(id: string): Promise<AgentRule | null> {
 export async function suggestRule(input: unknown, agentId: string | null, reason: unknown): Promise<AgentRule> {
   const v = checkRule(input) as RuleInput;
   await projectExists(v.projectId);
+  // REPO-TRUST-01: nothing from someone else's repository becomes a rule on an agent's word (the owner may still write one).
+  if (v.projectId) {
+    const owner = await q.one<{ user_id: string }>('SELECT user_id FROM chat_projects WHERE id = ?', v.projectId);
+    if (owner && await isOutsideProject(owner.user_id, v.projectId)) throw new RuleInputError('This project is on the Outside projects list: agents cannot suggest rules for it');
+  }
   const targets = normalTargets(v.who, v.targets);
   const why = typeof reason === 'string' ? [...clean(reason)].slice(0, REASON_CHARS).join('') : '';
   const open = await q.one<{ n: number }>("SELECT COUNT(*) AS n FROM agent_rules WHERE status = 'suggested'");

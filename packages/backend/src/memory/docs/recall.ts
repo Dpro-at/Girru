@@ -22,9 +22,12 @@ import { bm25FromCounts, hybridScore, termCounts, vectorScore, MIN_RECALL_SCORE 
 import { RELIABLE_SCORE, ITEM_SHARE } from '../quality/recall.js';
 import type { DrawerRef } from '../drawers.js';
 import { docIndexEnabled } from '../../services/doc-index-switch.js';
+import { isOutsideProject } from '../project-trust.js';
 import { ensureAgentSource, ensureProjectSources, queueDocIndex } from './indexer.js';
 
 export const DOC_RECALL_LIMIT = 4;
+/** REPO-TRUST-01: a chunk of an outside project's file counts this share of its score (it ranks below the owner's own). */
+export const OUTSIDE_WEIGHT = 0.8;
 const MAX_PER_FILE = 2;
 /** A source is looked at again by the indexer when recall finds it older than this. */
 const STALE_MS = 2 * 60_000;
@@ -39,6 +42,8 @@ export interface DocHit {
   text: string;
   score: number;
   scope: { kind: 'project' | 'agent'; key: string };
+  /** REPO-TRUST-01: from a project on the Outside projects list (someone else's repository). */
+  outside?: boolean;
 }
 
 export interface DocScopes {
@@ -127,6 +132,8 @@ export async function docRecall(input: { userId: string; query: string; limit?: 
   }
   const docs = (await Promise.all(input.scopes.sources.map(load))).flatMap((l) => l.docs);
   if (!docs.length) return none;
+  const outside = new Set<string>();
+  for (const s of input.scopes.sources) if (s.kind === 'project' && await isOutsideProject(input.userId, s.refId)) outside.add(s.refId);
   const tokens = lexicalTokens(query);
   const lexical = bm25FromCounts(tokens, docs);
   const q = await getEmbeddingService().embedQuery(query);
@@ -134,7 +141,8 @@ export async function docRecall(input: { userId: string; query: string; limit?: 
     const comparable = !!d.vec && d.model === q.model && d.vec.length === q.vector.length;
     // Hash vectors count only with a shared word (as in memory recall): otherwise a bucket collision.
     const vector = comparable && (q.semantic || lexical[i] > 0) ? vectorScore(cosine(q.vector, d.vec!), q.semantic) : null;
-    return { d, score: hybridScore(vector, lexical[i], q.semantic) };
+    const score = hybridScore(vector, lexical[i], q.semantic);
+    return { d, score: d.scope.kind === 'project' && outside.has(d.scope.key) ? score * OUTSIDE_WEIGHT : score };
   }).filter((x) => x.score >= MIN_RECALL_SCORE).sort((a, b) => b.score - a.score);
   const best = scored[0]?.score ?? 0;
   if (best < (q.semantic ? RELIABLE_SCORE.semantic : RELIABLE_SCORE.hash)) return { items: [], reliable: false, best };
@@ -145,7 +153,8 @@ export async function docRecall(input: { userId: string; query: string; limit?: 
     const n = perFile.get(x.d.file) ?? 0;
     if (n >= MAX_PER_FILE) continue;
     perFile.set(x.d.file, n + 1);
-    items.push({ chunkId: x.d.id, file: x.d.file, page: x.d.page, heading: x.d.heading, text: x.d.content, score: Math.round(x.score * 1000) / 1000, scope: x.d.scope });
+    items.push({ chunkId: x.d.id, file: x.d.file, page: x.d.page, heading: x.d.heading, text: x.d.content, score: Math.round(x.score * 1000) / 1000, scope: x.d.scope,
+      ...(x.d.scope.kind === 'project' && outside.has(x.d.scope.key) ? { outside: true } : {}) });
   }
   return { items, reliable: items.length > 0, best };
 }

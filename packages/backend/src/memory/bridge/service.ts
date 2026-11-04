@@ -9,6 +9,7 @@
  *                or handoff notes (handoff_write), for the project whose folder the
  *                CLI runs in; nothing for a folder Girru does not know
  */
+import { isOutsideProject, outsideProjectIds } from '../project-trust.js';
 import { designBlock, getDesign } from '../project-design.js';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -216,6 +217,8 @@ export async function syncOwner(ownerId: string): Promise<{ written: number; pro
   for (const f of await allFolderSettings(ownerId)) {
     const p = await findProject(ownerId, f.projectId);
     if (!p?.folder) continue;
+    // REPO-TRUST-01: an outside project keeps its folder as it is (no brief written, no back-flow).
+    if (await isOutsideProject(ownerId, p.id)) continue;
     if (f.filesEnabled) {
       const brief = await projectBrief(ownerId, p);
       const extras = await extrasOf(p.id);
@@ -275,7 +278,9 @@ export async function autoConnect(ownerId: string, allowed: boolean): Promise<{ 
     }
   }
   const known = new Set((await allFolderSettings(ownerId)).map((f) => f.projectId));
-  for (const p of (await listProjects(ownerId)).filter((x) => x.folder && !known.has(x.id))) {
+  // REPO-TRUST-01: Girru's files are never written into someone else's repository.
+  const outside = await outsideProjectIds(ownerId);
+  for (const p of (await listProjects(ownerId)).filter((x) => x.folder && !known.has(x.id) && !outside.has(x.id))) {
     try {
       const brief = await projectBrief(ownerId, p);
       const extras = await extrasOf(p.id);
@@ -381,6 +386,8 @@ export async function mcpCall(c: unknown, token: unknown, cwd: unknown, tool: un
     throw new BridgeError('This project needs a session started from Girru', 403, 'capability_required');
   }
   if (!project) throw new BridgeError('Girru does not know this folder. Add it as a project folder in Girru first.', 404, 'unknown_folder');
+  // REPO-TRUST-01: a coding app gets no memory in someone else's repository (the owner can trust the project in Girru).
+  if (await isOutsideProject(ownerId, project.id)) throw new BridgeError('This project is on the Outside projects list: its memory is not shared with coding apps', 403, 'outside_project');
   const a = args && typeof args === 'object' && !Array.isArray(args) ? args : {};
   const p6 = storeP6Enabled() && !!cap;
   // P6: company facts only where the owner allowed them (the capability carries it).

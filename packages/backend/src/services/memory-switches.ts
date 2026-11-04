@@ -48,6 +48,7 @@ export const MEMORY_SWITCHES: readonly MemorySwitch[] = Object.freeze([
   { env: 'GIRRU_STORE_P9', key: 'p9', what: 'memory hardening, privacy and quality', onByDefaultSince: SINCE, removeBy: REMOVE_BY },
   { env: 'GIRRU_STORE_P9B', key: 'p9b', what: 'memory quality engine', onByDefaultSince: SINCE, removeBy: REMOVE_BY },
   { env: 'GIRRU_MEMORY_HELPER', key: 'memoryHelper', what: 'the memory helper (local embedding model) installs itself', onByDefaultSince: SINCE, removeBy: REMOVE_BY },
+  { env: 'GIRRU_REPO_TRUST', key: 'repoTrust', what: 'outside projects: someone else\'s repository is kept apart', onByDefaultSince: SINCE, removeBy: REMOVE_BY },
   { env: 'GIRRU_DOC_INDEX', key: 'docIndex', what: 'document memory: project and knowledge files (md, txt, pdf) cited by file and page', onByDefaultSince: SINCE, removeBy: REMOVE_BY },
 ]);
 

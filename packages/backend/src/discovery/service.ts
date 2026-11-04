@@ -1,4 +1,5 @@
 import { discoveryFs, isolatedReadRegularFile } from '../services/discovery-fs.js';
+import { outsideFile } from '../memory/project-trust.js';
 import { publicKeyInfo } from '../services/ssh-keys.js';
 /**
  * "Found on this computer" (DISCOVER-01, board M17): one scan finds what coding
@@ -702,6 +703,8 @@ export async function automaticNoteSource(userId: string, id: string, home = os.
   if (saved?.state === 'ignored' || saved?.state === 'kept') return false;
   const exclusions = await P.allowedFolders(userId);
   if (P.isExcluded(entry.file, exclusions.exclude)) return false;
+  // REPO-TRUST-01: notes in someone else's repository are never turned into memories on their own.
+  if (await outsideFile(userId, entry.file)) return false;
   const project = await projectRoot(entry.root, home);
   const candidateRoot = project?.root ?? entry.root;
   const root = candidateRoot === home || candidateRoot === path.parse(candidateRoot).root ? null : candidateRoot;
