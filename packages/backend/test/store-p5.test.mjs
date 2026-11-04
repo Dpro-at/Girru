@@ -243,3 +243,20 @@ test('an older 0755 agents folder is tightened to 0700 and its notes are importe
   assert.equal(statSync(agents).mode & 0o777, 0o700);
   assert.match((await drawer.agentNotes('p5-old')).content, /Kept from an older install/);
 });
+
+test('agent notes stay out of the doctor, the owner list and "forget all" (they are read only through the agent drawer)', async () => {
+  process.env.GIRRU_STORE_P5 = '1';
+  await drawer.importAllAgentMemory();
+  const agentRows = count("SELECT COUNT(*) AS n FROM memories WHERE drawer_kind = 'agent'");
+  assert.ok(agentRows >= 2, 'two agents with the same kind of notes');
+  const { checkMemory } = await import(join(backendDir, 'src/memory/doctor.ts'));
+  const report = await checkMemory(O);
+  assert.equal(report.counts['broken-drawer'], 0);
+  assert.equal(report.counts.duplicate, 0);
+  assert.ok(report.issues.every((i) => i.memoryIds.every((id) => count("SELECT COUNT(*) AS n FROM memories WHERE id = ? AND drawer_kind = 'agent'", id) === 0)));
+  assert.ok((await getMemoryStorage().getByUser(O)).every((m) => m.drawer?.kind !== 'agent'));
+  const { forgetAll } = await import(join(backendDir, 'src/memory/forget.ts'));
+  await forgetAll(O, O);
+  assert.equal(count("SELECT COUNT(*) AS n FROM memories WHERE drawer_kind = 'agent'"), agentRows, 'forget all leaves the agents’ own notes');
+  assert.match((await drawer.agentNotes('p5-noor')).content, /\S/);
+});

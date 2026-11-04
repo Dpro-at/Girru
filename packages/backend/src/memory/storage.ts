@@ -382,9 +382,11 @@ export class MemoryStorage implements IMemoryStorage {
    * Get all memories for a user (with optional layer filter)
    */
   async getByUser(userId: string, layer?: string): Promise<Memory[]> {
+    // P5: an agent's own notes are read only through memory/agent-drawer.ts (like get and search),
+    // so the memory list, the doctor, consolidation and "forget all" never touch them.
     let query = `
       SELECT * FROM memories
-      WHERE user_id = ?
+      WHERE user_id = ? AND ${NOT_AGENT_NOTES_SQL}
     `;
     const params: any[] = [userId];
 
