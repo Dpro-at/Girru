@@ -60,6 +60,8 @@ export async function ollamaToolChat(opts: {
   timeoutMs?: number;
   /** CHAT-BUILD-01: the caller's stop (a stopped chat reaches its delegated agents). */
   signal?: AbortSignal;
+  /** STORE-MAP-01 P2b: the model's own window (num_ctx); unset = Ollama's default, as before. */
+  numCtx?: number;
 }): Promise<OllamaToolChatResult> {
   const messages: OllamaMessage[] = opts.systemPrompt
     ? [{ role: 'system', content: opts.systemPrompt }, ...opts.messages]
@@ -76,6 +78,7 @@ export async function ollamaToolChat(opts: {
       options: {
         ...(typeof opts.temperature === 'number' ? { temperature: opts.temperature } : {}),
         ...(opts.maxTokens ? { num_predict: opts.maxTokens } : {}),
+        ...(opts.numCtx ? { num_ctx: opts.numCtx } : {}),
       },
     }),
     signal: opts.signal ? AbortSignal.any([opts.signal, AbortSignal.timeout(opts.timeoutMs ?? 120_000)]) : AbortSignal.timeout(opts.timeoutMs ?? 120_000),
