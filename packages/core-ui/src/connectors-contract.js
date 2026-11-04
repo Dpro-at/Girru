@@ -68,7 +68,12 @@ function server(x) {
     connectionState:['connected','connecting','disconnected'].includes(x.connectionState)?x.connectionState:'unknown', enabled: x.enabled === true, active: x.active === true, launchApproved: x.launchApproved === true,
     status: str(x.status, 40), lastError: typeof x.lastError === 'string' ? x.lastError.slice(0, 500) : null,
     lastDiscoveredAt: typeof x.lastDiscoveredAt === 'string' ? x.lastDiscoveredAt.slice(0, 40) : null,
-    tools: Array.isArray(x.tools) ? x.tools.filter(record).slice(0, 200).map(tool) : [] };
+    tools: Array.isArray(x.tools) ? x.tools.filter(record).slice(0, 200).map(tool) : [],
+    sources: Array.isArray(x.sources) ? x.sources.filter(record).slice(0, 20).map(source) : [] };
+}
+// MCP-ONE-01: where a server was found (app, its file, the entry key); never a secret.
+function source(x) {
+  return { origin: str(x.origin, 80), file: str(x.file, 2048), key: str(x.key, 200), project: typeof x.project === 'string' ? x.project.slice(0, 2048) : null, appId: typeof x.appId === 'string' ? x.appId.slice(0, 128) : null };
 }
 
 const CODES = { 400: ['invalid_input'], 403: ['exec_tools_disabled', 'forbidden'], 404: ['not_found', 'tool_not_found'], 409: ['launch_approval_required', 'name_taken', 'disabled', 'conflict'] };

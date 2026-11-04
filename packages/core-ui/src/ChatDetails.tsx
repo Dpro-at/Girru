@@ -76,7 +76,7 @@ export function modelsUsed(people: readonly { name: string; model: string }[], u
 }
 
 /** The chat's live data for the panel (usage, delegations, schedule, connections); quiet on failure. */
-function useLive(client: SessionClient | undefined, chatId: string | null, owner: boolean, tick: number): Live {
+function useLive(client: SessionClient | undefined, chatId: string | null, owner: boolean, tick: number, agentId: string | null): Live {
   const [live, setLive] = useState<Live>({ usage: [], team: [], apps: [], schedule: null, connections: null });
   useEffect(() => {
     if (!client || !chatId) { setLive({ usage: [], team: [], apps: [], schedule: null, connections: null }); return; }
@@ -84,17 +84,20 @@ function useLive(client: SessionClient | undefined, chatId: string | null, owner
     const get = async (path: string) => { try { const r = await client.request({ method: 'GET', path } as never); return r.status === 200 ? r.body as Record<string, unknown> : null; } catch { return null; } };
     void (async () => {
       const [u, t, s, c] = await Promise.all([get(`/api/chat/conversations/${chatId}/usage`), get(`/api/chat/conversations/${chatId}/team`), owner ? get(`/api/chat/conversations/${chatId}/schedule`) : null, owner ? get('/api/mcp/servers') : null]);
+      // MCP-ONE-01: a chat uses the connections of the agent it talks to, so only those show here.
+      const g = owner && agentId ? await get(`/api/agents/${encodeURIComponent(agentId)}/tool-grants`) : null;
+      const granted = Array.isArray(g?.grants) ? (g!.grants as { tool?: unknown }[]).map(x => String(x.tool ?? '')) : null;
       if (!on) return;
       setLive({
         usage: Array.isArray(u?.usage) ? u!.usage as Usage[] : [],
         team: Array.isArray(t?.team) ? t!.team as Delegation[] : [],
         apps: Array.isArray(t?.apps) ? t!.apps as CodingApp[] : [],
         schedule: (s?.schedule as Schedule) ?? null,
-        connections: Array.isArray(c?.servers) ? (c!.servers as Record<string, unknown>[]).map(x => ({ id: String(x.id), name: String(x.name ?? x.id), enabled: x.enabled === true, needsYou: x.enabled === true && (!!x.lastError || x.active === false) })) : null,
+        connections: Array.isArray(c?.servers) && granted ? (c!.servers as Record<string, unknown>[]).filter(x => granted.some(t => t.startsWith(`mcp__${String(x.name)}__`) || t.startsWith(`mcp:${String(x.name)}:`))).map(x => ({ id: String(x.id), name: String(x.name ?? x.id), enabled: x.enabled === true, needsYou: x.enabled === true && (!!x.lastError || x.active === false) })) : null,
       });
     })();
     return () => { on = false; };
-  }, [client, chatId, owner, tick]);
+  }, [client, chatId, owner, tick, agentId]);
   return live;
 }
 
@@ -115,7 +118,8 @@ export function ChatDetails({ controller, client, recall, memoryCard, placeExtra
   // While a reply runs, look again every few seconds so coding apps an agent starts show up (and leave) in Team.
   const [pulse, setPulse] = useState(0);
   useEffect(() => { if (!s.runId) return; const t = setInterval(() => setPulse(p => p + 1), 4000); return () => clearInterval(t); }, [s.runId]);
-  const live = useLive(client, s.activeId, owner, s.turns.length + (s.runId ? 1 : 0) + pulse * 2);
+  const chatAgent = s.conversations.find(c => c.id === s.activeId)?.agentId ?? s.agentId ?? s.agents.find(a => a.primary)?.id ?? null;
+  const live = useLive(client, s.activeId, owner, s.turns.length + (s.runId ? 1 : 0) + pulse * 2, chatAgent);
   const stopApp = (id: string) => { if (!s.activeId) return; void client?.request({ method: 'POST', path: `/api/chat/conversations/${s.activeId}/apps/${id}/stop` } as never).catch(() => undefined).finally(() => setPulse(p => p + 1)); };
   useEffect(() => { void (async () => { try { const r = await client?.request({ method: 'GET', path: PANEL_PATH } as never); if (r?.status === 200) setPrefsState(readPanel((r.body as any)?.panel)); } catch { /* the usual order */ } })(); }, [client]);
   const setPrefs = (p: PanelPrefs) => { setPrefsState(p); void client?.request({ method: 'PUT', path: PANEL_PATH, body: p } as never).catch(() => undefined); };
@@ -178,7 +182,7 @@ export function ChatDetails({ controller, client, recall, memoryCard, placeExtra
     mcp: { has: conns.length > 0, summary: conns.some(c => c.needsYou) ? `${conns.filter(c => c.needsYou).length} needs you` : `${conns.length} on`, tone: conns.some(c => c.needsYou) ? 'needs' : undefined,
       side: onSettings ? <button type="button" className="link-button" onClick={onSettings}><UiIcon name="plus" size={11}/>Add</button> : undefined,
       // CH8: each connection with its real mark (vendored, never loaded from the internet) and an amber dot when it needs you.
-      body: <>{conns.slice(0, 3).map(c => <Row key={c.id} icon="tool" logo={serviceMark(c.name) ? <ServiceLogo id={c.name} size={13}/> : undefined} name={c.name} sub={c.needsYou ? 'Needs you' : 'On'} tone={c.needsYou ? 'needs' : undefined}
+      body: <><p className="fine-print details-mcp-who">The connections {lead} may use</p>{conns.slice(0, 3).map(c => <Row key={c.id} icon="tool" logo={serviceMark(c.name) ? <ServiceLogo id={c.name} size={13}/> : undefined} name={c.name} sub={c.needsYou ? 'Needs you' : 'On'} tone={c.needsYou ? 'needs' : undefined}
         end={c.needsYou ? <span className="details-needs-dot" aria-label="Needs you"/> : undefined}/>)}</>,
       more: onSettings ? <button type="button" className="link-button panel-more" onClick={onSettings}>{conns.length > 3 ? `View all (${conns.length}) in Settings` : 'View all in Settings'}</button> : undefined },
   };

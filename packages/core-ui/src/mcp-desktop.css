@@ -90,3 +90,50 @@
  .mcp-desk .mcp-back{display:inline-flex;justify-self:start;gap:6px;background:transparent;color:var(--accent);padding:0}
  .mcp-kinds,.mcp-form-pair{grid-template-columns:1fr}
 }
+/* MCP-ONE-01: where a connection comes from (chips on rows, list in the inspector) */
+.mcp-sources{display:flex;gap:4px;flex-wrap:nowrap;overflow:hidden;min-width:0}
+.mcp-source-chip{display:inline-flex;align-items:center;gap:4px;padding:1px 7px 1px 3px;border-radius:9px;background:color-mix(in srgb,var(--text) 7%,transparent);color:var(--text-2);font-size:11px;white-space:nowrap}
+.mcp-source-chip .dk-tile{border-radius:4px}
+.mcp-where{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.mcp-where li{display:flex;align-items:center;gap:8px;min-height:30px}
+.mcp-where li>svg{flex:none;color:var(--text-3)}
+.mcp-where-text{display:grid;gap:1px;min-width:0;flex:1}
+.mcp-where-text strong{font-size:12.5px;font-weight:600}
+.mcp-where-text small{font-size:11px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mcp-key-choice{border:0;margin:8px 0;padding:0;display:grid;gap:4px}
+.mcp-key-choice legend{font-size:12px;font-weight:600;margin-bottom:2px}
+.mcp-key-choice label{display:flex;align-items:center;gap:6px;font-size:12.5px}
+.mcp-girru-tile{display:inline-grid;place-items:center;inline-size:32px;block-size:32px;border-radius:8px;background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent)}
+.details-mcp-who{margin:0 0 4px}
+/* SSH-KEYS-01: Settings › Security › SSH keys */
+.ssh-keys{display:grid;grid-template-columns:minmax(260px,1fr) minmax(280px,340px);gap:16px;align-items:start}
+@media (max-width:900px){.ssh-keys{grid-template-columns:1fr}}
+.ssh-list-pane{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--surface)}
+.ssh-list-head{display:flex;align-items:center;justify-content:space-between;padding:6px 8px 6px 12px;font-size:12px;color:var(--text-3);border-bottom:1px solid var(--border)}
+.ssh-rows{list-style:none;margin:0;padding:4px;display:grid;gap:2px}
+.settings-content .ssh-keys .ssh-row{border:0;box-shadow:none;min-block-size:0}
+.settings-content .ssh-keys .ssh-row[aria-pressed=true]{box-shadow:inset 2px 0 0 var(--accent)}
+.ssh-row{display:flex;align-items:center;gap:10px;inline-size:100%;padding:7px 8px;border-radius:7px;background:transparent;text-align:start;color:var(--text)}
+.ssh-row:hover{background:var(--row-hover)}
+.ssh-keys .ssh-row[aria-pressed=true]{background:var(--row-active);box-shadow:inset 2px 0 0 var(--accent)}
+.ssh-row-text{display:grid;gap:2px;min-width:0;flex:1}
+.ssh-row-text strong{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ssh-row-text small{font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ssh-hosts-count{font-size:11px;color:var(--text-3);white-space:nowrap}
+.ssh-type{display:inline-grid;place-items:center;flex:none;inline-size:32px;block-size:32px;border-radius:8px;font-size:10.5px;font-weight:700;letter-spacing:.02em;background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent)}
+.ssh-type[data-type=RSA]{background:color-mix(in srgb,#b7791f 16%,transparent);color:#b7791f}
+.ssh-type[data-type=EC],.ssh-type[data-type=SK]{background:color-mix(in srgb,#2f855a 16%,transparent);color:#2f855a}
+.ssh-type[data-type="—"]{background:color-mix(in srgb,var(--text) 8%,transparent);color:var(--text-3)}
+.ssh-type-big{inline-size:36px;block-size:36px}
+.ssh-inspector{border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--surface)}
+.ssh-inspector .dk-insp{display:grid;gap:12px}
+.ssh-copy{display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.ssh-inspector .mcp-facts dd{display:flex;align-items:center;gap:6px;min-width:0;overflow-wrap:anywhere}
+.ssh-used{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.ssh-used li{display:flex;align-items:center;gap:8px}
+.ssh-used li span{display:grid}
+.ssh-used small{font-size:11px;color:var(--text-3)}
+.settings-later{opacity:.55;cursor:default}
+.settings-later small{margin-inline-start:auto;font-size:10.5px;color:var(--text-3)}
+.mcp-key-choice input[type=radio]{inline-size:14px;block-size:14px;min-block-size:0;margin:0;padding:0;flex:none;accent-color:var(--accent)}
+.mcp-desk .mcp-key-choice label{display:flex;align-items:center;gap:6px}
