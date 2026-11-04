@@ -6,7 +6,7 @@
 # test/pg-auth-teams.integration.test.mjs and (B2.2b-2)
 # test/pg-credentials.integration.test.mjs and (B2.2b-3)
 # test/pg-agents-tasks.integration.test.mjs and (B2.2b-4)
-# test/pg-memory.integration.test.mjs and (KNOW-INDEX-01) test/pg-doc-index.integration.test.mjs and (STORE-MAP-01 pilot) test/pg-store-pilot.integration.test.mjs and (P3) test/pg-store-p3.integration.test.mjs and (P6–P9) test/pg-store-p6/p7/p8/p9.integration.test.mjs and (B2.2c part 1)
+# test/pg-memory.integration.test.mjs and (KNOW-INDEX-01) test/pg-doc-index.integration.test.mjs and (REPO-TRUST-01) test/pg-project-trust.integration.test.mjs and (STORE-MAP-01 pilot) test/pg-store-pilot.integration.test.mjs and (P3) test/pg-store-p3.integration.test.mjs and (P6–P9) test/pg-store-p6/p7/p8/p9.integration.test.mjs and (B2.2c part 1)
 # test/pg-platform.integration.test.mjs and (B2.2c part 2)
 # test/pg-routes.integration.test.mjs and test/pg-boot.integration.test.mjs and (B2.2d)
 # test/pg-storage, pg-evaluation, pg-workflows, pg-camera, pg-skills,
@@ -77,6 +77,8 @@ test "${PIPESTATUS[0]}" -eq 0
 AGENT_PLAYER_PG_TEST_URL="$URL" node --import tsx --test --test-force-exit test/pg-store-p9.integration.test.mjs 2>&1 | tee "$OUT_DIR/integration-store-p9-output.txt"
 test "${PIPESTATUS[0]}" -eq 0
 AGENT_PLAYER_PG_TEST_URL="$URL" node --import tsx --test --test-force-exit test/pg-doc-index.integration.test.mjs 2>&1 | tee "$OUT_DIR/integration-doc-index-output.txt"
+test "${PIPESTATUS[0]}" -eq 0
+AGENT_PLAYER_PG_TEST_URL="$URL" node --import tsx --test --test-force-exit test/pg-project-trust.integration.test.mjs 2>&1 | tee "$OUT_DIR/integration-project-trust-output.txt"
 test "${PIPESTATUS[0]}" -eq 0
 AGENT_PLAYER_PG_TEST_URL="$URL" node --import tsx --test test/pg-platform.integration.test.mjs 2>&1 | tee "$OUT_DIR/integration-platform-output.txt"
 test "${PIPESTATUS[0]}" -eq 0
