@@ -59,7 +59,7 @@ test('the phone list is exactly the chat page (pinned)', async () => {
     ['GET', '/api/chat/conversations/abcdefgh1/usage'], ['GET', '/api/chat/conversations/abcdefgh1/team'],
     ['GET', '/api/chat/conversations/abcdefgh1/schedule'], ['POST', '/api/chat/conversations/abcdefgh1/stop'],
     ['GET', '/api/chat/sidebar'], ['PUT', '/api/chat/sidebar'], ['GET', '/api/chat/panel'], ['PUT', '/api/chat/panel'],
-    ['GET', '/api/chat/last'], ['GET', '/api/chat/settings'],
+    ['GET', '/api/chat/last'], ['GET', '/api/chat/settings'], ['GET', '/api/approvals?status=pending&limit=100'],
     // The owner's decision: the terminal too (the app asks for its biometric check first).
     ['GET', '/api/terminal'], ['GET', '/api/terminal/prefs'], ['PUT', '/api/terminal/prefs'], ['POST', '/api/terminal/sessions'],
     ['POST', `/api/terminal/sessions/${TID}/input`], ['POST', `/api/terminal/sessions/${TID}/resize`], ['DELETE', `/api/terminal/sessions/${TID}`],
@@ -74,7 +74,7 @@ test('the phone list is exactly the chat page (pinned)', async () => {
     ['GET', '/api/chat/runs/run-abcdefgh/events'], ['PUT', '/api/chat/settings'],
     ['POST', '/api/auth/login'], ['POST', '/api/auth/logout'], ['GET', '/api/users'], ['PUT', '/api/agents/main'], ['POST', '/api/agents/name-suggestion'],
     ['GET', '/api/credentials'], ['GET', '/api/backups'], ['GET', '/api/audit'], ['GET', '/api/extensions'], ['POST', '/api/mcp/servers'],
-    ['GET', '/api/runs'], ['GET', '/api/approvals'], ['GET', '/api/memory/proposals'], ['GET', '/health'], ['GET', '/api/../api/phone/devices'],
+    ['GET', '/api/runs'], ['GET', '/api/approvals'], ['POST', '/api/approvals/0b8a1c4e-0000-4000-8000-000000000001/approve'], ['GET', '/api/approvals?status=all&limit=100'], ['GET', '/api/health'], ['GET', '/api/memory/proposals'], ['GET', '/health'], ['GET', '/api/../api/phone/devices'],
   ];
   for (const [m, p] of no) assert.equal(await B.phoneMayCall(m, p), false, `${m} ${p}`);
 });
@@ -168,6 +168,10 @@ test('ui.get serves only the verified build, in parts', async () => {
       parts.push(Buffer.from(r.body, 'base64'));
     }
     assert.ok(Buffer.concat(parts).equals(big));
+    // Each part's reply, sealed and wrapped, stays under the relay's 1 MiB envelope.
+    const { sealedLength } = await import(join(backendDir, 'src/phone/service.ts'));
+    const reply = await B.uiGet(c, { type: 'ui.get', path: '/assets/app-1.js', part: 0 });
+    assert.ok(sealedLength(Buffer.byteLength(JSON.stringify({ type: 'reply', ref: 'p0123456789abcdef0123', ok: true, data: reply }))) <= 1024 * 1024);
     assert.equal(await code(B.uiGet(c, { type: 'ui.get', path: '/assets/app-1.js', part: 3 })), 'bad_format');
     for (const p of ['/secret.map', '/../package.json', '/assets/../index.html', '/assets/app-1.js.map', '/etc/passwd', 'index.html', '/memory/x']) {
       assert.equal((await B.uiGet(c, { type: 'ui.get', path: p })).status, 404, p);

@@ -598,7 +598,8 @@ through the session, never from the network. Three signed commands carry them:
   the verified build are served (its manifest and hashes are checked; no
   source maps, no paths outside it). The answer is
   `{status:200, type, size, parts, part, build, body}`: `body` is base64, at most
-  600 KiB of the file per answer; a bigger file is fetched part by part
+  512 KiB of the file per answer (it is base64 twice on the way, and the
+  sealed envelope must stay under the relay's 1 MiB); a bigger file is fetched part by part
   (`part` 0 … `parts`−1). `build` names the build, so a phone never mixes two.
 - **`api.call {method, path, body?}`**: one request of the pages, run inside
   the computer **as the owner** without any token reaching the phone. `path`
@@ -624,7 +625,8 @@ through the session, never from the network. Three signed commands carry them:
 the agents (read); conversations (list, open, create, rename, one page of
 messages, the side panel's usage, team and schedule, stop); sending a turn and
 steering or stopping a run; the chat sidebar, panel and settings (read, and
-the sidebar and panel layout); and, by the owner's decision, the terminal
+the sidebar and panel layout; the count of pending approvals for its badge);
+and, by the owner's decision, the terminal
 (open, type, resize, close, its settings; its output through `api.stream`).
 **The phone opens or joins a terminal only after its own biometric check**
 (Face ID, Touch ID, fingerprint or the phone's passcode), every time after a

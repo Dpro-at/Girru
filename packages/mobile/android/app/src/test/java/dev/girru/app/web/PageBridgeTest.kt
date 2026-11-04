@@ -19,6 +19,8 @@ class PageBridgeTest {
         assertEquals(PageBridge.Request.Api("GET", "/api/chat/conversations"), PageBridge.classify("GET", "/api/chat/conversations"))
         assertEquals(PageBridge.Request.Api("POST", "/api/chat/conversations/a1/runs"), PageBridge.classify("post", "/api/chat/conversations/a1/runs"))
         assertEquals(PageBridge.Request.Stream("/api/chat/runs/run-abcdefgh/events?after=4"), PageBridge.classify("GET", "/api/chat/runs/run-abcdefgh/events?after=4"))
+        assertEquals(PageBridge.Request.Stream("/api/terminal/sessions/abc/stream?after=7"), PageBridge.classify("GET", "/api/terminal/sessions/abc/stream?after=7"))
+        assertEquals(PageBridge.Request.Api("GET", "/api/terminal/sessions"), PageBridge.classify("GET", "/api/terminal/sessions"))
         assertEquals(PageBridge.Request.Refuse(400), PageBridge.classify("TRACE", "/api/auth/me"))
         assertEquals(PageBridge.Request.Refuse(400), PageBridge.classify("GET", "relative"))
     }

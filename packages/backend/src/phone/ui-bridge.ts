@@ -23,9 +23,14 @@ import { CommandError, type CommandContext } from './commands.js';
 const require = createRequire(import.meta.url);
 const CORE_UI = fileURLToPath(new URL('../../../core-ui/', import.meta.url));
 
-/** Raw bytes of one ui.get answer; base64 keeps it under the 1 MiB envelope. */
-export const UI_PART_BYTES = 600 * 1024;
+/**
+ * Raw bytes of one ui.get answer. The part is base64 in the JSON, then the
+ * sealed JSON is base64 again in the envelope (about 16/9 of the part in all),
+ * which must stay under the relay's 1 MiB: 512 KiB gives about 910 KiB.
+ */
+export const UI_PART_BYTES = 512 * 1024;
 export const API_BODY_BYTES = 256 * 1024;
+/** A projected answer (JSON) that still fits one sealed envelope. */
 export const API_ANSWER_BYTES = 700 * 1024;
 /** A terminal reader ends after this long (terminal-contract.js › TERMINAL_STREAM_MS). */
 const TERMINAL_STREAM_MS = 10 * 60_000;
@@ -90,6 +95,7 @@ const TERMINAL_KINDS: Record<string, Method[]> = {
   close: ['DELETE'],
 };
 
+const APPROVALS_READ = /^\/api\/approvals\?status=pending&limit=(?:[1-9]\d?|100)$/;
 const STEER = /^\/api\/chat\/runs\/[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}\/steer$/;
 const AGENT = /^\/api\/agents\/[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 
@@ -103,6 +109,8 @@ export async function phoneMayCall(method: string, target: string): Promise<bool
   if (typeof target !== 'string' || !target.startsWith('/api/') || target.length > 2048) return false;
   if (method === 'GET' && (target === '/api/auth/me' || target === '/api/agents' || (AGENT.test(target) && !target.endsWith('/name-suggestion')))) return true;
   if (method === 'POST' && STEER.test(target)) return true;
+  // The page's approvals badge reads the pending count; deciding stays on the phone's own Approvals screen.
+  if (method === 'GET' && APPROVALS_READ.test(target)) return true;
   // The owner's decision: the terminal opens on the phone too, behind the phone's own biometric check
   // (the app asks for it before it opens or joins a terminal). Its stream goes through api.stream.
   const term = (await terminalRoutes()).terminalPath(target)?.kind;

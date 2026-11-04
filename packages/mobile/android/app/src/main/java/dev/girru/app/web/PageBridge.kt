@@ -25,7 +25,7 @@ object PageBridge {
 
     private val METHODS = setOf("GET", "POST", "PUT", "PATCH", "DELETE")
     const val MAX_BODY = 256 * 1024
-    private const val MAX_PARTS = 70
+    private const val MAX_PARTS = 80
     const val JSON = "application/json"
     const val EVENTS = "text/event-stream"
 
@@ -38,10 +38,15 @@ object PageBridge {
         return Request.File(path.substringBefore('?'))
     }
 
-    /** `/api/chat/runs/<runId>/events[?after=N]` */
+    /**
+     * The streams the phone reads with `api.stream`: a run's events
+     * (`/api/chat/runs/<runId>/events[?after=N]`) and a terminal's output
+     * (`/api/terminal/sessions/<id>/stream[?after=N]`).
+     */
     fun isEvents(path: String): Boolean {
         val parts = path.substringBefore('?').split('/')
-        return parts.size == 6 && parts[1] == "api" && parts[2] == "chat" && parts[3] == "runs" && parts[4].isNotEmpty() && parts[5] == "events"
+        if (parts.size != 6 || parts[1] != "api" || parts[4].isEmpty()) return false
+        return (parts[2] == "chat" && parts[3] == "runs" && parts[5] == "events") || (parts[2] == "terminal" && parts[3] == "sessions" && parts[5] == "stream")
     }
 
     fun status(code: String): Int = when (code) {

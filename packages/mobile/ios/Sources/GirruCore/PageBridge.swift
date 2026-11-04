@@ -33,8 +33,8 @@ public enum PageBridge {
     static let methods: Set<String> = ["GET", "POST", "PUT", "PATCH", "DELETE"]
     /// The largest request body the computer takes (`api.call`).
     public static let maxBody = 256 * 1024
-    /// The most parts one file may have (40 MiB build limit / 600 KiB per part).
-    static let maxParts = 70
+    /// The most parts one file may have (40 MiB build limit / 512 KiB per part).
+    static let maxParts = 80
 
     public static func classify(method: String, path: String) -> PageRequest {
         let m = method.uppercased()
@@ -49,11 +49,14 @@ public enum PageBridge {
         return .file(path: file)
     }
 
-    /// `/api/chat/runs/<runId>/events[?after=N]`
+    /// The streams the phone reads with `api.stream`: a run's events
+    /// (`/api/chat/runs/<runId>/events[?after=N]`) and a terminal's output
+    /// (`/api/terminal/sessions/<id>/stream[?after=N]`).
     static func isEvents(_ path: String) -> Bool {
         let base = path.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false).first ?? ""
         let parts = base.split(separator: "/", omittingEmptySubsequences: false)
-        return parts.count == 6 && parts[1] == "api" && parts[2] == "chat" && parts[3] == "runs" && !parts[4].isEmpty && parts[5] == "events"
+        guard parts.count == 6, parts[1] == "api", !parts[4].isEmpty else { return false }
+        return (parts[2] == "chat" && parts[3] == "runs" && parts[5] == "events") || (parts[2] == "terminal" && parts[3] == "sessions" && parts[5] == "stream")
     }
 
     /// The request body as JSON, nil when empty. Anything else is refused before it is signed.

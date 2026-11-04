@@ -742,6 +742,8 @@ func checkPageBridge() throws {
     check(PageBridge.classify(method: "post", path: "/api/chat/conversations/a1/runs") == .api(method: "POST", path: "/api/chat/conversations/a1/runs"), "methods are upper-cased")
     check(PageBridge.classify(method: "GET", path: "/api/chat/runs/run-abcdefgh/events?after=4") == .stream(path: "/api/chat/runs/run-abcdefgh/events?after=4"), "run events stream")
     check(PageBridge.classify(method: "POST", path: "/api/chat/runs/run-abcdefgh/events") == .api(method: "POST", path: "/api/chat/runs/run-abcdefgh/events"), "only GET streams")
+    check(PageBridge.classify(method: "GET", path: "/api/terminal/sessions/0b8a1c4e-0000-4000-8000-000000000001/stream?after=7") == .stream(path: "/api/terminal/sessions/0b8a1c4e-0000-4000-8000-000000000001/stream?after=7"), "a terminal's output streams too")
+    check(PageBridge.classify(method: "GET", path: "/api/terminal/sessions") == .api(method: "GET", path: "/api/terminal/sessions"), "the terminal list is a request")
     check(PageBridge.classify(method: "TRACE", path: "/api/auth/me") == .refuse(status: 400), "unknown methods refused")
     check(PageBridge.classify(method: "GET", path: "relative") == .refuse(status: 400), "paths start with /")
 
