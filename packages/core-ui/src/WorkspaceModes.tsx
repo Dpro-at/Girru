@@ -26,7 +26,8 @@ export function useNabuRuntime() {
       const next={available:value.available,missing:!value.available&&value.runtime==='missing'};
       setState(s=>s.available===next.available&&s.missing===next.missing?s:next);
       clearTimeout(timer);
-      if(next.missing)timer=setTimeout(ask,4000);
+      // Asked again: every 4 s while Code is missing (an install shows at once), every 10 s otherwise (a removal shows too).
+      timer=setTimeout(ask,next.missing?4000:10000);
     };
     const ask=()=>{void bridge.status().then(update).catch(()=>{});};
     const unsubscribe=bridge.onState(update);

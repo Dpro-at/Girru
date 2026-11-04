@@ -103,7 +103,7 @@ globalThis.fetch = async (url) => {
 const { getDatabase } = await import(join(backendDir, 'src/db/database.ts'));
 const db = getDatabase();
 await db.initialize();
-const { readStore, localCatalogue, installFromStore } = await import(join(backendDir, 'src/services/store-catalogue.ts'));
+const { readStore, localCatalogue, installFromStore, uninstallFromStore } = await import(join(backendDir, 'src/services/store-catalogue.ts'));
 const { addJob } = await import(join(backendDir, 'src/services/store-install.ts'));
 const { codeRuntimeStatus, unpackTarGz, safeEntryPath, runtimePlatform } = await import(join(backendDir, 'src/services/code-runtime.ts'));
 const { parseRuntime, runtimesFrom } = await import(join(backendDir, 'src/services/store-repo.ts'));
@@ -157,7 +157,7 @@ test('install: downloads this computer\'s archive, checks it, unpacks it and mak
   assert.ok(existsSync(join(root, `editor/extensions/${'a'.repeat(60)}/${'b'.repeat(60)}/package.json`)), 'long names through pax headers');
   if (process.platform !== 'win32') { const { statSync } = await import('node:fs'); assert.equal(statSync(join(root, 'editor/node_modules/@vscode/ripgrep/bin/rg')).mode & 0o777, 0o755); }
   assert.deepEqual(readdirSync(join(runtimes, 'code')).filter((n) => n.startsWith('.')), [], 'no leftovers');
-  assert.equal((await codeItem()).state, 'included');
+  assert.equal((await codeItem()).state, 'installed');
   const s = await codeRuntimeStatus();
   assert.equal(s.state, 'installed'); assert.equal(s.version, '1.0.0'); assert.equal(s.update, null);
 });
@@ -165,7 +165,7 @@ test('install: downloads this computer\'s archive, checks it, unpacks it and mak
 test('update: a newer Store version shows as the update and replaces the old folder', async () => {
   forget(); publish('1.1.0');
   const x = await codeItem();
-  assert.equal(x.state, 'included'); assert.equal(x.update, '1.1.0');
+  assert.equal(x.state, 'installed'); assert.equal(x.update, '1.1.0');
   assert.equal((await codeRuntimeStatus()).update, '1.1.0');
   const old = current().dir;
   const j = await install();
@@ -189,7 +189,7 @@ test('a short or oversized download, or a different version inside, is refused',
   const good = archive('1.3.0');
   forget(); publish('1.3.0', good);
   for (const p of Object.keys(served)) if (p.includes('1.3.0')) served[p] = good.subarray(0, good.length - 10);
-  assert.match((await install()).message, /stopped before the end/);
+  assert.match((await install()).message, /stopped at .* of .*check the internet connection/);
   forget(); publish('1.3.0', good);
   for (const p of Object.keys(served)) if (p.includes('1.3.0')) served[p] = Buffer.concat([good, Buffer.alloc(5)]);
   assert.match((await install()).message, /larger than the Girru Store lists/);
@@ -313,4 +313,37 @@ test('an archive made by the release packer installs (its .bin links left out, o
   assert.equal(statSync(join(root, 'editor/out/server-main.js')).size, '// server\n'.length * 2000);
   symlinkSync('/etc/hosts', join(staged, 'editor/hosts-link'));
   await assert.rejects(packCodeRuntime({ runtime: staged, version: '3.0.1', platform: runtimePlatform(), out }), /link outside node_modules\/\.bin/);
+});
+
+
+test('no network: a clear message, nothing left behind', async () => {
+  forget(); publish('5.0.0');
+  const x = await codeItem();
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url) => { if (String(url).includes('/releases/')) throw new TypeError('fetch failed'); return real(url); };
+  try {
+    const r = await installFromStore('owner-1', 'girru:code', x.hash);
+    const j = await finish(r.job);
+    assert.equal(j.ok, false); assert.match(j.message, /could not reach the download; check the internet connection/);
+  } finally { globalThis.fetch = real; }
+  assert.deepEqual(readdirSync(join(runtimes, 'code')).filter((n) => n.startsWith('.')), []);
+});
+
+test('remove: only Girru\'s code folder goes; the Store offers Code again, and it installs again', async () => {
+  forget(); publish('5.0.0');
+  assert.equal((await install()).ok, true);
+  const projects = join(dir, 'my-project'); mkdirSync(projects, { recursive: true }); writeFileSync(join(projects, 'keep.txt'), 'mine');
+  assert.equal((await codeItem()).state, 'installed');
+  const r = await uninstallFromStore('owner-1', 'girru:code');
+  assert.deepEqual(r, { ok: true, state: 'available' });
+  assert.ok(!existsSync(join(runtimes, 'code')));
+  assert.equal(readFileSync(join(projects, 'keep.txt'), 'utf8'), 'mine');
+  assert.equal((await codeItem()).state, 'available');
+  assert.equal((await codeRuntimeStatus()).state, 'missing');
+  assert.equal((await uninstallFromStore('owner-1', 'girru:code')).code, 'not_found');
+  assert.equal((await install()).ok, true);
+  assert.equal(current().version, '5.0.0');
+  process.env.GIRRU_CODE_RUNTIME_BUNDLED = '1';
+  try { assert.equal((await uninstallFromStore('owner-1', 'girru:code')).code, 'not_installable'); assert.ok(existsSync(join(runtimes, 'code', 'current.json'))); }
+  finally { delete process.env.GIRRU_CODE_RUNTIME_BUNDLED; }
 });

@@ -204,12 +204,30 @@ async function downloadTo(archive: RuntimeArchive, file: string, get: RuntimeFet
       await out.write(chunk);
       progress(received);
     }
-    if (received !== archive.size) throw new Error('the download stopped before the end; try again');
+    if (received !== archive.size) throw new Error(`the download stopped at ${mb(received)} of ${mb(archive.size)}; check the internet connection and try again`);
     return hash.digest('hex');
   } catch (error) {
-    if (control.signal.aborted) throw new Error('the download stalled; try again');
-    throw error;
+    if (control.signal.aborted) throw new Error(received ? `the download stopped at ${mb(received)} of ${mb(archive.size)}; check the internet connection and try again` : 'the download did not start; check the internet connection and try again');
+    if (error instanceof Error && /larger than the Girru Store lists|answered \d+/.test(error.message)) throw error;
+    // fetch failed / socket closed: no network, or the connection dropped half-way.
+    throw new Error(received ? `the download stopped at ${mb(received)} of ${mb(archive.size)}; check the internet connection and try again` : 'Girru could not reach the download; check the internet connection and try again');
   } finally { clearTimeout(timer); await out.close(); }
+}
+
+const mb = (n: number) => { const v = n / 1048576; return `${v < 10 ? v.toFixed(1) : Math.round(v)} MB`; };
+
+/**
+ * Remove Code that was added from the Store: only Girru's own code folder (every version and
+ * current.json). A Code that comes inside the app, or one being added right now, stays.
+ */
+export function removeCodeRuntime(): { ok: true } | { ok: false; code: 'not_found' | 'refused'; message: string } {
+  if (!codeStoreActive() || codeBundled()) return { ok: false, code: 'refused', message: 'Code comes with this Girru; it cannot be removed here.' };
+  if (running && !running.done) return { ok: false, code: 'refused', message: 'Code is being added right now. Remove it when that has finished.' };
+  const root = codeRoot();
+  if (!installedCodeRuntime(root)) return { ok: false, code: 'not_found', message: 'Code is not installed.' };
+  if (fs.lstatSync(root).isSymbolicLink()) return { ok: false, code: 'refused', message: 'The app folder is a link; Girru leaves it alone.' };
+  fs.rmSync(root, { recursive: true, force: true });
+  return { ok: true };
 }
 
 /** Bytes from a stream, in exact amounts or in pieces. */

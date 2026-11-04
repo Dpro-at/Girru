@@ -11,6 +11,8 @@ import type {StoreData,StoreItem,StoreChange,StoreJob,PrivateAdd,WorkspaceApp} f
 import {WorkspaceApplications} from './WorkspaceApplications';
 
 /** APPS-06 (board Apps6): the four steps of adding an app from the Girru Store. */
+/** A size in MB for the download line (one decimal under 10 MB). */
+const mb=(n:number)=>{const v=n/1048576;return `${v<10?v.toFixed(1):Math.round(v)} MB`;};
 const ADD_STEPS:[string,string][]=[['getting','Getting it from the Girru Store'],['checking','Checking it is exactly what was reviewed'],['setting-up','Setting it up in your data folder'],['adding','Adding its page and tools']];
 const plainTable=(t:string,app:string)=>t.replace(new RegExp('^'+app.replace(/-/g,'_')+'_'),'').replace(/_/g,' ');
 import {initial} from './memory-desktop';
@@ -42,7 +44,8 @@ export type IncludedApp='genvr'|'trading'|'terminal'|'code'|'browser';
 export const sourceChip=(x:Pick<StoreItem,'id'|'source'>)=>x.source==='girru'?(x.id.startsWith('girru:')?'Made by Girru':'Girru’s registry'):x.source==='codex'?'Codex add-on':'Claude Code add-on';
 const TINT:Record<string,string>={marketing:'#E07AB0',sales:'#5FB37A',developer:'#9AA4B2',worlds:'#6FD3C7',trading:'#F0C27A',productivity:'#7AA5FF',more:'#B49AF0'};
 const ICONS=new Set<string>(['globe','chart','terminal','code','send','headset','calendar','puzzle','store']);
-const includedApp=(x:StoreItem)=>x.state==='included'&&x.kind==='app'?x.id.slice(6) as IncludedApp:null;
+// CODE-STORE-01: a Girru app added from the Store (Code) opens like one that comes with Girru.
+const includedApp=(x:StoreItem)=>(x.state==='included'||(x.state==='installed'&&x.id.startsWith('girru:')))&&x.kind==='app'?x.id.slice(6) as IncludedApp:null;
 /** Search: every kind and source; names that match first, then the rest of the words. */
 export const matchStore=(items:StoreItem[],query:string)=>{const q=query.trim().toLowerCase();if(!q)return [];const named=(x:StoreItem)=>itemName(x).toLowerCase().includes(q)||x.name.toLowerCase().includes(q);return [...items.filter(named),...items.filter(x=>!named(x)&&`${x.summary} ${x.maker} ${x.description}`.toLowerCase().includes(q))];};
 /** New first (the newest update date; items without one keep the store's order after them), or A–Z by name. */
@@ -84,7 +87,7 @@ export function StoreWorkspace({client,active,sidebarSlot,onOpenApp,request,onPe
  // SA6 (Mohamed): the owner's Store opens on All, then My apps (what is on this computer), then the kinds; others have My apps only.
  const [view,setView]=useState<StoreView>({kind:'all',category:'all',shelf:null,mine:!owner}),[mineRefresh,setMineRefresh]=useState(0),[folderOpen,setFolderOpen]=useState(false),[folder,setFolder]=useState(''),[sort,setSort]=useState<StoreSort>('new'),[query,setQuery]=useState('');
  const [page,setPage]=useState<string|null>(null),[updatesOpen,setUpdatesOpen]=useState(false),[adding,setAdding]=useState<StoreItem|null>(null),[busy,setBusy]=useState(false),[problem,setProblem]=useState(''),[toast,setToast]=useState<{id:number;text:string;undo:boolean;show?:unknown}|null>(null);
- const [progress,setProgress]=useState<{item:StoreItem;step:string}|null>(null),[removing,setRemoving]=useState<{item:StoreItem;data:{table:string;rows:number}[]}|null>(null);
+ const [progress,setProgress]=useState<{item:StoreItem;step:string;received?:number;total?:number;result?:{ok:boolean;message:string}}|null>(null),[removing,setRemoving]=useState<{item:StoreItem;data:{table:string;rows:number}[]}|null>(null);
  const undoRef=useRef<(()=>void)|null>(null),search=useRef<HTMLInputElement>(null),scroll=useRef<HTMLDivElement>(null),{menu,at,close}=useMenu();
  useEffect(()=>{if(request?.updates)setUpdatesOpen(true);if(request?.local||request?.mine){setView({kind:'all',category:'all',shelf:null,local:request.local??null,mine:!!request.mine});setPage(null);setQuery('');}
   // CODE-STORE-01: "Code" while it is not installed opens its page here (Get, then the usual steps).
@@ -98,8 +101,8 @@ export function StoreWorkspace({client,active,sidebarSlot,onOpenApp,request,onPe
   try{const r=await change(STORE_INSTALL_PATH,{id:x.id,hash:x.hash});
    if('ok' in r&&r.job){setAdding(null);void follow(x,r.job);}
    else if('ok' in r){setAdding(null);onReload();say(`${itemName(x)} added.`,()=>void remove(x,true));}
-   else{setProblem(r.message||'It could not be added.');if(r.code==='changed')onReload();}
-  }catch{setProblem('It could not be added. Try again.');}finally{setBusy(false);}
+   else{const m=r.message||'It could not be added.';if(adding)setProblem(m);else setProgress({item:x,step:'getting',result:{ok:false,message:m}});if(r.code==='changed')onReload();}
+  }catch{const m='It could not be added. Try again.';if(adding)setProblem(m);else setProgress({item:x,step:'getting',result:{ok:false,message:m}});}finally{setBusy(false);}
  }
  /** An app from the Girru Store is added by a job: one line under it shows each step (no progress page). */
  async function follow(x:StoreItem,job:string){
@@ -108,16 +111,18 @@ export function StoreWorkspace({client,active,sidebarSlot,onOpenApp,request,onPe
    await new Promise(r=>setTimeout(r,600));
    let j:StoreJob;try{j=(await client.request({method:'GET',path:storeJobPath(job)} as never)).body as StoreJob;}catch{continue;}
    if('code' in j){setProgress(null);say('Girru lost track of adding it. Look in My apps.');return;}
-   setProgress({item:x,step:j.step});
-   if(j.done){setProgress(null);onReload();say(j.message||(j.ok?`${itemName(x)} added.`:'It could not be added.'));return;}
+   // The result stays on the line until the owner closes it: a fading notice was easy to miss (Mohamed, 2026-11-04).
+   if(j.done){setProgress({item:x,step:j.step,result:{ok:!!j.ok,message:j.message||(j.ok?`${itemName(x)} added.`:'It could not be added.')}});onReload();return;}
+   setProgress({item:x,step:j.step,received:j.received,total:j.total});
   }
-  setProgress(null);
+  setProgress({item:x,step:'getting',result:{ok:false,message:'Girru stopped waiting for it. Look in My apps, or try again.'}});
  }
  async function remove(x:StoreItem,quiet=false,confirm=false){
   try{const r=await change(STORE_UNINSTALL_PATH,confirm?{id:x.id,confirm:true}:{id:x.id});
    // APPS-06: an app that keeps data of its own asks once; Girru saves a copy first.
    if(!('ok' in r)&&r.code==='has_data'&&r.data){setRemoving({item:x,data:r.data});return;}
    setRemoving(null);onReload();
+   if('ok' in r&&x.id==='girru:code'){say('Code removed. Your projects are not touched.');return;}
    if('ok' in r&&(x.id.startsWith('store:')||x.id.startsWith('private:'))){if(x.id.startsWith('private:'))setMineRefresh(n=>n+1);say(`${itemName(x)} removed${r.copied?'; a copy of its data is saved':''}.${r.restart==='auto'?' Girru starts again to finish.':' It leaves when Girru starts again.'}`);return;}if(!quiet)say('ok' in r?`${itemName(x)} removed.`:r.message||'It could not be removed.','ok' in r?()=>void change(STORE_INSTALL_PATH,{id:x.id,hash:x.hash}).then(onReload):undefined);}
   catch{say('It could not be removed. Try again.');}
  }
@@ -132,8 +137,8 @@ export function StoreWorkspace({client,active,sidebarSlot,onOpenApp,request,onPe
  /** The one action of an item: Open what comes with Girru, Get what is free, read about the rest. */
  const act=(x:StoreItem)=>{const app=includedApp(x);if(app)onOpenApp(app);else if(x.state==='available'){setProblem('');setAdding(x);}else setPage(x.id);};
  // Skills and specialties that come with Girru have no Open of their own: their page says where they are.
- const actionLabel=(x:StoreItem)=>x.state==='included'&&includedApp(x)?'Open':x.state==='available'?'Get':null;
- const itemMenu=(x:StoreItem):MenuItem[]=>[{label:'Show details',icon:'info',run:()=>setPage(x.id)},...(actionLabel(x)?[{label:actionLabel(x)!,icon:x.state==='included'?'open':'download',run:()=>act(x)} as MenuItem]:[]),...(x.state==='installed'?['sep' as const,{label:'Remove',icon:'trash',run:()=>void remove(x)} as MenuItem]:[])];
+ const actionLabel=(x:StoreItem)=>includedApp(x)?'Open':x.state==='available'?'Get':null;
+ const itemMenu=(x:StoreItem):MenuItem[]=>[{label:'Show details',icon:'info',run:()=>setPage(x.id)},...(actionLabel(x)?[{label:actionLabel(x)!,icon:x.state==='included'?'open':'download',run:()=>act(x)} as MenuItem]:[]),...(x.state==='installed'&&x.update&&x.id.startsWith('girru:')?[{label:`Update to ${x.update}`,icon:'download',run:()=>void add(x)} as MenuItem]:[]),...(x.state==='installed'?['sep' as const,{label:'Remove',icon:'trash',run:()=>void remove(x)} as MenuItem]:[])];
  const onKey=(e:ReactKeyboardEvent)=>{if(e.defaultPrevented||(e.currentTarget as HTMLElement).querySelector('.dk-sheet'))return;const mod=e.metaKey||e.ctrlKey,k=e.key.toLowerCase();if(mod&&k==='f'){e.preventDefault();search.current?.focus();}else if(mod&&e.key==='['&&page){e.preventDefault();setPage(null);}else if(mod&&k==='r'){e.preventDefault();onReload();}};
  const open=(x:StoreItem)=>setPage(x.id),ctx=(x:StoreItem)=>(e:ReactMouseEvent)=>at(e,itemMenu(x));
  const kindTitle=STORE_KINDS.find(([k])=>k===view.kind)![1],category=data?.categories.find(c=>c.id===view.category);
@@ -165,7 +170,7 @@ export function StoreWorkspace({client,active,sidebarSlot,onOpenApp,request,onPe
   :<div className="st-scroll" ref={scroll}>
    {error&&!data?<div className="dk-empty st-empty"><p>The store could not be read.</p><button type="button" onClick={onReload}>Try again</button></div>
    :!data?<p className="st-empty" role="status">Reading the store…</p>
-   :item?<AppPage item={item} data={data} onAct={act} onRemove={()=>void remove(item)} onCategory={id=>show({category:id})}/>
+   :item?<AppPage item={item} data={data} onAct={act} onUpdate={()=>void add(item)} onRemove={()=>void remove(item)} onCategory={id=>show({category:id})}/>
    :home?<Home data={data} onOpen={open} onAct={act} onMenu={ctx} onShelf={shelf=>{show({});setView(v=>({...v,shelf}));}}/>
    :view.local&&!items.length?<p className="st-empty">No {localTitle} add-ons on this computer. When you turn some on in {localTitle}, they show here.</p>
    :!items.length?<p className="st-empty">{searching?'Nothing in the store matches.':view.kind==='all'||view.kind==='app'?'Nothing in this category yet.':`No ${kindTitle==='MCP servers'?kindTitle:kindTitle.toLowerCase()} in the store yet. They come with the store’s own catalogue.`}</p>
@@ -187,8 +192,11 @@ export function StoreWorkspace({client,active,sidebarSlot,onOpenApp,request,onPe
    {adding.permissions.length?<><p>It will be able to:</p><ul className="st-asks">{adding.permissions.map(p=><li key={p}><UiIcon name="shield" size={13}/>{p}</li>)}</ul></>:<p>It does not ask for anything.</p>}
    {problem&&<p className="st-problem" role="alert">{problem}</p>}
   </Sheet>}
-  {progress&&<div className="st-progress" role="status" aria-label={`Adding ${itemName(progress.item)}`}><div className="st-progress-head"><StoreIcon item={progress.item} size={28}/><strong>{itemName(progress.item)}</strong><span>Adding…</span></div>
-   <ul>{ADD_STEPS.map(([k,label],i)=>{const at=ADD_STEPS.findIndex(([s])=>s===progress.step);return <li key={k} data-state={i<at?'done':i===at?'now':'wait'}><UiIcon name={i<at?'check':i===at?'refresh':'clock'} size={13}/>{label}</li>;})}</ul></div>}
+  {progress&&<div className="st-progress" role={progress.result&&!progress.result.ok?'alert':'status'} aria-label={`Adding ${itemName(progress.item)}`} data-result={progress.result?(progress.result.ok?'ok':'failed'):undefined}><div className="st-progress-head"><StoreIcon item={progress.item} size={28}/><strong>{itemName(progress.item)}</strong><span>{progress.result?(progress.result.ok?'Added':'Not added'):progress.step==='getting'&&progress.total?`${mb(progress.received??0)} of ${mb(progress.total)}`:'Adding…'}</span></div>
+   {progress.result?<><p className="st-progress-result"><UiIcon name={progress.result.ok?'check':'alert'} size={14}/>{progress.result.message}</p>
+    <div className="st-progress-actions">{!progress.result.ok&&<button type="button" className="primary" onClick={()=>{const x=data?.items.find(i=>i.id===progress.item.id)??progress.item;setProgress(null);void add(x);}}><UiIcon name="refresh" size={14}/>Try again</button>}<button type="button" onClick={()=>setProgress(null)}>{progress.result.ok?'Done':'Close'}</button></div></>
+   :<>{progress.step==='getting'&&progress.total?<progress className="st-progress-bar" max={progress.total} value={progress.received??0}/>:null}
+   <ul>{ADD_STEPS.map(([k,label],i)=>{const at=ADD_STEPS.findIndex(([s])=>s===progress.step);return <li key={k} data-state={i<at?'done':i===at?'now':'wait'}><UiIcon name={i<at?'check':i===at?'refresh':'clock'} size={13}/>{label}</li>;})}</ul></>}</div>}
   {removing&&<Sheet title={`Remove ${itemName(removing.item)}?`} onClose={()=>setRemoving(null)} actions={<><button type="button" onClick={()=>setRemoving(null)}>Cancel</button><button type="button" className="primary" onClick={()=>void remove(removing.item,false,true)}><UiIcon name="trash" size={14}/>Save a copy and remove</button></>}>
    <div className="st-sheet-head"><StoreIcon item={removing.item} size={36}/></div>
    <p>Its page, its tools and its code leave Girru. It keeps data of its own: <strong>{removing.data.filter(t=>t.rows>0).map(t=>`${t.rows} ${plainTable(t.table,removing.item.id.slice(removing.item.id.indexOf(':')+1))}`).join(', ')}</strong>.</p>
@@ -228,15 +236,15 @@ function Home({data,onOpen,onAct,onMenu,onShelf}:{data:StoreData;onOpen:(x:Store
  </>;
 }
 
-function AppPage({item,data,onAct,onRemove,onCategory}:{item:StoreItem;data:StoreData;onAct:(x:StoreItem)=>void;onRemove:()=>void;onCategory:(id:string)=>void}){
+function AppPage({item,data,onAct,onUpdate,onRemove,onCategory}:{item:StoreItem;data:StoreData;onAct:(x:StoreItem)=>void;onUpdate:()=>void;onRemove:()=>void;onCategory:(id:string)=>void}){
  const category=data.categories.find(c=>c.id===item.category);
  const facts:[string,string][]=[['Maker',item.maker||'Not given'],['From',sourceChip(item)],...(item.version?[['Version',item.version] as [string,string]]:[]),...(item.update?[['Newer version',item.update] as [string,string]]:[]),...(item.updated?[['Updated',item.updated] as [string,string]]:[]),...(item.languages.length?[['Languages',item.languages.join(', ')] as [string,string]]:[]),['Price','Free']];
- const label=item.state==='included'?'Open':item.state==='available'?'Get':null;
+ const label=includedApp(item)?'Open':item.state==='available'?'Get':null;
  return <article className="st-app" aria-label={itemName(item)}>
   <header className="st-app-head"><StoreIcon item={item} size={88}/><div><h3>{itemName(item)}</h3>
    <p className="st-maker">{item.verified&&<UiIcon name="shield" size={13}/>}{item.maker||sourceChip(item)}</p>
    <p className="st-meta">{category&&<button type="button" className="link-button" onClick={()=>onCategory(category.id)}>{category.title}</button>}<span className="st-chip" data-tone={item.source}>{sourceChip(item)}</span><span>Free</span></p></div>
-   <div className="st-app-actions">{label?<button type="button" className="primary" onClick={()=>onAct(item)}>{label}</button>:item.state==='installed'?<><span className="st-chip" data-tone="ok"><UiIcon name="check" size={11}/>Installed</span><button type="button" onClick={onRemove}>Remove</button></>:item.present?<span className="st-chip" data-tone="ok">On this computer</span>:null}</div></header>
+   <div className="st-app-actions">{label&&item.state==='installed'?<><button type="button" className="primary" onClick={()=>onAct(item)}>{label}</button>{item.update&&<button type="button" onClick={onUpdate}><UiIcon name="download" size={13}/>Update to {item.update}</button>}<button type="button" onClick={onRemove}>Remove</button></>:label?<button type="button" className="primary" onClick={()=>onAct(item)}>{label}</button>:item.state==='installed'?<><span className="st-chip" data-tone="ok"><UiIcon name="check" size={11}/>Installed</span><button type="button" onClick={onRemove}>Remove</button></>:item.present?<span className="st-chip" data-tone="ok">On this computer</span>:null}</div></header>
   <div className="st-app-body"><div>
    <section><h4>What it does</h4><p>{item.description||item.summary||'No description given.'}</p>{item.state==='elsewhere'&&<p className="st-help">Add it in {item.source==='codex'?'Codex':'Claude Code'} itself. Girru does not copy its keys.</p>}</section>
    <section><h4>What it asks for</h4>{item.permissions.length?<ul className="st-asks">{item.permissions.map(p=><li key={p}><UiIcon name="shield" size={13}/>{p}</li>)}</ul>:<p className="st-help">Nothing listed.</p>}</section>

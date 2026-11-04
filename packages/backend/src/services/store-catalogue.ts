@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto';
 import {addonCatalogue} from './addon-catalogue.js';
 import {searchMarketplace,checkForUpdates,installExtension,uninstallExtension,getExtensionDetails} from './extension-marketplace.js';
 import {readStoreRepo,type RepoRead,type StoreRuntime} from './store-repo.js';
-import {CODE_ITEM,codeStoreActive,codeBundled,installedCodeRuntime,runtimePlatform,startCodeInstall,type RuntimeFetch} from './code-runtime.js';
+import {CODE_ITEM,codeStoreActive,codeBundled,installedCodeRuntime,runtimePlatform,startCodeInstall,removeCodeRuntime,type RuntimeFetch} from './code-runtime.js';
 import {existsSync} from 'node:fs';
 import {backendPath} from '../config/backend-root.js';
 import {COMPANY_SPECIALTIES} from './company-specialties.js';
@@ -94,7 +94,8 @@ export type LocalCatalogue=CatalogueSource&{limited:()=>string[];have:()=>Have;a
 function codeState(runtime:StoreRuntime|null):{state:StoreState;update:string|null}{
  if(!codeStoreActive()||codeBundled())return {state:'included',update:null};
  const platform=runtimePlatform(),archive=runtime&&platform?runtime.archives[platform]:undefined,installed=installedCodeRuntime();
- if(installed)return {state:'included',update:archive&&runtime!.version!==installed.version?runtime!.version:null};
+ // Added from the Store: "installed" (it opens like an app that comes with Girru, and it can be removed).
+ if(installed)return {state:'installed',update:archive&&runtime!.version!==installed.version?runtime!.version:null};
  return {state:archive?'available':'elsewhere',update:null};
 }
 
@@ -114,7 +115,7 @@ export async function readStore(ownerId:string,source:LocalCatalogue=localCatalo
  const {installed:registry,present}=source.have();
  const items:StoreEntry[]=index.items.map(x=>{
   const state:StoreState=x.id.startsWith('girru:')?'included':x.id.startsWith('registry:')?(registry.has(x.id)?'installed':'available'):x.id.startsWith('store:')?(registry.has(x.id)?'installed':source.addable?.().has(x.id)?'available':'elsewhere'):'elsewhere';
-  if(x.id===CODE_ITEM){const c=codeState(source.codeRuntime?.()??null);return {...x,state:c.state,present:c.state==='included',update:c.update,hash:consentHash(x)};}
+  if(x.id===CODE_ITEM){const c=codeState(source.codeRuntime?.()??null);return {...x,state:c.state,present:c.state==='included'||c.state==='installed',update:c.update,hash:consentHash(x)};}
   const update=updates.find(u=>'registry:'+u.extension_id===x.id)?.latest_version??null;
   return {...x,state,present:state==='included'||state==='installed'||present.has(x.id),update:state==='installed'?update:null,hash:consentHash(x)};
  });
@@ -156,6 +157,8 @@ export async function installFromStore(ownerId:string,id:string,hash:string,opti
  return r.success?{ok:true,state:'installed'}:{ok:false,code:'refused',message:r.error||'It could not be added.'};
 }
 export async function uninstallFromStore(ownerId:string,id:string,options:{confirm?:boolean;restart?:()=>boolean}={}):Promise<StoreChange>{
+ // CODE-STORE-01: removing Code deletes only Girru's own code folder; your projects are never touched.
+ if(id===CODE_ITEM&&codeStoreActive()&&!codeBundled()){const r=removeCodeRuntime();return r.ok?{ok:true,state:'available'}:{ok:false,code:r.code==='not_found'?'not_found':'refused',message:r.message};}
  // SA6: a private app (added from a folder) is removed the same way as a Store app.
  if(id.startsWith('store:')||id.startsWith('private:')){
   const r=await removeApp(id.slice(id.indexOf(':')+1),options);
