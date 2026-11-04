@@ -49,6 +49,7 @@ const { allowedTerminal, terminalPath, terminalRoute, terminalResponse, Terminal
 const { allowedFooter, footerRoute, footerResponse } = require('../src/footer-contract.js');
 const { allowedMemoryHelper, memoryHelperRoute, memoryHelperResponse } = require('../src/memory-helper-contract.js');
 const { allowedDocIndex, docIndexResponse, docIndexRoute, READ_PDF_BASE64 } = require('../src/doc-index-contract.js');
+const { allowedProjectTrust, projectTrustResponse, projectTrustRoute } = require('../src/project-trust-contract.js');
 const { allowedStoreSwitches, storeSwitchesResponse, storeSwitchesRoute } = require('../src/store-switches-contract.js');
 const { allowedBackups, backupsRoute, backupsResponse } = require('../src/backups-contract.js');
 const { allowedChartPrefs, chartPrefsRoute, chartPrefsResponse } = require('../src/chart-prefs-contract.js');
@@ -150,6 +151,7 @@ function allowed(method, target, body) {
   if (footerRoute(target)) return allowedFooter(method, target, body);
   if (memoryHelperRoute(target)) return allowedMemoryHelper(method, target, body);
   if (docIndexRoute(target)) return allowedDocIndex(method, target, body);
+  if (projectTrustRoute(target)) return allowedProjectTrust(method, target, body);
   if (storeSwitchesRoute(target)) return allowedStoreSwitches(method, target, body);
   if (backupsRoute(target)) return allowedBackups(method, target, body);
   if (chartPrefsRoute(target)) return allowedChartPrefs(method, target, body);
@@ -250,6 +252,7 @@ function project(target, status, body) {
   if (footerRoute(target)) return footerResponse(status, body);
   if (memoryHelperRoute(target)) return memoryHelperResponse(target, status, body);
   if (docIndexRoute(target)) return docIndexResponse(target, status, body);
+  if (projectTrustRoute(target)) return projectTrustResponse(target, status, body);
   if (storeSwitchesRoute(target)) return storeSwitchesResponse(status, body);
   if (backupsRoute(target)) return backupsResponse(target, status, body);
   if (chartPrefsRoute(target)) return chartPrefsResponse(status, body);

@@ -91,6 +91,8 @@ export const DEFAULT_AGENT_TOOLS: readonly string[] = [
   'memory_corrected_checked', // STORE-MAP-01 P9b: mark a corrected memory as checked; every call needs one-time owner approval
   'memory_question_answer', // STORE-MAP-01 P9b: save the owner's answer to an open question; every call needs one-time owner approval
   'memory_question_forget', // STORE-MAP-01 P9b: forget an open question; every call needs one-time owner approval
+  'project_trust_review', // REPO-TRUST-01: read-only Outside projects list, owner's own turns
+  'project_trust_apply', // REPO-TRUST-01: trust / put outside / own accounts; every call needs one-time owner approval
   'open_in_code', // CODE-OPEN-01: a file in a project or the data folder at a line; every call needs one-time owner approval
   'storage_search',
   // BOARD-02: the agent's own board cards only (list, comment, move)

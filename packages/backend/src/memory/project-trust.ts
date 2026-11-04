@@ -243,10 +243,11 @@ export async function removeOwnOwner(ownerId: string, name: unknown, host: unkno
 async function forgetAutoVerdicts(ownerId: string): Promise<void> {
   await sql().read(run(`DELETE FROM project_trust WHERE owner_id = ? AND source = 'auto'`, ownerId));
   for (const k of [...cache.keys()]) if (k.startsWith(`${ownerId}\n`)) cache.delete(k);
+  folderCache.clear();
 }
 
 /** Tests: drop the in-process verdict cache. */
-export function clearProjectTrustCache(): void { cache.clear(); }
+export function clearProjectTrustCache(): void { cache.clear(); folderCache.clear(); }
 
 /** The Outside projects list and the owners counted as the owner's own. */
 export async function projectTrustView(ownerId: string): Promise<{ projects: Array<TrustVerdict & { name: string }>; owners: Array<{ name: string; host: string; builtIn: boolean }> }> {
@@ -276,18 +277,27 @@ export async function outsideFile(ownerId: string, file: string): Promise<boolea
       .filter((f): f is string => typeof f === 'string');
     if (folders.some(inside)) return isOutsideProject(ownerId, p.id);
   }
+  // A scan asks about many files of one folder: each folder's answer is kept for a short while.
+  const start = path.dirname(file);
+  const hit = folderCache.get(`${ownerId}\n${start}`);
+  if (hit && Date.now() - hit.at < CACHE_MS) return hit.outside;
   const own = await ownOwners(ownerId);
-  let dir = path.dirname(file);
+  let dir = start;
+  let outside = false;
   for (let i = 0; i < 16; i++) {
     const cfg = await readGitConfig(dir);
     if (cfg) {
       const remote = decidingRemote(parseGitRemotes(cfg.text));
       const who = remote ? remoteOwner(remote.url) : null;
-      return !!who && !isOwnOwner(who, own);
+      outside = !!who && !isOwnOwner(who, own);
+      break;
     }
     const up = path.dirname(dir);
     if (up === dir) break;
     dir = up;
   }
-  return false;
+  folderCache.set(`${ownerId}\n${start}`, { at: Date.now(), outside });
+  if (folderCache.size > 5000) folderCache.clear();
+  return outside;
 }
+const folderCache = new Map<string, { at: number; outside: boolean }>();

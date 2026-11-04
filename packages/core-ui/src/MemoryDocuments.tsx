@@ -12,6 +12,7 @@ import { canRevealFolder, revealFolder } from './chat-actions';
 import { DOCUMENTS_PATH, DOCUMENT_SOURCES_PATH, reindexPath } from './doc-index-contract.js';
 import type { DocProject, DocumentsView } from './doc-index-contract.js';
 import { PDF_UNREADABLE, statusLine } from './doc-index';
+import { OutsideTag, useOutsideProjects } from './outside-projects';
 
 const finder = () => (typeof navigator !== 'undefined' && /Win/.test(navigator.platform ?? '') ? 'Show in Explorer' : 'Show in Finder');
 
@@ -21,6 +22,7 @@ export function DocumentsPane({ client }: { client: SessionClient }) {
   const [toast, setToast] = useState<{ id: number; text: string; undo: boolean } | null>(null);
   const undo = useRef<(() => void) | null>(null);
   const menu = useMenu();
+  const trust = useOutsideProjects(client);
   const req = (method: 'GET' | 'PUT' | 'POST', path: string, body?: unknown) => client.request({ method, path, ...(body === undefined ? {} : { body }) } as never);
   async function load() {
     try {
@@ -67,7 +69,7 @@ export function DocumentsPane({ client }: { client: SessionClient }) {
         return <li key={p.id} className="doc-row" data-on={on || undefined} onContextMenu={(e: ReactMouseEvent) => { e.preventDefault(); menu.at(e, items(p)); }}>
           <button type="button" className="doc-row-main" disabled={!p.hasFolder} onClick={() => setOpen(p.id)} title={p.hasFolder ? 'Folders read and files that can’t be read' : 'This project has no folder on this computer'}>
             <Tile name={p.name}/>
-            <span className="doc-row-text"><span className="doc-row-name">{p.name}{bad > 0 && <span className="doc-badge" data-tone="warn">{bad === 1 ? '1 can’t be read' : `${bad} can’t be read`}</span>}</span>
+            <span className="doc-row-text"><span className="doc-row-name">{p.name}<OutsideTag store={trust} projectId={p.id}/>{bad > 0 && <span className="doc-badge" data-tone="warn">{bad === 1 ? '1 can’t be read' : `${bad} can’t be read`}</span>}</span>
               <span className="fine-print">{running && <UiIcon name="refresh" size={11}/>}{statusLine(p)}</span></span>
           </button>
           <button type="button" role="switch" className="ag-switch" aria-checked={on} disabled={!p.hasFolder} aria-label={`Read the documents of ${p.name}`} title={on ? 'Agents read its documents' : 'Not read'} onClick={() => void setOn(p, !on)}><i/></button>

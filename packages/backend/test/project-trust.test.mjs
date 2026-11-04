@@ -183,6 +183,28 @@ test('a note in someone else\'s repository (not a project) is never auto-importe
   assert.equal(await T.outsideFile(OWNER, join(dir, 'mine', 'notes.md')), false);
 });
 
+test('agents: the same list and actions, only in the owner\'s own turn; changes need his approval', async () => {
+  const { projectTrustReviewTool, projectTrustApplyTool } = await load('src/tools/memory/project-trust.ts');
+  const own = { userId: OWNER };
+  T.clearProjectTrustCache();
+  const r = await projectTrustReviewTool.execute({}, own);
+  assert.match(r.content[0].text, /Outside projects: \d+\./);
+  assert.ok(r.data.outside.some((p) => p.projectId === foreign.id));
+  // A board task run (another user acting for the owner) and a turn that answers an outsider are refused.
+  assert.match((await projectTrustApplyTool.execute({ action: 'trust', project_id: foreign.id }, { userId: 'agent-x', accessOwnerId: OWNER })).error, /owner's own turn/);
+  assert.match((await projectTrustApplyTool.execute({ action: 'trust', project_id: foreign.id }, { userId: OWNER, toolPolicy: {} })).error, /someone else/);
+  const t = await projectTrustApplyTool.execute({ action: 'trust', project_id: foreign.id }, own);
+  assert.equal(t.data.outside, false);
+  assert.equal(await T.isOutsideProject(OWNER, foreign.id), false);
+  await projectTrustApplyTool.execute({ action: 'reset', project_id: foreign.id }, own);
+  T.clearProjectTrustCache();
+  assert.equal(await T.isOutsideProject(OWNER, foreign.id), true);
+  assert.match((await projectTrustApplyTool.execute({ action: 'add_account', account: '../x' }, own)).error, /invalid_owner/);
+  const { approvalCategory } = await load('src/tools/approvals.ts');
+  assert.equal(approvalCategory({ name: 'project_trust_apply' }), 'settings', 'changes wait for the owner');
+  assert.equal(approvalCategory({ name: 'project_trust_review' }), null, 'the list is read only');
+});
+
 test('off: every project is the owner\'s own', async () => {
   process.env.GIRRU_REPO_TRUST = '0';
   try {

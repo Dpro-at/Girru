@@ -235,7 +235,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
       {placeParent[page]&&<button type="button" className="agent-return place-return" onClick={()=>setPage(placeParent[page]!)}><UiIcon name="arrow-left" size={13}/>{PARENT_LABEL[placeParent[page]!]}</button>}
       <div className="section-sidebar" ref={setSlot} hidden={page === 'chat'}/>
       {page === 'chat' && <div className="session-list">
-        {chat && <ConversationList controller={chat} search={user.role === 'guest' ? undefined : search?.side} onOpen={() => setPage('chat')} onNewChat={newChat} onAddToBoard={user.role === 'owner' ? id => { void chat.open(id).then(() => setBoardRequest(n => n + 1)); setPage('chat'); } : undefined}/>}
+        {chat && <ConversationList controller={chat} search={user.role === 'guest' ? undefined : search?.side} onOpen={() => setPage('chat')} onNewChat={newChat} onAddToBoard={user.role === 'owner' ? id => { void chat.open(id).then(() => setBoardRequest(n => n + 1)); setPage('chat'); } : undefined} trustClient={user.role === 'owner' ? client : undefined}/>}
       </div>}
       <div className="sidebar-footer">
         <details className="account-menu"><summary className="user-chip" title="Account">

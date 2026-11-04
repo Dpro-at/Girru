@@ -72,6 +72,7 @@ export const APPROVAL_REQUIRED_TOOLS: Readonly<Record<string, ApprovalCategory>>
   memory_corrected_checked: 'other', // STORE-MAP-01 P9b: marks a corrected memory as checked; the approval is the confirm
   memory_question_answer: 'other', // STORE-MAP-01 P9b: the owner approves the exact answer text that is saved
   memory_question_forget: 'other', // STORE-MAP-01 P9b: forgets an open question; the approval is the confirm
+  project_trust_apply: 'settings', // REPO-TRUST-01: what agents may take from a project's files; the approval is the confirm
   open_in_code: 'other', // CODE-OPEN-01: the owner approves which file opens in Code
   memory_privacy_decide: 'other', // STORE-MAP-01 P9: keeps or drops a personal-data / sensitive memory; the approval is the confirm
   memory_graph_sync: 'other', // MEM-FINISH-01 (M14 Rebuild map): re-indexes the map and prunes orphan links; the approval is the confirm
