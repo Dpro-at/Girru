@@ -1,5 +1,6 @@
 export type WorkspaceMode = 'code' | 'chat';
-export type WorkspaceModeState = { available: boolean; mode: WorkspaceMode; busy: boolean; error: string | null };
+/** CODE-STORE-01: `runtime` says where Code comes from; 'missing' = the desktop app has no Code yet (install it from the Store). */
+export type WorkspaceModeState = { available: boolean; mode: WorkspaceMode; busy: boolean; error: string | null; runtime?: 'bundled' | 'store' | 'missing' };
 export type CodeReview = {id:string;path:string;before:string;after:string};
 /** CODE-OPEN-01: open at a line; `note` = Girru writes this file (edits come back as a review); `readOnly` until an approval. */
 export type CodeOpenOptions = { line?: number; note?: boolean; readOnly?: boolean };
@@ -17,5 +18,5 @@ export type NabuBridge = {
 export function validWorkspaceState(value: unknown): value is WorkspaceModeState {
   if (!value || typeof value !== 'object') return false;
   const v = value as Record<string, unknown>;
-  return typeof v.available === 'boolean' && (v.mode === 'code' || v.mode === 'chat') && typeof v.busy === 'boolean' && (v.error === null || (typeof v.error === 'string' && v.error.length <= 160));
+  return typeof v.available === 'boolean' && (v.mode === 'code' || v.mode === 'chat') && typeof v.busy === 'boolean' && (v.error === null || (typeof v.error === 'string' && v.error.length <= 160)) && (v.runtime === undefined || v.runtime === 'bundled' || v.runtime === 'store' || v.runtime === 'missing');
 }

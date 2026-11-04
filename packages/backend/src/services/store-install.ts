@@ -18,7 +18,7 @@ import { readStoreRepo, storeBase, type StorePackage } from './store-repo.js';
 import { workspaceBackupsDir } from './backups.js';
 
 export type AddStep = 'getting' | 'checking' | 'setting-up' | 'adding';
-export interface AddJob { id: string; app: string; step: AddStep; done: boolean; ok?: boolean; message?: string; restart?: 'auto' | 'manual' }
+export interface AddJob { id: string; app: string; step: AddStep; done: boolean; ok?: boolean; message?: string; restart?: 'auto' | 'manual' | 'none'; /** CODE-STORE-01: bytes of a large download so far, and in all. */ received?: number; total?: number }
 const jobs = new Map<string, AddJob>();
 const ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/; // no "--", no trailing "-": table prefixes can never overlap
 const KEY = (id: string) => `store.installed.${id}`;
@@ -92,12 +92,17 @@ export function addJob(job: string): AddJob | null { return jobs.get(job) ?? nul
 
 /** Start adding a Store app; the window follows the job. */
 export function startAdd(app: string, options: { fetch?: Fetch; restart?: () => boolean; onDone?: (job: AddJob) => void } = {}): AddJob {
+  return trackJob(app, (job) => add(job, options), options.onDone);
+}
+
+/** One job the window follows (Store apps, and the Code runtime of CODE-STORE-01): the same steps, one map. */
+export function trackJob(app: string, run: (job: AddJob) => Promise<void>, onDone?: (job: AddJob) => void): AddJob {
   const job: AddJob = { id: randomUUID(), app, step: 'getting', done: false };
   jobs.set(job.id, job);
   setTimeout(() => jobs.delete(job.id), 3_600_000).unref?.();
-  void add(job, options)
+  void run(job)
     .catch((error: unknown) => Object.assign(job, { done: true, ok: false, message: `It could not be added: ${error instanceof Error ? error.message : 'unknown error'}.` }))
-    .finally(() => options.onDone?.(job));
+    .finally(() => onDone?.(job));
   return job;
 }
 

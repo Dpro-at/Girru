@@ -132,8 +132,14 @@ let shuttingDown = false;
 async function shutdown(code = 0): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
-  const deadline = setTimeout(() => process.exit(1), 20000);
+  // A restart (Store add/remove, BACKUP-01 restore) must come back as a restart even when a stream
+  // (an open chat, a live view) keeps a connection open: those are closed after 5 s, and a
+  // stop that still runs out of time keeps the restart code, so the desktop starts Girru again
+  // instead of showing "Girru could not start" (Mohamed's Store test, 2026-11-04).
+  const deadline = setTimeout(() => process.exit(code === RESTART_EXIT_CODE ? code : 1), 20000);
   deadline.unref();
+  const force = setTimeout(() => { try { (fastify.server as { closeAllConnections?: () => void }).closeAllConnections?.(); } catch { /* already closed */ } }, 5000);
+  force.unref();
   try {
     await stopSubscriptionProcesses();
     // Closing Fastify runs channel transport shutdown hooks before process exit.

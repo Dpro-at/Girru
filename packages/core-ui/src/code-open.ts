@@ -8,7 +8,7 @@ import { CODE_OPEN_PATH } from './code-open-contract.js';
 import type { CodeTarget } from './code-open-contract.js';
 
 type Requester = { request: (r: never) => Promise<{ status: number; body: unknown }> };
-export type CodeOpenResult = 'opened' | 'revealed' | 'outside' | 'not_found' | 'not_allowed' | 'no_code' | 'failed';
+export type CodeOpenResult = 'opened' | 'revealed' | 'store' | 'outside' | 'not_found' | 'not_allowed' | 'no_code' | 'failed';
 
 /** What the shell gives: open a checked file in the Code page (true when it opened). */
 export type CodeHost = (target: CodeTarget, options: { readOnly?: boolean }) => Promise<boolean>;
@@ -16,6 +16,11 @@ let host: CodeHost | null = null;
 let hostReady = false;
 /** The signed-in shell registers the Code page (null when the runtime is missing). */
 export function setCodeHost(fn: CodeHost | null, available: boolean) { host = fn; hostReady = available && !!fn; }
+/** CODE-STORE-01: the desktop app has no Code yet; Open in Code shows Code's page in the Store instead. */
+let installHost: (() => void) | null = null;
+export function setCodeInstall(fn: (() => void) | null) { installHost = fn; }
+/** True when Open in Code does something here: opens the file, or leads to installing Code. */
+export const codeOffered = () => hostReady || !!installHost;
 
 type RevealBridge = { revealFile?: (file: string) => Promise<unknown> };
 const bridge = () => (typeof window === 'undefined' ? undefined : (window as unknown as { dproApp?: RevealBridge }).dproApp);
@@ -42,11 +47,12 @@ export async function revealFile(client: Requester, path: string): Promise<CodeO
   try { return (await bridge()!.revealFile!(t.path)) === true ? 'revealed' : 'failed'; } catch { return 'failed'; }
 }
 
-/** Open in Code (⌘O): the file at its line; Show in Finder when Code is not installed. */
+/** Open in Code (⌘O): the file at its line; Code's Store page when the desktop app has no Code yet; else Show in Finder. */
 export async function openInCode(client: Requester, path: string, line?: number | null, options: { readOnly?: boolean } = {}): Promise<CodeOpenResult> {
   const t = await check(client, path, line);
   if (typeof t === 'string') return t;
   if (host && hostReady) { try { if (await host(t, options)) return 'opened'; } catch { /* falls back below */ } }
+  else if (installHost) { installHost(); return 'store'; }
   if (canRevealFile()) { try { if ((await bridge()!.revealFile!(t.path)) === true) return 'revealed'; } catch { /* reported below */ } }
   return 'no_code';
 }
@@ -55,6 +61,7 @@ export async function openInCode(client: Requester, path: string, line?: number 
 export function codeOpenNotice(r: CodeOpenResult): string | null {
   switch (r) {
     case 'opened': return null;
+    case 'store': return 'Code is not installed yet. Install it here, then open the file again.';
     case 'revealed': return `Code is not installed. The file is shown in ${finderWord()}.`;
     case 'outside': return 'This file is outside your projects.';
     case 'not_found': return 'This file is not on this computer.';

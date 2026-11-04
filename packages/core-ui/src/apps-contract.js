@@ -58,7 +58,8 @@ export function storeResponse(path,status,body){
  if(STORE_JOB.test(path)){
   if(status!==200)return {code:'not_found'};
   if(!body||!['getting','checking','setting-up','adding'].includes(body.step)||typeof body.done!=='boolean')throw Error('protocol');
-  return {step:body.step,done:body.done,...(body.done?{ok:body.ok===true,message:text(body.message??'',300),restart:body.restart==='auto'?'auto':'manual'}:{})};
+  const bytes=Number.isSafeInteger(body.total)&&body.total>0&&Number.isSafeInteger(body.received)&&body.received>=0&&body.received<=body.total?{received:body.received,total:body.total}:{};
+  return {step:body.step,done:body.done,...bytes,...(body.done?{ok:body.ok===true,message:text(body.message??'',300),restart:body.restart==='auto'?'auto':'manual'}:{})};
  }
  if(path===STORE_PRIVATE_PATH){
   if(status===200){if(!body||body.ok!==true||typeof body.id!=='string'||!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(body.id))throw Error('protocol');return {ok:true,state:'installed',id:body.id,name:text(body.name,80),restart:body.restart==='auto'?'auto':'manual'};}
