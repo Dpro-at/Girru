@@ -67,7 +67,7 @@ const FAKE=`const fs=require('node:fs');let s='';process.stdin.on('data',x=>s+=x
  if(process.argv.includes('stream-json')){const m=JSON.parse(s.trim());const n=m.message.content.filter(c=>c.type==='image').length;
   for(const row of [{type:'system',subtype:'init'},{type:'assistant',message:{content:[{type:'text',text:'x'}]}},{type:'result',subtype:'success',is_error:false,result:'saw '+n+' images'}])process.stdout.write(JSON.stringify(row)+'\\n');}
  else process.stdout.write(JSON.stringify({type:'result',result:'text:'+s}));});`;
-async function fixture(code){writeFileSync(binary,'#!'+process.execPath+'\n'+FAKE,{mode:0o700});const result=await run(process.execPath,['--import','tsx','--input-type=module','-e',`const api=await import(${JSON.stringify(source)});try{${code}}finally{await api.stopSubscriptionProcesses();}`],{env:{PATH:process.env.PATH,HOME:home,DPRO_SUBSCRIPTION_CHAT:'1',AGENT_PLAYER_DATA_DIR:dataDir,DATABASE_PATH:join(dataDir,'fixture.db')},timeout:20000,maxBuffer:65536});return result.stdout.trim();}
+async function fixture(code){writeFileSync(binary,'#!'+process.execPath+'\n'+FAKE,{mode:0o700});const result=await run(process.execPath,['--import','tsx','--input-type=module','-e',`const api=await import(${JSON.stringify(source)});try{${code}}finally{await api.stopSubscriptionProcesses();}`],{env:{PATH:process.env.PATH,HOME:home,DPRO_SUBSCRIPTION_CHAT:'1',AGENT_PLAYER_DATA_DIR:dataDir,DATABASE_PATH:join(dataDir,'fixture.db')},timeout:20000,maxBuffer:65536});return result.stdout.trim().split("\n").pop();}
 
 test('fake Claude Code binary: an image turn sends one stream-json message and returns the result; a text turn is unchanged',async()=>{
  const sig='new AbortController().signal';

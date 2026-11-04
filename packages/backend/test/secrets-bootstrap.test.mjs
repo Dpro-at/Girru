@@ -182,3 +182,9 @@ test('server entry loads env + secrets before any other import', () => {
   const firstImport = src.split('\n').find((l) => /^import\s/.test(l));
   assert.equal(firstImport.trim(), "import '../config/load-env.js';");
 });
+
+test('server entry: load-env is its only static import; the server loads after it (a pending restore is in place before any store opens)', () => {
+  const src = readFileSync(join(backendDir, 'src/api/server.ts'), 'utf-8').replace(/^\s*\/\/.*$/gm, '');
+  assert.deepEqual(src.match(/^import\s[^\n]*$/gm), ["import '../config/load-env.js';"]);
+  assert.match(src, /^await import\('\.\/server-main\.js'\);$/m);
+});

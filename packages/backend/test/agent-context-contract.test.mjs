@@ -17,6 +17,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { offeredNames, expectedNumCtx, expectedNumPredict, p2bOn } from './helpers/p2b.mjs';
 
+import { switchValueOn, clearEnv } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-context-contract-')));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });
@@ -30,7 +31,7 @@ process.env.NODE_ENV = 'test';
 process.env.OLLAMA_URL = 'http://127.0.0.1:11434';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-for (const k of ['AGENT_EXEC_TOOLS', 'OLLAMA_THINK', 'DEFAULT_MODEL', 'OUTSIDER_AGENT_MEMORY', 'GIRRU_STORE_P2', 'GIRRU_STORE_P8', 'GIRRU_STORE_P9B', 'GIRRU_STORE_PILOT', 'GIRRU_STORE_PILOT_AGENT']) delete process.env[k];
+for (const k of ['AGENT_EXEC_TOOLS', 'OLLAMA_THINK', 'DEFAULT_MODEL', 'OUTSIDER_AGENT_MEMORY', 'GIRRU_STORE_P2', 'GIRRU_STORE_P8', 'GIRRU_STORE_P9B', 'GIRRU_STORE_PILOT', 'GIRRU_STORE_PILOT_AGENT']) clearEnv(k);
 
 const bodies = [];
 globalThis.fetch = async (url, init = {}) => {
@@ -106,13 +107,14 @@ async function chatPrompt(channel = false) {
     return { system: body.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n'), tools: offeredNames(body) };
   } finally { turn?.end(); }
 }
-const withP2 = async (fn) => { process.env.GIRRU_STORE_P2 = '1'; try { return await fn(); } finally { delete process.env.GIRRU_STORE_P2; } };
+const withP2 = async (fn) => { process.env.GIRRU_STORE_P2 = '1'; try { return await fn(); } finally { process.env.GIRRU_STORE_P2 = '0'; } };
 
 test('switch off: every entry point is unchanged (known gaps pinned)', async () => {
   // P4 also turns the one context on (oneContextEnabled); this test pins the state with both off.
   const p4 = process.env.GIRRU_STORE_P4;
-  delete process.env.GIRRU_STORE_P4;
-  try { await knownGaps(); } finally { if (p4 !== undefined) process.env.GIRRU_STORE_P4 = p4; }
+  process.env.GIRRU_STORE_P4 = '0';
+  process.env.GIRRU_STORE_P2 = '0';
+  try { await knownGaps(); } finally { if (p4 !== undefined) process.env.GIRRU_STORE_P4 = p4; else delete process.env.GIRRU_STORE_P4; }
 });
 
 async function knownGaps() {
@@ -193,20 +195,21 @@ test('MD4 and MD9: save criteria lead memory_save and the brief; recalled memori
   const pack = { key: 'contract', text: '', memoryChars: 0, items: [], hit: false, memoryIds: [] };
   const off = await messageRecall({ userId: OWNER, drawers, query: 'When is alpha staging restored?', pack });
   // P9b (MD3): the line also carries its confidence.
-  assert.match(off.text, process.env.GIRRU_STORE_P9B === '1' ? /restored every Sunday night\. \(confidence \w+\)\n/ : /restored every Sunday night\.\n/);
+  assert.match(off.text, switchValueOn(process.env.GIRRU_STORE_P9B) ? /restored every Sunday night\. \(confidence \w+\)\n/ : /restored every Sunday night\.\n/);
   await withP2(async () => {
     assert.ok(memorySaveTool.description.startsWith(SAVE_CRITERIA));
     assert.equal(standingRules()[0], SAVE_CRITERIA);
     const on = await messageRecall({ userId: OWNER, drawers, query: 'When is the alpha staging data restored on Sunday?', pack });
-    assert.match(on.text, new RegExp(`restored every Sunday night\\. \\(as of \\d{4}-\\d{2}-\\d{2} · project:${projectKeyOf(project)}${process.env.GIRRU_STORE_P9B === '1' ? ' · confidence \\w+' : ''}\\)`));
+    assert.match(on.text, new RegExp(`restored every Sunday night\\. \\(as of \\d{4}-\\d{2}-\\d{2} · project:${projectKeyOf(project)}${switchValueOn(process.env.GIRRU_STORE_P9B) ? ' · confidence \\w+' : ''}\\)`));
   });
 });
 
 test('routes for the app: the switch, and the eye list strongest group first with groups', async () => {
   const get = (url) => app.inject({ method: 'GET', url, headers: auth });
-  // The route lists p6, p8 and p9 only while they are on.
-  const switches = (p2) => ({ p2, p3: process.env.GIRRU_STORE_P3 === '1', p4: process.env.GIRRU_STORE_P4 === '1',
-    ...Object.fromEntries(['p6', 'p8', 'p9'].filter((k) => /^(1|true|yes|on)$/i.test(process.env[`GIRRU_STORE_${k.toUpperCase()}`] ?? '')).map((k) => [k, true])) });
+  // The route lists p6, p8, p9 and p9b only while they are on.
+  process.env.GIRRU_STORE_P2 = '0';
+  const switches = (p2) => ({ p2, p3: switchValueOn(process.env.GIRRU_STORE_P3), p4: switchValueOn(process.env.GIRRU_STORE_P4),
+    ...Object.fromEntries(['p6', 'p8', 'p9', 'p9b'].filter((k) => switchValueOn(process.env[`GIRRU_STORE_${k.toUpperCase()}`] ?? '')).map((k) => [k, true])) });
   assert.deepEqual((await get('/api/store-switches')).json(), switches(false));
   assert.equal((await get('/api/agent-rules')).json().precedence, false);
   const before = (await get(`/api/agent-rules/effective?agentId=cc-agent&projectId=${project.id}`)).json();

@@ -1,8 +1,9 @@
+import { switchValueOn } from './switches.mjs';
 // STORE-MAP-01 P2b: helpers so older tests read the same with GIRRU_STORE_P2B off and on.
 // With P2b on, a local model turn sends the memory verbs and tool_load in full and lists the other
 // tools by name in the system text ("## Tool index"); a tool is offered when it is in either place.
 // A stub model server that does not answer /api/show gives the safe 8k window.
-export const p2bOn = () => /^(1|true|yes|on)$/i.test(String(process.env.GIRRU_STORE_P2B ?? '').trim());
+export const p2bOn = () => switchValueOn(String(process.env.GIRRU_STORE_P2B ?? '').trim());
 
 /** Tool names listed in a system text's tool index. */
 export function indexNames(system) {

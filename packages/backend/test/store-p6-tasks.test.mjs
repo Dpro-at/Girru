@@ -23,7 +23,7 @@ process.env.DATABASE_PATH = join(dir, '.data', 'agent-player.db');
 process.env.JWT_SECRET = randomBytes(64).toString('hex'); // throwaway, test only
 process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway, test only
 process.env.NODE_ENV = 'test';
-delete process.env.GIRRU_STORE_P6;
+process.env.GIRRU_STORE_P6 = '0';
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 const quiet = () => {}; console.log = quiet; console.info = quiet; console.warn = quiet;
 
@@ -62,7 +62,7 @@ const cardOf = async (no) => {
 };
 
 const on = () => { process.env.GIRRU_STORE_P6 = '1'; };
-const off = () => { delete process.env.GIRRU_STORE_P6; };
+const off = () => { process.env.GIRRU_STORE_P6 = '0'; };
 const HID = /<!-- girru:id=([A-Za-z0-9_-]+) v=(\d+) -->/g;
 const ids = (text = tasks()) => [...text.matchAll(HID)].map((m) => m[1]);
 const block1 = (no, title, dept = 'Development') => `## ${no} · ${title}\n- State: To do\n- Department: ${dept}\n- Agent:\n- Priority:\n- Worked on by:\n### Done\n### Left\n### Next\n### Log\n`;

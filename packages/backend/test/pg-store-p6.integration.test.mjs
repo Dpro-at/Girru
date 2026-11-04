@@ -64,7 +64,7 @@ test.before(async () => {
 
 test.after(async () => {
   if (!URL_) return;
-  delete process.env.GIRRU_STORE_P6;
+  process.env.GIRRU_STORE_P6 = '0';
   m.projection.setProjectionDebounce(false);
   for (const t of ['change_events', 'projection_state']) await m.pool.pgRun(`DELETE FROM ${t} WHERE scope LIKE ?`, `%${tag}%`).catch(() => {});
   for (const [t, c] of [['change_scopes', 'owner_id'], ['session_capabilities', 'owner_id'], ['write_requests', 'owner_id'], ['memory_place_settings', 'owner_id'], ['task_number_dismissals', 'owner_id'], ['memory_bridge_folders', 'owner_id'], ['memory_bridge_handoffs', 'owner_id'], ['memory_versions', 'user_id'], ['memories', 'user_id'], ['chat_projects', 'user_id']]) {

@@ -17,6 +17,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
+import { clearEnv } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const load = (rel) => import(pathToFileURL(join(backendDir, rel)).href);
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-store-p9b-')));
@@ -33,7 +34,7 @@ process.env.NODE_ENV = 'test';
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-for (const k of ['GIRRU_STORE_P9B', 'GIRRU_STORE_P9', 'GIRRU_STORE_P3', 'GIRRU_STORE_P2']) delete process.env[k];
+for (const k of ['GIRRU_STORE_P9B', 'GIRRU_STORE_P9', 'GIRRU_STORE_P3', 'GIRRU_STORE_P2']) clearEnv(k);
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
@@ -64,7 +65,7 @@ await storage.initialize();
 const ownerActor = userActor({ id: OWNER, role: 'owner' });
 
 const on = () => { process.env.GIRRU_STORE_P9B = '1'; };
-const off = () => { delete process.env.GIRRU_STORE_P9B; };
+const off = () => { process.env.GIRRU_STORE_P9B = '0'; };
 const trust = (id) => db.prepare('SELECT * FROM memory_trust WHERE memory_id = ?').get(id);
 const sources = (id) => db.prepare('SELECT source_key, kind FROM memory_trust_sources WHERE memory_id = ? ORDER BY at, source_key').all(id);
 const extraction = (content, importance = 5) => ({ content, type: 'fact', importance, origin: 'extraction' });

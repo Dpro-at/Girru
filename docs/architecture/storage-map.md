@@ -142,7 +142,7 @@ Open coding-tool sessions keep the copy they loaded, so the brief asks them to c
 
 ## Memory switches
 
-The memory work is built and in the source. Each part sits behind one backend switch, so it can be turned on and off as a unit. A switch is on when its environment variable is `1`, `true`, `yes` or `on`. In the current source every switch is off unless it is set; turning them on by default together is the last step before the next release, and this page is updated in that same change.
+The memory work is built and in the source. Each part sits behind one backend switch, so it can be turned on and off as a unit. Every switch except the pilot is on by default. To turn one off, set its environment variable to `0`, `false`, `no` or `off` (for example `GIRRU_STORE_P9=0`); any other value, or none, keeps it on, and the desktop app passes these variables on to its backend. The start-up log names every switch that is turned off. Each switch's off path is removed one release after it went on (after 2027-01-31; see [UPGRADING.md](../UPGRADING.md#storage-map-switches)). The pilot stays opt-in: it names one project and one agent, and P2 and P6 now do the same for everyone.
 
 | Switch | Part | Section |
 |---|---|---|
@@ -163,7 +163,7 @@ All switches were tested together: the full backend test suite passes with every
 
 ### Pilot (one project)
 
-A first version of the change log, the session capability and the shared agent context runs for one project and one agent when these backend environment variables are set:
+A first version of the change log, the session capability and the shared agent context runs for one project and one agent when these backend environment variables are set. `GIRRU_STORE_P2` (every agent) and `GIRRU_STORE_P6` (every project) now do the same for everyone and are on by default, so the pilot adds nothing; it stays opt-in until it is removed:
 
 | Variable | Effect |
 |---|---|
@@ -176,7 +176,7 @@ A first version of the change log, the session capability and the shared agent c
 
 ### Foundations
 
-`GIRRU_STORE_P3=1` turns on:
+`GIRRU_STORE_P3` (on by default; `GIRRU_STORE_P3=0` turns it off) turns on:
 
 - **One list of departments** for agents and projects (`departments`). Renaming or merging a department follows into agents, boards, cards, specialty templates, hire items, meeting decisions and rule targets; a merge can be undone; deleting one lets its agents and rules go (a rule left without a department is paused). Owner routes: `GET/POST /api/departments`, `PATCH /api/departments/:id`, `POST /api/departments/:id/merge`, `POST /api/departments/merges/:mergeId/undo`, `POST /api/departments/questions/:id`.
 - **Projects by id in memory:** at start-up every project key moves from the slug to the project's id; a key with no project becomes a real project. Deleting a project keeps its memory under its own id, so a new project with the same name starts empty. Links that name a project by its slug keep working for one release. With the switch off again, the keys move back.
@@ -185,7 +185,7 @@ A first version of the change log, the session capability and the shared agent c
 
 ### One store per piece
 
-`GIRRU_STORE_P4=1` turns on:
+`GIRRU_STORE_P4` (on by default; `GIRRU_STORE_P4=0` turns it off) turns on:
 
 - **One personality record:** an agent's personality text and its adjustments share one versioned history. Edits in Girru save at once (Undo restores the version before); `PERSONALITY.md` is written from the record; a change made to the file outside Girru, and every Evolution text suggestion, waits in Personality review. At start-up each agent's current file text is imported once.
 - **The job from the specialty link:** `system_prompt` keeps only the owner's extra instructions. Chat, task runs, coding apps and the heartbeat use the one agent context, so a hired agent's job reaches chat. A public room gets its own prompt and then only the agent's personality text.
@@ -194,14 +194,14 @@ A first version of the change log, the session capability and the shared agent c
 
 ### Agent notes and agent packages
 
-`GIRRU_STORE_P5=1` turns on:
+`GIRRU_STORE_P5` (on by default; `GIRRU_STORE_P5=0` turns it off) turns on:
 
 - **Agent notes in the database:** at start-up each agent's `MEMORY.md` is imported once into its own drawer, with the file's earlier versions as history. Prompts read the drawer; the owner saves with the hash of the text read; `MEMORY.md` is written from the drawer, and a file changed outside Girru is kept until the owner decides.
 - **Agent packages:** one JSON document per agent with `schemaVersion` and a content hash. Import is untrusted: permissions, tool grants, credentials, hooks and private history are never imported, a secret refuses the package, specialties and skills are linked only when this computer has the same content, and nothing is downloaded. Each import is recorded with its hash.
 
 ### Ids in files and proven sync
 
-`GIRRU_STORE_P6=1` turns on:
+`GIRRU_STORE_P6` (on by default; `GIRRU_STORE_P6=0` turns it off) turns on:
 
 - **A session for every project:** a coding app's memory calls open a project only with a session Girru issued for it (a folder path never grants anything). Girru issues one when it starts a coding app in a project folder and ends it when the run ends. Company facts reach a session only where the owner allowed them for that project.
 - **Limits on what a session can read:** a search answer is capped, unusual read volume is refused with one notice, and every read is logged with its session (ids only).
@@ -216,7 +216,7 @@ A first version of the change log, the session capability and the shared agent c
 
 ### One safe file writer
 
-`GIRRU_STORE_P7=1` turns on, for every file Girru writes into a project folder (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `DESIGN.md`, `.girru/` files and `.git/info/exclude`):
+`GIRRU_STORE_P7` (on by default; `GIRRU_STORE_P7=0` turns it off) turns on, for every file Girru writes into a project folder (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `DESIGN.md`, `.girru/` files and `.git/info/exclude`):
 
 - **Inside the folder only:** no `..`, no absolute, drive or network paths, no `\` or `:`, no Windows device names, and no name ending in a dot or a space. The full path must fit the system's length limit.
 - **Never through a link:** each folder on the way, and the file itself, must be a real folder or a plain file at its own path. Symbolic links, Windows junctions and hard links are refused.
@@ -241,7 +241,7 @@ With the same switch:
 
 ### Task links and run notes
 
-`GIRRU_STORE_P8=1` turns on:
+`GIRRU_STORE_P8` (on by default; `GIRRU_STORE_P8=0` turns it off) turns on:
 
 - **The task number links a task:** its task notes, its handoffs (newest first, with blockers, files touched, who wrote it with which app and from which chat), its chats and its line in `.girru/tasks.md` read in one call; a card shows how many handoffs it has and "Blocked" when the newest names a blocker. The owner edits blockers; files touched stay as written.
 - **Handoffs between agents:** a lead can hand part of a task to a specialist with a structured note; it is stored as the specialist's handoff naming the lead, and the specialist's own note names the lead too.
@@ -250,7 +250,7 @@ With the same switch:
 
 ### Hardening, privacy and quality
 
-`GIRRU_STORE_P9=1` turns on:
+`GIRRU_STORE_P9` (on by default; `GIRRU_STORE_P9=0` turns it off) turns on:
 
 - **Faster recall:** recall keeps its own index in memory: each memory's word counts and vector, checked against the stored text and model on every search and read again only when they changed. The full rows are loaded for the results alone. The scores and order are the same as before. Measured on generated data with 100,000 memories (46,731 in the open drawers): 1.06 s to 0.11 s with offline vectors and 3.8 s to 0.30 s with 1,024-dimension vectors (median), with less than half the memory. The index never goes to disk, is capped (256 MB by default, `GIRRU_RECALL_INDEX_MB`), drops a user's entries after 30 minutes without a search and drops them at once when a memory is forgotten. The drawer filter of every memory query has its own index (migration 179, used with the switch off too).
 - **Backups that really restore:** before a backup is signed, its copy of the main database is unpacked into a scratch folder, opened, checked and counted against what was saved. A backup that fails this is not marked checked and cannot be restored. Backup files are owner-only (0600, folders 0700); the signing key and the forget ledger's key are never in a backup. On PostgreSQL the app still does not dump the database; it reports whether a pg_dump file newer than 26 hours is in the backups folder.
@@ -267,7 +267,7 @@ With the same switch:
 
 ### One agent context and one Girru section
 
-`GIRRU_STORE_P2=1` turns on, for every agent:
+`GIRRU_STORE_P2` (on by default; `GIRRU_STORE_P2=0` turns it off) turns on, for every agent:
 
 - **One resolved context** for chat, task runs and coding-app replies: owner rules first, grouped from most to least binding (safety rules, this project, rules naming the agent, its department, all agents), then the hired instructions, personality text, working style, team and knowledge files. Memory, pinned facts and handoff notes are framed as data.
 - **Guides by name:** skills and specialties are listed by name and the first line of their description; the agent loads one guide's full text with the `guide_read` tool, and only its own.
@@ -277,7 +277,7 @@ With the same switch:
 
 ### Local models only
 
-`GIRRU_STORE_P2B=1` makes "local models only, no subscription" a full path:
+`GIRRU_STORE_P2B` (on by default; `GIRRU_STORE_P2B=0` turns it off) makes "local models only, no subscription" a full path:
 
 - **Tools on demand:** a turn sends the memory verbs in full, a `tool_load` tool and a short index of the agent's other tools (name and one line). The full form of another tool comes with `tool_load` or when it is called. One definition feeds the native tools, the subscription protocol and MCP. `tool_load` describes only tools the agent already has; grants, policies and approvals are unchanged.
 - **A budget from the real window:** Girru reads the model's context size (Ollama, LM Studio, or the setting of a generic OpenAI-compatible server on this computer) and splits it between instructions, memory, history and tools, so a turn fits an 8k model with room for the reply. Tool results inside a turn are clipped to fit.
@@ -290,7 +290,7 @@ On this path the model runs on this computer, so a turn sends nothing to a provi
 
 ### Memory quality
 
-`GIRRU_STORE_P9B=1` turns on:
+`GIRRU_STORE_P9B` (on by default; `GIRRU_STORE_P9B=0` turns it off) turns on:
 
 - **One write pipeline:** every way a memory arrives (chat, an agent's tool, a coding app over MCP, an import, a channel, the owner) goes through one pipeline that stores where it came from and a trust record in the same write. Further details are added in the background.
 - **Confidence from agreement:** how sure Girru is of a memory comes from how many independent sources agree with it and whether the owner verified it, not from the model's opinion.
@@ -304,7 +304,7 @@ On this path the model runs on this computer, so a turn sends nothing to a provi
 
 The memory helper is the small local model that turns memory into vectors for search, so recall finds meaning across words and languages. It runs only on this computer and never chats; it is not in any model picker. It is separate from the local chat model the owner may pick in first-run setup.
 
-`GIRRU_MEMORY_HELPER=1` makes it ready without the owner doing anything:
+`GIRRU_MEMORY_HELPER` (on by default; `GIRRU_MEMORY_HELPER=0` turns it off) makes it ready without the owner doing anything:
 
 - **Background only:** start-up never waits for it, and a reply never waits for it.
 - **Loopback only:** it works only with a local runtime on `127.0.0.1`, `::1` or `localhost`; a runtime it starts is bound to `127.0.0.1`. Any other address leaves memory on the offline fallback.

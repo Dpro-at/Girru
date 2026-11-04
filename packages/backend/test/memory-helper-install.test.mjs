@@ -39,7 +39,7 @@ delete process.env.MEMORY_EMBEDDING_MODEL;
 delete process.env.MEMORY_WORKER_MODEL;
 process.env.MEMORY_GRAPH_MODEL = 'off';
 const startedWith = process.env.GIRRU_MEMORY_HELPER;
-delete process.env.GIRRU_MEMORY_HELPER;
+process.env.GIRRU_MEMORY_HELPER = '0';
 const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
 
@@ -126,7 +126,7 @@ test('off: nothing runs, nothing is fetched, no health row', async () => {
   process.env.GIRRU_STORE_P9 = '1';
   const h = await H.memoryHealth(OWNER);
   assert.equal(h.rows.some((r) => r.id === 'memory_helper'), false);
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
 });
 
 test('the routes answer 404 while the switch is off', async () => {
@@ -139,7 +139,7 @@ test('the routes answer 404 while the switch is off', async () => {
   process.env.GIRRU_MEMORY_HELPER = '1';
   const r = await app.inject({ method: 'GET', url: '/api/memory/helper' });
   assert.ok([401, 403].includes(r.statusCode), `no owner, no state (got ${r.statusCode})`);
-  delete process.env.GIRRU_MEMORY_HELPER;
+  process.env.GIRRU_MEMORY_HELPER = '0';
   await app.close();
 });
 
@@ -213,7 +213,7 @@ test('installed, not running: started bound to 127.0.0.1, model pulled with prog
   const row = (await H.memoryHealth(OWNER)).rows.find((r) => r.id === 'memory_helper');
   assert.equal(row.word, 'Ready');
   assert.equal(row.state, 'ok');
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
 });
 
 test('already installed: no download, only the check and the re-embed', async () => {

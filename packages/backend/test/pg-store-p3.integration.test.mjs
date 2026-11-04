@@ -117,7 +117,7 @@ test('project keys move to ids and back (PostgreSQL)', { skip }, async () => {
   const assert = (await import('node:assert/strict')).default;
   const projects = await import('../src/repositories/chat-conversations.ts');
   const keys = await import('../src/memory/project-keys.ts');
-  delete process.env.GIRRU_STORE_P3;
+  process.env.GIRRU_STORE_P3 = '0';
   const p = await projects.createProject(owner, { name: `Gamma ${tag}` });
   const mem = await m.learning.saveVersioned(m.learning.newMemory(owner, { kind: 'project', key: p.slug }, { type: 'fact', importance: 5, content: 'Gamma ships monthly.' }, { source: 'owner' }), owner, 'test');
   await m.learning.saveVersioned(m.learning.newMemory(owner, { kind: 'project', key: `notes-${tag}` }, { type: 'fact', importance: 5, content: 'Loose notes.' }, { source: 'owner' }), owner, 'test');
@@ -127,7 +127,7 @@ test('project keys move to ids and back (PostgreSQL)', { skip }, async () => {
   assert.equal((await m.q.all('SELECT drawer_key FROM memories WHERE id = ?', mem.id))[0].drawer_key, p.id);
   assert.equal((await m.q.all('SELECT drawer_key FROM memory_versions WHERE memory_id = ? LIMIT 1', mem.id))[0].drawer_key, p.id);
   assert.equal(await keys.currentProjectKey(owner, p.slug), p.id);
-  delete process.env.GIRRU_STORE_P3;
+  process.env.GIRRU_STORE_P3 = '0';
   await keys.moveProjectKeys('slug');
   assert.equal((await m.q.all('SELECT drawer_key FROM memories WHERE id = ?', mem.id))[0].drawer_key, p.slug);
   await m.q.run('DELETE FROM memory_project_keys WHERE owner_id = ?', owner);
@@ -148,7 +148,7 @@ test('P4 (D7): coding-app notes in the one handoff table (PostgreSQL)', { skip }
     assert.equal((await bridge.latestBridgeHandoff(owner, p.id)).id, h.id);
     assert.equal(await bridge.copyAppHandoffs() >= 0, true);
   } finally {
-    delete process.env.GIRRU_STORE_P4;
+    process.env.GIRRU_STORE_P4 = '0';
     await m.q.run('DELETE FROM agent_handoffs WHERE owner_id = ?', owner);
     await m.q.run('DELETE FROM memory_bridge_handoffs WHERE owner_id = ?', owner);
     await m.q.run('DELETE FROM chat_projects WHERE id = ?', p.id);
@@ -181,7 +181,7 @@ test('P4 (T7): one personality record (PostgreSQL)', { skip }, async () => {
     assert.equal(version.textHash, p.proposedTextHash);
     assert.equal(await record.personalityTextFor(id), 'Suggested.');
   } finally {
-    delete process.env.GIRRU_STORE_P4;
+    process.env.GIRRU_STORE_P4 = '0';
     await m.q.run('DELETE FROM personality_proposals WHERE agent_id = ?', id);
     await m.q.run('DELETE FROM agents_config WHERE id = ?', id);
   }
@@ -213,7 +213,7 @@ test('P5: agent notes drawer and agent package (PostgreSQL)', { skip }, async ()
     imported = (await pack.importAgentPackage(pkg, owner, { expectedPackageHash: pkg.packageHash })).agentId;
     assert.equal((await m.q.all('SELECT system_prompt FROM agents_config WHERE id = ?', imported))[0].system_prompt, 'Short lines.');
   } finally {
-    delete process.env.GIRRU_STORE_P5;
+    process.env.GIRRU_STORE_P5 = '0';
     await m.q.run("DELETE FROM memory_versions WHERE memory_id IN (SELECT id FROM memories WHERE drawer_kind = 'agent' AND drawer_key = ?)", id);
     await m.q.run("DELETE FROM memories WHERE drawer_kind = 'agent' AND drawer_key = ?", id);
     if (imported) await m.q.run('DELETE FROM agents_config WHERE id = ?', imported);

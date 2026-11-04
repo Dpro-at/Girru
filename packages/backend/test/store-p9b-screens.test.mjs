@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
+import { clearEnv } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const load = (rel) => import(pathToFileURL(join(backendDir, rel)).href);
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-store-p9b-screens-')));
@@ -30,7 +31,7 @@ process.env.NODE_ENV = 'test';
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_P3', 'GIRRU_STORE_P9', 'GIRRU_STORE_P9B', 'GIRRU_STORE_PILOT']) delete process.env[k];
+for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_P3', 'GIRRU_STORE_P9', 'GIRRU_STORE_P9B', 'GIRRU_STORE_PILOT']) clearEnv(k);
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
@@ -57,7 +58,7 @@ const { approvalCategory } = await load('src/tools/approvals.ts');
 const { DEFAULT_AGENT_TOOLS } = await load('src/tools/grants.ts');
 const { createProject } = await load('src/repositories/chat-conversations.ts');
 
-const on = async (fn) => { process.env.GIRRU_STORE_P9B = '1'; resetTrustForTests(); try { return await fn(); } finally { delete process.env.GIRRU_STORE_P9B; } };
+const on = async (fn) => { process.env.GIRRU_STORE_P9B = '1'; resetTrustForTests(); try { return await fn(); } finally { process.env.GIRRU_STORE_P9B = '0'; } };
 const ago = (days) => new Date(Date.now() - days * 86_400_000).toISOString();
 const add = (id, content, kind, key = '') => db.prepare(`INSERT INTO memories (id, user_id, type, content, memory_layer, status, metadata, importance_score, created_at, access_count, drawer_kind, drawer_key)
   VALUES (?, ?, 'fact', ?, 'factual', 'active', '{}', 0.5, ?, 0, ?, ?)`).run(id, OWNER, content, ago(10), kind, key);

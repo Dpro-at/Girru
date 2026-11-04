@@ -34,7 +34,7 @@ process.env.NODE_ENV = 'test';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
-delete process.env.GIRRU_STORE_P9;
+process.env.GIRRU_STORE_P9 = '0';
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 const quiet = () => {}; console.log = quiet; console.info = quiet; console.warn = quiet;
 after(() => rmSync(dir, { recursive: true, force: true }));
@@ -89,7 +89,7 @@ test('switch on: a backup is restored for real into a scratch folder before it i
   assert.match(changed.error, /checksum/);
   // No scratch folder is left behind.
   assert.equal(readdirSync(tmpdir()).filter((n) => n.startsWith('girru-restore-test-')).every((n) => !existsSync(join(tmpdir(), n, 'restored.db'))), true);
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
 });
 
 test('forget writes ids and a keyed hash only; a restore brings it back and the replay forgets it again', async () => {
@@ -140,7 +140,7 @@ test('forget writes ids and a keyed hash only; a restore brings it back and the 
   assert.ok(L.readLedger().some((l) => l.memoryId === 'mem-twin'), 'the twin forgotten by the replay has its own line');
   const again = await L.replayForgetLedger();
   assert.equal(again.forgotten, 0, 'idempotent');
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
 });
 
 test('a new computer: the backup ledger lines are added to an empty current ledger', () => {

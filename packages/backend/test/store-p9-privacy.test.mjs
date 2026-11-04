@@ -17,6 +17,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
+import { clearEnv } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const load = (rel) => import(pathToFileURL(join(backendDir, rel)).href);
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-store-p9-privacy-')));
@@ -32,7 +33,7 @@ process.env.NODE_ENV = 'test';
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_P3', 'GIRRU_STORE_P9', 'GIRRU_STORE_PILOT']) delete process.env[k];
+for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_P3', 'GIRRU_STORE_P9', 'GIRRU_STORE_PILOT']) clearEnv(k);
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
@@ -88,7 +89,7 @@ test('PRIV2: the coding-app context and the bridge leave out a project that stay
   db.prepare(`INSERT INTO agents_config (id, name, provider, model, is_primary) VALUES ('a-p9', 'Sara', 'ollama', 'qwen-test', 1)`).run();
   const p = await createProject(OWNER, { name: 'Gamma' });
   add('g-1', OWNER, 'Gamma ships monthly.', 'project', p.slug);
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
   assert.equal((await brief.bridgeDrawers(OWNER, p)).length, 1);
   assert.equal((await brief.approvedMemories(OWNER, p)).length, 1);
   process.env.GIRRU_STORE_P9 = '1';
@@ -101,7 +102,7 @@ test('PRIV2: the coding-app context and the bridge leave out a project that stay
   assert.ok(!coding.drawers.some((d) => d.kind === 'project'));
   const local = await resolveAgentContext({ agentId: 'a-p9', entry: 'task', ownerId: OWNER, projectId: p.id });
   assert.ok(local.drawers.some((d) => d.kind === 'project'), 'a local model still reads it');
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
   assert.ok((await resolveAgentContext({ agentId: 'a-p9', entry: 'coding_app', ownerId: OWNER, projectId: p.id })).drawers.some((d) => d.kind === 'project'), 'off: as before');
 });
 
@@ -142,7 +143,7 @@ test('PRIV3/PRIV7: the classifier flags them with P9 on only', () => {
   assert.ok(classifyLearning(imported).reasons.includes('personal-data'));
   assert.ok(classifyLearning(channel).reasons.includes('personal-data'));
   assert.ok(!classifyLearning({ ...imported, imported: false, origin: 'agent' }).reasons.includes('personal-data'), 'only imported and channel text');
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
 });
 
 test('PRIV7: a special category is never saved automatically, even when a scope rule saves the rest', async () => {
@@ -158,7 +159,7 @@ test('PRIV7: a special category is never saved automatically, even when a scope 
   assert.equal(out.proposed.length, 1);
   assert.ok(out.classified.some((c) => c.reasons.includes('special-category')));
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM memories WHERE content LIKE '%hospital%'").get().n, 0);
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
 });
 
 test('PRIV8: the owner can NOT read a member\'s private memory through any memory route', async () => {
@@ -193,6 +194,6 @@ test('PRIV8: the owner can NOT read a member\'s private memory through any memor
   // The member reads their own.
   const own = await call(MEMBER, 'POST', '/api/memory/search', { query: 'private salary note', limit: 5 });
   assert.match(own.body, /salary note/);
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
   await app.close();
 });

@@ -272,7 +272,7 @@ test('S0-Q.16: owner export carries no other user\'s ciphertext; owner import ca
 
 // ---- S0-Q.14: onboarding (terminal wizard) -------------------------------
 test('S0-Q.14: onboarding routes are not registered by the server and are owner-only', async () => {
-  const serverSrc = readFileSync(fileURLToPath(new URL('../src/api/server.ts', import.meta.url)), 'utf8');
+  const serverSrc = readFileSync(fileURLToPath(new URL('../src/api/server-main.ts', import.meta.url)), 'utf8');
   assert.doesNotMatch(serverSrc, /^\s*await\s+fastify\.register\(\s*onboardingRoutes/m);
 
   for (const [method, url] of [['POST', '/api/onboarding/start'], ['POST', '/api/onboarding/resume'],

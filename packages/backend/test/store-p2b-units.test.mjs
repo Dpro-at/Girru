@@ -26,8 +26,9 @@ const { prepareLocalTurn, NO_INVENTED_MEMORY } = await import('../src/services/l
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
-test('the switch is off by default and reads the usual words', () => {
-  assert.equal(storeP2bEnabled({}), false);
+test('the switch is on by default; 0 / false / no / off turn it off', () => {
+  assert.equal(storeP2bEnabled({}), true);
+  for (const v of ['false', 'off', 'NO']) assert.equal(storeP2bEnabled({ GIRRU_STORE_P2B: v }), false);
   for (const v of ['1', 'true', 'on', 'YES']) assert.equal(storeP2bEnabled({ GIRRU_STORE_P2B: v }), true);
   assert.equal(storeP2bEnabled({ GIRRU_STORE_P2B: '0' }), false);
 });
@@ -249,7 +250,7 @@ test('LAT: background work waits while a local reply runs, one job at a time; th
     end2();
     assert.equal(S.backgroundKeepAlive('qwen3:4b', S.chatModelInUse(), '30m'), '30m');
     assert.equal(S.backgroundKeepAlive('worker:1b', S.chatModelInUse(), '30m'), S.HELPER_KEEP_ALIVE);
-  } finally { delete process.env.GIRRU_STORE_P2B; S.resetScheduler(); }
+  } finally { process.env.GIRRU_STORE_P2B = '0'; S.resetScheduler(); }
   // Off: no wait at all.
   const end = S.beginLocalReply('m');
   let ran = false;

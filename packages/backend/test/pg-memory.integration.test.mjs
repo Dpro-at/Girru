@@ -23,6 +23,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 
+import { switchValueOn } from './helpers/switches.mjs';
 const URL_ = process.env.AGENT_PLAYER_PG_TEST_URL;
 const skip = URL_ ? false : 'AGENT_PLAYER_PG_TEST_URL is not set (PostgreSQL integration test)';
 const backendDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -256,7 +257,7 @@ test('embeddings: JSON text vectors round-trip exactly; bytea (Float32) in the h
   await silent(() => m.storage.save({ ...mem, userId: ids.owner }));
   const back = await m.storage.getOwned(ids.owner, mem.id);
   // STORE-MAP-01 P3: with GIRRU_STORE_P3 on the vector is stored as Float32 bytes, so it comes back at Float32 precision.
-  const p3 = /^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P3 ?? '');
+  const p3 = switchValueOn(process.env.GIRRU_STORE_P3 ?? '');
   assert.deepEqual(back.embedding, p3 ? Array.from(new Float32Array(vector)) : vector);
   assert.equal((await one('SELECT embedding_dims FROM memories WHERE id = ?', mem.id)).embedding_dims, 5);
   // Hybrid index: Float32 bytes in a bytea column.

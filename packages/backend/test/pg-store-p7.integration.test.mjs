@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
+import { clearEnv } from './helpers/switches.mjs';
 const URL_ = process.env.AGENT_PLAYER_PG_TEST_URL;
 const skip = URL_ ? false : 'AGENT_PLAYER_PG_TEST_URL is not set (PostgreSQL integration test)';
 
@@ -66,7 +67,7 @@ test.before(async () => {
 
 test.after(async () => {
   if (!URL_) return;
-  for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_P7']) delete process.env[k];
+  for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_P7']) clearEnv(k);
   await m.pool.pgRun('DELETE FROM agent_rules WHERE project_id = ?', S.project.id).catch(() => {});
   await m.pool.pgRun('DELETE FROM agent_rule_files WHERE project_id = ?', S.project.id).catch(() => {});
   await m.pool.pgRun('DELETE FROM task_file_approvals WHERE project_id = ?', S.project.id).catch(() => {});

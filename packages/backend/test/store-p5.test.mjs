@@ -23,7 +23,7 @@ process.env.JWT_SECRET = randomBytes(64).toString('hex'); // throwaway, test onl
 process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway, test only
 process.env.NODE_ENV = 'test';
 process.env.MEMORY_EMBEDDINGS = 'hash';
-delete process.env.GIRRU_STORE_P5; delete process.env.GIRRU_STORE_P4;
+process.env.GIRRU_STORE_P5 = '0'; process.env.GIRRU_STORE_P4 = '0';
 let fetches = 0;
 const offline = async (url) => { fetches++; throw new Error(`offline: ${url}`); };
 globalThis.fetch = offline;
@@ -168,11 +168,11 @@ test('with the personality record on, the import carries the text into version 1
   const { agentId } = await pack.importAgentPackage(pkg, O, { expectedPackageHash: plan.packageHash, again: true });
   const { recordText } = await import(join(backendDir, 'src/services/personality-record.ts'));
   assert.equal((await recordText(agentId)).text, 'Calm and exact.');
-  delete process.env.GIRRU_STORE_P4;
+  process.env.GIRRU_STORE_P4 = '0';
 });
 
 test('switch off again: the prompt reads the file', async () => {
-  delete process.env.GIRRU_STORE_P5;
+  process.env.GIRRU_STORE_P5 = '0';
   assert.equal(await drawer.agentMemoryForPrompt('p5-noor'), 'Edited by a coding app.');
 });
 
@@ -182,11 +182,11 @@ test('security: an agent’s notes are never opened by id through the shared mem
   const storage = getMemoryStorage();
   assert.equal(await storage.get(id), null);
   assert.equal(await storage.getOwned(O, id), null);
-  delete process.env.GIRRU_STORE_P5;
+  process.env.GIRRU_STORE_P5 = '0';
 });
 
 test('P5a/P5b screens: history of the notes; MEMORY.md changed outside Girru waits for the owner (Use it / Keep Girru’s)', async () => {
-  delete process.env.GIRRU_STORE_P5;
+  process.env.GIRRU_STORE_P5 = '0';
   assert.equal(await drawer.agentNotesHistory('p5-noor'), null, 'off: no history route');
   assert.equal(await drawer.agentNotesOutside('p5-noor'), null);
   process.env.GIRRU_STORE_P5 = '1';
@@ -213,7 +213,7 @@ test('P5a/P5b screens: history of the notes; MEMORY.md changed outside Girru wai
   assert.doesNotMatch(now.content, /sk-live-abcdefghijklmnopqrstuvwx/, 'secrets hidden');
   assert.equal((await drawer.agentNotesHistory('p5-noor')).length, before + 1, 'one new version (Undo = the one before)');
   assert.equal((await drawer.agentMemoryStatus('p5-noor')).outsideChange, false);
-  delete process.env.GIRRU_STORE_P5;
+  process.env.GIRRU_STORE_P5 = '0';
 });
 
 test('the Memory window scope lists never show an agent’s own notes (they have their own row on the agent page)', async () => {
@@ -225,5 +225,38 @@ test('the Memory window scope lists never show an agent’s own notes (they have
   }
   const tree = await scopeTree(O, { fresh: true });
   assert.doesNotMatch(JSON.stringify(tree), /"agent:p5-noor"/);
-  delete process.env.GIRRU_STORE_P5;
+  process.env.GIRRU_STORE_P5 = '0';
+});
+
+test('an older 0755 agents folder is tightened to 0700 and its notes are imported; a folder others can write to is refused', { skip: process.platform === 'win32' }, async () => {
+  const { chmodSync, statSync, mkdirSync: mk, writeFileSync: wf } = await import('node:fs');
+  process.env.GIRRU_STORE_P5 = '1';
+  db.prepare(`INSERT INTO agents_config (id, name, provider, model, system_prompt) VALUES ('p5-old', 'Old', 'ollama', 'm', 'x')`).run();
+  const agents = join(dir, '.data', 'agents');
+  mk(join(agents, 'p5-old'), { recursive: true, mode: 0o700 });
+  wf(join(agents, 'p5-old', 'MEMORY.md'), 'Kept from an older install.', { mode: 0o600 });
+  chmodSync(agents, 0o775);
+  assert.equal(await drawer.importAgentMemory('p5-old'), false, 'group-writable: refused');
+  assert.equal(statSync(agents).mode & 0o777, 0o775, 'and left as it was');
+  chmodSync(agents, 0o755);
+  assert.equal(await drawer.importAgentMemory('p5-old'), true);
+  assert.equal(statSync(agents).mode & 0o777, 0o700);
+  assert.match((await drawer.agentNotes('p5-old')).content, /Kept from an older install/);
+});
+
+test('agent notes stay out of the doctor, the owner list and "forget all" (they are read only through the agent drawer)', async () => {
+  process.env.GIRRU_STORE_P5 = '1';
+  await drawer.importAllAgentMemory();
+  const agentRows = count("SELECT COUNT(*) AS n FROM memories WHERE drawer_kind = 'agent'");
+  assert.ok(agentRows >= 2, 'two agents with the same kind of notes');
+  const { checkMemory } = await import(join(backendDir, 'src/memory/doctor.ts'));
+  const report = await checkMemory(O);
+  assert.equal(report.counts['broken-drawer'], 0);
+  assert.equal(report.counts.duplicate, 0);
+  assert.ok(report.issues.every((i) => i.memoryIds.every((id) => count("SELECT COUNT(*) AS n FROM memories WHERE id = ? AND drawer_kind = 'agent'", id) === 0)));
+  assert.ok((await getMemoryStorage().getByUser(O)).every((m) => m.drawer?.kind !== 'agent'));
+  const { forgetAll } = await import(join(backendDir, 'src/memory/forget.ts'));
+  await forgetAll(O, O);
+  assert.equal(count("SELECT COUNT(*) AS n FROM memories WHERE drawer_kind = 'agent'"), agentRows, 'forget all leaves the agents’ own notes');
+  assert.match((await drawer.agentNotes('p5-noor')).content, /\S/);
 });

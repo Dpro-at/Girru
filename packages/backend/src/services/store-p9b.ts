@@ -7,13 +7,15 @@
  * (memory/quality/trust.ts); reply recall is routed by intent, re-ranked
  * locally within a 300 ms budget and says "no reliable memory" instead of
  * guessing (memory/quality/recall.ts); use teaches the ranking, verified facts
- * only (memory/quality/usage.ts). Off (the default), nothing changes.
+ * only (memory/quality/usage.ts). On by default; GIRRU_STORE_P9B=0 turns it off, and then nothing changes.
  *
- *   GIRRU_STORE_P9B=1
+ *   GIRRU_STORE_P9B=0   turns it off (on by default; services/memory-switches.ts)
  */
+
+import { memorySwitchOn } from './memory-switches.js';
 
 export const STORE_P9B_ENV = 'GIRRU_STORE_P9B';
 
 export function storeP9bEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return /^(1|true|yes|on)$/i.test(String(env[STORE_P9B_ENV] ?? '').trim());
+  return memorySwitchOn(STORE_P9B_ENV, env);
 }

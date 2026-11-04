@@ -58,7 +58,7 @@ test('data from a newer Girru is refused before anything is written', async () =
   assert.equal(after.prepare("SELECT COUNT(*) AS n FROM users WHERE id = 'mock-user'").get().n, 0, 'the default user was not added: nothing written');
   after.close();
   assert.equal(statSync(newer).mtimeMs, before);
-  delete process.env.GIRRU_STORE_P3;
+  process.env.GIRRU_STORE_P3 = '0';
   warnings.length = 0;
   await open(newer);
   assert.ok(warnings.some((w) => w.includes('999')), 'switch off: only logged');

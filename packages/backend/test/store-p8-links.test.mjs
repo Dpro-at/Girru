@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
+import { clearEnv } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const load = (rel) => import(pathToFileURL(join(backendDir, rel)).href);
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-store-p8-')));
@@ -34,7 +35,7 @@ process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
 const SWITCHES = ['GIRRU_STORE_P2', 'GIRRU_STORE_P3', 'GIRRU_STORE_P4', 'GIRRU_STORE_P5', 'GIRRU_STORE_P6', 'GIRRU_STORE_P7', 'GIRRU_STORE_P8', 'GIRRU_STORE_P9', 'GIRRU_STORE_P9B', 'GIRRU_STORE_PILOT'];
-for (const k of [...SWITCHES, 'CODEX_HOME', 'DEFAULT_MODEL', 'AGENT_EXEC_TOOLS']) delete process.env[k];
+for (const k of [...SWITCHES, 'CODEX_HOME', 'DEFAULT_MODEL', 'AGENT_EXEC_TOOLS']) clearEnv(k);
 // The only "model": a stub local Ollama for the delegated specialist. Anything else is a bug.
 let ollamaAnswer = 'Checked the login form; the bug is in the session cookie.';
 globalThis.fetch = async (url) => {
@@ -107,7 +108,7 @@ await offApp.ready();
 process.env.GIRRU_STORE_P8 = '1';
 const onApp = await buildServer();
 await onApp.ready();
-delete process.env.GIRRU_STORE_P8;
+process.env.GIRRU_STORE_P8 = '0';
 const p8 = async (fn) => {
   const was = process.env.GIRRU_STORE_P8;
   process.env.GIRRU_STORE_P8 = '1';
@@ -230,7 +231,7 @@ test('dpro-memory handoff_write and the contract verb take blockers, files and a
       const vr = db.prepare('SELECT card_id, task_no, blockers FROM agent_handoffs WHERE id = ?').get(v.data.handoffId);
       assert.deepEqual([vr.card_id, vr.task_no, JSON.parse(vr.blockers)], [card.id, 'T-12', ['Needs a reviewer']]);
       await s.end();
-    } finally { delete process.env.GIRRU_STORE_P6; }
+    } finally { process.env.GIRRU_STORE_P6 = '0'; }
     assert.deepEqual(Object.keys(K.mcpContractTools().find((t) => t.name === 'memory_handoff').inputSchema.properties), ['done', 'left', 'next', 'questions', 'request_id', 'blockers', 'files', 'task']);
     assert.deepEqual(bridgeTools(false).find((t) => t.name === 'latest_handoff').inputSchema.properties.task.type, 'string');
   });

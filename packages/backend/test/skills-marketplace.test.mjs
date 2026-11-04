@@ -21,7 +21,7 @@ process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway, test
 delete process.env.AGENT_PLAYER_DB;
 // The legacy marketplace code path, reachable while GIRRU_STORE_P4 is off; with P4 on the routes answer 410
 // retired (test/store-p4-marketplace.test.mjs, test/skills-auth.test.mjs).
-delete process.env.GIRRU_STORE_P4;
+process.env.GIRRU_STORE_P4 = '0';
 
 const quiet = { log: console.log, info: console.info };
 console.log = () => {}; console.info = () => {};

@@ -17,7 +17,7 @@ process.env.DATABASE_PATH = join(dir, '.data', 'agent-player.db');
 process.env.JWT_SECRET = randomBytes(64).toString('hex'); // throwaway, test only
 process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway, test only
 process.env.NODE_ENV = 'test';
-delete process.env.GIRRU_STORE_P4;
+process.env.GIRRU_STORE_P4 = '0';
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 console.log = () => {}; console.info = () => {}; console.warn = () => {};
 
@@ -41,6 +41,6 @@ test('switch on: retired with 410; the skill list still answers', async () => {
   assert.equal(r.json().code, 'retired');
   assert.equal((await get('/api/skills/marketplace/available')).statusCode, 410);
   assert.equal((await get('/api/skills')).statusCode, 200);
-  delete process.env.GIRRU_STORE_P4;
+  process.env.GIRRU_STORE_P4 = '0';
   await app.close();
 });

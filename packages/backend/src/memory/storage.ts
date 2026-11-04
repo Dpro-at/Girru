@@ -20,7 +20,7 @@ import { MIN_RECALL_SCORE, WORKING_LAYER_BOOST, bm25FromCounts, bm25Scores, hybr
 import { onMemorySaved } from './graph/store.js';
 import { NOT_ARCHIVED_SQL } from './scopes/store.js';
 import { NOT_REPLACED_SQL } from './validity.js';
-import { unpackVector, writeVectorStep } from './vectors.js';
+import { packVector, unpackVector, writeVectorStep } from './vectors.js';
 import { storeP3Enabled } from '../services/store-p3.js';
 import { storeP9Enabled } from '../services/store-p9.js';
 import { LIGHT_COLUMNS, entriesFor, entryCosine, type LightRow } from './recall-index.js';
@@ -382,9 +382,11 @@ export class MemoryStorage implements IMemoryStorage {
    * Get all memories for a user (with optional layer filter)
    */
   async getByUser(userId: string, layer?: string): Promise<Memory[]> {
+    // P5: an agent's own notes are read only through memory/agent-drawer.ts (like get and search),
+    // so the memory list, the doctor, consolidation and "forget all" never touch them.
     let query = `
       SELECT * FROM memories
-      WHERE user_id = ?
+      WHERE user_id = ? AND ${NOT_AGENT_NOTES_SQL}
     `;
     const params: any[] = [userId];
 
@@ -597,9 +599,10 @@ export class MemoryStorage implements IMemoryStorage {
    */
   async setEmbedding(userId: string, id: string, content: string, vector: number[], model: string): Promise<boolean> {
     const res = await sql().read(run(
-      // The packed copy (P3) is cleared with it: it would still hold the old model's numbers.
-      'UPDATE memories SET embedding = ?, embedding_model = ?, embedding_dims = ?, embedding_vec = NULL WHERE id = ? AND user_id = ? AND content = ?',
-      JSON.stringify(vector), model, vector.length, id, userId, content,
+      // The packed copy (P3) is written with it (it would still hold the old model's numbers);
+      // the start-up backfill has already run when the memory helper re-embeds. Off: cleared.
+      'UPDATE memories SET embedding = ?, embedding_model = ?, embedding_dims = ?, embedding_vec = ? WHERE id = ? AND user_id = ? AND content = ?',
+      JSON.stringify(vector), model, vector.length, storeP3Enabled() && vector.length ? packVector(vector) : null, id, userId, content,
     ));
     return res.changes === 1;
   }

@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
+import { clearEnv } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const load = (rel) => import(pathToFileURL(join(backendDir, rel)).href);
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-store-p7-clients-')));
@@ -30,7 +31,7 @@ process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway, test
 process.env.NODE_ENV = 'test';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_P6', 'GIRRU_STORE_P7', 'GIRRU_STORE_PILOT']) delete process.env[k];
+for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_P6', 'GIRRU_STORE_P7', 'GIRRU_STORE_PILOT']) clearEnv(k);
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 const quiet = () => {}; console.log = quiet; console.info = quiet; console.warn = quiet;
 
@@ -50,7 +51,7 @@ svc.setBridgeEnv({ home: dir, env: {} });
 const on = async (fn, extra = {}) => {
   const keys = { GIRRU_STORE_P7: '1', ...extra };
   for (const [k, v] of Object.entries(keys)) process.env[k] = v;
-  try { return await fn(); } finally { for (const k of Object.keys(keys)) delete process.env[k]; }
+  try { return await fn(); } finally { for (const k of Object.keys(keys)) clearEnv(k); }
 };
 const SECRETS = /token|secret|password|bearer|api[_-]?key/i;
 const register = async (client) => {

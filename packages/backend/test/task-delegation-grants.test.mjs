@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
+import { switchValueOn } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const dir = mkdtempSync(join(tmpdir(), 'ap-delegation-'));
 mkdirSync(join(dir, '.data'), { recursive: true });
@@ -127,7 +128,7 @@ test('owner-created tasks run with the agent\'s own grants', async () => {
 });
 
 // STORE-MAP-01 P2 (AG1): an agent may read its own guides (guide_read) wherever it runs; it is prompt text on demand, not a grant.
-const P2_ON = /^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P2 ?? '');
+const P2_ON = switchValueOn(process.env.GIRRU_STORE_P2 ?? '');
 const noGuide = (list) => list.filter((n) => n !== 'guide_read');
 test('cron run: delegated task offers only the subset; recurring copy keeps origin and assignee', async () => {
   const parentTask = await quietly(() => orchestrator.createTask({ title: 'p', description: 'p', origin: 'owner' }));

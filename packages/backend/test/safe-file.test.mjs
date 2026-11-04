@@ -36,8 +36,9 @@ const code = (c) => (e) => { assert.ok(e instanceof S.SafeFileError, `expected S
 const tempsIn = (d) => fs.readdirSync(d).filter((x) => x.includes('.girru-') && x.endsWith('.tmp'));
 test.after(() => { S.setSafeFileHooksForTests(null); process.chdir(backendDir); fs.rmSync(base, { recursive: true, force: true }); });
 
-test('switch is off by default and reads the usual values', () => {
-  assert.equal(storeP7Enabled({}), false);
+test('switch is on by default; 0 / false / no / off turn it off', () => {
+  assert.equal(storeP7Enabled({}), true);
+  for (const v of ['false', 'off', 'NO']) assert.equal(storeP7Enabled({ GIRRU_STORE_P7: v }), false);
   for (const v of ['1', 'true', 'on', 'YES']) assert.equal(storeP7Enabled({ GIRRU_STORE_P7: v }), true);
   assert.equal(storeP7Enabled({ GIRRU_STORE_P7: '0' }), false);
 });
@@ -226,7 +227,7 @@ test('switch on: managed files go through the safe writer; off: unchanged', { sk
     S.setSafeFileHooksForTests({ beforeRename: () => { fs.renameSync(join(d, 'docs'), join(d, 'docs-old')); fs.symlinkSync(outside, join(d, 'docs')); } });
     try { assert.throws(() => M.writeSection(d, 'docs/DESIGN.md', 'Changed', marks), (e) => e.code === 'unsafe_path' && e.status === 409); } finally { S.setSafeFileHooksForTests(null); }
     assert.deepEqual(fs.readdirSync(outside), []);
-    delete process.env.GIRRU_STORE_P7;
+    process.env.GIRRU_STORE_P7 = '0';
     fs.rmSync(join(d, 'docs')); fs.renameSync(join(d, 'docs-old'), join(d, 'docs'));
     assert.equal(M.writeSection(d, 'docs/DESIGN.md', 'Off again', marks).action, 'update');
     assert.match(fs.readFileSync(join(d, 'docs', 'DESIGN.md'), 'utf8'), /Off again/);

@@ -59,6 +59,16 @@ export const BACKGROUND_JOBS: ReadonlyArray<{ id: string; off: string }> = [
 export async function initializeBackend(fastify: FastifyInstance): Promise<StartupSummary> {
   const background = backgroundEnabled();
   if (!background) console.log('[Server] AGENT_PLAYER_BACKGROUND=off: no schedulers, timers, watchers or probes\n');
+  {
+    // STORE-MAP-01: the memory switches are on by default; say which ones a variable turned off,
+    // and (OPS9) which are past their removal date, so an old path does not live on unnoticed.
+    const { memorySwitchStates } = await import('../services/memory-switches.js');
+    const states = memorySwitchStates();
+    const off = states.filter((s) => !s.on).map((s) => s.env);
+    if (off.length) console.warn(`[Memory] switches turned off: ${off.join(', ')}`);
+    const expired = states.filter((s) => s.expired).map((s) => s.env);
+    if (expired.length) console.warn(`[Memory] switches past their removal date (remove the off path): ${expired.join(', ')}`);
+  }
 
   // Initialize Database
   const { initializeDatabase, getDatabase } = await import('../db/index.js');
