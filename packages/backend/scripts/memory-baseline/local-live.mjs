@@ -49,13 +49,15 @@ const call = (method, url, payload) => app.inject({ method, url, headers: auth, 
 async function approvePending() {
   const list = (await call('GET', '/api/memory/proposals?status=pending')).json();
   let n = 0;
+  const statuses = [];
   for (const p of list.proposals ?? list.items ?? list) {
-    if (/two reviewers/i.test(JSON.stringify(p))) continue; // the propose step stays waiting for the owner
     const full = (await call('GET', `/api/memory/proposals/${p.id}`)).json();
-    await call('POST', `/api/memory/proposals/${p.id}/approve`, { expectedReviewHash: full.reviewHash ?? full.proposal?.reviewHash });
+    if (/two reviewers/i.test(JSON.stringify(full))) continue; // the propose step stays waiting for the owner
+    const r = await call('POST', `/api/memory/proposals/${p.id}/approve`, { expectedReviewHash: full.reviewHash ?? full.proposal?.reviewHash });
+    statuses.push(r.statusCode);
     n++;
   }
-  return n;
+  return { n, statuses };
 }
 
 const conv = await createConversation(OWNER, { title: 'P2b live', agentId: 'live-main' });

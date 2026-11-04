@@ -10,6 +10,8 @@ import { lmStudioApiUrl, lmStudioModelName } from '../llm/lmstudio.js';
 import { openAiLocalModelName, openAiLocalUrl } from '../llm/openai-local.js';
 import { lmStudioWindow, ollamaWindow, openAiCompatWindow, FALLBACK_WINDOW, type ModelWindow } from '../llm/model-window.js';
 import { fitLocalTurn, planLocalBudget, shrinkStep, toolOutputChars, toolTokens, type FitMessage, type FitResult, type LocalBudget } from '../memory/context/local-budget.js';
+import { estimateTokens } from '../memory/context/budget.js';
+import { capTokens } from './agent-context/budget.js';
 import { CALLS_PER_STEP, OnDemandTools, STEPS_PER_TURN } from '../tools/on-demand.js';
 import type { ToolDef } from '../tools/tool-doors.js';
 import type { ToolResult } from '../tools/types.js';
@@ -73,9 +75,8 @@ export function prepareLocalTurn<M extends FitMessage>(input: {
   run: (name: string, args: Record<string, unknown>) => Promise<ToolResult>;
 }): LocalTurn<M> {
   const budget = planLocalBudget(input.window.tokens);
-  const toolset = new OnDemandTools(input.tools, budget.tier);
-  const parts = [input.systemHead, toolset.index(), NO_INVENTED_MEMORY, input.systemTail].filter((p) => p && p.trim());
-  const fit = fitLocalTurn({ system: parts.join('\n\n---\n\n'), messages: input.messages, tools: toolset.definitions(), budget });
+  const toolset = new OnDemandTools(input.tools, budget.tier, { fitTokens: budget.tools });
+  const fit = fitLocalTurn({ system: fitSystem(input.systemHead, toolset.index(), input.systemTail ?? '', budget.system), messages: input.messages, tools: toolset.definitions(), budget });
   return {
     window: input.window, budget, toolset, system: fit.system, messages: fit.messages, fit,
     toolSet: { definitions: () => toolset.definitions() },
@@ -88,6 +89,28 @@ export function prepareLocalTurn<M extends FitMessage>(input: {
     numCtx: budget.window,
     maxTokens: input.maxTokens && input.maxTokens > 0 ? Math.min(input.maxTokens, budget.replyTokens) : budget.replyTokens,
   };
+}
+
+/**
+ * The system text within its share, losing the least important part first:
+ * the UI spec, then the last lines of the tool index, and only then the
+ * middle of the core text (rules, persona, pinned facts keep their start and end).
+ */
+export function fitSystem(head: string, index: string, tail: string, tokens: number): string {
+  const join = (h: string, i: string, t: string) => [h, i, NO_INVENTED_MEMORY, t].filter((p) => p && p.trim()).join('\n\n---\n\n');
+  let text = join(head, index, tail);
+  if (estimateTokens(text) <= tokens) return text;
+  text = join(head, index, '');
+  if (estimateTokens(text) <= tokens) return text;
+  const lines = index.split('\n');
+  const intro = lines.slice(0, 2);
+  let items = lines.slice(2);
+  while (items.length && estimateTokens(join(head, [...intro, ...items].join('\n'), '')) > tokens) items = items.slice(0, -1);
+  const shortIndex = items.length ? [...intro, ...items].join('\n') : '';
+  text = join(head, shortIndex, '');
+  if (estimateTokens(text) <= tokens) return text;
+  const rest = estimateTokens(join('', shortIndex, '')) + 8;
+  return join(capTokens(head, Math.max(256, tokens - rest)), shortIndex, '');
 }
 
 /** Numbers only, for the log (no prompt text). */

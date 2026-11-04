@@ -55,9 +55,14 @@ export class OnDemandTools {
   private loadedNames: string[] = [];
   private readonly limits: (typeof LIMITS)[ModelTier];
 
-  constructor(all: readonly ToolDef[], readonly tier: ModelTier) {
+  /** Every tool fits the tools share: they are all sent in full, as before (no tool_load, no index). */
+  readonly allInFull: boolean;
+
+  constructor(all: readonly ToolDef[], readonly tier: ModelTier, opts: { fitTokens?: number } = {}) {
     for (const d of all) if (d.name !== TOOL_LOAD && !this.byName.has(d.name)) { this.byName.set(d.name, d); this.order.push(d.name); }
     this.limits = LIMITS[tier];
+    const defs = this.order.map((n) => this.byName.get(n)!);
+    this.allInFull = opts.fitTokens !== undefined && Math.ceil(JSON.stringify(defs).length / 3) <= opts.fitTokens;
   }
 
   /** The memory verbs this agent has (granted), in the fixed order. */
@@ -89,11 +94,13 @@ export class OnDemandTools {
   /** The tools sent in full on this step: tool_load, the memory verbs, then what was loaded (in load order). */
   definitions(): ToolDef[] {
     if (!this.order.length) return [];
+    if (this.allInFull) return this.order.map((n) => this.byName.get(n)!);
     return [this.loadDef(), ...this.always().map((n) => this.full(n)), ...this.loadedNames.map((n) => this.full(n))];
   }
 
   /** The short index for the system text (stable for one agent: it never lists what was loaded). */
   index(): string {
+    if (this.allInFull) return '';
     const rest = this.order.filter((n) => !this.always().includes(n) && !(this.tier === 'small' && ADMIN.test(n)));
     if (!rest.length) return '';
     const lines = rest.map((n) => `- ${n}: ${shortLine(this.byName.get(n)!.description, this.limits.line)}`);
@@ -142,8 +149,11 @@ export class OnDemandTools {
     }
     const def = this.byName.get(name);
     if (!def) {
+      // Not one of this agent's offered tools: the registry answers with its own refusal (exec policy, grants,
+      // channel rules, "not found"); the model also gets similar names it does have.
+      const refused = await run(name, (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {}) as Record<string, unknown>);
       const near = this.similar(name);
-      return text(`Error: there is no tool "${name}".${near.length ? ` Similar tools: ${near.join(', ')}.` : ''} Use a name from the tool index.`, 'unknown_tool');
+      return near.length && refused.error ? { ...refused, content: [...(refused.content ?? []), { type: 'text', text: `Similar tools you have: ${near.join(', ')}.` }] } : refused;
     }
     const checked = checkToolArgs(def.input_schema, rawArgs);
     if (!checked.ok) {

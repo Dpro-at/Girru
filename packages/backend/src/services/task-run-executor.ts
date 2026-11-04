@@ -460,7 +460,7 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
     if (storeP2bEnabled() && driver.provider === 'ollama') {
       const window = await localModelWindow('ollama', driver.model);
       const budget = planLocalBudget(window.tokens);
-      const onDemand = new OnDemandTools(registry.getToolsForAPI(), budget.tier);
+      const onDemand = new OnDemandTools(registry.getToolsForAPI(), budget.tier, { fitTokens: budget.tools });
       taskTools = onDemand;
       const system = capTokens([systemPrompt, onDemand.index(), NO_INVENTED_MEMORY].filter(Boolean).join('\n\n---\n\n'), budget.system);
       driver = ollamaDriver({ ...agent, model: driver.model, ...(isSmall ? { temperature: smallTemp! } : {}), max_tokens: Math.min(driver.maxTokens, budget.replyTokens) }, system, () => onDemand.definitions(), budget.window, toolOutputChars(budget));

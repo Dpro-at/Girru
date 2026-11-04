@@ -1245,6 +1245,9 @@ You: [Present results with \`\`\`spec blocks showing temperature, conditions, et
       temperature,
       maxTokens: p2b ? p2b.maxTokens : maxTokens,
       ...chatThinkFor(thinking, thinkCaps),
+      // STORE-MAP-01 P2b: a small window has no room for long thinking (live: qwen3:4b spent the whole reply on it);
+      // a small model answers without it unless the owner picked a Thinking level (thinkOptional: a model that cannot think is fine).
+      ...(p2b?.budget.tier === 'small' && (!thinking || thinking === 'normal') && !process.env.OLLAMA_THINK ? { think: false, thinkOptional: true } : {}),
       // MEM-CACHE-01: a fixed window and a kept-loaded model let Ollama reuse the prompt prefix.
       // STORE-MAP-01 P2b: the window is the model's own (fixed per model, so the prefix cache still works).
       numCtx: p2b ? p2b.numCtx : contextBudget().numCtx,
@@ -1363,7 +1366,7 @@ async function nonStreamChat(
     const ended = beginLocalReply(model);
     try {
       const result = provider === 'ollama'
-        ? await runOllamaAgentLoop({ ...common, url: OLLAMA_URL, model, messages: msgs, ...ollamaThinkOption(), numCtx: p2b.numCtx, keepAlive: keepAliveValue() })
+        ? await runOllamaAgentLoop({ ...common, url: OLLAMA_URL, model, messages: msgs, ...(p2b.budget.tier === 'small' && !process.env.OLLAMA_THINK ? { think: false, thinkOptional: true } : ollamaThinkOption()), numCtx: p2b.numCtx, keepAlive: keepAliveValue() })
         : await runLmStudioAgentLoop({ ...common, url: provider === 'openai-local' ? openAiLocalUrl() : lmStudioApiUrl(), model: provider === 'openai-local' ? openAiLocalModelName(model) : lmStudioModelName(model), messages: msgs });
       return { message: { role: 'assistant', content: result.answer }, steps: result.steps };
     } catch (err) {

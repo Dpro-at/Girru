@@ -104,7 +104,9 @@ test('tools on demand: the memory verbs and tool_load in full, the rest as a sho
   await t.execute('tool_load', { group: 'board' }, async () => {});
   assert.deepEqual(t.loaded(), ['web_fetch', 'board_move', 'board_comment', 'board_check', 'board_my_cards']);
   // An unknown tool: similar names; a wrong argument: what the tool takes; extras dropped and said.
-  assert.match((await t.execute('board_delete', {}, async () => {})).content[0].text, /no tool "board_delete".*Similar tools: board_move/);
+  const unknown = await t.execute('board_delete', {}, async (name) => ({ content: [{ type: 'text', text: `Error: Tool "${name}" not found` }], error: 'not found' }));
+  assert.match(unknown.content[0].text, /Tool "board_delete" not found/, 'the registry gives its own refusal');
+  assert.match(unknown.content[1].text, /Similar tools you have: board_move/);
   const bad = await t.execute('web_fetch', {}, async () => assert.fail('not run'));
   assert.equal(bad.error, 'invalid_arguments');
   assert.match(bad.content[0].text, /web_fetch was not run: url is required\. Its arguments: \{"type":"object"/);
@@ -169,7 +171,8 @@ test('adaptive budget: a full turn fits an 8k model with room for the reply, the
 });
 
 test('prepareLocalTurn: index and the memory rule in the system text, the reply room, caps per tier', () => {
-  const lt = prepareLocalTurn({ window: { tokens: 8192, reported: 8192, source: 'ollama_show' }, tools: ALL, systemHead: 'Rules.', systemTail: 'UI.', messages: [{ role: 'user', content: 'hi' }], maxTokens: 9000, run: async () => ({ content: [] }) });
+  const BIG = ALL.map((d) => ({ ...d, description: `${d.description} ${'More detail. '.repeat(40)}` })); // more than the tools share
+  const lt = prepareLocalTurn({ window: { tokens: 8192, reported: 8192, source: 'ollama_show' }, tools: BIG, systemHead: 'Rules.', systemTail: 'UI.', messages: [{ role: 'user', content: 'hi' }], maxTokens: 9000, run: async () => ({ content: [] }) });
   assert.match(lt.system, /^Rules\.\n\n---\n\n## Tool index\n/);
   assert.ok(lt.system.includes(NO_INVENTED_MEMORY) && lt.system.endsWith('UI.'));
   assert.deepEqual([lt.numCtx, lt.maxTokens, lt.callCap, lt.maxSteps], [8192, 1638, 2, 12]);
@@ -267,4 +270,14 @@ test('adaptive budget inside a turn: older tool results shrink so every step fit
   assert.match(msgs[3].content, /shortened to keep room/);
   assert.ok(msgs.reduce((t, m) => t + estimateTokens(m.content) + 4, 0) <= 3000);
   assert.equal(toolOutputChars(planLocalBudget(8192)), 2949);
+});
+
+test('tools on demand only when needed: a few tools that fit the share go in full, as before', async () => {
+  const few = new OD.OnDemandTools(ALL.slice(0, 5), 'small', { fitTokens: 10_000 });
+  assert.equal(few.allInFull, true);
+  assert.deepEqual(few.definitions(), ALL.slice(0, 5));
+  assert.equal(few.index(), '');
+  const many = new OD.OnDemandTools(ALL, 'small', { fitTokens: 50 });
+  assert.equal(many.allInFull, false);
+  assert.equal(many.definitions()[0].name, 'tool_load');
 });
