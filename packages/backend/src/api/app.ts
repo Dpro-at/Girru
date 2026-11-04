@@ -39,6 +39,7 @@ import { storeP8Routes } from './routes/store-p8.js'; // STORE-MAP-01 P8: task l
 import { memoryBridgeRoutes } from './routes/memory-bridge.js';
 import { memoryHelperRoutes } from './routes/memory-helper.js'; // MODELS-01-INSTALL: the memory helper's state, 404 while GIRRU_MEMORY_HELPER is off
 import { storeP9bRoutes } from './routes/store-p9b.js'; // STORE-MAP-01 P9b screens: how sure, corrected after use, open questions
+import { docIndexRoutes } from './routes/doc-index.js'; // KNOW-INDEX-01: document memory (status, sources, reindex)
 import { codeOpenRoutes } from './routes/code-open.js'; // CODE-OPEN-01: Open in Code (owner; files in projects or the data folder only)
 import { storeP9Routes } from './routes/store-p9.js'; // STORE-MAP-01 P9: one person's export and forget, health // MEM-BRIDGE-01: one memory for Claude Code, Codex, Gemini CLI, Antigravity
 import { departmentsRoutes } from './routes/departments.js'; // STORE-MAP-01 P3: one list of departments (GIRRU_STORE_P3)
@@ -374,6 +375,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await fastify.register(memoryBridgeRoutes); // MEM-BRIDGE-01: owner API + the dpro-memory MCP server's two loopback routes
   await fastify.register(storeP9Routes); // STORE-MAP-01 P9: 404 while GIRRU_STORE_P9 is off
   await fastify.register(storeP9bRoutes); // STORE-MAP-01 P9b screens: 404 while GIRRU_STORE_P9B is off
+  await fastify.register(docIndexRoutes); // KNOW-INDEX-01: 404 while GIRRU_DOC_INDEX is off
   await fastify.register(codeOpenRoutes); // CODE-OPEN-01
   await fastify.register(memoryHelperRoutes); // MODELS-01-INSTALL: 404 while GIRRU_MEMORY_HELPER is off
   await fastify.register(departmentsRoutes); // STORE-MAP-01 P3: one list of departments, 404 while the switch is off
