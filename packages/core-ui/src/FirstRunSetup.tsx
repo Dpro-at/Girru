@@ -48,15 +48,27 @@ export function useFirstRun(client: SessionClient, owner: boolean): { pending: b
 
 /** Clears what is typed on the shell's line first (Ctrl+U; Esc in PowerShell), so an earlier command is not run with it. */
 const CLEAR_LINE = typeof navigator !== 'undefined' && /win/i.test(navigator.platform) ? '\u001b' : '\u0015';
+/**
+ * The tab a setup command is typed into: one that has not run a setup command yet (and is still open),
+ * else a new tab. A command is never typed into a tab where an earlier one may still run, such as a
+ * sign-in waiting for the browser (Install on the Local model step once went into Claude's prompt).
+ */
+export function setupTab<T extends { key: string }>(tabs: { getSnapshot(): { tabs: readonly T[]; active: string | null }; add(): T | null; select(key: string): void }, used: ReadonlySet<string>): T | null {
+  const free = tabs.getSnapshot().tabs.find(tab => !used.has(tab.key));
+  if (free) { tabs.select(free.key); return free; }
+  return tabs.add();
+}
 /** Runs a fixed command in Girru's terminal when the owner presses Install or Sign in (Mohamed 2026-10-30: no extra Enter); the output stays in view. */
 function useSetupTerminal(client: SessionClient) {
   const t = useMemo(() => ({ tabs: new TerminalTabs(client), prefs: new TerminalPrefsController(client) }), [client]);
   const [shown, setShown] = useState<string | null>(null);
+  const used = useMemo(() => new Set<string>(), [t]);
   useEffect(() => () => t.tabs.dispose(), [t]);
   const type = (label: string, command: string) => {
     setShown(label);
-    const tab = t.tabs.getSnapshot().tabs[0] ?? t.tabs.add();
+    const tab = setupTab(t.tabs, used);
     if (!tab) return;
+    used.add(tab.key);
     // Type once the shell has printed its prompt, so the command is not echoed before it.
     let typed = false;
     const off = tab.terminal.onOutput(() => { if (typed) return; typed = true; setTimeout(() => { off(); tab.terminal.write(CLEAR_LINE + command + '\r'); }, 150); });
