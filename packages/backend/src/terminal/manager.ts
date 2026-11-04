@@ -11,7 +11,9 @@
 
 import { randomUUID } from 'node:crypto';
 import { homedir, platform } from 'node:os';
-import { existsSync } from 'node:fs';
+import { accessSync, chmodSync, constants as fsConstants, existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 
 export const TERMINAL_ENV = 'AGENT_TERMINAL';
 export const MAX_SESSIONS_PER_OWNER = 4;
@@ -107,7 +109,28 @@ export interface TerminalManagerOptions {
   cwd?: string;
 }
 
+/**
+ * node-pty starts shells on macOS through a small `spawn-helper`. npm installs
+ * its prebuilt copy without the run permission, so every shell fails with
+ * "posix_spawnp failed". Give it the permission once, before the first shell.
+ * Best effort: a read-only install keeps whatever it has.
+ */
+export function ensureSpawnHelper(os: NodeJS.Platform = platform(), arch: string = process.arch, resolvePkg: () => string = () => createRequire(import.meta.url).resolve('node-pty/package.json')): string[] {
+  if (os === 'win32') return [];
+  let root: string;
+  try { root = dirname(resolvePkg()); } catch { return []; }
+  const fixed: string[] = [];
+  for (const helper of [join(root, 'prebuilds', `${os}-${arch}`, 'spawn-helper'), join(root, 'build', 'Release', 'spawn-helper')]) {
+    if (!existsSync(helper)) continue;
+    try { accessSync(helper, fsConstants.X_OK); } catch {
+      try { chmodSync(helper, 0o755); fixed.push(helper); } catch { /* read-only install */ }
+    }
+  }
+  return fixed;
+}
+
 async function loadNodePty(): Promise<PtySpawn> {
+  ensureSpawnHelper();
   const mod: any = await import('node-pty');
   const spawn = mod.spawn ?? mod.default?.spawn;
   if (typeof spawn !== 'function') throw new TerminalError('disabled', 'The terminal backend is not available on this server');
