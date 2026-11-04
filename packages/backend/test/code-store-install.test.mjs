@@ -233,13 +233,13 @@ test('the unpacker keeps to its limits', async () => {
   await assert.rejects(unpackTarGz(file, to(4)), /damaged/);
 });
 
-test('the Add is bound to what the owner saw; the Store lists only github.com release archives', async () => {
+test('the Add is bound to what the owner saw; the Store lists only girru-store release archives', async () => {
   forget(); publish('1.5.0');
   const r = await installFromStore('owner-1', 'girru:code', 'f'.repeat(64));
   assert.equal(r.ok, false); assert.equal(r.code, 'changed');
   const ok = { version: '1.0.0', protocolVersion: 1, archives: { 'darwin-arm64': { url: `${URL_BASE}/v1/a.tar.gz`, sha256: 'a'.repeat(64), size: 10 } } };
   assert.equal(parseRuntime(ok).version, '1.0.0');
-  for (const url of ['http://github.com/a/b/releases/download/v1/a.tar.gz', 'https://example.com/a/b/releases/download/v1/a.tar.gz', 'https://github.com/a/b/raw/main/a.tar.gz', 'https://github.com/a/b/releases/download/v1/a.zip', 'https://user:pw@github.com/a/b/releases/download/v1/a.tar.gz', `${URL_BASE}/v1/a.tar.gz?x=1`]) {
+  for (const url of ['https://github.com/someone/else/releases/download/v1/a.tar.gz', 'http://github.com/a/b/releases/download/v1/a.tar.gz', 'https://example.com/a/b/releases/download/v1/a.tar.gz', 'https://github.com/a/b/raw/main/a.tar.gz', 'https://github.com/a/b/releases/download/v1/a.zip', 'https://user:pw@github.com/a/b/releases/download/v1/a.tar.gz', `${URL_BASE}/v1/a.tar.gz?x=1`]) {
     assert.throws(() => parseRuntime({ ...ok, archives: { 'darwin-arm64': { ...ok.archives['darwin-arm64'], url } } }), /store runtime/, url);
   }
   assert.throws(() => parseRuntime({ ...ok, archives: { 'beos-ppc': ok.archives['darwin-arm64'] } }), /store runtime/);
