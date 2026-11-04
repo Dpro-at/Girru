@@ -227,3 +227,19 @@ test('the Memory window scope lists never show an agent’s own notes (they have
   assert.doesNotMatch(JSON.stringify(tree), /"agent:p5-noor"/);
   process.env.GIRRU_STORE_P5 = '0';
 });
+
+test('an older 0755 agents folder is tightened to 0700 and its notes are imported; a folder others can write to is refused', { skip: process.platform === 'win32' }, async () => {
+  const { chmodSync, statSync, mkdirSync: mk, writeFileSync: wf } = await import('node:fs');
+  process.env.GIRRU_STORE_P5 = '1';
+  db.prepare(`INSERT INTO agents_config (id, name, provider, model, system_prompt) VALUES ('p5-old', 'Old', 'ollama', 'm', 'x')`).run();
+  const agents = join(dir, '.data', 'agents');
+  mk(join(agents, 'p5-old'), { recursive: true, mode: 0o700 });
+  wf(join(agents, 'p5-old', 'MEMORY.md'), 'Kept from an older install.', { mode: 0o600 });
+  chmodSync(agents, 0o775);
+  assert.equal(await drawer.importAgentMemory('p5-old'), false, 'group-writable: refused');
+  assert.equal(statSync(agents).mode & 0o777, 0o775, 'and left as it was');
+  chmodSync(agents, 0o755);
+  assert.equal(await drawer.importAgentMemory('p5-old'), true);
+  assert.equal(statSync(agents).mode & 0o777, 0o700);
+  assert.match((await drawer.agentNotes('p5-old')).content, /Kept from an older install/);
+});

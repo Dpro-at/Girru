@@ -118,7 +118,11 @@ export interface MemorySnapshot {content:string;hash:string|null;truncated:boole
 const digest=(content:Buffer|string)=>createHash('sha256').update(content).digest('hex');
 function memoryDir(agentId:string){if(typeof agentId!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(agentId)||agentId.includes('..'))throw Error('memory_unavailable');return path.join(AGENTS_DIR,agentId);}
 async function checkDirectory(dir:string,create=false):Promise<boolean>{
- try{const info=await fs.lstat(dir);if(!info.isDirectory()||info.isSymbolicLink()||info.uid!==process.getuid?.()||(info.mode&0o077)!==0)throw Error('memory_unavailable');return true;}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw Error('memory_unavailable');if(!create)return false;await fs.mkdir(dir,{mode:0o700});return checkDirectory(dir);}
+ try{let info=await fs.lstat(dir);
+  // Older installs made the agents folder 0755. Ours, a real folder and writable by no one else:
+  // tighten it to 0700 (a forward repair). A folder others could write to is still refused.
+  if(process.platform!=='win32'&&info.isDirectory()&&!info.isSymbolicLink()&&info.uid===process.getuid?.()&&(info.mode&0o022)===0&&(info.mode&0o077)!==0){await fs.chmod(dir,info.mode&0o700);info=await fs.lstat(dir);}
+  if(!info.isDirectory()||info.isSymbolicLink()||info.uid!==process.getuid?.()||(info.mode&0o077)!==0)throw Error('memory_unavailable');return true;}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw Error('memory_unavailable');if(!create)return false;await fs.mkdir(dir,{mode:0o700});return checkDirectory(dir);}
 }
 async function checkedMemoryDir(agentId:string,create=false):Promise<string|null>{
  const dir=memoryDir(agentId);
