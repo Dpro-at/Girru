@@ -66,6 +66,13 @@ test('remote owners are read from the URL forms git uses', () => {
   assert.deepEqual(T.remoteOwner('https://github.com/9mtm/nabu-code.git'), { host: 'github.com', owner: '9mtm' });
   assert.deepEqual(T.remoteOwner('git@github.com:someone/repo.git'), { host: 'github.com', owner: 'someone' });
   assert.deepEqual(T.remoteOwner('ssh://git@gitlab.com/Org/sub.git'), { host: 'gitlab.com', owner: 'Org' });
+  assert.deepEqual(T.remoteOwner('https://gitlab.com/attacker/9mtm/repo.git'), { host: 'gitlab.com', owner: 'attacker/9mtm' });
+  assert.deepEqual(T.remoteOwner('git@gitlab.com:group/sub/repo.git'), { host: 'gitlab.com', owner: 'group/sub' });
+  // A same-named account on another host, or nested under someone else's group, is not the owner's.
+  const own = [{ name: '9mtm', host: 'github.com' }];
+  assert.equal(T.isOwnOwner(T.remoteOwner('https://evil.example/9mtm/x.git'), own), false);
+  assert.equal(T.isOwnOwner(T.remoteOwner('https://gitlab.com/attacker/9mtm/repo.git'), own), false);
+  assert.equal(T.isOwnOwner(T.remoteOwner('https://github.com/9MTM/x.git'), own), true);
   assert.equal(T.remoteOwner('/Users/me/repos/x'), null);
   assert.equal(T.remoteOwner('file:///tmp/x'), null);
   assert.deepEqual(T.parseGitRemotes('[remote "up"]\n url = a\n[remote "origin"]\n url = b\n').map((r) => r.name), ['up', 'origin']);
