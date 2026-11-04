@@ -39,6 +39,37 @@ export function previewText(text: string): string {
   return redactImportText(stable.slice(-PREVIEW_CHARS)).text;
 }
 
+/** CHAT-LIVE-01: steps one live preview lists (the newest ones). */
+export const PREVIEW_STEPS = 12;
+const PLAN_TOOL = 'plan_steps';
+const LIVE_HIDDEN = new Set([PLAN_TOOL]);
+type LiveStep = { name: string; input: string; done: boolean; failed: boolean; ms?: number };
+type LivePlanStep = { title: string; status: string; parent?: number };
+/**
+ * CHAT-LIVE-01 (LW1/LW3): what the reply is doing, for the live preview only:
+ * its tool steps (inputs redacted and short) and its newest plan. Never
+ * stored and never numbered; the checked events replace it at the end.
+ */
+export function liveWork(parts: readonly TurnPart[]): { steps?: LiveStep[]; plan?: LivePlanStep[] } {
+  const calls = parts.flatMap((p) => (p.kind === 'tools' ? p.calls : []));
+  const steps = calls.filter((c) => !LIVE_HIDDEN.has(c.name)).slice(-PREVIEW_STEPS).map((c) => ({
+    name: c.name.slice(0, 64), input: redactImportText(String(c.input ?? '').slice(0, 300)).text, done: c.output !== undefined, failed: c.isError === true, ...(Number.isFinite(c.ms) ? { ms: c.ms } : {}),
+  }));
+  let plan: LivePlanStep[] | undefined;
+  for (const c of calls) {
+    if (c.name !== PLAN_TOOL || c.isError) continue;
+    let raw: unknown; try { raw = JSON.parse(String(c.input ?? '')); } catch { continue; }
+    const list = (raw as { steps?: unknown })?.steps;
+    if (!Array.isArray(list) || !list.length) continue;
+    plan = list.slice(0, 20).filter((x) => x && typeof x === 'object' && typeof (x as { title?: unknown }).title === 'string').map((x: any) => ({
+      title: redactImportText(String(x.title).replace(/\s+/g, ' ').trim().slice(0, 120)).text,
+      status: ['pending', 'active', 'done', 'skipped'].includes(x.status) ? x.status : 'pending',
+      ...(Number.isInteger(x.parent) && x.parent > 0 ? { parent: x.parent } : {}),
+    }));
+  }
+  return { ...(steps.length ? { steps } : {}), ...(plan?.length ? { plan } : {}) };
+}
+
 export type RunFrame = Record<string, unknown> & { type: string };
 export interface RunEvent { seq: number; frame: RunFrame }
 export type RunStatus = 'running' | TurnStatus;
@@ -168,6 +199,8 @@ export class ChatRun {
 
   /** The newest text part, shown live while the run works (CHAT-BUILD-01 stage 5). */
   private lastPreview = 0;
+  /** CHAT-LIVE-01: the newest preview, sent at once to a reader that (re)attaches while the run works. */
+  latestPreview?: Record<string, unknown>;
   private previewTimer?: ReturnType<typeof setTimeout>;
   private previewSoon() {
     if (this.previewTimer || this.published) return;
@@ -178,7 +211,8 @@ export class ChatRun {
       this.lastPreview = this.clock();
       const last = this.parts.at(-1);
       const tool = [...this.parts].reverse().find((p): p is Extract<TurnPart, { kind: 'tools' }> => p.kind === 'tools');
-      this.emitter.emit('preview', { type: 'preview', content: last?.kind === 'text' ? previewText(last.text) : '', ...(tool && last?.kind === 'tools' ? { tool: tool.calls.at(-1)?.name ?? '' } : {}) });
+      this.latestPreview = { type: 'preview', content: last?.kind === 'text' ? previewText(last.text) : '', ...(tool && last?.kind === 'tools' ? { tool: tool.calls.at(-1)?.name ?? '' } : {}), ...liveWork(this.parts) };
+      this.emitter.emit('preview', this.latestPreview);
     }, wait);
     this.previewTimer.unref?.();
   }

@@ -752,7 +752,8 @@ export class ConversationsController {
     void this.send(item.text);
   }
 
-  private async refreshList() {
+  /** CHAT-ORCH-01: the list again (sub-session states); public for the sessions card's quiet refresh. */
+  async refreshList() {
     try {
       const r = await this.call('GET', '/api/chat/conversations');
       if (this.live() && r.status === 200 && record(r.body) && Array.isArray(r.body.conversations)) this.publish({ conversations: r.body.conversations as Conversation[] });

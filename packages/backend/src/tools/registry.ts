@@ -18,10 +18,10 @@ import { NO_MCP_AGENTS } from '../mcp-client/config.js';
 import { hasSecretRef, resolveSecretRefs, scrubSecretValues, vaultToolResult } from '../services/chat-secrets.js';
 
 /** Tools whose input is stored as text by Girru: key-store references are never resolved for them (CHAT-SECRETS-01). */
-const KEEPS_TEXT = /^(?:memory_|board_|task_|handoff_|rule_suggest$|plan_steps$|create_reminder$)/;
+const KEEPS_TEXT = /^(?:memory_|board_|task_|handoff_|session_|rule_suggest$|plan_steps$|ask_choice$|create_reminder$)/;
 
 /** Self-only tools need no grant; an extension or MCP tool can never claim it. */
-const SELF_ONLY_TOOLS = new Set(['plan_steps', 'board_suggest_card', 'rule_suggest', 'handoff_save', 'handoff_read', 'guide_read', 'run_note']);
+const SELF_ONLY_TOOLS = new Set(['plan_steps', 'ask_choice', 'session_start', 'session_list', 'session_read', 'session_message', 'session_stop', 'board_suggest_card', 'rule_suggest', 'handoff_save', 'handoff_read', 'guide_read', 'run_note']);
 const isSelfOnly = (tool: Tool) => tool.selfOnly === true && SELF_ONLY_TOOLS.has(tool.name) && !tool.extensionId && !(tool as { mcp?: unknown }).mcp && !tool.execClass;
 /**
  * CORE-MEM-HANDOFF: the agent's own handoff note also lives in board task runs
@@ -49,7 +49,7 @@ export function injectedOrder(result: { content?: { type: string; text?: string 
 }
 
 /** Tools that only read, or keep text in Girru's own owner-reviewed stores, never ask because of the chat mode. */
-const MODE_FREE = new Set(['read', 'search', 'list', 'plan_steps', 'board_suggest_card', 'rule_suggest', 'memory_save', 'memory_search', 'memory_recall', 'team_list', 'team_results', 'web_fetch', 'web_search']);
+const MODE_FREE = new Set(['read', 'search', 'list', 'plan_steps', 'ask_choice', 'session_list', 'session_read', 'board_suggest_card', 'rule_suggest', 'memory_save', 'memory_search', 'memory_recall', 'team_list', 'team_results', 'web_fetch', 'web_search']);
 /** Girru's own file tools (in the agent's workspace). An extension or MCP tool never counts as one. */
 const isFileEdit = (tool: { name: string; extensionId?: string; mcp?: unknown }) => !tool.extensionId && !tool.mcp && (tool.name === 'write' || tool.name === 'edit');
 /** CHAT-BUILD-01 stage 3: does this tool change something (files, messages, settings, money, programs)? */

@@ -10,7 +10,7 @@ import { FileSandboxError, MAX_WRITE_BYTES, sandboxedWriteFile, writeRootFor } f
 
 export const writeTool: Tool = {
   name: 'write',
-  description: `Write a text file inside your workspace folder (paths are relative to it; parent folders are created; max ${MAX_WRITE_BYTES} bytes). Files outside the workspace cannot be written.`,
+  description: `Save a text file in your own private drafts folder (paths are relative to it; parent folders are created; max ${MAX_WRITE_BYTES} bytes). It never changes a project's files: in a project chat, change project files with the edit tool when you have it; otherwise say the change is not made.`,
   input_schema: {
     type: 'object',
     properties: {
@@ -43,9 +43,14 @@ export const writeTool: Tool = {
     try {
       const root = writeRootFor(context);
       const r = sandboxedWriteFile(root, filePath, content);
+      // CHAT-LIVE-01: in a project chat the read root is the project; say plainly that this is not the project file.
+      const project = !!context?.fileReadRoot;
+      const text = project
+        ? `Saved a private draft "${r.rel}" (${r.size} bytes) in your own drafts folder. The project's files are NOT changed; the project file "${r.rel}", if any, still has its old text. Do not tell the owner the project was changed.`
+        : `✅ File written: ${r.rel} (${r.size} bytes)`;
       return {
-        content: [{ type: 'text', text: `✅ File written: ${r.rel} (${r.size} bytes)` }],
-        details: { path: r.rel, size: r.size, modified: r.modified },
+        content: [{ type: 'text', text }],
+        details: { path: r.rel, size: r.size, modified: r.modified, ...(project ? { privateDraft: true } : {}) },
       };
     } catch (error: any) {
       const message = error instanceof FileSandboxError ? error.message : 'Failed to write file';

@@ -925,6 +925,8 @@ export async function chatConversationRoutes(fastify: FastifyInstance) {
     const onEvent = (e: RunEvent) => send(e);
     // CHAT-BUILD-01 stage 5: the live preview (no number; never stored) while the reply is written.
     const onPreview = (p: Record<string, unknown>) => { if (!raw.writableEnded) raw.write(`data: ${JSON.stringify(p)}\n\n`); };
+    // CHAT-LIVE-01: a reader that (re)attaches sees the work so far at once, not only at the next change.
+    if (run.latestPreview) onPreview(run.latestPreview);
     const onEnd = () => { cleanup(); raw.end(); };
     const cleanup = () => { run.emitter.off('event', onEvent); run.emitter.off('preview', onPreview); run.emitter.off('end', onEnd); };
     run.emitter.on('event', onEvent);

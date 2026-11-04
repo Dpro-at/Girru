@@ -8,8 +8,8 @@ import {editReview} from './edit-review';
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { SessionClient } from './session';
-import type { Part, ToolCall, Turn } from './turns';
-import { duration, toolView, turnPlan } from './turns';
+import type { ChoiceAsk, Part, PlanStep, StartedSession, ToolCall, Turn } from './turns';
+import { duration, planOf, toolView } from './turns';
 import { UiIcon } from './ui-icons';
 import { ContextMenu, useMenu } from './desktop-ui';
 import type { MenuItem } from './desktop-ui';
@@ -29,6 +29,10 @@ export type Moments = {
   changeCards?: Map<string, { undone: boolean; redo: () => void }>;
   /** CH6/CH10 team moments: put text in the box (never sent by itself), open an agent's page, open what an agent may do for one action. */
   onDraft?: (text: string) => void; onOpenAgent?: (agentId: string) => void; onOpenRules?: (agentId: string, category: string) => void;
+  /** CHAT-LIVE-01 (LW2): send the owner's answer to a choice as the next message. */
+  onAnswer?: (text: string) => void;
+  /** CHAT-ORCH-01 (LW4): open a chat (a sub-session), and a chat's live state from the sidebar list. */
+  onOpenChat?: (id: string) => void; chatState?: (id: string) => { running: boolean; waiting: number; title?: string } | undefined;
 };
 export const MomentsContext = createContext<Moments>({});
 
@@ -328,18 +332,27 @@ export function TitleFaces({ names, onOpen }: { names: readonly string[]; onOpen
 /** CH2: the chat's task list above the box (the latest plan), folded to one line. */
 export function TaskList({ turns, who, waits = 0 }: { turns: readonly Turn[]; who?: string; waits?: number }): ReactNode {
   const [open, setOpen] = useState(false);
-  const last = [...turns].reverse().find(t => t.role === 'assistant' && turnPlan(t.parts));
-  const steps = last ? turnPlan(last.parts) : null;
-  if (!steps?.length) return null;
-  const done = steps.filter(s => s.status === 'done').length;
-  const working = last!.status === 'running' ? steps.find(s => s.status === 'active') ?? steps.find(s => s.status === 'pending') : undefined;
-  return <section className="task-list" aria-label="Tasks">
-    <button type="button" className="task-head" aria-expanded={open} onClick={() => setOpen(v => !v)}>
+  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.altKey && (e.metaKey || e.ctrlKey) && e.code === 'KeyT') { e.preventDefault(); setOpen(v => !v); } }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, []);
+  // CHAT-LIVE-01 (LW3): one plan per task. The newest reply's plan (live while it runs); an older plan stays only while it has steps left.
+  const replies = turns.filter(t => t.role === 'assistant');
+  const lastReply = replies.at(-1);
+  const last = [...replies].reverse().find(t => planOf(t));
+  const steps = last ? planOf(last) : null;
+  if (!steps?.length || !last) return null;
+  const finished = steps.every(s => s.status === 'done' || s.status === 'skipped');
+  if (last !== lastReply && finished) return null;
+  const main = steps.filter(s => !s.parent);
+  const done = main.filter(s => s.status === 'done').length;
+  const running = last.status === 'running';
+  const working = running ? steps.find(s => s.status === 'active' && s.parent) ?? steps.find(s => s.status === 'active') ?? steps.find(s => s.status === 'pending') : undefined;
+  return <section className="task-list" aria-label="Tasks" data-live={running || undefined}>
+    <button type="button" className="task-head" aria-expanded={open} onClick={() => setOpen(v => !v)} title="Tasks (⌥⌘T)">
       <span className="chat-project-chevron" data-open={open || undefined}><UiIcon name="chevron" size={11}/></span>
-      <b>Tasks</b><span>{done} of {steps.length} done</span>{working && <span className="task-now">· {working.title}</span>}
+      <b>Tasks</b><span>{done} of {main.length} done</span>{working && <span className="task-now">· {working.title}</span>}
       {/* CH1: approvals of this chat that wait for the owner, in amber. */}
-      {waits > 0 && <span className="task-waits">· {waits} {waits === 1 ? 'waits' : 'wait'} for you</span>}</button>
-    {open && <ol>{steps.map((s, i) => <li key={i} data-state={s.status}><span className="task-dot" aria-hidden="true">{s.status === 'done' ? <UiIcon name="check" size={10}/> : null}</span><span dir="auto">{s.title}</span>{who && (s === working || s.status === 'done') && <small>{who}</small>}</li>)}</ol>}
+      {waits > 0 && <span className="task-waits">· {waits} {waits === 1 ? 'waits' : 'wait'} for you</span>}
+      {running && <span className="task-bar" aria-hidden="true"><span style={{ width: `${main.length ? Math.round(done / main.length * 100) : 0}%` }}/></span>}</button>
+    {open && <ol>{steps.map((s: PlanStep, i) => <li key={i} data-state={s.status} data-sub={s.parent ? true : undefined}><span className="task-dot" aria-hidden="true">{s.status === 'done' ? <UiIcon name="check" size={10}/> : null}</span><span dir="auto">{s.title}</span>{who && !s.parent && (s === working || s.status === 'done') && <small>{who}</small>}</li>)}</ol>}
   </section>;
 }
 
@@ -353,4 +366,50 @@ export function notifyDone(title: string, body: string) {
     if (Notification.permission === 'granted') new Notification(title, { body, silent: false });
     else if (Notification.permission === 'default') void Notification.requestPermission();
   } catch { /* notifications are optional */ }
+}
+
+/** CHAT-LIVE-01 (LW2): the agent's question with one button per answer; 1–5 pick; after a click it is one line. */
+export function ChoiceCard({ choice, open, answered }: { choice: ChoiceAsk; open: boolean; answered?: string }) {
+  const { onAnswer, onDraft } = useContext(MomentsContext);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [own, setOwn] = useState('');
+  const [sent, setSent] = useState<string | undefined>(answered);
+  const done = sent ?? answered;
+  const send = (text: string) => { const t = text.trim(); if (!t || !onAnswer) return; setSent(t); onAnswer(t); };
+  const order = choice.suggested ? [choice.suggested - 1, ...choice.options.map((_, i) => i).filter(i => i !== choice.suggested! - 1)] : choice.options.map((_, i) => i);
+  if (done || !open) return <p className="moment-line choice-done"><UiIcon name={done ? 'check' : 'info'} size={12}/>{done ? <>You chose <b dir="auto">{done}</b></> : <span dir="auto">{choice.question}</span>}
+    {done && open && onDraft && <button type="button" className="link-button" onClick={() => onDraft(`Change my answer to "${choice.question}": `)}>Change</button>}</p>;
+  return <section className="moment-card choice-card" data-tone="needs" aria-label="A choice for you"
+    onKeyDown={e => { const n = Number(e.key); if (!choice.multiple && n >= 1 && n <= order.length && !(e.target instanceof HTMLInputElement)) { e.preventDefault(); send(choice.options[order[n - 1]]); } }}>
+    <p className="choice-who"><UiIcon name="info" size={13}/>Needs your choice</p>
+    <strong className="choice-question" dir="auto">{choice.question}</strong>
+    {choice.multiple
+      ? <div className="choice-multi" role="group" aria-label="Answers">{choice.options.map(o => <label key={o}><input type="checkbox" checked={picked.includes(o)} onChange={e => setPicked(v => e.target.checked ? [...v, o] : v.filter(x => x !== o))}/><span dir="auto">{o}</span></label>)}
+        <span className="moment-actions"><button type="button" className="moment-main" disabled={!picked.length || !onAnswer} onClick={() => send(picked.join(', '))}>Continue with {picked.length || 'none'}</button></span></div>
+      : <div className="moment-choices" role="group" aria-label="Answers">{order.map((i, k) => <button key={choice.options[i]} type="button" className="moment-choice" data-suggested={choice.suggested === i + 1 || undefined} title={`${k + 1}`} disabled={!onAnswer} onClick={() => send(choice.options[i])}>
+        <span dir="auto">{choice.options[i]}</span>{choice.suggested === i + 1 && <small>· suggested</small>}</button>)}</div>}
+    <form className="choice-own" onSubmit={e => { e.preventDefault(); send(own); }}><UiIcon name="pencil" size={12}/><input value={own} onChange={e => setOwn(e.target.value)} placeholder="Or say it your way…" aria-label="Or say it your way" dir="auto"/></form>
+  </section>;
+}
+
+/** CHAT-ORCH-01 (LW4): the sessions a reply started, each with its live state and Open. */
+export function SessionsCard({ sessions }: { sessions: readonly StartedSession[] }) {
+  const { onOpenChat, chatState, agentName } = useContext(MomentsContext);
+  if (!sessions.length) return null;
+  const rows = sessions.map(x => ({ ...x, st: chatState?.(x.id) }));
+  const working = rows.filter(r => r.st?.running && !r.st.waiting).length, needs = rows.filter(r => (r.st?.waiting ?? 0) > 0).length;
+  return <section className="moment-card sessions-card" aria-label="Sessions">
+    <p className="sessions-head"><UiIcon name="branch" size={13}/>Started {rows.length} {rows.length === 1 ? 'session' : 'sessions'}{working ? ` · ${working} working` : ''}{needs ? ` · ${needs} needs you` : ''}</p>
+    {rows.map(r => <div key={r.id} className="session-row" data-state={r.st?.waiting ? 'needs' : r.st?.running ? 'working' : 'idle'}>
+      <span className="avatar" aria-hidden="true">{(agentName?.(r.agentId) ?? '?').slice(0, 1).toUpperCase()}</span>
+      <span className="session-text"><b dir="auto">{r.st?.title || r.title}</b><small>{agentName?.(r.agentId) ?? r.agentId} · {r.st?.waiting ? 'Needs you' : r.st?.running ? 'Working' : r.st ? 'Done' : 'Not in the list'}</small></span>
+      {onOpenChat && <button type="button" className="ghost-action" title="Open the session" onClick={() => onOpenChat(r.id)}>Open</button>}
+    </div>)}
+  </section>;
+}
+
+/** CHAT-ORCH-01 (LW4 §6): inside a sub-session, who started it and where it reports. */
+export function StartedByLine({ parentId, parentTitle }: { parentId: string; parentTitle?: string }) {
+  const { onOpenChat } = useContext(MomentsContext);
+  return <p className="moment-line started-by"><UiIcon name="branch" size={12}/>Started from {onOpenChat ? <button type="button" className="link-button" onClick={() => onOpenChat(parentId)}>{parentTitle || 'its parent chat'}</button> : parentTitle || 'its parent chat'} · reports back there</p>;
 }

@@ -7,7 +7,7 @@ import { Meetings } from './Meetings';
 import type { MeetingRecord } from './meetings-contract.js';
 import { ChatDetails, DetailsRail } from './ChatDetails';
 import type { PanelPart } from './ChatDetails';
-import { ApprovalCard, ChangesLine, DelegationCard, MomentsContext, NoticeCard, SteerLine, TaskList, TitleFaces, chatPeople, redoTarget } from './ChatMoments';
+import { ApprovalCard, ChangesLine, ChoiceCard, DelegationCard, MomentsContext, NoticeCard, SessionsCard, StartedByLine, SteerLine, TaskList, TitleFaces, chatPeople, redoTarget } from './ChatMoments';
 import { ScheduleSheet } from './ScheduleSheet';
 import { KeysSheet, ModeButton, ModelButton, PlusButton, ProjectChip, ProjectSheet, SlashList, WhoButton, slashMatches } from './ChatComposerControls';
 import { modelDisplayName } from './model-names';
@@ -33,8 +33,8 @@ import { Markdown } from './markdown';
 import { UiIcon } from './ui-icons';
 import { ClaudeCodeIcon, CodexIcon, GeminiIcon } from './brand-icons';
 import type { UiIconName } from './ui-icons';
-import { approxTokens, duration, groupLabel, splitWork, toolCount, toolView, turnOutputs, turnPlan, turnSuggestions, withoutPlan, workGroups, workSegments, type WorkItem } from './turns';
-import type { CardSuggestion, PlanStep } from './turns';
+import { approxTokens, duration, groupLabel, liveCalls, livePhase, planOf, splitWork, toolCount, toolView, turnChoice, turnOutputs, turnSessions, turnSuggestions, withoutPlan, workGroups, workSegments, type WorkItem } from './turns';
+import type { CardSuggestion } from './turns';
 import { ChatCardsController, activityLine, cardDraftFrom } from './chat-board';
 import type { ChatCard, ChatProgress } from './chat-board';
 import type { Priority } from './board';
@@ -242,6 +242,12 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
   const agentName = s.agents.find(a => a.id === (meetingMeta ? s.replyAgent || s.agentId : s.agentId))?.name;
   const who = whoAnswers(s.model, s.models);
   const activeConv = s.conversations.find(c => c.id === s.activeId);
+  // CHAT-ORCH-01 (LW4): while a sub-session of this chat works, the list (their states) refreshes every 5 s; nothing when none works.
+  const sessionsWorking = !!s.activeId && s.conversations.some(c => c.parentId === s.activeId && (c as { running?: boolean; waiting?: number }).running);
+  // A session just started and not yet in the list also refreshes it (once it shows, sessionsWorking takes over).
+  const lastReply = [...s.turns].reverse().find(t => t.role === 'assistant');
+  const startedNow = !!lastReply && turnSessions(lastReply.parts).some(x => !s.conversations.some(c => c.id === x.id));
+  useEffect(() => { if (!sessionsWorking && !startedNow) return; const t = setInterval(() => void controller.refreshList(), 5000); return () => clearInterval(t); }, [sessionsWorking, startedNow, controller]);
   const convAgentId = activeConv?.agentId ?? null;
   const nameOf = (id: string | null | undefined) => (id ? s.agents.find(a => a.id === id)?.name : s.agents.find(a => a.primary)?.name) ?? 'Main agent';
   const departmentOf = (id?: string | null) => (id ? s.agents.find(a => a.id === id) : s.agents.find(a => a.primary))?.department;
@@ -427,7 +433,9 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
   }, [client, s.activeId, s.runId]);
   const moments = { client, conversationId: s.activeId, onOpenApprovals, steps, changeCards, nativeCode:embeddedCode,
     // CH6/CH10 team moments: Hand it again adds to the box (never sends), Set a model opens the agent, Always allow opens What agents may do.
-    onOpenAgent, onOpenRules, onDraft: (text: string) => { const d = controller.getSnapshot().draft.trim(); controller.edit(d ? `${d}\n\n${text}` : text); },
+    onOpenAgent, onOpenRules, onAnswer: (text: string) => { void controller.send(text); },
+    onOpenChat: (id: string) => { void controller.open(id); },
+    chatState: (id: string) => { const x = s.conversations.find(c => c.id === id) as (typeof s.conversations[number] & { running?: boolean; waiting?: number }) | undefined; return x ? { running: x.running === true, waiting: x.waiting ?? 0, title: x.title ?? undefined } : undefined; }, onDraft: (text: string) => { const d = controller.getSnapshot().draft.trim(); controller.edit(d ? `${d}\n\n${text}` : text); },
     agentAbout: (id?: string) => s.agents.find(a => a.id === id)?.about, subAgentOf: (id?: string) => s.agents.find(a => a.id === id)?.subAgentOf, onStop: () => void controller.stopAll(), agentName: (id?: string) => (id ? s.agents.find(a => a.id === id)?.name ?? id : nameOf(convAgentId)),
     onSwitchAuto: () => controller.selectModel('auto'), onReviewChanges: () => setPane('changes'), onChanged: () => void controller.refreshGit(), onDecided: () => void controller.pickUpContinuation(),
     onStartFresh: (summary: string) => { const title = activeConv?.title ?? 'the last chat'; controller.newChat(); controller.edit(`Continue from “${title}”. ${summary}`.slice(0, 4000)); } };
@@ -474,6 +482,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
             <button type="button" className="ghost-action" onClick={onSetUpModel}>Local model…</button></span>
         </div>}
       </div> : <div className="chat-column" role="log" aria-live="polite" aria-relevant="additions">
+        {activeConv?.parentId && <StartedByLine parentId={activeConv.parentId} parentTitle={s.conversations.find(c => c.id === activeConv.parentId)?.title ?? undefined}/>}
         {s.hasEarlier && <button type="button" className="ghost-action chat-earlier" disabled={s.loadingEarlier} onClick={() => void controller.loadEarlier()}>{s.loadingEarlier ? 'Loading earlier messages…' : 'Show earlier messages'}</button>}
         {s.turns.map((t, i) => t.role === 'user'
           ? <UserMessage key={t.key} turn={t} highlight={flash === t.key} onKey={client ? setKeysOpen : undefined} onEdit={running ? undefined : text => { controller.edit(text); input.current?.focus(); }} onRemember={canRemember && messageRef(t) ? () => openRemember(t, t.content) : undefined}/>
@@ -773,9 +782,14 @@ function SecretChip({ type, id, onOpen }: { type: string; id: string; onOpen?: (
 /** One assistant turn: live parts in order while running; work folded once finished. */
 function AssistantTurn({ turn, last, onRetry, writer, writerDepartment, writerRole, recovery, onSuggest, onRemember, proposals, highlight, recall, onWrongPlace }: { turn: Turn; last: boolean; onRetry?: () => void; writer?: string; writerDepartment?: string | null; writerRole?: string; recovery?: ReactNode; onSuggest?: (s: CardSuggestion) => void; onRemember?: (text: string) => void; proposals?: ReactNode; highlight?: boolean; recall?: ChatRecallController | null; onWrongPlace?: (m: { id: string; text: string; drawerId: string }) => void }) {
   const live = turn.status === 'running';
-  const plan = turnPlan(turn.parts);
+  const plan = planOf(turn);
   const suggestions = turnSuggestions(turn.parts);
-  const parts = plan || suggestions.length ? withoutPlan(turn.parts) : turn.parts;
+  const choice = turnChoice(turn.parts);
+  const sessions = turnSessions(turn.parts);
+  const parts = plan || suggestions.length || choice || sessions.length ? withoutPlan(turn.parts) : turn.parts;
+  // CHAT-LIVE-01 (LW1): while it runs, the steps so far come from the live preview (the checked parts replace them at the end).
+  const liveSteps = live && parts.length === 0 ? liveCalls(turn.previewSteps) : [];
+  const phase = livePhase(turn);
   const { work, answer } = splitWork(parts);
   const tools = toolCount(parts);
   const answerText = answer.filter(p => p.kind === 'text').map(p => (p as { text: string }).text).join('');
@@ -784,18 +798,19 @@ function AssistantTurn({ turn, last, onRetry, writer, writerDepartment, writerRo
     {/* CH1/CH2: who wrote it, their role and the time, beside their face. */}
     {writer ? <p className="reply-writer"><span className="avatar" aria-hidden="true">{writer.slice(0, 1).toUpperCase()}</span><span className="reply-writer-name">{writer}</span><DepartmentBadge department={writerDepartment}/>{(writerRole || turn.at) && <span className="reply-meta">{[writerRole, turn.at ? clockTime(turn.at) : ''].filter(Boolean).map(x => ` · ${x}`).join('')}</span>}</p> : <p className="sr-only">Agent</p>}
     {/* CHAT-BUILD-01 stage 5 (CH1): the plan's steps live in Tasks above the box; here only one quiet line. */}
-    {live && plan && <p className="moment-line"><UiIcon name="list" size={12}/>Plan: {plan.length} {plan.length === 1 ? 'step' : 'steps'}, {plan.filter(s => s.status === 'done').length} done · the steps are in Tasks above the box</p>}
+    {live && plan && <p className="moment-line"><UiIcon name="list" size={12}/>Plan: {plan.filter(s => !s.parent).length} {plan.filter(s => !s.parent).length === 1 ? 'step' : 'steps'}, {plan.filter(s => !s.parent && s.status === 'done').length} done · the steps are in Tasks above the box</p>}
     {live
       ? <>{parts.map((p, i) => <PartView key={i} part={p} live last={i === parts.length - 1}/>)}
         {/* CHAT-BUILD-01 stage 5: the reply as it is written (checked text replaces it at the end). */}
         {!parts.some(p => p.kind === 'text') && turn.preview && <div className="chat-prose turn-text md-host chat-live" aria-live="off"><Markdown text={turn.preview}/></div>}
-        {(quiet || parts.length === 0) && <WorkingRow since={since} label={turn.previewTool ? `Using ${turn.previewTool}` : turn.preview ? 'Writing' : parts.length ? 'Working' : 'Thinking'}/>}</>
+        {liveSteps.length > 0 && <ToolStep calls={liveSteps} live/>}
+        {(quiet || parts.length === 0) && <WorkingRow since={since} label={parts.length && !turn.previewSteps ? 'Working' : phase.verb} target={phase.target}/>}</>
       : <>
         {tools > 0
           ? <WorkedRow parts={work} ms={turn.durationMs}/>
           : work.map((p, i) => <PartView key={i} part={p}/>)}
         {/* CH1: the plan's quiet line comes after the work row. */}
-        {plan && <p className="moment-line"><UiIcon name="list" size={12}/>Plan: {plan.length} {plan.length === 1 ? 'step' : 'steps'}, {plan.filter(s => s.status === 'done').length} done · the steps are in Tasks above the box</p>}
+        {plan && <p className="moment-line"><UiIcon name="list" size={12}/>Plan: {plan.filter(s => !s.parent).length} {plan.filter(s => !s.parent).length === 1 ? 'step' : 'steps'}, {plan.filter(s => !s.parent && s.status === 'done').length} done · the steps are in Tasks above the box</p>}
         {/* CHAT-BUILD-01 stage 5: hand-offs, what waits for you and notices stay in view when the work is folded. */}
         {/* CH6: a hand-off to a sub-agent of someone handed work in the same reply sits inside that person's card. */}
         <HandOffs calls={work.flatMap(p => (p.kind === 'tools' ? p.calls : [])).filter(c => c.name === 'team_delegate')}/>
@@ -808,6 +823,8 @@ function AssistantTurn({ turn, last, onRetry, writer, writerDepartment, writerRo
           <span>{turn.code === 'run_interrupted' ? 'Your request and tool checkpoints are saved. Continue safely after reviewing them; previous actions are not replayed automatically.' : turn.code === 'subscription_org_blocked' ? 'Your organization has disabled Claude Code subscription access. Ask its administrator to enable access, or choose another signed-in coding app.' : turn.code === 'lmstudio_not_running' ? 'Open LM Studio, load the model and start its local server (port 1234), then try again.' : turn.code === 'local_model_missing' ? 'This agent answers with a local model that is not on this computer. Pick an installed model or add a Claude key in Settings, then try again.' : turn.code === 'model_unavailable' ? 'Check that the model is running, then try again.' : 'Anything above was written before the failure.'}</span>
           {last && onRetry && <button type="button" className="chat-error-action" onClick={onRetry}><UiIcon name="refresh" size={12}/>{turn.code === 'run_interrupted' ? 'Continue safely' : 'Try again'}</button>}
         </div>}
+        {sessions.length > 0 && <SessionsCard sessions={sessions}/>}
+        {choice && <ChoiceCard choice={choice} open={last}/>}
         {suggestions.map((g, i) => <CardSuggestionView key={i} suggestion={g} onCreate={onSuggest}/>)}
         {proposals}
         {recovery}
@@ -904,35 +921,6 @@ function ChatCardBlock({ card, progress, nameOf, onOpen }: { card: ChatCard; pro
   </section>;
 }
 
-/** The agent's task plan as a live checklist; folds to one line once every step is done. */
-function PlanCard({ steps, live, status }: { steps: readonly PlanStep[]; live: boolean; status: Turn['status'] }) {
-  const done = steps.filter(s => s.status === 'done').length;
-  const counted = steps.filter(s => s.status !== 'skipped').length;
-  const finished = !live && steps.every(s => s.status === 'done' || s.status === 'skipped');
-  const [open, setOpen] = useState(!finished);
-  // Fold once the run ends with every step done (the owner can open it again).
-  useEffect(() => { if (finished) setOpen(false); }, [finished]);
-  const halted = !live && status !== 'complete';
-  const active = steps.find(s => s.status === 'active');
-  return <section className="plan-card" aria-label="Task plan" data-live={live || undefined}>
-    <button type="button" className="plan-head" aria-expanded={open} onClick={() => setOpen(v => !v)}>
-      <UiIcon name="check" size={12}/>
-      <span className="plan-title">{finished ? 'Plan done' : 'Plan'}</span>
-      <span className="plan-count">{done} of {counted}</span>
-      <span className="plan-bar" aria-hidden="true"><i style={{ inlineSize: `${counted ? Math.round((done / counted) * 100) : 0}%` }}/></span>
-      {!open && active && <span className="plan-now" dir="auto">{active.title}</span>}
-      <span className="plan-chevron" aria-hidden="true"><UiIcon name="chevron" size={10}/></span>
-    </button>
-    {open && <ol className="plan-steps">{steps.map((s, i) => {
-      const state = s.status === 'active' && halted ? 'halted' : s.status;
-      return <li key={i} data-status={state}>
-        <span className="plan-mark" aria-hidden="true">{state === 'done' ? <UiIcon name="check" size={10}/> : state === 'active' ? <i className="plan-spin"/> : null}</span>
-        <span className="plan-step" dir="auto">{s.title}</span>
-        <span className="sr-only">{state === 'done' ? 'done' : state === 'active' ? 'in progress' : state === 'halted' ? 'stopped here' : state === 'skipped' ? 'skipped' : 'to do'}</span>
-      </li>;
-    })}</ol>}
-  </section>;
-}
 
 /** True when a live turn produced nothing for QUIET_MS; returns when that quiet began. */
 function useQuiet(turn: Turn, live: boolean): [boolean, number] {
@@ -1066,8 +1054,8 @@ function ToolGroup({ item }: { item: Extract<WorkItem, { kind: 'group' }> }) {
   </div>;
 }
 
-function WorkingRow({ since, label }: { since: number; label: string }) {
-  return <p className="scaffold working" role="status"><span className="pulse" aria-hidden="true"/><span className="shimmer">{label}</span><Elapsed since={since}/></p>;
+function WorkingRow({ since, label, target }: { since: number; label: string; target?: string }) {
+  return <p className="scaffold working" role="status"><span className="pulse" aria-hidden="true"/><span className="shimmer">{label}</span>{target && <span className="working-target" dir="auto">{target}</span>}<Elapsed since={since}/></p>;
 }
 
 function Elapsed({ since }: { since: number }) {

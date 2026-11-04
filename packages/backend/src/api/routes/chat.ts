@@ -531,7 +531,7 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
         if(!reply.raw.writableEnded)reply.raw.write(`data: ${JSON.stringify({content:'',done:true})}\n\n`);
       }catch(error){
         // CHAT-BUILD-01 stage 5 (CH10): a coding app that hit its plan limit says so before the error.
-        if(!abort.signal.aborted&&error instanceof Error&&/limit|quota|usage|rate/i.test(error.message))currentChatRun()?.notice?.('plan_limit','The coding app hit its plan limit. Switch this chat to Auto or a local model.');
+        if(!abort.signal.aborted&&error instanceof Error&&!/^cli_/.test(error.message)&&/limit|quota|usage|rate/i.test(error.message))currentChatRun()?.notice?.('plan_limit','The coding app hit its plan limit. Switch this chat to Auto or a local model.');
         if(!abort.signal.aborted&&!reply.raw.writableEnded)reply.raw.write(`data: ${JSON.stringify({type:'error',code:error instanceof Error&&error.message==='subscription_org_blocked'?'subscription_org_blocked':'model_unavailable',error:'The subscription CLI could not finish.'})}\n\n`);}
       reply.raw.end();return reply;
     }
