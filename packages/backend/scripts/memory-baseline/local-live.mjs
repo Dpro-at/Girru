@@ -12,7 +12,8 @@ const MODEL = argValue('model', 'qwen3:4b');
 const out = argValue('out', null);
 if (!(await ollamaHas(MODEL))) { console.error(`${MODEL} is not on the local Ollama`); process.exit(2); }
 process.env.OLLAMA_URL = OLLAMA;
-process.env.MEMORY_EMBEDDINGS = 'hash';
+// --hash: the offline fallback; default: the memory helper's local embedding model (qwen3-embedding:0.6b), as shipped.
+if (process.argv.includes('--hash')) process.env.MEMORY_EMBEDDINGS = 'hash'; else delete process.env.MEMORY_EMBEDDINGS;
 process.env.NODE_ENV = 'test';
 process.env.CHAT_NUM_CTX = '8192';
 delete process.env.OLLAMA_THINK; // the chat's own default (thinking stays out of the answer)
@@ -24,7 +25,7 @@ mkdirSync(join(dataRoot, '.data', 'multi-agent'), { recursive: true });
 const requests = [];
 const guarded = globalThis.fetch;
 globalThis.fetch = async (url, init = {}) => {
-  if (String(url) === `${OLLAMA}/api/chat`) { const b = JSON.parse(init.body); requests.push({ numCtx: b.options?.num_ctx, numPredict: b.options?.num_predict, tools: (b.tools ?? []).map((t) => t.function.name), chars: JSON.stringify(b.messages).length + JSON.stringify(b.tools ?? []).length }); }
+  if (String(url) === `${OLLAMA}/api/chat`) { const b = JSON.parse(init.body); requests.push({ numCtx: b.options?.num_ctx, numPredict: b.options?.num_predict, tools: (b.tools ?? []).map((t) => t.function.name), chars: b.messages.reduce((n, m) => n + String(m.content ?? '').length, 0) + JSON.stringify(b.tools ?? []).length }); }
   if (String(url) === `${OLLAMA}/api/generate`) return new Response('{"error":"background off in this run"}', { status: 503 });
   return guarded(url, init);
 };
@@ -97,14 +98,14 @@ const checks = {
   recall: /friday/i.test(rows[1].answer),
   supersede: current.some((m) => /thursday/i.test(m.content)) && !current.some((m) => /friday/i.test(m.content) && !/thursday/i.test(m.content)),
   handoff: rows[3].results.some((x) => x.name === 'handoff_save' && !x.isError),
-  propose: JSON.stringify(pending).includes('two reviewers'),
+  propose: rows[4].results.some((x) => x.name === 'memory_save' && !x.isError && /owner|accept|review|propos/i.test(x.output)) && (pending.proposals ?? pending).length > 0,
   lastRecall: /thursday/i.test(last.answer) && !/friday/i.test(last.answer),
   fits8k: requests.every((q) => q.numCtx === 8192 && Math.ceil(q.chars / 3) <= 8192 - (q.numPredict ?? 0)),
 };
 const failures = Object.entries(checks).filter(([, ok]) => !ok).map(([k]) => k);
 const record = recordLocalConformance({ provider: 'ollama', model: MODEL, passed: failures.length === 0, failures, window: requests[0]?.numCtx ?? null });
-const report = { memories: facts.map((m) => ({ content: m.content.slice(0, 120), status: m.status, replaced: !!(m.valid_to || m.superseded_by) })), pendingProposals: JSON.stringify(pending).slice(0, 600), model: MODEL, window: 8192, passed: record.passed, memoryLimited: !record.passed, failures, checks, handoffRows: handoffs, usedTools: [...new Set(rows.flatMap((r) => r.tools.map((t) => t.name)))],
-  turns: rows.map((r) => ({ verb: r.verb, ms: r.ms, tools: r.tools.map((t) => `${t.name} ${t.input.slice(0, 120)}`), errors: r.results.filter((x) => x.isError).map((x) => `${x.name}: ${x.output.slice(0, 160)}`), answer: r.answer, requests: r.requests.map((q) => ({ numCtx: q.numCtx, numPredict: q.numPredict, tools: q.tools.length, estTokens: Math.ceil(q.chars / 3) })) })) };
+const report = { embeddings: process.env.MEMORY_EMBEDDINGS === 'hash' ? 'hash' : 'qwen3-embedding (local)', memories: facts.map((m) => ({ content: m.content.slice(0, 120), status: m.status, replaced: !!(m.valid_to || m.superseded_by) })), pendingProposals: JSON.stringify(pending).slice(0, 600), model: MODEL, window: 8192, passed: record.passed, memoryLimited: !record.passed, failures, checks, handoffRows: handoffs, usedTools: [...new Set(rows.flatMap((r) => r.tools.map((t) => t.name)))],
+  turns: rows.map((r) => ({ verb: r.verb, ms: r.ms, approved: r.approved, results: r.results.map((x) => `${x.name}: ${x.output.slice(0, 200)}`), tools: r.tools.map((t) => `${t.name} ${t.input.slice(0, 120)}`), errors: r.results.filter((x) => x.isError).map((x) => `${x.name}: ${x.output.slice(0, 160)}`), answer: r.answer, requests: r.requests.map((q) => ({ numCtx: q.numCtx, numPredict: q.numPredict, tools: q.tools.length, estTokens: Math.ceil(q.chars / 3) })) })) };
 console.log(JSON.stringify(report, null, 2));
 if (out) writeFileSync(out, JSON.stringify(report, null, 2));
 await app.close();

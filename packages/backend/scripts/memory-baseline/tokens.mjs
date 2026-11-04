@@ -205,7 +205,7 @@ if (storeP2bEnabled()) {
   const { capTokens: cap } = await import(join(backendDir, 'src/services/agent-context/budget.ts'));
   const w = await localModelWindow('ollama', 'qwen3:4b');
   const b = planLocalBudget(w.tokens);
-  const od = new OnDemandTools(taskRegistry.getToolsForAPI(), b.tier);
+  const od = new OnDemandTools(taskRegistry.getToolsForAPI(), b.tier, { fitTokens: b.tools });
   const sys = cap([taskSystem, od.index(), NO_INVENTED_MEMORY].join('\n\n---\n\n'), b.system);
   report.window = { tokens: w.tokens, source: w.source, tier: b.tier, replyTokens: b.replyTokens, promptTokens: b.promptTokens };
   report.entryPoints.taskRunLocalP2b = { tools: od.definitions().length, includes: { rules: sys.includes(MARK.rules), pinned: sys.includes(MARK.pinned) },
