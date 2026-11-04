@@ -28,7 +28,7 @@ import {allowedTemplates,templatePath,templatesResponse} from './specialty-contr
 import { allowedMcpImport, mcpImportPath, mcpImportResponse } from './mcp-import-contract.js';
 import { allowedSshKeys, sshKeysRoute, sshKeysResponse } from './ssh-keys-contract.js';
 import { allowedSkillLibrary, skillLibraryPath, skillLibraryResponse } from './skill-library-contract.js';
-import { allowedGenVR, genvrRoute, genvrResponse, GENVR_BYTES } from './genvr-contract.js';
+import { allowedGenVR, genvrRoute, genvrResponse, GENVR_BYTES, worldRoute } from './genvr-contract.js';
 import { allowedChannel, channelRoute, channelResponse } from './agent-connect-contract.js';
 import { allowedPersonality, personalityRoute, personalityResponse } from './personality-contract.js';
 import { allowedBoard, boardRoute, boardResponse, BOARDS_PATH } from './board-contract.js';
@@ -594,6 +594,7 @@ export class SessionClient {
     if (conversationPath(request.path)?.kind === 'approval' && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if ((conversationRoute(request.path) || chatSearchRoute(request.path) || chatExportRoute(request.path) || chatSecretsRoute(request.path)) && this.#state.user?.role === 'guest') throw new SessionFailure('blocked');
     if (request.path === CLEANUP_PATH && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
+    if (worldRoute(request.path) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if ((meetingsRoute(request.path) || marketRoute(request.path) || practiceRoute(request.path) || packRoute(request.path) || workspaceAppsRoute(request.path) || sourceCatalogueRoute(request.path) || appsCatalogueRoute(request.path) || storeRoute(request.path) || chatAddonsRoute(request.path) || request.path === '/api/chat/project-folders' || approvalRoute(request.path) || connectionsRoute(request.path) || libraryPath(request.path) || templatePath(request.path) || mcpImportPath(request.path) || sshKeysRoute(request.path) || channelRoute(request.path) || connectorRoute(request.path) || localImportRoute(request.path) || chatBoardRoute(request.path) || chatMemoryRoute(request.path)) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if ((memoryDesktopRoute(request.path) || memoryPagesRoute(request.path) || memoryRecallRoute(request.path) || memoryBridgeRoute(request.path) || projectFilesRoute(request.path) || taskLinksRoute(request.path) || personRoute(request.path) || trustRoute(request.path) || docIndexRoute(request.path) || codeOpenRoute(request.path) || discoveryRoute(request.path)) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if (terminalRoute(request.path) && (this.#state.user?.role !== 'owner' || terminalPath(request.path)?.kind === 'stream')) throw new SessionFailure('blocked');

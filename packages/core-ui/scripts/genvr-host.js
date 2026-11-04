@@ -12,7 +12,7 @@ window.addEventListener('message',async event=>{
    await isolateBrowserCache(data.storageNamespace);
    const sdk=await import('/genvr/dist/studio.js');mountStudio=sdk.mountStudio;
    const host=await studioHost(typeof data.privateLibrary==='string'&&/^[a-f0-9]{64}$/.test(data.privateLibrary)?data.privateLibrary:null);
-   studio=mountStudio(document.getElementById('studio'),{filmExample:'/film-examples/island-languages.genvrfilm',forceWebGL:true,initialProjectId:data.projectId,...host,agents:id=>request('agents',id),catalog:{list:()=>request('catalog-list'),asset:id=>request('catalog-asset',id)},storage:{list:()=>request('list'),read:id=>request('read',id),write:project=>request('write',project)}});
+   studio=mountStudio(document.getElementById('studio'),{filmExample:'/film-examples/island-languages.genvrfilm',forceWebGL:true,initialProjectId:data.projectId,...host,...(data.chat===true?hostChat():{}),agents:id=>request('agents',id),catalog:{list:()=>request('catalog-list'),asset:id=>request('catalog-asset',id)},storage:{list:()=>request('list'),read:id=>request('read',id),write:project=>request('write',project)}});
    send({operation:'mounted'});if(sdk.STUDIO_HOST_VERSION!==1&&typeof data.projectId==='string')openExisting(data.projectId);
   }catch{send({operation:'unavailable'});}
  }
@@ -21,9 +21,45 @@ window.addEventListener('message',async event=>{
   const token=document.querySelector('meta[name="genvr-studio-token"]')?.content;const n=data.notification;
   if(token&&n.type==='approval'&&typeof n.title==='string'&&typeof n.body==='string')void fetch('/studio-bridge/call',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({tool:'present_avatar',arguments:{event:{kind:'notification',notification:{type:'approval',title:n.title.slice(0,200),body:n.body.slice(0,500),...(typeof n.sourceId==='string'?{sourceId:n.sourceId.slice(0,200)}:{}),needsApproval:true}}}})}).catch(()=>{});
  }
+ // Board W1: Girru's own chat. The parent streams the answer, sends what the chat shows, and asks to undo
+ // (the Studio's own Ctrl/Cmd+Z on the Build and Items tabs, sent from an element so its key handler reads it).
+ if(data.operation==='model-delta'&&typeof data.id==='string'&&typeof data.delta==='string'&&data.delta.length<=65536){models.get(data.id)?.onDelta(data.delta);}
+ if(data.operation==='chat-info'&&studio?.setChat&&data.info&&typeof data.info==='object'&&JSON.stringify(data.info).length<=4096){try{studio.setChat(data.info);}catch{/* an older Studio without the chat option */}}
+ if(data.operation==='undo'&&Number.isInteger(data.count)&&data.count>0&&data.count<=50){for(let i=0;i<data.count;i++)document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'z',code:'KeyZ',ctrlKey:!/Mac/.test(navigator.platform),metaKey:/Mac/.test(navigator.platform),bubbles:true,cancelable:true}));}
  if(data.operation==='close'){try{send({operation:'closed',ok:await studio?.dispose()===true});}catch{send({operation:'closed',ok:false});}}
 });
 send({operation:'ready'});
+
+// Board W1: Girru answers the Studio chat. Tools still run in the Studio; Girru only gets the
+// conversation and the tool list, and gives back text and tool calls.
+const models=new Map(),MODEL_BYTES=2*1024*1024,MODEL_MS=10*60*1000;
+const PLACE_TABS=['build','items','avatar','filming','lab'];
+function hostChat(){
+ return {
+  onContext:context=>{if(!context||typeof context!=='object'||typeof context.projectId!=='string'||typeof context.name!=='string')return;send({operation:'context',context:{projectId:context.projectId.slice(0,100),name:context.name.slice(0,200),tab:PLACE_TABS.includes(context.tab)?context.tab:'build',look:String(context.look??'').slice(0,40),kind:String(context.kind??'').slice(0,40)}});},
+  chat:{chooseAnswerer:()=>send({operation:'choose-answerer'})},
+  model:(messages,onDelta,signal,_onQueue,tools)=>new Promise((resolve,reject)=>{
+   const value={messages,tools:Array.isArray(tools)?tools:[]};let text;try{text=JSON.stringify(value);}catch{reject(Error('This conversation cannot be sent to Girru.'));return;}
+   if(text.length>MODEL_BYTES){reject(Error('This conversation is too long for Girru. Start a new chat.'));return;}
+   const id='m'+(++sequence);
+   const finish=()=>{models.delete(id);clearTimeout(timer);signal?.removeEventListener('abort',abort);};
+   const abort=()=>{finish();send({operation:'model-cancel',id});reject(Object.assign(Error('Stopped.'),{name:'AbortError'}));};
+   const timer=setTimeout(()=>{finish();send({operation:'model-cancel',id});reject(Error('Girru did not answer in time. Try again.'));},MODEL_MS);
+   if(signal?.aborted){abort();return;}signal?.addEventListener('abort',abort,{once:true});
+   models.set(id,{onDelta:delta=>{try{onDelta(delta);}catch{}},resolve:result=>{finish();resolve(result);},reject:error=>{finish();reject(error);}});
+   send({id,operation:'model',value:JSON.parse(text)});
+  }),
+ };
+}
+// The final answer of a model request: {content, tool_calls}, checked before the Studio sees it.
+window.addEventListener('message',event=>{
+ if(event.source!==parent||event.origin!==location.origin||event.data?.type!=='dpro-genvr'||event.data.channel!==channel||event.data.operation!=='model-result')return;
+ const data=event.data,work=typeof data.id==='string'?models.get(data.id):undefined;if(!work)return;
+ if(!data.ok){work.reject(Error(typeof data.error==='string'?data.error.slice(0,300):'Girru could not answer.'));return;}
+ const v=data.value;const calls=Array.isArray(v?.tool_calls)?v.tool_calls:[];
+ if(!v||typeof v.content!=='string'||v.content.length>200000||calls.length>20||!calls.every(c=>c&&typeof c==='object'&&c.function&&typeof c.function.name==='string'&&/^[a-z_]{1,64}$/.test(c.function.name))){work.reject(Error('Girru sent an answer the Studio cannot read.'));return;}
+ work.resolve({content:v.content,tool_calls:calls.map(c=>({function:{name:c.function.name,arguments:c.function.arguments&&typeof c.function.arguments==='object'&&!Array.isArray(c.function.arguments)?c.function.arguments:{}}}))});
+});
 
 // Adapt the SDK's platform exit link to this local host without navigating away.
 document.addEventListener('click',event=>{

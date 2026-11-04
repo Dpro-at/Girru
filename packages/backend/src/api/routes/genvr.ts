@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { actorOf } from '../../auth/auth-gate.js';
 import { requireAccount, ScopeError } from '../../repositories/scope.js';
 import { genvrMarketRoutes } from './genvr-market.js';
+import { genvrWorldRoutes } from './genvr-world.js';
 import { repositories } from '../../repositories/index.js';
 import { q, sql, one, run, type Step } from '../../repositories/sql-steps.js';
 const validTeam=(team:unknown):team is {id:string;avatar:number}[]=>Array.isArray(team)&&team.length<=200&&new Set(team.map(a=>a?.id)).size===team.length&&team.every(a=>object(a)&&Object.keys(a).sort().join(',')==='avatar,id'&&id(a.id)&&Number.isInteger(a.avatar)&&a.avatar>=0&&a.avatar<8);
@@ -13,6 +14,8 @@ const object=(value:unknown):value is Record<string,any>=>!!value&&typeof value=
 export async function genvrRoutes(app:FastifyInstance,options:{marketFetch?:typeof fetch}={}){
  app.post('/api/genvr/mcp/bootstrap',{config:{access:'owner'}},async(request,reply)=>{if(!request.authUser||request.authUser.role!=='owner')return reply.code(403).send({code:'forbidden'});if(!request.body||typeof request.body!=='object'||Array.isArray(request.body)||Object.keys(request.body).length)return reply.code(400).send({code:'invalid_input'});return ensureGenvrMcp(request.authUser.id);});
  await genvrMarketRoutes(app,options.marketFetch);
+ // GENVR-WORLD-01 P1: each world's folder and project, who answers, and the Studio chat's model turn.
+ await genvrWorldRoutes(app);
  // No global SDK/account state: a project is always keyed by the active local user.
  if(q.dialect==='sqlite')await q.run('CREATE TABLE IF NOT EXISTS genvr_projects (user_id TEXT NOT NULL, id TEXT NOT NULL, title TEXT NOT NULL, document TEXT NOT NULL, revision INTEGER NOT NULL, PRIMARY KEY(user_id,id))');
  if(q.dialect==='sqlite'){await q.run('CREATE TABLE IF NOT EXISTS genvr_agent_looks (user_id TEXT NOT NULL, agent_id TEXT NOT NULL, avatar INTEGER NOT NULL, PRIMARY KEY(user_id,agent_id))');await q.run('CREATE TABLE IF NOT EXISTS genvr_members (user_id TEXT NOT NULL, project_id TEXT NOT NULL, agent_id TEXT NOT NULL, PRIMARY KEY(user_id,project_id,agent_id))');}
