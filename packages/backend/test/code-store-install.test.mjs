@@ -282,3 +282,35 @@ test('routes: GET /api/apps/code is owner-only; the job reports download progres
     assert.equal((await app.inject({ url: '/api/apps/code', headers: h('code-owner') })).json().version, '2.0.0');
   } finally { await app.close(); }
 });
+
+test('an archive made by the release packer installs (its .bin links left out, other links refused)', async () => {
+  const { createRequire } = await import('node:module');
+  const { packCodeRuntime } = createRequire(import.meta.url)(join(backendDir, '../desktop/scripts/pack-code-runtime.cjs'));
+  const { symlinkSync, statSync } = await import('node:fs');
+  const staged = join(dir, 'staged-runtime');
+  const put = (rel, text) => { mkdirSync(join(staged, rel, '..'), { recursive: true }); writeFileSync(join(staged, rel), text); };
+  put('nabu/runtime.json', JSON.stringify({ name: 'nabu-code-runtime', protocolVersion: 1, editorVersion: '1.143.1', entry: 'dpro/editor-runtime.mjs' }));
+  put('nabu/dpro/editor-runtime.mjs', 'export const protocolVersion = 1;\n');
+  put('editor/out/server-main.js', '// server\n'.repeat(2000));
+  put('editor/product.json', '{}');
+  put(`editor/extensions/${'long-extension-name-'.repeat(6)}/package.json`, '{}');
+  put('editor/node_modules/tool/cli.js', '#!/usr/bin/env node\n');
+  mkdirSync(join(staged, 'editor/node_modules/.bin'), { recursive: true });
+  symlinkSync('../tool/cli.js', join(staged, 'editor/node_modules/.bin/tool'));
+  const out = join(dir, 'packed');
+  const info = await packCodeRuntime({ runtime: staged, version: '3.0.0', platform: runtimePlatform(), out });
+  assert.equal(info.skippedLinks, 1);
+  const bytes = readFileSync(join(out, info.name));
+  assert.equal(bytes.length, info.size); assert.equal(sha(bytes), info.sha256);
+  assert.deepEqual(JSON.parse(readFileSync(join(out, info.name.replace('.tar.gz', '.json')), 'utf8')).sha256, info.sha256);
+  forget(); publish('3.0.0', bytes);
+  const j = await install();
+  assert.equal(j.ok, true, j.message);
+  const root = join(runtimes, 'code', current().dir);
+  assert.equal(JSON.parse(readFileSync(join(root, 'nabu/runtime.json'), 'utf8')).version, '3.0.0');
+  assert.ok(existsSync(join(root, `editor/extensions/${'long-extension-name-'.repeat(6)}/package.json`)));
+  assert.ok(!existsSync(join(root, 'editor/node_modules/.bin/tool')));
+  assert.equal(statSync(join(root, 'editor/out/server-main.js')).size, '// server\n'.length * 2000);
+  symlinkSync('/etc/hosts', join(staged, 'editor/hosts-link'));
+  await assert.rejects(packCodeRuntime({ runtime: staged, version: '3.0.1', platform: runtimePlatform(), out }), /link outside node_modules\/\.bin/);
+});
