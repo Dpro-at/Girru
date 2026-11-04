@@ -67,7 +67,7 @@ export async function saveFirstRunStep(userId: string, step: FirstRunStep, works
 
 export type AiToolId = 'claude' | 'codex' | 'gemini';
 export type AiTool = Readonly<{ id: AiToolId; name: string; installed: boolean; signedIn: boolean; install: string | null; signIn: string; needs?: 'node' }>;
-type Env = { home: string; platform: NodeJS.Platform; dirs: string[]; keychain?: (service: string, home: string) => Promise<boolean> };
+type Env = { home: string; platform: NodeJS.Platform; dirs: string[]; keychain?: (service: string, home: string) => Promise<boolean>; claudeStatus?: (bin: string, home: string) => Promise<boolean | null> };
 
 async function exists(file: string): Promise<boolean> { try { await fs.access(file); return true; } catch { return false; } }
 async function findBinary(env: Env, names: readonly string[]): Promise<string | null> {
@@ -90,6 +90,19 @@ export function keychainItem(service: string, home: string): Promise<boolean> {
  * account there before it saves the login, so a save that failed ("Couldn't save your login") left the
  * row showing "signed in". Only presence is checked, never a value.
  */
+/**
+ * What Claude Code itself says: `claude auth status --json` → loggedIn (true/false). This is the answer
+ * the CLI uses, wherever it keeps the login (keychain, file, environment). Only that one field is read;
+ * the email and organisation in the same output are dropped. null when the CLI cannot answer
+ * (older version, timeout), then the saved-login check below decides.
+ */
+export function claudeAuthStatus(bin: string, home: string): Promise<boolean | null> {
+  return new Promise(resolve => {
+    execFile(bin, ['auth', 'status', '--json'], { env: { ...process.env, HOME: home }, timeout: 10000, maxBuffer: 64 * 1024, windowsHide: true }, (_error, stdout) => {
+      try { const v = JSON.parse(String(stdout)); resolve(typeof v?.loggedIn === 'boolean' ? v.loggedIn : null); } catch { resolve(null); }
+    });
+  });
+}
 async function claudeSignedIn(home: string, platform: NodeJS.Platform, keychain: (service: string, home: string) => Promise<boolean>): Promise<boolean> {
   if (await exists(path.join(home, '.claude', '.credentials.json'))) return true;
   if (platform !== 'darwin') return false;
@@ -121,7 +134,7 @@ export async function aiTools(env?: Partial<Env>): Promise<AiTool[]> {
     : { id: 'gemini', name: 'Gemini CLI', installed: !!gemini, signedIn: !!gemini && await exists(path.join(home, '.gemini', 'oauth_creds.json')),
       install: gemini ? null : pkg('@google/gemini-cli', 'gemini-cli'), signIn: 'gemini', ...(!gemini && !npm && !brew ? { needs: 'node' as const } : {}) };
   return [
-    { id: 'claude', name: 'Claude Code', installed: !!claude, signedIn: !!claude && await claudeSignedIn(home, platform, env?.keychain ?? keychainItem),
+    { id: 'claude', name: 'Claude Code', installed: !!claude, signedIn: !!claude && ((await (env?.claudeStatus ?? claudeAuthStatus)(claude, home)) ?? await claudeSignedIn(home, platform, env?.keychain ?? keychainItem)),
       install: claude ? null : win ? 'irm https://claude.ai/install.ps1 | iex' : 'curl -fsSL https://claude.ai/install.sh | bash', signIn: 'claude' },
     { id: 'codex', name: 'ChatGPT Codex', installed: !!codex, signedIn: !!codex && await exists(path.join(codexHome, 'auth.json')),
       install: codex ? null : pkg('@openai/codex', 'codex'), signIn: 'codex login', ...(!codex && !npm && !brew ? { needs: 'node' as const } : {}) },

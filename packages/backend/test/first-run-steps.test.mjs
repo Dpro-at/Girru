@@ -122,6 +122,30 @@ test('Claude Code is not "signed in" when its login was not saved (account writt
   assert.equal(asked, false, 'the keychain is only asked once Claude has an account');
 });
 
+test('Claude Code: what the CLI itself reports (auth status) decides first; files only when it cannot answer', async () => {
+  const home = mkdtempSync(join(dir, 'home-status-')), bin = join(home, 'bin');
+  mkdirSync(bin); writeFileSync(join(bin, 'claude'), '#!/bin/sh\n'); chmodSync(join(bin, 'claude'), 0o755);
+  const claude = async (opts) => (await aiTools({ home, platform: 'darwin', dirs: [bin], ...opts })).find(t => t.id === 'claude');
+  const asked = [];
+  // Signed in with the real login keychain, nothing under HOME at all (Mohamed's case): the CLI says yes.
+  assert.equal((await claude({ claudeStatus: async (b, h) => { asked.push([b, h]); return true; }, keychain: async () => false })).signedIn, true);
+  assert.deepEqual(asked, [[join(bin, 'claude'), home]], 'the found claude binary is asked, with this HOME');
+  writeFileSync(join(home, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'x@example.test' } }));
+  assert.equal((await claude({ claudeStatus: async () => false, keychain: async () => true })).signedIn, false, 'the CLI saying no wins over files');
+  assert.equal((await claude({ claudeStatus: async () => null, keychain: async () => true })).signedIn, true, 'no answer: the saved-login check decides');
+});
+
+test('claudeAuthStatus reads only loggedIn from the real CLI output', async () => {
+  const { claudeAuthStatus } = await import('../src/onboarding/first-run.ts');
+  const b = join(dir, 'fake-claude-status'); const home = mkdtempSync(join(dir, 'home-cli-'));
+  writeFileSync(b, '#!/bin/sh\necho \'{"loggedIn":true,"email":"x@example.test"}\'\n'); chmodSync(b, 0o755);
+  assert.equal(await claudeAuthStatus(b, home), true);
+  writeFileSync(b, '#!/bin/sh\necho \'{"loggedIn":false}\'\nexit 1\n');
+  assert.equal(await claudeAuthStatus(b, home), false, 'exit 1 with loggedIn false still answers false');
+  writeFileSync(b, '#!/bin/sh\necho nope\n');
+  assert.equal(await claudeAuthStatus(b, home), null, 'an older CLI without the command gives no answer');
+});
+
 test('SUB1 (GIRRU_STORE_P7): the Google app is Antigravity (agy), signed in by its cached account', async () => {
   const home = mkdtempSync(join(dir, 'home-agy-')), bin = join(home, 'bin');
   mkdirSync(join(home, '.gemini'), { recursive: true }); mkdirSync(bin);
