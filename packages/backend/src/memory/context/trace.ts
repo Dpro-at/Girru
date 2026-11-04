@@ -227,7 +227,16 @@ async function view(row: TraceRow): Promise<TraceView> {
   const facts = factIds.length ? new Map((await sql().read(all<{ id: string; text: string; updated_at: string }>(
     `SELECT id, text, updated_at FROM memory_pinned_facts WHERE owner_id = ? AND id IN (${factIds.map(() => '?').join(', ')})`, row.user_id, ...factIds)).catch(() => []))
     .map((f) => [f.id, f])) : new Map<string, { id: string; text: string; updated_at: string }>();
+  // KNOW-INDEX-01: a document chunk of this owner; gone when its file changed or was removed since.
+  const docIds = items.filter((i) => i.kind === 'document' && ID.test(i.id)).map((i) => i.id);
+  const chunks = docIds.length ? new Map((await sql().read(all<{ id: string; content: string }>(
+    `SELECT id, content FROM doc_index_chunks WHERE owner_id = ? AND id IN (${docIds.map(() => '?').join(', ')})`, row.user_id, ...docIds)).catch(() => []))
+    .map((c) => [c.id, c])) : new Map<string, { id: string; content: string }>();
   const out: TraceView['items'] = items.map((i) => {
+    if (i.kind === 'document') {
+      const c = chunks.get(i.id);
+      return c ? { ...i, preview: oneLine(c.content, 300), state: 'active' } : { ...i, state: 'changed' };
+    }
     if (i.kind === 'fact') {
       const f = facts.get(i.id);
       if (!f) return { ...i, state: 'deleted' };
