@@ -82,7 +82,7 @@ export function conversationPath(path) {
   if (pm) return uuid(pm[1]) ? { kind: 'project-git', id: pm[1] } : null;
   pm = /^\/api\/chat\/projects\/([^/?#]+)\/changes$/.exec(path);
   if (pm) return uuid(pm[1]) ? { kind: 'project-changes', id: pm[1] } : null;
-  pm = /^\/api\/chat\/projects\/([^/?#]+)\/(diff|tree|file)(?:\?path=([A-Za-z0-9%._~!*'()-]{0,3000}))?$/.exec(path);
+  pm = /^\/api\/chat\/projects\/([^/?#]+)\/(diff|tree|file|pdf)(?:\?path=([A-Za-z0-9%._~!*'()-]{0,3000}))?$/.exec(path);
   if (pm) { const rel = paneRel(pm[3]); return uuid(pm[1]) && rel !== null && (rel !== '' || pm[2] === 'tree') ? { kind: `project-${pm[2]}`, id: pm[1], rel } : null; }
   let m = /^\/api\/chat\/conversations\/([^/?#]+)$/.exec(path);
   if (m) return uuid(m[1]) ? { kind: 'one', id: m[1] } : null;
@@ -132,7 +132,7 @@ export function allowedConversation(method, path, body) {
   if (p.kind === 'last') return method === 'GET' ? body === undefined : method === 'PUT' && record(body) && onlyKeys(body, ['last']) && (body.last === null || uuid(body.last));
   if (p.kind === 'sidebar') return method === 'GET' ? body === undefined : method === 'PUT' && record(body) && Object.keys(body).length > 0 && onlyKeys(body, ['order', 'hidden', 'folded'])
     && (body.order === undefined || sectionList(body.order)) && (body.hidden === undefined || sectionList(body.hidden)) && (body.folded === undefined || folderList(body.folded));
-  if (method === 'GET') return body === undefined && ['list', 'messages', 'events', 'projects', 'project-git', 'project-pr', 'project-changes', 'project-diff', 'project-tree', 'project-file', 'transcribe', 'variables', 'image'].includes(p.kind);
+  if (method === 'GET') return body === undefined && ['list', 'messages', 'events', 'projects', 'project-git', 'project-pr', 'project-changes', 'project-diff', 'project-tree', 'project-file', 'project-pdf', 'transcribe', 'variables', 'image'].includes(p.kind);
   if (method === 'POST' && p.kind === 'transcribe') return record(body) && onlyKeys(body, ['audio', 'language']) && typeof body.audio === 'string' && body.audio.length > 0 && body.audio.length <= MAX_AUDIO_CHARS && /^[A-Za-z0-9+/]+={0,2}$/.test(body.audio)
     && (body.language === undefined || STT_LANGUAGES.includes(body.language));
   if (method === 'DELETE') return body === undefined && (p.kind === 'one' || p.kind === 'project' || p.kind === 'variable');
@@ -271,6 +271,9 @@ export function conversationResponse(path, status, body) {
     return { path: str(body.path, 1024), truncated: body.truncated === true,
       entries: body.entries.slice(0, 1000).filter(e => record(e) && typeof e.name === 'string' && e.name && !e.name.includes('/') && (e.kind === 'dir' || e.kind === 'file')).map(e => ({ name: e.name.slice(0, 255), kind: e.kind, size: n(e.size) })) };
   }
+  // CHAT-CONTENT-01: a PDF's pages as text for the viewer (bounded), or why it cannot be shown.
+  if (p.kind === 'project-pdf') return typeof body.reason === 'string' ? { path: str(body.path, 1024), reason: str(body.reason, 40) }
+    : { path: str(body.path, 1024), pageCount: n(body.pageCount) ?? 0, pages: (Array.isArray(body.pages) ? body.pages : []).slice(0, 200).filter(x => record(x) && Number.isInteger(x.page) && typeof x.text === 'string').map(x => ({ page: x.page, text: x.text.slice(0, 20_000) })) };
   if (p.kind === 'project-file') return { path: str(body.path, 1024), text: typeof body.text === 'string' ? body.text.slice(0, 524_288) : null, size: n(body.size) ?? 0, binary: body.binary === true, hidden: body.hidden === true, truncated: body.truncated === true };
   if (p.kind === 'list' && status === 200) {
     if (!Array.isArray(body.conversations) || body.conversations.length > 1000) throw Error('protocol');

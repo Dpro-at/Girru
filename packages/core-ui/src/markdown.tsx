@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { createContext, useContext, useState } from 'react';
 import type { ReactNode } from 'react';
 import { SpecView, parseSpec } from './spec';
 
@@ -22,7 +22,7 @@ type Block =
   | { kind: 'h'; level: number; text: string }
   | { kind: 'quote'; lines: string[] }
   | { kind: 'ul' | 'ol'; items: string[]; start: number }
-  | { kind: 'code'; lang: string; text: string; open: boolean }
+  | { kind: 'code'; lang: string; text: string; open: boolean; file?: string }
   | { kind: 'table'; header: string[]; align: ('left' | 'right' | 'center' | undefined)[]; rows: string[][] }
   | { kind: 'hr' };
 
@@ -35,14 +35,15 @@ export function parseBlocks(source: string): Block[] {
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
-    const fence = /^\s*(```|~~~)\s*([\w+#.-]*)\s*$/.exec(line);
+    // CHAT-CONTENT-01: the fence may name its file after the language (```ts src/auth.ts, or title="src/auth.ts").
+    const fence = /^\s*(```|~~~)\s*([\w+#.-]*)(?:\s+(?:title=)?["']?([^\s"'`]{1,300})["']?)?\s*$/.exec(line);
     if (fence) {
       const body: string[] = [];
       i++;
       while (i < lines.length && !new RegExp(`^\\s*${fence[1]}\\s*$`).test(lines[i])) body.push(lines[i++]);
       const open = i >= lines.length; // no closing fence yet (a reply still streaming)
       i++;
-      out.push({ kind: 'code', lang: fence[2], text: body.join('\n'), open });
+      out.push({ kind: 'code', lang: fence[2], text: body.join('\n'), open, ...(fence[3] && /[./]/.test(fence[3]) ? { file: fence[3] } : {}) });
       continue;
     }
     if (line.includes('|') && i + 1 < lines.length && TABLE_RULE.test(lines[i + 1]) && lines[i + 1].includes('-')) {
@@ -95,7 +96,7 @@ function blocks(source: string): ReactNode[] {
       case 'quote': return <blockquote key={k} dir="auto">{withBreaks(b.lines)}</blockquote>;
       case 'ul': return <ul key={k} dir="auto">{b.items.map((t, j) => listItem(t, j))}</ul>;
       case 'ol': return <ol key={k} start={b.start} dir="auto">{b.items.map((t, j) => <li key={j}>{inline(t)}</li>)}</ol>;
-      case 'code': return b.lang === 'spec' ? (b.open ? <p key={k} className="spec-pending">Preparing a view…</p> : <SpecBlock key={k} text={b.text}/>) : <CodeBlock key={k} lang={b.lang} text={b.text} open={b.open}/>;
+      case 'code': return b.lang === 'spec' ? (b.open ? <p key={k} className="spec-pending">Preparing a view…</p> : <SpecBlock key={k} text={b.text}/>) : (TERMINAL_LANGS.has(b.lang.toLowerCase()) ? <TerminalBlock key={k} text={b.text} open={b.open}/> : <CodeBlock key={k} lang={b.lang} text={b.text} open={b.open} file={b.file}/>);
       case 'table': return <div key={k} className="md-table-wrap"><table className="md-table">
         <thead><tr>{b.header.map((c, j) => <th key={j} style={b.align[j] ? { textAlign: b.align[j] } : undefined} dir="auto">{inline(c)}</th>)}</tr></thead>
         <tbody>{b.rows.map((r, ri) => <tr key={ri}>{b.header.map((_, j) => <td key={j} style={b.align[j] ? { textAlign: b.align[j] } : undefined} dir="auto">{inline(r[j] ?? '')}</td>)}</tr>)}</tbody>
@@ -118,8 +119,52 @@ export const CODE_FOLD_LINES = 14;
 /** A ```spec block drawn as a rich view; one that does not parse stays visible as code. */
 function SpecBlock({ text }: { text: string }) { return parseSpec(text) ? <SpecView text={text}/> : <CodeBlock lang="spec" text={text}/>; }
 
-/** A fenced code block: language, Copy, wrap for long lines, and folding for long code. */
-export function CodeBlock({ lang, text, open = false }: { lang: string; text: string; open?: boolean }) {
+/**
+ * CHAT-CONTENT-01: what a reply's code can do in this place (the chat gives it; elsewhere nothing extra shows):
+ * open a named file beside the chat or in Code, and run a terminal command (the owner's own Terminal).
+ */
+export type MarkdownActions = { openFile?: (path: string) => void; openInCode?: (path: string) => void; runCommand?: (command: string) => void; folderName?: string };
+export const MarkdownActionsContext = createContext<MarkdownActions>({});
+const LANG_NAMES: Record<string, string> = { ts: 'TypeScript', tsx: 'TypeScript', typescript: 'TypeScript', js: 'JavaScript', jsx: 'JavaScript', mjs: 'JavaScript', cjs: 'JavaScript', javascript: 'JavaScript', py: 'Python', python: 'Python', rb: 'Ruby', go: 'Go', rs: 'Rust', rust: 'Rust', java: 'Java', php: 'PHP', css: 'CSS', scss: 'SCSS', html: 'HTML', json: 'JSON', yaml: 'YAML', yml: 'YAML', toml: 'TOML', sql: 'SQL', md: 'Markdown', markdown: 'Markdown', swift: 'Swift', kt: 'Kotlin', c: 'C', cpp: 'C++', cs: 'C#', xml: 'XML', diff: 'Diff' };
+export const langName = (lang: string) => LANG_NAMES[lang.toLowerCase()] ?? (lang || 'code');
+/** Fence languages shown as a command to run. */
+export const TERMINAL_LANGS = new Set(['bash', 'sh', 'shell', 'zsh', 'console', 'terminal', 'cmd', 'powershell', 'ps1']);
+/** A command block's command: the "$ " prompt and output lines (without a prompt, after the first prompt line) dropped. */
+export function commandOf(text: string): string {
+  const lines = text.split('\n');
+  const prompted = lines.filter(l => /^\s*[$>]\s/.test(l));
+  return (prompted.length ? prompted.map(l => l.replace(/^\s*[$>]\s/, '')) : lines).join('\n').trim();
+}
+
+/** What Run may type into the Terminal: one line, control characters removed, so nothing runs before the owner presses Enter (null for several lines). */
+export function terminalLine(command: string): string | null {
+  const one = command.replace(/\r\n?/g, '\n').replace(/\n+$/, '').replace(/^\n+/, '');
+  if (one.includes('\n')) return null;
+  const safe = one.replace(/[\x00-\x1f\x7f-\x9f]/g, '').trim();
+  return safe || null;
+}
+
+/** CHAT-CONTENT-01: a command to run: Copy and Run (Run types it into your own Terminal beside the chat; you press Enter). */
+export function TerminalBlock({ text, open = false }: { text: string; open?: boolean }) {
+  const { runCommand, folderName } = useContext(MarkdownActionsContext);
+  const [copied, setCopied] = useState(false);
+  const command = commandOf(text);
+  const copy = () => { if (!navigator.clipboard) return; void navigator.clipboard.writeText(command).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }, () => undefined); };
+  return <div className="md-codeblock md-terminal" data-streaming={open || undefined}>
+    <div className="md-code-head">
+      <span className="md-code-lang">Terminal{folderName ? ` · in ${folderName}` : ''}</span>
+      <span className="md-code-actions">
+        <button type="button" className="md-code-btn" onClick={copy} aria-label={copied ? 'Copied' : 'Copy command'}>{copied ? 'Copied' : 'Copy'}</button>
+        {runCommand && !open && command && terminalLine(command) && <button type="button" className="md-code-btn md-run" title="Put it in your Terminal beside the chat; you press Enter" onClick={() => runCommand(command)}>Run</button>}
+      </span>
+    </div>
+    <pre className="md-code" dir="ltr"><code>{text.split('\n').map((l, i) => <span key={i}>{/^\s*[$>]\s/.test(l) ? <><span className="md-prompt">$ </span>{l.replace(/^\s*[$>]\s/, '')}</> : l}{'\n'}</span>)}</code></pre>
+  </div>;
+}
+
+/** A fenced code block: file and language, Open / Open in Code, Copy, wrap for long lines, and folding for long code. */
+export function CodeBlock({ lang, text, open = false, file }: { lang: string; text: string; open?: boolean; file?: string }) {
+  const actions = useContext(MarkdownActionsContext);
   const [copied, setCopied] = useState<'idle' | 'done' | 'failed'>('idle');
   const [wrap, setWrap] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -133,8 +178,10 @@ export function CodeBlock({ lang, text, open = false }: { lang: string; text: st
   };
   return <div className="md-codeblock" data-streaming={open || undefined}>
     <div className="md-code-head">
-      <span className="md-code-lang">{lang || 'code'}</span>
+      <span className="md-code-lang">{file ? <><span dir="ltr">{file}</span> · {langName(lang || file.split('.').at(-1) || '')}</> : langName(lang)}</span>
       <span className="md-code-actions">
+        {file && actions.openFile && <button type="button" className="md-code-btn" title="Show the file beside the chat" onClick={() => actions.openFile!(file)}>Open</button>}
+        {file && actions.openInCode && <button type="button" className="md-code-btn" aria-label="Open in Code" title="Open in Code" onClick={() => actions.openInCode!(file)}>Code</button>}
         {wide && <button type="button" className="md-code-btn" aria-pressed={wrap} onClick={() => setWrap(v => !v)}>{wrap ? 'No wrap' : 'Wrap'}</button>}
         <button type="button" className="md-code-btn" onClick={copy} aria-label={copied === 'done' ? 'Copied' : copied === 'failed' ? 'Copy failed' : 'Copy code'}>{copied === 'done' ? 'Copied' : copied === 'failed' ? 'Copy failed' : 'Copy'}</button>
       </span>

@@ -7,6 +7,7 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import { readRegularFile, FileReadError } from '../services/read-regular-file.js';
+import { extractPdfText, PDF_MAX_BYTES } from '../memory/docs/pdf-text.js';
 import path from 'node:path';
 
 export class ProjectPathError extends Error {}
@@ -153,6 +154,23 @@ export async function readFolderFile(folder: string, rawRel: unknown): Promise<{
     const { data, stat: st, truncated } = await readRegularFile(real, MAX_FILE_BYTES, { root: folder, truncate: true });
     if (data.includes(0)) return { path: rel, text: null, size: st.size, binary: true, hidden: false, truncated: false };
     return { path: rel, text: data.toString('utf8'), size: st.size, binary: false, hidden: false, truncated };
+  } catch (error) {
+    if (error instanceof FileReadError) throw new ProjectPathError(error.message);
+    throw error;
+  }
+}
+
+/** CHAT-CONTENT-01: a PDF in the folder as its pages' text (the document memory's own reader), for the viewer beside the chat. */
+export async function readFolderPdf(folder: string, rawRel: unknown): Promise<{ path: string; pageCount: number; pages: { page: number; text: string }[] } | { path: string; reason: string }> {
+  const rel = cleanRel(rawRel);
+  if (!rel || !/\.pdf$/i.test(rel)) throw new ProjectPathError('Pick a PDF file');
+  const real = await inside(folder, rel);
+  if (secretPath(rel) || await secretTarget(folder, real)) return { path: rel, reason: 'hidden' };
+  try {
+    const { data } = await readRegularFile(real, PDF_MAX_BYTES, { root: folder });
+    const r = extractPdfText(data);
+    if (!r.ok) return { path: rel, reason: r.reason };
+    return { path: rel, pageCount: r.pageCount, pages: r.pages.slice(0, 200).map(p => ({ page: p.page, text: p.text.slice(0, 20_000) })) };
   } catch (error) {
     if (error instanceof FileReadError) throw new ProjectPathError(error.message);
     throw error;

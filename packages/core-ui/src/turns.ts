@@ -322,7 +322,7 @@ export function liveCalls(steps: readonly LiveStep[] | undefined): ToolCall[] {
 
 /** CHAT-LIVE-01 (LW2): the agent's question with buttons. */
 export const CHOICE_TOOL = 'ask_choice';
-export type ChoiceAsk = Readonly<{ question: string; options: readonly string[]; multiple: boolean; suggested?: number }>;
+export type ChoiceAsk = Readonly<{ question: string; options: readonly string[]; reasons?: readonly string[]; multiple: boolean; suggested?: number }>;
 /** The newest question in this turn that the agent really asked (a refused call shows nothing). */
 export function turnChoice(parts: readonly Part[]): ChoiceAsk | null {
   let out: ChoiceAsk | null = null;
@@ -330,10 +330,19 @@ export function turnChoice(parts: readonly Part[]): ChoiceAsk | null {
     if (c.name !== CHOICE_TOOL || c.isError || c.output === undefined) continue;
     const a = args(c.input);
     const question = typeof a.question === 'string' ? a.question.replace(/\s+/g, ' ').trim().slice(0, 300) : '';
-    const options = Array.isArray(a.options) ? [...new Set(a.options.filter((o): o is string => typeof o === 'string').map(o => o.replace(/\s+/g, ' ').trim().slice(0, 80)).filter(Boolean))].slice(0, 5) : [];
+    // CHAT-CONTENT-01: an answer is a text or { label, reason }; reasons may also come as their own list.
+    const raw = Array.isArray(a.options) ? a.options : [];
+    const given = Array.isArray(a.reasons) ? a.reasons : [];
+    const items: { label: string; reason: string }[] = [];
+    raw.forEach((o, i) => {
+      const label = (typeof o === 'string' ? o : o && typeof o === 'object' && typeof (o as { label?: unknown }).label === 'string' ? (o as { label: string }).label : '').replace(/\s+/g, ' ').trim().slice(0, 80);
+      const r = o && typeof o === 'object' && typeof (o as { reason?: unknown }).reason === 'string' ? (o as { reason: string }).reason : typeof given[i] === 'string' ? given[i] as string : '';
+      if (label && !items.some(x => x.label === label)) items.push({ label, reason: r.replace(/\s+/g, ' ').trim().slice(0, 140) });
+    });
+    const options = items.slice(0, 5).map(x => x.label), reasons = items.slice(0, 5).map(x => x.reason);
     if (!question || options.length < 2) continue;
     const n = Number(a.suggested);
-    out = Object.freeze({ question, options, multiple: a.multiple === true, ...(Number.isInteger(n) && n >= 1 && n <= options.length ? { suggested: n } : {}) });
+    out = Object.freeze({ question, options, ...(reasons.some(Boolean) ? { reasons } : {}), multiple: a.multiple === true, ...(Number.isInteger(n) && n >= 1 && n <= options.length ? { suggested: n } : {}) });
   }
   return out;
 }

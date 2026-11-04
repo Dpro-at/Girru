@@ -7,7 +7,7 @@ import { Meetings } from './Meetings';
 import type { MeetingRecord } from './meetings-contract.js';
 import { ChatDetails, DetailsRail } from './ChatDetails';
 import type { PanelPart } from './ChatDetails';
-import { ApprovalCard, ChangesLine, ChoiceCard, DelegationCard, MomentsContext, NoticeCard, SessionsCard, StartedByLine, SteerLine, TaskList, TitleFaces, chatPeople, redoTarget } from './ChatMoments';
+import { ApprovalCard, ChangesLine, ChoiceCard, DelegationCard, FileChips, MomentsContext, replyFiles, NoticeCard, SessionsCard, StartedByLine, SteerLine, TaskList, TitleFaces, chatPeople, redoTarget } from './ChatMoments';
 import { ScheduleSheet } from './ScheduleSheet';
 import { KeysSheet, ModeButton, ModelButton, PlusButton, ProjectChip, ProjectSheet, SlashList, WhoButton, slashMatches } from './ChatComposerControls';
 import { modelDisplayName } from './model-names';
@@ -29,7 +29,9 @@ import { TerminalPane } from './TerminalPane';
 import { MicController } from './mic';
 import type { PaneName } from './panes';
 import type { SessionClient } from './session';
-import { Markdown } from './markdown';
+import { Markdown, MarkdownActionsContext, terminalLine } from './markdown';
+import { fileMenu, openFile as openInCodeFile } from './CodeOpen';
+import { joinPath } from './code-open';
 import { UiIcon } from './ui-icons';
 import { ClaudeCodeIcon, CodexIcon, GeminiIcon } from './brand-icons';
 import type { UiIconName } from './ui-icons';
@@ -436,7 +438,27 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
     void read(); const t = setInterval(() => void read(), 3000);
     return () => { on = false; clearInterval(t); };
   }, [client, s.activeId, s.runId, handingOff]);
+  // CHAT-CONTENT-01: files and commands named in replies: open beside the chat, Code, Finder, copy path, run in your Terminal.
+  const fileCtl = useMenu();
+  const folder = project?.folder ?? null;
+  const say = (t: string) => controller.say(t);
+  const openBeside = (rel: string, mark?: string) => { if (!panes || !folder) return; setPane('files'); void panes.openFile(rel.replace(/^\.\//, ''), { mark }); };
+  const runInTerminal = (command: string) => {
+    if (!owner || !terminal) return;
+    const line = terminalLine(command);
+    if (!line) { say('This command has several lines; copy it instead.'); return; }
+    setTermOpen(true);
+    // Typed into your own Terminal beside the chat; nothing runs until you press Enter.
+    let tries = 0;
+    const put = () => { const st = terminal.tabs.getSnapshot(); const tab = st.tabs.find(t => t.key === st.active) ?? st.tabs[0];
+      if (tab && tab.terminal.getSnapshot().phase === 'open') { tab.terminal.write(line); return; }
+      if (++tries < 40) setTimeout(put, 150); else say('The Terminal did not open; copy the command instead.'); };
+    setTimeout(put, 150);
+  };
+  const mdActions = { ...(folder ? { openFile: (rel: string) => openBeside(rel) } : {}), ...(folder && client ? { openInCode: (rel: string) => void openInCodeFile(client, joinPath(folder, rel), null, say) } : {}),
+    ...(owner && terminal ? { runCommand: runInTerminal } : {}), ...(folder ? { folderName: folder.split(/[\\/]/).filter(Boolean).at(-1) } : {}) };
   const moments = { client, conversationId: s.activeId, onOpenApprovals, steps, changeCards, nativeCode:embeddedCode,
+    ...(folder ? { onOpenFile: openBeside } : {}), ...(folder && client ? { onFileMenu: (e: React.MouseEvent, rel: string) => fileCtl.at(e, fileMenu(client, joinPath(folder, rel), null, say)) } : {}),
     // CH6/CH10 team moments: Hand it again adds to the box (never sends), Set a model opens the agent, Always allow opens What agents may do.
     onOpenAgent, onOpenRules, onAnswer: (text: string) => { void controller.send(text); },
     onOpenChat: (id: string) => { void controller.open(id); }, onStopChat: (id: string) => { void controller.stopChat(id); },
@@ -444,7 +466,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
     agentAbout: (id?: string) => s.agents.find(a => a.id === id)?.about, subAgentOf: (id?: string) => s.agents.find(a => a.id === id)?.subAgentOf, onStop: () => void controller.stopAll(), agentName: (id?: string) => (id ? s.agents.find(a => a.id === id)?.name ?? id : nameOf(convAgentId)),
     onSwitchAuto: () => controller.selectModel('auto'), onReviewChanges: () => setPane('changes'), onChanged: () => void controller.refreshGit(), onDecided: () => void controller.pickUpContinuation(),
     onStartFresh: (summary: string) => { const title = activeConv?.title ?? 'the last chat'; controller.newChat(); controller.edit(`Continue from “${title}”. ${summary}`.slice(0, 4000)); } };
-  return <MomentsContext.Provider value={moments}><div className="chat-layout" data-code-expanded={embeddedCode&&codeExpanded||undefined} data-panel={pane ?? 'rail'} data-empty={empty || undefined} data-max={(maximized && termOpen) || undefined}>
+  return <MarkdownActionsContext.Provider value={mdActions}><MomentsContext.Provider value={moments}><div className="chat-layout" data-code-expanded={embeddedCode&&codeExpanded||undefined} data-panel={pane ?? 'rail'} data-empty={empty || undefined} data-max={(maximized && termOpen) || undefined}>
   {embeddedCode&&<CodeChatResize onResize={()=>setCodeExpanded(false)}/>}
   <div className="chat-screen" onDragOver={e=>{if(e.dataTransfer.types.includes('Files'))e.preventDefault();}} onDrop={e=>{if(e.dataTransfer.files.length){e.preventDefault();void onFiles(e.dataTransfer.files);}}}>
     {embeddedCode&&<div className="code-chat-heading"><strong>{activeConv?.title||'Chat'}</strong><button type="button" className="tool" aria-label={codeExpanded?'Narrow chat':'Expand chat'} aria-expanded={codeExpanded} title={codeExpanded?'Narrow chat':'Expand chat'} onClick={()=>setCodeExpanded(v=>!v)}><UiIcon name="expand" size={14}/></button></div>}
@@ -585,7 +607,8 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
     {pane === 'changes' ? <ChangesPane panes={panes} client={client} folder={project?.folder ?? null}/> : <FilesPane panes={panes} onOpenCode={onOpenCode&&project?.folder?file=>onOpenCode(project.folder!,file):undefined}/>}
   </aside>}
 
-  </div></MomentsContext.Provider>;
+  <ContextMenu menu={fileCtl.menu} onClose={fileCtl.close}/>
+  </div></MomentsContext.Provider></MarkdownActionsContext.Provider>;
 }
 
 const TERMINAL_APPS = [{ id: 'subscription:claude', label: 'Claude Code' }, { id: 'subscription:codex', label: 'Codex' }, { id: 'subscription:gemini', label: 'Google Gemini' }] as const;
@@ -830,6 +853,8 @@ function AssistantTurn({ turn, last, onRetry, writer, writerDepartment, writerRo
           <span>{turn.code === 'run_interrupted' ? 'Your request and tool checkpoints are saved. Continue safely after reviewing them; previous actions are not replayed automatically.' : turn.code === 'subscription_org_blocked' ? 'Your organization has disabled Claude Code subscription access. Ask its administrator to enable access, or choose another signed-in coding app.' : turn.code === 'lmstudio_not_running' ? 'Open LM Studio, load the model and start its local server (port 1234), then try again.' : turn.code === 'local_model_missing' ? 'This agent answers with a local model that is not on this computer. Pick an installed model or add a Claude key in Settings, then try again.' : turn.code === 'model_unavailable' ? 'The model or coding app stopped before the reply was done. Check that it is running and signed in, then try again; anything above was written before it stopped.' : 'Something went wrong before the reply was done; anything above was written before it.'}</span>
           {last && onRetry && <button type="button" className="chat-error-action" onClick={onRetry}><UiIcon name="refresh" size={12}/>{turn.code === 'run_interrupted' ? 'Continue safely' : 'Try again'}</button>}
         </div>}
+        {/* CHAT-CONTENT-01: the files this reply changed, wrote or read. */}
+        <FileChips files={replyFiles(turn.parts)}/>
         {sessions.length > 0 && <SessionsCard sessions={sessions}/>}
         {choice && <ChoiceCard choice={choice} open={last}/>}
         {suggestions.map((g, i) => <CardSuggestionView key={i} suggestion={g} onCreate={onSuggest}/>)}
@@ -1008,10 +1033,29 @@ function ToolDetail({ call, kind, command, args }: { call: ToolCall; kind: ToolK
       <div key={k}><dt>{k}</dt><dd dir="auto">{typeof val === 'string' ? val.slice(0, 400) : JSON.stringify(val).slice(0, 400)}</dd></div>)}</dl>}
     {call.output !== undefined && <div className="tool-output">
       <div className="tool-output-head"><span>{call.isError ? 'Error' : 'Output'}</span><Copy text={call.output} label="Copy output"/></div>
-      <pre dir="ltr">{call.output || '(no output)'}</pre>
+      {kind === 'command' ? <CommandOutput call={call}/> : <pre dir="ltr">{call.output || '(no output)'}</pre>}
     </div>}
     {call.running && <p className="tool-running">Running…</p>}
   </div>;
+}
+
+/** CHAT-CONTENT-01: a command's output folds after 6 lines; its end state shows (the exit code when the output gives it). */
+export const OUTPUT_FOLD_LINES = 6;
+export function exitOf(output: string, isError?: boolean): string {
+  const m = /\bexit(?:ed)?(?: with)?(?: code| status)?[:=\s]+(-?\d{1,3})\b/i.exec(output);
+  const code = m ? Number(m[1]) : null;
+  return code !== null ? (code === 0 && !isError ? 'Done · exit 0' : `Failed · exit ${code}`) : isError ? 'Failed' : 'Done';
+}
+function CommandOutput({ call }: { call: ToolCall }) {
+  const [all, setAll] = useState(false);
+  const lines = (call.output ?? '').split('\n');
+  const fold = !all && lines.length > OUTPUT_FOLD_LINES;
+  const end = call.running ? null : exitOf(call.output ?? '', call.isError);
+  return <>
+    <pre dir="ltr">{(fold ? lines.slice(0, OUTPUT_FOLD_LINES).join('\n') : call.output) || '(no output)'}</pre>
+    {fold && <button type="button" className="md-code-more" onClick={() => setAll(true)}>Show {lines.length - OUTPUT_FOLD_LINES} more lines</button>}
+    {end && <p className="tool-exit" data-failed={/^Failed/.test(end) || undefined}>{end}{call.ms !== undefined ? ` · ${stepTime(call.ms)}` : ''}</p>}
+  </>;
 }
 
 function HandOffs({ calls }: { calls: ToolCall[] }) {

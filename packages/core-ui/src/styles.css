@@ -3874,3 +3874,64 @@ label.setup-kind { display:flex; align-items:center; justify-content:flex-start;
 /* CHAT-LIVE-01: steps and sub-steps line up in one column; a sub-step only has a smaller dot and quieter text. */
 .app-shell .plan-line li[data-sub], .app-shell .task-list li[data-sub] { padding-inline-start:0; font-size:inherit; color:var(--text-3); }
 .app-shell .plan-line li[data-sub] .task-dot, .app-shell .task-list li[data-sub] .task-dot { transform:scale(.75); }
+
+/* CHAT-CONTENT-01: the choice card (board "What a reply can hold" §1). */
+.choice-card .choice-options { display:flex; flex-direction:column; gap:8px; }
+.choice-card .choice-option { display:flex; align-items:flex-start; gap:12px; inline-size:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border, #2E3344); background:transparent; color:var(--text); font:inherit; text-align:start; cursor:pointer; }
+.choice-card .choice-option:hover { background:var(--row-hover); }
+.choice-card .choice-option[data-recommended] { border:1.5px solid var(--accent); background:color-mix(in srgb, var(--accent) 10%, transparent); }
+.choice-card .choice-option[aria-pressed="true"] { border-color:var(--accent); }
+.choice-card .choice-num { flex:none; inline-size:22px; block-size:22px; border-radius:6px; display:grid; place-items:center; font-size:12px; font-weight:700; background:var(--row-hover); color:var(--text-2); }
+.choice-card .choice-option[data-recommended] .choice-num { background:var(--accent); color:var(--on-accent, #fff); }
+.choice-card .choice-text { display:flex; flex-direction:column; gap:3px; min-inline-size:0; }
+.choice-card .choice-label { font-size:13.5px; font-weight:600; }
+.choice-card .choice-rec { margin-inline-start:6px; font-size:11px; font-weight:600; color:var(--accent); }
+.choice-card .choice-reason { font-size:12.5px; color:var(--text-3); }
+.choice-card .choice-else { border-style:dashed; color:var(--text-3); align-items:center; }
+.choice-card .choice-else .choice-num { background:transparent; border:1px solid var(--border, #2E3344); }
+.choice-card .choice-hint { display:flex; justify-content:space-between; gap:12px; margin:0; font-size:11.5px; color:var(--text-4, var(--text-3)); }
+.tool-output .tool-exit { margin:4px 0 0; font-size:11.5px; color:#3FB37F; font-family:ui-monospace, Menlo, monospace; }
+.tool-output .tool-exit[data-failed] { color:#E5484D; }
+/* CHAT-CONTENT-01: file chips (board §4). */
+.file-chips { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 2px; }
+.file-chip { display:flex; align-items:center; gap:10px; min-inline-size:200px; max-inline-size:320px; padding:8px 10px; border-radius:10px; border:1px solid var(--border, #2E3344); background:var(--surface, transparent); color:var(--text); font:inherit; text-align:start; cursor:pointer; }
+.file-chip:hover { background:var(--row-hover); }
+.file-chip .file-tile { flex:none; inline-size:30px; block-size:30px; border-radius:8px; display:grid; place-items:center; font-size:10px; font-weight:700; background:#22304f; color:#82aaff; }
+.file-chip[data-tile="html"] .file-tile { background:#3a2a1a; color:#f0972a; }
+.file-chip[data-tile="pdf"] .file-tile { background:#3a1a1e; color:#ff7a80; }
+.file-chip[data-tile="code"] .file-tile { background:#1f2b3a; color:#7cc4ff; }
+.file-chip[data-tile="data"] .file-tile { background:#1d3027; color:#67e8b4; }
+.file-chip[data-tile="text"] .file-tile { background:var(--row-hover); color:var(--text-2); }
+.file-chip .file-chip-text { display:flex; flex-direction:column; gap:1px; min-inline-size:0; }
+.file-chip b { font-size:12.5px; font-weight:600; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.file-chip small { font-size:11.5px; color:var(--text-3); }
+
+/* CHAT-CONTENT-01: the file viewer beside the chat (board right column). */
+@media (min-width: 901px) { .app-shell .chat-layout[data-panel="files"]:has(.file-viewer) { grid-template-columns:minmax(0,1fr) minmax(24rem,46%); } }
+.file-viewer .pane-head { gap:6px; }
+.file-viewer .file-modes { display:inline-flex; margin-inline-start:auto; padding:2px; border-radius:8px; background:var(--row-hover); }
+.file-viewer .file-modes button { min-block-size:24px; padding:0 9px; border:0; border-radius:6px; background:transparent; color:var(--text-3); font-size:12px; }
+.file-viewer .file-modes button[aria-selected="true"] { background:var(--surface, #262B3B); color:var(--text); box-shadow:0 0 0 1px var(--border); }
+.file-viewer .md-view { display:flex; min-block-size:0; flex:1; overflow:auto; }
+.file-viewer .md-outline { flex:none; inline-size:150px; padding:12px 10px; border-inline-end:1px solid var(--border); display:flex; flex-direction:column; gap:6px; font-size:12px; position:sticky; inset-block-start:0; align-self:flex-start; }
+.file-viewer .md-outline b { color:var(--text-2); font-weight:600; }
+.file-viewer .md-outline button { all:unset; cursor:pointer; color:var(--text-3); overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.file-viewer .md-outline button:hover { color:var(--accent); }
+.file-viewer .md-outline button[data-level="2"] { padding-inline-start:10px; } .file-viewer .md-outline button[data-level="3"], .file-viewer .md-outline button[data-level="4"] { padding-inline-start:20px; }
+.file-viewer .md-body { flex:1; min-inline-size:0; padding:14px 18px; }
+.file-viewer .html-view { display:flex; flex-direction:column; flex:1; min-block-size:0; padding:8px 12px 12px; gap:6px; }
+.file-viewer .html-view iframe { flex:1; min-block-size:300px; border:0; border-radius:8px; background:#fff; }
+.file-viewer .html-note { margin:0; font-size:11px; }
+.file-viewer .pdf-view { display:flex; gap:10px; flex:1; min-block-size:0; padding:10px; overflow:hidden; }
+.file-viewer .pdf-thumbs { flex:none; inline-size:46px; display:flex; flex-direction:column; gap:6px; overflow:auto; }
+.file-viewer .pdf-thumbs button { block-size:58px; border:0; border-radius:3px; background:var(--row-hover); color:var(--text-3); font-size:11px; display:grid; place-items:end center; padding-block-end:4px; }
+.file-viewer .pdf-thumbs button[aria-selected="true"] { background:#f5f5f2; color:#1B1D24; outline:2px solid var(--accent); }
+.file-viewer .pdf-thumbs button[data-marked]::before { content:''; inline-size:6px; block-size:6px; border-radius:50%; background:#ffd84d; position:relative; inset-block-start:-34px; }
+.file-viewer .pdf-page { flex:1; min-inline-size:0; overflow:auto; padding:14px 16px; border-radius:4px; background:#f5f5f2; color:#1B1D24; font-size:12.5px; line-height:1.55; }
+.file-viewer .pdf-page p { margin:0 0 4px; white-space:pre-wrap; }
+.file-viewer mark { background:#fff3b0; color:#1B1D24; border-radius:2px; }
+/* CHAT-CONTENT-01: command blocks (board §3). */
+.md-terminal .md-code { background:#08090D; color:#E8EAF0; }
+.md-terminal .md-prompt { color:#6b7189; }
+.md-code-btn.md-run { background:#1f6f4a; border-color:#2a8a5e; color:#fff; }
+.app-shell .md-code-lang, .md-code-lang { text-transform:none; }

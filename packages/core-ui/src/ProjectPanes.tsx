@@ -5,6 +5,7 @@ import { UiIcon } from './ui-icons';
 import { ContextMenu, useMenu } from './desktop-ui';
 import { OpenInCodeIcon, fileMenu } from './CodeOpen';
 import { joinPath } from './code-open';
+import { Markdown } from './markdown';
 type CodeRequester = Parameters<typeof fileMenu>[0];
 
 /** Names that usually hold secrets: shown locked; Girru does not open them (the server checks again). */
@@ -95,18 +96,7 @@ export function FilesPane({ panes, onOpenCode }: { panes: PanesController; onOpe
   useEffect(() => { if (s.projectId && !s.tree['']) void panes.loadFolder(''); }, [panes, s.projectId, s.tree]);
   const [q, setQ] = useState('');
   if (!s.projectId) return <p className="pane-empty">Pick a project with a folder to browse its files.</p>;
-  if (s.file) {
-    const f = s.file.load;
-    return <div className="pane" aria-label="File">
-      <div className="pane-head"><button type="button" className="row-tool" aria-label="Back to files" onClick={() => panes.closeFile()}><UiIcon name="arrow-left" size={12}/></button>
-        <span className="pane-path" dir="ltr" title={s.file.path}>{s.file.path}</span>{f.phase === 'ready' && <span className="muted">{size(f.data.size)}</span>}{onOpenCode&&f.phase==='ready'&&!f.data.hidden&&<button type="button" className="row-tool" aria-label="Open file in Code" title="Open file in Code" onClick={()=>onOpenCode(s.file!.path)}><UiIcon name="code" size={13}/></button>}</div>
-      {f.phase === 'loading' ? <p className="pane-empty">Loading…</p> : f.phase === 'error' ? <p className="pane-empty error">{f.message}</p>
-        : f.data.hidden ? <p className="pane-empty">Hidden: this file may hold secrets.</p>
-        : f.data.binary || f.data.text === null ? <p className="pane-empty">Binary file; it cannot be shown as text.</p>
-        : <div className="file-view" dir="ltr">{f.data.text.split('\n').map((line, i) => <div key={i} className="file-line"><span className="diff-no" aria-hidden="true">{i + 1}</span><code>{line}</code></div>)}
-          {f.data.truncated && <p className="pane-empty">Only the first 512 KB are shown.</p>}</div>}
-    </div>;
-  }
+  if (s.file) return <FileViewer panes={panes} file={s.file} view={s.diffView} onOpenCode={onOpenCode}/>;
   return <div className="pane" aria-label="Files">
     {/* CH4: find a file by name in the folders that are open. */}
     <div className="pane-head"><label className="pane-find"><UiIcon name="search" size={12}/><input type="search" aria-label="Find a file" placeholder="Find a file" value={q} onChange={e => setQ(e.target.value)}/></label>
@@ -134,3 +124,82 @@ function Folder({ panes, rel, depth, q }: { panes: PanesController; rel: string;
     </li>;
   })}{t.data.truncated && <li className="pane-empty">Only the first 1000 entries are listed.</li>}</ul>;
 }
+
+/** CHAT-CONTENT-01: what a file can show beside the chat. */
+type FileMode = 'preview' | 'source' | 'changes' | 'pages';
+const kindOf = (path: string) => /\.(md|markdown|mdx)$/i.test(path) ? 'md' : /\.html?$/i.test(path) ? 'html' : /\.pdf$/i.test(path) ? 'pdf' : 'text';
+/** The headings of a Markdown text (the viewer's outline), with stable ids. */
+export function outlineOf(text: string): { level: number; title: string; id: string }[] {
+  const out: { level: number; title: string; id: string }[] = []; let fence = false;
+  for (const line of text.split('\n')) {
+    if (/^\s*(```|~~~)/.test(line)) { fence = !fence; continue; }
+    const m = !fence && /^(#{1,4})\s+(.+?)\s*#*\s*$/.exec(line);
+    if (m) out.push({ level: m[1].length, title: m[2].replace(/[*_`]/g, ''), id: `h-${out.length}` });
+  }
+  return out.slice(0, 80);
+}
+/** Text split around every place `mark` appears (any case), for the marked line. */
+export function markParts(text: string, mark?: string): { text: string; hit: boolean }[] {
+  if (!mark) return [{ text, hit: false }];
+  const out: { text: string; hit: boolean }[] = []; const lc = text.toLowerCase(), m = mark.toLowerCase(); let i = 0;
+  for (let j = lc.indexOf(m); j >= 0 && out.length < 200; j = lc.indexOf(m, i)) { if (j > i) out.push({ text: text.slice(i, j), hit: false }); out.push({ text: text.slice(j, j + m.length), hit: true }); i = j + m.length; }
+  if (i < text.length) out.push({ text: text.slice(i), hit: false });
+  return out;
+}
+
+function FileViewer({ panes, file, view, onOpenCode }: { panes: PanesController; file: NonNullable<ReturnType<PanesController['getSnapshot']>['file']>; view: DiffViewName; onOpenCode?: (file: string) => void }) {
+  const kind = kindOf(file.path);
+  const [mode, setMode] = useState<FileMode>(kind === 'pdf' ? 'pages' : kind === 'text' ? 'source' : 'preview');
+  const [copied, setCopied] = useState(false);
+  const [page, setPage] = useState(0);
+  const body = useRef<HTMLDivElement>(null);
+  useEffect(() => { setMode(kind === 'pdf' ? 'pages' : kind === 'text' ? 'source' : 'preview'); setPage(0); }, [file.path]);
+  useEffect(() => { if (mode === 'changes') void panes.loadFileDiff(); }, [mode, file.path]);
+  const f = file.load;
+  const text = f.phase === 'ready' && !f.data.hidden && !f.data.binary ? f.data.text : null;
+  const pdf = file.pdf?.phase === 'ready' ? file.pdf.data : null;
+  const pages = pdf && 'pages' in pdf ? pdf.pages : null;
+  // The page that holds the marked text opens first.
+  useEffect(() => { if (pages && file.mark) { const i = pages.findIndex(p => p.text.toLowerCase().includes(file.mark!.toLowerCase())); if (i >= 0) setPage(i); } }, [pages, file.mark]);
+  // A folder without git has no changes to show, so its files drop the Changes tab.
+  const changes = panes.getSnapshot().changes;
+  useEffect(() => { if (!changes) void panes.loadChanges(); }, [changes]);
+  const tracked = !(changes?.phase === 'ready' && changes.data.notGit);
+  const modes: FileMode[] = (kind === 'pdf' ? ['pages'] : kind === 'text' ? ['source', 'changes'] : ['preview', 'source', 'changes']).filter((m): m is FileMode => tracked || m !== 'changes') as FileMode[];
+  const label: Record<FileMode, string> = { preview: 'Preview', source: 'Source', changes: 'Changes', pages: 'Pages' };
+  const copy = () => { const t = text ?? (pages ? pages.map(p => p.text).join('\n\n') : ''); if (!t || !navigator.clipboard) return; void navigator.clipboard.writeText(t).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }, () => undefined); };
+  const outline = kind === 'md' && text && mode === 'preview' ? outlineOf(text) : [];
+  return <div className="pane file-viewer" aria-label="File" data-kind={kind}>
+    <div className="pane-head">
+      <button type="button" className="row-tool" aria-label="Back to files" title="Back to files" onClick={() => panes.closeFile()}><UiIcon name="arrow-left" size={12}/></button>
+      <span className="pane-path" dir="ltr" title={file.path}>{file.path.split('/').at(-1)}</span>
+      {f.phase === 'ready' && !pdf && <span className="muted">{size(f.data.size)}</span>}
+      {pages && <span className="muted">Page {page + 1} of {pdf && 'pageCount' in pdf ? pdf.pageCount : pages.length}</span>}
+      {modes.length > 1 && <span className="file-modes" role="tablist" aria-label="View">{modes.map(m => <button key={m} type="button" role="tab" aria-selected={mode === m} onClick={() => setMode(m)}>{label[m]}</button>)}</span>}
+      <button type="button" className="row-tool" aria-label={copied ? 'Copied' : 'Copy the file text'} title={copied ? 'Copied' : 'Copy the file text'} onClick={copy}><UiIcon name={copied ? 'check' : 'copy'} size={12}/></button>
+      {onOpenCode && f.phase === 'ready' && !f.data.hidden && <button type="button" className="row-tool" aria-label="Open in Code" title="Open in Code" onClick={() => onOpenCode(file.path)}><UiIcon name="code" size={13}/></button>}
+      <button type="button" className="row-tool" aria-label="Close the file" title="Close (Esc)" onClick={() => panes.closeFile()}><UiIcon name="close" size={12}/></button>
+    </div>
+    {f.phase === 'loading' ? <p className="pane-empty">Loading…</p> : f.phase === 'error' ? <p className="pane-empty error">{f.message}</p>
+      : f.data.hidden ? <p className="pane-empty">Hidden: this file may hold secrets.</p>
+      : mode === 'changes' ? (file.diff ? <DiffView load={file.diff} view={view}/> : <p className="pane-empty">Loading…</p>)
+      : kind === 'pdf' ? (file.pdf?.phase === 'loading' || !file.pdf ? <p className="pane-empty">Reading the PDF…</p>
+        : file.pdf.phase === 'error' ? <p className="pane-empty error">{file.pdf.message}</p>
+        : !pages ? <p className="pane-empty">{pdfWhy((file.pdf.data as { reason: string }).reason)}</p>
+        : <div className="pdf-view">
+          <div className="pdf-thumbs" role="tablist" aria-label="Pages">{pages.map((p, i) => <button key={p.page} type="button" role="tab" aria-selected={i === page} aria-label={`Page ${p.page}`} title={`Page ${p.page}`} data-marked={!!file.mark && p.text.toLowerCase().includes(file.mark.toLowerCase()) || undefined} onClick={() => setPage(i)}><span>{p.page}</span></button>)}</div>
+          <div className="pdf-page" dir="auto">{(pages[page]?.text ?? '').split('\n').map((line, i) => <p key={i}>{markParts(line, file.mark).map((x, j) => x.hit ? <mark key={j}>{x.text}</mark> : x.text)}</p>)}</div>
+        </div>)
+      : text === null ? <p className="pane-empty">Binary file; it cannot be shown as text.</p>
+      : mode === 'preview' && kind === 'md' ? <div className="md-view" ref={body}>
+          {outline.length > 1 && <nav className="md-outline" aria-label="On this page"><b>On this page</b>{outline.map((h, i) => <button key={i} type="button" data-level={h.level} onClick={() => body.current?.querySelectorAll('.md-body h1, .md-body h2, .md-body h3, .md-body h4')[i]?.scrollIntoView({ block: 'start', behavior: 'smooth' })}>{h.title}</button>)}</nav>}
+          <div className="md-body chat-prose md-host"><Markdown text={text}/></div>
+        </div>
+      : mode === 'preview' && kind === 'html' ? <div className="html-view"><p className="muted html-note">Preview · scripts off</p>
+          {/* Shown in a frame with every permission off: no scripts, forms, popups or same-origin access. */}
+          <iframe title={`Preview of ${file.path}`} sandbox="" srcDoc={text} referrerPolicy="no-referrer"/></div>
+      : <div className="file-view" dir="ltr">{text.split('\n').map((line, i) => <div key={i} className="file-line"><span className="diff-no" aria-hidden="true">{i + 1}</span><code>{markParts(line, file.mark).map((x, j) => x.hit ? <mark key={j}>{x.text}</mark> : x.text)}</code></div>)}
+          {f.data.truncated && <p className="pane-empty">Only the first 512 KB are shown.</p>}</div>}
+  </div>;
+}
+const pdfWhy = (r: string) => r === 'encrypted' ? 'This PDF is locked with a password.' : r === 'no_text' ? 'This PDF has no text Girru can read (a scan).' : r === 'too_large' ? 'This PDF is too large to show.' : r === 'hidden' ? 'Hidden: this file may hold secrets.' : 'This PDF cannot be shown.';
