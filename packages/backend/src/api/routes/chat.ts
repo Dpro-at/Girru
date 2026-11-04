@@ -1203,7 +1203,7 @@ You: [Present results with \`\`\`spec blocks showing temperature, conditions, et
         signal: lmAbort.signal,
         temperature,
         maxTokens: p2b ? p2b.maxTokens : maxTokens,
-        ...(p2b ? { toolSet: p2b.toolSet, callCap: p2b.callCap, maxSteps: p2b.maxSteps } : {}),
+        ...(p2b ? { toolSet: p2b.toolSet, callCap: p2b.callCap, maxSteps: p2b.maxSteps, toolOutputChars: p2b.toolOutputChars, beforeStep: p2b.beforeStep } : {}),
       });
       console.log('[Chat] ✅ LM Studio turn ended', { steps: result.steps, chars: result.answer.length, aborted: result.aborted, ms: Date.now() - lmStarted });
     } catch (err) {
@@ -1239,7 +1239,7 @@ You: [Present results with \`\`\`spec blocks showing temperature, conditions, et
       messages: ollamaMessages.map((m) => ({ role: m.role, content: messageText(m.content), ...(m.images?.length ? { images: m.images.map((i) => i.data) } : {}) })),
       tools,
       execute: p2b ? p2b.execute : (name, args) => toolsRegistry.execute(name, args),
-      ...(p2b ? { toolSet: p2b.toolSet, callCap: p2b.callCap, maxSteps: p2b.maxSteps } : {}),
+      ...(p2b ? { toolSet: p2b.toolSet, callCap: p2b.callCap, maxSteps: p2b.maxSteps, toolOutputChars: p2b.toolOutputChars, beforeStep: p2b.beforeStep } : {}),
       write: (frame) => { if (!reply.raw.writableEnded) reply.raw.write(`data: ${JSON.stringify(frame)}\n\n`); },
       signal: upstreamAbort.signal,
       temperature,
@@ -1359,7 +1359,7 @@ async function nonStreamChat(
     });
     console.log('[Chat] P2b local turn (one piece)', localTurnLog(p2b));
     const msgs = [{ role: 'system' as const, content: p2b.system }, ...p2b.messages.map((m) => ({ role: m.role === 'assistant' ? 'assistant' as const : 'user' as const, content: messageText(m.content) }))];
-    const common = { execute: p2b.execute, write: () => {}, signal: AbortSignal.timeout(180_000), temperature, maxTokens: p2b.maxTokens, tools: [], toolSet: p2b.toolSet, callCap: p2b.callCap, maxSteps: p2b.maxSteps };
+    const common = { execute: p2b.execute, write: () => {}, signal: AbortSignal.timeout(180_000), temperature, maxTokens: p2b.maxTokens, tools: [], toolSet: p2b.toolSet, callCap: p2b.callCap, maxSteps: p2b.maxSteps, toolOutputChars: p2b.toolOutputChars, beforeStep: p2b.beforeStep };
     const ended = beginLocalReply(model);
     try {
       const result = provider === 'ollama'

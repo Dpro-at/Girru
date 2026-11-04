@@ -50,6 +50,10 @@ export interface LmStudioLoopOptions {
   toolSet?: { definitions(): ApiTool[] };
   /** STORE-MAP-01 P2b (weak tool calling): at most this many calls of one reply run, one after another. */
   callCap?: number;
+  /** STORE-MAP-01 P2b (adaptive budget): characters of one tool result given back to the model. */
+  toolOutputChars?: number;
+  /** STORE-MAP-01 P2b (adaptive budget): called with the messages before every model call (shortens them to fit). */
+  beforeStep?: (messages: { role: string; content: unknown }[]) => void;
 }
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}\n… ${s.length - n} more characters` : s);
@@ -83,6 +87,7 @@ export async function runLmStudioAgentLoop(o: LmStudioLoopOptions): Promise<{ st
       step++;
       // CHAT-BUILD-01 stage 5 (Steer now): the owner's messages sent while it works go in before this step.
       for (const text of currentChatRun()?.takeSteers?.() ?? []) messages.push({ role: 'user', content: text });
+      o.beforeStep?.(messages as { role: string; content: unknown }[]);
       const { content, calls: asked } = await streamOne();
       if (!asked.length) { answer = content; break; }
       const calls = o.callCap ? planCalls(asked, o.callCap).run : asked;
@@ -91,7 +96,7 @@ export async function runLmStudioAgentLoop(o: LmStudioLoopOptions): Promise<{ st
       const { results, skippedNote } = await runStepCalls(asked, o.execute, now, o.callCap);
       if (o.signal.aborted) throw new Aborted();
       o.write({ type: 'tool_result', step, results: results.map((r) => ({ id: r.id, name: r.name, output: clip(r.text, TOOL_OUTPUT_CHARS), isError: r.isError, ms: r.ms })) });
-      for (const [i, r] of results.entries()) messages.push({ role: 'tool', tool_call_id: r.id, content: clip(r.text, TOOL_OUTPUT_MODEL_CHARS) + (skippedNote && i === results.length - 1 ? `\n\n${skippedNote}` : '') });
+      for (const [i, r] of results.entries()) messages.push({ role: 'tool', tool_call_id: r.id, content: clip(r.text, o.toolOutputChars ?? TOOL_OUTPUT_MODEL_CHARS) + (skippedNote && i === results.length - 1 ? `\n\n${skippedNote}` : '') });
       if (step >= maxSteps) {
         const note = `\n\nI used ${maxSteps} steps on this task. Tell me to continue and I will pick up from here.`;
         o.write({ type: 'text', content: note });

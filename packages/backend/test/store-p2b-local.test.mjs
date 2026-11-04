@@ -228,7 +228,7 @@ for (const [label, provider, wire, model] of [['Ollama', 'ollama', 'ollama', 'qw
       i++;
       return r;
     };
-    const common = { messages: [{ role: 'system', content: lt.system }, ...lt.messages], tools: [], execute, write: () => {}, signal: new AbortController().signal, toolSet: lt.toolSet, callCap: lt.callCap, maxSteps: lt.maxSteps, maxTokens: lt.maxTokens };
+    const common = { messages: [{ role: 'system', content: lt.system }, ...lt.messages], tools: [], execute, write: () => {}, signal: new AbortController().signal, toolSet: lt.toolSet, callCap: lt.callCap, maxSteps: lt.maxSteps, maxTokens: lt.maxTokens, toolOutputChars: lt.toolOutputChars, beforeStep: lt.beforeStep };
     const out = provider === 'ollama'
       ? await runOllamaAgentLoop({ ...common, url: OLLAMA, model, numCtx: lt.numCtx })
       : await runLmStudioAgentLoop({ ...common, url: provider === 'lmstudio' ? LMSTUDIO : GENERIC, model: model.split(':').slice(1).join(':') });

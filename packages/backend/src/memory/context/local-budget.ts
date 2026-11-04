@@ -135,3 +135,27 @@ export function fitLocalTurn<M extends FitMessage>(input: { system: string; mess
     fits: total <= budget.promptTokens,
   };
 }
+
+/**
+ * Inside one turn, tool results grow the prompt step by step. Before each
+ * model call the oldest tool results, then the oldest earlier answers of this
+ * turn, are shortened until the request fits `tokens` again (the system text
+ * and the new message are never touched). Mutates `messages`; returns how many
+ * were shortened.
+ */
+export function shrinkStep(messages: { role: string; content: unknown }[], tokens: number, keepChars = 400): number {
+  const size = () => messages.reduce((n, m) => n + estimateTokens(textOf(m.content)) + 4, 0);
+  let shortened = 0;
+  for (const role of ['tool', 'assistant']) {
+    for (let i = 0; i < messages.length - 1 && size() > tokens; i++) {
+      const m = messages[i];
+      if (m.role !== role || typeof m.content !== 'string' || m.content.length <= keepChars + 40) continue;
+      m.content = `${m.content.slice(0, keepChars)}\n[… shortened to keep room in this model's window …]`;
+      shortened++;
+    }
+  }
+  return shortened;
+}
+
+/** Characters of one tool result given back to a model of this budget (its memory share). */
+export const toolOutputChars = (b: LocalBudget): number => Math.max(1200, b.memory * 3);

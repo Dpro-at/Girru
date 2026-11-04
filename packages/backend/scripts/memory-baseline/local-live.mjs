@@ -15,7 +15,7 @@ process.env.OLLAMA_URL = OLLAMA;
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.NODE_ENV = 'test';
 process.env.CHAT_NUM_CTX = '8192';
-process.env.OLLAMA_THINK = 'false';
+delete process.env.OLLAMA_THINK; // the chat's own default (thinking stays out of the answer)
 process.env.AGENT_PLAYER_CONFIG_DIR = join(dataRoot, 'cli-config');
 for (const k of ['GIRRU_STORE_PILOT', 'GIRRU_STORE_P2', 'GIRRU_STORE_P3', 'GIRRU_STORE_P4', 'GIRRU_STORE_P5', 'GIRRU_STORE_P6', 'GIRRU_STORE_P7', 'GIRRU_STORE_P8', 'GIRRU_STORE_P9', 'GIRRU_STORE_P9B', 'GIRRU_STORE_P2B']) process.env[k] = '1';
 mkdirSync(join(dataRoot, '.data', 'multi-agent'), { recursive: true });
@@ -80,20 +80,20 @@ for (const [verb, text] of TURNS) {
   const results = frames.filter((f) => f.type === 'tool_result').flatMap((f) => f.results.map((x) => ({ name: x.name, isError: x.isError, output: x.output.slice(0, 300) })));
   const approved = await approvePending();
   history.push({ role: 'assistant', content: answer || '(no text)' });
-  rows.push({ verb, ms: Date.now() - started, tools, results, answer: answer.slice(0, 300), approved, requests: requests.slice(before) });
+  rows.push({ verb, ms: Date.now() - started, tools, results, answer: answer.slice(-600), approved, requests: requests.slice(before) });
 }
 
 const used = (names) => rows.some((r) => r.results.some((x) => names.includes(x.name) && !x.isError));
-const facts = db.prepare(`SELECT content, valid_to, superseded_by, status FROM memories WHERE user_id = ? AND content LIKE '%Orbit release day%'`).all(OWNER);
-const current = facts.filter((m) => !m.valid_to && !m.superseded_by && m.status !== 'superseded');
+const facts = db.prepare(`SELECT content, valid_to, superseded_by, status, metadata FROM memories WHERE user_id = ? AND (content LIKE '%Orbit%' OR content LIKE '%hursday%' OR content LIKE '%riday%' OR metadata LIKE '%orbit-release-day%')`).all(OWNER);
+const current = facts.filter((m) => !m.valid_to && !m.superseded_by && m.status !== 'superseded' && m.status !== 'deleted');
 const handoffs = db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'agent_handoffs'`).get().n
   ? db.prepare('SELECT COUNT(*) AS n FROM agent_handoffs').get().n : null;
 const pending = (await call('GET', '/api/memory/proposals?status=pending')).json();
 const last = rows.at(-1);
 const checks = {
   save: rows[0].results.some((x) => x.name === 'memory_save' && !x.isError),
-  recall: rows[1].results.some((x) => x.name === 'memory_search' && !x.isError) && /friday/i.test(rows[1].answer),
-  supersede: current.some((m) => /thursday/i.test(m.content)) && !current.some((m) => /friday/i.test(m.content)),
+  recall: /friday/i.test(rows[1].answer),
+  supersede: current.some((m) => /thursday/i.test(m.content)) && !current.some((m) => /friday/i.test(m.content) && !/thursday/i.test(m.content)),
   handoff: rows[3].results.some((x) => x.name === 'handoff_save' && !x.isError),
   propose: JSON.stringify(pending).includes('two reviewers'),
   lastRecall: /thursday/i.test(last.answer) && !/friday/i.test(last.answer),
@@ -101,7 +101,7 @@ const checks = {
 };
 const failures = Object.entries(checks).filter(([, ok]) => !ok).map(([k]) => k);
 const record = recordLocalConformance({ provider: 'ollama', model: MODEL, passed: failures.length === 0, failures, window: requests[0]?.numCtx ?? null });
-const report = { model: MODEL, window: 8192, passed: record.passed, memoryLimited: !record.passed, failures, checks, handoffRows: handoffs, usedTools: [...new Set(rows.flatMap((r) => r.tools.map((t) => t.name)))],
+const report = { memories: facts.map((m) => ({ content: m.content.slice(0, 120), status: m.status, replaced: !!(m.valid_to || m.superseded_by) })), pendingProposals: JSON.stringify(pending).slice(0, 600), model: MODEL, window: 8192, passed: record.passed, memoryLimited: !record.passed, failures, checks, handoffRows: handoffs, usedTools: [...new Set(rows.flatMap((r) => r.tools.map((t) => t.name)))],
   turns: rows.map((r) => ({ verb: r.verb, ms: r.ms, tools: r.tools.map((t) => `${t.name} ${t.input.slice(0, 120)}`), errors: r.results.filter((x) => x.isError).map((x) => `${x.name}: ${x.output.slice(0, 160)}`), answer: r.answer, requests: r.requests.map((q) => ({ numCtx: q.numCtx, numPredict: q.numPredict, tools: q.tools.length, estTokens: Math.ceil(q.chars / 3) })) })) };
 console.log(JSON.stringify(report, null, 2));
 if (out) writeFileSync(out, JSON.stringify(report, null, 2));

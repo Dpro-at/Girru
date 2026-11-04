@@ -9,7 +9,7 @@ import { OLLAMA_URL } from '../llm/ollama.js';
 import { lmStudioApiUrl, lmStudioModelName } from '../llm/lmstudio.js';
 import { openAiLocalModelName, openAiLocalUrl } from '../llm/openai-local.js';
 import { lmStudioWindow, ollamaWindow, openAiCompatWindow, FALLBACK_WINDOW, type ModelWindow } from '../llm/model-window.js';
-import { fitLocalTurn, planLocalBudget, type FitMessage, type FitResult, type LocalBudget } from '../memory/context/local-budget.js';
+import { fitLocalTurn, planLocalBudget, shrinkStep, toolOutputChars, toolTokens, type FitMessage, type FitResult, type LocalBudget } from '../memory/context/local-budget.js';
 import { CALLS_PER_STEP, OnDemandTools, STEPS_PER_TURN } from '../tools/on-demand.js';
 import type { ToolDef } from '../tools/tool-doors.js';
 import type { ToolResult } from '../tools/types.js';
@@ -50,6 +50,9 @@ export interface LocalTurn<M extends FitMessage> {
   execute(name: string, args: Record<string, unknown>): Promise<ToolResult>;
   callCap: number;
   maxSteps: number;
+  /** Characters of one tool result for the model, and the per-step shrink that keeps every request in the window. */
+  toolOutputChars: number;
+  beforeStep(messages: { role: string; content: unknown }[]): void;
   numCtx: number;
   /** The reply limit: the owner's or the agent's when smaller, else the budget's reply room. */
   maxTokens: number;
@@ -79,6 +82,9 @@ export function prepareLocalTurn<M extends FitMessage>(input: {
     execute: (name, args) => toolset.execute(name, args, input.run),
     callCap: CALLS_PER_STEP[budget.tier],
     maxSteps: STEPS_PER_TURN[budget.tier],
+    toolOutputChars: toolOutputChars(budget),
+    // The system message is part of `messages` in the loops; the tools are sent beside them.
+    beforeStep: (messages) => { shrinkStep(messages, budget.promptTokens - toolTokens(toolset.definitions())); },
     numCtx: budget.window,
     maxTokens: input.maxTokens && input.maxTokens > 0 ? Math.min(input.maxTokens, budget.replyTokens) : budget.replyTokens,
   };

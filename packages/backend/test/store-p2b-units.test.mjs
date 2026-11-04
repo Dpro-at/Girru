@@ -255,3 +255,16 @@ test('LAT: background work waits while a local reply runs, one job at a time; th
   end();
   assert.equal(S.schedulerStats().queued, 0);
 });
+
+test('adaptive budget inside a turn: older tool results shrink so every step fits', async () => {
+  const { shrinkStep, toolOutputChars } = await import('../src/memory/context/local-budget.ts');
+  const msgs = [{ role: 'system', content: 'S'.repeat(3000) }, { role: 'user', content: 'q' },
+    { role: 'assistant', content: 'a'.repeat(6000) }, { role: 'tool', content: 't'.repeat(9000) }, { role: 'tool', content: 'u'.repeat(9000) }, { role: 'user', content: 'last' }];
+  const n = shrinkStep(msgs, 3000);
+  assert.ok(n >= 2);
+  assert.equal(msgs[0].content.length, 3000, 'the system text is never touched');
+  assert.equal(msgs.at(-1).content, 'last');
+  assert.match(msgs[3].content, /shortened to keep room/);
+  assert.ok(msgs.reduce((t, m) => t + estimateTokens(m.content) + 4, 0) <= 3000);
+  assert.equal(toolOutputChars(planLocalBudget(8192)), 2949);
+});

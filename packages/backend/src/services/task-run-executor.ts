@@ -43,7 +43,7 @@ import { resolveProviderApiKey } from '../credentials/authority.js';
 import { ollamaToolChat } from '../llm/ollama-tool-chat.js';
 import { storeP2bEnabled } from './store-p2b.js';
 import { localModelWindow, NO_INVENTED_MEMORY } from './local-turn.js';
-import { planLocalBudget } from '../memory/context/local-budget.js';
+import { planLocalBudget, toolOutputChars } from '../memory/context/local-budget.js';
 import { OnDemandTools } from '../tools/on-demand.js';
 import { capTokens } from './agent-context/budget.js';
 import { DEFAULT_OLLAMA_MODEL } from '../llm/ollama.js';
@@ -237,7 +237,7 @@ function claudeDriver(claude: ClaudeClient, agent: AgentRow, systemPrompt: strin
 }
 
 /** MCP-01: local Ollama model of the small agent (non-streaming, tools in function format). */
-function ollamaDriver(agent: AgentRow, systemPrompt: string, tools: any[] | (() => any[]), numCtx?: number): ModelDriver {
+function ollamaDriver(agent: AgentRow, systemPrompt: string, tools: any[] | (() => any[]), numCtx?: number, toolChars?: number): ModelDriver {
   // STORE-MAP-01 P2b: tools on demand give the list of each step (the memory verbs, tool_load, what was loaded).
   const toolsNow = () => (typeof tools === 'function' ? tools() : tools);
   return {
@@ -261,7 +261,7 @@ function ollamaDriver(agent: AgentRow, systemPrompt: string, tools: any[] | (() 
     toolResultMessages: (results) => results.map(({ tool, result, text }) => ({
       role: 'tool',
       tool_name: tool,
-      content: result?.error ? `Error: ${text}` : text,
+      content: (result?.error ? `Error: ${text}` : text).slice(0, toolChars ?? Number.MAX_SAFE_INTEGER),
     })),
   };
 }
@@ -463,7 +463,7 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
       const onDemand = new OnDemandTools(registry.getToolsForAPI(), budget.tier);
       taskTools = onDemand;
       const system = capTokens([systemPrompt, onDemand.index(), NO_INVENTED_MEMORY].filter(Boolean).join('\n\n---\n\n'), budget.system);
-      driver = ollamaDriver({ ...agent, model: driver.model, ...(isSmall ? { temperature: smallTemp! } : {}), max_tokens: Math.min(driver.maxTokens, budget.replyTokens) }, system, () => onDemand.definitions(), budget.window);
+      driver = ollamaDriver({ ...agent, model: driver.model, ...(isSmall ? { temperature: smallTemp! } : {}), max_tokens: Math.min(driver.maxTokens, budget.replyTokens) }, system, () => onDemand.definitions(), budget.window, toolOutputChars(budget));
     }
 
     const loopMessages: LoopMessage[] = [{ role: 'user', content: prompt }];
