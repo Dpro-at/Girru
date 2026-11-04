@@ -79,14 +79,16 @@ function Chips({item}:{item:StoreItem}){
  * its page (SA2); Get opens a short sheet (SA3); updates that need the owner
  * are a toolbar icon with a badge.
  */
-export function StoreWorkspace({client,active,sidebarSlot,onOpenApp,request,onPermissions,onAccounts,footerItem,canCode=true,canBrowser=false}:{client:SessionClient;active:boolean;sidebarSlot?:HTMLElement|null;onOpenApp:(id:IncludedApp)=>void;request?:{updates:boolean;n:number;local?:'claude-code'|'codex';mine?:boolean};onPermissions:()=>void;onAccounts:()=>void;footerItem?:(id:string)=>MenuItem|null;canCode?:boolean;canBrowser?:boolean}){
+export function StoreWorkspace({client,active,sidebarSlot,onOpenApp,request,onPermissions,onAccounts,footerItem,canCode=true,canBrowser=false,codeMissing=false}:{client:SessionClient;codeMissing?:boolean;active:boolean;sidebarSlot?:HTMLElement|null;onOpenApp:(id:IncludedApp)=>void;request?:{updates:boolean;n:number;local?:'claude-code'|'codex';mine?:boolean;item?:string};onPermissions:()=>void;onAccounts:()=>void;footerItem?:(id:string)=>MenuItem|null;canCode?:boolean;canBrowser?:boolean}){
  const owner=client.getSnapshot().user?.role==='owner',store=useStore(client,active&&owner,0),{data,error}=store,onReload=store.reload;
  // SA6 (Mohamed): the owner's Store opens on All, then My apps (what is on this computer), then the kinds; others have My apps only.
  const [view,setView]=useState<StoreView>({kind:'all',category:'all',shelf:null,mine:!owner}),[mineRefresh,setMineRefresh]=useState(0),[folderOpen,setFolderOpen]=useState(false),[folder,setFolder]=useState(''),[sort,setSort]=useState<StoreSort>('new'),[query,setQuery]=useState('');
  const [page,setPage]=useState<string|null>(null),[updatesOpen,setUpdatesOpen]=useState(false),[adding,setAdding]=useState<StoreItem|null>(null),[busy,setBusy]=useState(false),[problem,setProblem]=useState(''),[toast,setToast]=useState<{id:number;text:string;undo:boolean;show?:unknown}|null>(null);
  const [progress,setProgress]=useState<{item:StoreItem;step:string}|null>(null),[removing,setRemoving]=useState<{item:StoreItem;data:{table:string;rows:number}[]}|null>(null);
  const undoRef=useRef<(()=>void)|null>(null),search=useRef<HTMLInputElement>(null),scroll=useRef<HTMLDivElement>(null),{menu,at,close}=useMenu();
- useEffect(()=>{if(request?.updates)setUpdatesOpen(true);if(request?.local||request?.mine){setView({kind:'all',category:'all',shelf:null,local:request.local??null,mine:!!request.mine});setPage(null);setQuery('');}},[request?.n]);
+ useEffect(()=>{if(request?.updates)setUpdatesOpen(true);if(request?.local||request?.mine){setView({kind:'all',category:'all',shelf:null,local:request.local??null,mine:!!request.mine});setPage(null);setQuery('');}
+  // CODE-STORE-01: "Code" while it is not installed opens its page here (Get, then the usual steps).
+  if(request?.item){setView(v=>({...v,mine:false,local:null,shelf:null}));setQuery('');setPage(request.item);}},[request?.n]);
  const show=(next:Partial<StoreView>)=>{setView(v=>({...v,shelf:null,local:null,mine:false,...next}));setPage(null);setQuery('');scroll.current?.scrollTo?.(0,0);};
  const item=page?data?.items.find(x=>x.id===page)??null:null;
  const say=(text:string,undo?:()=>void)=>{undoRef.current=undo??null;setToast({id:Date.now(),text,undo:!!undo});};
@@ -158,7 +160,7 @@ export function StoreWorkspace({client,active,sidebarSlot,onOpenApp,request,onPe
    <IconButton icon="more" label="More" onClick={e=>at(e,[{label:'Check for new apps',icon:'refresh',shortcut:'⌘R',run:onReload},{label:'Updates',icon:'download',run:()=>setUpdatesOpen(true)}])}/></span>}</header>
   {!mine&&!searching&&!view.local&&data&&<div className="st-cat-row" role="toolbar" aria-label="Categories">{[{id:'all',title:'All',icon:'store'},...data.categories].map(c=><button type="button" key={c.id} aria-pressed={view.category===c.id} style={{'--tint':TINT[c.id]??'var(--accent)'} as never} onClick={()=>show({category:c.id})}>{c.id!=='all'&&<UiIcon name={(ICONS.has(c.icon)?c.icon:'puzzle') as UiIconName} size={13}/>}{c.title}</button>)}</div>}
   {mine?<div className="apps-mine">
-   <WorkspaceApplications client={client} active={active&&mine} query={query} refresh={mineRefresh} onOpen={id=>onOpenApp(id)} onCode={canCode?()=>onOpenApp('code'):undefined} onBrowser={canBrowser?()=>onOpenApp('browser'):undefined} onPermissions={onPermissions} onAccountConnections={onAccounts} footerItem={footerItem} onRemove={owner?app=>void remove(addedItem(app)):undefined}/>
+   <WorkspaceApplications client={client} active={active&&mine} query={query} refresh={mineRefresh} onOpen={id=>onOpenApp(id)} onCode={canCode?()=>onOpenApp('code'):codeMissing?()=>{setView(v=>({...v,mine:false,local:null,shelf:null}));setQuery('');setPage('girru:code');}:undefined} codeMissing={!canCode&&codeMissing} onBrowser={canBrowser?()=>onOpenApp('browser'):undefined} onPermissions={onPermissions} onAccountConnections={onAccounts} footerItem={footerItem} onRemove={owner?app=>void remove(addedItem(app)):undefined}/>
   </div>
   :<div className="st-scroll" ref={scroll}>
    {error&&!data?<div className="dk-empty st-empty"><p>The store could not be read.</p><button type="button" onClick={onReload}>Try again</button></div>

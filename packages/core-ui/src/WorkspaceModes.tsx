@@ -8,18 +8,32 @@ export function editorBounds() {
 }
 
 /** Native capability only: ordinary browser and remote-server clients remain unchanged. */
-export function useNabuAvailability() {
-  const [available,setAvailable]=useState(false);
+export function useNabuAvailability() { return useNabuRuntime().available; }
+
+/**
+ * CODE-STORE-01: whether Code opens here, and whether the desktop app has no Code yet
+ * (then the footer, ⌘K and Open in Code lead to Code's page in the Store). While Code is
+ * missing the bridge is asked again every few seconds, so an install from the Store shows at once.
+ */
+export function useNabuRuntime() {
+  const [state,setState]=useState({available:false,missing:false});
   const bridge=typeof window==='undefined'?undefined:window.dproApp?.nabu;
   useEffect(()=>{
     if(!bridge)return;
-    let active=true;
-    const update=(value:unknown)=>{if(active&&validWorkspaceState(value))setAvailable(value.available);};
+    let active=true,timer:ReturnType<typeof setTimeout>|undefined;
+    const update=(value:unknown)=>{
+      if(!active||!validWorkspaceState(value))return;
+      const next={available:value.available,missing:!value.available&&value.runtime==='missing'};
+      setState(s=>s.available===next.available&&s.missing===next.missing?s:next);
+      clearTimeout(timer);
+      if(next.missing)timer=setTimeout(ask,4000);
+    };
+    const ask=()=>{void bridge.status().then(update).catch(()=>{});};
     const unsubscribe=bridge.onState(update);
-    void bridge.status().then(update).catch(()=>{});
-    return()=>{active=false;unsubscribe();};
+    ask();
+    return()=>{active=false;clearTimeout(timer);unsubscribe();};
   },[bridge]);
-  return available;
+  return state;
 }
 
 export function WorkspaceModes({onModeChange}:{onModeChange:(mode:WorkspaceMode)=>void}) {
