@@ -1,5 +1,7 @@
 import type {Tool,ToolResult} from '../tools/types.js';
 import {asProtocol} from '../tools/tool-doors.js';
+/** Model steps one coding-app reply may take (each a tool call or the answer). */
+export const SUBSCRIPTION_TOOL_STEPS=16;
 /** CLI replies use a bounded structured exchange; execution stays in Girru's grants/approval registry. */
 export async function subscriptionToolLoop(options:{
  prompt:string;signal:AbortSignal;tools:Pick<Tool,'name'|'description'|'input_schema'>[];
@@ -15,7 +17,8 @@ export async function subscriptionToolLoop(options:{
  let prompt=options.prompt+protocol;
  if(Buffer.byteLength(prompt,'utf8')>190000)throw Error('cli_input_invalid');
  let asked=false;
- for(let step=0;step<8;step++){
+ // CHAT-CONTENT-01: 16 steps (a plan, its ticks and a few reads used up 8); the prompt's own byte limit still stops a runaway loop.
+ for(let step=0;step<SUBSCRIPTION_TOOL_STEPS;step++){
   if(signal.aborted)throw Error('cancelled');
   const text=await options.reply(prompt);
   if(signal.aborted)throw Error('cancelled');

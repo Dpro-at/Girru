@@ -57,9 +57,10 @@ test('a choice shows buttons (suggested first) and a click sends the answer', ()
   assert.equal(turnChoice([{ kind: 'tools', step: 1, calls: [{ ...call, isError: true }] }]), null);
   const sent = [];
   const html = renderToStaticMarkup(React.createElement(MomentsContext.Provider, { value: { onAnswer: t => sent.push(t) } }, React.createElement(ChoiceCard, { choice, open: true })));
-  assert.match(html, /Needs your choice/);
-  assert.match(html, /<button[^>]*data-suggested="true"[^>]*><span dir="auto">Sushi<\/span><small>· suggested<\/small>.*Pizza.*Salad/s);
-  assert.match(html, /Or say it your way/);
+  assert.match(html, /aria-label="A choice for you"/);
+  assert.match(html, /data-recommended="true"><span class="choice-num" aria-hidden="true">1<\/span><span class="choice-text"><span class="choice-label" dir="auto">Sushi<small class="choice-rec">Recommended<\/small>.*>2<.*Pizza.*>3<.*Salad/s, 'numbered, its pick first and marked Recommended');
+  assert.match(html, /Something else…/);
+  assert.match(html, /Press 1, 2, 3 or type your own · Esc to skip/);
   const closed = renderToStaticMarkup(React.createElement(ChoiceCard, { choice, open: false }));
   assert.doesNotMatch(closed, /<button/, 'an older question is one quiet line');
 });

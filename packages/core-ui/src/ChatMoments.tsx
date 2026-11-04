@@ -33,6 +33,8 @@ export type Moments = {
   /** CHAT-LIVE-01 (LW2): send the owner's answer to a choice as the next message. */
   onAnswer?: (text: string) => void;
   /** CHAT-ORCH-01 (LW4): open a chat (a sub-session), and a chat's live state from the sidebar list. */
+  /** CHAT-CONTENT-01: a file the reply named: open it beside the chat (mark = text to find in it), or its right-click menu. */
+  onOpenFile?: (path: string, mark?: string) => void; onFileMenu?: (e: React.MouseEvent, path: string) => void;
   onOpenChat?: (id: string) => void; onStopChat?: (id: string) => void; chatState?: (id: string) => { running: boolean; waiting: number; title?: string } | undefined;
 };
 export const MomentsContext = createContext<Moments>({});
@@ -370,27 +372,44 @@ export function notifyDone(title: string, body: string) {
   } catch { /* notifications are optional */ }
 }
 
-/** CHAT-LIVE-01 (LW2): the agent's question with one button per answer; 1–5 pick; after a click it is one line. */
+/** CHAT-LIVE-01 (LW2) + CHAT-CONTENT-01: the agent's question: numbered answers (its pick first, marked Recommended, a reason under each),
+ * "Something else…", 1–5 to answer, Esc to skip; several can be picked when the agent allows it. After an answer it is one line. */
 export function ChoiceCard({ choice, open, answered }: { choice: ChoiceAsk; open: boolean; answered?: string }) {
   const { onAnswer, onDraft } = useContext(MomentsContext);
   const [picked, setPicked] = useState<string[]>([]);
-  const [own, setOwn] = useState('');
+  const [own, setOwn] = useState<string | null>(null);
   const [sent, setSent] = useState<string | undefined>(answered);
+  const [skipped, setSkipped] = useState(false);
+  const card = useRef<HTMLElement>(null);
   const done = sent ?? answered;
+  // 1–5 work at once: the card takes the focus when it appears, unless you are typing somewhere.
+  useEffect(() => { if (!open || done) return; const a = document.activeElement; if (!a || a === document.body || !(a instanceof HTMLInputElement || a instanceof HTMLTextAreaElement)) card.current?.focus({ preventScroll: true }); }, [open, done]);
   const send = (text: string) => { const t = text.trim(); if (!t || !onAnswer) return; setSent(t); onAnswer(t); };
   const order = choice.suggested ? [choice.suggested - 1, ...choice.options.map((_, i) => i).filter(i => i !== choice.suggested! - 1)] : choice.options.map((_, i) => i);
-  if (done || !open) return <p className="moment-line choice-done"><UiIcon name={done ? 'check' : 'info'} size={12}/>{done ? <>You chose <b dir="auto">{done}</b></> : <span dir="auto">{choice.question}</span>}
-    {done && open && onDraft && <button type="button" className="link-button" onClick={() => onDraft(`Change my answer to "${choice.question}": `)}>Change</button>}</p>;
-  return <section className="moment-card choice-card" data-tone="needs" aria-label="A choice for you"
-    onKeyDown={e => { const n = Number(e.key); if (!choice.multiple && n >= 1 && n <= order.length && !(e.target instanceof HTMLInputElement)) { e.preventDefault(); send(choice.options[order[n - 1]]); } }}>
-    <p className="choice-who"><UiIcon name="info" size={13}/>Needs your choice</p>
+  const pick = (i: number) => { const o = choice.options[i]; if (choice.multiple) setPicked(v => v.includes(o) ? v.filter(x => x !== o) : [...v, o]); else send(o); };
+  if (done || !open || skipped) return <p className="moment-line choice-done"><UiIcon name={done ? 'check' : 'info'} size={12}/>{done ? <>You chose <b dir="auto">{done}</b></> : skipped ? <span>Skipped: <span dir="auto">{choice.question}</span></span> : <span dir="auto">{choice.question}</span>}
+    {(done || skipped) && open && onDraft && <button type="button" className="link-button" onClick={() => { setSkipped(false); onDraft(`About "${choice.question}": `); }}>{done ? 'Change' : 'Answer'}</button>}</p>;
+  return <section ref={card} className="moment-card choice-card" aria-label="A choice for you" tabIndex={-1}
+    onKeyDown={e => {
+      if (e.target instanceof HTMLInputElement) { if (e.key === 'Escape') { e.preventDefault(); setOwn(null); } return; }
+      const n = Number(e.key);
+      if (n >= 1 && n <= order.length) { e.preventDefault(); pick(order[n - 1]); }
+      else if (e.key === 'Escape') { e.preventDefault(); setSkipped(true); }
+    }}>
     <strong className="choice-question" dir="auto">{choice.question}</strong>
-    {choice.multiple
-      ? <div className="choice-multi" role="group" aria-label="Answers">{choice.options.map(o => <label key={o}><input type="checkbox" checked={picked.includes(o)} onChange={e => setPicked(v => e.target.checked ? [...v, o] : v.filter(x => x !== o))}/><span dir="auto">{o}</span></label>)}
-        <span className="moment-actions"><button type="button" className="moment-main" disabled={!picked.length || !onAnswer} onClick={() => send(picked.join(', '))}>Continue with {picked.length || 'none'}</button></span></div>
-      : <div className="moment-choices" role="group" aria-label="Answers">{order.map((i, k) => <button key={choice.options[i]} type="button" className="moment-choice" data-suggested={choice.suggested === i + 1 || undefined} title={`${k + 1}`} disabled={!onAnswer} onClick={() => send(choice.options[i])}>
-        <span dir="auto">{choice.options[i]}</span>{choice.suggested === i + 1 && <small>· suggested</small>}</button>)}</div>}
-    <form className="choice-own" onSubmit={e => { e.preventDefault(); send(own); }}><UiIcon name="pencil" size={12}/><input value={own} onChange={e => setOwn(e.target.value)} placeholder="Or say it your way…" aria-label="Or say it your way" dir="auto"/></form>
+    <div className="choice-options" role="group" aria-label="Answers">
+      {order.map((i, k) => { const on = picked.includes(choice.options[i]); const rec = choice.suggested === i + 1;
+        return <button key={choice.options[i]} type="button" className="choice-option" data-recommended={rec || undefined} aria-pressed={choice.multiple ? on : undefined} disabled={!onAnswer} onClick={() => pick(i)}>
+          <span className="choice-num" aria-hidden="true">{choice.multiple && on ? <UiIcon name="check" size={11}/> : k + 1}</span>
+          <span className="choice-text"><span className="choice-label" dir="auto">{choice.options[i]}{rec && <small className="choice-rec">Recommended</small>}</span>
+            {choice.reasons?.[i] && <span className="choice-reason" dir="auto">{choice.reasons[i]}</span>}</span>
+        </button>; })}
+      {own === null
+        ? <button type="button" className="choice-option choice-else" onClick={() => setOwn('')}><span className="choice-num" aria-hidden="true"><UiIcon name="pencil" size={11}/></span>Something else…</button>
+        : <form className="choice-own" onSubmit={e => { e.preventDefault(); send(own); }}><UiIcon name="pencil" size={12}/><input autoFocus value={own} onChange={e => setOwn(e.target.value)} placeholder="Say it your way, then Enter" aria-label="Your own answer" dir="auto"/></form>}
+    </div>
+    {choice.multiple && <span className="moment-actions"><button type="button" className="moment-main" disabled={!picked.length || !onAnswer} onClick={() => send(picked.join(', '))}>Continue with {picked.length || 'none'}</button></span>}
+    <p className="choice-hint"><span>Press {order.slice(0, 3).map((_, k) => k + 1).join(', ')}{order.length > 3 ? '…' : ''} or type your own · Esc to skip</span>{choice.multiple && <span>Several can be picked</span>}</p>
   </section>;
 }
 
@@ -415,4 +434,38 @@ export function SessionsCard({ sessions }: { sessions: readonly StartedSession[]
 export function StartedByLine({ parentId, parentTitle }: { parentId: string; parentTitle?: string }) {
   const { onOpenChat } = useContext(MomentsContext);
   return <p className="moment-line started-by"><UiIcon name="branch" size={12}/>Started from {onOpenChat ? <button type="button" className="link-button" onClick={() => onOpenChat(parentId)}>{parentTitle || 'its parent chat'}</button> : parentTitle || 'its parent chat'} · reports back there</p>;
+}
+
+/** CHAT-CONTENT-01: the files a reply changed, wrote or read, as chips: a type tile, the name and what happened. */
+export type ReplyFile = { path: string; status: 'changed' | 'written' | 'read'; detail?: string; mark?: string };
+export function replyFiles(parts: readonly Part[]): ReplyFile[] {
+  const out = new Map<string, ReplyFile>();
+  const rank = { read: 0, written: 1, changed: 2 } as const;
+  for (const p of parts) if (p.kind === 'tools') for (const c of p.calls) {
+    if (c.isError || c.running || c.output === undefined || /private draft|^Waiting for owner approval/.test(c.output)) continue;
+    const v = toolView({ ...c, running: false });
+    if (v.kind !== 'read' && v.kind !== 'write' && v.kind !== 'edit') continue;
+    const path = ['path', 'file', 'file_path', 'filename'].map(k => v.args[k]).find((x): x is string => typeof x === 'string' && !!x && x !== '.');
+    if (!path || /\/$/.test(path) || /^Folder /.test(c.output)) continue;
+    const status: ReplyFile['status'] = v.kind === 'edit' ? 'changed' : v.kind === 'write' ? 'written' : 'read';
+    const bytes = /\((\d+) bytes\)/.exec(c.output)?.[1];
+    const lines = /lines \d+–\d+ of (\d+)/.exec(c.output)?.[1];
+    const detail = bytes ? (Number(bytes) < 1024 ? `${bytes} B` : `${Math.round(Number(bytes) / 1024)} KB`) : lines ? `${lines} lines` : undefined;
+    const mark = typeof v.args.pattern === 'string' ? v.args.pattern : undefined;
+    const prev = out.get(path);
+    if (!prev || rank[status] >= rank[prev.status]) out.set(path, { path, status, ...(detail ? { detail } : {}), ...(mark ?? prev?.mark ? { mark: mark ?? prev?.mark } : {}) });
+  }
+  return [...out.values()].slice(0, 12);
+}
+const TILE: Record<string, string> = { md: 'md', markdown: 'md', html: 'html', htm: 'html', pdf: 'pdf', ts: 'code', tsx: 'code', js: 'code', jsx: 'code', py: 'code', json: 'data', csv: 'data', yml: 'data', yaml: 'data', log: 'text', txt: 'text' };
+export function FileChips({ files }: { files: readonly ReplyFile[] }) {
+  const { onOpenFile, onFileMenu } = useContext(MomentsContext);
+  if (!files.length) return null;
+  return <div className="file-chips" role="list" aria-label="Files in this reply">{files.map(f => {
+    const ext = (f.path.split('.').at(-1) ?? '').toLowerCase(); const name = f.path.split('/').at(-1) ?? f.path;
+    return <button key={f.path} type="button" role="listitem" className="file-chip" data-tile={TILE[ext] ?? 'text'} title={f.path} disabled={!onOpenFile}
+      onClick={() => onOpenFile?.(f.path, f.mark)} onContextMenu={e => { if (onFileMenu) { e.preventDefault(); onFileMenu(e, f.path); } }}>
+      <span className="file-tile" aria-hidden="true">{(ext || 'file').slice(0, 4).toUpperCase()}</span>
+      <span className="file-chip-text"><b dir="ltr">{name}</b><small>{f.status === 'changed' ? 'Changed' : f.status === 'written' ? 'Written' : 'Read'}{f.detail ? ` · ${f.detail}` : ''}</small></span>
+    </button>; })}</div>;
 }

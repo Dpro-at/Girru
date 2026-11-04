@@ -41,7 +41,7 @@ import {
   addUserMessage, createConversation, createProject, deleteConversation, deleteProject, findConversation, findProject, gitInfo,
   listConversationMessages, listConversations, pageConversationMessages, CHAT_MODES, CHAT_THINKING, listProjects, patchConversation, patchProject, ProjectInputError, type Conversation, type ConversationMessage,
 } from '../../repositories/chat-conversations.js';
-import { ProjectPathError, gitChanges, gitFileDiff, listFolder, readFolderFile } from '../../repositories/project-files.js';
+import { ProjectPathError, gitChanges, gitFileDiff, listFolder, readFolderFile, readFolderPdf } from '../../repositories/project-files.js';
 import { MAX_AUDIO_BYTES, STT_LANGUAGES, SttError, sttSetup, transcribe } from '../../services/local-stt.js';
 import { acceptChatRun, approvalResultsSince, recoverChatRuns, recoverStaleRun, needsRecoveryReview, journalContext, finishChatRun, recoveryApprovalResults } from '../../repositories/chat-recovery.js';
 import { withChatRun, type ChatRunContext } from '../../services/chat-run-context.js';
@@ -904,7 +904,7 @@ export async function chatConversationRoutes(fastify: FastifyInstance) {
     const c = await gitChanges(folder);
     return c ?? { branch: null, changes: [], truncated: false, notGit: true };
   });
-  for (const [route, fn] of [['diff', gitFileDiff], ['tree', listFolder], ['file', readFolderFile]] as const) {
+  for (const [route, fn] of [['diff', gitFileDiff], ['tree', listFolder], ['file', readFolderFile], ['pdf', readFolderPdf]] as const) {
     fastify.get(`/api/chat/projects/:id/${route}`, { config: { access: 'owner' } }, async (request: Req, reply) => {
       const folder = await folderOf(request, reply); if (!folder) return reply;
       try { return await fn(folder, (request.query as Record<string, unknown>).path); } catch (err) { return paneError(reply, err); }

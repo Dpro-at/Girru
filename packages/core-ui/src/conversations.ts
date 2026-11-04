@@ -151,6 +151,8 @@ export class ConversationsController {
   }
   dispose() { this.#follow?.abort(); this.#unsubscribe(); this.#disposed = true; this.#listeners.clear(); }
 
+  /** CHAT-CONTENT-01: one short notice under the box (Open in Code, copy path…). */
+  say(text: string) { if (this.live()) this.publish({ notice: text.slice(0, 300) }); }
   edit(draft: string) { this.publish({ draft: draft.slice(0, MAX_MESSAGE), ...(draft.length > MAX_MESSAGE ? { notice: `A message can be at most ${MAX_MESSAGE.toLocaleString('en')} characters. The rest was not added.` } : {}) }); }
   selectAgent(agentId: string) { if (!this.#state.activeId) this.publish({ agentId }); }
   /** In an open conversation: which agent writes the next replies ('' = the conversation's own agent). */

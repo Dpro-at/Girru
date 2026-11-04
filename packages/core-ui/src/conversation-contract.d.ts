@@ -15,7 +15,7 @@ export type WireDiff = { path: string; diff: string; truncated: boolean; binary:
 export type WireEntry = { name: string; kind: 'dir' | 'file'; size: number | null };
 export type WireTree = { path: string; truncated: boolean; entries: WireEntry[] };
 export type WireFile = { path: string; text: string | null; size: number; binary: boolean; hidden: boolean; truncated: boolean };
-export function panePath(id: string, kind: 'diff' | 'tree' | 'file', rel?: string): string;
+export function panePath(id: string, kind: 'diff' | 'tree' | 'file' | 'pdf', rel?: string): string;
 export const TRANSCRIBE_PATH: '/api/chat/transcribe';
 export const MAX_AUDIO_CHARS: number;
 export const MAX_IMAGE_CHARS: number;
@@ -32,7 +32,7 @@ export function validRunId(x: unknown): x is string;
 export type ConversationPath =
   | { kind: 'list' | 'projects' | 'transcribe' | 'approval' | 'folder-picker' | 'sidebar' | 'panel' | 'last' | 'chat-settings' } | { kind: 'chat-usage' | 'chat-team' | 'chat-schedule' | 'chat-stop'; id: string } | { kind: 'app-stop'; id: string; run: string } | { kind: 'variables'; id: string } | { kind: 'variable'; id: string; name: string } | { kind: 'one' | 'messages' | 'runs' | 'project' | 'project-git' | 'project-pr'; id: string }
   | { kind: 'images'; id: string } | { kind: 'image'; id: string; image: string } | { kind: 'events'; run: string; after: number } | { kind: 'stop'; run: string }
-  | { kind: 'project-changes'; id: string } | { kind: 'project-diff' | 'project-tree' | 'project-file'; id: string; rel: string };
+  | { kind: 'project-changes'; id: string } | { kind: 'project-diff' | 'project-tree' | 'project-file' | 'project-pdf'; id: string; rel: string };
 export function conversationPath(path: string): ConversationPath | null;
 export function conversationRoute(path: string): boolean;
 export function allowedConversation(method: string, path: string, body?: unknown): boolean;

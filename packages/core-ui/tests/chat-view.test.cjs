@@ -45,7 +45,7 @@ test('send creates the conversation, follows the run and stores the work; the li
   assert.match(html, /Worked for/);
   assert.match(html, /Read 1 file|ran 1 command/i);
   assert.match(html, /<table class="md-table">/);
-  assert.match(html, /<span class="md-code-lang">ts<\/span>/);
+  assert.match(html, /<span class="md-code-lang">TypeScript<\/span>/);
   await until(() => c.getSnapshot().conversations[0]?.title === 'Plan the launch week with details'.split(' ').slice(0, 7).join(' ').split('\n')[0] || c.getSnapshot().conversations[0]?.title?.startsWith('Plan the launch week'));
   assert.ok(calls.some(x => x.method === 'POST' && x.path === '/api/chat/conversations'));
   assert.ok(calls.some(x => /\/api\/chat\/runs\/run-.+\/events/.test(x.path)));

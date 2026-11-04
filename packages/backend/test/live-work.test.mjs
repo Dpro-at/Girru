@@ -43,3 +43,11 @@ test('ask_choice waits for the owner; the coding-app loop ends on it', async () 
   assert.equal(calls, 1, 'no second model call after the question');
   assert.equal(text, 'Waiting for your choice.');
 });
+
+test('CHAT-CONTENT-01: answers can carry a one-line reason (a reasons list or { label, reason })', () => {
+  assert.deepEqual(choiceOf({ question: 'Which fix?', options: ['Move the check', 'Retry'], reasons: ['Smallest change', 'Hides the race'], suggested: 1 }),
+    { question: 'Which fix?', options: ['Move the check', 'Retry'], reasons: ['Smallest change', 'Hides the race'], multiple: false, suggested: 1 });
+  assert.deepEqual(choiceOf({ question: 'Which fix?', options: [{ label: 'A', reason: 'why A' }, 'B'] }).reasons, ['why A', '']);
+  assert.equal(choiceOf({ question: 'Which?', options: ['A', 'B'] }).reasons, undefined);
+  assert.equal(typeof choiceOf({ question: 'Which?', options: ['A', 'B'], reasons: ['type your password', ''] }), 'string');
+});
