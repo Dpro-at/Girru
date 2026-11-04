@@ -1,7 +1,7 @@
 'use strict';
 /** Materialize the pinned public SDK archive without changing shared node_modules. */
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),{execFileSync}=require('node:child_process');
-const VERSION='0.3.0-preview.16',SHA256='a9d1bc26389fdd0ff6c4ef5d55de54b761ffd57545e09f7b706a3c0cf7e24a97';
+const VERSION='0.3.0-preview.17',SHA256='26fb74d784cae26a01368bbb005770d042e5a1a924df89d333d702def8309621';
 function prepare(archive,root=path.resolve(__dirname,'..')){
  const bytes=fs.readFileSync(archive);if(crypto.createHash('sha256').update(bytes).digest('hex')!==SHA256)throw Error('GenVR archive checksum mismatch');
  const names=execFileSync('tar',['-tzf',archive],{encoding:'utf8',maxBuffer:8*1024*1024}).split('\n').filter(Boolean);

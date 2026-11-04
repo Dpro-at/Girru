@@ -67,9 +67,12 @@ jobs:
         # The checksum in prepare-genvr.cjs must match, or the step fails.
         shell: bash
         run: |
+          # The SDK preview is a GitHub release archive (not on npm); prepare-genvr checks its SHA-256.
           version=$(node -p "require('./packages/core-ui/genvr-sdk.json').version")
+          url=$(node -p "require('./packages/core-ui/genvr-sdk.json').distribution")
+          case "$url" in https://github.com/Dpro-at/genvr-world-sdk/releases/download/*) ;; *) echo "Unexpected GenVR SDK source"; exit 1;; esac
           mkdir -p .genvr-archive
-          npm pack "3d-world-sdk@${version}" --pack-destination .genvr-archive
+          curl -fsSL --retry 3 -o ".genvr-archive/3d-world-sdk-${version}.tgz" "$url"
           node packages/core-ui/scripts/prepare-genvr.cjs ".genvr-archive/3d-world-sdk-${version}.tgz"
       - name: Stage production runtime
         shell: bash
