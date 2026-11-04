@@ -55,10 +55,12 @@ async function run(user:string,opts:Options){
   const previous=await latestImportJob(user);
   if(previous&&previous.done<previous.total){await patch(user,s=>({...s,status:'review',lastImported:memoryCount,lastProposed:memoryCount,notice:`${memoryCount} structured memory files saved. Project notes wait for the current import or local model; saved progress is retained.`}));return;}
   const saved=await read(user),known=await importedSessions(user),ids=new Set<string>((saved.pending??[]).filter(id=>!known.has(id)));let cursor=saved.cursor;
+  // Every note seen so far comes back on each page: a turned-down note (someone else's repository) is checked once per run.
+  const checked=new Set<string>(ids);
   if(!saved.scanningComplete)do{
    if(!await allowed())return;
    const page:ScanPage=opts.scan?await opts.scan(user,cursor):await scanProjectDocuments(user,{auto:true,...(cursor?{cursor}:{})},{purpose:'watch',...(opts.home?{home:opts.home}:{})});
-   for(const id of page.allDocumentIds??page.documents.map(doc=>doc.id))if(!known.has(id)&&!ids.has(id)&&await structured.automaticNoteSource(user,id,opts.home??os.homedir()))ids.add(id);
+   for(const id of page.allDocumentIds??page.documents.map(doc=>doc.id))if(!known.has(id)&&!checked.has(id)){checked.add(id);if(await structured.automaticNoteSource(user,id,opts.home??os.homedir()))ids.add(id);}
    for(const home of page.memoryHomes??[])memoryHomes.add(home);
    denied=page.deniedRoots??0;unavailable=page.unavailableRoots??0;skipped=page.skippedFiles??0;
    cursor=page.nextCursor??undefined;
