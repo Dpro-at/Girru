@@ -47,7 +47,7 @@ export function AuthBoundary({ client: supplied, children, initialPage }: { clie
     if (s.mode === 'fixture') client.selectMode('live');
     if (client.getSnapshot().phase !== 'signed-out' || client.getSnapshot().setup) return;
     // Restore through the local bridge; the backend still validates the session.
-    const keep = localSessionKeep(typeof window !== 'undefined' ? window.location.hostname : '');
+    const keep = localSessionKeep(typeof window !== 'undefined' ? window.location.hostname : '', typeof window !== 'undefined' ? window.location.origin : undefined);
     if (keep && resumedClient.current !== client) { resumedClient.current = client; void client.resume(keep).then(ok => { if (!ok && client.getSnapshot().phase === 'signed-out') void client.discoverSetup(); }); }
     else void client.discoverSetup();
   }, [client, liveOnly, state.mode, state.epoch]);

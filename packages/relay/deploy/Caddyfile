@@ -1,0 +1,20 @@
+# Caddy in front of the Girru relay. Caddy gets and renews the TLS
+# certificate by itself and passes WebSocket upgrades through.
+# Install: copy to /etc/caddy/Caddyfile, set your name, then
+#   systemctl reload caddy
+#
+# No `log` directive: Caddy writes no access log for this site.
+
+relay.example.org {
+	handle /v1 {
+		reverse_proxy 127.0.0.1:41540
+	}
+
+	handle /health {
+		reverse_proxy 127.0.0.1:41540
+	}
+
+	handle {
+		respond 404
+	}
+}

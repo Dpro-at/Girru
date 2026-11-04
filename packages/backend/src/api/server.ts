@@ -26,6 +26,8 @@ import { assertSafeIsolatedTree } from '../config/isolated-tree.js';
 import { flushAuditWritesWithin, SHUTDOWN_AUDIT_FLUSH_MS } from '../services/audit-logger.js';
 import { startAutomaticProjectImports, stopAutomaticProjectImports } from '../memory/import/automatic-project-import.js';
 import { startDiscoveryWatch, stopDiscoveryWatch } from '../discovery/service.js';
+import { startPhoneLink, stopPhoneLink } from '../phone/service.js';
+import { bindPhoneApi } from '../phone/ui-bridge.js';
 import { resumePendingImports, stopLocalImports } from '../memory/import/local-import.js';
 import {recoverSubscriptionProcesses,stopSubscriptionProcesses} from '../services/subscription-chat.js';
 import { getOrchestrator } from '../multi-agent/orchestrator.js';
@@ -88,6 +90,9 @@ async function start() {
       void resumePendingImports().catch(() => console.warn('[Memory import] Saved progress unavailable; no new import started.')).finally(() => { startAutomaticProjectImports(); startDiscoveryWatch(); });
       // TASKLOG-01: read the projects' task files and watch them for changes from the coding apps.
       void import('../services/task-file.js').then((m) => m.syncAllTasks(true)).catch(() => undefined);
+      // MOB-LINK-01: the phone link dials the relay only while a phone or an open pairing needs it.
+      bindPhoneApi(fastify);
+      void startPhoneLink().catch(() => console.warn('[Phone] Phone link unavailable; paired phones cannot reach this computer.'));
     }
 
     const pythonStatus = summary.background ? await probePython() : '— (background off)';
@@ -145,6 +150,7 @@ async function shutdown(code = 0): Promise<void> {
     // Closing Fastify runs channel transport shutdown hooks before process exit.
     await stopAutomaticProjectImports();
     stopDiscoveryWatch();
+    await stopPhoneLink();
     await stopLocalImports();
     // MODELS-01-INSTALL: a download in progress stops; it goes on at the next start.
     await import('../memory/helper.js').then((m) => m.stopMemoryHelper()).catch(() => undefined);

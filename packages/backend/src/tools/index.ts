@@ -113,6 +113,7 @@ import {
   skillInstallTool,
 } from './skill-install.js';
 import { discoveryTool, discoveryApplyTool } from './discovery.js';
+import { phoneDevicesTool } from './phone.js';
 
 import { getMcpTools, getMcpToolsSync, isMcpToolName } from '../mcp-client/index.js';
 
@@ -134,6 +135,7 @@ const CORE_TOOLS: Tool[] = [
   memoryTrashTool, memoryRestoreTool, memoryTrashEmptyTool, memoryProjectTrashTool, memoryGroupsTool, memoryGroupApplyTool, // MEM-UX-02: owner-only Trash + groups; empty / project trash / group changes need owner approval
   memoryBridgeTool, memoryBridgeApplyTool, // MEM-BRIDGE-01: owner-only; apply needs owner approval
   discoveryTool, discoveryApplyTool, // DISCOVER-01: what coding agents left on this computer; owner-only; apply needs owner approval
+  phoneDevicesTool, // MOB-PAIR-01: the paired phones, read only and owner-only; no tool pairs, allows or forgets a phone
   memoryReviewTool, memoryReviewDecideTool, memoryReviewRoutineTool, memoryGraphReviewTool, memoryGraphTopicTool, memoryGraphSyncTool, memoryRecallTool, // owner's review inbox, topics + reply trace; decisions need owner approval
   memoryPersonExportTool, memoryPersonForgetTool, memoryPrivacyReviewTool, memoryPrivacyDecideTool, // STORE-MAP-01 P9: one person, personal-data review (P9 only); export / forget / decide need owner approval
   memoryTrustReviewTool, memoryCorrectedCheckedTool, memoryQuestionAnswerTool, memoryQuestionForgetTool, // STORE-MAP-01 P9b screens (P9b only): corrected after use, open questions; changes need owner approval

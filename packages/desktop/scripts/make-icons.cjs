@@ -8,7 +8,7 @@
  *
  * The icon is the logo on the rounded macOS tile: an 824 px tile on a 1024 px
  * picture (100 px clear edge), rounded-square corners, a soft shadow below and
- * the logo at about 62% of the tile. Plain Node only: the shapes are filled with
+ * the logo at about 74% of the tile. Plain Node only: the shapes are filled with
  * 4×4 samples per pixel and the files are written by hand, so nothing is installed.
  *
  * Usage: node scripts/make-icons.cjs [--out <dir>]
@@ -23,7 +23,7 @@ const TILE_COLOR = [255, 255, 255];
 const SHADOW = { offsetY: 10, radius: 9, alpha: 0.3 };
 
 /** The logo mark (dpro_logo/svg/logo2), in its 500×500 drawing units; the mark fills the 400-unit square at (48, 51). */
-const LOGO_VIEW = { x: 48, y: 51, size: 400, share: 0.62 };
+const LOGO_VIEW = { x: 48, y: 51, size: 400, share: 0.74 };
 const LOGO = [
   { color: [0xa2, 0x86, 0xbe], points: [[246.73, 293.45], [176.85, 365.19], [249.91, 436.35], [319.79, 364.61]] },
   { color: [0x65, 0x2d, 0x91], points: [[432.85, 248.54], [319.79, 364.61], [246.73, 293.45], [289.62, 249.42], [246.99, 207.9], [317.8, 136.48]] },

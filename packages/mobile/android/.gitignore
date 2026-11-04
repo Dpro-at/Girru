@@ -1,0 +1,19 @@
+.gradle/
+build/
+app/build/
+.cxx/
+.idea/
+*.iml
+captures/
+local.properties
+
+# Gradle wrapper is generated locally (see README), never committed.
+gradlew
+gradlew.bat
+gradle/wrapper/
+
+# Per-project Firebase config and signing material stay out of the repo.
+app/google-services.json
+*.jks
+*.keystore
+keystore.properties

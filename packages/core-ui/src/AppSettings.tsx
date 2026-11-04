@@ -16,6 +16,7 @@ import {UpdateSettings} from './UpdateSettings';
 import {DepartmentsSettings} from './DepartmentsSettings';
 import {SpecialtyUpdates} from './SpecialtyUpdates';
 import {SettingsBackups} from './SettingsBackups';
+import {PhoneSettings} from './PhoneSettings';
 import {AppUpdateSettings,appUpdateBridge} from './AppUpdateSettings';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -29,7 +30,7 @@ import { McpSection } from './ToolSections';
 import type { UiIconName } from './ui-icons';
 /** Places that are sections of their own; their Settings rows open them. MCP connections stays in Settings with its places nested, like Memory. */
 type Tool='mcp'|'library';
-type Place='voice'|'general'|'account'|'replies'|'move'|'permissions'|'verification'|'approval-rules'|'keys'|'accounts'|'channels'|'memory'|'departments'|'apps'|Tool|'backups'|'about';
+type Place='voice'|'general'|'account'|'replies'|'move'|'permissions'|'verification'|'approval-rules'|'keys'|'accounts'|'channels'|'phone'|'memory'|'departments'|'apps'|Tool|'backups'|'about';
 /** Old names ('models', 'sharing', 'connections') still open their places. */
 export type SettingsTab=Place|'models'|'sharing'|'connections';
 type Row={value:Place;label:string;icon:UiIconName;words:string;note?:string;jump?:boolean};
@@ -46,6 +47,7 @@ const ROWS:Record<Place,Row>={
  keys:{value:'keys',label:'Saved keys',icon:'key',words:'secrets tokens passwords key store older chats',note:'Keys you pasted in chats, kept encrypted on this computer.'},
  accounts:{value:'accounts',label:'Accounts',icon:'contact',words:'connections accounts genvr world account connect disconnect test publication',note:'Accounts connected to this workspace.'},
  channels:{value:'channels',label:'Channels',icon:'message',words:'messaging services telegram discord whatsapp trusted senders conversations automatic replies',note:'Messaging services and trusted senders.'},
+ phone:{value:'phone',label:'Phone',icon:'mobile',words:'phone mobile iphone android pair qr code app relay wi-fi forget signed in',note:'Use Girru from your phone.'},
  mcp:{value:'mcp',label:'MCP connections',icon:'tool',words:'mcp connections connectors tools servers add import coding apps genvr-local',note:'Tools your agents reach through MCP servers.'},
  memory:{value:'memory',label:'Memory',icon:'database',words:MEMORY_PANES.map(p=>p.label).join(' ')+' memory rules sources access',note:'Memory rules, sources and access.'},
  departments:{value:'departments',label:'Departments',icon:'building',words:'departments teams groups rename move agents new department',note:'The departments of your agents.'},
@@ -79,7 +81,7 @@ export function AppSettings({ onOpenStore, signedIn, preference, onTheme, onAcco
   const groups:{name:string;keys:Place[]}[]=live?[
     {name:'Application',keys:['general','account','replies',...ownerOnly(['voice','move'])]},
     {name:'Security',keys:[...ownerOnly(['permissions']),...(user?.role!=='guest'?['verification' as const]:[]),...ownerOnly(['approval-rules']),'keys']},
-    {name:'Connections',keys:ownerOnly(['accounts','channels',...(client?['mcp' as const]:[]),'memory'])},
+    {name:'Connections',keys:ownerOnly(['accounts','channels','phone',...(client?['mcp' as const]:[]),'memory'])},
     {name:'Workspace',keys:[...ownerOnly(['departments']),...(onOpenApps?['apps' as const]:[]),...(onOpenTool?ownerOnly(['library']):[])]},
     {name:'',keys:[...ownerOnly(['backups']),'about']},
   ]:[{name:'Application',keys:['general','account','replies']},{name:'',keys:['about']}];
@@ -96,7 +98,7 @@ export function AppSettings({ onOpenStore, signedIn, preference, onTheme, onAcco
     {!signedIn&&<div className="settings-signin-note"><p>Sign in to see your account, keys and workspace settings.</p><button type="button" onClick={onAccount}>Sign in</button></div>}
   </nav>;
   const label=aboutOnly?'About Girru':active_==='memory'?`Memory · ${MEMORY_PANES.find(p=>p.key===pane)?.label??'Settings'}`:ROWS[active_].label;
-  const ownTitle=active_==='memory'||active_==='mcp'||active_==='backups';
+  const ownTitle=active_==='memory'||active_==='mcp'||active_==='backups'||active_==='phone';
   const signIn=(title:string,description:string)=><PreferenceGroup title={title}><PreferenceRow title="Sign in required" description={description} icon="contact"><button type="button" onClick={onAccount}>Sign in</button></PreferenceRow></PreferenceGroup>;
   const page=<div id="settings-view-panel" aria-label={label} className="settings-content settings-st" data-pane={active_}><div className="preferences-page">
       {!ownTitle&&<header className="settings-page-head"><h2 className="settings-page-title">{label}</h2>{ROWS[active_].note&&<p className="settings-page-desc">{ROWS[active_].note}</p>}</header>}
@@ -125,6 +127,7 @@ export function AppSettings({ onOpenStore, signedIn, preference, onTheme, onAcco
       {active_==='accounts'&&owner&&<ConnectionsSettings client={client!} onOpenGenvr={onOpenGenvr}/>}
       {active_==='departments'&&owner&&<DepartmentsSettings client={client!} onAgent={onAgent}/>}
       {active_==='channels'&&owner&&<AgentConnectSettings client={client!}/>}
+      {active_==='phone'&&owner&&<PhoneSettings client={client!} active={active}/>}
       {active_==='memory'&&owner&&<MemorySettings client={client!} pane={pane} onOpenMemory={onOpenMemory}/>}
       {active_==='mcp'&&owner&&<McpSection client={client!} active={active} nav={mcpNav} openId={mcpOpenId} onOpenAgents={onAgents}/>}
       {active_==='backups'&&owner&&<SettingsBackups client={client!} active={active}/>}

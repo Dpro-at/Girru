@@ -1,6 +1,8 @@
 // Simple line icons drawn for this app (24-unit grid, 2-unit round strokes).
 const shapes = {
   'device-phone': <><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M10 5h4M11 19h2"/></>,
+  // The phone app (pairing, Settings › Phone); 'phone' is a call handset.
+  mobile: <><rect x="7" y="2.5" width="10" height="19" rx="2.2"/><path d="M11 18.5h2"/></>,
   'device-tablet': <><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M11 19h2"/></>,
   'device-foldable': <><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></>,
   'device-desktop': <><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></>,
@@ -36,6 +38,9 @@ const shapes = {
   brain: <><path d="M9 4a3 3 0 0 0-3 3v1a3 3 0 0 0-2 5a3 3 0 0 0 3 4a3 3 0 0 0 5 1V5a2 2 0 0 0-3-1z"/><path d="M15 4a3 3 0 0 1 3 3v1a3 3 0 0 1 2 5a3 3 0 0 1-3 4a3 3 0 0 1-5 1"/></>,
   tool: <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>,
   chevron: <path d="M9 6l6 6-6 6"/>,
+  'chevron-left': <path d="M15 6l-6 6 6 6"/>,
+  'chevron-down': <path d="M6 9l6 6 6-6"/>,
+  clipboard: <><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/></>,
   'arrow-down': <><path d="M12 5v14"/><path d="M6 13l6 6 6-6"/></>,
   pin: <><path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/></>,
   trash: <><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/></>,

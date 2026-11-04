@@ -223,3 +223,20 @@ test('terminal look: owner prefs saved and merged; unknown or out-of-range setti
   }
   assert.equal((await call('PUT', '/api/terminal/prefs', 'tm-owner', { fontSize: 13 })).json().prefs.theme, 'ocean', 'a partial save keeps the rest');
 });
+
+test('node-pty spawn-helper gets the run permission it is installed without', { skip: process.platform === 'win32' }, async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, statSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join: j } = await import('node:path');
+  const pkg = mkdtempSync(j(tmpdir(), 'ap-pty-'));
+  mkdirSync(j(pkg, 'prebuilds', 'darwin-x64'), { recursive: true });
+  writeFileSync(j(pkg, 'package.json'), '{}');
+  const helper = j(pkg, 'prebuilds', 'darwin-x64', 'spawn-helper');
+  writeFileSync(helper, 'x', { mode: 0o644 });
+  const fixed = mgr.ensureSpawnHelper('darwin', 'x64', () => j(pkg, 'package.json'));
+  assert.deepEqual(fixed, [helper]);
+  assert.equal(statSync(helper).mode & 0o111, 0o111);
+  // Already runnable: nothing to do. Windows: never touched.
+  assert.deepEqual(mgr.ensureSpawnHelper('darwin', 'x64', () => j(pkg, 'package.json')), []);
+  assert.deepEqual(mgr.ensureSpawnHelper('win32', 'x64', () => j(pkg, 'package.json')), []);
+});

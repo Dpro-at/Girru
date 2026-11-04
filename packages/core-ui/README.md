@@ -610,3 +610,13 @@ and browser integration are outside this guarantee. The UI is unchanged and
 may still offer actions that this mode refuses. Synthetic tests use only
 ephemeral loopback upstreams and close their listeners; they do not certify a
 real isolated backend run.
+
+## Phone pairing (MOB-PAIR-01)
+
+Settings › Phone, the sidebar phone button and the last setup step share one
+pairing flow (`src/phone.ts`, `src/PhonePairing.tsx`, `src/PhoneSettings.tsx`).
+`src/phone-contract.js` is the only way to `/api/phone/*`: owner only, exact
+bodies, known reply fields and fixed codes; it is wired into `session.ts` and
+`scripts/application-server.cjs`. The QR code is drawn by the own encoder in
+`src/qr-code.ts` (byte mode, level M). Tests: `tests/qr-code.test.cjs`,
+`tests/phone-contract.test.cjs`, `tests/phone-ui.test.cjs`.

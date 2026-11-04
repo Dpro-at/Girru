@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One window, one screen visible at a time (MainActivity.render). Texts follow the approved phone boards P1 (pair) and P2 (unlock). -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/surface">
+
+    <FrameLayout
+        android:id="@+id/web_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <!-- P2 Unlock -->
+    <LinearLayout
+        android:id="@+id/lock_screen"
+        style="@style/Girru.Screen"
+        android:gravity="center"
+        android:visibility="gone">
+
+        <TextView
+            style="@style/Girru.Title"
+            android:text="@string/lock_title" />
+
+        <TextView
+            android:id="@+id/lock_computer"
+            style="@style/Girru.Body"
+            android:gravity="center"
+            tools:text="My Mac · paired" />
+
+        <TextView
+            android:id="@+id/lock_error"
+            style="@style/Girru.Body"
+            android:gravity="center"
+            android:text="@string/lock_unavailable"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/unlock_button"
+            style="@style/Girru.PrimaryButton"
+            android:text="@string/unlock" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/screen_lock_needed"
+        style="@style/Girru.Screen"
+        android:gravity="center"
+        android:visibility="gone">
+
+        <TextView
+            style="@style/Girru.Title"
+            android:text="@string/screen_lock_title" />
+
+        <TextView
+            style="@style/Girru.Body"
+            android:gravity="center"
+            android:text="@string/screen_lock_body" />
+
+        <Button
+            android:id="@+id/open_security_settings"
+            style="@style/Girru.PrimaryButton"
+            android:text="@string/screen_lock_action" />
+    </LinearLayout>
+
+    <!-- P1 Pair with your computer -->
+    <ScrollView
+        android:id="@+id/pair_screen"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:visibility="gone">
+
+        <LinearLayout style="@style/Girru.Screen">
+
+            <TextView
+                style="@style/Girru.Title"
+                android:text="@string/pair_title" />
+
+            <TextView
+                style="@style/Girru.Body"
+                android:text="@string/pair_subtitle" />
+
+            <TextView
+                android:id="@+id/pair_notice"
+                style="@style/Girru.Notice"
+                android:visibility="gone"
+                tools:text="@string/pair_notice_expired"
+                tools:visibility="visible" />
+
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="220dp"
+                android:layout_marginTop="16dp"
+                android:background="@drawable/scanner_frame">
+
+                <TextView
+                    style="@style/Girru.Muted"
+                    android:layout_gravity="center"
+                    android:text="@string/pair_camera_hint" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/scanner_note"
+                style="@style/Girru.Muted"
+                android:text="@string/pair_scanner_not_yet"
+                android:visibility="gone" />
+
+            <Button
+                android:id="@+id/scan_button"
+                style="@style/Girru.PrimaryButton"
+                android:text="@string/pair_scan"
+                android:visibility="gone" />
+
+            <Button
+                android:id="@+id/type_code_button"
+                style="@style/Girru.TextButton"
+                android:text="@string/pair_type_code" />
+
+            <LinearLayout
+                android:id="@+id/code_group"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <EditText
+                    android:id="@+id/code_input"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:fontFamily="monospace"
+                    android:hint="@string/pair_code_hint"
+                    android:importantForAutofill="no"
+                    android:inputType="textMultiLine|textNoSuggestions|textVisiblePassword"
+                    android:minLines="3"
+                    android:textColor="@color/text"
+                    android:textColorHint="@color/muted"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/code_error"
+                    style="@style/Girru.Error"
+                    android:visibility="gone" />
+
+                <Button
+                    android:id="@+id/read_code_button"
+                    style="@style/Girru.PrimaryButton"
+                    android:text="@string/pair_read_code" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/confirm_group"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/confirm_computer"
+                    style="@style/Girru.Subtitle"
+                    tools:text="Pair with My Mac" />
+
+                <TextView
+                    style="@style/Girru.Subtitle"
+                    android:text="@string/lifetime_title" />
+
+                <RadioGroup
+                    android:id="@+id/lifetime_group"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:checkedButton="@+id/life_90">
+
+                    <RadioButton
+                        android:id="@+id/life_30"
+                        style="@style/Girru.Radio"
+                        android:text="@string/lifetime_30" />
+
+                    <RadioButton
+                        android:id="@+id/life_60"
+                        style="@style/Girru.Radio"
+                        android:text="@string/lifetime_60" />
+
+                    <RadioButton
+                        android:id="@+id/life_90"
+                        style="@style/Girru.Radio"
+                        android:text="@string/lifetime_90" />
+
+                    <RadioButton
+                        android:id="@+id/life_120"
+                        style="@style/Girru.Radio"
+                        android:text="@string/lifetime_120" />
+
+                    <RadioButton
+                        android:id="@+id/life_never"
+                        style="@style/Girru.Radio"
+                        android:text="@string/lifetime_never" />
+                </RadioGroup>
+
+                <TextView
+                    android:id="@+id/never_warning"
+                    style="@style/Girru.Notice"
+                    android:text="@string/lifetime_never_warning"
+                    android:visibility="gone" />
+
+                <Button
+                    android:id="@+id/send_pairing_button"
+                    style="@style/Girru.PrimaryButton"
+                    android:text="@string/pair_send" />
+            </LinearLayout>
+
+            <TextView
+                style="@style/Girru.Muted"
+                android:layout_marginTop="24dp"
+                android:text="@string/pair_footnote" />
+        </LinearLayout>
+    </ScrollView>
+
+    <LinearLayout
+        android:id="@+id/waiting_screen"
+        style="@style/Girru.Screen"
+        android:gravity="center"
+        android:visibility="gone">
+
+        <TextView
+            style="@style/Girru.Title"
+            android:text="@string/waiting_title" />
+
+        <TextView
+            android:id="@+id/waiting_check_code"
+            style="@style/Girru.Code"
+            tools:text="Check code 123 456" />
+
+        <TextView
+            android:id="@+id/waiting_check_code_hint"
+            style="@style/Girru.Muted"
+            android:gravity="center"
+            android:text="@string/check_code_hint" />
+
+        <TextView
+            android:id="@+id/waiting_for_code"
+            style="@style/Girru.Muted"
+            android:gravity="center"
+            android:text="@string/waiting_for_code" />
+
+        <TextView
+            android:id="@+id/waiting_body"
+            style="@style/Girru.Body"
+            android:gravity="center"
+            android:text="@string/waiting_body" />
+
+        <Button
+            android:id="@+id/finish_pairing_button"
+            style="@style/Girru.PrimaryButton"
+            android:text="@string/waiting_finish"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/waiting_not_reached"
+            style="@style/Girru.Notice"
+            android:text="@string/waiting_not_reached"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/cancel_pairing_button"
+            style="@style/Girru.TextButton"
+            android:text="@string/waiting_cancel" />
+
+        <Button
+            android:id="@+id/debug_continue"
+            style="@style/Girru.TextButton"
+            android:text="@string/debug_continue"
+            android:visibility="gone" />
+    </LinearLayout>
+
+</FrameLayout>

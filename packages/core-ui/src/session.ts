@@ -56,6 +56,7 @@ import { allowedBackups, backupsRoute, backupsResponse } from './backups-contrac
 import { allowedChartPrefs, chartPrefsRoute, chartPrefsResponse } from './chart-prefs-contract.js';
 import { allowedDepartments, departmentsRoute, departmentsResponse } from './departments-contract.js';
 import { allowedFirstRun, firstRunRoute, firstRunResponse } from './first-run-contract.js';
+import { allowedPhone, phoneRoute, phoneResponse } from './phone-contract.js';
 import { allowedAgentRules, agentRulesRoute, agentRulesResponse } from './agent-rules-contract.js';
 import { allowedOrg, orgRoute, orgResponse } from './org-contract.js';
 import { allowedLibrary as allowedAgentLibrary, libraryRoute as agentLibraryRoute, libraryResponse as agentLibraryResponse } from './agent-library-contract.js';
@@ -146,6 +147,7 @@ export function allowedRequest(method: string, path: string, body?: unknown): bo
   if (departmentsRoute(path)) return allowedDepartments(method, path, body);
   if (meetingsRoute(path)) return allowedMeetings(method, path, body);
   if (firstRunRoute(path)) return allowedFirstRun(method, path, body);
+  if (phoneRoute(path)) return allowedPhone(method, path, body);
   if (agentRulesRoute(path)) return allowedAgentRules(method, path, body);
   if (orgRoute(path)) return allowedOrg(method, path, body);
   if (agentLibraryRoute(path)) return allowedAgentLibrary(method, path, body);
@@ -251,6 +253,7 @@ function projectResponse(path: string, response: WireResponse): WireResponse {
   if (departmentsRoute(path)) return { status: response.status, body: departmentsResponse(response.status, response.body, path) };
   if (meetingsRoute(path)) return { status: response.status, body: meetingsResponse(path, response.status, response.body) };
   if (firstRunRoute(path)) return { status: response.status, body: firstRunResponse(path, response.status, response.body) };
+  if (phoneRoute(path)) return { status: response.status, body: phoneResponse(path, response.status, response.body) };
   if (agentRulesRoute(path)) return { status: response.status, body: agentRulesResponse(path, response.status, response.body) };
   if (orgRoute(path)) return { status: response.status, body: orgResponse(path, response.status, response.body) };
   if (agentLibraryRoute(path)) return { status: response.status, body: agentLibraryResponse(path, response.status, response.body) };
@@ -303,10 +306,23 @@ export function isAppOrigin(origin: string): boolean {
   return match !== null && Number(match[1]) <= 65535;
 }
 
+/** The Girru phone app's origin for the computer's chat page. The app answers
+ * it itself through its end-to-end session with the computer (never the
+ * network) and sets `window.girruShell` before the page loads. */
+export const SHELL_ORIGIN = 'girru-app://computer';
+export function isShellOrigin(origin: string, shell: unknown = (globalThis as { girruShell?: unknown }).girruShell): boolean {
+  return origin === SHELL_ORIGIN && !!shell && typeof shell === 'object';
+}
+/** Inside the phone app the computer runs each request as the owner the phone
+ * was paired for: the page holds this placeholder, never a token, and the
+ * transport sends no Authorization header from there. */
+export const SHELL_SESSION = 'girru-phone-session';
+
 /** Deployment must serve these routes on this exact origin from the reviewed backend.
  * This is a client boundary, not a proxy. Static fixture preview does not implement it. */
 export function createSameOriginTransport(origin: string, fetcher: typeof fetch): WireTransport {
-  if (!isAppOrigin(origin)) throw new SessionFailure('blocked');
+  const shell = isShellOrigin(origin);
+  if (!isAppOrigin(origin) && !shell) throw new SessionFailure('blocked');
   return async request => {
     if (!allowedRequest(request.method, request.path, request.body)) throw new SessionFailure('blocked');
     const keys = Object.keys(request.headers);
@@ -319,8 +335,8 @@ export function createSameOriginTransport(origin: string, fetcher: typeof fetch)
     try {
       const response = await fetcher(origin + request.path, {
         method: request.method, body: request.body === undefined ? undefined : JSON.stringify(request.body),
-        headers: { Accept: chat || runEvents ? 'text/event-stream' : 'application/json', ...(request.body === undefined ? {} : { 'Content-Type': 'application/json' }), ...request.headers },
-        signal: request.signal, credentials: ['/api/auth/login', '/api/auth/logout'].includes(request.path) || request.headers.Authorization === 'Bearer dpro-remembered-session' ? 'same-origin' : 'omit', mode: 'same-origin', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer',
+        headers: { Accept: chat || runEvents ? 'text/event-stream' : 'application/json', ...(request.body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(shell ? {} : request.headers) },
+        signal: request.signal, credentials: !shell && (['/api/auth/login', '/api/auth/logout'].includes(request.path) || request.headers.Authorization === 'Bearer dpro-remembered-session') ? 'same-origin' : 'omit', mode: 'same-origin', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer',
       });
       if (response.redirected || response.type === 'opaqueredirect' || (response.url && response.url !== origin + request.path) || (response.status >= 300 && response.status < 400)) throw new SessionFailure('blocked');
       if (runEvents && response.status === 200) {
@@ -576,6 +592,7 @@ export class SessionClient {
     if (request.method === 'POST' && request.path.startsWith('/api/memory/') && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if ((personalityRoute(request.path) || cardRoute(request.path) || (request.method === 'DELETE' && !conversationRoute(request.path) && !chatSecretsRoute(request.path))) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if (orgRoute(request.path) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
+    if (phoneRoute(request.path) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if ((agentLibraryRoute(request.path) || notesRoute(request.path)) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if (((request.method === 'POST' && request.path === '/api/agents') || grantsAgentId(request.path) || request.path === CATALOGUE_PATH || request.path === PLAN_PATH || request.path === DISTRIBUTION_PATH || request.path === BATCHES_PATH || batchPath(request.path) || permissionsAgentId(request.path) || request.path === BOARDS_PATH || request.path.startsWith(`${BOARDS_PATH}/`)) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     const epoch = this.#state.epoch;

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  TLS only, system CAs only (no user-added CAs), no plain http anywhere.
+  core-ui is not fetched from the network at all: the web host serves it from
+  the end-to-end session (WebOrigin.COMPUTER). The local-network path to the
+  computer is encrypted by the protocol itself, not by http.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

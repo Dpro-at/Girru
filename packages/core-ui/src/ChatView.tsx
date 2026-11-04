@@ -256,6 +256,12 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
   const owner = client?.getSnapshot().user?.role === 'owner';
   const p8 = useStoreP8(client);
   useEffect(()=>{if(terminalRequest>0&&owner)setTermOpen(true);},[terminalRequest,owner]);
+  // The phone app opens the terminal with #terminal (after its own fingerprint check): full size, then the hash is dropped.
+  useEffect(()=>{
+    if(typeof window==='undefined'||!(window as {girruShell?:unknown}).girruShell)return;
+    const open=()=>{if(window.location.hash!=='#terminal'||!owner)return;setTermOpen(true);setMaximized(true);history.replaceState(null,'',window.location.pathname+window.location.search);};
+    open();window.addEventListener('hashchange',open);return()=>window.removeEventListener('hashchange',open);
+  },[owner]);
   // CH1/CH8c: the side panel on one of its parts (the faces open Team, the title bar's project name opens Place).
   const openPart = (id: PanelPart) => { setPane('details'); setFocusPart(f => ({ id, n: (f?.n ?? 0) + 1 })); };
   useEffect(() => { if (placeRequest > 0) openPart('place'); }, [placeRequest]);
