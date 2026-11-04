@@ -24,6 +24,8 @@ import { splitAttached } from './conversations';
 import { AgentPanel } from './AgentPanel';
 import { ChangesPane, FilesPane } from './ProjectPanes';
 import { PanesController } from './panes';
+import { ChatOrb } from './ChatOrb';
+import { orbStateOf } from './chat-orb';
 import { TerminalPrefsController, TerminalTabs } from './terminal';
 import { TerminalPane } from './TerminalPane';
 import { MicController } from './mic';
@@ -492,7 +494,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
         <IconButton icon="close" label="OK, keep it outside" onClick={() => void trust?.set(outsideNotice.project.id, true)}/></div>}
     <div className="chat-thread" ref={thread} onScroll={onScroll} aria-label="Conversation">
 
-      {s.threadPhase === 'loading' && <p className="chat-loading" role="status"><span className="pulse" aria-hidden="true"/>Opening the conversation</p>}
+      {s.threadPhase === 'loading' && <div className="chat-opening" role="status"><p className="chat-opening-head"><ChatOrb state="load"/>Loading the chat…</p><div className="sk" style={{ inlineSize: '70%' }}/><div className="sk" style={{ inlineSize: '90%' }}/><div className="sk" style={{ inlineSize: '55%' }}/></div>}
       {empty ? <div className="chat-empty">
         {/* CHAT-BUILD-01 stage 3 (CH5): one sentence and three ideas. */}
         <span className="chat-empty-tile" aria-hidden="true"><UiIcon name="message" size={22}/></span>
@@ -830,7 +832,7 @@ function AssistantTurn({ turn, last, onRetry, writer, writerDepartment, writerRo
     {live
       ? <>{parts.map((p, i) => <PartView key={i} part={p} live last={i === parts.length - 1}/>)}
         {/* CHAT-BUILD-01 stage 5: the reply as it is written (checked text replaces it at the end). */}
-        {!parts.some(p => p.kind === 'text') && turn.preview && <div className="chat-prose turn-text md-host chat-live" aria-live="off"><Markdown text={turn.preview}/></div>}
+        {!parts.some(p => p.kind === 'text') && turn.preview && <div className="chat-prose turn-text md-host chat-live" aria-live="off"><Markdown text={turn.preview}/><span className="orb-caret" aria-hidden="true"/></div>}
         {liveSteps.length > 0 && <ToolStep calls={liveSteps} live/>}
         {(quiet || parts.length === 0) && <WorkingRow since={since} label={parts.length && !turn.previewSteps ? 'Working' : phase.verb} target={phase.target}/>}</>
       : <>
@@ -849,6 +851,7 @@ function AssistantTurn({ turn, last, onRetry, writer, writerDepartment, writerRo
         {answer.map((p, i) => <PartView key={`a${i}`} part={p}/>)}
         {turn.changes && <ChangesLine turn={turn} messageId={turn.key}/>}
         {turn.status === 'error' && <div className="chat-error" role="alert">
+          <span className="chat-state-mark" data-kind="fail" aria-hidden="true"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="9"/><path d="M7 7l6 6M13 7l-6 6"/></svg></span>
           <strong>{turn.code === 'run_interrupted' ? 'Work interrupted by restart' : turn.code === 'subscription_org_blocked' ? 'Claude subscription access is disabled' : turn.code === 'lmstudio_not_running' ? 'LM Studio is not running' : turn.code === 'local_model_missing' ? 'The local model is not installed' : turn.code === 'model_unavailable' ? 'The model did not answer' : 'This reply did not finish'}</strong>
           <span>{turn.code === 'run_interrupted' ? 'Your request and tool checkpoints are saved. Continue safely after reviewing them; previous actions are not replayed automatically.' : turn.code === 'subscription_org_blocked' ? 'Your organization has disabled Claude Code subscription access. Ask its administrator to enable access, or choose another signed-in coding app.' : turn.code === 'lmstudio_not_running' ? 'Open LM Studio, load the model and start its local server (port 1234), then try again.' : turn.code === 'local_model_missing' ? 'This agent answers with a local model that is not on this computer. Pick an installed model or add a Claude key in Settings, then try again.' : turn.code === 'model_unavailable' ? 'The model or coding app stopped before the reply was done. Check that it is running and signed in, then try again; anything above was written before it stopped.' : 'Something went wrong before the reply was done; anything above was written before it.'}</span>
           {last && onRetry && <button type="button" className="chat-error-action" onClick={onRetry}><UiIcon name="refresh" size={12}/>{turn.code === 'run_interrupted' ? 'Continue safely' : 'Try again'}</button>}
@@ -1074,7 +1077,7 @@ export function WorkedRow({ parts, ms }: { parts: Part[]; ms: number | null }) {
   const segments = workSegments(parts);
   return <div className="scaffold worked" data-open={open || undefined}>
     <button type="button" className="scaffold-row" aria-expanded={open} onClick={() => setOpen(v => !v)}>
-      <UiIcon name="check" size={14}/><span>{ms !== null ? `Worked for ${duration(ms)}` : 'Worked'}</span>
+      <span className="chat-state-mark" data-kind="done" aria-hidden="true"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="9"/><path d="M5.5 10.5l3 3 6-6.5"/></svg></span><span>{ms !== null ? `Worked for ${duration(ms)}` : 'Worked'}</span>
       {segments.length > 0 && <span className="worked-summary">{segments.map(s => <span key={s.kind} className="worked-seg" data-error={s.failed > 0 || undefined}><span aria-hidden="true">· </span>{s.label}{s.failed > 0 && `, ${s.failed} failed`}<span className="worked-seg-caret" aria-hidden="true"> ›</span></span>)}</span>}
       <span className="caret" aria-hidden="true"><UiIcon name="chevron" size={11}/></span>
     </button>
@@ -1106,7 +1109,8 @@ function ToolGroup({ item }: { item: Extract<WorkItem, { kind: 'group' }> }) {
 }
 
 function WorkingRow({ since, label, target }: { since: number; label: string; target?: string }) {
-  return <p className="scaffold working" role="status"><span className="pulse" aria-hidden="true"/><span className="shimmer">{label}</span>{target && <span className="working-target" dir="auto">{target}</span>}<Elapsed since={since}/></p>;
+  // CHAT-LOADER-01: the agent's orb; its ring and motion follow the phase words.
+  return <p className="scaffold working orb-row" role="status"><ChatOrb state={orbStateOf(label)}/><span className="shimmer">{label}</span>{target && <span className="working-target" dir="auto">{target}</span>}<Elapsed since={since}/></p>;
 }
 
 function Elapsed({ since }: { since: number }) {
