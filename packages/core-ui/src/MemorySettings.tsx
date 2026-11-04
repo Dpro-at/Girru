@@ -2,7 +2,7 @@
 // memory options moved out of the Memory window. Rules · Folders and drives ·
 // Sources · Documents · Projects · Access · Health and backup · Schedule. Each pane reuses
 // the controller the old Memory tabs used, so nothing is lost on the way.
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useStoreP2, useStoreP3 } from './store-switches';
 import type { SessionClient } from './session';
 import { MemoryHealthController } from './memory-health';
@@ -20,7 +20,8 @@ import { FilesView } from './MemoryPlaces';
 import { UiIcon } from './ui-icons';
 import { MemoryHelperRow } from './MemoryHelper';
 import { DocumentsPane } from './MemoryDocuments';
-import { Tile, useMenu, ContextMenu } from './desktop-ui';
+import { Tile, useMenu, ContextMenu, IconButton, Notice, Sheet } from './desktop-ui';
+import { OutsideTag, useOutsideProjects, verdictWhy } from './outside-projects';
 import type { ProjectGroup } from './memory-desktop-contract.js';
 import type { ScopeRules } from './memory-pages-contract.js';
 
@@ -137,7 +138,21 @@ function ProjectsPane({ client, scopes, disc }: { client: SessionClient; scopes:
   const dk = use(desk);
   const menu = useMenu();
   useEffect(() => { if (desk) void desk.loadGroups(); }, [desk]);
-  const projects = (ss?.tree?.projects ?? []).filter(p => !p.archived && !p.mergedInto);
+  // REPO-TRUST-01 (board R1): someone else's repositories are listed apart, under the owner's projects.
+  const trust = useOutsideProjects(client);
+  const [toast, setToast] = useState<{ id: number; text: string; undo: boolean } | null>(null);
+  const undo = useRef<(() => Promise<void>) | null>(null);
+  const [adding, setAdding] = useState(false);
+  const trustIdOf = (p: { slug: string; name: string }) => trust?.getSnapshot().view?.projects.find(v => v.projectId === p.slug)?.projectId
+    ?? trust?.getSnapshot().view?.projects.find(v => v.name === p.name)?.projectId ?? null;
+  async function setOutside(id: string, name: string, outside: boolean) {
+    const u = await trust?.set(id, outside);
+    if (!u) { setToast({ id: Date.now(), text: 'Not changed. Try again.', undo: false }); return; }
+    undo.current = u;
+    setToast({ id: Date.now(), text: outside ? `${name} is on Outside projects` : `${name} is trusted`, undo: true });
+  }
+  const outsideList = (trust?.getSnapshot().view?.projects ?? []).filter(v => v.outside);
+  const projects = (ss?.tree?.projects ?? []).filter(p => !p.archived && !p.mergedInto && !trust?.isOutside(trustIdOf(p)));
   const groups: readonly ProjectGroup[] = Array.isArray(dk?.groups) ? dk!.groups as readonly ProjectGroup[] : [];
   const roots = ds?.view?.roots ?? [];
   const foldersOf = (slug: string, name: string) => roots.filter(r => (r.project ?? '').toLowerCase() === slug || r.name.toLowerCase() === name.toLowerCase());
@@ -147,6 +162,7 @@ function ProjectsPane({ client, scopes, disc }: { client: SessionClient; scopes:
       ...groups.filter(g => !g.projects.includes(p.slug)).map(g => ({ label: `Move to ${g.name}`, icon: 'group' as const, run: () => void desk?.moveToGroup(p.slug, g.id) })),
       ...(rs.some(r => r.group) ? [{ label: 'Separate…', icon: 'diff' as const, run: () => { const r = rs.find(x => x.group); if (r) void disc.separate(r.id); } }] : []),
       ...(rs.length ? [{ label: 'Merge with another folder…', icon: 'folder' as const, run: () => disc.startMerge([rs[0].id], p.name) }] : []),
+      ...(trustIdOf(p) ? ['sep' as const, { label: 'Put on Outside projects', icon: 'shield' as const, run: () => void setOutside(trustIdOf(p)!, p.name, true) }] : []),
     ])}>
       <Tile name={p.name}/><span className="mem-project-name"><b>{p.name}</b><span className="fine-print">{p.memories} memories</span></span>
       <span className="mem-project-folders">{rs.length ? rs.flatMap(r => r.group ? r.group.members.map(m => <span key={m.id} className="fine-print dk-path" title={m.path}>{m.path} · joined by you</span>) : [<span key={r.id} className="fine-print dk-path" title={r.path ?? ''}>{r.path ?? r.name} · {r.path ? 'this computer' : 'older computer · no folder here'}</span>]) : <span className="fine-print">no folder found yet</span>}</span>
@@ -166,7 +182,18 @@ function ProjectsPane({ client, scopes, disc }: { client: SessionClient; scopes:
     {groups.map(g => <section key={g.id} className="mem-group"><h4><Tile name={g.name}/>{g.name}{g.label ? <span className="fine-print"> · {g.label}</span> : null}</h4><ul className="mem-projects">{projects.filter(p => g.projects.includes(p.slug)).map(row)}</ul></section>)}
     <section className="mem-group">{groups.length > 0 && <h4>Not in a group</h4>}<ul className="mem-projects">{projects.filter(p => !grouped.has(p.slug)).map(row)}</ul></section>
     {dk?.groups === 'missing' && <p className="fine-print">Groups of projects arrive with the next backend update.</p>}
-    <p className="fine-print">Right-click a project: Move to group · Merge with another folder · Separate.</p>
+    <p className="fine-print">Right-click a project: Move to group · Merge with another folder · Separate · Put on Outside projects.</p>
+    {trust && !trust.getSnapshot().off && <section className="mem-group outside-group" aria-label="Outside projects">
+      <h4><UiIcon name="shield" size={14}/>Outside projects</h4>
+      <p className="fine-print">Someone else’s repositories. Their files are read as data only and rank below your memory; they never become rules or pinned facts, coding apps get no memory there, and tasks from their task file wait for you once.</p>
+      {outsideList.length ? <ul className="mem-projects">{outsideList.map(v => <li key={v.projectId} className="mem-project outside-row" onContextMenu={e => menu.at(e, [{ label: 'Trust it', icon: 'check', run: () => void setOutside(v.projectId, v.name ?? 'Project', false) }])}>
+        <Tile name={v.name ?? 'Project'}/><span className="mem-project-name"><b>{v.name ?? 'Project'}<OutsideTag store={trust} projectId={v.projectId}/></b><span className="fine-print">{verdictWhy(v)}</span></span>
+        <span className="outside-actions"><button type="button" onClick={() => void setOutside(v.projectId, v.name ?? 'Project', false)}>Trust it</button></span>
+      </li>)}</ul> : <p className="fine-print">None. A project whose folder is someone else’s repository shows here by itself.</p>}
+      <p className="fine-print outside-accounts">Your accounts: {(trust.getSnapshot().view?.owners ?? []).map((o, i) => <span key={`${o.host}/${o.name}`}>{i ? ' · ' : ''}<b title={o.host}>{o.name}</b>{!o.builtIn && <IconButton icon="close" label={`Stop counting ${o.name} as yours`} onClick={() => void trust.removeAccount(o.name, o.host)}/>}</span>)} · <button type="button" className="link-button" onClick={() => setAdding(true)}>Add an account…</button></p>
+    </section>}
+    {adding && trust && <AddAccountSheet onClose={() => setAdding(false)} onAdd={async (name, host) => { setAdding(false); if (!(await trust.addAccount(name, host))) setToast({ id: Date.now(), text: 'Not added. Use a name like my-org (letters, numbers, - _ .).', undo: false }); }}/>}
+    <Notice toast={toast} onUndo={() => { void undo.current?.(); undo.current = null; setToast(null); }} onDone={id => setToast(t => (t?.id === id ? null : t))}/>
     <ContextMenu menu={menu.menu} onClose={menu.close}/>
   </div>;
 }
@@ -285,4 +312,16 @@ function DataJobs({ client }: { client: SessionClient }) {
     <ul>{jobs.map(j => <li key={j.id}><UiIcon name={JOB_LABEL[j.id]?.icon ?? 'database'} size={14}/><span>{JOB_LABEL[j.id]?.label ?? j.id}</span>
       <span className="fine-print">{j.done >= j.total ? 'Done' : `${j.total ? Math.floor((j.done / j.total) * 100) : 0} % · resumes after a restart`}</span></li>)}</ul>
     <p className="fine-print">Girru works normally meanwhile; a job reads the old layout until it finishes.</p></section>;
+}
+
+/** REPO-TRUST-01: an account (or group) whose repositories count as the owner's own. */
+function AddAccountSheet({ onClose, onAdd }: { onClose: () => void; onAdd: (name: string, host: string) => void }) {
+  const [name, setName] = useState('');
+  const [host, setHost] = useState('github.com');
+  const ok = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}(\/[A-Za-z0-9][A-Za-z0-9._-]{0,99}){0,4}$/.test(name.trim()) && !name.includes('..') && /^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$/.test(host.trim());
+  return <Sheet title="An account of yours" onClose={onClose} actions={<><button type="button" onClick={onClose}>Cancel</button><button type="button" className="primary" disabled={!ok} onClick={() => onAdd(name.trim(), host.trim().toLowerCase())}>Add</button></>}>
+    <label className="dk-field">Account or group<input autoFocus value={name} placeholder="my-org" onChange={e => setName(e.target.value)}/></label>
+    <label className="dk-field">Site<input value={host} onChange={e => setHost(e.target.value)}/></label>
+    <p className="fine-print">Repositories of this account on this site count as yours: they are not put on Outside projects.</p>
+  </Sheet>;
 }

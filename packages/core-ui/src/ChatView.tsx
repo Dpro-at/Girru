@@ -1,4 +1,5 @@
 import { ChatVoice } from './ChatVoice';
+import { useOutsideProjects } from './outside-projects';
 import {CodeChatResize} from './CodeChatResize';
 import { DepartmentBadge } from './DepartmentBadge';
 import { MeetingPanels } from './MeetingPanels';
@@ -46,7 +47,7 @@ import { ContextCard, HandoffCard, RecallChip, RecallPanel, SpeedDetails } from 
 import { MemoryMoveController } from './memory-move';
 import { MoveDialog } from './MemoryDialogs';
 import { exportConversation, exportNote } from './chat-export';
-import { ContextMenu, Sheet, useMenu } from './desktop-ui';
+import { ContextMenu, IconButton, Sheet, useMenu } from './desktop-ui';
 import type { MenuItem } from './desktop-ui';
 import { ContinueElsewhere, openChatWindow } from './chat-actions';
 import { secretLabel, splitSecrets } from './chat-secrets';
@@ -260,6 +261,14 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
   const [maximized, setMaximized] = useState(false);
   useEffect(() => { if (!client) return; const p = new PanesController(client); setPanes(p); const t = { tabs: new TerminalTabs(client), prefs: new TerminalPrefsController(client) }; setTerminal(t); return () => { p.dispose(); t.tabs.dispose(); t.prefs.dispose(); }; }, [client]);
   const owner = client?.getSnapshot().user?.role === 'owner';
+  // REPO-TRUST-01 (board R1 · R2): the first chat in a project Girru found to be someone else's says so once.
+  const trust = useOutsideProjects(owner ? client : null);
+  // Shown only while the verdict is Girru's own: either answer is the owner's choice (kept on the server), so it never comes back.
+  const outsideNotice = (() => {
+    const v = project ? trust?.verdict(project.id) : null;
+    if (!project || !v?.outside || v.source !== 'auto') return null;
+    return { project, remote: v.remote };
+  })();
   const p8 = useStoreP8(client);
   useEffect(()=>{if(terminalRequest>0&&owner)setTermOpen(true);},[terminalRequest,owner]);
   // The phone app opens the terminal with #terminal (after its own fingerprint check): full size, then the hash is dropped.
@@ -442,7 +451,12 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
     {!embeddedCode && mode === 'live' && client && client.getSnapshot().user?.role === 'owner' && <Meetings key={s.activeId ?? 'new'} client={client} controller={controller} active={active} onMeetingChanged={setMeetingMeta} callTarget={meetingStage} onCallChanged={setMeetingCall} onOpenCard={onOpenCard}/>}
     <MeetingPanels active={meetingCall} onStage={setMeetingStage}>
     {mode === 'live' && avatarOn && !meetingMeta && <ChatAvatar turns={s.turns} agentId={convAgentId ?? s.agentId ?? ''} agentName={nameOf(convAgentId ?? s.agentId)} onClose={toggleAvatar}/>}
+    {outsideNotice && <div className="outside-notice" role="status"><UiIcon name="shield" size={16}/>
+        <span><b>{outsideNotice.project.name} is someone else’s repository</b>{outsideNotice.remote ? ` (${outsideNotice.remote.host}/${outsideNotice.remote.owner})` : ''}. Girru reads its files as data only and keeps it on Outside projects. Trust it if it is yours.</span>
+        <button type="button" onClick={() => void trust?.set(outsideNotice.project.id, false)}>Trust it</button>
+        <IconButton icon="close" label="OK, keep it outside" onClick={() => void trust?.set(outsideNotice.project.id, true)}/></div>}
     <div className="chat-thread" ref={thread} onScroll={onScroll} aria-label="Conversation">
+
       {s.threadPhase === 'loading' && <p className="chat-loading" role="status"><span className="pulse" aria-hidden="true"/>Opening the conversation</p>}
       {empty ? <div className="chat-empty">
         {/* CHAT-BUILD-01 stage 3 (CH5): one sentence and three ideas. */}
