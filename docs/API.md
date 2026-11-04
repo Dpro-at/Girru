@@ -194,7 +194,21 @@ Each answers `404 not_found` while the switch is off. Agents never mark a memory
 | `POST /api/memory/open-questions/:id/answer` | `{ text, drawer? }` → `{ question, memoryId }`: saved as the owner's own fact; `409 not_open` when it no longer waits |
 | `POST /api/memory/open-questions/:id/forget` · `/restore` | forget (no confirmation) → `{ id, undo }`; restore within 10 minutes → `{ question }`, else `410 gone` |
 
-### Open in Code (owner only, CODE-OPEN-01)
+### Memory helper (owner only, `GIRRU_MEMORY_HELPER`)
+
+| Route | Body / answer |
+|---|---|
+| `GET /api/memory/helper` | `{ status, row }`: the helper's phase (`waiting`, `checking`, `starting_runtime`, `downloading`, `verifying`, `reembedding`, `ready` or `fallback`), download progress and the fallback reason; codes and counts only, never memory text or paths. `row` is its Memory › Health row |
+| `POST /api/memory/helper/retry` | try again now after a failure; answers at once |
+
+### The Code app (owner only)
+
+| Route | Body / answer |
+|---|---|
+| `GET /api/apps/code` | `{ state, platform, version, update, available, job }`; `state` is `installed`, `missing`, `unsupported` (no archive for this platform), `bundled` (a developer build that includes Code) or `unavailable`; `update` names a newer version when there is one; `job` is a running install |
+| `POST /api/store/install` | `{ id: "girru:code" }` adds or updates Code like any Store app: download, size and SHA-256 check, unpack. Follow it with `GET /api/store/install/:job` |
+
+### Open in Code (owner only)
 
 | Route | Body / answer |
 |---|---|

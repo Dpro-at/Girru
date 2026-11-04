@@ -111,10 +111,13 @@ Memory is the core of Girru. Every agent, chat and coding tool works from the sa
 - 💻 **One memory for your coding tools.** One project brief reaches Claude Code, Codex and Antigravity together, through `AGENTS.md` and a memory server (MCP). Girru writes only inside its own marked section.
 - 📥 **Brings in what you have.** Import past coding conversations and project documents. Secrets are hidden first, and you review before anything is kept.
 - 🔐 **Private by design.** It stays on your computer. Each agent's read and write access is set by company, department and project. Background memory work uses a local model when one is available.
+- 🎯 **Careful, not confident.** Recall says "no reliable memory" instead of guessing, shows how sure it is, and a new fact on the same topic replaces the old one.
+- 🏠 **Some things never leave.** Mark a memory place, such as People, to stay on this computer: only a local model ever sees it. Export everything about one person in one file, or forget it in one action; a restored backup does not bring it back.
+- 🖥️ **Local models only, if you like.** Girru also works with no subscription: each turn fits the local model's real window. A small local memory helper, used only for search, gets ready by itself in the background once a local model runtime is installed.
 
 **Unified memory does not mean unrestricted access.** Ownership, scope, and permissions remain part of the system.
 
-See [FEATURES.md](FEATURES.md#-memory) for every memory feature and its status.
+See [FEATURES.md](FEATURES.md#-memory) for every memory feature and its status, and the [storage map](docs/architecture/storage-map.md) for what is stored where, what leaves your computer, how to export or forget it, and the numbers measured locally.
 
 Cross-provider coverage is expanding. Sharing context does not transfer a provider’s underlying model or change its training.
 

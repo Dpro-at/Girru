@@ -10,6 +10,8 @@ This is the full list of what Girru can do. The [README](README.md) gives the ov
 | 🟡 **Partly built** | Some of it is in the source, and the rest is in progress. |
 | 🧭 **Planned** | On the roadmap. |
 
+Many memory features are built behind backend switches that are turned on together for a release. The [storage map](docs/architecture/storage-map.md#memory-switches) lists each switch and its current default, and gives the measured numbers.
+
 Being in the source does not always mean it is in an installer. The [changelog](https://girru.dev/changelog/) lists what each published version includes.
 
 **Sections:** [Memory](#-memory) · [Desktop app and first run](#-desktop-app-and-first-run) · [Chat](#-chat) · [Meetings](#-meetings) · [Voice](#-voice) · [Agents and teams](#-agents-and-teams) · [Library](#-library) · [Board and tasks](#-board-and-tasks) · [Scheduling, runs and approvals](#-scheduling-runs-and-approvals) · [Code workspace](#-code-workspace) · [Browser](#-browser) · [Models and connections](#-models-and-connections) · [Channels](#-channels) · [Store, apps and MCP](#-store-apps-and-mcp) · [Security and privacy](#-security-and-privacy) · [Backups, settings and updates](#-backups-settings-and-updates) · [Command line](#-command-line) · [Worlds and beyond](#-worlds-and-beyond)
@@ -41,6 +43,10 @@ Girru's memory is the centre of the system. You explain something once, and ever
 | **Context budget and cache** | Each reply loads memory in a fixed order and within a set budget, so local models stay fast and reuse their cache. | ✅ Built |
 | **Why this answer** | Each reply records which facts, memories and notes it used and why, and you can open that record. | ✅ Built |
 | **Re-embedding** | When the embedding model changes, stored memories are updated so search stays correct. | ✅ Built |
+| **Careful recall** | Recall is routed by what you ask, re-ranked on your computer, and says "no reliable memory" instead of guessing. | ✅ Built |
+| **How sure** | Each memory shows how sure Girru is, from how many sources agree and whether you verified it. You can mark a memory as verified. | ✅ Built |
+| **The newest fact wins** | A new fact on the same topic replaces the old one, which stays in History and is no longer recalled. | ✅ Built |
+| **Fast at scale** | Recall keeps a small index in memory. Measured locally on generated data: about 0.3 s for 100,000 memories. | ✅ Built |
 
 ### Learning, with you in control
 
@@ -55,6 +61,8 @@ Girru's memory is the centre of the system. You explain something once, and ever
 | **Weekly summary** | A short "what I learned this week" for each drawer, built without paid calls. | ✅ Built |
 | **Memory doctor** | A health check that finds duplicates and other problems. A fix runs only after you confirm it. | ✅ Built |
 | **Handoff notes** | When a chat goes quiet or a task run ends, a short note (done, left, next) is written so the next agent can continue. | ✅ Built |
+| **Corrected after use and open questions** | Memories that were corrected after a reply used them, and questions memory could not answer, wait in Needs you. Answer a question in place and it becomes a verified fact. | ✅ Built |
+| **Memory health** | Remembering, saving, backups, coding apps and background jobs, each "ok" or "needs you". A read-only check runs at night and never fixes anything by itself. | ✅ Built |
 
 ### Access and privacy
 
@@ -64,6 +72,11 @@ Girru's memory is the centre of the system. You explain something once, and ever
 | **Time-limited exceptions** | An agent can get extra access that ends on a date you set. | ✅ Built |
 | **Secret redaction** | Imports and shared files are scanned, and keys, tokens and passwords are hidden before anything is saved or written. | ✅ Built |
 | **Local first** | Memory stays on your computer. Background memory work uses a local model when one is available. | ✅ Built |
+| **Stays on this computer** | Mark a memory place (People by default) so that it reaches only a model on your computer, never a provider or a coding tool. | ✅ Built |
+| **One person: export and forget** | Everything about one person in one file, and forget it in one action. | ✅ Built |
+| **Forgotten stays forgotten** | Forgetting removes the text and its copies; restoring an older backup does not bring it back. | ✅ Built |
+| **Sensitive facts wait for you** | Facts about health, religion, politics and other special categories are never saved by an agent on its own. Other people's contact or bank details in imports are flagged. | ✅ Built |
+| **Memory helper** | A small local model, used only for memory search, that gets ready by itself in the background. Until then memory uses an offline search that is weaker across languages. Installing the local runtime for you is still to come. | 🟡 Partly built |
 
 ### One memory for your coding tools
 
@@ -75,7 +88,9 @@ Girru's memory is the centre of the system. You explain something once, and ever
 | **Your text stays yours** | Girru writes only inside its own marked section and never changes your own text around it. | ✅ Built |
 | **Kept out of Git** | Generated files can be hidden from Git automatically. | ✅ Built |
 | **Learn back from tools** | Notes you write in your coding tools' own memory files come back as suggestions for you to review. | ✅ Built |
-| **More tool files** | Writing to Cursor and GitHub Copilot instruction files. | 🧭 Planned |
+| **More tool files** | Cursor and GitHub Copilot get Girru's instructions and the memory server too. | ✅ Built |
+| **One memory contract** | Every model and coding tool uses the same five memory verbs (recall, save, supersede, handoff, propose), checked by the server. | ✅ Built |
+| **A session per project** | A coding tool reads memory only for the project Girru opened it in. A folder path never grants anything, and every read is logged. | ✅ Built |
 
 ### Bring in what you already have
 
@@ -166,6 +181,9 @@ Girru's memory is the centre of the system. You explain something once, and ever
 | **Specialties** | Job descriptions that bring their own skills, tools and memory access, up to ten per agent. | ✅ Built |
 | **Hiring** | Hire one agent from a specialty, or plan a bigger company and hire a whole team at once. | ✅ Built |
 | **Per-agent files** | Each agent has a personality file, a memory file and a knowledge folder, with versions you can restore. | ✅ Built |
+| **One personality record** | An agent's personality text and traits share one history in the database; `PERSONALITY.md` is written from it, and an outside edit of the file waits for your review. | ✅ Built |
+| **One context everywhere** | Chat, task runs and coding apps give an agent the same rules, job, personality and memory. Skills load by name, full text only when needed. | ✅ Built |
+| **Agent packages** | Export one agent as one file and import it on another computer. Permissions, keys and private history never travel. | ✅ Built |
 | **Tool permissions** | Each kind of tool is off, ask first or allowed, per agent. | ✅ Built |
 | **Scheduled check-ins** | An agent can pick up its assigned tasks on a schedule. | ✅ Built |
 | **Specialty exams** | Score an agent on standard tasks for its specialty, before and after a change. | 🧭 Planned |
@@ -189,6 +207,7 @@ Girru's memory is the centre of the system. You explain something once, and ever
 | **Task page** | Description, checklist with owners and dates, sub-tasks, comments, links and an activity log with file changes. | ✅ Built |
 | **Repeating tasks** | A card that comes back on a schedule. | ✅ Built |
 | **One task file per project** | `.girru/tasks.md` is read and written by every agent and coding tool and shown on the board in both directions. Finished tasks move to their own file. | ✅ Built |
+| **Task numbers link everything** | A task number brings its notes, handoffs, chats and its line in the task file together. A card shows when it is blocked. | ✅ Built |
 | **Rules in the project** | Owner rules are written into the project folder so coding tools follow them too. | ✅ Built |
 | **Design file** | A project's design notes are kept in `DESIGN.md` for every agent. | ✅ Built |
 | **Your own record types** | Define your own records and fields, and get forms and agent tools for them. | 🧭 Planned |
@@ -217,7 +236,8 @@ Girru's memory is the centre of the system. You explain something once, and ever
 | **Coding sessions and add-ons** | See your coding sessions, and the plugins, hooks, skills and MCP servers each one uses. | ✅ Built |
 | **Pull request status** | See a project's pull request state and checks. | ✅ Built |
 | **Project variables** | Keep a project's settings and keys in encrypted variables. | ✅ Built |
-| **Code editor** | A full project editor next to the chat, with review of agent edits. It is in the desktop app and hidden from the bottom bar by default. | 🟡 Partly built |
+| **Code editor** | A full project editor next to the chat, with review of agent edits. It is an app you install from the Store, not part of the Girru download; the download is checked before it is used. | ✅ Built |
+| **Open in Code** | Open project files, task lines, rule files and changed files in Code at the right line. An agent asks first. | ✅ Built |
 
 ## 🌐 Browser
 
@@ -232,7 +252,8 @@ Girru's memory is the centre of the system. You explain something once, and ever
 | Feature | What it does | Status |
 |---|---|---|
 | **Use your subscriptions** | Sign in to Claude Code, Codex and Antigravity and work through the plans you already have. No separate API billing is needed. | ✅ Built |
-| **Local models** | Run local models through Ollama or LM Studio. A model that stops answering is noticed. | ✅ Built |
+| **Local models** | Run local models through Ollama, LM Studio or another OpenAI-compatible server on your computer. A model that stops answering is noticed. | ✅ Built |
+| **Local models only** | Work with no subscription at all: tools load on demand and each turn fits the model's real window (an 8k turn measured about 2,600 tokens locally). A model that misses part of the memory check is marked "memory limited". The first-run choice and the mark on screen are still to come. | 🟡 Partly built |
 | **Small local helper** | Your coding tools can hand light jobs to a small local model. | ✅ Built |
 | **Model per agent** | Choose the model each agent uses, including the main agent. | ✅ Built |
 | **Optional API keys** | Your own provider keys can be added as an extra choice. They are stored encrypted. | ✅ Built |
@@ -260,7 +281,7 @@ Girru's memory is the centre of the system. You explain something once, and ever
 | **Calendar** | An app for Google and iCal calendars. | 🟡 Partly built |
 | **Email** | An app for email accounts. | 🟡 Partly built |
 | **Team invitations** | Invite other people to your workspace. | ✅ Built |
-| **Lighter core** | Apps are downloaded from the Store when you install them, so the core program gets smaller. | 🟡 Partly built |
+| **Lighter core** | Apps are downloaded from the Store when you install them, so the core program gets smaller. Code already comes this way. | 🟡 Partly built |
 | **Marketing app** | SEO tools and social posting: connect accounts, schedule and publish. | 🧭 Planned |
 
 ## 🔐 Security and privacy
