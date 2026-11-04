@@ -1,6 +1,6 @@
 // Settings › Memory (boards M25–M27, M29, M31 J6, M32 K4): the advanced
 // memory options moved out of the Memory window. Rules · Folders and drives ·
-// Sources · Projects · Access · Health and backup · Schedule. Each pane reuses
+// Sources · Documents · Projects · Access · Health and backup · Schedule. Each pane reuses
 // the controller the old Memory tabs used, so nothing is lost on the way.
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useStoreP2, useStoreP3 } from './store-switches';
@@ -19,13 +19,14 @@ import { LocalImport } from './LocalImport';
 import { FilesView } from './MemoryPlaces';
 import { UiIcon } from './ui-icons';
 import { MemoryHelperRow } from './MemoryHelper';
+import { DocumentsPane } from './MemoryDocuments';
 import { Tile, useMenu, ContextMenu } from './desktop-ui';
 import type { ProjectGroup } from './memory-desktop-contract.js';
 import type { ScopeRules } from './memory-pages-contract.js';
 
-export type MemorySettingsPane = 'rules' | 'folders' | 'sources' | 'projects' | 'access' | 'health' | 'schedule';
+export type MemorySettingsPane = 'rules' | 'folders' | 'sources' | 'documents' | 'projects' | 'access' | 'health' | 'schedule';
 export const MEMORY_PANES: ReadonlyArray<{ key: MemorySettingsPane; label: string }> = [
-  { key: 'rules', label: 'Rules' }, { key: 'folders', label: 'Folders and drives' }, { key: 'sources', label: 'Sources' }, { key: 'projects', label: 'Projects' },
+  { key: 'rules', label: 'Rules' }, { key: 'folders', label: 'Folders and drives' }, { key: 'sources', label: 'Sources' }, { key: 'documents', label: 'Documents' }, { key: 'projects', label: 'Projects' },
   { key: 'access', label: 'Access' }, { key: 'health', label: 'Health and backup' }, { key: 'schedule', label: 'Schedule' },
 ];
 
@@ -51,6 +52,7 @@ export function MemorySettings({ client, pane, onOpenMemory }: { client: Session
     {pane === 'rules' && health && <RulesPane client={client} health={health} scopes={scopes}/>}
     {pane === 'folders' && disc && <><p className="fine-print">Tick folders, drives or partitions (several at once). Everything inside is read, also new folders. Girru only reads; your files never change. On Windows: C:, D:, E: and USB drives show here the same way.</p><FolderTree c={disc}/></>}
     {pane === 'sources' && <SourcesPane client={client} disc={disc}/>}
+    {pane === 'documents' && <DocumentsPane client={client}/>}
     {pane === 'projects' && scopes && disc && <ProjectsPane client={client} scopes={scopes} disc={disc}/>}
     {pane === 'access' && <AccessPane client={client} tree={ss?.tree ?? null}/>}
     {pane === 'health' && health && <>{files ? <><button type="button" className="link-button" onClick={() => setFiles(false)}>Back to Health and backup</button><FilesView client={client} agents={ss?.agents ?? {}} drawers={[{ id: 'owner', name: 'About you' }, { id: 'experience', name: 'Lessons' }, ...(ss?.tree?.projects ?? []).filter(p => !p.archived && !p.mergedInto && !p.trashedAt).map(p => ({ id: `project:${p.slug}`, name: p.name }))]}/></>

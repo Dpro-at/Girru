@@ -31,7 +31,7 @@ const PASS_THROUGH = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_AL
   'GIRRU_STORE_URL',
   // The memory switches are on by default; `=0` turns one off (backend services/memory-switches.ts).
   'GIRRU_STORE_P2', 'GIRRU_STORE_P2B', 'GIRRU_STORE_P3', 'GIRRU_STORE_P4', 'GIRRU_STORE_P5', 'GIRRU_STORE_P6',
-  'GIRRU_STORE_P7', 'GIRRU_STORE_P8', 'GIRRU_STORE_P9', 'GIRRU_STORE_P9B', 'GIRRU_MEMORY_HELPER'];
+  'GIRRU_STORE_P7', 'GIRRU_STORE_P8', 'GIRRU_STORE_P9', 'GIRRU_STORE_P9B', 'GIRRU_MEMORY_HELPER', 'GIRRU_DOC_INDEX'];
 
 function backendEnv({ base = process.env, dataDir, token, allowedOrigin, extra = {} }) {
   const env = {};

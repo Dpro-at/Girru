@@ -178,7 +178,7 @@ export async function agentFilesRoutes(fastify: FastifyInstance) {
     const b=request.body;if(!only(b,['name','content','expectedHash'])||!b||!('expectedHash' in b))return reply.code(400).send({code:'invalid_input'});
     try{return await saveFile(request.params.id,b.name,b.content,b.expectedHash);}catch(error){return libraryFail(reply,error);}
   });
-  fastify.post<{Params:{id:string};Body:{name?:unknown;content?:unknown;read?:unknown}}>('/api/agents/:id/library/file',{...lib,bodyLimit:3*1024*1024},async(request,reply)=>{
+  fastify.post<{Params:{id:string};Body:{name?:unknown;content?:unknown;read?:unknown}}>('/api/agents/:id/library/file',{...lib,bodyLimit:15*1024*1024},async(request,reply)=>{
     if(!libraryOwner(request,reply))return reply;
     const b=request.body;if(!only(b,['name','content','read']))return reply.code(400).send({code:'invalid_input'});
     try{return reply.code(201).send(await addFile(request.params.id,b.name,b.content,b.read??true));}catch(error){return libraryFail(reply,error);}

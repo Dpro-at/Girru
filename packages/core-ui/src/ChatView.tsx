@@ -41,6 +41,7 @@ import { ChatMemoryController, messageRef, proposalsByRun, rememberDraft, MAX_RE
 import type { ChatMemory, RememberDrawer, RememberType } from './chat-memory';
 import { drawerLabel } from './MemoryViews';
 import { ChatRecallController } from './chat-recall';
+import { PDF_BYTES, PDF_UNREADABLE, readPdf } from './doc-index';
 import { ContextCard, HandoffCard, RecallChip, RecallPanel, SpeedDetails } from './ChatRecall';
 import { MemoryMoveController } from './memory-move';
 import { MoveDialog } from './MemoryDialogs';
@@ -157,11 +158,16 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
       // CHAT-GAPS-01: images go to a model that can see; other binary files are still refused.
       const pics=[...list].filter(f=>/^image\/(png|jpeg|gif|webp)$/.test(f.type));
       if(pics.length){const read=await Promise.all(pics.map(f=>new Promise<{name:string;type:string;data:string}>((ok,no)=>{const r=new FileReader();r.onload=()=>ok({name:f.name,type:f.type,data:String(r.result).replace(/^data:[^,]*,/,'')});r.onerror=()=>no(r.error);r.readAsDataURL(f);})));setAttachError(controller.attachImages(read));if(pics.length===list.length){if(picker.current)picker.current.value='';return;}}
-      if([...list].some(f=>!pics.includes(f)&&(/^(image|audio|video)\//.test(f.type)||/\.(pdf|zip|gz|png|jpe?g|gif|webp|mp4|mov|mp3|wav|svg)$/i.test(f.name)))){setAttachError('This chat attaches text and code files and PNG, JPEG, GIF or WebP images. PDFs and other binary files are not supported here yet.');return;}
-      if([...list].some(f=>f.size>2_000_000)){setAttachError('Choose smaller text files. Each attachment can contain up to 60,000 characters.');return;}
-      const files = await Promise.all([...list].filter(f=>!pics.includes(f)).map(async f => ({ name: f.name, text: await f.text() })));
+      // KNOW-INDEX-01: a PDF is read with Girru's own reader (its text, pages marked); never guessed when it can't be read.
+      const pdfs=[...list].filter(f=>!pics.includes(f)&&(f.type==='application/pdf'||/\.pdf$/i.test(f.name)));
+      if([...list].some(f=>!pics.includes(f)&&!pdfs.includes(f)&&(/^(image|audio|video)\//.test(f.type)||/\.(zip|gz|png|jpe?g|gif|webp|mp4|mov|mp3|wav|svg)$/i.test(f.name)))){setAttachError('This chat attaches text and code files, PDFs, and PNG, JPEG, GIF or WebP images. Other binary files are not supported here yet.');return;}
+      if([...list].some(f=>!pdfs.includes(f)&&f.size>2_000_000)){setAttachError('Choose smaller text files. Each attachment can contain up to 60,000 characters.');return;}
+      if(pdfs.some(f=>f.size>PDF_BYTES)){setAttachError('Choose a smaller PDF (up to 10 MB).');return;}
+      const pdfErrors:string[]=[];
+      const read = await Promise.all(pdfs.map(async f => { if(!client){pdfErrors.push(`${f.name}: PDFs need the desktop app.`);return null;} const r = await readPdf(client, f); if('text' in r)return { name: f.name, text: r.text }; pdfErrors.push(`${f.name}: ${PDF_UNREADABLE[r.reason] ?? PDF_UNREADABLE.unreadable}`); return null; }));
+      const files = [...read.filter((x): x is { name: string; text: string } => !!x), ...await Promise.all([...list].filter(f=>!pics.includes(f)&&!pdfs.includes(f)).map(async f => ({ name: f.name, text: await f.text() })))];
       // CH3: the files that can be read are added; each one that cannot shows its reason in a red chip.
-      const errors = files.map(f => controller.attach([f])).filter((e): e is string => !!e);
+      const errors = [...pdfErrors, ...files.map(f => controller.attach([f])).filter((e): e is string => !!e)];
       setAttachError(errors.length ? errors.join(' · ') : null);
     } catch { setAttachError('The file could not be read.'); }
     if (picker.current) picker.current.value = '';
@@ -517,7 +523,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
           onChange={e => controller.edit(e.target.value)} onPaste={e=>{if(e.clipboardData.files.length){e.preventDefault();void onFiles(e.clipboardData.files);}}} onKeyDown={onKeyDown} disabled={s.access === 'denied'}/>
         <div className="chat-composer-row">
           <input ref={picker} type="file" multiple hidden onChange={e => void onFiles(e.target.files)}
-            accept=".txt,.md,.csv,.json,.yml,.yaml,.xml,.toml,.ini,.log,.ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.rb,.go,.rs,.java,.php,.sh,.sql,.html,.css,text/*,image/png,image/jpeg,image/gif,image/webp"/>
+            accept=".txt,.md,.pdf,application/pdf,.csv,.json,.yml,.yaml,.xml,.toml,.ini,.log,.ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.rb,.go,.rs,.java,.php,.sh,.sql,.html,.css,text/*,image/png,image/jpeg,image/gif,image/webp"/>
           {!s.activeId && onChooseContext && <ProjectChip controller={controller} onNewProject={folder => setProjectSheet({ id: null, folder })}/>}
           <PlusButton onFiles={() => picker.current?.click()} onLong={() => setLongDraft(true)}/>
           <ModeButton value={s.mode} onChange={m => void controller.setMode(m)} open={popover === 'mode'} setOpen={v => setPopover(v ? 'mode' : null)}/>

@@ -158,6 +158,7 @@ The memory work is built and in the source. Each part sits behind one backend sw
 | `GIRRU_STORE_P9` | Faster recall, privacy enforcement, health, forget ledger | [Hardening](#hardening-privacy-and-quality) |
 | `GIRRU_STORE_P9B` | One write pipeline, confidence, careful recall | [Memory quality](#memory-quality) |
 | `GIRRU_MEMORY_HELPER` | The memory helper gets itself ready | [Memory helper](#memory-helper) |
+| `GIRRU_DOC_INDEX` | Document memory: answers from project files, cited by file and page | [Document memory](#document-memory) |
 
 All switches were tested together: the full backend test suite passes with every switch on and with every switch off, on SQLite and on PostgreSQL. See [Measured on this computer](#measured-on-this-computer).
 
@@ -314,6 +315,17 @@ The memory helper is the small local model that turns memory into vectors for se
 - **The runtime itself is not installed yet:** when Ollama is missing, the helper reports it and stays on the fallback. Installing the runtime for the owner in first-run setup is **Planned**.
 
 The memory helper's status is one row in Memory › Health.
+
+## Document memory
+
+`GIRRU_DOC_INDEX` (on by default; `GIRRU_DOC_INDEX=0` turns it off) lets agents find answers inside documents and say where they came from:
+
+- **What is read:** `.md`, `.txt` and `.pdf` files in the folders of every project that has a folder (turn one off in Settings › Memory › Documents) and in each agent's Knowledge folder (for that agent only). The files stay where they are. A folder may hold a repository cloned from someone else, so its text is always treated as untrusted data.
+- **What is never read:** hidden files and folders (`.git`, `.env`, …), files named like secrets, credentials or keys, key files, dependency and build folders, links, and files over 20 MB (2 MB for text). At most 500 files per project. Secrets inside a file are hidden before its text is kept.
+- **PDFs:** read with Girru's own reader (no extra package): text, page by page. A PDF that cannot be read (a scan, a locked file, unknown fonts) is listed with the reason; nothing is guessed.
+- **What is kept:** for each file its hash and a revision, and for each piece of text its page (PDF) or heading (Markdown) and its vector. A changed file is read again; a deleted file loses its pieces. The work runs in the background and goes on after a restart; a reply never waits for it.
+- **Recall:** the same places and privacy as memory. A project's documents are recalled only when its memory is open for the turn, never for a model off this computer when the project stays on this computer. Lines are marked as the file's own words (data, not instructions), share the recall size budget with memories, and carry the file and page. The reply's details (Used N memories · N documents) list each file and page; `memory_search` returns the same lines.
+- **Knowledge files:** a file marked "It reads this file" that fits is put whole into the agent's instructions and is not indexed; every other Knowledge file (PDFs included) is indexed. A file is never in both places.
 
 ## Code as a Store app
 

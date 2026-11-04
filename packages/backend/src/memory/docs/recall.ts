@@ -22,7 +22,7 @@ import { bm25FromCounts, hybridScore, termCounts, vectorScore, MIN_RECALL_SCORE 
 import { RELIABLE_SCORE, ITEM_SHARE } from '../quality/recall.js';
 import type { DrawerRef } from '../drawers.js';
 import { docIndexEnabled } from '../../services/doc-index-switch.js';
-import { ensureAgentSource, queueDocIndex } from './indexer.js';
+import { ensureAgentSource, ensureProjectSources, queueDocIndex } from './indexer.js';
 
 export const DOC_RECALL_LIMIT = 4;
 const MAX_PER_FILE = 2;
@@ -54,6 +54,8 @@ interface Loaded {
 const cache = new Map<string, Loaded>();
 /** Agent sources known to exist (one insert per agent and process, not one per turn). */
 const ensured = new Set<string>();
+/** Projects whose default source was already created this process (one insert per project, not per turn). */
+const ensuredProjects = new Set<string>();
 
 /** The sources this turn may read, with their revisions (two small queries; no chunk text). */
 export async function docScopes(input: { userId: string; drawers: readonly DrawerRef[]; agentId?: string | null }): Promise<DocScopes> {
@@ -77,6 +79,13 @@ export async function docScopes(input: { userId: string; drawers: readonly Drawe
   if (agentId) { parts.push(`(kind = 'agent' AND ref_id = ?)`); params.push(agentId); }
   const rows = await sql().read(all<{ id: string; kind: 'project' | 'agent'; ref_id: string; revision: number; state: string; scanned_at: string | null }>(
     `SELECT id, kind, ref_id, revision, state, scanned_at FROM doc_index_sources WHERE owner_id = ? AND enabled = 1 AND (${parts.join(' OR ')}) ORDER BY id`, ...params));
+  // A project with a folder is read by default: one the index has not met yet gets its source now (read in the background).
+  const known = new Set(rows.filter((r) => r.kind === 'project').map((r) => r.ref_id));
+  const missing = projectIds.filter((id) => !known.has(id) && !ensuredProjects.has(`${input.userId}\n${id}`));
+  if (missing.length) {
+    for (const id of missing) ensuredProjects.add(`${input.userId}\n${id}`);
+    for (const id of await ensureProjectSources(input.userId).catch(() => [])) queueDocIndex(id);
+  }
   const sources = rows.map((r) => ({ id: r.id, kind: r.kind, refId: r.ref_id, revision: Number(r.revision), state: r.state, scannedAt: r.scanned_at }));
   return { sources, token: sources.map((s) => `${s.id}:${s.revision}`).join(',') };
 }
@@ -104,7 +113,7 @@ async function load(source: DocScopes['sources'][number]): Promise<Loaded> {
 }
 
 /** Drop the in-process chunk cache (tests; a forgotten source). */
-export function clearDocRecallCache(): void { cache.clear(); ensured.clear(); }
+export function clearDocRecallCache(): void { cache.clear(); ensured.clear(); ensuredProjects.clear(); }
 
 export async function docRecall(input: { userId: string; query: string; limit?: number; scopes: DocScopes }): Promise<{ items: DocHit[]; reliable: boolean; best: number }> {
   const none = { items: [], reliable: false, best: 0 };
