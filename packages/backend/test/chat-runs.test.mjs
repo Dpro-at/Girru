@@ -344,7 +344,11 @@ test('task plan: every agent may call plan_steps (no grant); the steps travel in
   assert.match(ev.find((f) => f.type === 'tool_result').results[0].output, /Plan shown to the owner: 1\/3 done; now: Write the summary/);
   const { planSteps } = await import(new URL('../src/tools/plan/plan-steps.ts', import.meta.url).href);
   assert.equal(typeof planSteps([{ title: 'a', status: 'active' }, { title: 'b', status: 'active' }]), 'string', 'one active step at a time');
-  assert.equal(typeof planSteps(Array.from({ length: 13 }, (_, i) => ({ title: `s${i}`, status: 'pending' }))), 'string');
+  assert.equal(typeof planSteps(Array.from({ length: 21 }, (_, i) => ({ title: `s${i}`, status: 'pending' }))), 'string');
+  // CHAT-LIVE-01: sub-steps point at an earlier main step, one level only.
+  assert.deepEqual(planSteps([{ title: 'a', status: 'active' }, { title: 'a1', status: 'active', parent: 1 }, { title: 'b', status: 'pending' }]), [{ title: 'a', status: 'active' }, { title: 'a1', status: 'active', parent: 1 }, { title: 'b', status: 'pending' }]);
+  assert.equal(typeof planSteps([{ title: 'a1', status: 'pending', parent: 1 }]), 'string', 'a parent must come first');
+  assert.equal(typeof planSteps([{ title: 'a', status: 'pending' }, { title: 'a1', status: 'pending', parent: 1 }, { title: 'a1x', status: 'pending', parent: 2 }]), 'string', 'one level only');
 });
 
 test('team chat: another agent can write the next reply; it is stored per reply and earlier replies are named', async () => {

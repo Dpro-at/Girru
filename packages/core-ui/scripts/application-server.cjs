@@ -490,7 +490,8 @@ function createApplicationServer({ browserController = null, packageRoot = root,
             touch();
             try {
               const frames = parser.push(chunk);
-              for (const frame of frames) if (!res.write(`data: ${JSON.stringify(frame)}\n\n`)) response.pause();
+              // CHAT-LIVE-01: the live preview keeps no number on the way out (with seq 0 the window took it for a numbered frame and dropped it).
+              for (const frame of frames) { const out = frame.type === 'preview' ? (({ seq: _seq, ...rest }) => rest)(frame) : frame; if (!res.write(`data: ${JSON.stringify(out)}\n\n`)) response.pause(); }
               const now = performance.now();
               if (!frames.length && now - lastKeepalive >= KEEPALIVE_MS) { res.write(': keepalive\n\n'); lastKeepalive = now; }
               if (parser.ended) finish();

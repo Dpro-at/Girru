@@ -18,10 +18,10 @@ import { NO_MCP_AGENTS } from '../mcp-client/config.js';
 import { hasSecretRef, resolveSecretRefs, scrubSecretValues, vaultToolResult } from '../services/chat-secrets.js';
 
 /** Tools whose input is stored as text by Girru: key-store references are never resolved for them (CHAT-SECRETS-01). */
-const KEEPS_TEXT = /^(?:memory_|board_|task_|handoff_|rule_suggest$|plan_steps$|create_reminder$)/;
+const KEEPS_TEXT = /^(?:memory_|board_|task_|handoff_|session_|rule_suggest$|plan_steps$|ask_choice$|create_reminder$)/;
 
 /** Self-only tools need no grant; an extension or MCP tool can never claim it. */
-const SELF_ONLY_TOOLS = new Set(['plan_steps', 'board_suggest_card', 'rule_suggest', 'handoff_save', 'handoff_read', 'guide_read', 'run_note']);
+const SELF_ONLY_TOOLS = new Set(['plan_steps', 'ask_choice', 'session_start', 'session_list', 'session_read', 'session_message', 'session_stop', 'board_suggest_card', 'rule_suggest', 'handoff_save', 'handoff_read', 'guide_read', 'run_note']);
 const isSelfOnly = (tool: Tool) => tool.selfOnly === true && SELF_ONLY_TOOLS.has(tool.name) && !tool.extensionId && !(tool as { mcp?: unknown }).mcp && !tool.execClass;
 /**
  * CORE-MEM-HANDOFF: the agent's own handoff note also lives in board task runs
@@ -49,9 +49,15 @@ export function injectedOrder(result: { content?: { type: string; text?: string 
 }
 
 /** Tools that only read, or keep text in Girru's own owner-reviewed stores, never ask because of the chat mode. */
-const MODE_FREE = new Set(['read', 'search', 'list', 'plan_steps', 'board_suggest_card', 'rule_suggest', 'memory_save', 'memory_search', 'memory_recall', 'team_list', 'team_results', 'web_fetch', 'web_search']);
+const MODE_FREE = new Set(['read', 'search', 'list', 'plan_steps', 'ask_choice', 'session_list', 'session_read', 'board_suggest_card', 'rule_suggest', 'memory_save', 'memory_search', 'memory_recall', 'team_list', 'team_results', 'web_fetch', 'web_search']);
 /** Girru's own file tools (in the agent's workspace). An extension or MCP tool never counts as one. */
 const isFileEdit = (tool: { name: string; extensionId?: string; mcp?: unknown }) => !tool.extensionId && !tool.mcp && (tool.name === 'write' || tool.name === 'edit');
+/**
+ * CHAT-LIVE-01 (LW6): in a chat with a folder (the owner's project or the chat's own folder), Girru's file
+ * edit and write change that folder's real files. They are offered there without a separate grant; the tools
+ * themselves check the owner and the folder, and every mode but "Accept edits" asks the owner first.
+ */
+const chatFolderFile = (tool: Tool, context: ToolExecutionContext) => isFileEdit(tool) && !tool.execClass && context.chatPlan === true && !context.toolPolicy && !!context.fileReadRoot && !!context.userId && !!context.sessionId && !context.delegatedFrom?.length && !context.taskId;
 /** CHAT-BUILD-01 stage 3: does this tool change something (files, messages, settings, money, programs)? */
 export function changesSomething(tool: Pick<Tool, 'name'> & { mcp?: unknown; execClass?: boolean; extensionId?: string }): boolean {
   if (MODE_FREE.has(tool.name)) return false;
@@ -106,7 +112,7 @@ export class ToolsRegistry {
     return Array.from(this.tools.values()).filter((tool) =>
       isToolObjectAllowedByExecPolicy(tool)
       && (!policy || isToolAllowedInChannel(policy, tool))
-      && (isSelfOnly(tool) ? selfOnlyOffered(tool, this.context) : isToolGranted(grants, tool.name))
+      && (isSelfOnly(tool) ? selfOnlyOffered(tool, this.context) : isToolGranted(grants, tool.name) || chatFolderFile(tool, this.context))
       && modeFor(this.context.permissions, tool) !== 'off'
     );
   }
@@ -163,7 +169,7 @@ export class ToolsRegistry {
     }
 
     // SECURITY (S1.2): only tools granted to this agent run, even if the model emits others
-    const grantRefused = isSelfOnly(tool) && selfOnlyOffered(tool, this.context) ? null : grantCallRefusal(this.grants(), toolName, tool, params);
+    const grantRefused = (isSelfOnly(tool) && selfOnlyOffered(tool, this.context)) || chatFolderFile(tool, this.context) ? null : grantCallRefusal(this.grants(), toolName, tool, params);
     if (grantRefused) {
       console.warn(`[ToolsRegistry] ⛔ Refused ungranted tool for agent ${this.context.agentId ?? '(none)'}: ${toolName}`);
       return grantRefused;
@@ -214,6 +220,8 @@ export class ToolsRegistry {
     // "Accept edits": Girru's own file edits run as the agent's rules say; anything else that changes something asks.
     // (For coding-app replies the owner's Accept edits also lets the app edit files in the chat's folders.)
     if ((chatMode === 'ask' || chatMode === 'plan' || (chatMode === 'accept_edits' && !isFileEdit(tool))) && changesSomething(tool)) category = category ?? modeCategory ?? 'other';
+    // CHAT-LIVE-01 (LW6): "Auto" changes the chat folder's real files only after the owner allows it (the mode text promises it).
+    if (chatMode !== 'accept_edits' && chatFolderFile(tool, this.context)) category = category ?? modeCategory ?? 'other';
     if (category && (reviewerRequired || !isConfinedChannelReply(policy, toolName)) && !consumeApprovalTicket(options.approvalTicket, toolName)) {
       try {
         return await requestApproval(tool, params, this.context, category);

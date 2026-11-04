@@ -43,12 +43,12 @@ export type WireToolCall = { id: string; name: string; input: string; output?: s
 export type WirePart = { kind: 'text'; text: string } | { kind: 'reasoning'; text: string; ms?: number } | { kind: 'tools'; step: number; calls: WireToolCall[] }
   | { kind: 'steer'; text: string; step: number } | { kind: 'notice'; code: 'injection' | 'summarized' | 'plan_limit' | 'images_not_seen'; text?: string }
   | { kind: 'images'; images: { id: string; type: string; name: string }[] };
-export type WireMessage = { id: string; role: 'user' | 'assistant' | 'system'; content: string; parts: WirePart[] | null; status: 'complete' | 'stopped' | 'error'; runId: string | null; durationMs: number | null; createdAt: string; agentId?: string; code?: 'run_interrupted'; changes?: { files: number; undone: boolean; unavailable?: boolean; added?: number; removed?: number } };
+export type WireMessage = { id: string; role: 'user' | 'assistant' | 'system'; content: string; parts: WirePart[] | null; status: 'complete' | 'stopped' | 'error'; runId: string | null; durationMs: number | null; createdAt: string; agentId?: string; code?: 'run_interrupted' | 'model_unavailable' | 'local_model_missing' | 'lmstudio_not_running' | 'subscription_org_blocked'; changes?: { files: number; undone: boolean; unavailable?: boolean; added?: number; removed?: number } };
 export type RunEvent = ({ seq: number; at?: number }) & (
   | { type: 'text' | 'reasoning'; content: string }
   | { type: 'tool_start'; step: number; tools: { id: string; name: string; input: string }[] }
   | { type: 'tool_result'; step: number; results: { id: string; name: string; output: string; isError: boolean; ms?: number; approvalId?: string }[] }
-  | { type: 'preview'; content: string; tool?: string }
+  | { type: 'preview'; content: string; tool?: string; steps?: LiveStep[]; plan?: LivePlanStep[] }
   | { type: 'notice'; code: 'rate_limited' | 'claude_key_missing' | 'local_model_slow' | 'injection' | 'summarized' | 'plan_limit' | 'images_not_seen'; waitSec?: number; model?: string; text?: string }
   | { type: 'steer'; content: string; step: number }
   | { type: 'end'; status: 'complete' | 'stopped' | 'error'; ms: number; code?: 'model_unavailable' | 'local_model_missing' | 'lmstudio_not_running' | 'subscription_org_blocked' });
@@ -60,3 +60,8 @@ export class RunEventParser {
   push(bytes: Uint8Array): RunEvent[];
   finish(): void;
 }
+
+/** CHAT-LIVE-01: a step of a running reply, from its live preview. */
+export type LiveStep = { name: string; input: string; done: boolean; failed: boolean; ms?: number };
+export type LivePlanStep = { title: string; status: 'pending' | 'active' | 'done' | 'skipped'; parent?: number };
+export function previewWork(raw: Record<string, unknown>): { steps?: LiveStep[]; plan?: LivePlanStep[] };

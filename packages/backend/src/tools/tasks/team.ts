@@ -27,7 +27,7 @@ export function teamFailure(err: unknown, timedOut: boolean, stopped: boolean): 
  * and not a sub-agent. Who it may give work to is mayDelegate (AGENTS-ORG-01): the main agent anyone
  * but other agents' sub-agents; a manager (anyone else) the agents under it and its own sub-agents.
  */
-async function coordinator(context?: ToolExecutionContext): Promise<OrgRow[] | null> {
+export async function coordinator(context?: ToolExecutionContext): Promise<OrgRow[] | null> {
   if (!context?.userId || !context.agentId || !context.sessionId || context.toolPolicy || context.delegatedFrom?.length || context.taskId) return null;
   const owner = await sql().read(one<{ role: string }>('SELECT role FROM users WHERE id=?', context.userId));
   if (owner?.role !== 'owner') return null;

@@ -1577,7 +1577,9 @@ button.status-item:hover { background:var(--row-hover); color:var(--text); }
 .app-shell .search-result { display:flex; flex-direction:column; gap:1px; }
 .app-shell .search-result-title { display:flex; align-items:baseline; gap:6px; justify-content:flex-start; min-block-size:24px; padding:2px 8px; background:transparent; color:var(--text); font-size:12.5px; font-weight:500; box-shadow:none; border-radius:2px; text-align:start; }
 .app-shell .search-result-title:hover, .app-shell .search-hit:hover { background:var(--row-hover); }
-.app-shell .search-result-project { margin-inline-start:auto; font-size:10.5px; font-weight:400; color:var(--text-4); white-space:nowrap; }
+.app-shell .search-result-project { margin-inline-start:auto; flex:0 1 auto; max-inline-size:45%; font-size:10.5px; font-weight:400; color:var(--text-4); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* CHAT-LIVE-01 (LW6): the chat name is one line (cut with …), never squeezed to a word per line. */
+.app-shell .search-result-name { flex:1 1 auto; min-inline-size:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 .app-shell .search-hit { display:flex; flex-direction:column; align-items:stretch; gap:1px; min-block-size:0; padding:3px 8px 3px 14px; background:transparent; color:var(--text-3); font-size:11.5px; font-weight:400; line-height:1.4; box-shadow:none; border-radius:2px; text-align:start; }
 .app-shell .search-hit-kind { font-size:10px; color:var(--text-4); }
 .app-shell .hit-snippet { overflow:hidden; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow-wrap:anywhere; unicode-bidi:plaintext; }
@@ -2388,8 +2390,11 @@ button.status-item:hover { background:var(--row-hover); color:var(--text); }
 .dk-menu button[data-danger]:hover { color:var(--on-accent); background:var(--danger); }
 .dk-menu button:disabled { background:transparent; opacity:.45; }
 .dk-menu hr { border:0; block-size:1px; background:var(--border); margin:4px 6px; }
-.dk-menu kbd { margin-inline-start:auto; opacity:.6; }
-.dk-menu-label { flex:1; text-align:start; }
+.dk-menu kbd { flex:none; margin-inline-start:auto; padding-inline-start:12px; opacity:.6; }
+/* CHAT-LIVE-01 (LW6): a long item (a project name) is cut with … and its shortcut stays inside the menu. */
+.dk-menu button { display:flex; align-items:center; min-inline-size:0; max-inline-size:100%; overflow:hidden; }
+.dk-menu { max-inline-size:min(420px, calc(100vw - 16px)); }
+.dk-menu-label { flex:1; min-inline-size:0; text-align:start; overflow:hidden; text-overflow:ellipsis; }
 .dk-menu-gap { inline-size:14px; }
 .dk-popover { position:absolute; z-index:50; inset-block-start:calc(100% + 6px); inset-inline-end:0; inline-size:280px; padding:12px; border-radius:10px; background:var(--surface); box-shadow:0 0 0 1px var(--border),0 12px 32px #0003; }
 .dk-popover[data-wide] { inline-size:360px; inset-inline-end:auto; inset-inline-start:0; }
@@ -2399,6 +2404,7 @@ button.status-item:hover { background:var(--row-hover); color:var(--text); }
 .dk-pop-menu { display:grid; gap:2px; }
 .dk-pop-menu button { justify-content:space-between; background:transparent; }
 .dk-pop-menu button:hover { background:var(--row-hover); }
+.dk-sheet-scrim[data-window] { position:fixed; z-index:70; }
 .dk-sheet-scrim { position:absolute; inset:0; z-index:40; display:flex; justify-content:center; align-items:flex-start; background:color-mix(in srgb,var(--canvas) 40%,transparent); }
 .dk-sheet { margin-block-start:56px; inline-size:min(440px,calc(100% - 32px)); max-block-size:calc(100% - 80px); overflow:auto; display:grid; gap:12px; padding:18px; border-radius:12px; background:var(--surface); box-shadow:0 0 0 1px var(--border),0 24px 64px #0004; }
 .dk-sheet[data-wide] { inline-size:min(600px,calc(100% - 32px)); }
@@ -3824,3 +3830,47 @@ label.setup-kind { display:flex; align-items:center; justify-content:flex-start;
 .outside-notice { flex:none; inline-size:calc(100% - 32px); box-sizing:border-box; display:flex; align-items:flex-start; gap:10px; margin:12px auto 0; max-inline-size:760px; padding:10px 12px; border-radius:10px; background:var(--mem-warn-bg); box-shadow:inset 0 0 0 1px var(--mem-warn-line); font-size:12.5px; line-height:1.5; }
 .outside-notice > svg { flex:none; margin-block-start:2px; color:var(--mem-warn); }
 .outside-notice span { flex:1; }
+
+/* CHAT-LIVE-01: live phase target, plan sub-steps + progress, choice card */
+.app-shell .working .working-target { color:var(--text-3); overflow:hidden; white-space:nowrap; text-overflow:ellipsis; max-inline-size:360px; }
+.app-shell .task-list li[data-sub] { padding-inline-start:20px; font-size:11.5px; }
+.app-shell .task-list .task-bar { margin-inline-start:auto; inline-size:72px; block-size:4px; border-radius:2px; background:var(--row-hover); overflow:hidden; }
+.app-shell .task-list .task-bar > span { display:block; block-size:100%; background:var(--accent); transition:width .3s ease; }
+.choice-card { display:flex; flex-direction:column; gap:8px; }
+.choice-card .choice-who { display:flex; align-items:center; gap:6px; margin:0; font-size:12px; color:var(--text-3); }
+.choice-card .choice-question { font-size:13.5px; font-weight:600; }
+.choice-card .moment-choice[data-suggested] { box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 60%,transparent); }
+.choice-card .moment-choice small { margin-inline-start:4px; opacity:.75; font-weight:400; }
+.choice-card .choice-multi { display:flex; flex-direction:column; gap:4px; }
+.choice-card .choice-multi label { display:flex; align-items:center; gap:8px; min-block-size:28px; padding:0 8px; border-radius:7px; background:var(--row-hover); }
+.choice-card .choice-own { display:flex; align-items:center; gap:6px; min-block-size:30px; padding:0 8px; border-radius:7px; box-shadow:inset 0 0 0 1px var(--border, #2C323C); color:var(--text-3); }
+.choice-card .choice-own input { flex:1; border:0; background:transparent; color:var(--text); font:inherit; outline:none; }
+.choice-done b { font-weight:600; }
+/* CHAT-ORCH-01: sessions card + started-by line */
+.sessions-card { display:flex; flex-direction:column; gap:2px; }
+.sessions-card .sessions-head { display:flex; align-items:center; gap:6px; margin:0 0 4px; font-size:12px; color:var(--text-3); }
+.sessions-card .session-row { display:grid; grid-template-columns:24px minmax(0,1fr) auto; align-items:center; gap:10px; padding:6px; border-radius:8px; }
+.sessions-card .session-row[data-state="needs"] { background:color-mix(in srgb,#F0C27A 10%,transparent); }
+.sessions-card .session-row .avatar { inline-size:24px; block-size:24px; border-radius:50%; display:grid; place-items:center; font-size:11px; font-weight:700; background:var(--row-hover); }
+.sessions-card .session-text { display:flex; flex-direction:column; min-inline-size:0; }
+.sessions-card .session-text b { font-weight:600; font-size:13px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.sessions-card .session-text small { color:var(--text-3); font-size:12px; }
+.sessions-card .session-row[data-state="working"] small::before { content:''; display:inline-block; inline-size:7px; block-size:7px; margin-inline-end:5px; border-radius:50%; background:var(--accent); }
+.sessions-card .session-row[data-state="needs"] small::before { content:''; display:inline-block; inline-size:7px; block-size:7px; margin-inline-end:5px; border-radius:50%; background:#F0C27A; }
+.started-by .link-button { padding:0; }
+.sessions-card .session-actions { display:flex; align-items:center; gap:2px; }
+
+/* CHAT-LIVE-01: the work row and the plan read as part of the reply: no frame, no fill (frames are kept for what needs the owner). */
+.app-shell .scaffold.worked > .scaffold-row, .shell[data-theme="dark"] .app-shell .scaffold.worked > .scaffold-row, .app-shell[data-theme="dark"] .scaffold.worked > .scaffold-row { background:transparent; box-shadow:none; padding:0 2px; block-size:26px; color:var(--text-3); }
+.app-shell .scaffold.worked > .scaffold-row:hover { background:transparent; color:var(--text-2); }
+.app-shell .task-list, .shell[data-theme="dark"] .app-shell .task-list, .app-shell[data-theme="dark"] .task-list { background:transparent; box-shadow:none; border:0; }
+.app-shell .task-list .task-head { padding-inline:2px; }
+.app-shell .plan-line > summary { list-style:none; cursor:pointer; }
+.app-shell .plan-line > summary::-webkit-details-marker { display:none; }
+.app-shell .plan-line ol { list-style:none; margin:2px 0 4px; padding:0 0 0 20px; display:flex; flex-direction:column; gap:3px; font-size:12px; color:var(--text-2); }
+.app-shell .plan-line li { display:flex; align-items:center; gap:8px; }
+.app-shell .plan-line li[data-sub] { padding-inline-start:18px; }
+.app-shell .plan-line li[data-state="done"] > span:not(.task-dot) { color:var(--text-3); }
+/* CHAT-LIVE-01: steps and sub-steps line up in one column; a sub-step only has a smaller dot and quieter text. */
+.app-shell .plan-line li[data-sub], .app-shell .task-list li[data-sub] { padding-inline-start:0; font-size:inherit; color:var(--text-3); }
+.app-shell .plan-line li[data-sub] .task-dot, .app-shell .task-list li[data-sub] .task-dot { transform:scale(.75); }

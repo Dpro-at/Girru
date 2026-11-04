@@ -66,7 +66,7 @@ export interface ConversationMessage {
   runId: string | null;
   durationMs: number | null;
   createdAt: string;
-  code?: 'run_interrupted';
+  code?: 'run_interrupted' | (typeof KEPT_ERROR_CODES)[number];
   /** CHAT-PRO-02 I: the agent that wrote an assistant reply (null = the conversation's agent). */
   agentId?: string | null;
   /** CHAT-BUILD-01 stage 5: files this reply changed in the project folder, and whether they were undone. */
@@ -99,7 +99,7 @@ function parseParts(raw: string | null): TurnPart[] | null {
 function toMessage(r: MessageRow): ConversationMessage {
   return {
     id: r.id, role: r.role, content: r.content, parts: parseParts(r.parts), status: r.status ?? 'complete',
-    runId: r.run_id, durationMs: r.duration_ms, createdAt: r.created_at, agentId: r.agent_id ?? null, ...(r.error_code === 'run_interrupted' ? { code: 'run_interrupted' as const } : {}),
+    runId: r.run_id, durationMs: r.duration_ms, createdAt: r.created_at, agentId: r.agent_id ?? null, ...(r.error_code === 'run_interrupted' || (KEPT_ERROR_CODES as readonly string[]).includes(r.error_code ?? '') ? { code: r.error_code as ConversationMessage['code'] } : {}),
     ...(Number(r.checkpoint_files) > 0 ? { changes: { files: Number(r.checkpoint_files), undone: !!r.checkpoint_undone, ...(r.checkpoint_added != null ? { added: Number(r.checkpoint_added), removed: Number(r.checkpoint_removed ?? 0) } : {}) } } : Number(r.checkpoint_files) === -1 ? { changes: { files: 0, undone: false, unavailable: true } } : {}),
   };
 }
@@ -121,10 +121,10 @@ export async function findConversation(userId: string, id: string): Promise<Conv
   return r ? toConversation(r) : undefined;
 }
 
-export async function createConversation(userId: string, input: { title?: string | null; agentId?: string | null; projectId?: string | null; model?: string; mode?: ChatMode; thinking?: ChatThinking }): Promise<Conversation> {
+export async function createConversation(userId: string, input: { title?: string | null; agentId?: string | null; projectId?: string | null; model?: string; mode?: ChatMode; thinking?: ChatThinking; parentId?: string | null }): Promise<Conversation> {
   const id = randomUUID();
-  await q.run('INSERT INTO chat_sessions (id, user_id, title, model, agent_id, project_id, mode, thinking) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    id, userId, input.title?.trim() || null, input.model || 'default', input.agentId || null, input.projectId || null, input.mode ?? null, input.thinking ?? null);
+  await q.run('INSERT INTO chat_sessions (id, user_id, title, model, agent_id, project_id, mode, thinking, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    id, userId, input.title?.trim() || null, input.model || 'default', input.agentId || null, input.projectId || null, input.mode ?? null, input.thinking ?? null, input.parentId || null);
   return (await findConversation(userId, id))!;
 }
 
@@ -203,13 +203,16 @@ export async function addUserMessage(sessionId: string, content: string, runId: 
 }
 
 /** Stores the assistant's turn of a run (once per run id). */
-export async function addAssistantMessage(sessionId: string, input: { runId: string; content: string; parts: TurnPart[]; status: TurnStatus; durationMs: number; agentId?: string | null }): Promise<ConversationMessage> {
+/** CHAT-LIVE-01 (LW6): why a reply failed, kept with it so the chat shows the same plain text live and after reopening. */
+export const KEPT_ERROR_CODES = ['model_unavailable', 'local_model_missing', 'lmstudio_not_running', 'subscription_org_blocked'] as const;
+export async function addAssistantMessage(sessionId: string, input: { runId: string; content: string; parts: TurnPart[]; status: TurnStatus; durationMs: number; agentId?: string | null; errorCode?: string | null }): Promise<ConversationMessage> {
   const id = orderedId();
   return sql().tx(function* (): Step<ConversationMessage> {
     const existing = yield* one<MessageRow>("SELECT * FROM chat_messages WHERE run_id = ? AND role = 'assistant'", input.runId);
     if (existing) return toMessage(existing);
-    yield* run("INSERT INTO chat_messages (id, session_id, role, content, parts, status, run_id, duration_ms, agent_id) VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?)",
-      id, sessionId, input.content, JSON.stringify(input.parts), input.status, input.runId, Math.max(0, Math.round(input.durationMs)), input.agentId ?? null);
+    const code = input.status === 'error' && (KEPT_ERROR_CODES as readonly string[]).includes(input.errorCode ?? '') ? input.errorCode! : null;
+    yield* run("INSERT INTO chat_messages (id, session_id, role, content, parts, status, run_id, duration_ms, agent_id, error_code) VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?, ?)",
+      id, sessionId, input.content, JSON.stringify(input.parts), input.status, input.runId, Math.max(0, Math.round(input.durationMs)), input.agentId ?? null, code);
     yield* run('UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', sessionId);
     return toMessage((yield* one<MessageRow>('SELECT * FROM chat_messages WHERE id = ?', id))!);
   });

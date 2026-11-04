@@ -196,7 +196,7 @@ function message(x) {
   return { id: str(x.id, 64), role: x.role, content: x.content.slice(0, 1000000), parts,
     status: ['complete', 'stopped', 'error'].includes(x.status) ? x.status : 'complete',
     runId: validRunId(x.runId) ? x.runId : null, durationMs: num(x.durationMs) ?? null, createdAt: str(x.createdAt, 40),
-    ...(x.code === 'run_interrupted' ? { code: 'run_interrupted' } : {}),
+    ...(['run_interrupted', 'model_unavailable', 'local_model_missing', 'lmstudio_not_running', 'subscription_org_blocked'].includes(x.code) ? { code: x.code } : {}),
     ...(agentId(x.agentId) ? { agentId: x.agentId } : {}),
     ...(record(x.changes) && num(x.changes.files) ? { changes: { files: num(x.changes.files), undone: x.changes.undone === true, ...(Number.isSafeInteger(x.changes.added) && x.changes.added >= 0 && Number.isSafeInteger(x.changes.removed) && x.changes.removed >= 0 ? { added: x.changes.added, removed: x.changes.removed } : {}) } } : record(x.changes) && x.changes.unavailable === true ? { changes: { files: 0, undone: false, unavailable: true } } : {}) };
 }
@@ -336,6 +336,22 @@ function projectEvent(x) {
   return undefined;
 }
 
+/** CHAT-LIVE-01: the live steps and plan a preview may carry (shape-checked, short; never stored). */
+export function previewWork(raw) {
+  const out = {};
+  if (Array.isArray(raw.steps)) {
+    const steps = raw.steps.slice(-12).filter(x => x && typeof x === 'object' && typeof x.name === 'string' && x.name)
+      .map(x => ({ name: x.name.slice(0, 64), input: str(x.input, 300), done: x.done === true, failed: x.failed === true, ...(num(x.ms) !== undefined ? { ms: num(x.ms) } : {}) }));
+    if (steps.length) out.steps = steps;
+  }
+  if (Array.isArray(raw.plan)) {
+    const plan = raw.plan.slice(0, 20).filter(x => x && typeof x === 'object' && typeof x.title === 'string' && x.title.trim())
+      .map(x => ({ title: x.title.trim().slice(0, 120), status: ['pending', 'active', 'done', 'skipped'].includes(x.status) ? x.status : 'pending', ...(Number.isInteger(x.parent) && x.parent > 0 && x.parent <= 20 ? { parent: x.parent } : {}) }));
+    if (plan.length) out.plan = plan;
+  }
+  return out;
+}
+
 /** Incremental parser for a run's SSE stream: numbered frames in order, comments ignored. */
 export class RunEventParser {
   constructor(after = 0) { this.last = after; this.decoder = new TextDecoder('utf-8', { fatal: true }); this.line = ''; this.data = []; this.size = 0; this.cr = false; this.ended = false; }
@@ -350,8 +366,8 @@ export class RunEventParser {
             const raw = JSON.parse(this.data.join('\n'));
             this.data = []; this.size = 0;
             // CHAT-BUILD-01 stage 5: the live preview has no number; it never moves the resume point.
-            if (raw && raw.type === 'preview' && raw.seq === undefined) { if (!this.ended) out.push({ seq: 0, type: 'preview', content: str(raw.content, RUN_FRAME_BYTES), ...(typeof raw.tool === 'string' ? { tool: raw.tool.slice(0, 128) } : {}) }); }
-            const frame = raw && raw.type === 'preview' && raw.seq === undefined ? undefined : projectRunEvent(raw);
+            if (raw && raw.type === 'preview' && (raw.seq === undefined || raw.seq === 0)) { if (!this.ended) out.push({ seq: 0, type: 'preview', content: str(raw.content, RUN_FRAME_BYTES), ...(typeof raw.tool === 'string' ? { tool: raw.tool.slice(0, 128) } : {}), ...previewWork(raw) }); }
+            const frame = raw && raw.type === 'preview' && (raw.seq === undefined || raw.seq === 0) ? undefined : projectRunEvent(raw);
             if (frame && frame.seq > this.last) {
               if (this.ended) throw Error('protocol');
               this.last = frame.seq; if (frame.type === 'end') this.ended = true; out.push(frame);

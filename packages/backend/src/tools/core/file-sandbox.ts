@@ -231,6 +231,30 @@ export function resolveReadPath(root: string, input: unknown): { real: string; r
   return { real, rel };
 }
 
+/** Biggest file the read tool scans for a part or a search (CHAT-LIVE-01). */
+export const MAX_SCAN_BYTES = 32 * 1024 * 1024;
+
+/**
+ * Text of an already-resolved real path (from resolveReadPath, or a plain
+ * file found by walking a resolved folder without following links): regular
+ * file, no symlink at the last step, at most MAX_SCAN_BYTES, not binary.
+ */
+export function sandboxedReadText(real: string, maxBytes = MAX_SCAN_BYTES): string {
+  const fd = fs.openSync(real, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+  try {
+    const st = fs.fstatSync(fd);
+    if (!st.isFile()) throw new FileSandboxError('Not a regular file', 'not_a_file');
+    if (st.size > maxBytes) throw new FileSandboxError(`File is too large to read (${st.size} bytes, max ${maxBytes})`, 'too_large');
+    const buf = Buffer.alloc(st.size);
+    let off = 0;
+    while (off < st.size) { const n = fs.readSync(fd, buf, off, st.size - off, off); if (n <= 0) break; off += n; }
+    if (buf.subarray(0, Math.min(off, 8192)).includes(0)) throw new FileSandboxError('Not a text file', 'not_a_file');
+    return buf.subarray(0, off).toString('utf-8');
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 /** Read a file inside the root (regular file, size-limited, no symlink at the last step). */
 export function sandboxedReadFile(root: string, input: unknown, maxBytes = MAX_READ_BYTES): { content: string; rel: string; size: number; modified: Date } {
   const { real, rel } = resolveReadPath(root, input);

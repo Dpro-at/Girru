@@ -2,7 +2,7 @@
 // message or a live run's events become a Turn; tool calls become one short
 // human line ("Ran npm test", "Read config.ts"); a finished turn splits into
 // its work (reasoning, tools, interim notes) and its final answer.
-import type { RunEvent, WireMessage, WirePart } from './conversation-contract.js';
+import type { LivePlanStep, LiveStep, RunEvent, WireMessage, WirePart } from './conversation-contract.js';
 
 export type ToolCall = Readonly<{ id: string; name: string; input: string; output?: string; isError?: boolean; ms?: number; running: boolean; approvalId?: string }>;
 export type Part =
@@ -26,6 +26,9 @@ export type Turn = Readonly<{
   preview?: string;
   /** The tool it runs right now (live). */
   previewTool?: string;
+  /** CHAT-LIVE-01: its steps so far and its plan, live (the checked parts replace them at the end). */
+  previewSteps?: readonly LiveStep[];
+  previewPlan?: readonly LivePlanStep[];
   /** CH2: when the message was saved (ISO), for the author line. */
   at?: string;
 }>;
@@ -54,7 +57,7 @@ export function fromWire(m: WireMessage): Turn {
 
 /** Applies one run event to the live assistant turn (events at or below lastSeq are ignored). */
 export function applyEvent(turn: Turn, e: RunEvent, received: number): Turn {
-  if (e.type === 'preview') return turn.status === 'running' ? Object.freeze({ ...turn, preview: e.content, previewTool: e.tool }) : turn;
+  if (e.type === 'preview') return turn.status === 'running' ? Object.freeze({ ...turn, preview: e.content, previewTool: e.tool, ...(e.steps ? { previewSteps: e.steps } : {}), ...(e.plan ? { previewPlan: e.plan } : {}) }) : turn;
   if (e.seq <= turn.lastSeq) return turn;
   // Server time when known: replayed events keep their real spacing.
   const base = turn.base ?? (e.at !== undefined ? received - e.at : undefined);
@@ -109,7 +112,7 @@ export function applyEvent(turn: Turn, e: RunEvent, received: number): Turn {
     case 'end':
       closeReasoning();
       return Object.freeze({ ...turn, parts: parts.map(p => (p.kind === 'tools' ? { ...p, calls: p.calls.map(c => (c.running ? { ...c, running: false } : c)) } : p)),
-        content, status: e.status, durationMs: e.ms, lastSeq: e.seq, preview: undefined, previewTool: undefined, ...(e.code ? { code: e.code } : {}) });
+        content, status: e.status, durationMs: e.ms, lastSeq: e.seq, preview: undefined, previewTool: undefined, previewSteps: undefined, previewPlan: undefined, ...(e.code ? { code: e.code } : {}) });
   }
   return Object.freeze({ ...turn, parts, content, lastSeq: e.seq });
 }
@@ -187,7 +190,8 @@ export function workSegments(parts: readonly Part[]): WorkSegment[] {
   const secs = Math.round(timed.reduce((n, p) => n + (p.endedAt! - p.startedAt!), 0) / 1000);
   const out: WorkSegment[] = thoughts.length ? [{ kind: 'thought', label: !timed.length ? 'Thought' : secs < 1 ? 'Thought briefly' : `Thought for ${duration(secs * 1000)}`, failed: 0 }] : [];
   const counts = new Map<ToolKind, { n: number; failed: number }>();
-  for (const p of parts) if (p.kind === 'tools') for (const c of p.calls) { const k = kindOf(c); const e = counts.get(k) ?? { n: 0, failed: 0 }; e.n++; if (c.isError) e.failed++; counts.set(k, e); }
+  // CHAT-LIVE-01 (LW6): a call that waits for the owner is not counted as done ("Edited 1 file"); its card says it waits.
+  for (const p of parts) if (p.kind === 'tools') for (const c of p.calls) { if (c.approvalId || /^Waiting for owner approval/.test(c.output ?? '')) continue; const k = kindOf(c); const e = counts.get(k) ?? { n: 0, failed: 0 }; e.n++; if (c.isError) e.failed++; counts.set(k, e); }
   for (const [k, e] of counts) out.push({ kind: k, label: groupLabel(k, e.n), failed: e.failed });
   return out;
 }
@@ -231,6 +235,8 @@ export function turnOutputs(turns: readonly Turn[]): { path: string; kind: 'writ
     if (c.isError || c.running) continue;
     const v = toolView({ ...c, running: false });
     if (v.kind !== 'write' && v.kind !== 'edit') continue;
+    // CHAT-LIVE-01 (LW6): only real files of the folder: not a private draft, not a call that waits for the owner.
+    if (/private draft|^Waiting for owner approval/.test(c.output ?? '')) continue;
     const path = ['path', 'file', 'file_path', 'filename'].map(k => v.args[k]).find(x => typeof x === 'string') as string | undefined;
     if (path) { out.delete(path); out.set(path, v.kind); }
   }
@@ -247,7 +253,7 @@ export function approxTokens(turns: readonly Turn[]): number {
 /** The agent's live task plan (CHAT-PRO-02 H): its latest plan_steps call. */
 export const PLAN_TOOL = 'plan_steps';
 export type PlanStatus = 'pending' | 'active' | 'done' | 'skipped';
-export type PlanStep = Readonly<{ title: string; status: PlanStatus }>;
+export type PlanStep = Readonly<{ title: string; status: PlanStatus; parent?: number }>;
 const PLAN_STATUS: readonly string[] = ['pending', 'active', 'done', 'skipped'];
 
 /** The newest plan in this turn (a refused call does not replace the last good plan), or null. */
@@ -257,8 +263,8 @@ export function turnPlan(parts: readonly Part[]): PlanStep[] | null {
     if (c.name !== PLAN_TOOL || c.isError) continue;
     const steps = args(c.input).steps;
     if (!Array.isArray(steps) || !steps.length) continue;
-    const clean = steps.slice(0, 12).filter((s): s is { title: string; status?: string } => !!s && typeof s === 'object' && typeof (s as { title?: unknown }).title === 'string' && !!(s as { title: string }).title.trim())
-      .map(s => ({ title: s.title.trim().slice(0, 120), status: (PLAN_STATUS.includes(s.status ?? '') ? s.status : 'pending') as PlanStatus }));
+    const clean = steps.slice(0, 20).filter((s): s is { title: string; status?: string; parent?: unknown } => !!s && typeof s === 'object' && typeof (s as { title?: unknown }).title === 'string' && !!(s as { title: string }).title.trim())
+      .map(s => ({ title: s.title.trim().slice(0, 120), status: (PLAN_STATUS.includes(s.status ?? '') ? s.status : 'pending') as PlanStatus, ...(Number.isInteger(s.parent) && (s.parent as number) > 0 ? { parent: s.parent as number } : {}) }));
     if (clean.length) plan = clean;
   }
   return plan;
@@ -290,8 +296,66 @@ export function withoutPlan(parts: readonly Part[]): Part[] {
   const out: Part[] = [];
   for (const p of parts) {
     if (p.kind !== 'tools') { out.push(p); continue; }
-    const calls = p.calls.filter(c => c.name !== PLAN_TOOL && c.name !== SUGGEST_TOOL);
+    const calls = p.calls.filter(c => c.name !== PLAN_TOOL && c.name !== SUGGEST_TOOL && c.name !== CHOICE_TOOL && c.name !== SESSION_START);
     if (calls.length) out.push(calls.length === p.calls.length ? p : { ...p, calls });
   }
   return out;
+}
+
+/** CHAT-LIVE-01 (LW1): the live row's words: what the reply does right now, in plain words. */
+export function livePhase(turn: Pick<Turn, 'preview' | 'previewSteps'>): { verb: string; target: string } {
+  const now = [...(turn.previewSteps ?? [])].reverse().find(s => !s.done);
+  if (now) {
+    if (now.name === CHOICE_TOOL) return { verb: 'Waiting for you', target: '' };
+    if (/^team_delegate|^session_/.test(now.name)) return { verb: 'Asking a teammate', target: '' };
+    const v = toolView({ name: now.name, input: now.input, running: true });
+    const verb = v.kind === 'search' && /web/.test(now.name) ? 'Searching the web' : v.kind === 'web' ? 'Opening' : v.verb;
+    return { verb, target: v.kind === 'other' ? '' : v.target };
+  }
+  return turn.preview ? { verb: 'Answering', target: '' } : { verb: 'Thinking', target: '' };
+}
+
+/** CHAT-LIVE-01 (LW1): the live steps as tool calls (for the same step lines as a finished reply). */
+export function liveCalls(steps: readonly LiveStep[] | undefined): ToolCall[] {
+  return (steps ?? []).filter(s => s.name !== CHOICE_TOOL).map((s, i) => ({ id: `live-${i}`, name: s.name, input: s.input, running: !s.done, ...(s.done ? { output: '' } : {}), ...(s.failed ? { isError: true } : {}), ...(s.ms !== undefined ? { ms: s.ms } : {}) }));
+}
+
+/** CHAT-LIVE-01 (LW2): the agent's question with buttons. */
+export const CHOICE_TOOL = 'ask_choice';
+export type ChoiceAsk = Readonly<{ question: string; options: readonly string[]; multiple: boolean; suggested?: number }>;
+/** The newest question in this turn that the agent really asked (a refused call shows nothing). */
+export function turnChoice(parts: readonly Part[]): ChoiceAsk | null {
+  let out: ChoiceAsk | null = null;
+  for (const p of parts) if (p.kind === 'tools') for (const c of p.calls) {
+    if (c.name !== CHOICE_TOOL || c.isError || c.output === undefined) continue;
+    const a = args(c.input);
+    const question = typeof a.question === 'string' ? a.question.replace(/\s+/g, ' ').trim().slice(0, 300) : '';
+    const options = Array.isArray(a.options) ? [...new Set(a.options.filter((o): o is string => typeof o === 'string').map(o => o.replace(/\s+/g, ' ').trim().slice(0, 80)).filter(Boolean))].slice(0, 5) : [];
+    if (!question || options.length < 2) continue;
+    const n = Number(a.suggested);
+    out = Object.freeze({ question, options, multiple: a.multiple === true, ...(Number.isInteger(n) && n >= 1 && n <= options.length ? { suggested: n } : {}) });
+  }
+  return out;
+}
+
+/** The live plan of a running reply, else the newest finished plan (LW3). */
+export function planOf(turn: Pick<Turn, 'status' | 'parts' | 'previewPlan'>): PlanStep[] | null {
+  if (turn.status === 'running' && turn.previewPlan?.length) return turn.previewPlan.map(s => ({ ...s }));
+  return turnPlan(turn.parts);
+}
+
+/** CHAT-ORCH-01 (LW4): the sub-sessions this reply started (successful starts only). */
+export const SESSION_START = 'session_start';
+export type StartedSession = Readonly<{ id: string; title: string; agentId: string }>;
+export function turnSessions(parts: readonly Part[]): StartedSession[] {
+  const out: StartedSession[] = [];
+  for (const p of parts) if (p.kind === 'tools') for (const c of p.calls) {
+    if (c.name !== SESSION_START || c.isError || !c.output) continue;
+    const id = /\(id ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)/.exec(c.output)?.[1];
+    if (!id || out.some(x => x.id === id)) continue;
+    const a = args(c.input);
+    const title = (typeof a.title === 'string' && a.title.trim() ? a.title : typeof a.task === 'string' ? a.task : 'Session').replace(/\s+/g, ' ').trim().slice(0, 80);
+    out.push(Object.freeze({ id, title, agentId: typeof a.agent_id === 'string' ? a.agent_id : '' }));
+  }
+  return out.slice(0, 10);
 }

@@ -99,6 +99,8 @@ import {
 } from './credentials/index.js';
 
 import { planStepsTool } from './plan/plan-steps.js';
+import { askChoiceTool } from './plan/ask-choice.js';
+import { sessionTools } from './tasks/sessions.js';
 import { askCodingAppTool } from './cli/ask-coding-app.js';
 import { boardSuggestCardTool } from './board/board-suggest.js';
 import { ruleSuggestTool } from './rules/rule-suggest.js';
@@ -147,6 +149,8 @@ const CORE_TOOLS: Tool[] = [
   skillInstallTool,
   boardMyCardsTool, boardCommentTool, boardMoveTool, boardChecklistTool, boardCheckTool, boardTaskUpdateTool, // BOARD-02/03: only the agent's own board cards; TASKLOG-01: their task in the project's task file
   planStepsTool, // CHAT-PRO-02 H: the agent's own live task plan (self-only, no grant)
+  askChoiceTool, // CHAT-LIVE-01: the agent asks the owner to choose, with buttons (self-only, no grant)
+  ...sessionTools, // CHAT-ORCH-01: sub-sessions (start asks the owner; only coordinators in the owner's chat)
   ruleSuggestTool, // RULES-01: suggests a rule; only the owner turns it into one (self-only, no grant)
   boardSuggestCardTool, // CHAT-PRO-02 I step 2: suggests a board card; only the owner creates it (self-only, no grant)
   handoffSaveTool, handoffReadTool, // CORE-MEM-HANDOFF: the agent's own done/left/next note for its next session (self-only, no grant)

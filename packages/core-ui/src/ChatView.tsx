@@ -7,7 +7,7 @@ import { Meetings } from './Meetings';
 import type { MeetingRecord } from './meetings-contract.js';
 import { ChatDetails, DetailsRail } from './ChatDetails';
 import type { PanelPart } from './ChatDetails';
-import { ApprovalCard, ChangesLine, DelegationCard, MomentsContext, NoticeCard, SteerLine, TaskList, TitleFaces, chatPeople, redoTarget } from './ChatMoments';
+import { ApprovalCard, ChangesLine, ChoiceCard, DelegationCard, MomentsContext, NoticeCard, SessionsCard, StartedByLine, SteerLine, TaskList, TitleFaces, chatPeople, redoTarget } from './ChatMoments';
 import { ScheduleSheet } from './ScheduleSheet';
 import { KeysSheet, ModeButton, ModelButton, PlusButton, ProjectChip, ProjectSheet, SlashList, WhoButton, slashMatches } from './ChatComposerControls';
 import { modelDisplayName } from './model-names';
@@ -33,8 +33,8 @@ import { Markdown } from './markdown';
 import { UiIcon } from './ui-icons';
 import { ClaudeCodeIcon, CodexIcon, GeminiIcon } from './brand-icons';
 import type { UiIconName } from './ui-icons';
-import { approxTokens, duration, groupLabel, splitWork, toolCount, toolView, turnOutputs, turnPlan, turnSuggestions, withoutPlan, workGroups, workSegments, type WorkItem } from './turns';
-import type { CardSuggestion, PlanStep } from './turns';
+import { approxTokens, duration, groupLabel, liveCalls, livePhase, planOf, splitWork, toolCount, toolView, turnChoice, turnOutputs, turnSessions, turnSuggestions, withoutPlan, workGroups, workSegments, type WorkItem } from './turns';
+import type { CardSuggestion } from './turns';
 import { ChatCardsController, activityLine, cardDraftFrom } from './chat-board';
 import type { ChatCard, ChatProgress } from './chat-board';
 import type { Priority } from './board';
@@ -242,6 +242,15 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
   const agentName = s.agents.find(a => a.id === (meetingMeta ? s.replyAgent || s.agentId : s.agentId))?.name;
   const who = whoAnswers(s.model, s.models);
   const activeConv = s.conversations.find(c => c.id === s.activeId);
+  // CHAT-LIVE-01 (LW1 §3): a short re-attach is silent; only 5 s without news shows a quiet "Catching up…".
+  const [catchingUp, setCatchingUp] = useState(false);
+  useEffect(() => { if (!s.reconnecting) { setCatchingUp(false); return; } const t = setTimeout(() => setCatchingUp(true), 5000); return () => clearTimeout(t); }, [s.reconnecting]);
+  // CHAT-ORCH-01 (LW4): while a sub-session of this chat works, the list (their states) refreshes every 5 s; nothing when none works.
+  const sessionsWorking = !!s.activeId && s.conversations.some(c => c.parentId === s.activeId && (c as { running?: boolean; waiting?: number }).running);
+  // A session just started and not yet in the list also refreshes it (once it shows, sessionsWorking takes over).
+  const lastReply = [...s.turns].reverse().find(t => t.role === 'assistant');
+  const startedNow = !!lastReply && turnSessions(lastReply.parts).some(x => !s.conversations.some(c => c.id === x.id));
+  useEffect(() => { if (!sessionsWorking && !startedNow) return; const t = setInterval(() => void controller.refreshList(), 5000); return () => clearInterval(t); }, [sessionsWorking, startedNow, controller]);
   const convAgentId = activeConv?.agentId ?? null;
   const nameOf = (id: string | null | undefined) => (id ? s.agents.find(a => a.id === id)?.name : s.agents.find(a => a.primary)?.name) ?? 'Main agent';
   const departmentOf = (id?: string | null) => (id ? s.agents.find(a => a.id === id) : s.agents.find(a => a.primary))?.department;
@@ -416,18 +425,22 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
     window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
   });
   // CHAT-BUILD-01 stage 5: what the trust moments in the thread need (approvals, undo, switch to Auto, start fresh).
-  // CH6: while a reply works, the step each delegated agent is on (read every 3 s from the chat's team).
+  // CH6: while a reply works, the step each delegated agent is on (read every 3 s from the chat's team) — only while it hands work to someone (CHAT-LIVE-01).
+  const liveReply = s.turns.find(t => t.status === 'running');
+  const handingOff = !!liveReply && (liveReply.previewSteps ?? []).some(x => x.name === 'team_delegate' && !x.done) || !!liveReply?.parts.some(p => p.kind === 'tools' && p.calls.some(c => c.name === 'team_delegate' && c.running));
   const [steps, setSteps] = useState<readonly { agentId: string; tool: string; at: string }[]>([]);
   useEffect(() => {
-    if (!client || !s.activeId || !s.runId) { setSteps([]); return; }
+    if (!client || !s.activeId || !s.runId || !handingOff) { setSteps([]); return; }
     let on = true; const id = s.activeId;
     const read = async () => { try { const r = await client.request({ method: 'GET', path: `/api/chat/conversations/${id}/team` } as never); if (on && r.status === 200) setSteps(((r.body as { steps?: { agentId: string; tool: string; at: string }[] }).steps) ?? []); } catch { /* the card keeps "Thinking…" */ } };
     void read(); const t = setInterval(() => void read(), 3000);
     return () => { on = false; clearInterval(t); };
-  }, [client, s.activeId, s.runId]);
+  }, [client, s.activeId, s.runId, handingOff]);
   const moments = { client, conversationId: s.activeId, onOpenApprovals, steps, changeCards, nativeCode:embeddedCode,
     // CH6/CH10 team moments: Hand it again adds to the box (never sends), Set a model opens the agent, Always allow opens What agents may do.
-    onOpenAgent, onOpenRules, onDraft: (text: string) => { const d = controller.getSnapshot().draft.trim(); controller.edit(d ? `${d}\n\n${text}` : text); },
+    onOpenAgent, onOpenRules, onAnswer: (text: string) => { void controller.send(text); },
+    onOpenChat: (id: string) => { void controller.open(id); }, onStopChat: (id: string) => { void controller.stopChat(id); },
+    chatState: (id: string) => { const x = s.conversations.find(c => c.id === id) as (typeof s.conversations[number] & { running?: boolean; waiting?: number }) | undefined; return x ? { running: x.running === true, waiting: x.waiting ?? 0, title: x.title ?? undefined } : undefined; }, onDraft: (text: string) => { const d = controller.getSnapshot().draft.trim(); controller.edit(d ? `${d}\n\n${text}` : text); },
     agentAbout: (id?: string) => s.agents.find(a => a.id === id)?.about, subAgentOf: (id?: string) => s.agents.find(a => a.id === id)?.subAgentOf, onStop: () => void controller.stopAll(), agentName: (id?: string) => (id ? s.agents.find(a => a.id === id)?.name ?? id : nameOf(convAgentId)),
     onSwitchAuto: () => controller.selectModel('auto'), onReviewChanges: () => setPane('changes'), onChanged: () => void controller.refreshGit(), onDecided: () => void controller.pickUpContinuation(),
     onStartFresh: (summary: string) => { const title = activeConv?.title ?? 'the last chat'; controller.newChat(); controller.edit(`Continue from “${title}”. ${summary}`.slice(0, 4000)); } };
@@ -474,6 +487,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
             <button type="button" className="ghost-action" onClick={onSetUpModel}>Local model…</button></span>
         </div>}
       </div> : <div className="chat-column" role="log" aria-live="polite" aria-relevant="additions">
+        {activeConv?.parentId && <StartedByLine parentId={activeConv.parentId} parentTitle={s.conversations.find(c => c.id === activeConv.parentId)?.title ?? undefined}/>}
         {s.hasEarlier && <button type="button" className="ghost-action chat-earlier" disabled={s.loadingEarlier} onClick={() => void controller.loadEarlier()}>{s.loadingEarlier ? 'Loading earlier messages…' : 'Show earlier messages'}</button>}
         {s.turns.map((t, i) => t.role === 'user'
           ? <UserMessage key={t.key} turn={t} highlight={flash === t.key} onKey={client ? setKeysOpen : undefined} onEdit={running ? undefined : text => { controller.edit(text); input.current?.focus(); }} onRemember={canRemember && messageRef(t) ? () => openRemember(t, t.content) : undefined}/>
@@ -504,7 +518,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
         <p>“{activeConv.title || 'New chat'}” and its messages are deleted for good. To keep it out of the way instead, archive it from the sidebar.</p></Sheet>}
       {remember && memCtl && <RememberForm key={remember.key} controller={memCtl} seed={remember} project={project?.name ?? null} agent={convAgentName} onClose={() => setRemember(null)}/>}
       {cardForm && cardsCtl && <ChatCardForm key={cardForm.key} controller={cardsCtl} seed={cardForm} agents={s.agents} onClose={() => setCardForm(null)}/>}
-      {s.reconnecting && <p className="chat-notice" role="status">Reconnecting to the reply…</p>}
+      {catchingUp && <p className="chat-notice" role="status">Catching up…</p>}
       {s.elsewhere && s.queue.length > 0 && !s.queuePaused && <p className="chat-notice" role="status">This chat is working in another window. Your message waits until it is done.</p>}
       {s.queuePaused && s.queue.length > 0 && <p className="chat-notice" role="status">Stopped. The waiting {s.queue.length === 1 ? 'message stays' : 'messages stay'} here until you send {s.queue.length === 1 ? 'it' : 'them'}.</p>}
       {s.queue.length > 0 && <ul className="chat-queue" aria-label="Waiting to send">
@@ -562,7 +576,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
       memoryCard={s.activeId ? <>{recallCtl && <HandoffCard c={recallCtl} agentId={convAgentId || s.agentId || s.agents[0]?.id || ''} agentName={convAgentName}/>}{memCtl && <ChatMemoryCard controller={memCtl} onOpen={onOpenMemory}/>}</> : undefined}
       resultsExtra={withRunNotes(project?.folder && s.git?.branch ? <GitHubCard git={s.git} pr={owner && client ? { client, projectId: project.id } : undefined} onRefresh={() => void controller.refreshGit()}/> : undefined, p8 && owner && client && s.runId ? <ChatRunNotes client={client} runId={s.runId}/> : undefined)}
       placeExtra={client && owner && project?.folder ? <details className="details-more"><summary>Coding sessions in this folder</summary><CodingSessions key={project.id + ':' + project.folder} client={client} controller={controller} folder={project.folder}/></details> : undefined}
-      onOpenPane={p => (p === 'terminal' ? setTermOpen(true) : setPane(p))} onStop={() => void controller.stopAll()}
+      onOpenPane={(p, file) => { if (p === 'terminal') setTermOpen(true); else { setPane(p); if (p === 'files' && file) void panes?.openFile(file); } }} onStop={() => void controller.stopAll()}
       onSchedule={() => setScheduleOpen(true)} onAddFolder={() => project && setProjectSheet({ id: project.id })} onContinue={() => setChatSheet('continue')} focusPart={focusPart}
       switcher={<PaneSwitch items={paneButtons} pane={pane} onPane={setPane}/>}/>
     : pane === null && !embeddedCode && <DetailsRail controller={controller} onOpen={openPart}/>}
@@ -773,9 +787,14 @@ function SecretChip({ type, id, onOpen }: { type: string; id: string; onOpen?: (
 /** One assistant turn: live parts in order while running; work folded once finished. */
 function AssistantTurn({ turn, last, onRetry, writer, writerDepartment, writerRole, recovery, onSuggest, onRemember, proposals, highlight, recall, onWrongPlace }: { turn: Turn; last: boolean; onRetry?: () => void; writer?: string; writerDepartment?: string | null; writerRole?: string; recovery?: ReactNode; onSuggest?: (s: CardSuggestion) => void; onRemember?: (text: string) => void; proposals?: ReactNode; highlight?: boolean; recall?: ChatRecallController | null; onWrongPlace?: (m: { id: string; text: string; drawerId: string }) => void }) {
   const live = turn.status === 'running';
-  const plan = turnPlan(turn.parts);
+  const plan = planOf(turn);
   const suggestions = turnSuggestions(turn.parts);
-  const parts = plan || suggestions.length ? withoutPlan(turn.parts) : turn.parts;
+  const choice = turnChoice(turn.parts);
+  const sessions = turnSessions(turn.parts);
+  const parts = plan || suggestions.length || choice || sessions.length ? withoutPlan(turn.parts) : turn.parts;
+  // CHAT-LIVE-01 (LW1): while it runs, the steps so far come from the live preview (the checked parts replace them at the end).
+  const liveSteps = live && parts.length === 0 ? liveCalls(turn.previewSteps) : [];
+  const phase = livePhase(turn);
   const { work, answer } = splitWork(parts);
   const tools = toolCount(parts);
   const answerText = answer.filter(p => p.kind === 'text').map(p => (p as { text: string }).text).join('');
@@ -784,18 +803,21 @@ function AssistantTurn({ turn, last, onRetry, writer, writerDepartment, writerRo
     {/* CH1/CH2: who wrote it, their role and the time, beside their face. */}
     {writer ? <p className="reply-writer"><span className="avatar" aria-hidden="true">{writer.slice(0, 1).toUpperCase()}</span><span className="reply-writer-name">{writer}</span><DepartmentBadge department={writerDepartment}/>{(writerRole || turn.at) && <span className="reply-meta">{[writerRole, turn.at ? clockTime(turn.at) : ''].filter(Boolean).map(x => ` · ${x}`).join('')}</span>}</p> : <p className="sr-only">Agent</p>}
     {/* CHAT-BUILD-01 stage 5 (CH1): the plan's steps live in Tasks above the box; here only one quiet line. */}
-    {live && plan && <p className="moment-line"><UiIcon name="list" size={12}/>Plan: {plan.length} {plan.length === 1 ? 'step' : 'steps'}, {plan.filter(s => s.status === 'done').length} done · the steps are in Tasks above the box</p>}
+    {live && plan && <p className="moment-line"><UiIcon name="list" size={12}/>Plan: {plan.filter(s => !s.parent).length} {plan.filter(s => !s.parent).length === 1 ? 'step' : 'steps'}, {plan.filter(s => !s.parent && s.status === 'done').length} done · the steps are in Tasks above the box</p>}
     {live
       ? <>{parts.map((p, i) => <PartView key={i} part={p} live last={i === parts.length - 1}/>)}
         {/* CHAT-BUILD-01 stage 5: the reply as it is written (checked text replaces it at the end). */}
         {!parts.some(p => p.kind === 'text') && turn.preview && <div className="chat-prose turn-text md-host chat-live" aria-live="off"><Markdown text={turn.preview}/></div>}
-        {(quiet || parts.length === 0) && <WorkingRow since={since} label={turn.previewTool ? `Using ${turn.previewTool}` : turn.preview ? 'Writing' : parts.length ? 'Working' : 'Thinking'}/>}</>
+        {liveSteps.length > 0 && <ToolStep calls={liveSteps} live/>}
+        {(quiet || parts.length === 0) && <WorkingRow since={since} label={parts.length && !turn.previewSteps ? 'Working' : phase.verb} target={phase.target}/>}</>
       : <>
         {tools > 0
           ? <WorkedRow parts={work} ms={turn.durationMs}/>
           : work.map((p, i) => <PartView key={i} part={p}/>)}
         {/* CH1: the plan's quiet line comes after the work row. */}
-        {plan && <p className="moment-line"><UiIcon name="list" size={12}/>Plan: {plan.length} {plan.length === 1 ? 'step' : 'steps'}, {plan.filter(s => s.status === 'done').length} done · the steps are in Tasks above the box</p>}
+        {/* CHAT-LIVE-01: a finished reply keeps its plan as one line that opens to the steps (the box above is for live work). */}
+        {plan && <details className="plan-line"><summary className="moment-line"><UiIcon name="list" size={12}/>Plan · {plan.filter(s => !s.parent && s.status === 'done').length} of {plan.filter(s => !s.parent).length} done</summary>
+          <ol>{plan.map((p, i) => <li key={i} data-state={p.status} data-sub={p.parent ? true : undefined}><span className="task-dot" aria-hidden="true">{p.status === 'done' ? <UiIcon name="check" size={10}/> : null}</span><span dir="auto">{p.title}</span></li>)}</ol></details>}
         {/* CHAT-BUILD-01 stage 5: hand-offs, what waits for you and notices stay in view when the work is folded. */}
         {/* CH6: a hand-off to a sub-agent of someone handed work in the same reply sits inside that person's card. */}
         <HandOffs calls={work.flatMap(p => (p.kind === 'tools' ? p.calls : [])).filter(c => c.name === 'team_delegate')}/>
@@ -804,10 +826,12 @@ function AssistantTurn({ turn, last, onRetry, writer, writerDepartment, writerRo
         {answer.map((p, i) => <PartView key={`a${i}`} part={p}/>)}
         {turn.changes && <ChangesLine turn={turn} messageId={turn.key}/>}
         {turn.status === 'error' && <div className="chat-error" role="alert">
-          <strong>{turn.code === 'run_interrupted' ? 'Work interrupted by restart' : turn.code === 'subscription_org_blocked' ? 'Claude subscription access is disabled' : turn.code === 'lmstudio_not_running' ? 'LM Studio is not running' : turn.code === 'local_model_missing' ? 'The local model is not installed' : turn.code === 'model_unavailable' ? 'The model could not be reached' : 'This reply failed'}</strong>
-          <span>{turn.code === 'run_interrupted' ? 'Your request and tool checkpoints are saved. Continue safely after reviewing them; previous actions are not replayed automatically.' : turn.code === 'subscription_org_blocked' ? 'Your organization has disabled Claude Code subscription access. Ask its administrator to enable access, or choose another signed-in coding app.' : turn.code === 'lmstudio_not_running' ? 'Open LM Studio, load the model and start its local server (port 1234), then try again.' : turn.code === 'local_model_missing' ? 'This agent answers with a local model that is not on this computer. Pick an installed model or add a Claude key in Settings, then try again.' : turn.code === 'model_unavailable' ? 'Check that the model is running, then try again.' : 'Anything above was written before the failure.'}</span>
+          <strong>{turn.code === 'run_interrupted' ? 'Work interrupted by restart' : turn.code === 'subscription_org_blocked' ? 'Claude subscription access is disabled' : turn.code === 'lmstudio_not_running' ? 'LM Studio is not running' : turn.code === 'local_model_missing' ? 'The local model is not installed' : turn.code === 'model_unavailable' ? 'The model did not answer' : 'This reply did not finish'}</strong>
+          <span>{turn.code === 'run_interrupted' ? 'Your request and tool checkpoints are saved. Continue safely after reviewing them; previous actions are not replayed automatically.' : turn.code === 'subscription_org_blocked' ? 'Your organization has disabled Claude Code subscription access. Ask its administrator to enable access, or choose another signed-in coding app.' : turn.code === 'lmstudio_not_running' ? 'Open LM Studio, load the model and start its local server (port 1234), then try again.' : turn.code === 'local_model_missing' ? 'This agent answers with a local model that is not on this computer. Pick an installed model or add a Claude key in Settings, then try again.' : turn.code === 'model_unavailable' ? 'The model or coding app stopped before the reply was done. Check that it is running and signed in, then try again; anything above was written before it stopped.' : 'Something went wrong before the reply was done; anything above was written before it.'}</span>
           {last && onRetry && <button type="button" className="chat-error-action" onClick={onRetry}><UiIcon name="refresh" size={12}/>{turn.code === 'run_interrupted' ? 'Continue safely' : 'Try again'}</button>}
         </div>}
+        {sessions.length > 0 && <SessionsCard sessions={sessions}/>}
+        {choice && <ChoiceCard choice={choice} open={last}/>}
         {suggestions.map((g, i) => <CardSuggestionView key={i} suggestion={g} onCreate={onSuggest}/>)}
         {proposals}
         {recovery}
@@ -904,35 +928,6 @@ function ChatCardBlock({ card, progress, nameOf, onOpen }: { card: ChatCard; pro
   </section>;
 }
 
-/** The agent's task plan as a live checklist; folds to one line once every step is done. */
-function PlanCard({ steps, live, status }: { steps: readonly PlanStep[]; live: boolean; status: Turn['status'] }) {
-  const done = steps.filter(s => s.status === 'done').length;
-  const counted = steps.filter(s => s.status !== 'skipped').length;
-  const finished = !live && steps.every(s => s.status === 'done' || s.status === 'skipped');
-  const [open, setOpen] = useState(!finished);
-  // Fold once the run ends with every step done (the owner can open it again).
-  useEffect(() => { if (finished) setOpen(false); }, [finished]);
-  const halted = !live && status !== 'complete';
-  const active = steps.find(s => s.status === 'active');
-  return <section className="plan-card" aria-label="Task plan" data-live={live || undefined}>
-    <button type="button" className="plan-head" aria-expanded={open} onClick={() => setOpen(v => !v)}>
-      <UiIcon name="check" size={12}/>
-      <span className="plan-title">{finished ? 'Plan done' : 'Plan'}</span>
-      <span className="plan-count">{done} of {counted}</span>
-      <span className="plan-bar" aria-hidden="true"><i style={{ inlineSize: `${counted ? Math.round((done / counted) * 100) : 0}%` }}/></span>
-      {!open && active && <span className="plan-now" dir="auto">{active.title}</span>}
-      <span className="plan-chevron" aria-hidden="true"><UiIcon name="chevron" size={10}/></span>
-    </button>
-    {open && <ol className="plan-steps">{steps.map((s, i) => {
-      const state = s.status === 'active' && halted ? 'halted' : s.status;
-      return <li key={i} data-status={state}>
-        <span className="plan-mark" aria-hidden="true">{state === 'done' ? <UiIcon name="check" size={10}/> : state === 'active' ? <i className="plan-spin"/> : null}</span>
-        <span className="plan-step" dir="auto">{s.title}</span>
-        <span className="sr-only">{state === 'done' ? 'done' : state === 'active' ? 'in progress' : state === 'halted' ? 'stopped here' : state === 'skipped' ? 'skipped' : 'to do'}</span>
-      </li>;
-    })}</ol>}
-  </section>;
-}
 
 /** True when a live turn produced nothing for QUIET_MS; returns when that quiet began. */
 function useQuiet(turn: Turn, live: boolean): [boolean, number] {
@@ -1066,8 +1061,8 @@ function ToolGroup({ item }: { item: Extract<WorkItem, { kind: 'group' }> }) {
   </div>;
 }
 
-function WorkingRow({ since, label }: { since: number; label: string }) {
-  return <p className="scaffold working" role="status"><span className="pulse" aria-hidden="true"/><span className="shimmer">{label}</span><Elapsed since={since}/></p>;
+function WorkingRow({ since, label, target }: { since: number; label: string; target?: string }) {
+  return <p className="scaffold working" role="status"><span className="pulse" aria-hidden="true"/><span className="shimmer">{label}</span>{target && <span className="working-target" dir="auto">{target}</span>}<Elapsed since={since}/></p>;
 }
 
 function Elapsed({ since }: { since: number }) {

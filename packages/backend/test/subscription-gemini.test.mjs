@@ -40,7 +40,7 @@ test('unknown tool, abort, pending approval and iteration limits fail closed wit
  await assert.rejects(subscriptionToolLoop({...base,reply:async()=>'{"type":"tool","name":"unoffered","arguments":{}}'}),/cli_tool_invalid/);
  const abort=new AbortController();abort.abort();await assert.rejects(subscriptionToolLoop({...base,signal:abort.signal,reply:async()=>{throw Error('must not call');}}),/cancelled/);
  let calls=0;const text=await subscriptionToolLoop({...base,reply:async()=>{calls++;return '{"type":"tool","name":"test_lookup","arguments":{}}';},execute:async()=>({content:[{type:'text',text:'Awaiting approval'}],details:{status:'pending_approval'}})});
- assert.equal(text,'Awaiting approval');assert.equal(calls,1);
+ assert.equal(text,'This waits for your approval.');assert.equal(calls,1); // CHAT-LIVE-01: one plain line; the card shows what waits
  let executions=0;await assert.rejects(subscriptionToolLoop({...base,reply:async()=>'{"type":"tool","name":"test_lookup","arguments":{}}',execute:async()=>{executions++;return {content:[]};}}),/cli_tool_limit/);assert.equal(executions,8);
 });
 test('reply-only native launches keep Girru execution behind its own tool registry',()=>{

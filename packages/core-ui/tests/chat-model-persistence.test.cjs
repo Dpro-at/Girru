@@ -20,7 +20,7 @@ test('per-conversation selection survives controller recreation and rapid change
  a.selectModel('qwen');a.selectModel('subscription:codex');await a.open(id);
  assert.equal(f.rows.get(id).model,'subscription:codex');
  const b=f.make();await b.load();await b.open(id);assert.equal(b.getSnapshot().model,'subscription:codex');
- b.newChat();assert.equal(b.getSnapshot().model,'auto','CHAT-BUILD-01: a new chat starts on Auto');assert.equal(f.rows.get(id).model,'subscription:codex');
+ b.newChat();assert.equal(b.getSnapshot().model,'subscription:codex','CHAT-LIVE-01 (LW6): a new chat keeps the model of the chat it came from');assert.equal(f.rows.get(id).model,'subscription:codex');
  await b.open(id);b.selectModel('');await b.open(id);assert.equal(b.getSnapshot().model,'');assert.equal(f.rows.get(id).model,undefined);
 });
 test('failed model persistence blocks sending instead of silently using another provider',async t=>{

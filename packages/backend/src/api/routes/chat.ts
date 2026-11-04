@@ -517,7 +517,9 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
         const allTools=registry.getAll().map(t=>({name:t.name,description:t.description,input_schema:t.input_schema}));
         const onDemand=storeP2bEnabled()?new OnDemandTools(allTools,'large'):null;
         const toolIndex=onDemand?.index()??'';
-        const replyPrompt=subscriptionReplyPrompt(context+(toolIndex?`\n\n${toolIndex}`:'')+(systemPromptAppend?`\n\n${systemPromptAppend}`:''),history);
+        // CHAT-LIVE-01 (LW6): outside "Accept edits" the coding app's own file access is read-only; file changes go through Girru's edit/write (the owner approves each).
+        const fileNote=currentChatRun()?.chatMode!=='accept_edits'&&input.fileReadRoot?'Your own file access in this chat is read-only. To change a file in this folder, call the Girru tool edit (part of an existing file; read it first) or write (a whole file), loading it with tool_load first when it is not listed; the owner approves the change, then it is made in the real file. Do not say the change is impossible.':'';
+        const replyPrompt=subscriptionReplyPrompt(context+(toolIndex?`\n\n${toolIndex}`:'')+(systemPromptAppend?`\n\n${systemPromptAppend}`:'')+(fileNote?`\n\n${fileNote}`:''),history);
         {const run=currentChatRun();if(run)run.usage={model:subscriptionSource!,tokensIn:estimateTokens(replyPrompt)};}
         const answer=await subscriptionToolLoop({prompt:replyPrompt,signal:abort.signal,
           tools:onDemand?onDemand.definitions():allTools,
@@ -531,7 +533,7 @@ export async function executeChatTurn(reply: FastifyReply, input: ChatTurnInput)
         if(!reply.raw.writableEnded)reply.raw.write(`data: ${JSON.stringify({content:'',done:true})}\n\n`);
       }catch(error){
         // CHAT-BUILD-01 stage 5 (CH10): a coding app that hit its plan limit says so before the error.
-        if(!abort.signal.aborted&&error instanceof Error&&/limit|quota|usage|rate/i.test(error.message))currentChatRun()?.notice?.('plan_limit','The coding app hit its plan limit. Switch this chat to Auto or a local model.');
+        if(!abort.signal.aborted&&error instanceof Error&&!/^cli_/.test(error.message)&&/limit|quota|usage|rate/i.test(error.message))currentChatRun()?.notice?.('plan_limit','The coding app hit its plan limit. Switch this chat to Auto or a local model.');
         if(!abort.signal.aborted&&!reply.raw.writableEnded)reply.raw.write(`data: ${JSON.stringify({type:'error',code:error instanceof Error&&error.message==='subscription_org_blocked'?'subscription_org_blocked':'model_unavailable',error:'The subscription CLI could not finish.'})}\n\n`);}
       reply.raw.end();return reply;
     }
