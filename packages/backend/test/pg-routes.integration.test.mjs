@@ -478,13 +478,14 @@ test('multiverse: world create/update/delete with owner checks, bots added concu
 // Public chat
 // ---------------------------------------------------------------------------
 
-test('public chat: anonymous visitor in a public room gets no MEMORY.md (S0-A.14); the room owner does; counters and joins are exact', { skip }, async () => {
+test('public chat: no MEMORY.md in a public room for a visitor, a member or the owner (S0-A.14) unless the server opts in; counters and joins are exact', { skip }, async () => {
   const agentId = `pc-agent-${tag}`;
   await pgRun(`INSERT INTO agents_config (id, name) VALUES (?, ?)`, agentId, `Room agent ${tag}`);
   const agentDir = m.agentFiles.getAgentDir(agentId);
   mkdirSync(agentDir, { recursive: true });
   writeFileSync(join(agentDir, 'PERSONALITY.md'), `You are the room agent. ${PERSONALITY_MARK}`);
-  writeFileSync(join(agentDir, 'MEMORY.md'), `Owner notes. ${MEMORY_MARK}`);
+  // Girru writes MEMORY.md owner-only (0600) and refuses to read a file others can read.
+  writeFileSync(join(agentDir, 'MEMORY.md'), `Owner notes. ${MEMORY_MARK}`, { mode: 0o600 });
   const app = await appWith(m.routes.publicChat);
   const created = await inject(app, { method: 'POST', url: '/api/public-chat/rooms', headers: bearer(u.owner.id), payload: { name: `Lobby ${tag}`, model: 'llama3', agent_id: agentId, is_public: true, rate_limit_seconds: 0 } });
   assert.equal(created.statusCode, 200, created.body);
@@ -510,20 +511,33 @@ test('public chat: anonymous visitor in a public room gets no MEMORY.md (S0-A.14
   assert.equal(member.statusCode, 200, member.body);
   assert.ok(!prompts.join('\n').includes(MEMORY_MARK), 'no MEMORY.md for a non-owner member');
 
+  // A public-room answer is seen by every visitor, so even the room owner's
+  // message is answered without MEMORY.md unless the server opts in.
   prompts.length = 0;
   const owner = await inject(app, { method: 'POST', url: msgUrl, headers: bearer(u.owner.id), payload: { content: 'hi from owner' } });
   assert.equal(owner.statusCode, 200, owner.body);
-  assert.ok(prompts.join('\n').includes(MEMORY_MARK), 'the room owner gets MEMORY.md');
+  assert.ok(!prompts.join('\n').includes(MEMORY_MARK), 'no MEMORY.md for the room owner in a public room');
+
+  // Server opt-in (OUTSIDER_AGENT_MEMORY=true): the memory reaches the prompt.
+  process.env.OUTSIDER_AGENT_MEMORY = 'true';
+  try {
+    prompts.length = 0;
+    const optIn = await inject(app, { method: 'POST', url: msgUrl, headers: bearer(u.owner.id), payload: { content: 'hi with sharing on' } });
+    assert.equal(optIn.statusCode, 200, optIn.body);
+    assert.ok(prompts.join('\n').includes(MEMORY_MARK), 'MEMORY.md shared after the server opt-in');
+  } finally {
+    delete process.env.OUTSIDER_AGENT_MEMORY;
+  }
 
   // Messages and counters: every message counted once; order kept.
   const msgs = await inject(app, { method: 'GET', url: msgUrl });
   assert.equal(msgs.statusCode, 200, msgs.body);
   const list = msgs.json().messages;
-  assert.equal(list.length, 6);
-  assert.deepEqual(list.map((x) => x.role), ['user', 'assistant', 'user', 'assistant', 'user', 'assistant']);
-  assert.deepEqual(list.filter((x) => x.role === 'user').map((x) => x.content), ['hello', 'hi from member', 'hi from owner']);
+  assert.equal(list.length, 8);
+  assert.deepEqual(list.map((x) => x.role), ['user', 'assistant', 'user', 'assistant', 'user', 'assistant', 'user', 'assistant']);
+  assert.deepEqual(list.filter((x) => x.role === 'user').map((x) => x.content), ['hello', 'hi from member', 'hi from owner', 'hi with sharing on']);
   assert.match(list[0].created_at, TEXT_TS);
-  assert.equal((await one('SELECT message_count FROM public_chat_rooms WHERE id = ?', room.id)).message_count, 6);
+  assert.equal((await one('SELECT message_count FROM public_chat_rooms WHERE id = ?', room.id)).message_count, 8);
 
   // Three concurrent joins with the same name: one participant, counted once.
   const joins = await Promise.all([1, 2, 3].map(() => inject(app, { method: 'POST', url: `/api/public-chat/rooms/${room.id}/join`, payload: { username: `guest-${tag}` } })));
