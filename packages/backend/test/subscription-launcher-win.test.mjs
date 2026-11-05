@@ -7,6 +7,7 @@
 // Run: node --import tsx --test test/subscription-launcher-win.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
@@ -72,32 +73,63 @@ test('refused: P7 off, not Windows, not an absolute .exe, a NUL in an argument',
 });
 
 const read = (stream) => { let s = ''; stream.on('data', (d) => { s += d; }); return () => s; };
+// The first PowerShell fixture took 38 seconds on CI; keep startup bounded
+// within the runner's 90-second test limit and always reap a failed fixture.
+const STARTUP_MS = 70_000;
+async function within(promise, ms, message) {
+  let timer;
+  try { return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); })]); }
+  finally { clearTimeout(timer); }
+}
+async function stopFixture(launch) {
+  if (launch.child.exitCode === null && launch.child.signalCode === null) launch.child.kill();
+  await within(launch.completion, 5000, 'fixture leader did not stop');
+}
+async function waitForPid(output, child, ms = STARTUP_MS) {
+  const deadline = Date.now() + ms;
+  while (!/^\d+\r?\n/.test(output())) {
+    if (child.exitCode !== null || child.signalCode !== null) throw new Error('fixture leader exited before reporting its child');
+    if (Date.now() >= deadline) throw new Error('fixture child startup deadline exceeded');
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  const pid = Number(output().trim());
+  assert.ok(Number.isSafeInteger(pid) && pid > 0, 'the grandchild started');
+  return pid;
+}
 
-test('Windows: answer, exit code and stdin go through the job leader', { skip: !onWindows && 'Windows only (CI)' }, async () => {
+test('a failed readiness check still reaps its fixture process', async () => {
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const completion = new Promise(resolve => { child.once('close', resolve); });
+  try { await assert.rejects(waitForPid(read(child.stdout), child, 100), /startup deadline exceeded/); }
+  finally { await stopFixture({ child, completion }); }
+  assert.ok(child.exitCode !== null || child.signalCode !== null, 'no live leader remains after the failed check');
+});
+
+
+test('Windows: answer, exit code and stdin go through the job leader', { skip: !onWindows && 'Windows only (CI)' }, async (t) => {
   await withP7(async () => {
     const script = "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{process.stdout.write('got:'+s);process.exit(3);});";
     const l = await win.launchWindowsSubscription(process.execPath, ['-e', script], { cwd: tmpdir(), env: { PATH: process.env.PATH } });
+    t.after(() => stopFixture(l));
     const out = read(l.child.stdout);
     l.start('hello "there"');
-    assert.equal(await l.completion, 3);
+    assert.equal(await within(l.completion, STARTUP_MS, 'fixture CLI did not finish'), 3);
     assert.equal(out(), 'got:hello "there"');
   });
 });
 
-test('Windows: stopping the leader ends the CLI\'s own children too', { skip: !onWindows && 'Windows only (CI)' }, async () => {
+test('Windows: stopping the leader ends the CLI\'s own children too', { skip: !onWindows && 'Windows only (CI)' }, async (t) => {
   await withP7(async () => {
     const script = "const c=require('node:child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});process.stdout.write(String(c.pid)+'\\n');setInterval(()=>{},1000);";
     const l = await win.launchWindowsSubscription(process.execPath, ['-e', script], { cwd: tmpdir(), env: { PATH: process.env.PATH } });
+    t.after(() => stopFixture(l));
     const out = read(l.child.stdout);
     l.start('');
-    const deadline = Date.now() + 20000;
-    while (!/\d+\n/.test(out()) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100));
-    const pid = Number(out().trim());
-    assert.ok(pid > 0, 'the grandchild started');
+    const pid = await waitForPid(out, l.child);
     const alive = (p) => { try { process.kill(p, 0); return true; } catch { return false; } };
     assert.ok(alive(pid));
     l.child.kill();
-    await l.completion;
+    await within(l.completion, 5000, 'fixture leader did not exit after stop');
     const until = Date.now() + 5000;
     while (alive(pid) && Date.now() < until) await new Promise((r) => setTimeout(r, 100));
     assert.equal(alive(pid), false, 'the job took the grandchild with it');
