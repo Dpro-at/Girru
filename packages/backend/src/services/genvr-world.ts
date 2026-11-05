@@ -100,7 +100,7 @@ async function makeFolder(userId: string, name: string): Promise<string> {
     try { await fs.promises.mkdir(folder, { mode: 0o700 }); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue; throw error; }
     for (const part of ['documents', 'exports']) await fs.promises.mkdir(path.join(folder, part), { mode: 0o700 });
-    await fs.promises.writeFile(path.join(folder, 'README.md'), `# ${base}\n\nThis folder belongs to the GenVR world "${base}".\n\n- documents/ notes, story and rules (Girru reads them for the chat)\n- exports/ films, pictures and packages\n\nThe world itself is saved in Girru. Its memory is this project's memory in Girru.\n`, { flag: 'wx', mode: 0o600 });
+    await fs.promises.writeFile(path.join(folder, 'README.md'), '# GenVR world\n\nThis folder belongs to a GenVR world.\n\n- documents/ notes, story and rules (Girru reads them for the chat)\n- exports/ films, pictures and packages\n\nThe world itself is saved in Girru. Its memory is this project\'s memory in Girru.\n', { flag: 'wx', mode: 0o600 });
     return folder;
   }
   throw new WorldError(409, 'folder_unavailable');
