@@ -38,8 +38,17 @@ export type PtySpawn = (file: string, args: string[], options: {
   name: string; cols: number; rows: number; cwd: string; env: Record<string, string>;
 }) => PtyProcess;
 
+/**
+ * A chat command must look exactly like what runs: no control characters
+ * (tab and newline allowed), no zero-width or text-direction characters.
+ */
+export const HIDDEN_COMMAND_CHARS = /[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/;
+export function commandAllowed(command: unknown): command is string {
+  return typeof command === 'string' && !!command.trim() && command.length <= 16000 && !HIDDEN_COMMAND_CHARS.test(command);
+}
+
 export class TerminalError extends Error {
-  constructor(readonly code: 'disabled' | 'limit' | 'not_found' | 'invalid' | 'closed', message: string) {
+  constructor(readonly code: 'disabled' | 'limit' | 'not_found' | 'invalid' | 'closed' | 'unsupported', message: string) {
     super(message);
   }
 }
@@ -163,10 +172,13 @@ export class TerminalManager {
   /** `size.cwd`: a folder already checked by the caller (a project folder); otherwise home. */
   async create(ownerId: string, size: { cols?: unknown; rows?: unknown; cwd?: string; extraEnv?: Record<string, string>; command?: string } = {}) {
     if (!terminalEnabled(this.env)) throw new TerminalError('disabled', 'The terminal is turned off on this server');
-    if (this.list(ownerId).length >= MAX_SESSIONS_PER_OWNER) {
+    // A finished session keeps its transcript for replay but no longer takes a place.
+    if (this.list(ownerId).filter(t => !t.exited).length >= MAX_SESSIONS_PER_OWNER) {
       throw new TerminalError('limit', `At most ${MAX_SESSIONS_PER_OWNER} terminals per account`);
     }
-    if (size.command !== undefined && (typeof size.command !== 'string' || !size.command.trim() || size.command.length > 16000 || size.command.includes('\0'))) throw new TerminalError('invalid', 'Invalid command');
+    if (size.command !== undefined && !commandAllowed(size.command)) throw new TerminalError('invalid', 'Invalid command');
+    // Not verified on a real Windows shell yet: chat commands stay off there until they are.
+    if (size.command !== undefined && this.os === 'win32') throw new TerminalError('unsupported', 'Running a command from chat is not available on Windows yet. Copy it into the Terminal instead.');
     const spawn = this.spawnFn ?? (this.spawnFn = await loadNodePty());
     const { cols, rows } = clampSize(size.cols, size.rows);
     const shell = defaultShell(this.os, this.env);
@@ -183,7 +195,8 @@ export class TerminalManager {
     pty.onExit(({ exitCode, signal }) => {
       session.exitCode = exitCode; session.signal = signal;
       for (const l of session.listeners) l({ type: 'exit', exitCode, ...(signal ? { signal } : {}) });
-      this.clearIdle(session);
+      // Keep the finished transcript for a while (replay), then let it go.
+      this.touch(session);
     });
     this.sessions.set(session.id, session);
     this.touch(session);

@@ -26,13 +26,16 @@ test('media reads are bounded, project-confined and refuse secret symlink target
 });
 
 test('command mode passes exact command as one shell argument, stop keeps transcript until real exit', async t => {
-  for(const platform of ['darwin','win32']){
+  // Chat commands stay off on Windows until verified on a real Windows shell.
+  const off=new TerminalManager({os:'win32',env:{AGENT_TERMINAL:'true'},spawn:()=>{throw new Error('must not spawn');}});
+  await assert.rejects(off.create('owner',{cwd:os.tmpdir(),command:'dir'}),e=>e.code==='unsupported');
+  for(const platform of ['darwin','linux']){
     let args,exit,data,killed=false;
     const manager=new TerminalManager({os:platform,env:{AGENT_TERMINAL:'true',SHELL:'/bin/sh'},spawn:(file,a)=>{args=a;return{onData:f=>{data=f;},onExit:f=>{exit=f;},write(){},resize(){},kill(){killed=true;}};}});
     t.after(()=>manager.closeAll());
     const exact='printf "a; b"; exit 7';
     const session=await manager.create('owner',{cwd:os.tmpdir(),command:exact});
-    assert.equal(args.at(-1),exact);assert.ok(args.includes(platform==='win32'?'-Command':'-c'));
+    assert.equal(args.at(-1),exact);assert.ok(args.includes('-c'));
     const seen=[];manager.subscribe('owner',session.id,0,e=>seen.push(e));data('fictional output');manager.stop('owner',session.id);
     assert.equal(killed,true);assert.equal(seen.some(e=>e.type==='exit'),false);exit({exitCode:7,signal:1});assert.equal(seen.at(-1).exitCode,7);
     const replay=[];manager.subscribe('owner',session.id,0,e=>replay.push(e));assert.equal(replay[0].chunk.data,'fictional output');assert.equal(replay.at(-1).exitCode,7);assert.equal(replay.at(-1).signal,1);

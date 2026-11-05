@@ -69,7 +69,7 @@ export function TerminalPane({ tabs, prefs, projectId, maximized, onToggleMax, o
         <button type="button" className="phone-term-icon" aria-label="More" aria-expanded={menu} onClick={() => setMenu(v => !v)}><UiIcon name="more" size={20}/></button>
         {menu && <div className="phone-term-menu" role="menu">
           {t.tabs.length > 1 && t.tabs.map(x => <button key={x.key} type="button" role="menuitemradio" aria-checked={x.key === t.active} onClick={() => { tabs.select(x.key); setMenu(false); }}>Terminal {x.n}</button>)}
-          <button type="button" role="menuitem" disabled={t.tabs.length >= MAX_TERMINAL_TABS} onClick={() => { tabs.add(); setMenu(false); }}>New terminal</button>
+          <button type="button" role="menuitem" disabled={!tabs.canAdd()} onClick={() => { tabs.add(); setMenu(false); }}>New terminal</button>
           <button type="button" role="menuitem" disabled={!active} onClick={() => { active?.terminal.clear(); setMenu(false); }}>Clear the screen</button>
           <button type="button" role="menuitem" onClick={() => { setSettings(true); setMenu(false); }}>Terminal settings</button>
           <button type="button" role="menuitem" disabled={!active} onClick={() => { if (active) closeTab(active.key); setMenu(false); }}>Close this terminal</button>
@@ -105,8 +105,8 @@ export function TerminalPane({ tabs, prefs, projectId, maximized, onToggleMax, o
     <div className="term-bar">
       <div className="term-tabs" role="tablist" aria-label="Terminals">
         {t.tabs.map(x => <TabButton key={x.key} n={x.n} terminal={x.terminal} active={x.key === t.active} onSelect={() => tabs.select(x.key)} onClose={() => closeTab(x.key)}/>)}
-        <button type="button" className="term-tool" aria-label="New terminal" title={t.tabs.length >= MAX_TERMINAL_TABS ? `Up to ${MAX_TERMINAL_TABS} terminals` : 'New terminal (⌃⇧`)'}
-          disabled={t.tabs.length >= MAX_TERMINAL_TABS} onClick={() => tabs.add()}><UiIcon name="plus" size={12}/></button>
+        <button type="button" className="term-tool" aria-label="New terminal" title={!tabs.canAdd() ? `Up to ${MAX_TERMINAL_TABS} terminals` : 'New terminal (⌃⇧`)'}
+          disabled={!tabs.canAdd()} onClick={() => tabs.add()}><UiIcon name="plus" size={12}/></button>
       </div>
       <div className="term-actions">
         <button type="button" className="term-tool" aria-label="Stop" title="Stop what runs here (⌃C)" disabled={!active} onClick={() => active?.terminal.write('\x03')}><UiIcon name="stop" size={12}/></button>
@@ -124,12 +124,15 @@ export function TerminalPane({ tabs, prefs, projectId, maximized, onToggleMax, o
   </div>;
 }
 
+/** A command tab is named after its command: the first line, kept short. */
+export const commandLabel = (command: string) => { const first = command.split('\n')[0].trim(); const more = command.includes('\n') ? ' …' : ''; return (first.length > 32 ? `${first.slice(0, 31)}…` : first) + more; };
+
 function TabButton({ n, terminal, active, onSelect, onClose }: { n: number; terminal: TerminalController; active: boolean; onSelect: () => void; onClose: () => void }) {
   const s = useSyncExternalStore(terminal.subscribe, terminal.getSnapshot, terminal.getSnapshot);
   const folder = s.cwd ? s.cwd.split('/').filter(Boolean).at(-1) : '';
   return <span className="term-tab" role="tab" aria-selected={active} data-phase={s.phase}>
     <button type="button" className="term-tab-open" onClick={onSelect} title={s.cwd ? shortPath(s.cwd) : undefined}>
-      <i className="term-dot" aria-hidden="true"/>{s.shell || 'shell'}{n > 1 ? ` ${n}` : ''} · you{folder ? <span className="term-tab-dir"> · {folder}</span> : null}
+      <i className="term-dot" aria-hidden="true"/>{s.command ? <span className="term-tab-command" dir="ltr">{commandLabel(s.command)}</span> : <>{s.shell || 'shell'}{n > 1 ? ` ${n}` : ''} · you</>}{folder ? <span className="term-tab-dir"> · {folder}</span> : null}
     </button>
     <button type="button" className="term-tab-close" aria-label={`Close terminal ${n}`} onClick={onClose}><UiIcon name="close" size={9}/></button>
   </span>;
@@ -165,7 +168,7 @@ export function TerminalScreen({ terminal, p, projectId, visible, onSize, phone,
     void (async () => {
       const [{ Terminal }, { FitAddon }] = await Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit'), import('@xterm/xterm/css/xterm.css')]);
       if (cancelled) return;
-      const x = new Terminal({ ...xtermOptions(prefsRef.current), allowProposedApi: false, disableStdin: passive, macOptionIsMeta: true, rightClickSelectsWord: true, drawBoldTextInBrightColors: true });
+      const x = new Terminal({ ...xtermOptions(prefsRef.current), allowProposedApi: false, disableStdin: passive, ...(passive ? { cursorInactiveStyle: 'none' as const } : {}), macOptionIsMeta: true, rightClickSelectsWord: true, drawBoldTextInBrightColors: true });
       const fit = new FitAddon(); x.loadAddon(fit);
       x.open(el); term.current = x;
       const refit = () => { if (!el.offsetParent) return; try { fit.fit(); size.current = { cols: x.cols, rows: x.rows }; if (!passive) terminal.resize(x.cols, x.rows); onSize(`${x.cols}×${x.rows}`); } catch { /* hidden */ } };

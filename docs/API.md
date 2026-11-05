@@ -506,7 +506,9 @@ or `{path,size,reason}` when hidden, unavailable, unsupported, or over the 32 MB
 Secret files and symlink targets outside the project remain refused. SVG is displayed as an
 image, never as an active document. CSV and JSON previews are read-only; CSV formulas are text.
 
-`POST /api/terminal/sessions` optionally accepts `command` (1–16,000 characters, no NUL)
+`POST /api/terminal/sessions` optionally accepts `command` (1–16,000 characters; tab and
+newline allowed, but no other control characters and no zero-width or text-direction
+characters, so what the owner approves is exactly what runs; otherwise `400 invalid`)
 with the existing `projectId`, `cols`, and `rows`. The owner reviews and approves the exact
 command in chat before creation. This starts a dedicated command session in the same Girru
 PTY manager, using the existing owner/loopback checks, project folder and environment rules.
@@ -515,6 +517,10 @@ the same controller and transcript, and does not create or execute another comma
 `POST /api/terminal/sessions/:id/stop` requests termination without discarding the transcript;
 the UI waits for the real exit event. Closing a terminal still uses DELETE.
 This does not grant agents additional execution permissions.
+On Windows a `command` is refused with `501 unsupported` until it is verified on a real
+Windows shell; an interactive terminal still opens there. A finished command session keeps
+its transcript for replay but no longer counts toward the four-terminal limit, and it is
+released after the idle timeout.
 
 `GET /api/chat/projects/:id/office?path=…` previews DOCX/XLSX inside the same owner-only
 project pane. The response is `{path,kind,parts:[{name,text}],images:[{name,mime,base64}],truncated}`

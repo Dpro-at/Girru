@@ -108,7 +108,7 @@ test('terminal: Stop sends ⌃C, ⌃⇧` opens a new tab, your own shell says "�
   const t = src('TerminalPane.tsx');
   assert.match(t, /aria-label="Stop" title="Stop what runs here \(⌃C\)" disabled=\{!active\} onClick=\{\(\) => active\?\.terminal\.write\('\\x03'\)\}/);
   assert.match(t, /'New terminal \(⌃⇧`\)'/);
-  assert.match(t, / · you\{folder/);
+  assert.match(t, / · you<\/>\}\{folder/);
   const v = src('ChatView.tsx');
   assert.ok(v.indexOf("e.ctrlKey && e.shiftKey && !e.metaKey && e.code === 'Backquote'") < v.indexOf("e.ctrlKey && !e.metaKey && e.code === 'Backquote'"), 'the new-tab key is checked before the toggle');
 });

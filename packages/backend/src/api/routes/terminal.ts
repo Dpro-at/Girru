@@ -19,7 +19,7 @@ import { actorOf } from '../../auth/auth-gate.js';
 import { actorOrReply, requireOwner } from '../../repositories/scope.js';
 import { logAudit } from '../../services/audit-logger.js';
 import { openSseStream } from '../../services/chat-sse.js';
-import { TerminalError, TerminalManager, terminalEnabled, terminalPrefs, DEFAULT_TERMINAL_PREFS } from '../../terminal/manager.js';
+import { TerminalError, TerminalManager, commandAllowed, terminalEnabled, terminalPrefs, DEFAULT_TERMINAL_PREFS } from '../../terminal/manager.js';
 import { getPref, setPref } from '../../repositories/user-prefs.js';
 import { checkFolder, findProject } from '../../repositories/chat-conversations.js';
 
@@ -27,7 +27,7 @@ const SESSION_ID = /^[0-9a-f-]{36}$/;
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
 const STATUS: Record<TerminalError['code'], number> = {
-  disabled: 403, limit: 429, not_found: 404, invalid: 400, closed: 409,
+  disabled: 403, limit: 429, not_found: 404, invalid: 400, closed: 409, unsupported: 501,
 };
 
 /** The socket peer, not a forwarded header: only this machine may open a shell. */
@@ -113,7 +113,7 @@ export function terminalRoutesWith(manager: TerminalManager) {
           try { cwd = checkFolder(project.folder); } catch { return reply.code(404).send({ error: 'The project folder is gone', code: 'not_found' }); }
           extraEnv = await variablesEnv(owner, project.id).catch(() => undefined);
         }
-        if (body.command !== undefined && (typeof body.command !== 'string' || !body.command.trim() || body.command.length > 16000 || body.command.includes('\0'))) return reply.code(400).send({ code: 'invalid' });
+        if (body.command !== undefined && !commandAllowed(body.command)) return reply.code(400).send({ error: 'This command has hidden or control characters, or is too long', code: 'invalid' });
         const created = await manager.create(owner, { cols: body.cols, rows: body.rows, cwd, extraEnv, ...(typeof body.command === 'string' ? { command: body.command } : {}) });
         audit(request, owner, 'terminal.session.open', created.id);
         return reply.code(201).send(created);

@@ -6,7 +6,7 @@ import path from 'node:path';
 import { TerminalManager } from '../src/terminal/manager.ts';
 
 /** A real platform PTY, with a throwaway working folder and no provider calls. */
-test('native command session runs once and retains the real exit/transcript', { timeout: 75000 }, async t => {
+test('native command session runs once and retains the real exit/transcript', { timeout: 75000, skip: process.platform === 'win32' && 'chat commands are off on Windows until verified there' }, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'girru-command-native-'));
   const env = { ...process.env, AGENT_TERMINAL: 'true', SHELL: process.platform === 'win32' ? undefined : '/bin/sh', HOME: root, USERPROFILE: root };
   const manager = new TerminalManager({ env, cwd: root });

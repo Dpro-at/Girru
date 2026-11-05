@@ -27,7 +27,16 @@ test('a shell block is a command to run: Copy, and Run only for the owner', () =
   const t = '```bash\n$ npm test -- login\n```';
   assert.match(md(t, { folderName: 'agent_player' }), /Terminal · in agent_player/);
   assert.doesNotMatch(md(t), /md-run/);
-  assert.match(md(t, { runCommand: () => {} }), /class="md-code-btn md-run"[^>]*>Run</);
+  assert.match(md(t, { runCommand: () => {} }), /class="md-code-btn md-run"[^>]*>(?:<svg[\s\S]*?<\/svg>)?Run</);
+});
+
+test('a command with hidden or control characters is copy-only, never Run', () => {
+  const { HIDDEN_COMMAND_CHARS } = require('../src/markdown.tsx');
+  for (const bad of ['ls\u202e', 'echo a\u200bb', 'ls\x1b[2J', 'ls\r']) assert.ok(HIDDEN_COMMAND_CHARS.test(bad), JSON.stringify(bad));
+  assert.ok(!HIDDEN_COMMAND_CHARS.test('npm ci\n\tnpm test'), 'newline and tab are fine');
+  const hidden = md('```bash\n$ ls \u202etxt.exe\n```', { runCommand: () => {}, commandRun: () => null });
+  assert.doesNotMatch(hidden, /md-run/);
+  assert.match(hidden, /can only be copied/);
 });
 
 test('file chips: changed beats read; private drafts and waiting calls are left out; a search marks its text', () => {

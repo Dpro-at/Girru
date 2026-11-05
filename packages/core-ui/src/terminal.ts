@@ -68,7 +68,8 @@ export class TerminalController {
       try {
         const r = await this.client.terminalStream(id, last, (f: TerminalFrame) => {
           if (f.type === 'output') { if (f.seq > this.#outputSeq + 1) this.publish({ droppedOutput: true }); this.#outputSeq = f.seq; this.emit(f.data); }
-          else { this.emit(`\r\n[process exited with ${f.signal ? `signal ${f.signal}` : `code ${f.exitCode}`}]\r\n`); this.publish({ phase: 'exited', exitCode: f.exitCode, signal: f.signal }); }
+          // A chat command shows how it ended in its own status line, not as a line of output.
+          else { if (!this.#state.command) this.emit(`\r\n[process exited with ${f.signal ? `signal ${f.signal}` : `code ${f.exitCode}`}]\r\n`); this.publish({ phase: 'exited', exitCode: f.exitCode, signal: f.signal }); }
         }, ac.signal);
         const progressed = r.last > last;
         last = r.last;
@@ -175,9 +176,13 @@ export class TerminalTabs {
   getSnapshot = () => this.#state;
   subscribe = (fn: () => void) => { this.#listeners.add(fn); return () => { this.#listeners.delete(fn); }; };
   private publish(p: Partial<TerminalTabsState>) { this.#state = Object.freeze({ ...this.#state, ...p }); this.#listeners.forEach(fn => fn()); }
+  /** Tabs whose session still runs: a finished command keeps its tab but no longer takes a place. */
+  #live() { return this.#state.tabs.filter(t => t.terminal.getSnapshot().phase !== 'exited').length; }
+  /** Whether another live terminal may open. */
+  canAdd() { return this.#live() < MAX_TERMINAL_TABS; }
   /** Opens a new tab (its shell starts when its screen mounts). */
   add() {
-    if (this.#state.tabs.length >= MAX_TERMINAL_TABS) return null;
+    if (this.#live() >= MAX_TERMINAL_TABS) return null;
     const tab: TerminalTab = { key: `t${++this.#n}`, n: this.#n, terminal: new TerminalController(this.client) };
     this.publish({ tabs: [...this.#state.tabs, tab], active: tab.key });
     return tab;
@@ -185,7 +190,7 @@ export class TerminalTabs {
   command(key: string, command: string, projectId: string | null) {
     const old = this.#state.tabs.find(t => t.commandKey === key);
     if (old) return old;
-    if (this.#state.tabs.length >= MAX_TERMINAL_TABS) return null;
+    if (this.#live() >= MAX_TERMINAL_TABS) return null;
     const tab: TerminalTab = { key: `t${++this.#n}`, n: this.#n, terminal: new TerminalController(this.client), commandKey: key };
     this.publish({ tabs: [...this.#state.tabs, tab], active: this.#state.active });
     void tab.terminal.open(projectId, { cols: 80, rows: 24 }, command);

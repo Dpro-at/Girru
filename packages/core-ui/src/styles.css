@@ -3931,9 +3931,42 @@ label.setup-kind { display:flex; align-items:center; justify-content:flex-start;
 .file-viewer .pdf-page p { margin:0 0 4px; white-space:pre-wrap; }
 .file-viewer mark { background:#fff3b0; color:#1B1D24; border-radius:2px; }
 /* CHAT-CONTENT-01: command blocks (board §3). */
-.md-terminal .md-code { background:#08090D; color:#E8EAF0; }
+/* CHAT-CONTENT-02: one dark terminal card in every theme: head, command, (approval), output, status line. */
+.app-shell .md-codeblock.md-terminal { background:#121417; color:#dfe3ea; box-shadow:inset 0 0 0 1px #262a31; }
+.app-shell .md-terminal .md-code-head { background:#181b20; border-bottom:1px solid #262a31; padding-block:3px; }
+.app-shell .md-terminal .md-code-lang { color:#9aa1ad; }
+.app-shell .md-terminal .md-code-btn { color:#9aa1ad; }
+.app-shell .md-terminal .md-code-btn:hover { color:#dfe3ea; background:#262a31; }
+.app-shell .md .md-codeblock.md-terminal .md-code { background:transparent; color:#dfe3ea; padding:8px 12px; }
 .md-terminal .md-prompt { color:#6b7189; }
-.md-code-btn.md-run { background:#1f6f4a; border-color:#2a8a5e; color:#fff; }
+.app-shell .md-code-btn.md-icon-btn { inline-size:22px; padding:0; display:inline-flex; align-items:center; justify-content:center; }
+.app-shell .md-code-btn.md-run, .app-shell .md-code-btn.md-stop, .inline-command-review .md-run { display:inline-flex; align-items:center; gap:5px; padding:0 9px; font-weight:600; }
+.app-shell .md-code-btn.md-run, .inline-command-review .md-run { background:#1f6f4a; color:#fff; }
+.app-shell .md-code-btn.md-run:hover, .inline-command-review .md-run:hover { background:#23805a; color:#fff; }
+.app-shell .md-code-btn.md-stop { background:#4a2328; color:#ffd9dc; }
+.app-shell .md-code-btn.md-stop:hover { background:#5a2a30; color:#fff; }
+.app-shell .md-code-btn.md-stop:disabled { opacity:.6; }
+.inline-command-review { display:flex; flex-wrap:wrap; align-items:center; gap:8px 10px; padding:8px 12px; border-top:1px solid #262a31; background:#181b20; font-size:12.5px; }
+.inline-command-ask { flex:1; color:#dfe3ea; }
+.inline-command-exact { order:3; flex-basis:100%; margin:0; padding:6px 8px; border-radius:6px; background:#0d0f12; color:#dfe3ea; font:11.5px/1.5 Menlo,Monaco,"SF Mono",monospace; white-space:pre-wrap; overflow-wrap:anywhere; max-block-size:160px; overflow:auto; }
+.inline-command-review-actions { display:flex; gap:6px; }
+.inline-command-review button { min-block-size:24px; padding:0 10px; border-radius:5px; border:0; font:inherit; font-size:12px; cursor:pointer; }
+.inline-command-review button:not(.md-run) { background:transparent; color:#c4c9d2; box-shadow:inset 0 0 0 1px #2e333c; }
+.inline-command { border-top:1px solid #262a31; }
+.inline-command-screen { block-size:0; overflow:hidden; transition:block-size .12s ease; }
+@media (prefers-reduced-motion: reduce) { .inline-command-screen { transition:none; } }
+.inline-command-screen .term-screen-wrap { block-size:100%; padding:6px 12px 2px; background:#121417; box-sizing:border-box; }
+.inline-command-screen .terminal-screen { min-block-size:0; block-size:100%; }
+.inline-command-foot { display:flex; align-items:center; justify-content:space-between; gap:8px; min-block-size:28px; padding:2px 6px 2px 12px; border-top:1px solid #1d2026; font-size:11.5px; }
+.inline-command-status { display:inline-flex; align-items:center; gap:6px; color:#9aa1ad; }
+.inline-command-status[data-tone="done"] { color:#3fb37f; }
+.inline-command-status[data-tone="fail"] { color:#ff7a80; }
+.inline-command-dot { inline-size:7px; block-size:7px; border-radius:50%; background:#5b8cff; animation:inline-command-pulse 1.2s ease-in-out infinite; }
+@keyframes inline-command-pulse { 50% { opacity:.35; } }
+@media (prefers-reduced-motion: reduce) { .inline-command-dot { animation:none; } }
+.inline-command-tools { display:flex; gap:2px; }
+.inline-command-note { margin:0; padding:4px 12px; font-size:11.5px; color:#9aa1ad; border-top:1px solid #1d2026; }
+.term-tab-command { font-family:Menlo,Monaco,"SF Mono",monospace; font-size:11px; }
 .app-shell .md-code-lang, .md-code-lang { text-transform:none; }
 /* CHAT-LOADER-01: the chat orb. The ring and motion say what the agent does (board "The orb in the chat"). */
 .chat-orb { position:relative; display:inline-flex; align-items:center; justify-content:center; flex:none; border-radius:50%; }
@@ -4019,16 +4052,6 @@ label.setup-kind { display:flex; align-items:center; justify-content:flex-start;
 .file-table-scroll th,.file-table-scroll td { border-bottom:1px solid var(--border); border-inline-end:1px solid var(--border); padding:8px 12px; white-space:pre-wrap; min-width:90px; max-width:320px; overflow-wrap:anywhere; }
 .file-table-scroll td button { text-align:inherit; font:inherit; color:inherit; background:none; border:0; padding:0; width:100%; min-height:18px; cursor:copy; white-space:pre-wrap; }
 .file-view[data-wrap] .file-line code { white-space:pre-wrap; overflow-wrap:anywhere; }
-.inline-command { border-top:1px solid var(--border); }
-.inline-command-status { padding:8px 12px; display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:12px; }
-.inline-command-status>span:last-child { display:flex; gap:12px; flex-wrap:wrap; }
-.inline-command .term-screen-wrap { height:148px; padding:8px; background:var(--surface); }
-.inline-command[data-expanded] .term-screen-wrap { height:360px; }
-.inline-command-review { padding:12px; border-top:1px solid var(--border); font-size:13px; }
-.inline-command-review button { margin-inline-end:8px; }
-.md-terminal .md-code { color:var(--text); }
-.inline-command .term-screen-wrap { height:116px; background:var(--term-bg); color:var(--term-fg); }
-.inline-command .terminal-screen { min-block-size:96px; }
 .file-chip[data-tile="media"] .file-tile { background:#1f2f4e; color:#9ec4ff; }
 @media (max-width:900px) {
   .app-shell .chat-layout[data-panel="files"]:has(.file-viewer) { position:relative; }

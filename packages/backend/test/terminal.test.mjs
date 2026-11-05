@@ -183,6 +183,40 @@ test('per-owner session cap and malformed ids', async () => {
   assert.equal((await call('POST', '/api/terminal/sessions/not-a-uuid/input', 'tm-owner', { data: 'x' })).statusCode, 404);
 });
 
+test('finished sessions free their place; they are let go after the idle time', async () => {
+  const exits = [];
+  const fake = () => ({ onData() {}, onExit(fn) { exits.push(fn); }, write() {}, resize() {}, kill() {} });
+  const m = new mgr.TerminalManager({ env: { AGENT_TERMINAL: 'true', PATH: '/bin' }, spawn: fake, idleTimeoutMs: 40, cwd: dir });
+  for (let i = 0; i < mgr.MAX_SESSIONS_PER_OWNER; i++) await m.create('o1', { command: 'true' });
+  await assert.rejects(m.create('o1'), err => err.code === 'limit');
+  exits[0]({ exitCode: 0 });
+  const next = await m.create('o1'); // the finished one no longer counts
+  assert.ok(next.id);
+  assert.equal(m.list('o1').filter(s => s.exited).length, 1, 'its transcript is still there to replay');
+  await new Promise(r => setTimeout(r, 90));
+  assert.equal(m.list('o1').filter(s => s.exited).length, 0, 'let go after the idle time');
+  m.closeAll();
+});
+
+test('a chat command with hidden or control characters is refused', async () => {
+  const fake = () => ({ onData() {}, onExit() {}, write() {}, resize() {}, kill() {} });
+  const m = new mgr.TerminalManager({ env: { AGENT_TERMINAL: 'true', PATH: '/bin' }, spawn: fake, cwd: dir, os: 'darwin' });
+  for (const bad of ['ls\u202e', 'echo a\u200bb', 'ls\x1b[2J', 'ls\r', 'x\0', ' ', 'a'.repeat(16001)]) {
+    await assert.rejects(m.create('o1', { command: bad }), err => err.code === 'invalid', JSON.stringify(bad.slice(0, 20)));
+  }
+  assert.ok((await m.create('o1', { command: 'npm test\n\tnpm run build' })).id, 'newline and tab are fine');
+  assert.equal(mgr.commandAllowed('npm test'), true);
+  m.closeAll();
+});
+
+test('chat commands are refused on Windows until verified there; shells still open', async () => {
+  const fake = () => ({ onData() {}, onExit() {}, write() {}, resize() {}, kill() {} });
+  const m = new mgr.TerminalManager({ env: { AGENT_TERMINAL: 'true', PATH: 'C:\\Windows' }, spawn: fake, os: 'win32', cwd: dir });
+  await assert.rejects(m.create('o1', { command: 'dir' }), err => err.code === 'unsupported');
+  assert.ok((await m.create('o1')).id);
+  m.closeAll();
+});
+
 test('idle sessions are closed', async () => {
   let killed = false;
   const fake = () => ({ onData() {}, onExit() {}, write() {}, resize() {}, kill() { killed = true; } });
