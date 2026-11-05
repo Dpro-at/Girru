@@ -2,8 +2,6 @@
 //  - approvals carry an absolute `expiresAt`; approval, task-run, memory
 //    proposal, personality-version and small-agent timestamps are ISO-8601
 //    UTC with `Z` (DB format unchanged);
-//  - new public rooms are private by default; `GET /api/public-chat/policy`
-//    exposes publicRooms.allowAnonymous read-only to signed-in users;
 //  - optimistic concurrency: `version` + ETag on agents and tool grants,
 //    `expectedVersion` / If-Match -> 409 on mismatch; partial agent PUT;
 //  - chat: every SSE frame and JSON body carries runId + messageId; a
@@ -166,34 +164,6 @@ test('personality versions return ISO UTC createdAt', async () => {
 });
 
 // --- public rooms ------------------------------------------------------------
-
-test('new public-chat rooms are private by default; explicit is_public still works', async () => {
-  const a = await inject({ method: 'POST', url: '/api/public-chat/rooms', headers: bearer('c-owner'), payload: { name: 'Default room' } });
-  assert.equal(a.statusCode, 200, a.body);
-  assert.equal(a.json().room.is_public, 0);
-  const b = await inject({ method: 'POST', url: '/api/public-chat/rooms', headers: bearer('c-owner'), payload: { name: 'Open room', is_public: true } });
-  assert.equal(b.json().room.is_public, 1);
-});
-
-test('GET /api/public-chat/policy: read-only allowAnonymous for signed-in users, owner-only change', async () => {
-  assert.equal((await inject({ method: 'GET', url: '/api/public-chat/policy' })).statusCode, 401);
-  for (const who of ['c-owner', 'c-member', 'c-guest']) {
-    const res = await inject({ method: 'GET', url: '/api/public-chat/policy', headers: bearer(who) });
-    assert.equal(res.statusCode, 200, `${who}: ${res.body}`);
-    assert.deepEqual(res.json(), { publicRooms: { allowAnonymous: false, newRoomsPublicByDefault: false } });
-  }
-  assert.equal((await inject({ method: 'PUT', url: '/api/settings', headers: bearer('c-member'), payload: { publicRooms: { allowAnonymous: true } } })).statusCode, 403);
-  const on = await inject({ method: 'PUT', url: '/api/settings', headers: bearer('c-owner'), payload: { publicRooms: { allowAnonymous: true } } });
-  assert.equal(on.statusCode, 200, on.body);
-  try {
-    const res = await inject({ method: 'GET', url: '/api/public-chat/policy', headers: bearer('c-member') });
-    assert.equal(res.json().publicRooms.allowAnonymous, true);
-  } finally {
-    await inject({ method: 'PUT', url: '/api/settings', headers: bearer('c-owner'), payload: { publicRooms: { allowAnonymous: false } } });
-  }
-});
-
-// --- optimistic concurrency ---------------------------------------------------
 
 test('agents: version + ETag; partial PUT {name}; stale expectedVersion / If-Match -> 409', async () => {
   const created = (await inject({ method: 'POST', url: '/api/agents', headers: bearer('c-owner'), payload: { name: 'Version One', description: 'first' } })).json().agent;

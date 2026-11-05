@@ -125,7 +125,6 @@ export const PORTED = [
   'src/api/routes/world-bots.ts',
   'src/api/routes/multiverse.ts',
   'src/api/routes/extensions.ts',
-  'src/api/routes/public-chat.ts',
   'src/api/routes/telephony.ts',
   'src/api/routes/avatar.ts',
 ];

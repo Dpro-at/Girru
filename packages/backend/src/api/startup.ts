@@ -11,7 +11,6 @@ import { fileURLToPath } from 'node:url';
 
 import type { FastifyInstance } from 'fastify';
 import { processScheduledNotifications } from '../services/notification-service.js';
-import { startCalendarSyncScheduler } from '../services/calendar-sync.js';
 import { config } from '../config/index.js';
 import { backgroundEnabled } from '../config/background.js';
 import { dataPathOr } from '../config/data-root.js';
@@ -40,7 +39,6 @@ export const BACKGROUND_JOBS: ReadonlyArray<{ id: string; off: string }> = [
   { id: 'memory-files-sync', off: 'startMemoryFilesSync not called (exported memory files follow the database only on owner request)' },
   { id: 'login-pruning', off: 'startLoginRecordPruning not called' },
   { id: 'scheduled-notifications', off: '60 s interval not started' },
-  { id: 'calendar-sync', off: 'startCalendarSyncScheduler not called' },
   { id: 'extension-stats', off: 'hourly interval not started' },
   { id: 'memory-consolidation', off: 'startScheduler not called' },
   { id: 'gateway-session-cleanup', off: 'SessionManager starts no 5 min cleanup interval' },
@@ -343,10 +341,6 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
       processScheduledNotifications().catch(() => { /* non-fatal */ });
     }, 60_000);
 
-    // Initialize Calendar Sync Scheduler
-    startCalendarSyncScheduler();
-    console.log('[Server] ✅ Calendar sync scheduler started\n');
-
     // Initialize Extension Storage Stats Scheduler (hourly updates)
     const { updateAllExtensionStorageStats } = await import('../services/extension-analytics.js');
     setInterval(() => {
@@ -430,10 +424,6 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
 
   console.log('[Server] ✅ Extension analytics middleware registered\n');
 
-  // Email Sync Service moved to email-client extension
-  // const { emailSyncService } = await import('../services/email-sync-service.js');
-  // await emailSyncService.startAllAutoSync();
-  // console.log('[Server] ✅ Email sync service initialized\n');
 
   // MCP-01b: per-install identity next to the CLI token, so the MCP server
   // can verify this backend before it sends the owner's token.

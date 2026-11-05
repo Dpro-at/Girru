@@ -121,17 +121,7 @@ import { aiToolsRoutes } from './routes/ai-tools.js';
 import { cameraRoutes } from './routes/camera.js';
 import { profileRoutes } from './routes/profile.js';
 import { notificationsRoutes } from './routes/notifications.js';
-import { registerTeamRoutes } from './routes/team.js';
 import { phoneRoutes } from './routes/phone.js';
-// Email routes moved to email-client extension
-// import { registerEmailRoutes } from './routes/email.js';
-// import emailAccountsRoutes from './routes/email-accounts.js';
-// import emailFoldersRoutes from './routes/email-folders.js';
-// import emailMessagesRoutes from './routes/email-messages.js';
-// import emailSearchRoutes from './routes/email-search.js';
-// import emailComposeRoutes from './routes/email-compose.js';
-// import emailAttachmentsRoutes from './routes/email-attachments.js';
-// import emailDraftsRoutes from './routes/email-drafts.js';
 import { worldsRoutes } from './routes/worlds.js';
 import { multiverseRoutes } from './routes/multiverse.js';
 import { worldBotsRoutes } from './routes/world-bots.js';
@@ -144,8 +134,6 @@ import { registerTelephonyRoutes } from './routes/telephony.js';
 import { agentFilesRoutes } from './routes/agent-files.js';
 import { agentPackagesRoutes } from './routes/agent-packages.js';
 import { registerDashboardRoutes } from './routes/dashboard.js';
-import { registerCalendarRoutes } from './routes/calendar.js';
-import { registerPublicChatRoutes } from './routes/public-chat.js';
 import { registerCostAnalyticsRoutes } from './routes/cost-analytics.js';
 import evolutionRoutes from './routes/evolution.js';
 import evaluationRoutes from './routes/evaluation.js';
@@ -464,7 +452,6 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await fastify.register(cameraRoutes);        // 📷 Camera Sessions + WebRTC Signaling
   await fastify.register(profileRoutes);       // 👤 User Profile (GET/PUT /api/profile)
   await fastify.register(notificationsRoutes); // 🔔 Notifications (CRUD + Settings + Schedules)
-  await fastify.register(registerTeamRoutes);     // 👥 Team Management (Teams, Members, Invitations)
   // Email routes moved to email-client extension (install via /dashboard/extensions)
   // await fastify.register(registerEmailRoutes);    // 📧 Email Configuration (SMTP Test + Verify)
   // await fastify.register(emailAccountsRoutes);    // 📬 Email Accounts (Multi-Account IMAP/SMTP + OAuth)
@@ -487,8 +474,6 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await fastify.register(agentFilesRoutes);    // 📝 Agent Files (PERSONALITY.md + MEMORY.md)
   await fastify.register(agentPackagesRoutes); // STORE-MAP-01 P5: agent packages (GIRRU_STORE_P5)
   await fastify.register(registerDashboardRoutes); // 📊 Customizable Dashboard (Widgets + Layouts)
-  await fastify.register(registerCalendarRoutes);  // 📅 Calendar System (Events + Google Calendar Sync)
-  await fastify.register(registerPublicChatRoutes); // 💬 Public Chat Rooms (Multi-User Chat with AI Agents)
   await fastify.register(registerCostAnalyticsRoutes); // 💰 Cost Analytics (Model Usage & Savings Tracking)
   await fastify.register(evolutionRoutes);        // 🧬 Agent Evolution System (Self-Learning & Adaptation)
   await fastify.register(evaluationRoutes);       // 📊 Agent Evaluation Framework (Quality Assessment & Metrics)

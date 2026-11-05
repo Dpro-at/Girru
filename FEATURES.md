@@ -142,7 +142,6 @@ Girru's memory is the centre of the system. You explain something once, and ever
 | **Scheduled chats** | Send a saved message to an agent on a schedule. | ✅ Built |
 | **Chat and board** | Add a chat to a board, see the cards the agent suggests, and get board updates in the chat. | ✅ Built |
 | **Export** | Save a chat as Markdown, with secrets removed. | ✅ Built |
-| **Public chat rooms** | Put a chat room on a website with embed code. Visitors never see your private memory, and anonymous visitors are off by default. | ✅ Built |
 | **Talking avatar beside the chat** | An agent face that shows when it is thinking or speaking. It needs the optional GenVR package. | 🟡 Partly built |
 | **More chat tools** | Branch a reply to compare models, side chats, and sources under research answers. | 🧭 Planned |
 
@@ -278,9 +277,10 @@ Girru's memory is the centre of the system. You explain something once, and ever
 | **My apps** | Installed apps as a launcher, with updates, removal (with a saved copy) and pinning to the bottom bar. | ✅ Built |
 | **Private apps** | Add your own app from a folder on your computer. | ✅ Built |
 | **MCP connections** | Add MCP servers, choose which agents can use them, and import the ones your coding tools already use. | ✅ Built |
-| **Calendar** | An app for Google and iCal calendars. | 🟡 Partly built |
-| **Email** | An app for email accounts. | 🟡 Partly built |
-| **Team invitations** | Invite other people to your workspace. | ✅ Built |
+| **Calendar** | A Store app for Google and iCal calendars, rebuilt from the start. | 🧭 Planned |
+| **Email** | A Store app for email accounts, rebuilt from the start. | 🧭 Planned |
+| **Team invitations** | Invite other people to your workspace, as a Store app. | 🧭 Planned |
+| **Public chat rooms** | A chat room for a website, as a Store app. | 🧭 Planned |
 | **Lighter core** | Apps are downloaded from the Store when you install them, so the core program gets smaller. Code already comes this way. | 🟡 Partly built |
 | **Marketing app** | SEO tools and social posting: connect accounts, schedule and publish. | 🧭 Planned |
 
