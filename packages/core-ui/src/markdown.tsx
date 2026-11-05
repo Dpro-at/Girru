@@ -1,4 +1,7 @@
-import { createContext, useContext, useState } from 'react';
+import { InlineCommand, useCommandState } from './InlineCommand';
+import { UiIcon } from './ui-icons';
+import type { CommandRun } from './InlineCommand';
+import { createContext, useContext, useState, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { SpecView, parseSpec } from './spec';
 
@@ -123,7 +126,7 @@ function SpecBlock({ text }: { text: string }) { return parseSpec(text) ? <SpecV
  * CHAT-CONTENT-01: what a reply's code can do in this place (the chat gives it; elsewhere nothing extra shows):
  * open a named file beside the chat or in Code, and run a terminal command (the owner's own Terminal).
  */
-export type MarkdownActions = { openFile?: (path: string) => void; openInCode?: (path: string) => void; runCommand?: (command: string) => void; folderName?: string };
+export type MarkdownActions = { openFile?: (path: string) => void; openInCode?: (path: string) => void; runCommand?: (command: string) => void; commandRun?: (command: string, start?: boolean) => CommandRun | null; folderName?: string };
 export const MarkdownActionsContext = createContext<MarkdownActions>({});
 const LANG_NAMES: Record<string, string> = { ts: 'TypeScript', tsx: 'TypeScript', typescript: 'TypeScript', js: 'JavaScript', jsx: 'JavaScript', mjs: 'JavaScript', cjs: 'JavaScript', javascript: 'JavaScript', py: 'Python', python: 'Python', rb: 'Ruby', go: 'Go', rs: 'Rust', rust: 'Rust', java: 'Java', php: 'PHP', css: 'CSS', scss: 'SCSS', html: 'HTML', json: 'JSON', yaml: 'YAML', yml: 'YAML', toml: 'TOML', sql: 'SQL', md: 'Markdown', markdown: 'Markdown', swift: 'Swift', kt: 'Kotlin', c: 'C', cpp: 'C++', cs: 'C#', xml: 'XML', diff: 'Diff' };
 export const langName = (lang: string) => LANG_NAMES[lang.toLowerCase()] ?? (lang || 'code');
@@ -144,21 +147,57 @@ export function terminalLine(command: string): string | null {
   return safe || null;
 }
 
-/** CHAT-CONTENT-01: a command to run: Copy and Run (Run types it into your own Terminal beside the chat; you press Enter). */
+/** Control and format characters (zero-width, text-direction, tags), separators and invisible fillers; tab and newline allowed. A command with them is copy-only. */
+export const HIDDEN_COMMAND_CHARS = /(?![\t\n])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\u115f\u1160\u3164\uffa0]/u;
+
+/**
+ * CHAT-CONTENT-01/02: a command in a reply. Copy, and Run on its own session after you allow it;
+ * the output shows under the command and in the Terminal pane (the same session).
+ */
 export function TerminalBlock({ text, open = false }: { text: string; open?: boolean }) {
-  const { runCommand, folderName } = useContext(MarkdownActionsContext);
+  const { runCommand, commandRun, folderName } = useContext(MarkdownActionsContext);
   const [copied, setCopied] = useState(false);
   const command = commandOf(text);
+  const [review, setReview] = useState(false), [started, setStarted] = useState<CommandRun | null>(null);
+  useEffect(() => { setStarted(null); setReview(false); }, [command]);
+  const run = started ?? commandRun?.(command) ?? null;
+  const s = useCommandState(run);
+  const hidden = HIDDEN_COMMAND_CHARS.test(command);
+  const canRun = !!(runCommand || commandRun) && !open && !!command && !hidden;
+  const busy = !!s && (s.phase === 'starting' || s.phase === 'open' || s.phase === 'stopping');
+  const start = () => { setReview(false); setStarted(commandRun?.(command, true) ?? null); };
   const copy = () => { if (!navigator.clipboard) return; void navigator.clipboard.writeText(command).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }, () => undefined); };
+  // One main action, always in the same place: Run, then Stop while it runs, then Run again.
+  const main = !canRun || review ? null
+    : busy ? <button type="button" className="md-code-btn md-stop" disabled={s?.phase !== 'open'} title="Stop this command" onClick={() => void run?.terminal.stop()}><UiIcon name="stop" size={11}/>Stop</button>
+    : <button type="button" className="md-code-btn md-run" aria-expanded={review} title={run ? 'Run this command again' : 'Run this command'} onClick={() => { if (commandRun) setReview(true); else runCommand?.(command); }}><UiIcon name={run ? 'refresh' : 'play'} size={11}/>{run ? 'Run again' : 'Run'}</button>;
   return <div className="md-codeblock md-terminal" data-streaming={open || undefined}>
     <div className="md-code-head">
       <span className="md-code-lang">Terminal{folderName ? ` · in ${folderName}` : ''}</span>
       <span className="md-code-actions">
-        <button type="button" className="md-code-btn" onClick={copy} aria-label={copied ? 'Copied' : 'Copy command'}>{copied ? 'Copied' : 'Copy'}</button>
-        {runCommand && !open && command && terminalLine(command) && <button type="button" className="md-code-btn md-run" title="Put it in your Terminal beside the chat; you press Enter" onClick={() => runCommand(command)}>Run</button>}
+        <button type="button" className="md-code-btn md-icon-btn" onClick={copy} aria-label={copied ? 'Command copied' : 'Copy command'} title={copied ? 'Copied' : 'Copy command'}><UiIcon name={copied ? 'check' : 'copy'} size={12}/></button>
+        {main}
       </span>
     </div>
     <pre className="md-code" dir="ltr"><code>{text.split('\n').map((l, i) => <span key={i}>{/^\s*[$>]\s/.test(l) ? <><span className="md-prompt">$ </span>{l.replace(/^\s*[$>]\s/, '')}</> : l}{'\n'}</span>)}</code></pre>
+    {hidden && !open && <p className="inline-command-note">This command has hidden characters, so it can only be copied.</p>}
+    {review && <CommandReview command={command} folderName={folderName} onRun={start} onCancel={() => setReview(false)}/>}
+    {run && <InlineCommand run={run}/>}
+  </div>;
+}
+
+/** Ask before running: the exact text that will run, then Run or Cancel (Enter / Esc). */
+function CommandReview({ command, folderName, onRun, onCancel }: { command: string; folderName?: string; onRun: () => void; onCancel: () => void }) {
+  const runRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => { runRef.current?.focus(); }, []);
+  const lines = command.split('\n').length;
+  return <div className="inline-command-review" role="group" aria-label="Run this command?" onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); onCancel(); } }}>
+    <span className="inline-command-ask">{lines > 1 ? `Run these ${lines} lines` : 'Run this'}{folderName ? ` in ${folderName}` : ''}?</span>
+    <pre className="inline-command-exact" dir="ltr"><code>{command}</code></pre>
+    <span className="inline-command-review-actions">
+      <button type="button" onClick={onCancel}>Cancel</button>
+      <button type="button" ref={runRef} className="md-run" onClick={onRun}><UiIcon name="play" size={11}/>Run</button>
+    </span>
   </div>;
 }
 

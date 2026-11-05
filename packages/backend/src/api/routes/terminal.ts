@@ -19,7 +19,7 @@ import { actorOf } from '../../auth/auth-gate.js';
 import { actorOrReply, requireOwner } from '../../repositories/scope.js';
 import { logAudit } from '../../services/audit-logger.js';
 import { openSseStream } from '../../services/chat-sse.js';
-import { TerminalError, TerminalManager, terminalEnabled, terminalPrefs, DEFAULT_TERMINAL_PREFS } from '../../terminal/manager.js';
+import { TerminalError, TerminalManager, commandAllowed, terminalEnabled, terminalPrefs, DEFAULT_TERMINAL_PREFS } from '../../terminal/manager.js';
 import { getPref, setPref } from '../../repositories/user-prefs.js';
 import { checkFolder, findProject } from '../../repositories/chat-conversations.js';
 
@@ -27,7 +27,7 @@ const SESSION_ID = /^[0-9a-f-]{36}$/;
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
 const STATUS: Record<TerminalError['code'], number> = {
-  disabled: 403, limit: 429, not_found: 404, invalid: 400, closed: 409,
+  disabled: 403, limit: 429, not_found: 404, invalid: 400, closed: 409, unsupported: 501,
 };
 
 /** The socket peer, not a forwarded header: only this machine may open a shell. */
@@ -99,7 +99,7 @@ export function terminalRoutesWith(manager: TerminalManager) {
       return { prefs };
     });
 
-    fastify.post<{ Body: { cols?: unknown; rows?: unknown; projectId?: unknown } }>('/api/terminal/sessions', { config }, async (request, reply) => {
+    fastify.post<{ Body: { cols?: unknown; rows?: unknown; projectId?: unknown; command?: unknown } }>('/api/terminal/sessions', { config }, async (request, reply) => {
       const owner = ownerOf(request, reply);
       if (!owner) return reply;
       try {
@@ -113,7 +113,8 @@ export function terminalRoutesWith(manager: TerminalManager) {
           try { cwd = checkFolder(project.folder); } catch { return reply.code(404).send({ error: 'The project folder is gone', code: 'not_found' }); }
           extraEnv = await variablesEnv(owner, project.id).catch(() => undefined);
         }
-        const created = await manager.create(owner, { cols: body.cols, rows: body.rows, cwd, extraEnv });
+        if (body.command !== undefined && !commandAllowed(body.command)) return reply.code(400).send({ error: 'This command has hidden or control characters, or is too long', code: 'invalid' });
+        const created = await manager.create(owner, { cols: body.cols, rows: body.rows, cwd, extraEnv, ...(typeof body.command === 'string' ? { command: body.command } : {}) });
         audit(request, owner, 'terminal.session.open', created.id);
         return reply.code(201).send(created);
       } catch (err) {
@@ -143,7 +144,7 @@ export function terminalRoutesWith(manager: TerminalManager) {
         openSseStream(raw);
         unsubscribe = manager.subscribe(owner, id, Number.isFinite(after) && after > 0 ? after : 0, event => {
           if (event.type === 'data') send('output', event.chunk);
-          else { send('exit', { exitCode: event.exitCode }); raw.end(); }
+          else { send('exit', { exitCode: event.exitCode, ...(event.signal ? { signal: event.signal } : {}) }); raw.end(); }
         });
         request.raw.on('close', () => unsubscribe?.());
       });
@@ -174,6 +175,12 @@ export function terminalRoutesWith(manager: TerminalManager) {
           return fail(reply, err);
         }
       });
+
+    fastify.post<{ Params: { id: string } }>('/api/terminal/sessions/:id/stop', { config }, async (request, reply) => {
+      const owner = ownerOf(request, reply); if (!owner) return reply;
+      const id = sessionId(request, reply); if (!id) return reply;
+      try { manager.stop(owner, id); return reply.code(204).send(); } catch (err) { return fail(reply, err); }
+    });
 
     fastify.delete<{ Params: { id: string } }>('/api/terminal/sessions/:id', { config }, async (request, reply) => {
       const owner = ownerOf(request, reply);

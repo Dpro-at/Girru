@@ -1,3 +1,5 @@
+import type { OfficePayload } from './office-content';
+import { mediaKind } from './file-content';
 import type { SessionClient } from './session';
 import { panePath } from './conversation-contract.js';
 import type { WireChanges, WireDiff, WireFile, WireTree } from './conversation-contract.js';
@@ -9,6 +11,7 @@ export const DIFF_VIEW_PATH = '/api/chat/panel';
 /** Below this pane width Side by side shows as one column; the choice is kept. */
 export const SPLIT_MIN_WIDTH = 520;
 /** CHAT-CONTENT-01: a PDF's pages as text (or why it cannot be shown). */
+export type WireMedia = { path: string; size: number; mime?: string; base64?: string; reason?: string };
 export type WirePdf = { path: string; pageCount: number; pages: { page: number; text: string }[] } | { path: string; reason: string };
 type Load<T> = { phase: 'loading' } | { phase: 'ready'; data: T } | { phase: 'error'; message: string };
 export type PanesState = Readonly<{
@@ -19,7 +22,7 @@ export type PanesState = Readonly<{
   /** Loaded folder levels, by relative path ("" is the project folder). */
   tree: Readonly<Record<string, Load<WireTree>>>;
   expanded: readonly string[];
-  file?: { path: string; load: Load<WireFile>; pdf?: Load<WirePdf>; diff?: Load<WireDiff>; mark?: string };
+  file?: { path: string; load: Load<WireFile>; pdf?: Load<WirePdf>; media?: Load<WireMedia>; office?: Load<OfficePayload>; diff?: Load<WireDiff>; mark?: string };
   diffView: DiffView;
 }>;
 
@@ -90,6 +93,16 @@ export class PanesController {
     const id = this.#state.projectId; if (!id) return;
     const mark = options.mark?.trim().slice(0, 200) || undefined;
     this.publish({ file: { path, load: { phase: 'loading' }, ...(mark ? { mark } : {}) } });
+    if (/\.(docx|xlsx|pptx)$/i.test(path)) {
+      const office = await this.get<OfficePayload>(panePath(id, 'office', path));
+      if (this.current(id) && this.#state.file?.path === path) this.publish({ file: { ...this.#state.file, load: { phase: 'ready', data: { path, text: null, size: 0, binary: true, hidden: office.phase === 'ready' && office.data.reason === 'hidden', truncated: false } }, office } });
+      return;
+    }
+    if (mediaKind(path)) {
+      const media = await this.get<WireMedia>(panePath(id, 'media', path));
+      if (this.current(id) && this.#state.file?.path === path) this.publish({ file: { ...this.#state.file, load: { phase: 'ready', data: { path, text: null, size: media.phase === 'ready' ? media.data.size : 0, binary: true, hidden: media.phase === 'ready' && media.data.reason === 'hidden', truncated: false } }, media } });
+      return;
+    }
     if (/\.pdf$/i.test(path)) {
       const pdf = await this.get<WirePdf>(panePath(id, 'pdf', path));
       if (this.current(id) && this.#state.file?.path === path) this.publish({ file: { ...this.#state.file, load: { phase: 'ready', data: { path, text: null, size: 0, binary: true, hidden: false, truncated: false } as WireFile }, pdf } });

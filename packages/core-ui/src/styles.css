@@ -3931,9 +3931,42 @@ label.setup-kind { display:flex; align-items:center; justify-content:flex-start;
 .file-viewer .pdf-page p { margin:0 0 4px; white-space:pre-wrap; }
 .file-viewer mark { background:#fff3b0; color:#1B1D24; border-radius:2px; }
 /* CHAT-CONTENT-01: command blocks (board §3). */
-.md-terminal .md-code { background:#08090D; color:#E8EAF0; }
+/* CHAT-CONTENT-02: one dark terminal card in every theme: head, command, (approval), output, status line. */
+.app-shell .md-codeblock.md-terminal { background:#121417; color:#dfe3ea; box-shadow:inset 0 0 0 1px #262a31; }
+.app-shell .md-terminal .md-code-head { background:#181b20; border-bottom:1px solid #262a31; padding-block:3px; }
+.app-shell .md-terminal .md-code-lang { color:#9aa1ad; }
+.app-shell .md-terminal .md-code-btn { color:#9aa1ad; }
+.app-shell .md-terminal .md-code-btn:hover { color:#dfe3ea; background:#262a31; }
+.app-shell .md .md-codeblock.md-terminal .md-code { background:transparent; color:#dfe3ea; padding:8px 12px; }
 .md-terminal .md-prompt { color:#6b7189; }
-.md-code-btn.md-run { background:#1f6f4a; border-color:#2a8a5e; color:#fff; }
+.app-shell .md-code-btn.md-icon-btn { inline-size:22px; padding:0; display:inline-flex; align-items:center; justify-content:center; }
+.app-shell .md-code-btn.md-run, .app-shell .md-code-btn.md-stop, .inline-command-review .md-run { display:inline-flex; align-items:center; gap:5px; padding:0 9px; font-weight:600; }
+.app-shell .md-code-btn.md-run, .inline-command-review .md-run { background:#1f6f4a; color:#fff; }
+.app-shell .md-code-btn.md-run:hover, .inline-command-review .md-run:hover { background:#23805a; color:#fff; }
+.app-shell .md-code-btn.md-stop { background:#4a2328; color:#ffd9dc; }
+.app-shell .md-code-btn.md-stop:hover { background:#5a2a30; color:#fff; }
+.app-shell .md-code-btn.md-stop:disabled { opacity:.6; }
+.inline-command-review { display:flex; flex-wrap:wrap; align-items:center; gap:8px 10px; padding:8px 12px; border-top:1px solid #262a31; background:#181b20; font-size:12.5px; }
+.inline-command-ask { flex:1; color:#dfe3ea; }
+.inline-command-exact { order:3; flex-basis:100%; margin:0; padding:6px 8px; border-radius:6px; background:#0d0f12; color:#dfe3ea; font:11.5px/1.5 Menlo,Monaco,"SF Mono",monospace; white-space:pre-wrap; overflow-wrap:anywhere; max-block-size:160px; overflow:auto; }
+.inline-command-review-actions { display:flex; gap:6px; }
+.inline-command-review button { min-block-size:24px; padding:0 10px; border-radius:5px; border:0; font:inherit; font-size:12px; cursor:pointer; }
+.inline-command-review button:not(.md-run) { background:transparent; color:#c4c9d2; box-shadow:inset 0 0 0 1px #2e333c; }
+.inline-command { border-top:1px solid #262a31; }
+.inline-command-screen { block-size:0; overflow:hidden; transition:block-size .12s ease; }
+@media (prefers-reduced-motion: reduce) { .inline-command-screen { transition:none; } }
+.inline-command-screen .term-screen-wrap { block-size:100%; padding:6px 12px 2px; background:#121417; box-sizing:border-box; }
+.inline-command-screen .terminal-screen { min-block-size:0; block-size:100%; }
+.inline-command-foot { display:flex; align-items:center; justify-content:space-between; gap:8px; min-block-size:28px; padding:2px 6px 2px 12px; border-top:1px solid #1d2026; font-size:11.5px; }
+.inline-command-status { display:inline-flex; align-items:center; gap:6px; color:#9aa1ad; }
+.inline-command-status[data-tone="done"] { color:#3fb37f; }
+.inline-command-status[data-tone="fail"] { color:#ff7a80; }
+.inline-command-dot { inline-size:7px; block-size:7px; border-radius:50%; background:#5b8cff; animation:inline-command-pulse 1.2s ease-in-out infinite; }
+@keyframes inline-command-pulse { 50% { opacity:.35; } }
+@media (prefers-reduced-motion: reduce) { .inline-command-dot { animation:none; } }
+.inline-command-tools { display:flex; gap:2px; }
+.inline-command-note { margin:0; padding:4px 12px; font-size:11.5px; color:#9aa1ad; border-top:1px solid #1d2026; }
+.term-tab-command { font-family:Menlo,Monaco,"SF Mono",monospace; font-size:11px; }
 .app-shell .md-code-lang, .md-code-lang { text-transform:none; }
 /* CHAT-LOADER-01: the chat orb. The ring and motion say what the agent does (board "The orb in the chat"). */
 .chat-orb { position:relative; display:inline-flex; align-items:center; justify-content:center; flex:none; border-radius:50%; }
@@ -3991,3 +4024,70 @@ label.setup-kind { display:flex; align-items:center; justify-content:flex-start;
 .app-shell .chat-error > .chat-state-mark { position:absolute; inset-inline-start:12px; inset-block-start:12px; }
 .app-shell .chat-error:has(> .chat-state-mark) { padding-inline-start:38px; }
 .app-shell .task-list li .chat-orb { margin-inline:0 1px; }
+
+/* Chat file content stays inside the existing trailing pane. */
+.file-viewer { min-width:0; overflow:hidden; }
+.file-content-tools { display:flex; align-items:center; gap:8px; padding:8px 12px; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+.file-content-tools output { min-width:42px; text-align:center; font-size:12px; font-variant-numeric:tabular-nums; }
+.file-media { flex:1; min-height:0; display:flex; flex-direction:column; overflow:auto; }
+.file-image-canvas { flex:1; min-height:180px; overflow:auto; display:grid; place-items:center; padding:16px; background:color-mix(in srgb,var(--muted) 5%,transparent); }
+.file-image-canvas img { display:block; flex-shrink:0; max-width:none; }
+.file-image-canvas img.image-fit { max-width:100%; max-height:70vh; object-fit:contain; }
+.file-video { justify-content:center; padding:16px; }
+.file-video video { width:100%; max-height:75vh; }
+.file-audio-player { margin:auto; padding:28px 20px; display:flex; flex-direction:column; align-items:center; gap:22px; width:100%; box-sizing:border-box; }
+.file-audio-player strong { overflow-wrap:anywhere; font-size:14px; }
+.file-audio-player audio { width:100%; }
+.file-json { padding:14px; overflow:auto; font:12px/1.8 var(--mono,monospace); }
+.json-node .json-node { margin-inline-start:16px; border-inline-start:1px solid var(--border); padding-inline-start:10px; }
+.json-node summary { cursor:pointer; }
+.json-leaf, .json-node summary { overflow-wrap:anywhere; }
+.json-key { color:var(--accent); margin-inline-end:10px; }
+.json-value { white-space:pre-wrap; overflow-wrap:anywhere; }
+.json-node .row-tool { margin-inline-start:8px; vertical-align:middle; }
+.file-csv,.file-source { display:flex; flex-direction:column; min-height:0; flex:1; overflow:hidden; }
+.file-table-scroll { overflow:auto; min-height:0; }
+.file-table-scroll table { width:100%; border-collapse:collapse; font-size:12px; }
+.file-table-scroll th { position:sticky; top:0; background:var(--surface,var(--bg)); text-align:left; z-index:1; }
+.file-table-scroll th,.file-table-scroll td { border-bottom:1px solid var(--border); border-inline-end:1px solid var(--border); padding:8px 12px; white-space:pre-wrap; min-width:90px; max-width:320px; overflow-wrap:anywhere; }
+.file-table-scroll td button { text-align:inherit; font:inherit; color:inherit; background:none; border:0; padding:0; width:100%; min-height:18px; cursor:copy; white-space:pre-wrap; }
+.file-view[data-wrap] .file-line code { white-space:pre-wrap; overflow-wrap:anywhere; }
+.file-chip[data-tile="media"] .file-tile { background:#1f2f4e; color:#9ec4ff; }
+@media (max-width:900px) {
+  .app-shell .chat-layout[data-panel="files"]:has(.file-viewer) { position:relative; }
+  .app-shell .chat-layout[data-panel="files"]:has(.file-viewer) > .chat-screen { visibility:hidden; }
+  .app-shell .chat-layout[data-panel="files"] > .chat-panel.chat-pane:has(.file-viewer) { position:absolute; inset:0; inline-size:auto; }
+}
+
+/* Office previews reuse the same read-only file pane. */
+.file-office { flex:1; min-block-size:0; overflow:auto; padding:0 14px 18px; }
+.office-note { margin:10px 0; font-size:11px; color:var(--muted); }
+.office-paper { padding:28px; background:#fff; color:#23272d; border:1px solid var(--border); border-radius:3px; font:14px/1.65 system-ui,sans-serif; overflow-wrap:anywhere; }
+.office-paragraph { min-block-size:1em; margin-block:0 10px; white-space:pre-wrap; }
+.office-heading-1 { font-size:24px; font-weight:700; margin-block:12px; }
+.office-heading-2 { font-size:20px; font-weight:700; }
+.office-heading-3,.office-heading-4,.office-heading-5,.office-heading-6 { font-size:16px; font-weight:700; }
+.office-list { display:list-item; list-style:disc; margin-inline-start:20px; }
+.office-paper img { display:block; max-inline-size:100%; block-size:auto; margin-block:10px; }
+.office-word-table { overflow:auto; margin-block:14px; }
+.office-word-table table { border-collapse:collapse; inline-size:100%; }
+.office-word-table td { border:1px solid #cbd2dc; padding:6px 8px; min-inline-size:70px; }
+.office-word-table .office-paragraph { margin-block:0; }
+.file-workbook { padding:0; display:flex; flex-direction:column; overflow:hidden; }
+.file-workbook .office-note { padding-inline:12px; }
+.file-workbook .file-table-scroll { flex:1; }
+.file-workbook tbody th { color:var(--muted); background:var(--surface); }
+.file-chip[data-tile="word"] .file-tile { background:#1b3460; color:#a6c9ff; }
+@media(max-width:900px) { .office-paper { padding:18px; } }
+.file-presentation { padding:0; display:flex; flex-direction:column; }
+.file-presentation>.office-note { padding-inline:12px; }
+.file-presentation select { max-inline-size:240px; }
+.office-slide-space { padding:16px; flex:1; min-block-size:0; overflow:auto; display:grid; align-items:center; }
+.office-slide { position:relative; inline-size:100%; background:white; border:1px solid var(--border); overflow:hidden; container-type:inline-size; color:#20252c; box-shadow:0 2px 12px #0000000a; }
+.office-slide-item { position:absolute; white-space:pre-wrap; overflow:hidden; }
+.office-slide-item p { margin:0 0 .3em; line-height:1.3; overflow-wrap:anywhere; }
+.office-slide-item img { inline-size:100%; block-size:100%; object-fit:contain; }
+.file-chip[data-tile="slides"] .file-tile { background:#68351d; color:#ffbf91; }
+.office-slide-flow { min-block-size:260px; padding:20px; }
+.office-slide-flow .office-slide-item { position:static; inline-size:100%!important; block-size:auto!important; margin-block:10px; }
+.office-slide-flow .office-slide-item img { block-size:auto; max-block-size:300px; }

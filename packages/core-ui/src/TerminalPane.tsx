@@ -69,7 +69,7 @@ export function TerminalPane({ tabs, prefs, projectId, maximized, onToggleMax, o
         <button type="button" className="phone-term-icon" aria-label="More" aria-expanded={menu} onClick={() => setMenu(v => !v)}><UiIcon name="more" size={20}/></button>
         {menu && <div className="phone-term-menu" role="menu">
           {t.tabs.length > 1 && t.tabs.map(x => <button key={x.key} type="button" role="menuitemradio" aria-checked={x.key === t.active} onClick={() => { tabs.select(x.key); setMenu(false); }}>Terminal {x.n}</button>)}
-          <button type="button" role="menuitem" disabled={t.tabs.length >= MAX_TERMINAL_TABS} onClick={() => { tabs.add(); setMenu(false); }}>New terminal</button>
+          <button type="button" role="menuitem" disabled={!tabs.canAdd()} onClick={() => { tabs.add(); setMenu(false); }}>New terminal</button>
           <button type="button" role="menuitem" disabled={!active} onClick={() => { active?.terminal.clear(); setMenu(false); }}>Clear the screen</button>
           <button type="button" role="menuitem" onClick={() => { setSettings(true); setMenu(false); }}>Terminal settings</button>
           <button type="button" role="menuitem" disabled={!active} onClick={() => { if (active) closeTab(active.key); setMenu(false); }}>Close this terminal</button>
@@ -105,8 +105,8 @@ export function TerminalPane({ tabs, prefs, projectId, maximized, onToggleMax, o
     <div className="term-bar">
       <div className="term-tabs" role="tablist" aria-label="Terminals">
         {t.tabs.map(x => <TabButton key={x.key} n={x.n} terminal={x.terminal} active={x.key === t.active} onSelect={() => tabs.select(x.key)} onClose={() => closeTab(x.key)}/>)}
-        <button type="button" className="term-tool" aria-label="New terminal" title={t.tabs.length >= MAX_TERMINAL_TABS ? `Up to ${MAX_TERMINAL_TABS} terminals` : 'New terminal (⌃⇧`)'}
-          disabled={t.tabs.length >= MAX_TERMINAL_TABS} onClick={() => tabs.add()}><UiIcon name="plus" size={12}/></button>
+        <button type="button" className="term-tool" aria-label="New terminal" title={!tabs.canAdd() ? `Up to ${MAX_TERMINAL_TABS} terminals` : 'New terminal (⌃⇧`)'}
+          disabled={!tabs.canAdd()} onClick={() => tabs.add()}><UiIcon name="plus" size={12}/></button>
       </div>
       <div className="term-actions">
         <button type="button" className="term-tool" aria-label="Stop" title="Stop what runs here (⌃C)" disabled={!active} onClick={() => active?.terminal.write('\x03')}><UiIcon name="stop" size={12}/></button>
@@ -124,12 +124,15 @@ export function TerminalPane({ tabs, prefs, projectId, maximized, onToggleMax, o
   </div>;
 }
 
+/** A command tab is named after its command: the first line, kept short. */
+export const commandLabel = (command: string) => { const first = command.split('\n')[0].trim(); const more = command.includes('\n') ? ' …' : ''; return (first.length > 32 ? `${first.slice(0, 31)}…` : first) + more; };
+
 function TabButton({ n, terminal, active, onSelect, onClose }: { n: number; terminal: TerminalController; active: boolean; onSelect: () => void; onClose: () => void }) {
   const s = useSyncExternalStore(terminal.subscribe, terminal.getSnapshot, terminal.getSnapshot);
   const folder = s.cwd ? s.cwd.split('/').filter(Boolean).at(-1) : '';
   return <span className="term-tab" role="tab" aria-selected={active} data-phase={s.phase}>
     <button type="button" className="term-tab-open" onClick={onSelect} title={s.cwd ? shortPath(s.cwd) : undefined}>
-      <i className="term-dot" aria-hidden="true"/>{s.shell || 'shell'}{n > 1 ? ` ${n}` : ''} · you{folder ? <span className="term-tab-dir"> · {folder}</span> : null}
+      <i className="term-dot" aria-hidden="true"/>{s.command ? <span className="term-tab-command" dir="ltr">{commandLabel(s.command)}</span> : <>{s.shell || 'shell'}{n > 1 ? ` ${n}` : ''} · you</>}{folder ? <span className="term-tab-dir"> · {folder}</span> : null}
     </button>
     <button type="button" className="term-tab-close" aria-label={`Close terminal ${n}`} onClick={onClose}><UiIcon name="close" size={9}/></button>
   </span>;
@@ -148,7 +151,7 @@ function TermStatus({ terminal, size, theme }: { terminal: TerminalController; s
 
 /** One shell's screen. Stays mounted while hidden so its scrollback is kept. */
 type PhoneHooks = { register: (api: ScreenApi | null) => void; ctrl: { current: boolean }; ctrlUsed: () => void; keyboard: (shown: boolean) => void; paste: (text: string) => void };
-function TerminalScreen({ terminal, p, projectId, visible, onSize, phone }: { terminal: TerminalController; p: TerminalPrefs; projectId: string | null; visible: boolean; onSize: (s: string) => void; phone?: PhoneHooks }) {
+export function TerminalScreen({ terminal, p, projectId, visible, onSize, phone, passive = false }: { terminal: TerminalController; p: TerminalPrefs; projectId: string | null; visible: boolean; onSize: (s: string) => void; phone?: PhoneHooks; passive?: boolean }) {
   const phoneRef = useRef(phone); phoneRef.current = phone;
   const tapStartedFocused = useRef(false);
   const s = useSyncExternalStore(terminal.subscribe, terminal.getSnapshot, terminal.getSnapshot);
@@ -158,21 +161,22 @@ function TerminalScreen({ terminal, p, projectId, visible, onSize, phone }: { te
   const size = useRef({ cols: 80, rows: 24 });
   const prefsRef = useRef(p); prefsRef.current = p;
 
-  useEffect(() => { if (s.phase === 'idle') void terminal.open(projectId, size.current); }, [terminal, projectId, s.phase]);
+  useEffect(() => { if (s.phase === 'idle' && !s.command) void terminal.open(projectId, size.current); }, [terminal, projectId, s.phase]);
   useEffect(() => {
     const el = host.current; if (!el) return;
     let stop = () => {}; let cancelled = false;
     void (async () => {
       const [{ Terminal }, { FitAddon }] = await Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit'), import('@xterm/xterm/css/xterm.css')]);
       if (cancelled) return;
-      const x = new Terminal({ ...xtermOptions(prefsRef.current), allowProposedApi: false, macOptionIsMeta: true, rightClickSelectsWord: true, drawBoldTextInBrightColors: true });
+      const x = new Terminal({ ...xtermOptions(prefsRef.current), allowProposedApi: false, disableStdin: passive, ...(passive ? { cursorInactiveStyle: 'none' as const } : {}), macOptionIsMeta: true, rightClickSelectsWord: true, drawBoldTextInBrightColors: true });
       const fit = new FitAddon(); x.loadAddon(fit);
       x.open(el); term.current = x;
-      const refit = () => { if (!el.offsetParent) return; try { fit.fit(); size.current = { cols: x.cols, rows: x.rows }; terminal.resize(x.cols, x.rows); onSize(`${x.cols}×${x.rows}`); } catch { /* hidden */ } };
+      const refit = () => { if (!el.offsetParent) return; try { fit.fit(); size.current = { cols: x.cols, rows: x.rows }; if (!passive) terminal.resize(x.cols, x.rows); onSize(`${x.cols}×${x.rows}`); } catch { /* hidden */ } };
       fitRef.current = refit; refit();
       const offOut = terminal.onOutput(d => x.write(d));
       const offClear = terminal.onClear(() => x.clear());
       const input = x.onData(d => {
+        if (passive) return;
         const ph = phoneRef.current;
         // The phone's Ctrl key: the next letter typed goes with Control.
         if (ph?.ctrl.current) { ph.ctrl.current = false; ph.ctrlUsed(); terminal.write(withCtrl(d)); return; }
@@ -193,21 +197,21 @@ function TerminalScreen({ terminal, p, projectId, visible, onSize, phone }: { te
       const sel = x.onSelectionChange(() => { const text = x.getSelection(); if (prefsRef.current.copyOnSelect && text) void navigator.clipboard?.writeText(text).catch(() => {}); });
       const ro = new ResizeObserver(refit); ro.observe(el);
       // On the phone the keyboard stays hidden until the owner taps the terminal.
-      if (el.offsetParent && !phoneRef.current) x.focus();
+      if (el.offsetParent && !phoneRef.current && !passive) x.focus();
       stop = () => { offPhone(); ro.disconnect(); input.dispose(); sel.dispose(); offOut(); offClear(); x.dispose(); term.current = null; fitRef.current = null; };
     })();
     return () => { cancelled = true; stop(); };
   }, [terminal]);
   // Settings apply live; the grid is measured again after a font change.
   useEffect(() => { const x = term.current; if (!x) return; Object.assign(x.options, xtermOptions(p)); fitRef.current?.(); }, [p]);
-  useEffect(() => { if (visible) { fitRef.current?.(); if (!phoneRef.current) term.current?.focus(); } }, [visible]);
+  useEffect(() => { if (visible) { fitRef.current?.(); if (!phoneRef.current && !passive) term.current?.focus(); } }, [visible]);
 
   // On the phone a tap shows the keyboard, and a tap while it shows hides it.
   return <div className="term-screen-wrap" hidden={!visible}
     onPointerDown={phone ? () => { tapStartedFocused.current = !!term.current?.textarea && document.activeElement === term.current.textarea; } : undefined}
     onClick={phone ? () => { if (tapStartedFocused.current && !term.current?.hasSelection()) term.current?.blur(); else term.current?.focus(); } : undefined}>
-    {(s.phase === 'off' || s.phase === 'error' || s.phase === 'exited') && <p className={s.phase === 'exited' ? 'term-note' : 'term-note error'} role="status">
-      {s.phase === 'exited' ? 'The shell has exited.' : s.message} {s.phase !== 'off' && <button type="button" className="link-button" onClick={() => void terminal.close()}>Start again</button>}</p>}
+    {(s.phase === 'off' || s.phase === 'error' || (s.phase === 'exited' && !passive)) && <p className={s.phase === 'exited' ? 'term-note' : 'term-note error'} role="status">
+      {s.phase === 'exited' ? s.command ? 'The command has finished.' : 'The shell has exited.' : s.message} {s.phase !== 'off' && !s.command && <button type="button" className="link-button" onClick={() => void terminal.close()}>Start again</button>}</p>}
     <div className="terminal-screen" ref={host} dir="ltr"/>
   </div>;
 }

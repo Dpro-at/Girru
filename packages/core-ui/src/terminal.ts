@@ -2,8 +2,8 @@ import type { SessionClient } from './session';
 import type { TerminalFrame, TerminalPrefs } from './terminal-contract.js';
 import { DEFAULT_TERMINAL_PREFS, terminalPrefOk, terminalPrefs } from './terminal-contract.js';
 
-export type TerminalPhase = 'idle' | 'starting' | 'open' | 'exited' | 'off' | 'error';
-export type TerminalState = Readonly<{ phase: TerminalPhase; id: string | null; cwd: string; shell: string; message?: string; projectId: string | null }>;
+export type TerminalPhase = 'idle' | 'starting' | 'open' | 'stopping' | 'exited' | 'off' | 'error';
+export type TerminalState = Readonly<{ phase: TerminalPhase; id: string | null; cwd: string; shell: string; message?: string; projectId: string | null; command?: string; exitCode?: number; signal?: number; droppedOutput?: boolean }>;
 
 const record = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
 /** Output kept for redrawing the screen when the pane opens again. */
@@ -19,6 +19,7 @@ export class TerminalController {
   #listeners = new Set<() => void>();
   #output = new Set<(data: string) => void>();
   #replay = '';
+  #outputSeq = 0;
   #pending = '';
   #sending = false;
   #stream: AbortController | null = null;
@@ -36,17 +37,18 @@ export class TerminalController {
   onOutput(fn: (data: string) => void) { if (this.#replay) fn(this.#replay); this.#output.add(fn); return () => { this.#output.delete(fn); }; }
   private publish(p: Partial<TerminalState>) { if (this.#disposed) return; this.#state = Object.freeze({ ...this.#state, ...p }); this.#listeners.forEach(fn => fn()); }
   private emit(data: string) {
+    if (this.#replay.length + data.length > REPLAY_CHARS && !this.#state.droppedOutput) this.publish({ droppedOutput: true });
     this.#replay = (this.#replay + data).slice(-REPLAY_CHARS);
     this.#output.forEach(fn => fn(data));
   }
 
   /** Opens a shell in the project folder (or home without a project). */
-  async open(projectId: string | null, size: { cols: number; rows: number }) {
+  async open(projectId: string | null, size: { cols: number; rows: number }, command?: string) {
     if (this.#state.phase === 'starting' || this.#state.phase === 'open') return;
-    this.#replay = ''; this.#pending = '';
-    this.publish({ phase: 'starting', message: undefined, projectId, id: null });
+    this.#replay = ''; this.#pending = ''; this.#outputSeq = 0;
+    this.publish({ phase: 'starting', message: undefined, projectId, id: null, command, exitCode: undefined, signal: undefined, droppedOutput: false });
     try {
-      const r = await this.client.request({ method: 'POST', path: '/api/terminal/sessions', body: { cols: size.cols, rows: size.rows, ...(projectId ? { projectId } : {}) } } as never);
+      const r = await this.client.request({ method: 'POST', path: '/api/terminal/sessions', body: { cols: size.cols, rows: size.rows, ...(projectId ? { projectId } : {}), ...(command !== undefined ? { command } : {}) } } as never);
       if (r.status !== 201 || !record(r.body) || typeof r.body.id !== 'string') {
         const code = record(r.body) ? r.body.code : undefined;
         this.publish(code === 'disabled' ? { phase: 'off', message: 'The terminal is turned off on this server.' }
@@ -65,12 +67,14 @@ export class TerminalController {
       const began = Date.now();
       try {
         const r = await this.client.terminalStream(id, last, (f: TerminalFrame) => {
-          if (f.type === 'output') this.emit(f.data);
-          else { this.emit(`\r\n[process exited with code ${f.exitCode}]\r\n`); this.publish({ phase: 'exited' }); }
+          if (f.type === 'output') { if (f.seq > this.#outputSeq + 1) this.publish({ droppedOutput: true }); this.#outputSeq = f.seq; this.emit(f.data); }
+          // A chat command shows how it ended in its own status line, not as a line of output.
+          else { if (!this.#state.command) this.emit(`\r\n[process exited with ${f.signal ? `signal ${f.signal}` : `code ${f.exitCode}`}]\r\n`); this.publish({ phase: 'exited', exitCode: f.exitCode, signal: f.signal }); }
         }, ac.signal);
         const progressed = r.last > last;
         last = r.last;
-        if (r.ended) { if (this.#state.phase === 'open') this.publish({ phase: 'exited' }); return; }
+        // A command stream that ends without its exit frame is a lost connection, not a finish.
+        if (r.ended) { if (this.#state.command && ['open', 'stopping'].includes(this.#state.phase)) this.publish({ phase: 'error', message: 'Lost the connection to the terminal.' }); else if (this.#state.phase === 'open') this.publish({ phase: 'exited' }); return; }
         // A stream that closed with nothing new waits before re-attaching (never a tight loop).
         if (progressed || Date.now() - began >= 2000) tries = 0; else { tries++; await new Promise(res => setTimeout(res, 400 * tries)); }
       } catch {
@@ -78,7 +82,16 @@ export class TerminalController {
         tries++; await new Promise(r => setTimeout(r, 500 * tries));
       }
     }
-    if (!ac.signal.aborted && this.#state.id === id && this.#state.phase === 'open') this.publish({ phase: 'error', message: 'Lost the connection to the terminal.' });
+    if (!ac.signal.aborted && this.#state.id === id && ['open', 'stopping'].includes(this.#state.phase)) this.publish({ phase: 'error', message: 'Lost the connection to the terminal.' });
+  }
+
+  /** Retain the same PTY and wait for its authoritative exit frame after stopping. */
+  async stop() {
+    const id = this.#state.id; if (!id || this.#state.phase !== 'open') return;
+    this.publish({ phase: 'stopping' });
+    try { const r = await this.client.request({ method: 'POST', path: `/api/terminal/sessions/${id}/stop` } as never);
+      if (r.status !== 204 && !(r.status === 200 && record(r.body) && r.body.ok === true) && this.getSnapshot().id === id && this.getSnapshot().phase === 'stopping') this.publish({ phase: 'open', message: 'Could not stop this command.' });
+    } catch { if (this.getSnapshot().id === id && this.getSnapshot().phase === 'stopping') this.publish({ phase: 'open', message: 'Could not stop this command (no connection).' }); }
   }
 
   /** Keystrokes from the screen, sent in order. */
@@ -152,7 +165,7 @@ export class TerminalPrefsController {
 }
 
 export const MAX_TERMINAL_TABS = 4;
-export type TerminalTab = Readonly<{ key: string; n: number; terminal: TerminalController }>;
+export type TerminalTab = Readonly<{ key: string; n: number; terminal: TerminalController; commandKey?: string }>;
 export type TerminalTabsState = Readonly<{ tabs: readonly TerminalTab[]; active: string | null }>;
 
 /** Several shells side by side as tabs (the server allows four per owner). */
@@ -164,11 +177,24 @@ export class TerminalTabs {
   getSnapshot = () => this.#state;
   subscribe = (fn: () => void) => { this.#listeners.add(fn); return () => { this.#listeners.delete(fn); }; };
   private publish(p: Partial<TerminalTabsState>) { this.#state = Object.freeze({ ...this.#state, ...p }); this.#listeners.forEach(fn => fn()); }
+  /** Tabs whose session still runs: a finished command keeps its tab but no longer takes a place. */
+  #live() { return this.#state.tabs.filter(t => t.terminal.getSnapshot().phase !== 'exited').length; }
+  /** Whether another live terminal may open. */
+  canAdd() { return this.#live() < MAX_TERMINAL_TABS; }
   /** Opens a new tab (its shell starts when its screen mounts). */
   add() {
-    if (this.#state.tabs.length >= MAX_TERMINAL_TABS) return null;
+    if (this.#live() >= MAX_TERMINAL_TABS) return null;
     const tab: TerminalTab = { key: `t${++this.#n}`, n: this.#n, terminal: new TerminalController(this.client) };
     this.publish({ tabs: [...this.#state.tabs, tab], active: tab.key });
+    return tab;
+  }
+  command(key: string, command: string, projectId: string | null) {
+    const old = this.#state.tabs.find(t => t.commandKey === key);
+    if (old) return old;
+    if (this.#live() >= MAX_TERMINAL_TABS) return null;
+    const tab: TerminalTab = { key: `t${++this.#n}`, n: this.#n, terminal: new TerminalController(this.client), commandKey: key };
+    this.publish({ tabs: [...this.#state.tabs, tab], active: this.#state.active });
+    void tab.terminal.open(projectId, { cols: 80, rows: 24 }, command);
     return tab;
   }
   select(key: string) { if (this.#state.tabs.some(t => t.key === key)) this.publish({ active: key }); }

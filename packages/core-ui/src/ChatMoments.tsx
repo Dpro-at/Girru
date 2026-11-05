@@ -457,7 +457,7 @@ export function replyFiles(parts: readonly Part[]): ReplyFile[] {
   }
   return [...out.values()].slice(0, 12);
 }
-const TILE: Record<string, string> = { md: 'md', markdown: 'md', html: 'html', htm: 'html', pdf: 'pdf', ts: 'code', tsx: 'code', js: 'code', jsx: 'code', py: 'code', json: 'data', csv: 'data', yml: 'data', yaml: 'data', log: 'text', txt: 'text' };
+const TILE: Record<string, string> = { docx: 'word', pptx: 'slides', xlsx: 'data', png: 'media', jpg: 'media', jpeg: 'media', gif: 'media', webp: 'media', svg: 'media', mp4: 'media', webm: 'media', mp3: 'media', wav: 'media', m4a: 'media', md: 'md', markdown: 'md', html: 'html', htm: 'html', pdf: 'pdf', ts: 'code', tsx: 'code', js: 'code', jsx: 'code', py: 'code', json: 'data', csv: 'data', yml: 'data', yaml: 'data', log: 'text', txt: 'text' };
 export function FileChips({ files }: { files: readonly ReplyFile[] }) {
   const { onOpenFile, onFileMenu } = useContext(MomentsContext);
   if (!files.length) return null;

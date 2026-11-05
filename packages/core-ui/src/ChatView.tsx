@@ -457,8 +457,17 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
       if (++tries < 40) setTimeout(put, 150); else say('The Terminal did not open; copy the command instead.'); };
     setTimeout(put, 150);
   };
+  const commandRun = (command: string, start = false) => {
+    if (!owner || !terminal || !s.activeId) return null;
+    const key = `${s.activeId}:${command}`;
+    const previous = terminal.tabs.getSnapshot().tabs.find(t => t.commandKey === key);
+    if (start && previous?.terminal.getSnapshot().phase === 'exited' && previous.terminal.getSnapshot().exitCode !== undefined) terminal.tabs.close(previous.key);
+    const tab = terminal.tabs.getSnapshot().tabs.find(t => t.commandKey === key) ?? (start ? terminal.tabs.command(key, command, folderProject) : null);
+    if (!tab) { if (start) say('Close a Terminal tab before running another command.'); return null; }
+    return { terminal: tab.terminal, prefs: terminal.prefs, show: () => { terminal.tabs.select(tab.key); setTermOpen(true); } };
+  };
   const mdActions = { ...(folder ? { openFile: (rel: string) => openBeside(rel) } : {}), ...(folder && client ? { openInCode: (rel: string) => void openInCodeFile(client, joinPath(folder, rel), null, say) } : {}),
-    ...(owner && terminal ? { runCommand: runInTerminal } : {}), ...(folder ? { folderName: folder.split(/[\\/]/).filter(Boolean).at(-1) } : {}) };
+    ...(owner && terminal ? { runCommand: runInTerminal, commandRun } : {}), ...(folder ? { folderName: folder.split(/[\\/]/).filter(Boolean).at(-1) } : {}) };
   const moments = { client, conversationId: s.activeId, onOpenApprovals, steps, changeCards, nativeCode:embeddedCode,
     ...(folder ? { onOpenFile: openBeside } : {}), ...(folder && client ? { onFileMenu: (e: React.MouseEvent, rel: string) => fileCtl.at(e, fileMenu(client, joinPath(folder, rel), null, say)) } : {}),
     // CH6/CH10 team moments: Hand it again adds to the box (never sends), Set a model opens the agent, Always allow opens What agents may do.
