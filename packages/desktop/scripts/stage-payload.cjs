@@ -4,26 +4,27 @@
  * (copied into the app by electron-builder as extraResources):
  *
  *   payload/node/node[.exe]  the Node runtime that runs the backend
- *   payload/backend/         backend source + its installed node_modules
+ *   payload/backend/         compiled backend + its runtime node_modules
  *   payload/node_modules/    hoisted dependencies, copied by an explicit resource mapping
  *   payload/core-ui/         UI bridge scripts + contracts + the candidate UI build
  *
  * Local builds only: the Node runtime is the one running this script (or
  * --node), the modules are the ones already installed (--backend-modules).
- * Nothing is downloaded. Release bundles with a pinned, checksummed Node and
- * production-only modules are INSTALLER-04.
+ * Nothing is downloaded. Only locked runtime modules for the current
+ * platform are copied; build tools stay in the development environment.
  *
  * Usage: node scripts/stage-payload.cjs [--node <path>] [--backend-modules <dir>] [--root-modules <dir>] [--core-ui-dist <dir>]
  */
 const fs = require('node:fs');
 const path = require('node:path');
+const { productionModules, moduleFilter, compileBackend, BUILD_TOOLS, validateModules, compilerOptions, assertBridgeImports, assertExtensionRuntime, assertCompiledRuntime } = require('./payload-runtime.cjs');
 
 const here = path.resolve(__dirname, '..');
 const packages = path.resolve(here, '..');
 const out = path.join(here, 'payload');
 
 /** Backend parts the server needs at run time (no tests, no one-off maintenance scripts). */
-const BACKEND_PARTS = ['package.json', 'tsconfig.json', 'src', 'extensions', 'skills', 'python-scripts'];
+const BACKEND_PARTS = ['extensions', 'skills', 'python-scripts'];
 /** Bridge parts: its scripts and the plain-JS contracts it requires. */
 const CORE_UI_SCRIPTS = ['application-server.cjs', 'build-artifacts.cjs', 'preview.cjs', 'memory-response.cjs', 'genvr-assets.cjs', 'genvr-studio-host.cjs', 'prepare-genvr.cjs', 'genvr-host.js', 'voice-library-host.cjs', 'voice-runtime.cjs', 'chat-voice-host.cjs', 'chat-voice-worker.py', 'portable-voice-host.cjs', 'portable-voice-worker.py', 'portable-voice-models.json'];
 
@@ -37,7 +38,6 @@ function parseArgs(argv) {
   return options;
 }
 
-const SKIP_MODULES = new Set(['.bin', '.cache', '.vite']);
 const copy = (from, to, filter) => fs.cpSync(from, to, { recursive: true, verbatimSymlinks: true, filter });
 const noSecrets = src => !/(^|[\\/])\.env(\.|$)(?!example)/.test(src) && !src.split(path.sep).includes('.data');
 
@@ -83,6 +83,14 @@ function stage(options) {
   for (const [label, p] of [['Node runtime', options.node], ['backend node_modules', options.backendModules], ['root node_modules', options.rootModules], ['core-ui dist', options.coreUiDist]]) {
     if (!fs.existsSync(p)) throw new Error(`${label} not found: ${p}`);
   }
+  const backend = path.join(packages, 'backend');
+  const ts = require(require.resolve('typescript', { paths: [backend, path.join(packages, 'core-ui')] }));
+  const compiler = compilerOptions(backend, ts);
+  const lock = JSON.parse(fs.readFileSync(path.join(backend, 'package-lock.json'), 'utf8'));
+  const allowed = productionModules(lock);
+  validateModules(lock, allowed, [options.backendModules, options.rootModules]);
+  assertExtensionRuntime(path.join(backend, 'extensions'), ts);
+  assertExtensionRuntime(path.join(backend, 'skills'), ts);
   fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });
 
@@ -91,14 +99,21 @@ function stage(options) {
   fs.copyFileSync(fs.realpathSync(options.node), path.join(out, 'node', nodeName));
   fs.chmodSync(path.join(out, 'node', nodeName), 0o755);
 
-  const backend = path.join(packages, 'backend');
   for (const part of BACKEND_PARTS) copy(path.join(backend, part), path.join(out, 'backend', part), noSecrets);
-  const moduleFilter = src => !SKIP_MODULES.has(path.basename(src)) && noSecrets(src);
-  copy(fs.realpathSync(options.backendModules), path.join(out, 'backend', 'node_modules'), moduleFilter);
-  copy(fs.realpathSync(options.rootModules), path.join(out, 'node_modules'), moduleFilter);
+  compileBackend(path.join(backend, 'src'), path.join(out, 'backend', 'src'), ts, compiler);
+  assertCompiledRuntime(path.join(out, 'backend', 'src'), ts);
+  const manifest = JSON.parse(fs.readFileSync(path.join(backend, 'package.json'), 'utf8'));
+  // Development still uses tsx; the shipped server is JavaScript and needs no loader.
+  for (const name of BUILD_TOOLS) delete manifest.dependencies?.[name];
+  delete manifest.devDependencies;
+  fs.writeFileSync(path.join(out, 'backend', 'package.json'), JSON.stringify(manifest, null, 2) + '\n');
+  for (const [source, destination] of [[options.backendModules, path.join(out, 'backend', 'node_modules')], [options.rootModules, path.join(out, 'node_modules')]]) {
+    const root = fs.realpathSync(source);
+    copy(root, destination, moduleFilter(root, allowed, noSecrets));
+  }
   // MACAPP-01: every package the program depends on must be in the app (the agent-connect
   // extension, which runs every chat channel, loads agent-connect-dpro at run time; a missing one fails quietly).
-  const missing = missingPackages(backend, [path.join(out, 'backend', 'node_modules'), path.join(out, 'node_modules')]);
+  const missing = missingPackages(path.join(out, 'backend'), [path.join(out, 'backend', 'node_modules'), path.join(out, 'node_modules')]);
   if (missing.length) throw new Error(`packages missing from the payload: ${missing.join(', ')}`);
   // node-pty's helper must stay executable (npm may have installed it without the bit).
   for (const helper of ['build/Release/spawn-helper', `prebuilds/${process.platform}-${process.arch}/spawn-helper`]) {
@@ -109,6 +124,8 @@ function stage(options) {
   const coreUi = path.join(packages, 'core-ui');
   const ui = path.join(out, 'core-ui');
   stageUiBridge(coreUi, ui);
+  assertBridgeImports(path.join(ui, 'scripts'), ts);
+  assertBridgeImports(path.join(ui, 'src'), ts);
   // Only the candidate build the pointer names, nothing older.
   const pointer = JSON.parse(fs.readFileSync(path.join(options.coreUiDist, 'candidate.json'), 'utf8'));
   if (pointer.status !== 'ready' || !/^build-[a-f0-9-]{36}$/.test(pointer.buildId)) throw new Error('core-ui candidate build is not ready');

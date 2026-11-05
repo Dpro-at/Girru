@@ -6,7 +6,7 @@
  * @author Dpro Team
  */
 
-import { AgentRuntime, Skill } from './index';
+import { AgentRuntime, Skill } from './index.js';
 
 // Example: Mock skills for demonstration
 const exampleSkills: Skill[] = [
