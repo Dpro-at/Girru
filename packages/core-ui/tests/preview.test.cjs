@@ -41,7 +41,7 @@ function request(server, target, { method = 'GET', headers = {} } = {}) {
 }
 test('preview configuration reserves strict loopback 42522; fictional GET/HEAD carry production CSP and no cache', async t => {
   assert.equal(PORT, 42522); assert.equal(HOST, '127.0.0.1');
-  assert.equal(CSP, "default-src 'self'; script-src 'self'; style-src 'self'; style-src-elem 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+  assert.equal(CSP, "default-src 'self'; script-src 'self'; style-src 'self'; style-src-elem 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data: blob:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
   const server = await serverFor(t, fixture());
   for (const [target,type] of [['/','text/html'], ['/assets/one.js','text/javascript'], ['/assets/one.css','text/css'], ['/THIRD_PARTY_NOTICES.txt','text/plain']]) {
     const response = await request(server, target);

@@ -85,7 +85,7 @@ export function clampSize(cols: unknown, rows: unknown): { cols: number; rows: n
 }
 
 export interface OutputChunk { seq: number; data: string }
-type Listener = (event: { type: 'data'; chunk: OutputChunk } | { type: 'exit'; exitCode: number }) => void;
+type Listener = (event: { type: 'data'; chunk: OutputChunk } | { type: 'exit'; exitCode: number; signal?: number }) => void;
 
 interface Session {
   id: string;
@@ -95,6 +95,7 @@ interface Session {
   bufferedBytes: number;
   nextSeq: number;
   exitCode: number | null;
+  signal?: number;
   listeners: Set<Listener>;
   idleTimer: NodeJS.Timeout | null;
   createdAt: string;
@@ -160,26 +161,28 @@ export class TerminalManager {
   }
 
   /** `size.cwd`: a folder already checked by the caller (a project folder); otherwise home. */
-  async create(ownerId: string, size: { cols?: unknown; rows?: unknown; cwd?: string; extraEnv?: Record<string, string> } = {}) {
+  async create(ownerId: string, size: { cols?: unknown; rows?: unknown; cwd?: string; extraEnv?: Record<string, string>; command?: string } = {}) {
     if (!terminalEnabled(this.env)) throw new TerminalError('disabled', 'The terminal is turned off on this server');
     if (this.list(ownerId).length >= MAX_SESSIONS_PER_OWNER) {
       throw new TerminalError('limit', `At most ${MAX_SESSIONS_PER_OWNER} terminals per account`);
     }
+    if (size.command !== undefined && (typeof size.command !== 'string' || !size.command.trim() || size.command.length > 16000 || size.command.includes('\0'))) throw new TerminalError('invalid', 'Invalid command');
     const spawn = this.spawnFn ?? (this.spawnFn = await loadNodePty());
     const { cols, rows } = clampSize(size.cols, size.rows);
     const shell = defaultShell(this.os, this.env);
     // CHAT-BUILD-01 stage 3: a project's terminal also gets the project's own variables (checked names).
     const env = { ...shellEnv(this.os, this.env), ...(size.extraEnv ?? {}) };
     const cwd = size.cwd ?? this.cwd ?? (env.HOME || env.USERPROFILE || homedir());
-    const pty = spawn(shell.file, shell.args, { name: 'xterm-256color', cols, rows, cwd, env });
+    const args = size.command === undefined ? shell.args : this.os === 'win32' ? ['-NoLogo', '-NonInteractive', '-Command', size.command] : [...shell.args, '-c', size.command];
+    const pty = spawn(shell.file, args, { name: 'xterm-256color', cols, rows, cwd, env });
     const session: Session = {
       id: randomUUID(), ownerId, pty, chunks: [], bufferedBytes: 0, nextSeq: 1, exitCode: null,
       listeners: new Set(), idleTimer: null, createdAt: new Date().toISOString(), shell: shell.file,
     };
     pty.onData(data => this.push(session, data));
-    pty.onExit(({ exitCode }) => {
-      session.exitCode = exitCode;
-      for (const l of session.listeners) l({ type: 'exit', exitCode });
+    pty.onExit(({ exitCode, signal }) => {
+      session.exitCode = exitCode; session.signal = signal;
+      for (const l of session.listeners) l({ type: 'exit', exitCode, ...(signal ? { signal } : {}) });
       this.clearIdle(session);
     });
     this.sessions.set(session.id, session);
@@ -221,11 +224,17 @@ export class TerminalManager {
     const s = this.get(ownerId, id);
     for (const chunk of s.chunks) if (chunk.seq > afterSeq) listener({ type: 'data', chunk });
     if (s.exitCode !== null) {
-      listener({ type: 'exit', exitCode: s.exitCode });
+      listener({ type: 'exit', exitCode: s.exitCode, ...(s.signal ? { signal: s.signal } : {}) });
       return () => {};
     }
     s.listeners.add(listener);
     return () => { s.listeners.delete(listener); };
+  }
+
+  /** Stop this session without discarding its exit event or transcript. */
+  stop(ownerId: string, id: string) {
+    const s = this.get(ownerId, id);
+    if (s.exitCode === null) s.pty.kill();
   }
 
   close(ownerId: string, id: string) {

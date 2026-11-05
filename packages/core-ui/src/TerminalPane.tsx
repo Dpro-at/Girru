@@ -148,7 +148,7 @@ function TermStatus({ terminal, size, theme }: { terminal: TerminalController; s
 
 /** One shell's screen. Stays mounted while hidden so its scrollback is kept. */
 type PhoneHooks = { register: (api: ScreenApi | null) => void; ctrl: { current: boolean }; ctrlUsed: () => void; keyboard: (shown: boolean) => void; paste: (text: string) => void };
-function TerminalScreen({ terminal, p, projectId, visible, onSize, phone }: { terminal: TerminalController; p: TerminalPrefs; projectId: string | null; visible: boolean; onSize: (s: string) => void; phone?: PhoneHooks }) {
+export function TerminalScreen({ terminal, p, projectId, visible, onSize, phone, passive = false }: { terminal: TerminalController; p: TerminalPrefs; projectId: string | null; visible: boolean; onSize: (s: string) => void; phone?: PhoneHooks; passive?: boolean }) {
   const phoneRef = useRef(phone); phoneRef.current = phone;
   const tapStartedFocused = useRef(false);
   const s = useSyncExternalStore(terminal.subscribe, terminal.getSnapshot, terminal.getSnapshot);
@@ -158,21 +158,22 @@ function TerminalScreen({ terminal, p, projectId, visible, onSize, phone }: { te
   const size = useRef({ cols: 80, rows: 24 });
   const prefsRef = useRef(p); prefsRef.current = p;
 
-  useEffect(() => { if (s.phase === 'idle') void terminal.open(projectId, size.current); }, [terminal, projectId, s.phase]);
+  useEffect(() => { if (s.phase === 'idle' && !s.command) void terminal.open(projectId, size.current); }, [terminal, projectId, s.phase]);
   useEffect(() => {
     const el = host.current; if (!el) return;
     let stop = () => {}; let cancelled = false;
     void (async () => {
       const [{ Terminal }, { FitAddon }] = await Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit'), import('@xterm/xterm/css/xterm.css')]);
       if (cancelled) return;
-      const x = new Terminal({ ...xtermOptions(prefsRef.current), allowProposedApi: false, macOptionIsMeta: true, rightClickSelectsWord: true, drawBoldTextInBrightColors: true });
+      const x = new Terminal({ ...xtermOptions(prefsRef.current), allowProposedApi: false, disableStdin: passive, macOptionIsMeta: true, rightClickSelectsWord: true, drawBoldTextInBrightColors: true });
       const fit = new FitAddon(); x.loadAddon(fit);
       x.open(el); term.current = x;
-      const refit = () => { if (!el.offsetParent) return; try { fit.fit(); size.current = { cols: x.cols, rows: x.rows }; terminal.resize(x.cols, x.rows); onSize(`${x.cols}×${x.rows}`); } catch { /* hidden */ } };
+      const refit = () => { if (!el.offsetParent) return; try { fit.fit(); size.current = { cols: x.cols, rows: x.rows }; if (!passive) terminal.resize(x.cols, x.rows); onSize(`${x.cols}×${x.rows}`); } catch { /* hidden */ } };
       fitRef.current = refit; refit();
       const offOut = terminal.onOutput(d => x.write(d));
       const offClear = terminal.onClear(() => x.clear());
       const input = x.onData(d => {
+        if (passive) return;
         const ph = phoneRef.current;
         // The phone's Ctrl key: the next letter typed goes with Control.
         if (ph?.ctrl.current) { ph.ctrl.current = false; ph.ctrlUsed(); terminal.write(withCtrl(d)); return; }
@@ -193,21 +194,21 @@ function TerminalScreen({ terminal, p, projectId, visible, onSize, phone }: { te
       const sel = x.onSelectionChange(() => { const text = x.getSelection(); if (prefsRef.current.copyOnSelect && text) void navigator.clipboard?.writeText(text).catch(() => {}); });
       const ro = new ResizeObserver(refit); ro.observe(el);
       // On the phone the keyboard stays hidden until the owner taps the terminal.
-      if (el.offsetParent && !phoneRef.current) x.focus();
+      if (el.offsetParent && !phoneRef.current && !passive) x.focus();
       stop = () => { offPhone(); ro.disconnect(); input.dispose(); sel.dispose(); offOut(); offClear(); x.dispose(); term.current = null; fitRef.current = null; };
     })();
     return () => { cancelled = true; stop(); };
   }, [terminal]);
   // Settings apply live; the grid is measured again after a font change.
   useEffect(() => { const x = term.current; if (!x) return; Object.assign(x.options, xtermOptions(p)); fitRef.current?.(); }, [p]);
-  useEffect(() => { if (visible) { fitRef.current?.(); if (!phoneRef.current) term.current?.focus(); } }, [visible]);
+  useEffect(() => { if (visible) { fitRef.current?.(); if (!phoneRef.current && !passive) term.current?.focus(); } }, [visible]);
 
   // On the phone a tap shows the keyboard, and a tap while it shows hides it.
   return <div className="term-screen-wrap" hidden={!visible}
     onPointerDown={phone ? () => { tapStartedFocused.current = !!term.current?.textarea && document.activeElement === term.current.textarea; } : undefined}
     onClick={phone ? () => { if (tapStartedFocused.current && !term.current?.hasSelection()) term.current?.blur(); else term.current?.focus(); } : undefined}>
-    {(s.phase === 'off' || s.phase === 'error' || s.phase === 'exited') && <p className={s.phase === 'exited' ? 'term-note' : 'term-note error'} role="status">
-      {s.phase === 'exited' ? 'The shell has exited.' : s.message} {s.phase !== 'off' && <button type="button" className="link-button" onClick={() => void terminal.close()}>Start again</button>}</p>}
+    {(s.phase === 'off' || s.phase === 'error' || (s.phase === 'exited' && !passive)) && <p className={s.phase === 'exited' ? 'term-note' : 'term-note error'} role="status">
+      {s.phase === 'exited' ? s.command ? 'The command has finished.' : 'The shell has exited.' : s.message} {s.phase !== 'off' && !s.command && <button type="button" className="link-button" onClick={() => void terminal.close()}>Start again</button>}</p>}
     <div className="terminal-screen" ref={host} dir="ltr"/>
   </div>;
 }

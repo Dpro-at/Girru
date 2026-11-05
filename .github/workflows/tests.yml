@@ -90,7 +90,7 @@ jobs:
         run: |
           npm ci --prefix packages/backend
           cd packages/backend
-          node --import tsx --import ../../scripts/test-temp-root.mjs --test --test-timeout=90000 test/first-run-steps.test.mjs test/replace-discovery-file.test.mjs test/local-agent-import.test.mjs test/chat-reply-rounds.test.mjs test/sync-directory.test.mjs test/safe-file.test.mjs test/subscription-launcher-win.test.mjs
+          node --import tsx --import ../../scripts/test-temp-root.mjs --test --test-timeout=90000 test/first-run-steps.test.mjs test/replace-discovery-file.test.mjs test/local-agent-import.test.mjs test/chat-reply-rounds.test.mjs test/sync-directory.test.mjs test/safe-file.test.mjs test/subscription-launcher-win.test.mjs test/terminal-command-native.test.mjs
 
       - name: Repeat Windows first-run checkpoint replacement
         if: runner.os == 'Windows'

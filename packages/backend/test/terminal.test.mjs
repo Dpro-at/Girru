@@ -240,3 +240,30 @@ test('node-pty spawn-helper gets the run permission it is installed without', { 
   assert.deepEqual(mgr.ensureSpawnHelper('darwin', 'x64', () => j(pkg, 'package.json')), []);
   assert.deepEqual(mgr.ensureSpawnHelper('win32', 'x64', () => j(pkg, 'package.json')), []);
 });
+
+
+test('reviewed command mode starts once and returns the actual shell exit', { skip: !posix }, async () => {
+  const r = await call('POST','/api/terminal/sessions','tm-owner',{command:'printf COMMAND_MODE_OK; exit 7'});
+  assert.equal(r.statusCode,201);
+  const id=r.json().id;
+  try {
+    const transcript=await readStream(id,'tm-owner',s=>s.includes('"exitCode":7'));
+    assert.match(transcript.text,/COMMAND_MODE_OK/);
+    assert.match(transcript.text,/"exitCode":7/);
+    assert.equal((await call('POST',`/api/terminal/sessions/${id}/stop`,'tm-user')).statusCode,403);
+    assert.equal((await call('POST',`/api/terminal/sessions/${id}/stop`,'tm-owner')).statusCode,204);
+  } finally { await call('DELETE',`/api/terminal/sessions/${id}`,'tm-owner'); }
+});
+
+test('Stop terminates a real command PTY and preserves the authoritative termination status', { skip: !posix }, async () => {
+  const r=await call('POST','/api/terminal/sessions','tm-owner',{command:'printf READY_TO_STOP; read reply'});
+  assert.equal(r.statusCode,201);const id=r.json().id;
+  try {
+    const started=await readStream(id,'tm-owner',s=>s.includes('READY_TO_STOP'));
+    assert.match(started.text,/READY_TO_STOP/);
+    assert.equal((await call('POST',`/api/terminal/sessions/${id}/stop`,'tm-owner')).statusCode,204);
+    const finished=await readStream(id,'tm-owner',s=>s.includes('event: exit'));
+    const event=finished.text.split('\n').filter(x=>x.startsWith('data: ')).map(x=>JSON.parse(x.slice(6))).find(x=>'exitCode' in x);
+    assert.ok(event && (event.signal>0 || event.exitCode!==0));
+  } finally { await call('DELETE',`/api/terminal/sessions/${id}`,'tm-owner'); }
+});

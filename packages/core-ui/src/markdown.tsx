@@ -1,4 +1,6 @@
-import { createContext, useContext, useState } from 'react';
+import { InlineCommand } from './InlineCommand';
+import type { CommandRun } from './InlineCommand';
+import { createContext, useContext, useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { SpecView, parseSpec } from './spec';
 
@@ -123,7 +125,7 @@ function SpecBlock({ text }: { text: string }) { return parseSpec(text) ? <SpecV
  * CHAT-CONTENT-01: what a reply's code can do in this place (the chat gives it; elsewhere nothing extra shows):
  * open a named file beside the chat or in Code, and run a terminal command (the owner's own Terminal).
  */
-export type MarkdownActions = { openFile?: (path: string) => void; openInCode?: (path: string) => void; runCommand?: (command: string) => void; folderName?: string };
+export type MarkdownActions = { openFile?: (path: string) => void; openInCode?: (path: string) => void; runCommand?: (command: string) => void; commandRun?: (command: string, start?: boolean) => CommandRun | null; folderName?: string };
 export const MarkdownActionsContext = createContext<MarkdownActions>({});
 const LANG_NAMES: Record<string, string> = { ts: 'TypeScript', tsx: 'TypeScript', typescript: 'TypeScript', js: 'JavaScript', jsx: 'JavaScript', mjs: 'JavaScript', cjs: 'JavaScript', javascript: 'JavaScript', py: 'Python', python: 'Python', rb: 'Ruby', go: 'Go', rs: 'Rust', rust: 'Rust', java: 'Java', php: 'PHP', css: 'CSS', scss: 'SCSS', html: 'HTML', json: 'JSON', yaml: 'YAML', yml: 'YAML', toml: 'TOML', sql: 'SQL', md: 'Markdown', markdown: 'Markdown', swift: 'Swift', kt: 'Kotlin', c: 'C', cpp: 'C++', cs: 'C#', xml: 'XML', diff: 'Diff' };
 export const langName = (lang: string) => LANG_NAMES[lang.toLowerCase()] ?? (lang || 'code');
@@ -146,19 +148,24 @@ export function terminalLine(command: string): string | null {
 
 /** CHAT-CONTENT-01: a command to run: Copy and Run (Run types it into your own Terminal beside the chat; you press Enter). */
 export function TerminalBlock({ text, open = false }: { text: string; open?: boolean }) {
-  const { runCommand, folderName } = useContext(MarkdownActionsContext);
+  const { runCommand, commandRun, folderName } = useContext(MarkdownActionsContext);
   const [copied, setCopied] = useState(false);
   const command = commandOf(text);
+  const [review, setReview] = useState(false), [started, setStarted] = useState<CommandRun | null>(null);
+  useEffect(() => { setStarted(null); setReview(false); }, [command]);
+  const run = started ?? commandRun?.(command) ?? null;
   const copy = () => { if (!navigator.clipboard) return; void navigator.clipboard.writeText(command).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }, () => undefined); };
   return <div className="md-codeblock md-terminal" data-streaming={open || undefined}>
     <div className="md-code-head">
       <span className="md-code-lang">Terminal{folderName ? ` · in ${folderName}` : ''}</span>
       <span className="md-code-actions">
         <button type="button" className="md-code-btn" onClick={copy} aria-label={copied ? 'Copied' : 'Copy command'}>{copied ? 'Copied' : 'Copy'}</button>
-        {runCommand && !open && command && terminalLine(command) && <button type="button" className="md-code-btn md-run" title="Put it in your Terminal beside the chat; you press Enter" onClick={() => runCommand(command)}>Run</button>}
+        {(runCommand || commandRun) && !run && !open && command && <button type="button" className="md-code-btn md-run" title="Review this command before running" onClick={() => { if (commandRun) setReview(true); else runCommand?.(command); }}>Run</button>}
       </span>
     </div>
+    {review && <div className="inline-command-review" role="group" aria-label="Run command approval"><p>Run this exact command{folderName ? ` in ${folderName}` : ''} using Girru Terminal?</p><button type="button" className="primary" onClick={() => { setReview(false); setStarted(commandRun?.(command, true) ?? null); }}>Approve and run</button><button type="button" onClick={() => setReview(false)}>Cancel</button></div>}
     <pre className="md-code" dir="ltr"><code>{text.split('\n').map((l, i) => <span key={i}>{/^\s*[$>]\s/.test(l) ? <><span className="md-prompt">$ </span>{l.replace(/^\s*[$>]\s/, '')}</> : l}{'\n'}</span>)}</code></pre>
+    {run && <InlineCommand run={run} onAgain={() => setReview(true)}/>}
   </div>;
 }
 

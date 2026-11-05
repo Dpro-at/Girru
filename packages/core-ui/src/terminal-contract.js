@@ -46,7 +46,7 @@ export function terminalPath(path) {
   if (path === '/api/terminal/sessions') return { kind: 'create' };
   let m = /^\/api\/terminal\/sessions\/([^/?#]+)$/.exec(path);
   if (m) return ID.test(m[1]) ? { kind: 'close', id: m[1] } : null;
-  m = /^\/api\/terminal\/sessions\/([^/?#]+)\/(input|resize)$/.exec(path);
+  m = /^\/api\/terminal\/sessions\/([^/?#]+)\/(input|resize|stop)$/.exec(path);
   if (m) return ID.test(m[1]) ? { kind: m[2], id: m[1] } : null;
   m = /^\/api\/terminal\/sessions\/([^/?#]+)\/stream(?:\?after=(0|[1-9]\d{0,12}))?$/.exec(path);
   if (m) return ID.test(m[1]) ? { kind: 'stream', id: m[1], after: Number(m[2] ?? 0) } : null;
@@ -60,8 +60,10 @@ export function allowedTerminal(method, path, body) {
   switch (p.kind) {
     case 'info': case 'stream': return method === 'GET' && body === undefined;
     case 'prefs': return (method === 'GET' && body === undefined) || (method === 'PUT' && record(body) && Object.keys(body).length > 0 && Object.entries(body).every(([k, v]) => terminalPrefOk(k, v)));
-    case 'create': return method === 'POST' && record(body) && onlyKeys(body, ['cols', 'rows', 'projectId'])
+    case 'create': return method === 'POST' && record(body) && onlyKeys(body, ['cols', 'rows', 'projectId', 'command'])
+      && (body.command === undefined || (typeof body.command === 'string' && !!body.command.trim() && body.command.length <= 16000 && !body.command.includes('\0')))
       && (body.cols === undefined || size(body.cols, 10, 500)) && (body.rows === undefined || size(body.rows, 2, 200)) && (body.projectId === undefined || (typeof body.projectId === 'string' && ID.test(body.projectId)));
+    case 'stop': return method === 'POST' && body === undefined;
     case 'input': return method === 'POST' && record(body) && onlyKeys(body, ['data']) && typeof body.data === 'string' && body.data.length > 0 && body.data.length <= TERMINAL_INPUT_CHARS;
     case 'resize': return method === 'POST' && record(body) && onlyKeys(body, ['cols', 'rows']) && size(body.cols, 10, 500) && size(body.rows, 2, 200);
     case 'close': return method === 'DELETE' && body === undefined;
@@ -131,6 +133,6 @@ function projectTerminalFrame(event, x) {
   if (!record(x)) return null;
   const type = event || x.type;
   if (type === 'output' && Number.isSafeInteger(x.seq) && x.seq > 0 && typeof x.data === 'string') return { type: 'output', seq: x.seq, data: x.data };
-  if (type === 'exit') return { type: 'exit', exitCode: Number.isInteger(x.exitCode) ? x.exitCode : -1 };
+  if (type === 'exit') return { type: 'exit', exitCode: Number.isInteger(x.exitCode) ? x.exitCode : -1, ...(Number.isInteger(x.signal) && x.signal > 0 && x.signal <= 255 ? { signal: x.signal } : {}) };
   return null;
 }

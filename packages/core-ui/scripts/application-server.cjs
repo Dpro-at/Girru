@@ -363,7 +363,7 @@ function createApplicationServer({ browserController = null, packageRoot = root,
     // Explicit chat talk mode uses only this origin's microphone and generated local audio.
     if(!stage1ReadOnly){
       res.setHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=()');
-      res.setHeader('Content-Security-Policy', HEADERS['Content-Security-Policy'] + "; media-src 'self' blob:");
+      res.setHeader('Content-Security-Policy', HEADERS['Content-Security-Policy']);
     }
     const send = (status, body = null, type = 'application/json; charset=utf-8') => {
       if (res.destroyed || res.writableEnded) return;
@@ -425,7 +425,7 @@ function createApplicationServer({ browserController = null, packageRoot = root,
     const audio = req.method === 'POST' && raw === '/api/chat/transcribe';
     // Agent files are up to 1 MB of text; JSON escaping can double it.
     // KNOW-INDEX-01: a Knowledge PDF or a chat's PDF comes as base64 (10 MB of PDF).
-    const limit = raw===VOICE_LIBRARY_PATH ? 4_200_000 : (req.method === 'POST' && (/^\/api\/agents\/[^/?#]+\/library\/file$/.test(raw) || raw === '/api/memory/documents/read-pdf')) ? READ_PDF_BASE64 + 65536 : meetingsRoute(raw) ? 512 * 1024 : agentLibraryRoute(raw) ? 2_400_000 : notesRoute(raw) ? 4_300_000 : packRoute(raw) ? 2_100_000 : genvrRoute(raw) ? GENVR_BYTES + 65536 : audio ? AUDIO_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/images$/.test(raw) ? IMAGE_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/runs$/.test(raw) ? RUN_LIMIT : LIMIT;
+    const limit = raw===VOICE_LIBRARY_PATH ? 4_200_000 : (req.method === 'POST' && (/^\/api\/agents\/[^/?#]+\/library\/file$/.test(raw) || raw === '/api/memory/documents/read-pdf')) ? READ_PDF_BASE64 + 65536 : meetingsRoute(raw) ? 512 * 1024 : agentLibraryRoute(raw) ? 2_400_000 : notesRoute(raw) ? 4_300_000 : packRoute(raw) ? 2_100_000 : conversationPath(raw)?.kind === 'project-media' ? 44_739_244 + 8192 : genvrRoute(raw) ? GENVR_BYTES + 65536 : audio ? AUDIO_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/images$/.test(raw) ? IMAGE_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/runs$/.test(raw) ? RUN_LIMIT : LIMIT;
     if (!Number.isSafeInteger(length) || length < 0 || length > limit) return send(413);
     if (req.headers['content-type'] && !/^application\/json(?:;\s*charset=utf-8)?$/i.test(req.headers['content-type'])) return send(415);
     try {
@@ -541,7 +541,7 @@ function createApplicationServer({ browserController = null, packageRoot = root,
         }
         // The terminal answers input, resize and close with 204: a fixed { ok: true } leaves the bridge.
         if (status === 204 && terminalRoute(raw) && req.method !== 'GET') { response.resume(); return send(200, { ok: true }); }
-        const responseLimit = genvrRoute(raw) ? GENVR_BYTES + 65536 : chat ? 16384 : req.method === 'GET' && /^\/api\/chat\/conversations\/[^/?#]+\/images\/[a-f0-9]{32}$/.test(raw) ? IMAGE_LIMIT : RESPONSE_LIMIT;
+        const responseLimit = conversationPath(raw)?.kind === 'project-media' ? 44_739_244 + 8192 : genvrRoute(raw) ? GENVR_BYTES + 65536 : chat ? 16384 : req.method === 'GET' && /^\/api\/chat\/conversations\/[^/?#]+\/images\/[a-f0-9]{32}$/.test(raw) ? IMAGE_LIMIT : RESPONSE_LIMIT;
         if (status >= 300 && status < 400 || response.headers.location || response.headers['set-cookie'] || response.headers['content-encoding'] || !/^application\/json(?:\s*;|$)/i.test(response.headers['content-type'] || '') || Number(response.headers['content-length'] || 0) > responseLimit) return fail();
         const parts = []; let count = 0;
         response.on('data', chunk => { count += chunk.length; if (count > responseLimit) fail(); else parts.push(chunk); });

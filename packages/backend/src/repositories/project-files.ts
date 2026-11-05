@@ -4,6 +4,7 @@
  * file's text. Every path stays inside the project folder (symlinks too), and
  * files that usually hold secrets are listed but never opened.
  */
+import { officeMembers, OfficeArchiveError } from '../services/office-archive.js';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import { readRegularFile, FileReadError } from '../services/read-regular-file.js';
@@ -173,6 +174,58 @@ export async function readFolderPdf(folder: string, rawRel: unknown): Promise<{ 
     return { path: rel, pageCount: r.pageCount, pages: r.pages.slice(0, 200).map(p => ({ page: p.page, text: p.text.slice(0, 20_000) })) };
   } catch (error) {
     if (error instanceof FileReadError) throw new ProjectPathError(error.message);
+    throw error;
+  }
+}
+
+
+export const MAX_MEDIA_BYTES = 32 * 1024 * 1024;
+const MEDIA_TYPES: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4' };
+/** Bounded, authenticated media bytes. The client embeds images, never SVG documents or HTML. */
+export async function readFolderMedia(folder: string, rawRel: unknown): Promise<{ path: string; size: number; mime?: string; base64?: string; reason?: string }> {
+  const rel = cleanRel(rawRel);
+  if (!rel) throw new ProjectPathError('Pick a file');
+  const real = await inside(folder, rel);
+  if (secretPath(rel) || await secretTarget(folder, real)) return { path: rel, size: 0, reason: 'hidden' };
+  const mime = MEDIA_TYPES[path.extname(rel).toLowerCase()];
+  if (!mime) return { path: rel, size: 0, reason: 'unsupported' };
+  try {
+    const { data, stat } = await readRegularFile(real, MAX_MEDIA_BYTES, { root: folder });
+    return { path: rel, size: stat.size, mime, base64: data.toString('base64') };
+  } catch (error) {
+    if (error instanceof FileReadError) return { path: rel, size: 0, reason: error.message === 'File is too large' ? 'too_large' : 'unavailable' };
+    throw error;
+  }
+}
+
+export const MAX_OFFICE_BYTES = 16 * 1024 * 1024;
+/** XML and embedded raster images only; never execute Office code or unpack arbitrary files. */
+export async function readFolderOffice(folder: string, rawRel: unknown) {
+  const rel = cleanRel(rawRel);
+  if (!rel || !/\.(docx|xlsx|pptx)$/i.test(rel)) throw new ProjectPathError('Pick a DOCX, XLSX or PPTX file');
+  const real = await inside(folder, rel);
+  if (secretPath(rel) || await secretTarget(folder, real)) return { path: rel, reason: 'hidden' };
+  try {
+    const { data } = await readRegularFile(real, MAX_OFFICE_BYTES, { root: folder });
+    const members = officeMembers(data), kind = /\.docx$/i.test(rel) ? 'docx' : /\.xlsx$/i.test(rel) ? 'xlsx' : 'pptx';
+    const selected = members.filter(m => m.name === '[Content_Types].xml' || m.name === '_rels/.rels' || (kind === 'docx' ? /^word\/(?:document\.xml|_rels\/document\.xml\.rels)$/.test(m.name) : kind === 'pptx' ? /^ppt\/(?:presentation\.xml|_rels\/presentation\.xml\.rels|slides\/[^/]+\.xml|slides\/_rels\/[^/]+\.xml\.rels)$/.test(m.name) : /^xl\/(?:workbook\.xml|_rels\/workbook\.xml\.rels|sharedStrings\.xml|styles\.xml|worksheets\/[^/]+\.xml)$/.test(m.name)));
+    if (selected.length > 128 || selected.reduce((n, m) => n + m.bytes, 0) > 2 * 1024 * 1024) return { path: rel, reason: 'too_large' };
+    const parts = selected.map(m => ({ name: m.name, text: new TextDecoder('utf-8', { fatal: true }).decode(m.read()) }));
+    // No DTD or custom entity expansion, even in a part the preview does not use.
+    if (parts.some(p => /<!\s*(?:DOCTYPE|ENTITY)/i.test(p.text))) return { path: rel, reason: 'unsupported' };
+    const images: { name: string; mime: string; base64: string }[] = []; let imageBytes = 0, truncated = false;
+    if (kind !== 'xlsx') for (const m of members.filter(m => /^(?:word|ppt)\/media\/[^/]+\.(png|jpe?g|gif|webp)$/i.test(m.name))) {
+      if (m.bytes > 512 * 1024 || imageBytes + m.bytes > 1024 * 1024 || images.length >= 32) { truncated = true; continue; }
+      const bytes = m.read(); imageBytes += bytes.length;
+      const ext = path.extname(m.name).toLowerCase();
+      images.push({ name: m.name, mime: MEDIA_TYPES[ext], base64: bytes.toString('base64') });
+    }
+    const result = { path: rel, kind, parts, images, truncated };
+    if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 3 * 1024 * 1024) return { path: rel, reason: 'too_large' };
+    return result;
+  } catch (error) {
+    if (error instanceof FileReadError) return { path: rel, reason: error.message === 'File is too large' ? 'too_large' : 'unavailable' };
+    if (error instanceof OfficeArchiveError || error instanceof TypeError) return { path: rel, reason: 'unsupported' };
     throw error;
   }
 }
