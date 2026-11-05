@@ -210,6 +210,10 @@ Each answers `404 not_found` while the switch is off. Agents never mark a memory
 | `POST /api/memory/documents/sources/:id/reindex` | look at the files again now (background; `202`) |
 | `POST /api/memory/documents/read-pdf` | `{ data }` (base64, 10 MB at most) → `{ text }` with `--- page N ---` markers, or `{ reason }`; nothing is kept (chat attachments) |
 
+### Store package validation
+
+Store package paths must resolve consistently on Linux, macOS and Windows. Case-folded file/directory collisions, noncanonical `migrations` directory names, trailing dots and Windows device names are refused before activation. During installation, SQL migrations execute only the checksum-verified in-memory bytes that passed the app-table allowlist; the installer never re-reads those statements from an installed path.
+
 ### Agent Connect (owner configuration)
 
 | Route | Body / answer |

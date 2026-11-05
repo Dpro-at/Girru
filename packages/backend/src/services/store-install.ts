@@ -135,7 +135,10 @@ async function add(job: AddJob, { fetch: get = globalThis.fetch as unknown as Fe
   job.step = 'checking';
   const plugin = JSON.parse(files.find((f) => f.path === 'agentplayer.plugin.json')!.bytes.toString('utf8')) as { id?: unknown; version?: unknown; main?: unknown };
   if (plugin.id !== id || plugin.version !== item.version || typeof plugin.main !== 'string' || !files.some((f) => f.path === plugin.main)) throw new Error('the package is not this app');
-  const tables = appTables(id, files.filter((f) => f.path.startsWith('migrations/') && f.path.endsWith('.sql')).map((f) => f.bytes.toString('utf8')));
+  const checkedMigrations = files.filter((f) => f.path.startsWith('migrations/') && f.path.endsWith('.sql'));
+  const tables = appTables(id, checkedMigrations.map((f) => f.bytes.toString('utf8')));
+  const migrations = checkedMigrations.filter((f) => f.path.split('/').length === 2)
+    .sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
   // 4. Set it up in the data folder: a new folder, then one rename.
   job.step = 'setting-up';
   const root = installedAppsRoot();
@@ -157,10 +160,11 @@ async function add(job: AddJob, { fetch: get = globalThis.fetch as unknown as Fe
     // Only its own migrations, recorded as the extension runner records them; then the copy of its data, if one was saved.
     const db = await sql();
     db.transaction(() => {
-      for (const file of migrationFiles(dest)) {
-        const name = path.basename(file);
+      for (const file of migrations) {
+        const name = file.path.slice('migrations/'.length);
         if (db.prepare('SELECT 1 FROM extension_migrations WHERE extension_id = ? AND filename = ?').get(id, name)) continue;
-        db.exec(fs.readFileSync(file, 'utf8'));
+        // Execute the same verified bytes that passed the SQL allowlist, never a disk alias.
+        db.exec(file.bytes.toString('utf8'));
         db.prepare('INSERT INTO extension_migrations (extension_id, filename) VALUES (?, ?)').run(id, name);
       }
     })();
