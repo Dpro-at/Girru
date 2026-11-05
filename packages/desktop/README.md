@@ -103,3 +103,7 @@ GenVR opens its existing Store page when its runtime is absent. The desktop host
 Only the SDK version pinned by the running Girru build is accepted. A newer incompatible Store archive requires updating Girru. Archive integrity is checked before installation; program files are protected from agent filesystem edits. Account settings and worlds survive removal. Re-adding or relocating the managed MCP launch resets agent tool grants, which must be reviewed again.
 
 On AppImage or translocated macOS installations whose Node executable path changes at each launch, the managed MCP launch is re-approved and its agent grants are reset on each restart. Review GenVR agent permissions again in those environments.
+
+### Agent Connect channels
+
+Channels use the existing Agent Connect package as a separate Store app. The core includes the web channel and a small configuration/security host, with no Agent Connect, Telegram, WhatsApp or Graph provider dependencies in its production payload. Settings › Channels opens the Store when the app is missing. The Store uses pinned npm archives and no install scripts; optional Python providers still need their own explicit setup. Removal stops channels while retaining settings, credentials, delivery history and provider state. Re-adding keeps channel choices and does not switch disabled channels on.

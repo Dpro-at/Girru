@@ -8,8 +8,6 @@ import type { FastifyInstance } from 'fastify';
 import { getChannelRegistry } from '../../channels/index.js';
 import {
   WebChannelAdapter,
-  createWhatsAppAdapter,
-  createTelegramAdapter,
 } from '../../channels/index.js';
 import { handleError } from '../error-handler.js';
 
@@ -228,16 +226,6 @@ async function initializeBuiltInChannels(registry: any): Promise<void> {
   const webChannel = new WebChannelAdapter();
   registry.register(webChannel);
   await webChannel.connect();
-
-  // 2. WhatsApp (if configured)
-  // TODO: Check if WhatsApp is configured in settings
-  // const whatsappChannel = createWhatsAppAdapter();
-  // registry.register(whatsappChannel);
-
-  // 3. Telegram (if configured)
-  // TODO: Check if Telegram is configured in settings
-  // const telegramChannel = createTelegramAdapter(process.env.TELEGRAM_BOT_TOKEN);
-  // registry.register(telegramChannel);
 
   console.log('[Channels] ✅ Built-in channels initialized');
 }

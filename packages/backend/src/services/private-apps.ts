@@ -74,6 +74,7 @@ export async function addPrivateApp(folder: string, options: { home?: string; re
   let plugin: { id?: unknown; name?: unknown; version?: unknown; main?: unknown };
   try { plugin = JSON.parse(manifest.bytes.toString('utf8')); } catch { return fail('The app file is not valid JSON.'); }
   const id = typeof plugin.id === 'string' ? plugin.id : '';
+  if(id==='agent-connect')return fail('Agent Connect is reserved for the reviewed Girru Store app.','exists');
   if (!ID.test(id) || id.length > 64) return fail('The app id must be lower-case letters and numbers joined by single dashes.');
   if (typeof plugin.version !== 'string' || !plugin.version.trim() || typeof plugin.main !== 'string' || !files.some((f) => f.path === plugin.main)) return fail('The app file needs a version and a main file that is in the folder.');
   const name = typeof plugin.name === 'string' && plugin.name.trim() ? plugin.name.trim().slice(0, 80) : id;

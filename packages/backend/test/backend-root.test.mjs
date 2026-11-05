@@ -16,7 +16,8 @@ test('extensions and skills come from the program folder, whatever the working f
   try {
     const { BACKEND_ROOT, backendPath } = await import(join(backendDir, 'src/config/backend-root.ts'));
     assert.equal(BACKEND_ROOT, backendDir);
-    assert.ok(existsSync(backendPath('extensions', 'agent-connect')), 'the agent-connect extension ships with the program');
+    assert.equal(existsSync(backendPath('extensions','agent-connect')),false,'the channel app no longer ships with the program');
+    assert.ok(existsSync(backendPath('extensions','shared','channel-host.js')),'the small channel integration host stays with the program');
     assert.ok(existsSync(backendPath('skills', 'dpro-workspace', 'SKILL.md')), 'the shipped skills');
     const { ExtensionRunner } = await import(join(backendDir, 'src/plugins/extension-runner.ts'));
     assert.equal(new ExtensionRunner().extensionsDir, backendPath('extensions'));

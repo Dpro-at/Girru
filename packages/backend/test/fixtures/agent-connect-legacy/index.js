@@ -1,5 +1,5 @@
 import { CHANNEL_CATALOG, PythonTransport } from 'agent-connect-dpro';
-import { isNativeChannel, registerChannelRoutes, stopChannel } from '../shared/channel-host.js';
+import { isNativeChannel, registerChannelRoutes, stopChannel } from '../../../extensions/shared/channel-host.js';
 import { isValidEnvironment, isValidSettings, isValidStateDirectory, transportOptions } from './policy.js';
 import { channelSendTools, SEND_TOOL_NAMES } from './tools.js';
 
