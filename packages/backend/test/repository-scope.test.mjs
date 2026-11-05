@@ -652,7 +652,7 @@ test('routes: no user id from body/query in the moved routes; SYSTEM_ACTOR never
   const routesDir = join(backendDir, 'src/api/routes');
   const moved = ['task-runs.ts', 'agent-grants.ts', 'agent-personality.ts', 'credentials.ts', 'audit.ts', 'memory-files.ts', 'profile.ts',
     'agents-config.ts', 'memory.ts', 'memory-learning.ts', 'memory-import.ts',
-    'auth.ts', 'team.ts', 'gateway.ts',
+    'auth.ts', 'gateway.ts',
     'memory-quality.ts', 'memory-sharing.ts', 'memory-access.ts'];
   for (const f of moved) {
     const src = readFileSync(join(routesDir, f), 'utf8');

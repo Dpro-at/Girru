@@ -291,33 +291,6 @@ Owner only. "Schedule a task": `{ instructions, every, at, weekday?, agentId?, n
 ### GET /api/runs/schedules/:id/runs
 The last runs of one schedule (`job:…`, `chatsch:…`, `cardsch:…`, `checkin:…`).
 
-## Calendar
-
-### GET /api/calendar/events
-List calendar events
-
-### POST /api/calendar/events
-Create event
-```json
-{
-  "title": "Meeting",
-  "start": "2026-02-22T10:00:00Z",
-  "end": "2026-02-22T11:00:00Z",
-  "type": "meeting"
-}
-```
-
-### GET /api/calendar/sources
-List calendar sources (Google, iCal)
-
-### POST /api/calendar/sources
-Add calendar source
-
-### POST /api/calendar/sync/:sourceId
-Sync calendar source
-
----
-
 ## Storage
 
 ### GET /api/storage

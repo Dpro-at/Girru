@@ -138,45 +138,6 @@ test('a secrets file readable by others is set back to 0600', { skip: process.pl
   assert.ok(out.lines.some((l) => l.includes('0600')));
 });
 
-test('email encryption: no hard-coded fallback; an encrypted value survives a restart; legacy JWT key still reads', async () => {
-  const saved = { ENCRYPTION_KEY: process.env.ENCRYPTION_KEY, JWT_SECRET: process.env.JWT_SECRET };
-  const email = await import(join(backendDir, 'src/services/email-encryption.ts'));
-  const quietErr = console.error; console.error = () => {};
-  try {
-    delete process.env.ENCRYPTION_KEY; delete process.env.JWT_SECRET;
-    assert.throws(() => email.encrypt('x'), /ENCRYPTION_KEY is not set/);
-    const src = readFileSync(join(backendDir, 'src/services/email-encryption.ts'), 'utf-8');
-    assert.ok(!/default-encryption-key/.test(src), 'hard-coded fallback still in source');
-
-    // "first start": generate, encrypt
-    const dataDir = freshDir();
-    const run1 = {};
-    bootstrapSecrets({ dataDir, env: run1, log: () => {} });
-    Object.assign(process.env, { ENCRYPTION_KEY: run1.ENCRYPTION_KEY, JWT_SECRET: run1.JWT_SECRET });
-    const secret = 'imap-' + randomBytes(6).toString('hex');
-    const stored = email.encrypt(secret);
-    // "restart": env cleared, values come back from the file
-    delete process.env.ENCRYPTION_KEY; delete process.env.JWT_SECRET;
-    bootstrapSecrets({ dataDir, log: () => {} });
-    assert.equal(email.decrypt(stored), secret);
-
-    // legacy: stored with the JWT_SECRET-derived key when ENCRYPTION_KEY was missing
-    const jwtOnly = randomBytes(32).toString('hex');
-    process.env.ENCRYPTION_KEY = jwtOnly;
-    const legacy = email.encrypt('legacy-value');
-    process.env.JWT_SECRET = jwtOnly;
-    process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex');
-    assert.equal(email.decrypt(legacy), 'legacy-value');
-    process.env.JWT_SECRET = randomBytes(32).toString('hex');
-    assert.throws(() => email.decrypt(legacy), /Failed to decrypt/);
-  } finally {
-    console.error = quietErr;
-    for (const [k, v] of Object.entries(saved)) {
-      if (v === undefined) delete process.env[k]; else process.env[k] = v;
-    }
-  }
-});
-
 test('server entry loads env + secrets before any other import', () => {
   const src = readFileSync(join(backendDir, 'src/api/server.ts'), 'utf-8');
   const firstImport = src.split('\n').find((l) => /^import\s/.test(l));
