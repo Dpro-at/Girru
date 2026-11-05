@@ -106,3 +106,12 @@ test('SDK skill symlinks and hardlinks are refused before activation',async()=>{
   assert.equal(fs.existsSync(path.join(root,'outside')),false);
  }
 });
+
+test('package metadata retains the 64 KiB bound with descriptor-based reads',async()=>{
+ const metadata=JSON.stringify({name:'3d-world-sdk',version});
+ for(const [size,ok] of [[65536,true],[65537,false]]){
+  const files=sdkFiles().map(([name,body])=>[name,name==='package/package.json'?metadata.padEnd(size,' '):body]);
+  const f=fixture('metadata-'+size,files),job=await done(await startGenvrInstall(f.options));
+  assert.equal(job.ok,ok);assert.equal(!!installedGenvrRuntime(f.options.root,f.options.pin),ok);
+ }
+});

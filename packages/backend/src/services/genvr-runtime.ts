@@ -7,6 +7,7 @@ import { runtimePlatform, unpackTarGz, type RuntimeFetch } from './code-runtime.
 import { genvrRuntimesRoot, genvrStoreActive, genvrBundled } from '../config/genvr-runtime.js';
 export { genvrStoreActive, genvrBundledRoot, genvrRuntime, genvrInstalled, genvrBundled } from '../config/genvr-runtime.js';
 import { readStoreRepo, runtimeUrlAllowed, type RepoRead, type RuntimePlatform, type StoreRuntime, type RuntimeArchive } from './store-repo.js';
+import { readRegularFile } from './read-regular-file.js';
 import { trackJob, type AddJob } from './store-install.js';
 
 export const GENVR_ITEM = 'girru:genvr';
@@ -70,10 +71,9 @@ async function download(archive: RuntimeArchive, file: string, get: RuntimeFetch
   } finally { clearTimeout(timer); control.abort(); await out.close(); }
 }
 
-function sdkManifest(incoming: string, pin: typeof PIN) {
+async function sdkManifest(incoming: string, pin: typeof PIN) {
   const packageFile = path.join(incoming, 'package/package.json');
-  if (fs.statSync(packageFile).size > 65536) throw new InstallError('The GenVR package metadata is too large.');
-  const pkg = JSON.parse(fs.readFileSync(packageFile, 'utf8'));
+  const pkg = JSON.parse((await readRegularFile(packageFile, 65536)).data.toString('utf8'));
   if (pkg.name !== '3d-world-sdk' || pkg.version !== pin.version) throw new InstallError('The archive is not the expected GenVR version.');
   const files: Record<string, string> = {};
   const add = (file: string) => {
@@ -110,7 +110,7 @@ async function install(job: AddJob, archive: RuntimeArchive, options: Options & 
     job.step = 'checking';
     fs.mkdirSync(incoming, { mode: 0o700 }); job.step = 'setting-up';
     await unpackTarGz(downloadFile, incoming, { bytes: 512 * 1024 * 1024, entries: 50000 });
-    sdkManifest(incoming, options.pin);
+    await sdkManifest(incoming, options.pin);
     const dir = `${options.pin.version}-${id}`;
     fs.renameSync(incoming, path.join(root, dir));
     fs.writeFileSync(pointer, JSON.stringify({ version: options.pin.version, dir, sha256: archive.sha256, installedAt: new Date().toISOString() }), { mode: 0o600, flag: 'wx' });
