@@ -111,4 +111,9 @@ function openLog(file, maxBytes = 5 * 1024 * 1024) {
   };
 }
 
-module.exports = { createLocalRuntime, openLog, listen, closeServer };
+/** Retire the old bridge and its optional app hosts before rebuilding the local runtime. */
+async function restartLocalRuntime(previous, start, isQuitting = () => false) {
+  await previous?.stop();
+  if(!isQuitting())return start();
+}
+module.exports = { createLocalRuntime, restartLocalRuntime, openLog, listen, closeServer };

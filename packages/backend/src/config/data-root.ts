@@ -129,6 +129,8 @@ export function protectedDataDirs(): string[] {
     credentialsBackupDir(),
     envDir('UPLOADS_DIR', false) ?? dataPathOr(path.join(cwd, '..', '..', '.data', 'uploads'), 'uploads'),
     envDir('STORAGE_BASE_DIR', false),
+    // Installed program bytes are not agent-editable workspace files.
+    envDir('GIRRU_APP_RUNTIMES_DIR', false),
     dataPathOr(path.join(cwd, '..', '..', '.data', 'memory'), 'memory'),
     // BACKUP-01: backups hold a copy of everything above, keys included.
     backupsFolder(),

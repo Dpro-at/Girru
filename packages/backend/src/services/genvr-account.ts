@@ -7,7 +7,9 @@
  * stays in this process. Only the account's display name, scopes and expiry
  * are kept in plain form so Settings → Connections can show the state.
  */
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
+import path from 'node:path';
+import { genvrRuntime } from '../config/genvr-runtime.js';
 import { q } from '../repositories/sql-steps.js';
 import { getCredentialManager } from '../credentials/manager.js';
 import { CredentialType } from '../credentials/types.js';
@@ -40,11 +42,14 @@ interface Sdk {
   WorldSession: { create(input: { id: string; title: string }): GenvrWorldSession };
   worldShareUrl(web: string, id: string): string;
 }
-let sdkLoad: Promise<Sdk> | undefined;
-/** The pinned SDK copy prepared by core-ui/scripts/prepare-genvr.cjs. */
+let sdkLoad: { file:string; promise:Promise<Sdk> } | undefined;
+/** Resolve the optional reviewed SDK each time, including after install/removal. */
 export function genvrSdk(): Promise<Sdk> {
-  sdkLoad ??= import(pathToFileURL(fileURLToPath(new URL('../../../core-ui/vendor/genvr/package/dist/index.js', import.meta.url))).href) as Promise<Sdk>;
-  return sdkLoad;
+  const runtime=genvrRuntime();
+  if(!runtime)return Promise.reject(new Error('Add GenVR from the Girru Store first.'));
+  const file=path.join(runtime.packageDir,'dist/index.js');
+  if(sdkLoad?.file!==file)sdkLoad={file,promise:import(pathToFileURL(file).href) as Promise<Sdk>};
+  return sdkLoad.promise;
 }
 
 export type ConnectionStatus = 'not_connected' | 'connecting' | 'connected' | 'expired' | 'error';

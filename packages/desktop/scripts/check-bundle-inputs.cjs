@@ -1,9 +1,9 @@
 'use strict';
 /**
  * Runs before every installer build (npm "predist:*"). electron-builder skips a
- * missing extraResources folder without a word, so an app could ship without
- * GenVR and only fail on the owner's computer. This stops the build instead and
- * names what to stage.
+ * missing extraResources folder without a word. GenVR and Code are Store apps;
+ * the core builds without their runtimes. An optional developer copy must be
+ * complete if it is staged.
  *
  * The Code editor (Nabu) is a Store app (D-CODE-STORE): a release builds without
  * nabu-runtime/ and Girru installs Code from the Girru Store. A developer may still
@@ -39,8 +39,8 @@ function bundleProblems(desktop = path.resolve(__dirname, '..'), pin = require('
   const { VERSION, SHA256 } = pin;
   let manifest = null;
   try { manifest = JSON.parse(fs.readFileSync(path.join(desktop, 'payload', 'core-ui', 'vendor', 'genvr', 'manifest.json'), 'utf8')); } catch { /* not staged */ }
-  if (!manifest) problems.push('payload has no GenVR SDK: prepare core-ui/vendor/genvr, then run npm run stage');
-  else if (manifest.version !== VERSION || manifest.archiveSha256 !== SHA256) problems.push(`payload GenVR SDK is not the pinned ${VERSION}: prepare it again, then run npm run stage`);
+  if (!manifest && fs.existsSync(path.join(desktop, 'payload', 'core-ui', 'vendor', 'genvr'))) problems.push('payload GenVR SDK is only partly staged');
+  else if (manifest && (manifest.version !== VERSION || manifest.archiveSha256 !== SHA256)) problems.push(`payload GenVR SDK is not the pinned ${VERSION}: prepare it again, then run npm run stage`);
   const code = codeRuntimeState(desktop);
   if (code !== 'none' && code !== 'ready') problems.push(code);
   return problems;
@@ -51,8 +51,8 @@ if (require.main === module) {
   const problems = bundleProblems(desktop);
   if (problems.length) { for (const p of problems) console.error(`Build stopped: ${p}`); process.exitCode = 1; }
   else console.log(codeRuntimeState(desktop) === 'ready'
-    ? 'Bundle inputs ready: payload with GenVR SDK, Code editor runtime (bundled)'
-    : 'Bundle inputs ready: payload with GenVR SDK; Code is not bundled (Girru installs it from the Store)');
+    ? 'Bundle inputs ready: core payload, optional bundled Code runtime'
+    : 'Bundle inputs ready: GenVR and Code are supplied by the Store');
 }
 
 module.exports = { bundleProblems, codeRuntimeState, CODE_FILES };

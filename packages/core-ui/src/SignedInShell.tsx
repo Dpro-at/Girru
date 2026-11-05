@@ -12,7 +12,7 @@ import {usePendingApprovalCount} from './ApprovalPage';
 import {useBackupAlert} from './SettingsBackups';
 import {ApprovalsWorkspace} from './HumanReviewsPage';
 import type {ApprovalsPlaceRequest} from './HumanReviewsPage';
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { FirstRunSetup, useFirstRun } from './FirstRunSetup';
 import type { ReactNode } from 'react';
 import type { SessionClient } from './session';
@@ -26,6 +26,7 @@ import { TaskBoard } from './TaskBoard';
 import { RunsDestination } from './RunsDestination';
 import type { RunsPlace } from './RunsDestination';
 import { GenVRPage } from './GenVRPage';
+import { GENVR_RUNTIME } from './genvr-contract';
 import type {SettingsTab} from './AppSettings';
 import { AppSettings } from './AppSettings';
 import { useAppNavigation, useAppTheme } from './app-navigation';
@@ -95,6 +96,9 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
   useEffect(() => { void window.dproApp?.setSetupWindow?.(false).catch(() => {}); }, []);
   const state = useSyncExternalStore(client.subscribe, client.getSnapshot, client.getSnapshot);
   const [page, setPage] = useState<Page>('chat');
+  const [genvrOpened,setGenvrOpened]=useState(false);
+  const genvrOpenSeq=useRef(0);
+  useEffect(()=>{genvrOpenSeq.current++;return()=>{genvrOpenSeq.current++;};},[page,state.user?.id,state.user?.role]);
   // CODE-STORE-01: Code comes from the Store; while the desktop app has none, every way to Code opens its Store page.
   const {available:nativeEditor,missing:codeMissing}=useNabuRuntime();
   useEffect(()=>{if(page!=='code'){const {top,bottom}=editorBounds();void window.dproApp?.nabu?.select('chat',top,bottom).catch(()=>{});}},[page]);
@@ -149,6 +153,16 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
   const openRuns=(place:RunsPlace)=>{setRunsRequest(r=>({place,n:(r?.n??0)+1}));setPage('runs');};
   const [storeRequest,setStoreRequest]=useState<{updates:boolean;n:number;local?:'claude-code'|'codex';mine?:boolean;item?:string}>();
   const openCodeInStore=()=>{setStoreRequest(r=>({updates:false,item:'girru:code',n:(r?.n??0)+1}));setPage('store');};
+  const openGenvr=async()=>{
+    const seq=++genvrOpenSeq.current;
+    try{
+      const result=await client.request({method:'GET',path:GENVR_RUNTIME} as never);
+      if(seq!==genvrOpenSeq.current)return;
+      if(result.status===200&&['installed','bundled'].includes((result.body as {state?:string})?.state??'')){setGenvrOpened(true);setPage('genvr');return;}
+    }catch{/* The Store explains availability and offers the existing retry action. */}
+    if(seq!==genvrOpenSeq.current)return;
+    setStoreRequest(r=>({updates:false,item:'girru:genvr',n:(r?.n??0)+1}));setPage('store');
+  };
   const openStore=(updates=false,local?:'claude-code'|'codex',mine=false)=>{setStoreRequest(r=>({updates,local,mine,n:(r?.n??0)+1}));setPage('store');};
   // SA6: Apps is Store › My apps now; every way that opened Apps opens it.
   const openMyApps=()=>openStore(false,undefined,true);
@@ -158,7 +172,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
   const openTerminal=()=>{if(user.role!=='owner')return;setTerminalRequest(n=>n+1);setPage('chat');};
   const openMemorySettings=(target:SettingsTarget)=>{setMemoryPane(target);setSettingsTab('memory');setSettingsVisit(n=>n+1);setPage('settings');};
   const tools=[
-    {id:'genvr',label:'GenVR',icon:<Icon name="dice"/>,run:()=>setPage('genvr')},
+    {id:'genvr',label:'GenVR',icon:<Icon name="dice"/>,run:()=>void openGenvr()},
     ...(user.role==='owner'?[
       {id:'terminal',label:'Terminal',icon:<UiIcon name="terminal" size={14}/>,run:openTerminal},
       ...(nativeEditor||codeMissing?[{id:'code',label:'Code',icon:<UiIcon name="code" size={14}/>,run:nativeEditor?openCode:openCodeInStore}]:[]),
@@ -214,7 +228,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
   const browser=useBrowserApp(client,user.role==='owner');
   const owner=user.role==='owner',go=(p:Page)=>()=>setPage(p);
   const entry=(id:Page,available=true,run=go(id),badge?:string,parent?:FooterSection):FooterEntry=>({available,current:page===id,run,badge,parent});
-  const footerEntries:Record<FooterSection,FooterEntry>={chat:entry('chat'),agents:entry('agents'),library:{...entry('library',owner),current:page==='library'||page==='rules'},board:entry('board'),runs:entry('runs',user.role!=='guest'),memory:entry('memory'),approvals:entry('approvals',user.role!=='guest',go('approvals'),pendingApprovals.count?(pendingApprovals.count===100?'100+':String(pendingApprovals.count)):undefined),store:entry('store',true,go('store')),genvr:entry('genvr',true,go('genvr'),undefined,'store'),
+  const footerEntries:Record<FooterSection,FooterEntry>={chat:entry('chat'),agents:entry('agents'),library:{...entry('library',owner),current:page==='library'||page==='rules'},board:entry('board'),runs:entry('runs',user.role!=='guest'),memory:entry('memory'),approvals:entry('approvals',user.role!=='guest',go('approvals'),pendingApprovals.count?(pendingApprovals.count===100?'100+':String(pendingApprovals.count)):undefined),store:entry('store',true,go('store')),genvr:entry('genvr',true,()=>void openGenvr(),undefined,'store'),
     browser:{available:owner&&browser.available,current:page==='browser',run:go('browser'),parent:'store'},terminal:entry('terminal',owner,openTerminal,undefined,'store'),code:entry('code',owner&&(nativeEditor||codeMissing),nativeEditor?openCode:openCodeInStore,undefined,'store'),skills:entry('skills',owner,go('skills'),undefined,'library'),personalities:entry('personalities',owner,go('personalities'),undefined,'library'),specialties:entry('specialties',owner,go('specialties'),undefined,'library')};
 
   const sidebarShown = rail && (page === 'chat' || ownSidebar);
@@ -267,10 +281,10 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
       </>}
       <section className="page page-ui" hidden={page!=='code'||!!chat}><p role="status" className="fine-print">Select Code in the bottom bar to open or reconnect the project editor.</p></section>
       <section className="page page-browser" hidden={page!=='browser'}><BrowserWorkspace client={client} active={page==='browser'}/></section>
-      <section className="page page-store" hidden={page!=='store'}><StoreWorkspace client={client} active={page==='store'} sidebarSlot={slot} request={storeRequest} canBrowser={browser.available&&owner} canCode={nativeEditor&&owner} codeMissing={codeMissing&&owner} onOpenApp={id=>{if(id==='browser')setPage('browser');else if(id==='code')void (nativeEditor?openCode():openCodeInStore());else if(id==='terminal')openTerminal();else setPage(id);}} onAccounts={()=>openSettings('accounts')} footerItem={owner?id=>footerToolItem(footerPrefsNow,id,x=>footer.toggle(x)):undefined} onPermissions={()=>{if(user.role!=='owner'){setPage('agents');return;}setApprovalsPlace(r=>({place:'perms',n:(r?.n??0)+1}));setPage('approvals');}}/></section>
+      <section className="page page-store" hidden={page!=='store'}><StoreWorkspace client={client} active={page==='store'} sidebarSlot={slot} request={storeRequest} canBrowser={browser.available&&owner} canCode={nativeEditor&&owner} codeMissing={codeMissing&&owner} onOpenApp={id=>{if(id==='browser')setPage('browser');else if(id==='code')void (nativeEditor?openCode():openCodeInStore());else if(id==='terminal')openTerminal();else if(id==='genvr')void openGenvr();else setPage(id);}} onAccounts={()=>openSettings('accounts')} footerItem={owner?id=>footerToolItem(footerPrefsNow,id,x=>footer.toggle(x)):undefined} onPermissions={()=>{if(user.role!=='owner'){setPage('agents');return;}setApprovalsPlace(r=>({place:'perms',n:(r?.n??0)+1}));setPage('approvals');}}/></section>
       {user.role==='owner'&&<section className="page page-trading" hidden={page!=='trading'}><TradingWorkspace client={client} active={page==='trading'} sidebarSlot={slot} onBack={openMyApps}/></section>}
-      <section className="page page-genvr" hidden={page !== 'genvr'}><GenVRPage key={user.id} client={client} active={page === 'genvr'}/></section>
-      {page === 'settings' && <section className="page page-settings"><AppSettings key={settingsVisit} mcpOpenId={mcpOpen} onOpenStore={local=>openStore(false,local)} initialTab={settingsTab} initialMemoryPane={memoryPane} sidebarSlot={slot} active signedIn client={client} preference={appearance.preference} onTheme={appearance.setPreference} onAccount={() => openSettings('account')} onAgents={() => setPage('agents')} onOpenMemory={() => setPage('memory')} onOpenChat={() => setPage('chat')} onOpenApps={openMyApps} onOpenTool={tool => setPage(tool)} onOpenGenvr={() => setPage('genvr')} onApprovals={() => setPage('approvals')} onBoard={() => setPage('board')} onAgent={id => { setAgentFocus(f => ({ id, n: (f?.n ?? 0) + 1 })); setPage('agents'); }}/></section>}
+      <section className="page page-genvr" hidden={page !== 'genvr'}>{genvrOpened&&<GenVRPage key={user.id} client={client} active={page === 'genvr'}/>}</section>
+      {page === 'settings' && <section className="page page-settings"><AppSettings key={settingsVisit} mcpOpenId={mcpOpen} onOpenStore={local=>openStore(false,local)} initialTab={settingsTab} initialMemoryPane={memoryPane} sidebarSlot={slot} active signedIn client={client} preference={appearance.preference} onTheme={appearance.setPreference} onAccount={() => openSettings('account')} onAgents={() => setPage('agents')} onOpenMemory={() => setPage('memory')} onOpenChat={() => setPage('chat')} onOpenApps={openMyApps} onOpenTool={tool => setPage(tool)} onOpenGenvr={()=>void openGenvr()} onApprovals={() => setPage('approvals')} onBoard={() => setPage('board')} onAgent={id => { setAgentFocus(f => ({ id, n: (f?.n ?? 0) + 1 })); setPage('agents'); }}/></section>}
     </main>
     <ShellFooter controller={footer} settingsCurrent={page==='settings'} settingsAlert={backupFailed?'the last backup failed':undefined} onSettings={()=>backupFailed?openSettings('backups'):setPage('settings')} onCustomize={()=>openSettings('general')}
       status={mode === 'mock' ? <span className="status-item"><span className={`status-dot ${mode}`} aria-hidden="true"/>Offline practice — fictional data</span>

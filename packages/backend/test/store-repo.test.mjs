@@ -11,6 +11,7 @@ const backendDir = process.cwd();
 const dir = mkdtempSync(join(tmpdir(), 'ap-store-repo-'));
 process.env.AGENT_PLAYER_DATA_DIR = join(dir, '.data');
 process.env.HOME = dir;
+process.env.GIRRU_GENVR_BUNDLED = '0'; delete process.env.GIRRU_APP_RUNTIMES_DIR;
 process.env.DATABASE_PATH = join(dir, '.data', 'agent-player.db');
 process.env.JWT_SECRET = 'x'.repeat(64); // throwaway, test only
 process.env.NODE_ENV = 'test';
@@ -64,7 +65,7 @@ test('the Store window: the repository words for Girru apps; an item without a p
   const repo = async () => ({ index: fromRepo(REPO), asOf: '2026-10-29T10:00:00.000Z', fresh: true });
   const store = await readStore('owner-1', localCatalogue({ home: dir, repo }));
   const genvr = store.items.find((x) => x.id === 'girru:genvr');
-  assert.equal(genvr.description, 'GenVR as the repository says it'); assert.equal(genvr.state, 'included');
+  assert.equal(genvr.description, 'GenVR as the repository says it'); assert.equal(genvr.state, 'elsewhere');
   const notes = store.items.find((x) => x.id === 'store:notes');
   assert.equal(notes.state, 'elsewhere', 'no package: nothing to add'); assert.equal(notes.present, false);
   assert.ok(store.collections.find((c) => c.id === 'new').items.includes('store:notes'));
@@ -72,7 +73,7 @@ test('the Store window: the repository words for Girru apps; an item without a p
   const r = await installFromStore('owner-1', 'store:notes', notes.hash);
   assert.equal(r.ok, false); assert.equal(r.code, 'not_found');
   const offline = await readStore('owner-1', localCatalogue({ home: dir, repo: async () => ({ index: null, asOf: null, fresh: false }) }));
-  assert.ok(offline.limited.includes('store')); assert.ok(offline.items.some((x) => x.id === 'girru:genvr'), 'the apps that come with Girru are always there');
+  assert.ok(offline.limited.includes('store')); assert.ok(offline.items.some((x) => x.id === 'girru:genvr'), 'the built-in app cards remain visible even when the runtime is missing');
 });
 
 test('skills and specialties that come with Girru show as installed; others wait for a package', async () => {

@@ -26,7 +26,7 @@ const out = path.join(here, 'payload');
 /** Backend parts the server needs at run time (no tests, no one-off maintenance scripts). */
 const BACKEND_PARTS = ['extensions', 'skills', 'python-scripts'];
 /** Bridge parts: its scripts and the plain-JS contracts it requires. */
-const CORE_UI_SCRIPTS = ['application-server.cjs', 'build-artifacts.cjs', 'preview.cjs', 'memory-response.cjs', 'genvr-assets.cjs', 'genvr-studio-host.cjs', 'prepare-genvr.cjs', 'genvr-host.js', 'voice-library-host.cjs', 'voice-runtime.cjs', 'chat-voice-host.cjs', 'chat-voice-worker.py', 'portable-voice-host.cjs', 'portable-voice-worker.py', 'portable-voice-models.json'];
+const CORE_UI_SCRIPTS = ['application-server.cjs', 'build-artifacts.cjs', 'preview.cjs', 'memory-response.cjs', 'genvr-assets.cjs', 'genvr-studio-host.cjs', 'genvr-runtime-path.cjs', 'genvr-host.js', 'genvr-avatar-host.js', 'voice-library-host.cjs', 'voice-runtime.cjs', 'chat-voice-host.cjs', 'chat-voice-worker.py', 'portable-voice-host.cjs', 'portable-voice-worker.py', 'portable-voice-models.json'];
 
 function parseArgs(argv) {
   const options = { node: process.execPath, backendModules: path.join(packages, 'backend', 'node_modules'), rootModules: path.join(packages, '..', 'node_modules'), coreUiDist: path.join(packages, 'core-ui', 'dist') };
@@ -54,16 +54,6 @@ function refuseDevAccounts(coreUi, buildDir) {
   }
 }
 
-/** The prepared, pinned GenVR SDK folder; refuses a missing or different one instead of building without GenVR. */
-function requireGenVR(coreUi) {
-  const { VERSION, SHA256 } = require(path.join(coreUi, 'scripts', 'prepare-genvr.cjs'));
-  const genvr = path.join(coreUi, 'vendor', 'genvr');
-  let manifest = null;
-  try { manifest = JSON.parse(fs.readFileSync(path.join(genvr, 'manifest.json'), 'utf8')); } catch { /* not prepared */ }
-  if (!manifest || manifest.version !== VERSION || manifest.archiveSha256 !== SHA256) throw new Error(`GenVR SDK ${VERSION} is not prepared in core-ui/vendor/genvr (run: node packages/core-ui/scripts/prepare-genvr.cjs <3d-world-sdk-${VERSION}.tgz>)`);
-  return genvr;
-}
-
 /** Dependencies of the backend's package.json that none of the module folders holds. */
 function missingPackages(backendDir, moduleDirs) {
   const deps = Object.keys(JSON.parse(fs.readFileSync(path.join(backendDir, 'package.json'), 'utf8')).dependencies || {});
@@ -75,6 +65,8 @@ function stageUiBridge(coreUi, ui) {
   fs.mkdirSync(path.join(ui, 'scripts'), { recursive: true });
   fs.copyFileSync(path.join(coreUi, 'package.json'), path.join(ui, 'package.json'));
   for (const file of CORE_UI_SCRIPTS) fs.copyFileSync(path.join(coreUi, 'scripts', file), path.join(ui, 'scripts', file));
+  // The source bridge's proxy becomes a standalone copy of the shared path validator.
+  fs.copyFileSync(path.join(coreUi, '..', 'backend', 'src', 'config', 'genvr-runtime-path.cjs'), path.join(ui, 'scripts', 'genvr-runtime-path.cjs'));
   copy(path.join(coreUi,'scripts','voice-engine'),path.join(ui,'scripts','voice-engine'),src=>fs.statSync(src).isDirectory()||/\.(mjs|py|json|txt)$/.test(src));
   copy(path.join(coreUi, 'src'), path.join(ui, 'src'), src => fs.statSync(src).isDirectory() || /\.(c?js)$/.test(src));
 }
@@ -133,8 +125,7 @@ function stage(options) {
   fs.mkdirSync(path.join(ui, 'dist'));
   fs.copyFileSync(path.join(options.coreUiDist, 'candidate.json'), path.join(ui, 'dist', 'candidate.json'));
   copy(path.join(options.coreUiDist, pointer.buildId), path.join(ui, 'dist', pointer.buildId));
-  // GenVR (Studio, worlds, account link) runs from the pinned SDK: an app without it opens a broken GenVR page.
-  copy(requireGenVR(coreUi), path.join(ui, 'vendor', 'genvr'), noSecrets);
+  // GenVR is installed through the Store; no SDK bytes go into the core payload.
   refuseDevAccounts(coreUi, path.join(ui, 'dist', pointer.buildId));
   return out;
 }
@@ -148,4 +139,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { stage, parseArgs, BACKEND_PARTS, refuseDevAccounts, missingPackages, stageUiBridge, requireGenVR };
+module.exports = { stage, parseArgs, BACKEND_PARTS, refuseDevAccounts, missingPackages, stageUiBridge };

@@ -46,8 +46,8 @@ export function runtimeUrlAllowed(value: string): boolean {
   let u: URL;
   try { u = new URL(value); } catch { return false; }
   if (u.username || u.password || u.search || u.hash) return false;
-  if (u.protocol === 'http:' && u.hostname === '127.0.0.1' && (process.env.GIRRU_STORE_URL ?? '').startsWith('http://127.0.0.1:')) return /\.tar\.gz$/.test(u.pathname);
-  return u.protocol === 'https:' && u.hostname === 'github.com' && !u.port && /^\/(?:Dpro-at\/girru-store|9mtm\/nabu-code)\/releases\/download\/[A-Za-z0-9_.+-]+\/[A-Za-z0-9_.+-]+\.tar\.gz$/.test(u.pathname);
+  if (u.protocol === 'http:' && u.hostname === '127.0.0.1' && (process.env.GIRRU_STORE_URL ?? '').startsWith('http://127.0.0.1:')) return /(?:\.tar\.gz|\.tgz)$/.test(u.pathname);
+  return u.protocol === 'https:' && u.hostname === 'github.com' && !u.port && (/^\/(?:Dpro-at\/girru-store|9mtm\/nabu-code)\/releases\/download\/[A-Za-z0-9_.+-]+\/[A-Za-z0-9_.+-]+\.tar\.gz$/.test(u.pathname) || /^\/Dpro-at\/genvr-world-sdk\/releases\/download\/v([0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?)\/3d-world-sdk-\1\.tgz$/.test(u.pathname));
 }
 /** A runtime as the repository lists it; anything outside these rules is refused. */
 export function parseRuntime(raw: unknown): StoreRuntime {

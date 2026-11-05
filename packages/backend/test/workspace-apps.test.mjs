@@ -38,3 +38,20 @@ test('a failed source is unavailable instead of fabricating a disconnected app l
  const unavailable=Fastify();unavailable.decorateRequest('authUser',null);unavailable.addHook('onRequest',async request=>{request.authUser={id:'apps-owner',role:'owner'};});await unavailable.register(workspaceAppsRoutes,{sources:{servers:async()=>{throw Error('PRIVATE-FAILURE');},account:async()=>({status:'not_connected'}),state:()=>''}});
  const r=await unavailable.inject({url:'/api/apps'});assert.equal(r.statusCode,503);assert.deepEqual(r.json(),{code:'apps_unavailable'});await unavailable.close();
 });
+
+test('GenVR runtime removal is separate from the preserved account connection',async()=>{
+ const source={servers:async()=>[],account:async()=>({status:'connected'}),state:()=>'',genvr:()=>null};
+ const item=async()=> (await listWorkspaceApps('apps-owner',source)).items.find(x=>x.id==='genvr');
+ assert.equal((await item()).runtime,'missing');assert.equal((await item()).removable,false);
+ source.genvr=()=>({source:'installed',version:'0.3.0-preview.17'});
+ assert.equal((await item()).runtime,'installed');assert.equal((await item()).removable,true);assert.equal((await item()).state,'connected');
+ source.genvr=()=>({source:'bundled',version:'0.3.0-preview.17'});
+ assert.equal((await item()).removable,false);
+});
+
+test('real My apps metadata remains available without an SDK after removal',async()=>{
+ const oldRoot=process.env.GIRRU_APP_RUNTIMES_DIR,oldBundled=process.env.GIRRU_GENVR_BUNDLED;
+ process.env.GIRRU_APP_RUNTIMES_DIR=path.join(root,'empty-runtimes');process.env.GIRRU_GENVR_BUNDLED='0';
+ try{const response=await get();assert.equal(response.statusCode,200);assert.equal(response.json().items.find(x=>x.id==='genvr').runtime,'missing');}
+ finally{if(oldRoot===undefined)delete process.env.GIRRU_APP_RUNTIMES_DIR;else process.env.GIRRU_APP_RUNTIMES_DIR=oldRoot;if(oldBundled===undefined)delete process.env.GIRRU_GENVR_BUNDLED;else process.env.GIRRU_GENVR_BUNDLED=oldBundled;}
+});

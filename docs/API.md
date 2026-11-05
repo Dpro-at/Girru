@@ -210,12 +210,15 @@ Each answers `404 not_found` while the switch is off. Agents never mark a memory
 | `POST /api/memory/documents/sources/:id/reindex` | look at the files again now (background; `202`) |
 | `POST /api/memory/documents/read-pdf` | `{ data }` (base64, 10 MB at most) → `{ text }` with `--- page N ---` markers, or `{ reason }`; nothing is kept (chat attachments) |
 
-### The Code app (owner only)
+### Optional app runtimes (owner only except local program metadata)
 
 | Route | Body / answer |
 |---|---|
 | `GET /api/apps/code` | `{ state, platform, version, update, available, job }`; `state` is `installed`, `missing`, `unsupported` (no archive for this platform), `bundled` (a developer build that includes Code) or `unavailable`; `update` names a newer version when there is one; `job` is a running install |
-| `POST /api/store/install` | `{ id: "girru:code" }` adds or updates Code like any Store app: download, size and SHA-256 check, unpack. Follow it with `GET /api/store/install/:job` |
+| `GET /api/apps/genvr` | Owner-only, loopback-only runtime/install metadata: `{ state, platform, version, update, available, job }`; same state vocabulary as Code; only the SDK version pinned by this Girru build can be installed |
+| `GET /api/genvr/runtime` | Local UI bridge only: `{ state: "installed" \| "bundled" \| "missing", version }` describes the runtime loaded by this bridge; no account, paths or job details; GET without query/body |
+| `POST /api/store/install` | `{ id: "girru:genvr" \| "girru:code", hash }` adds the reviewed app runtime using the exact catalogue consent hash (download, size and SHA-256 check, unpack); follow `GET /api/store/install/:job`; existing job progress reports whether a restart is automatic or manual |
+| `POST /api/store/uninstall` | `{ id: "girru:genvr" }` removes only the managed runtime and closes its managed MCP connection; worlds, projects and account settings remain; removal retains grants, but re-adding or moving the managed launch resets agent grants for review; a restart may be required |
 
 ### Open in Code (owner only)
 
