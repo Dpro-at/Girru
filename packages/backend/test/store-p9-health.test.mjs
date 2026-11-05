@@ -12,7 +12,7 @@
 // Throwaway DB + cwd + HOME, random test-only secrets, no network, no real model.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, realpathSync, readFileSync, statSync, existsSync, openSync, closeSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, readFileSync, fstatSync, existsSync, openSync, closeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -131,7 +131,9 @@ test('coding apps: a handoff waits while Girru is away and is sent when it is ba
   await other.call('handoff_write', { done: ['C'] });
   await b.call('handoff_write', { done: ['D'], refuse: true });
   const file = join(configDir, Q.QUEUE_FILE);
-  assert.equal(statSync(file).mode & 0o077, 0, 'owner only');
+  const initial = openSync(file, 'r');
+  try { assert.equal(fstatSync(initial).mode & 0o077, 0, 'owner only'); }
+  finally { closeSync(initial); }
   assert.equal(Q.queuedHandoffs(configDir), 4);
   process.env.GIRRU_STORE_P9 = '1';
   assert.equal((await H.memoryHealth(OWNER)).rows.find((r) => r.id === 'coding_apps').word, '4 handoffs waiting');
