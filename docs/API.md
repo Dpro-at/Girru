@@ -494,3 +494,52 @@ Get token from login response and store in `localStorage`.
 - 403: Forbidden
 - 404: Not found
 - 500: Server error
+
+
+### Chat file previews and command sessions
+
+The owner-only project pane routes accept a relative `path` within the selected project:
+`GET /api/chat/projects/:id/file`, `/pdf`, and `/media`.
+Text previews are limited to 512 KB. The media route returns `{path,size,mime,base64}`
+for supported images (PNG/JPEG/GIF/WebP/SVG), video (MP4/WebM), and audio (MP3/WAV/M4A),
+or `{path,size,reason}` when hidden, unavailable, unsupported, or over the 32 MB preview limit.
+Secret files and symlink targets outside the project remain refused. SVG is displayed as an
+image, never as an active document. CSV and JSON previews are read-only; CSV formulas are text.
+
+`POST /api/terminal/sessions` optionally accepts `command` (1–16,000 characters, no NUL)
+with the existing `projectId`, `cols`, and `rows`. The owner reviews and approves the exact
+command in chat before creation. This starts a dedicated command session in the same Girru
+PTY manager, using the existing owner/loopback checks, project folder and environment rules.
+Its stream exit event is the actual command-shell exit. Opening the Terminal pane attaches
+the same controller and transcript, and does not create or execute another command.
+`POST /api/terminal/sessions/:id/stop` requests termination without discarding the transcript;
+the UI waits for the real exit event. Closing a terminal still uses DELETE.
+This does not grant agents additional execution permissions.
+
+`GET /api/chat/projects/:id/office?path=…` previews DOCX/XLSX inside the same owner-only
+project pane. The response is `{path,kind,parts:[{name,text}],images:[{name,mime,base64}],truncated}`
+or `{path,reason}`. The file cap is 16 MB, selected XML is bounded to 2 MB/4,096 parts,
+and the projected response stays below 3 MB. Archive members are read in memory with
+size and CRC checks; no files are extracted. Encrypted, split/ZIP64, malformed and
+DTD/entity-bearing packages are refused. External links, macros and embedded programs
+are not loaded or executed.
+DOCX supports basic paragraphs, emphasis, headings, raster images and tables; layout
+is approximate. XLSX shows visible sheets/rows and saved cell values, with search and
+copy-cell, without recalculating formulas or loading external data. Preview limits are
+20 sheets, 1,000 rows, 100 columns and 20,000 cells per sheet. Advanced formatting,
+charts and legacy DOC/XLS files are not supported.
+
+The same `/office` route also previews PPTX. It reads the presentation's ordered slide
+relationships and supports up to 40 visible slides, 200 basic shapes per slide, plain/rich
+text and embedded raster images. The viewer offers previous/next, slide selection and
+arrow keys. Direct shape coordinates are retained where available; slides depending on
+layout inheritance use a simplified content layout. Master themes, grouped shapes,
+charts, embedded programs, hyperlinks, transitions and animation are not reproduced or
+executed. Hidden slides are omitted. All archive, XML, image and response limits above
+remain in force. Legacy PPT is not supported.
+
+Format references: [Office Open XML document structure](https://learn.microsoft.com/en-us/office/open-xml/word/structure-of-a-wordprocessingml-document),
+[SpreadsheetML structure](https://learn.microsoft.com/en-us/office/open-xml/spreadsheet/structure-of-a-spreadsheetml-document),
+and [ZIP format specification](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT).
+
+Command confirmation shows the actual script, interpreter and working folder. Hidden/control formatting characters are refused (tabs and newlines are allowed); Run is disabled for fence languages that do not match the host shell. Completed transcripts expire after five minutes and may be evicted earlier when a new terminal needs a slot. Running command sessions have no input-idle timeout. Stop requests TERM then KILL after three seconds and retains the authoritative exit frame. Windows command sessions use PowerShell NoProfile/EncodedCommand.

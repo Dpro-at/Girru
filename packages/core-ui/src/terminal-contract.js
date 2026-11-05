@@ -46,7 +46,7 @@ export function terminalPath(path) {
   if (path === '/api/terminal/sessions') return { kind: 'create' };
   let m = /^\/api\/terminal\/sessions\/([^/?#]+)$/.exec(path);
   if (m) return ID.test(m[1]) ? { kind: 'close', id: m[1] } : null;
-  m = /^\/api\/terminal\/sessions\/([^/?#]+)\/(input|resize)$/.exec(path);
+  m = /^\/api\/terminal\/sessions\/([^/?#]+)\/(input|resize|stop)$/.exec(path);
   if (m) return ID.test(m[1]) ? { kind: m[2], id: m[1] } : null;
   m = /^\/api\/terminal\/sessions\/([^/?#]+)\/stream(?:\?after=(0|[1-9]\d{0,12}))?$/.exec(path);
   if (m) return ID.test(m[1]) ? { kind: 'stream', id: m[1], after: Number(m[2] ?? 0) } : null;
@@ -60,8 +60,10 @@ export function allowedTerminal(method, path, body) {
   switch (p.kind) {
     case 'info': case 'stream': return method === 'GET' && body === undefined;
     case 'prefs': return (method === 'GET' && body === undefined) || (method === 'PUT' && record(body) && Object.keys(body).length > 0 && Object.entries(body).every(([k, v]) => terminalPrefOk(k, v)));
-    case 'create': return method === 'POST' && record(body) && onlyKeys(body, ['cols', 'rows', 'projectId'])
+    case 'create': return method === 'POST' && record(body) && onlyKeys(body, ['cols', 'rows', 'projectId', 'command'])
+      && (body.command === undefined || (safeTerminalCommand(body.command)))
       && (body.cols === undefined || size(body.cols, 10, 500)) && (body.rows === undefined || size(body.rows, 2, 200)) && (body.projectId === undefined || (typeof body.projectId === 'string' && ID.test(body.projectId)));
+    case 'stop': return method === 'POST' && body === undefined;
     case 'input': return method === 'POST' && record(body) && onlyKeys(body, ['data']) && typeof body.data === 'string' && body.data.length > 0 && body.data.length <= TERMINAL_INPUT_CHARS;
     case 'resize': return method === 'POST' && record(body) && onlyKeys(body, ['cols', 'rows']) && size(body.cols, 10, 500) && size(body.rows, 2, 200);
     case 'close': return method === 'DELETE' && body === undefined;
@@ -79,7 +81,7 @@ export function terminalResponse(path, status, body) {
   if (status !== 200 && status !== 201) { const code = record(body) ? body.code : undefined; return (ERRORS[status] ?? []).includes(code) ? { code } : null; }
   if (!record(body)) throw Error('protocol');
   if (p.kind === 'prefs') return { prefs: terminalPrefs(body.prefs) };
-  if (p.kind === 'info') return { enabled: body.enabled === true, sessions: Array.isArray(body.sessions) ? body.sessions.filter(s => record(s) && typeof s.id === 'string' && ID.test(s.id)).slice(0, 20).map(s => ({ id: s.id, exited: s.exited === true })) : [] };
+  if (p.kind === 'info') return { enabled: body.enabled === true, shell: typeof body.shell === 'string' ? body.shell.split(/[\\/]/).pop().slice(0, 40) : '', cwd: typeof body.cwd === 'string' ? body.cwd.slice(0, 1024) : '', sessions: Array.isArray(body.sessions) ? body.sessions.filter(s => record(s) && typeof s.id === 'string' && ID.test(s.id)).slice(0, 20).map(s => ({ id: s.id, exited: s.exited === true })) : [] };
   if (p.kind === 'create') {
     if (typeof body.id !== 'string' || !ID.test(body.id)) throw Error('protocol');
     return { id: body.id, cols: size(body.cols, 10, 500) ? body.cols : 80, rows: size(body.rows, 2, 200) ? body.rows : 24,
@@ -131,6 +133,19 @@ function projectTerminalFrame(event, x) {
   if (!record(x)) return null;
   const type = event || x.type;
   if (type === 'output' && Number.isSafeInteger(x.seq) && x.seq > 0 && typeof x.data === 'string') return { type: 'output', seq: x.seq, data: x.data };
-  if (type === 'exit') return { type: 'exit', exitCode: Number.isInteger(x.exitCode) ? x.exitCode : -1 };
+  if (type === 'exit') return { type: 'exit', exitCode: Number.isInteger(x.exitCode) ? x.exitCode : -1, ...(Number.isInteger(x.signal) && x.signal > 0 && x.signal <= 255 ? { signal: x.signal } : {}) };
   return null;
+}
+
+
+export function safeTerminalCommand(command) {
+  return typeof command === 'string' && !!command.trim() && command.length <= 16000 && !/[\p{Cc}\p{Cf}\u2028\u2029]/u.test(command.replace(/[\n\t]/g, ''));
+}
+export function terminalLanguageMatches(language, shell) {
+  const name = String(shell).split(/[\\/]/).pop().replace(/\.exe$/i, '').toLowerCase();
+  const lang = String(language || 'console').toLowerCase();
+  if (['shell','console','terminal'].includes(lang)) return !!name;
+  if (['powershell','ps1'].includes(lang)) return ['powershell','pwsh'].includes(name);
+  if (lang === 'sh') return ['sh','dash'].includes(name);
+  return lang === name;
 }

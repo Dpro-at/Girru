@@ -175,6 +175,12 @@ test('source boundary: only injected session transport may network; no browser s
       assert.deepEqual(source.match(/https:\/\/[^']+/g), ['https://girru.dev/app']);
       source = source.replace(/https:\/\/[^']+/g, 'app-page');
     }
+    if (name === 'office-content.ts') {
+      // XML namespace identifiers select attributes; they are never network targets.
+      const namespaces = source.match(/https?:\/\/[^']*/g);
+      assert.deepEqual(namespaces, ['http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'http://purl.oclc.org/ooxml/officeDocument/relationships']);
+      source = source.replace(/https?:\/\/[^']*/g, 'xml-namespace');
+    }
     if (name === 'entry-client.ts') assertEntryBinding(source);
     else if (name !== 'session.ts') assert.doesNotMatch(source, /\bfetch\b|https?:\/\//, name);
     else { assert.match(source, /fetcher: typeof fetch/); assert.doesNotMatch(source, /\bfetch\s*\(/); }

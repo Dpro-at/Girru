@@ -15,7 +15,7 @@ export type WireDiff = { path: string; diff: string; truncated: boolean; binary:
 export type WireEntry = { name: string; kind: 'dir' | 'file'; size: number | null };
 export type WireTree = { path: string; truncated: boolean; entries: WireEntry[] };
 export type WireFile = { path: string; text: string | null; size: number; binary: boolean; hidden: boolean; truncated: boolean };
-export function panePath(id: string, kind: 'diff' | 'tree' | 'file' | 'pdf', rel?: string): string;
+export function panePath(id: string, kind: 'diff' | 'tree' | 'file' | 'pdf' | 'media' | 'office', rel?: string): string;
 export const TRANSCRIBE_PATH: '/api/chat/transcribe';
 export const MAX_AUDIO_CHARS: number;
 export const MAX_IMAGE_CHARS: number;

@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const { createApplicationServer, allowed, LIMIT, RESPONSE_LIMIT } = require('../scripts/application-server.cjs');
 const { allowedRequest, SessionClient, createSameOriginTransport } = require('../src/session.ts');
 const { HEADERS: PREVIEW_HEADERS } = require('../scripts/preview.cjs');
-const HEADERS = {...PREVIEW_HEADERS, 'Permissions-Policy':'camera=(), microphone=(self), geolocation=()', 'Content-Security-Policy':PREVIEW_HEADERS['Content-Security-Policy'] + "; media-src 'self' blob:"};
+const HEADERS = {...PREVIEW_HEADERS, 'Permissions-Policy':'camera=(), microphone=(self), geolocation=()', 'Content-Security-Policy':PREVIEW_HEADERS['Content-Security-Policy']};
 const listen = server => new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', () => resolve(server.address().port)); });
 const close = server => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
 const token = 'fiction-only-token';
@@ -434,4 +434,13 @@ test('schedule definition bridge returns only masked readback and paused save me
  value={jobId:id,revision:2,enabled:false,definitionHash};const write=await s.request(path,{method:'PUT',body:{expectedRevision:1,changes:{name:'Renamed'}}});assert.equal(write.status,200);assert.equal(write.headers['set-cookie'],undefined);assert.deepEqual(JSON.parse(write.text),value);
  const count=s.calls.length;assert.equal((await s.request(path,{method:'PUT',body:{expectedRevision:1,changes:{enabled:true}}})).status,400);assert.equal(s.calls.length,count);
  value={...value,token:'must-not-become-auth'};assert.equal((await s.request(path,{method:'PUT',body:{expectedRevision:1,changes:{name:'Renamed'}}})).status,502);
+});
+
+test('only media reads have the bounded 32 MB base64 allowance, ordinary responses keep the smaller cap', async t => {
+  const content='A'.repeat(RESPONSE_LIMIT+4);
+  const s=await setup(t,(_req,res)=>res.end(JSON.stringify({path:'large.png',size:content.length*3/4,mime:'image/png',base64:content})));
+  const id='0f8fad5b-d9cb-469f-a165-70867728950e';
+  const r=await s.request(`/api/chat/projects/${id}/media?path=large.png`);
+  assert.equal(r.status,200);assert.equal(JSON.parse(r.text).base64.length,content.length);
+  const small=await s.request('/api/auth/me');assert.notEqual(small.status,200);
 });

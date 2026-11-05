@@ -28,6 +28,7 @@ export function terminalEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
 
 /** The parts of node-pty we use (lets tests pass a fake). */
 export interface PtyProcess {
+  readonly pid?: number;
   onData(listener: (data: string) => void): { dispose(): void } | void;
   onExit(listener: (e: { exitCode: number; signal?: number }) => void): { dispose(): void } | void;
   write(data: string): void;
@@ -85,7 +86,7 @@ export function clampSize(cols: unknown, rows: unknown): { cols: number; rows: n
 }
 
 export interface OutputChunk { seq: number; data: string }
-type Listener = (event: { type: 'data'; chunk: OutputChunk } | { type: 'exit'; exitCode: number }) => void;
+type Listener = (event: { type: 'data'; chunk: OutputChunk } | { type: 'exit'; exitCode: number; signal?: number }) => void;
 
 interface Session {
   id: string;
@@ -95,8 +96,11 @@ interface Session {
   bufferedBytes: number;
   nextSeq: number;
   exitCode: number | null;
+  signal?: number;
   listeners: Set<Listener>;
   idleTimer: NodeJS.Timeout | null;
+  stopTimer: NodeJS.Timeout | null;
+  command: boolean;
   createdAt: string;
   shell: string;
 }
@@ -104,6 +108,8 @@ interface Session {
 export interface TerminalManagerOptions {
   spawn?: PtySpawn;
   idleTimeoutMs?: number;
+  exitRetentionMs?: number;
+  stopGraceMs?: number;
   env?: NodeJS.ProcessEnv;
   os?: NodeJS.Platform;
   cwd?: string;
@@ -137,10 +143,18 @@ async function loadNodePty(): Promise<PtySpawn> {
   return spawn as PtySpawn;
 }
 
+/** Permit multiline scripts but refuse invisible execution-changing control/format bytes. */
+export function safeTerminalCommand(command: unknown): command is string {
+  return typeof command === 'string' && !!command.trim() && command.length <= 16000 && !/[\p{Cc}\p{Cf}\u2028\u2029]/u.test(command.replace(/[\n\t]/g, ''));
+}
+
 export class TerminalManager {
   private readonly sessions = new Map<string, Session>();
+  private readonly opening = new Map<string, number>();
   private spawnFn: PtySpawn | null;
   private readonly idleTimeoutMs: number;
+  private readonly exitRetentionMs: number;
+  private readonly stopGraceMs: number;
   private readonly env: NodeJS.ProcessEnv;
   private readonly os: NodeJS.Platform;
   private readonly cwd: string | undefined;
@@ -148,6 +162,8 @@ export class TerminalManager {
   constructor(options: TerminalManagerOptions = {}) {
     this.spawnFn = options.spawn ?? null;
     this.idleTimeoutMs = options.idleTimeoutMs ?? IDLE_TIMEOUT_MS;
+    this.exitRetentionMs = options.exitRetentionMs ?? 5 * 60 * 1000;
+    this.stopGraceMs = options.stopGraceMs ?? 3000;
     this.env = options.env ?? process.env;
     this.os = options.os ?? platform();
     this.cwd = options.cwd;
@@ -160,31 +176,48 @@ export class TerminalManager {
   }
 
   /** `size.cwd`: a folder already checked by the caller (a project folder); otherwise home. */
-  async create(ownerId: string, size: { cols?: unknown; rows?: unknown; cwd?: string; extraEnv?: Record<string, string> } = {}) {
+  async create(ownerId: string, size: { cols?: unknown; rows?: unknown; cwd?: string; extraEnv?: Record<string, string>; command?: string } = {}) {
     if (!terminalEnabled(this.env)) throw new TerminalError('disabled', 'The terminal is turned off on this server');
-    if (this.list(ownerId).length >= MAX_SESSIONS_PER_OWNER) {
+    // Finished transcripts are retained briefly, but never block a new live session.
+    while ((this.list(ownerId).length + (this.opening.get(ownerId) ?? 0)) >= MAX_SESSIONS_PER_OWNER) {
+      const expired = [...this.sessions.values()].find(s => s.ownerId === ownerId && s.exitCode !== null);
+      if (!expired) break;
+      this.destroy(expired);
+    }
+    if ((this.list(ownerId).length + (this.opening.get(ownerId) ?? 0)) >= MAX_SESSIONS_PER_OWNER) {
       throw new TerminalError('limit', `At most ${MAX_SESSIONS_PER_OWNER} terminals per account`);
     }
+    if (size.command !== undefined && (!safeTerminalCommand(size.command))) throw new TerminalError('invalid', 'Invalid command');
+    this.opening.set(ownerId, (this.opening.get(ownerId) ?? 0) + 1);
+    try {
     const spawn = this.spawnFn ?? (this.spawnFn = await loadNodePty());
     const { cols, rows } = clampSize(size.cols, size.rows);
     const shell = defaultShell(this.os, this.env);
     // CHAT-BUILD-01 stage 3: a project's terminal also gets the project's own variables (checked names).
     const env = { ...shellEnv(this.os, this.env), ...(size.extraEnv ?? {}) };
     const cwd = size.cwd ?? this.cwd ?? (env.HOME || env.USERPROFILE || homedir());
-    const pty = spawn(shell.file, shell.args, { name: 'xterm-256color', cols, rows, cwd, env });
+    const args = size.command === undefined ? shell.args : this.os === 'win32' ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(size.command, 'utf16le').toString('base64')] : [/^(?:t?csh)$/.test(shell.file.split('/').at(-1) ?? '') ? '' : '-l', '-c', '--', size.command].filter(Boolean);
+    const pty = spawn(shell.file, args, { name: 'xterm-256color', cols, rows, cwd, env });
     const session: Session = {
       id: randomUUID(), ownerId, pty, chunks: [], bufferedBytes: 0, nextSeq: 1, exitCode: null,
-      listeners: new Set(), idleTimer: null, createdAt: new Date().toISOString(), shell: shell.file,
+      listeners: new Set(), idleTimer: null, stopTimer: null, command: size.command !== undefined, createdAt: new Date().toISOString(), shell: shell.file,
     };
     pty.onData(data => this.push(session, data));
-    pty.onExit(({ exitCode }) => {
-      session.exitCode = exitCode;
-      for (const l of session.listeners) l({ type: 'exit', exitCode });
+    pty.onExit(({ exitCode, signal }) => {
+      session.exitCode = exitCode; session.signal = signal;
+      for (const l of session.listeners) l({ type: 'exit', exitCode, ...(signal ? { signal } : {}) });
       this.clearIdle(session);
+      if (session.stopTimer) clearTimeout(session.stopTimer);
+      session.stopTimer = null;
+      if (this.sessions.get(session.id) === session) {
+        session.idleTimer = setTimeout(() => this.destroy(session), this.exitRetentionMs);
+        session.idleTimer.unref?.();
+      }
     });
     this.sessions.set(session.id, session);
     this.touch(session);
     return { id: session.id, shell: shell.file, cols, rows, cwd };
+    } finally { const count = (this.opening.get(ownerId) ?? 1) - 1; if (count) this.opening.set(ownerId, count); else this.opening.delete(ownerId); }
   }
 
   /** Owner-scoped lookup: another account's session id reads as not found. */
@@ -221,11 +254,22 @@ export class TerminalManager {
     const s = this.get(ownerId, id);
     for (const chunk of s.chunks) if (chunk.seq > afterSeq) listener({ type: 'data', chunk });
     if (s.exitCode !== null) {
-      listener({ type: 'exit', exitCode: s.exitCode });
+      listener({ type: 'exit', exitCode: s.exitCode, ...(s.signal ? { signal: s.signal } : {}) });
       return () => {};
     }
     s.listeners.add(listener);
     return () => { s.listeners.delete(listener); };
+  }
+
+  /** Stop this session without discarding its exit event or transcript. */
+  stop(ownerId: string, id: string) {
+    const s = this.get(ownerId, id);
+    if (s.exitCode !== null || s.stopTimer) return;
+    this.kill(s, 'SIGTERM');
+    if (s.exitCode === null && this.os !== 'win32') {
+      s.stopTimer = setTimeout(() => { s.stopTimer = null; if (s.exitCode === null) this.kill(s, 'SIGKILL'); }, this.stopGraceMs);
+      s.stopTimer.unref?.();
+    }
   }
 
   close(ownerId: string, id: string) {
@@ -237,12 +281,29 @@ export class TerminalManager {
     for (const s of [...this.sessions.values()]) this.destroy(s);
   }
 
+  /** PTYs own a process group on POSIX; terminate its foreground descendants too. */
+  private kill(s: Session, signal: string) {
+    if (this.os === 'win32') {
+      try { s.pty.kill(); } catch { /* the native handle may already be closing */ }
+      return;
+    }
+    if (Number.isInteger(s.pty.pid) && s.pty.pid! > 1) {
+      try { process.kill(-s.pty.pid!, signal as NodeJS.Signals); return; } catch { /* fall back to the PTY handle */ }
+    }
+    try { s.pty.kill(signal); } catch { /* an already-exiting PTY still reports its exit asynchronously */ }
+  }
+
+  context() {
+    const env = shellEnv(this.os, this.env);
+    return { shell: defaultShell(this.os, this.env).file.split(/[\\/]/).at(-1) ?? '', cwd: this.cwd ?? env.HOME ?? env.USERPROFILE ?? homedir() };
+  }
+
   private destroy(s: Session) {
     this.clearIdle(s);
     this.sessions.delete(s.id);
-    if (s.exitCode === null) {
-      try { s.pty.kill(); } catch { /* already gone */ }
-    }
+    if (s.stopTimer) clearTimeout(s.stopTimer);
+    s.stopTimer = null;
+    if (s.exitCode === null) this.kill(s, 'SIGKILL');
     s.listeners.clear();
   }
 
@@ -258,6 +319,7 @@ export class TerminalManager {
 
   private touch(s: Session) {
     this.clearIdle(s);
+    if (s.command && s.exitCode === null) return;
     s.idleTimer = setTimeout(() => this.destroy(s), this.idleTimeoutMs);
     s.idleTimer.unref?.();
   }

@@ -31,7 +31,7 @@ import { TerminalPane } from './TerminalPane';
 import { MicController } from './mic';
 import type { PaneName } from './panes';
 import type { SessionClient } from './session';
-import { Markdown, MarkdownActionsContext, terminalLine } from './markdown';
+import { Markdown, MarkdownActionsContext } from './markdown';
 import { fileMenu, openFile as openInCodeFile } from './CodeOpen';
 import { joinPath } from './code-open';
 import { UiIcon } from './ui-icons';
@@ -271,9 +271,11 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [panes, setPanes] = useState<PanesController | null>(null);
   const [terminal, setTerminal] = useState<{ tabs: TerminalTabs; prefs: TerminalPrefsController } | null>(null);
+  const [commandHost, setCommandHost] = useState<{ shell: string; cwd: string } | null>(null);
   const [maximized, setMaximized] = useState(false);
   useEffect(() => { if (!client) return; const p = new PanesController(client); setPanes(p); const t = { tabs: new TerminalTabs(client), prefs: new TerminalPrefsController(client) }; setTerminal(t); return () => { p.dispose(); t.tabs.dispose(); t.prefs.dispose(); }; }, [client]);
   const owner = client?.getSnapshot().user?.role === 'owner';
+  useEffect(() => { let live = true; setCommandHost(null); if (client && owner) void client.request({ method: 'GET', path: '/api/terminal' } as never).then(r => { const b = r.body as { shell?: string; cwd?: string } | null; if (live && r.status === 200 && b?.shell && b.cwd) setCommandHost({ shell: b.shell, cwd: b.cwd }); }).catch(() => undefined); return () => { live = false; }; }, [client, owner]);
   // REPO-TRUST-01 (board R1 · R2): the first chat in a project Girru found to be someone else's says so once.
   const trust = useOutsideProjects(owner ? client : null);
   // Shown only while the verdict is Girru's own: either answer is the owner's choice (kept on the server), so it never comes back.
@@ -445,20 +447,18 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
   const folder = project?.folder ?? null;
   const say = (t: string) => controller.say(t);
   const openBeside = (rel: string, mark?: string) => { if (!panes || !folder) return; setPane('files'); void panes.openFile(rel.replace(/^\.\//, ''), { mark }); };
-  const runInTerminal = (command: string) => {
-    if (!owner || !terminal) return;
-    const line = terminalLine(command);
-    if (!line) { say('This command has several lines; copy it instead.'); return; }
-    setTermOpen(true);
-    // Typed into your own Terminal beside the chat; nothing runs until you press Enter.
-    let tries = 0;
-    const put = () => { const st = terminal.tabs.getSnapshot(); const tab = st.tabs.find(t => t.key === st.active) ?? st.tabs[0];
-      if (tab && tab.terminal.getSnapshot().phase === 'open') { tab.terminal.write(line); return; }
-      if (++tries < 40) setTimeout(put, 150); else say('The Terminal did not open; copy the command instead.'); };
-    setTimeout(put, 150);
+  const commandRun = (command: string, start = false, blockId = '') => {
+    if (!owner || !terminal || !s.activeId) return null;
+    const key = `${s.activeId}:${blockId}:${command}`;
+    const previous = terminal.tabs.getSnapshot().tabs.find(t => t.commandKey === key);
+    if (previous?.terminal.getSnapshot().phase === 'idle') { if (!start) return null; terminal.tabs.close(previous.key); }
+    if (start && previous?.terminal.getSnapshot().phase === 'exited' && previous.terminal.getSnapshot().exitCode !== undefined) terminal.tabs.close(previous.key);
+    const tab = terminal.tabs.getSnapshot().tabs.find(t => t.commandKey === key) ?? (start ? terminal.tabs.command(key, command, folderProject) : null);
+    if (!tab) { if (start) say('Close a Terminal tab before running another command.'); return null; }
+    return { terminal: tab.terminal, prefs: terminal.prefs, show: () => { terminal.tabs.select(tab.key); setTermOpen(true); } };
   };
   const mdActions = { ...(folder ? { openFile: (rel: string) => openBeside(rel) } : {}), ...(folder && client ? { openInCode: (rel: string) => void openInCodeFile(client, joinPath(folder, rel), null, say) } : {}),
-    ...(owner && terminal ? { runCommand: runInTerminal } : {}), ...(folder ? { folderName: folder.split(/[\\/]/).filter(Boolean).at(-1) } : {}) };
+    ...(owner && terminal && commandHost ? { commandRun, commandShell: commandHost.shell, commandCwd: folder || commandHost.cwd } : {}), ...(folder ? { folderName: folder.split(/[\\/]/).filter(Boolean).at(-1) } : {}) };
   const moments = { client, conversationId: s.activeId, onOpenApprovals, steps, changeCards, nativeCode:embeddedCode,
     ...(folder ? { onOpenFile: openBeside } : {}), ...(folder && client ? { onFileMenu: (e: React.MouseEvent, rel: string) => fileCtl.at(e, fileMenu(client, joinPath(folder, rel), null, say)) } : {}),
     // CH6/CH10 team moments: Hand it again adds to the box (never sends), Set a model opens the agent, Always allow opens What agents may do.
