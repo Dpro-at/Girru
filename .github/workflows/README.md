@@ -34,8 +34,12 @@ CodeQL analysis for the current JavaScript/TypeScript source.
 
 Dependency and secret detection failures fail their jobs. A successful CodeQL
 analysis job confirms analysis/upload, not the absence of findings: review the
-repository security alerts separately. Full-history secret validation can be
-requested manually. Reviewed historical exceptions use exact fingerprints in
+repository security alerts separately. Every secret scan checks full Git history
+using the pinned Gitleaks CLI
+(currently 8.30.1), verifies the archive against its committed SHA-256 before
+execution, and fully redacts findings in logs. It does not require the separate
+Gitleaks GitHub Action organization license or upload a findings artifact.
+Reviewed historical exceptions use exact fingerprints in
 `.gitleaksignore`; no general test or documentation directory bypass applies.
 Never print credential values when investigating a result.
 

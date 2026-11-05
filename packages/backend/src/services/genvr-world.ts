@@ -15,7 +15,7 @@ import { q } from '../repositories/sql-steps.js';
 import { createProject, findProject } from '../repositories/chat-conversations.js';
 import { DEFAULT_OLLAMA_MODEL } from '../llm/ollama.js';
 import { ollamaToolChat, type OllamaMessage } from '../llm/ollama-tool-chat.js';
-import { ClaudeClient } from '../llm/claude-client.js';
+import { interactiveClaudeMessage } from '../llm/model-call.js';
 import { resolveProviderApiKey } from '../credentials/authority.js';
 import { runSubscription, subscriptionEnabled, subscriptionModel } from './subscription-chat.js';
 import { subscriptionAgentContext, subscriptionReplyPrompt } from './subscription-agent-context.js';
@@ -94,7 +94,8 @@ async function makeFolder(userId: string, name: string): Promise<string> {
   const taken = new Set((await q.all<{ folder: string }>('SELECT folder FROM genvr_worlds WHERE user_id=?', userId)).map(r => r.folder));
   const base = worldFolderName(name);
   for (let n = 1; n < 1000; n++) {
-    const folder = path.join(realRoot, n === 1 ? base : `${base} ${n}`);
+    const folder = path.resolve(realRoot, n === 1 ? base : `${base} ${n}`);
+    if (!folder.startsWith(realRoot + path.sep)) throw new WorldError(400, 'invalid_folder');
     if (taken.has(folder)) continue;
     try { await fs.promises.mkdir(folder, { mode: 0o700 }); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue; throw error; }
@@ -220,6 +221,7 @@ export interface TurnDeps {
 
 /** One model turn in a world, as the world's agent, with that agent's provider. */
 export async function worldTurn(userId: string, role: string, projectId: string, input: TurnInput, signal: AbortSignal, deps: TurnDeps = {}): Promise<TurnResult> {
+  if (role !== 'owner') throw new WorldError(403, 'owner_required');
   if (!WORLD_ID.test(projectId)) throw new WorldError(400, 'invalid_input');
   const row = await worldRow(userId, projectId);
   if (!row) throw new WorldError(409, 'world_not_open');
@@ -247,8 +249,8 @@ export async function worldTurn(userId: string, role: string, projectId: string,
   if (/^claude-/.test(model)) {
     const key = await resolveProviderApiKey('claude', { agentId: agent.id });
     if (!key) throw new WorldError(409, 'model_unavailable', `${agent.name} has no Claude key. Pick another agent for this world.`);
-    const result = await new ClaudeClient(key, model).sendMessage([{ role: 'user', content: conversationText(input.messages) || 'Hello' }],
-      { systemPrompt: system, tools: defs, maxTokens: 4096, timeoutMs: 240_000 });
+    const result = await interactiveClaudeMessage({ provider: 'claude', apiKey: key, model }, [{ role: 'user', content: conversationText(input.messages) || 'Hello' }],
+      { systemPrompt: system, tools: defs, maxTokens: 4096, timeoutMs: 240_000 }, 'genvr_chat');
     return { content: withoutThinking(result.content), tool_calls: keep((result.toolCalls ?? []).map(c => ({ function: { name: c.tool, arguments: argsOf(c.arguments) ?? {} } }))), answerer };
   }
   if (/^(lmstudio|openai-local):/.test(model)) throw new WorldError(409, 'model_unavailable', `${answerer.detail} cannot answer in GenVR yet. Pick another agent for this world.`);
