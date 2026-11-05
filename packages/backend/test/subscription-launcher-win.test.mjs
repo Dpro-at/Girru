@@ -9,9 +9,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 
 const backendDir = process.cwd();
-const win = await import(join(backendDir, 'src/services/subscription-launcher-win.ts'));
+const win = await import(pathToFileURL(join(backendDir, 'src/services/subscription-launcher-win.ts')).href);
 const onWindows = process.platform === 'win32';
 const withP7 = async (fn) => { process.env.GIRRU_STORE_P7 = '1'; try { return await fn(); } finally { process.env.GIRRU_STORE_P7 = '0'; } };
 
