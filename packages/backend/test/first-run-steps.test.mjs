@@ -137,13 +137,14 @@ test('Claude Code: what the CLI itself reports (auth status) decides first; file
 
 test('claudeAuthStatus reads only loggedIn from the real CLI output', async () => {
   const { claudeAuthStatus } = await import('../src/onboarding/first-run.ts');
-  const b = join(dir, 'fake-claude-status'); const home = mkdtempSync(join(dir, 'home-cli-'));
-  writeFileSync(b, '#!/bin/sh\necho \'{"loggedIn":true,"email":"x@example.test"}\'\n'); chmodSync(b, 0o755);
-  assert.equal(await claudeAuthStatus(b, home), true);
-  writeFileSync(b, '#!/bin/sh\necho \'{"loggedIn":false}\'\nexit 1\n');
-  assert.equal(await claudeAuthStatus(b, home), false, 'exit 1 with loggedIn false still answers false');
-  writeFileSync(b, '#!/bin/sh\necho nope\n');
-  assert.equal(await claudeAuthStatus(b, home), null, 'an older CLI without the command gives no answer');
+  const b = join(dir, 'auth'); const home = mkdtempSync(join(dir, 'home-cli-'));
+  const fixture = (text, code = 0) => writeFileSync(b, `if (JSON.stringify(process.argv.slice(2)) !== '["status","--json"]' || process.env.HOME !== ${JSON.stringify(home)}) process.exit(2); process.stdout.write(${JSON.stringify(text)}); process.exit(${code});`);
+  fixture('{"loggedIn":true,"email":"x@example.test"}');
+  assert.equal(await claudeAuthStatus(process.execPath, home), true);
+  fixture('{"loggedIn":false}', 1);
+  assert.equal(await claudeAuthStatus(process.execPath, home), false, 'exit 1 with loggedIn false still answers false');
+  fixture('nope');
+  assert.equal(await claudeAuthStatus(process.execPath, home), null, 'an older CLI without the command gives no answer');
 });
 
 test('SUB1 (GIRRU_STORE_P7): the Google app is Antigravity (agy), signed in by its cached account', async () => {

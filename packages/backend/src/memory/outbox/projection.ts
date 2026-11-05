@@ -18,7 +18,8 @@
 
 import fs, { constants } from 'node:fs';
 import path from 'node:path';
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
+import { contentSha256 } from '../../services/content-hash.js';
 import { q } from '../../repositories/sql-steps.js';
 import { nowText } from '../../db/pg/dialect.js';
 import { findProject, type Project } from '../../repositories/chat-conversations.js';
@@ -68,7 +69,7 @@ export interface RunOptions {
   beforeRename?: () => Promise<void> | void;
 }
 
-const sha = (text: string | Buffer): string => createHash('sha256').update(text).digest('hex');
+const sha = contentSha256;
 
 /** A file or folder Girru may not write through: a link, a different kind of entry, or a hard-linked file. */
 class UnsafeEntryError extends Error {}

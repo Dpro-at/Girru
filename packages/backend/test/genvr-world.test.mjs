@@ -89,3 +89,9 @@ test('protocol replies: plain text is an answer, only offered tools come back',(
 test('a thinking model\'s reasoning never reaches the chat',()=>{
  assert.equal(withoutThinking('<think>plan</think> Hello'),'Hello');assert.equal(withoutThinking('long reasoning </think> I placed it.'),'I placed it.');assert.equal(withoutThinking('Plain'),'Plain');
 });
+
+
+test('world turns reject a non-owner before opening any world or provider', async () => {
+  const { worldTurn } = await import('../src/services/genvr-world.ts');
+  await assert.rejects(worldTurn('world-member', 'user', 'never-opened', turn, new AbortController().signal, deps), { status: 403, code: 'owner_required' });
+});

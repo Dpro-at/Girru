@@ -367,3 +367,15 @@ test('world generator: a clear refusal when neither the local model nor an allow
     globalThis.fetch = keep;
   }
 });
+
+
+test('interactive tool turns record paid usage without using the autonomous reservation gate', async () => {
+  const before = db.prepare("SELECT COUNT(*) AS n FROM interactive_usage WHERE purpose='genvr_chat'").get().n;
+  const result = await MC.interactiveClaudeMessage(
+    { provider: 'claude', apiKey: testKey(), model: 'claude-sonnet-test' },
+    [{ role: 'user', content: 'A Studio chat turn' }], { maxTokens: 256 }, 'genvr_chat');
+  assert.equal(result.content, 'chat reply');
+  const recorded = db.prepare("SELECT input_tokens,output_tokens FROM interactive_usage WHERE purpose='genvr_chat' ORDER BY rowid DESC LIMIT 1").get();
+  assert.deepEqual(recorded, { input_tokens: 2000, output_tokens: 1000 });
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM interactive_usage WHERE purpose='genvr_chat'").get().n, before + 1);
+});
