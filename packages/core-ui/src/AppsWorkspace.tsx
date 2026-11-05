@@ -21,7 +21,7 @@ export function footerToolItem(prefs:FooterPrefs,id:string,toggle:(id:FooterSect
  * Settings › Models and replies (board AP1). MCP connections, Channels and Accounts are
  * places in Settings.
  */
-export function AppsWorkspace({client,active,sidebarSlot,onOpen,onSettings,onPermissions,onCode,onStore}:{client:SessionClient;active:boolean;sidebarSlot?:HTMLElement|null;onOpen:(id:'terminal'|'genvr'|'trading')=>void;onConnections:(id?:string)=>void;onSettings?:(place:'accounts')=>void;onChat?:()=>void;onPermissions:()=>void;onCode?:()=>void;onSkills?:()=>void;onStore?:()=>void;placeRequest?:{place:AppsPlace;n:number}}){
+export function AppsWorkspace({client,active,sidebarSlot,onOpen,onSettings,onPermissions,onCode,onStore}:{client:SessionClient;active:boolean;sidebarSlot?:HTMLElement|null;onOpen:(id:'channels'|'terminal'|'genvr'|'trading')=>void;onConnections:(id?:string)=>void;onSettings?:(place:'accounts')=>void;onChat?:()=>void;onPermissions:()=>void;onCode?:()=>void;onSkills?:()=>void;onStore?:()=>void;placeRequest?:{place:AppsPlace;n:number}}){
  const searchInput=useRef<HTMLInputElement>(null),footer=footerFor(client),{prefs:footerPrefs}=useSyncExternalStore(footer.subscribe,footer.getSnapshot,footer.getSnapshot);
  const owner=client.getSnapshot().user?.role==='owner';
  const [query,setQuery]=useState(''),[refresh,setRefresh]=useState(0);

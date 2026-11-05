@@ -1,4 +1,4 @@
-import { sendChannel } from '../shared/channel-host.js';
+import { sendChannel } from '../../../extensions/shared/channel-host.js';
 
 // Send tools for the channels with a native transport. Their names, destination parameters and
 // approval category are known to the core (tools/channel-policy.ts, approvals.ts, grants.ts): in a

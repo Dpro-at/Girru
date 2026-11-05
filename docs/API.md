@@ -210,6 +210,16 @@ Each answers `404 not_found` while the switch is off. Agents never mark a memory
 | `POST /api/memory/documents/sources/:id/reindex` | look at the files again now (background; `202`) |
 | `POST /api/memory/documents/read-pdf` | `{ data }` (base64, 10 MB at most) → `{ text }` with `--- page N ---` markers, or `{ reason }`; nothing is kept (chat attachments) |
 
+### Agent Connect (owner configuration)
+
+| Route | Body / answer |
+|---|---|
+| `GET /api/agent-connect/catalog` | Existing channel metadata and masked configuration state, plus `app: { installed, ready }`; `configurable` is false until the separate app is ready. No credentials or program paths are returned. |
+| `PUT /api/agent-connect/:id/config` | Saves the existing allowed sender/conversation lists and provider configuration; saving never starts a provider. |
+| `PUT /api/agent-connect/:id/activation` | `{ enabled }`; enabling requires the installed runtime, an owner and configured channel. A restart may be needed for the app's routes to load. |
+
+`store:agent-connect` uses the normal Store install/consent/job APIs. Its reviewed package includes a bounded `runtime-packages.npm` list of exact npm archives. These are streamed, size/hash checked and unpacked before atomic activation, without running package scripts. Removing the app retains its channel configuration, credentials and `channel_events`; it stops running hosts and removes only program files. Older hosts without the integration capability are asked to update before the Store plugin registers anything.
+
 ### Optional app runtimes (owner only except local program metadata)
 
 | Route | Body / answer |

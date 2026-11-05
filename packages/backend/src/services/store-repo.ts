@@ -82,7 +82,7 @@ export function parsePackage(raw: unknown): StorePackage {
   const files = (p.files as Array<Record<string, unknown>>).map((f) => {
     if (!f || typeof f.path !== 'string' || typeof f.sha256 !== 'string' || !HEX.test(f.sha256) || !Number.isSafeInteger(f.size) || (f.size as number) < 0) throw new TypeError('store package');
     const parts = f.path.split('/');
-    if (seen.has(f.path) || parts.length > 8 || !parts.every((x) => SEGMENT.test(x)) || !PACKAGE_EXT.test(f.path)) throw new TypeError('store package');
+    if (seen.has(f.path) || parts.length > 8 || !parts.every((x) => SEGMENT.test(x)) || !(PACKAGE_EXT.test(f.path)||f.path==='runtime-packages.npm')) throw new TypeError('store package');
     seen.add(f.path); total += f.size as number;
     return { path: f.path, sha256: f.sha256, size: f.size as number };
   });

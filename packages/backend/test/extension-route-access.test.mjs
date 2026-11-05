@@ -117,16 +117,16 @@ test('routeAccess "public" is not a level: the extension stays owner/admin', asy
 });
 
 test('no real extension declares a blanket public level', () => {
-  for (const id of ['agent-connect', 'call-center', 'trading']) {
+  for (const id of ['call-center', 'trading']) {
     const manifest = JSON.parse(readFileSync(join(backendDir, 'extensions', id, 'agentplayer.plugin.json'), 'utf8'));
     assert.notEqual(manifest.routeAccess, 'public', id);
     assert.ok(['owner-admin', 'authenticated'].includes(getExtensionRouteAccess(manifest)), id);
   }
 });
 
-test('the real channel extension stays owner/admin (default) and its manifest parses', () => {
+test('the channel compatibility fixture stays owner/admin (default) and its manifest parses', () => {
   for (const id of ['agent-connect']) {
-    const manifest = JSON.parse(readFileSync(join(backendDir, 'extensions', id, 'agentplayer.plugin.json'), 'utf8'));
+    const manifest = JSON.parse(readFileSync(join(backendDir, 'test', 'fixtures', 'agent-connect-legacy', 'agentplayer.plugin.json'), 'utf8'));
     assert.equal(getExtensionRouteAccess(manifest), 'owner-admin', id);
     assert.equal(manifest.publicRoutes, undefined, id);
   }

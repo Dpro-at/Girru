@@ -1,3 +1,4 @@
+import './fixtures/channel-library.mjs';
 // S0-Q.6: Agent Connect channel config cannot choose the interpreter, pass
 // dangerous or foreign environment variables, or move state outside the
 // server-controlled directory.
@@ -10,11 +11,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { CHANNEL_CATALOG } from 'agent-connect-dpro';
-import extension from '../extensions/agent-connect/index.js';
+import extension from './fixtures/agent-connect-legacy/index.js';
 import {
   isAllowedEnvironmentKey, isValidEnvironment, isValidSettings, filterSettings, isValidStateDirectory, resolvePythonExecutable,
   resolveStateDirectory, transportOptions, DEFAULT_PYTHON,
-} from '../extensions/agent-connect/policy.js';
+} from '../extensions/shared/channel-policy.js';
 
 const base = await mkdtemp(join(tmpdir(), 'agent-connect-config-'));
 const env = { AGENT_CONNECT_STATE_DIR: base, AGENT_CONNECT_PYTHON: '/opt/server/python3' };

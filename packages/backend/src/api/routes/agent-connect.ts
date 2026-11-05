@@ -5,11 +5,12 @@
  * variables and settings for the Python worker.
  */
 import type { FastifyInstance } from 'fastify';
-import { CHANNEL_CATALOG } from 'agent-connect-dpro';
+import { CHANNEL_CATALOG } from '../../../extensions/shared/channel-catalog.js';
+import {channelRuntimeStatus} from '../../services/channel-runtime.js';
 import { actorOf } from '../../auth/auth-gate.js';
 import { requireOwner, ScopeError } from '../../repositories/scope.js';
 import { q, sql, one, run, type Step } from '../../repositories/sql-steps.js';
-import { isValidEnvironment, isValidSettings } from '../../../extensions/agent-connect/policy.js';
+import { isValidEnvironment, isValidSettings } from '../../../extensions/shared/channel-policy.js';
 
 import { channelRuntimeState, isNativeChannel as native, refreshChannel } from '../../../extensions/shared/channel-host.js';
 
@@ -35,10 +36,11 @@ export async function agentConnectRoutes(app: FastifyInstance) {
       requireOwner(actorOf(request));
       const row = await q.one<{ enabled: number; config_json: string }>('SELECT enabled, config_json FROM extension_configs WHERE extension_id = ?', EXTENSION);
       const root = row ? JSON.parse(row.config_json) : {};
+      const runtime=await channelRuntimeStatus();
       return { channels: CHANNEL_CATALOG.map(c => ({
         label: c.label, runtime: native(c.id) ? 'node' : 'python', requiredEnv: [...c.requiredEnv], prerequisites: c.prerequisites,
         ...visible(c.id, root, row?.enabled === 1),
-      })), configurable: q.dialect === 'sqlite' };
+      })), configurable: q.dialect === 'sqlite' && runtime.ready, app:runtime };
     } catch (error) { return deny(reply, error); }
   });
   app.put<{ Params: { id: string } }>('/api/agent-connect/:id/activation', { config, bodyLimit: 1024 }, async (request, reply) => {
@@ -50,6 +52,7 @@ export async function agentConnectRoutes(app: FastifyInstance) {
       if (q.dialect !== 'sqlite') return reply.code(409).send({ code: 'unsupported_store' });
       const body = request.body;
       if (!record(body) || Object.keys(body).length !== 1 || typeof body.enabled !== 'boolean') throw new TypeError();
+      if(body.enabled&&!(await channelRuntimeStatus()).ready)return reply.code(409).send({code:'unavailable'});
       const channel = await sql().tx(function* (): Step<ReturnType<typeof visible>> {
         const row = yield* one<{config_json:string;enabled:number}>('SELECT config_json, enabled FROM extension_configs WHERE extension_id=?', EXTENSION);
         if (!row) throw new TypeError();

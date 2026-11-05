@@ -17,7 +17,7 @@
  */
 import { homedir } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { CHANNEL_CATALOG } from 'agent-connect-dpro';
+import { CHANNEL_CATALOG } from './channel-catalog.js';
 
 export const DEFAULT_PYTHON = 'python';
 

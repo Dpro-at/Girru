@@ -131,6 +131,8 @@ export function protectedDataDirs(): string[] {
     envDir('STORAGE_BASE_DIR', false),
     // Installed program bytes are not agent-editable workspace files.
     envDir('GIRRU_APP_RUNTIMES_DIR', false),
+    envDir('GIRRU_CHANNELS_RUNTIME_DIR', false),
+    envDir('AGENT_CONNECT_STATE_DIR', false) ?? path.join(os.homedir(), '.agent-connect'),
     dataPathOr(path.join(cwd, '..', '..', '.data', 'memory'), 'memory'),
     // BACKUP-01: backups hold a copy of everything above, keys included.
     backupsFolder(),

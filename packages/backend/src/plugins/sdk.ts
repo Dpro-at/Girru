@@ -10,6 +10,9 @@ import type { Database } from 'better-sqlite3';
 import type { Tool } from '../tools/types.js';
 import { registerExtensionTool, unregisterExtensionTool, isReservedToolName } from '../tools/index.js';
 import { EXEC_EXTENSION_PERMISSIONS } from '../tools/exec-policy.js';
+import {loadChannelLibrary,channelHostCapabilityAllowed} from '../services/channel-runtime.js';
+import * as channelHost from '../../extensions/shared/channel-host.js';
+import * as channelPolicy from '../../extensions/shared/channel-policy.js';
 import { beginChannelTurn, CHANNEL_TURN_HEADER, type ChannelOrigin } from '../tools/channel-policy.js';
 import { getDatabase } from '../db/index.js';
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'fs';
@@ -28,6 +31,8 @@ import { extractAgentReply } from '../../extensions/shared/agent-reply.js';
  * Extensions receive this interface when their register() hook is called
  */
 export interface ExtensionApi {
+  /** Host integration for the separately installed Agent Connect package only. */
+  channelHost?:Record<string,unknown>;
   authorizeChannelRequest(request: FastifyRequest): string;
   authorizeChannelUser(userId: string): void;
   /**
@@ -166,6 +171,7 @@ export function createExtensionApi(
 
   return {
     extensionId,
+    ...(extensionId==='agent-connect'&&channelHostCapabilityAllowed(db,extensionDir)?{channelHost:Object.freeze({...channelHost,...channelPolicy,loadLibrary:loadChannelLibrary})}:{}),
     authorizeChannelRequest(request) {
       const userId = getUserIdFromRequest(request);
       this.authorizeChannelUser(userId);
