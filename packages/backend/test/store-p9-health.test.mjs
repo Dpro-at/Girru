@@ -12,7 +12,7 @@
 // Throwaway DB + cwd + HOME, random test-only secrets, no network, no real model.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, realpathSync, readFileSync, statSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, readFileSync, statSync, existsSync, openSync, closeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -141,7 +141,9 @@ test('coding apps: a handoff waits while Girru is away and is sent when it is ba
   assert.equal(got[0][0], 'project_brief');
   assert.deepEqual(got.slice(1).map(([t, a]) => [t, a.done[0]]), [['handoff_write', 'A'], ['memory_handoff', 'B']], 'this folder\'s notes, oldest first; the refused one dropped');
   assert.equal(Q.queuedHandoffs(configDir), 1, 'the other folder\'s note waits');
-  assert.match(readFileSync(file, 'utf8'), /beta/);
+  const queued = openSync(file, 'r');
+  try { assert.match(readFileSync(queued, 'utf8'), /beta/); }
+  finally { closeSync(queued); }
   await other.call('latest_handoff', {});
   assert.equal(existsSync(file), false);
 });

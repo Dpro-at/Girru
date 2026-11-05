@@ -77,3 +77,30 @@ test('the editor bridge says Code is missing, then opens it once the Store has i
   const after = await ipc.handlers.get(CHANNELS.status)(event);
   assert.equal(after.runtime, 'missing'); assert.equal(after.available, false); assert.equal(after.mode, 'chat');
 });
+
+
+test('current.json reads reject oversize input and a pathname replaced after open, closing the descriptor', t => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'girru-code-read-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const runtimes = path.join(tmp, 'runtimes');
+  fakeRuntime(path.join(runtimes, 'code', '1.2.3-0a1b2c3d'));
+  const file = path.join(runtimes, 'code', 'current.json');
+  write(file, ' '.repeat(4097));
+  assert.equal(resolveCodeRuntime({ runtimesDir: runtimes }), null);
+  current(runtimes, { version: '1.2.3', dir: '1.2.3-0a1b2c3d' });
+  const originalOpen = fs.openSync;
+  let opened;
+  fs.openSync = function (target, ...args) {
+    const fd = originalOpen.call(fs, target, ...args);
+    if (target === file) {
+      opened = fd;
+      fs.renameSync(file, file + '.original');
+      write(file, JSON.stringify({ version: '1.2.3', dir: '1.2.3-0a1b2c3d' }));
+    }
+    return fd;
+  };
+  try {
+    assert.equal(resolveCodeRuntime({ runtimesDir: runtimes }), null);
+    assert.throws(() => fs.fstatSync(opened), { code: 'EBADF' });
+  } finally { fs.openSync = originalOpen; }
+});

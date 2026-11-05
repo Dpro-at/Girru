@@ -277,7 +277,9 @@ export function safeWriteFile(folder: string, relative: string, text: string | B
  */
 export function safeWriteAt(root: string, file: string, text: string | Buffer, opts: SafeWriteOptions = {}): SafeWriteResult {
   const realRoot = safeRoot(root);
-  const resolved = path.resolve(realRoot, file);
+  const fromSelectedRoot = path.relative(path.resolve(root), path.resolve(root, file));
+  const selectedChild = fromSelectedRoot && !fromSelectedRoot.startsWith('..') && !path.isAbsolute(fromSelectedRoot);
+  const resolved = selectedChild ? path.resolve(realRoot, fromSelectedRoot) : path.resolve(realRoot, file);
   const rel = path.relative(realRoot, resolved);
   if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) return safeWriteFile(realRoot, rel.split(path.sep).join('/'), text, opts);
   return safeWriteFile(path.dirname(resolved), path.basename(resolved), text, opts);

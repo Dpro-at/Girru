@@ -197,7 +197,7 @@ test('no directory fsync on Windows; one elsewhere; modes kept', () => {
     S.safeWriteFile(d, 'a.md', 'x', { platform: 'win32' });
     assert.deepEqual(synced, []);
     S.safeWriteFile(d, 'b.md', 'x', { platform: 'linux' });
-    assert.deepEqual(synced, [d]);
+    assert.deepEqual(synced, [fs.realpathSync.native(d)]);
   } finally { S.setSafeFileHooksForTests(null); }
   if (!win) {
     fs.chmodSync(join(d, 'b.md'), 0o600);
@@ -210,8 +210,16 @@ test('no directory fsync on Windows; one elsewhere; modes kept', () => {
 
 test('safeWriteAt: inside the root by relative path; outside it, only the file\'s own folder', () => {
   const d = folder(), gitDir = folder();
-  assert.equal(S.safeWriteAt(d, join(d, '.git', 'info', 'exclude'), 'x').file, join(d, '.git', 'info', 'exclude'));
-  assert.equal(S.safeWriteAt(d, join(gitDir, 'exclude'), 'y').file, join(gitDir, 'exclude'));
+  assert.equal(S.safeWriteAt(d, join(d, '.git', 'info', 'exclude'), 'x').file, join(fs.realpathSync.native(d), '.git', 'info', 'exclude'));
+  assert.equal(S.safeWriteAt(d, join(gitDir, 'exclude'), 'y').file, join(fs.realpathSync.native(gitDir), 'exclude'));
+});
+
+test('safeWriteAt keeps new descendants inside a selected root reached through an alias', { skip: win && 'directory symlink privilege varies on Windows' }, () => {
+  const d = folder(), alias = join(base, 'selected-alias');
+  fs.symlinkSync(d, alias, 'dir');
+  const result = S.safeWriteAt(alias, join(alias, '.git', 'info', 'exclude'), 'alias fixture');
+  assert.equal(result.file, join(fs.realpathSync.native(d), '.git', 'info', 'exclude'));
+  assert.equal(fs.readFileSync(join(d, '.git', 'info', 'exclude'), 'utf8'), 'alias fixture');
 });
 
 test('switch on: managed files go through the safe writer; off: unchanged', { skip: win && 'symlinks need rights on Windows' }, async () => {

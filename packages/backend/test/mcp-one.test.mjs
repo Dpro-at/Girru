@@ -69,7 +69,7 @@ test('found list: one row per program or address, every source kept, Girru memor
   assert.deepEqual(fsRow.sources.map((s) => s.origin).sort(), ['Claude', 'Codex']);
   assert.deepEqual(fsRow.secretNames, ['FIXTURE_KEY']);
   assert.equal(fsRow.state, 'new');
-  const docs = body.rows.filter((x) => x.target?.startsWith('https://docs.example.invalid'));
+  const docs = body.rows.filter((x) => URL.canParse(x.target) && new URL(x.target).origin === 'https://docs.example.invalid');
   assert.equal(docs.length, 1, 'Gemini and Antigravity entries for one address are one row');
   assert.deepEqual(docs[0].sources.map((s) => s.origin).sort(), ['Antigravity', 'Gemini']);
   assert.ok(body.rows.some((x) => x.name === 'local' && x.sources[0].origin === 'Antigravity'));
