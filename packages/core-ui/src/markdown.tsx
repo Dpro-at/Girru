@@ -147,8 +147,8 @@ export function terminalLine(command: string): string | null {
   return safe || null;
 }
 
-/** Zero-width, text-direction and control characters (tab and newline allowed): a command with them is copy-only. */
-export const HIDDEN_COMMAND_CHARS = /[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/;
+/** Control and format characters (zero-width, text-direction, tags), separators and invisible fillers; tab and newline allowed. A command with them is copy-only. */
+export const HIDDEN_COMMAND_CHARS = /(?![\t\n])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\u115f\u1160\u3164\uffa0]/u;
 
 /**
  * CHAT-CONTENT-01/02: a command in a reply. Copy, and Run on its own session after you allow it;
@@ -193,7 +193,7 @@ function CommandReview({ command, folderName, onRun, onCancel }: { command: stri
   const lines = command.split('\n').length;
   return <div className="inline-command-review" role="group" aria-label="Run this command?" onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); onCancel(); } }}>
     <span className="inline-command-ask">{lines > 1 ? `Run these ${lines} lines` : 'Run this'}{folderName ? ` in ${folderName}` : ''}?</span>
-    {lines > 1 && <pre className="inline-command-exact" dir="ltr"><code>{command}</code></pre>}
+    <pre className="inline-command-exact" dir="ltr"><code>{command}</code></pre>
     <span className="inline-command-review-actions">
       <button type="button" onClick={onCancel}>Cancel</button>
       <button type="button" ref={runRef} className="md-run" onClick={onRun}><UiIcon name="play" size={11}/>Run</button>

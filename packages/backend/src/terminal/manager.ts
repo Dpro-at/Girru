@@ -39,10 +39,11 @@ export type PtySpawn = (file: string, args: string[], options: {
 }) => PtyProcess;
 
 /**
- * A chat command must look exactly like what runs: no control characters
- * (tab and newline allowed), no zero-width or text-direction characters.
+ * A chat command must look exactly like what runs: no control or format characters
+ * (tab and newline allowed), so no zero-width, text-direction, tag or invisible filler
+ * characters, and no line or paragraph separators.
  */
-export const HIDDEN_COMMAND_CHARS = /[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/;
+export const HIDDEN_COMMAND_CHARS = /(?![\t\n])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\u115f\u1160\u3164\uffa0]/u;
 export function commandAllowed(command: unknown): command is string {
   return typeof command === 'string' && !!command.trim() && command.length <= 16000 && !HIDDEN_COMMAND_CHARS.test(command);
 }

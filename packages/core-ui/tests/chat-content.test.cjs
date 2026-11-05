@@ -32,7 +32,7 @@ test('a shell block is a command to run: Copy, and Run only for the owner', () =
 
 test('a command with hidden or control characters is copy-only, never Run', () => {
   const { HIDDEN_COMMAND_CHARS } = require('../src/markdown.tsx');
-  for (const bad of ['ls\u202e', 'echo a\u200bb', 'ls\x1b[2J', 'ls\r']) assert.ok(HIDDEN_COMMAND_CHARS.test(bad), JSON.stringify(bad));
+  for (const bad of ['ls\u202e', 'echo a\u200bb', 'ls\x1b[2J', 'ls\r', 'ls\u061c', 'ls\u3164x', 'ls\u{E0041}', 'ls\u2028x']) assert.ok(HIDDEN_COMMAND_CHARS.test(bad), JSON.stringify(bad));
   assert.ok(!HIDDEN_COMMAND_CHARS.test('npm ci\n\tnpm test'), 'newline and tab are fine');
   const hidden = md('```bash\n$ ls \u202etxt.exe\n```', { runCommand: () => {}, commandRun: () => null });
   assert.doesNotMatch(hidden, /md-run/);

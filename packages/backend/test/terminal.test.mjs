@@ -201,11 +201,12 @@ test('finished sessions free their place; they are let go after the idle time', 
 test('a chat command with hidden or control characters is refused', async () => {
   const fake = () => ({ onData() {}, onExit() {}, write() {}, resize() {}, kill() {} });
   const m = new mgr.TerminalManager({ env: { AGENT_TERMINAL: 'true', PATH: '/bin' }, spawn: fake, cwd: dir, os: 'darwin' });
-  for (const bad of ['ls\u202e', 'echo a\u200bb', 'ls\x1b[2J', 'ls\r', 'x\0', ' ', 'a'.repeat(16001)]) {
+  for (const bad of ['ls\u202e', 'echo a\u200bb', 'ls\x1b[2J', 'ls\r', 'x\0', ' ', 'a'.repeat(16001), 'ls\u061c', 'ls\u3164x', 'ls\u{E0041}', 'ls\u2028x', 'ls\u00ad']) {
     await assert.rejects(m.create('o1', { command: bad }), err => err.code === 'invalid', JSON.stringify(bad.slice(0, 20)));
   }
   assert.ok((await m.create('o1', { command: 'npm test\n\tnpm run build' })).id, 'newline and tab are fine');
   assert.equal(mgr.commandAllowed('npm test'), true);
+  assert.equal(mgr.commandAllowed('echo "مرحبًا"'), true, 'Arabic with marks is fine');
   m.closeAll();
 });
 

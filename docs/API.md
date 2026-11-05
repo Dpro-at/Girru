@@ -507,8 +507,9 @@ Secret files and symlink targets outside the project remain refused. SVG is disp
 image, never as an active document. CSV and JSON previews are read-only; CSV formulas are text.
 
 `POST /api/terminal/sessions` optionally accepts `command` (1–16,000 characters; tab and
-newline allowed, but no other control characters and no zero-width or text-direction
-characters, so what the owner approves is exactly what runs; otherwise `400 invalid`)
+newline allowed, but no other control or format characters (zero-width, text-direction,
+tag), no line or paragraph separators and no invisible fillers, so what the owner approves
+is exactly what runs; otherwise `400 invalid`). The approval shows the exact command text
 with the existing `projectId`, `cols`, and `rows`. The owner reviews and approves the exact
 command in chat before creation. This starts a dedicated command session in the same Girru
 PTY manager, using the existing owner/loopback checks, project folder and environment rules.
