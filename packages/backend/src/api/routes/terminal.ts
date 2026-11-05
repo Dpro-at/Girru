@@ -178,7 +178,8 @@ export function terminalRoutesWith(manager: TerminalManager) {
 
     fastify.post<{ Params: { id: string } }>('/api/terminal/sessions/:id/stop', { config }, async (request, reply) => {
       const owner = ownerOf(request, reply); if (!owner) return reply;
-      try { manager.stop(owner, request.params.id); return reply.code(204).send(); } catch (err) { return fail(reply, err); }
+      const id = sessionId(request, reply); if (!id) return reply;
+      try { manager.stop(owner, id); return reply.code(204).send(); } catch (err) { return fail(reply, err); }
     });
 
     fastify.delete<{ Params: { id: string } }>('/api/terminal/sessions/:id', { config }, async (request, reply) => {

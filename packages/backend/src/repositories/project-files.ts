@@ -209,7 +209,7 @@ export async function readFolderOffice(folder: string, rawRel: unknown) {
     const { data } = await readRegularFile(real, MAX_OFFICE_BYTES, { root: folder });
     const members = officeMembers(data), kind = /\.docx$/i.test(rel) ? 'docx' : /\.xlsx$/i.test(rel) ? 'xlsx' : 'pptx';
     const selected = members.filter(m => m.name === '[Content_Types].xml' || m.name === '_rels/.rels' || (kind === 'docx' ? /^word\/(?:document\.xml|_rels\/document\.xml\.rels)$/.test(m.name) : kind === 'pptx' ? /^ppt\/(?:presentation\.xml|_rels\/presentation\.xml\.rels|slides\/[^/]+\.xml|slides\/_rels\/[^/]+\.xml\.rels)$/.test(m.name) : /^xl\/(?:workbook\.xml|_rels\/workbook\.xml\.rels|sharedStrings\.xml|styles\.xml|worksheets\/[^/]+\.xml)$/.test(m.name)));
-    if (selected.length > 128 || selected.reduce((n, m) => n + m.bytes, 0) > 2 * 1024 * 1024) return { path: rel, reason: 'too_large' };
+    if (selected.length > 4096 || selected.reduce((n, m) => n + m.bytes, 0) > 2 * 1024 * 1024) return { path: rel, reason: 'too_large' };
     const parts = selected.map(m => ({ name: m.name, text: new TextDecoder('utf-8', { fatal: true }).decode(m.read()) }));
     // No DTD or custom entity expansion, even in a part the preview does not use.
     if (parts.some(p => /<!\s*(?:DOCTYPE|ENTITY)/i.test(p.text))) return { path: rel, reason: 'unsupported' };

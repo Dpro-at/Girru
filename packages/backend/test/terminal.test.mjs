@@ -218,6 +218,22 @@ test('chat commands are refused on Windows until verified there; shells still op
   m.closeAll();
 });
 
+test('a running command is not ended for being quiet; Stop escalates if it does not end', async () => {
+  const signals = []; let exit;
+  const fake = () => ({ onData() {}, onExit(fn) { exit = fn; }, write() {}, resize() {}, kill(sig) { signals.push(sig ?? 'default'); } });
+  const m = new mgr.TerminalManager({ env: { AGENT_TERMINAL: 'true', PATH: '/bin' }, spawn: fake, idleTimeoutMs: 20, stopGraceMs: 30, cwd: dir, os: 'darwin' });
+  const s = await m.create('o1', { command: 'sleep 100' });
+  await new Promise(r => setTimeout(r, 60));
+  assert.equal(m.list('o1').length, 1, 'still there after the idle time');
+  m.stop('o1', s.id);
+  m.stop('o1', s.id); // a second Stop while waiting sends nothing new
+  assert.deepEqual(signals, ['SIGTERM']);
+  await new Promise(r => setTimeout(r, 60));
+  assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+  exit({ exitCode: 0, signal: 9 });
+  m.closeAll();
+});
+
 test('idle sessions are closed', async () => {
   let killed = false;
   const fake = () => ({ onData() {}, onExit() {}, write() {}, resize() {}, kill() { killed = true; } });

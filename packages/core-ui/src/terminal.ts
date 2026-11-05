@@ -73,7 +73,8 @@ export class TerminalController {
         }, ac.signal);
         const progressed = r.last > last;
         last = r.last;
-        if (r.ended) { if (this.#state.phase === 'open') this.publish({ phase: 'exited' }); return; }
+        // A command stream that ends without its exit frame is a lost connection, not a finish.
+        if (r.ended) { if (this.#state.command && ['open', 'stopping'].includes(this.#state.phase)) this.publish({ phase: 'error', message: 'Lost the connection to the terminal.' }); else if (this.#state.phase === 'open') this.publish({ phase: 'exited' }); return; }
         // A stream that closed with nothing new waits before re-attaching (never a tight loop).
         if (progressed || Date.now() - began >= 2000) tries = 0; else { tries++; await new Promise(res => setTimeout(res, 400 * tries)); }
       } catch {
