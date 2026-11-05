@@ -39,3 +39,14 @@ test('asset replaced by a symlink between path validation and open is never serv
   assert.equal(status,503);assert.ok(!String(body).includes('private fixture'));
  }finally{fs.openSync=open;fs.rmSync(folder,{recursive:true,force:true});}
 });
+
+test('local runtime availability has a minimal program-only contract',()=>{
+ const {GENVR_RUNTIME}=require('../src/genvr-contract.js');
+ assert.equal(GENVR_RUNTIME,'/api/genvr/runtime');
+ assert.equal(allowedRequest('GET',GENVR_RUNTIME),true);
+ assert.equal(allowedGenVR('POST',GENVR_RUNTIME,{}),false);
+ assert.equal(allowedGenVR('GET',GENVR_RUNTIME+'?owner=other'),false);
+ assert.deepEqual(genvrResponse(GENVR_RUNTIME,200,{state:'installed',version:'0.3.0-preview.17',job:'private',account:'private'}),{state:'installed',version:'0.3.0-preview.17'});
+ assert.deepEqual(genvrResponse(GENVR_RUNTIME,200,{state:'missing',version:null}),{state:'missing',version:null});
+ assert.throws(()=>genvrResponse(GENVR_RUNTIME,200,{state:'installed',version:'invalid'}));
+});

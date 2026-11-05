@@ -35,7 +35,7 @@ export function useShown(reset:unknown){
  return {shown,more:()=>setShown(n=>n+STORE_PART),end};
 }
 /** A private app or a Store app from My apps, as the Store's Remove expects it. */
-export const addedItem=(app:Pick<WorkspaceApp,'name'|'sourceId'|'origin'>):StoreItem=>({id:`${app.origin==='private'?'private':'store'}:${app.sourceId}`,kind:'app',source:'girru',name:app.name,summary:'',description:'',icon:'puzzle',maker:'',verified:false,version:null,updated:null,category:'more',permissions:[],worksWith:[],languages:[],state:'installed',present:true,update:null,hash:'0'.repeat(64)});
+export const addedItem=(app:Pick<WorkspaceApp,'name'|'sourceId'|'origin'>&Partial<Pick<WorkspaceApp,'id'>>):StoreItem=>({id:app.id==='genvr'?'girru:genvr':`${app.origin==='private'?'private':'store'}:${app.sourceId}`,kind:'app',source:'girru',name:app.name,summary:'',description:'',icon:'puzzle',maker:'',verified:false,version:null,updated:null,category:'more',permissions:[],worksWith:[],languages:[],state:'installed',present:true,update:null,hash:'0'.repeat(64)});
 /** SA5: the coding apps whose add-ons get a place of their own ("On this computer"). */
 export const LOCAL_APPS:ReadonlyArray<['claude-code'|'codex',string]>=[['claude-code','Claude Code'],['codex','Codex']];
 export type StoreSort='new'|'az';
@@ -91,6 +91,7 @@ export function StoreWorkspace({client,active,sidebarSlot,onOpenApp,request,onPe
  const undoRef=useRef<(()=>void)|null>(null),search=useRef<HTMLInputElement>(null),scroll=useRef<HTMLDivElement>(null),{menu,at,close}=useMenu();
  useEffect(()=>{if(request?.updates)setUpdatesOpen(true);if(request?.local||request?.mine){setView({kind:'all',category:'all',shelf:null,local:request.local??null,mine:!!request.mine});setPage(null);setQuery('');}
   // CODE-STORE-01: "Code" while it is not installed opens its page here (Get, then the usual steps).
+  if(request?.item&&!owner){setProblem('Ask the workspace owner to add this app on this computer.');return;}
   if(request?.item){setView(v=>({...v,mine:false,local:null,shelf:null}));setQuery('');setPage(request.item);}},[request?.n]);
  const show=(next:Partial<StoreView>)=>{setView(v=>({...v,shelf:null,local:null,mine:false,...next}));setPage(null);setQuery('');scroll.current?.scrollTo?.(0,0);};
  const item=page?data?.items.find(x=>x.id===page)??null:null;
@@ -122,6 +123,7 @@ export function StoreWorkspace({client,active,sidebarSlot,onOpenApp,request,onPe
    // APPS-06: an app that keeps data of its own asks once; Girru saves a copy first.
    if(!('ok' in r)&&r.code==='has_data'&&r.data){setRemoving({item:x,data:r.data});return;}
    setRemoving(null);onReload();
+   if('ok' in r&&x.id==='girru:genvr'){setMineRefresh(n=>n+1);say(`GenVR removed. Your worlds and account connection are kept. Review agent permissions after re-adding it.${r.restart==='auto'?' Girru starts again to finish.':' Restart Girru to finish.'}`);return;}
    if('ok' in r&&x.id==='girru:code'){say('Code removed. Your projects are not touched.');return;}
    if('ok' in r&&(x.id.startsWith('store:')||x.id.startsWith('private:'))){if(x.id.startsWith('private:'))setMineRefresh(n=>n+1);say(`${itemName(x)} removed${r.copied?'; a copy of its data is saved':''}.${r.restart==='auto'?' Girru starts again to finish.':' It leaves when Girru starts again.'}`);return;}if(!quiet)say('ok' in r?`${itemName(x)} removed.`:r.message||'It could not be removed.','ok' in r?()=>void change(STORE_INSTALL_PATH,{id:x.id,hash:x.hash}).then(onReload):undefined);}
   catch{say('It could not be removed. Try again.');}

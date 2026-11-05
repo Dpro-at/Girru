@@ -444,3 +444,14 @@ test('only media reads have the bounded 32 MB base64 allowance, ordinary respons
   assert.equal(r.status,200);assert.equal(JSON.parse(r.text).base64.length,content.length);
   const small=await s.request('/api/auth/me');assert.notEqual(small.status,200);
 });
+
+test('local GenVR availability never forwards owner metadata or accepts actions',async t=>{
+ const s=await setup(t,null,{genvrRuntimesDir:'/not-an-installed-runtime'});
+ const response=await s.request('/api/genvr/runtime');
+ assert.equal(response.status,200);assert.equal(response.headers['cache-control'],'no-store');
+ assert.deepEqual(JSON.parse(response.text),{state:'missing',version:null});assert.equal(s.calls.length,0);
+ assert.equal((await s.request('/api/genvr/runtime?account=other')).status,400);
+ assert.equal((await s.request('/api/genvr/runtime',{method:'POST',body:{}})).status,405);
+ assert.equal((await s.request('/api/genvr/runtime',{headers:{Origin:'https://example.invalid'}})).status,403);
+ assert.equal(s.calls.length,0);
+});

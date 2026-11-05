@@ -1,5 +1,6 @@
 export const GENVR_BYTES:number;
 export const GENVR_PATH:string;
+export const GENVR_RUNTIME:'/api/genvr/runtime';
 export function genvrId(value:unknown):value is string;
 export function validStudioProject(value:unknown):boolean;
 export function genvrRoute(path:string):boolean;

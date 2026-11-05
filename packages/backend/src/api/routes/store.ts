@@ -5,6 +5,7 @@ import {extensionsAvailable} from '../../plugins/extension-runner.js';
 import {readStore,localCatalogue,installFromStore,uninstallFromStore} from '../../services/store-catalogue.js';
 import {addJob} from '../../services/store-install.js';
 import {codeRuntimeStatus} from '../../services/code-runtime.js';
+import {genvrRuntimeStatus} from '../../services/genvr-runtime.js';
 import {addPrivateApp} from '../../services/private-apps.js';
 import {requestRestart} from '../restart-request.js';
 
@@ -64,6 +65,12 @@ export async function storeRoutes(app:FastifyInstance,options:{home?:string}={})
   if(Object.keys(request.query as object).length)return reply.code(400).send({code:'invalid_input'});
   reply.header('Cache-Control','no-store');
   return codeRuntimeStatus();
+ });
+ app.get('/api/apps/genvr',{config:{access:'owner'}},async(request,reply)=>{
+  if(!guard(request,reply))return;
+  if(Object.keys(request.query as object).length)return reply.code(400).send({code:'invalid_input'});
+  reply.header('Cache-Control','no-store');
+  return genvrRuntimeStatus();
  });
  // APPS-06: how adding an app from the Girru Store goes (the window asks while it waits).
  app.get('/api/store/install/:job',{config:{access:'owner'}},async(request,reply)=>{

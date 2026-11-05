@@ -1,3 +1,4 @@
+const path = require('node:path');
 const {BROWSER_APP_PATH,allowedBrowserApp,browserAppResponse}=require('../src/browser-app-contract.js');
 const {createVoiceLibrary}=require('./voice-library-host.cjs');
 const {VOICE_LIBRARY_PATH,allowedVoiceLibrary,voiceLibraryResponse}=require('../src/voice-library-contract.js');
@@ -29,10 +30,11 @@ const { allowedMcpImport, mcpImportPath, mcpImportResponse } = require('../src/m
 const { allowedSshKeys, sshKeysRoute, sshKeysResponse } = require('../src/ssh-keys-contract.js');
 const { allowedSkillLibrary, skillLibraryPath, skillLibraryResponse } = require('../src/skill-library-contract.js');
 const { createGenVRAssets } = require('./genvr-assets.cjs');
+const { resolveGenvrRuntime } = require('./genvr-runtime-path.cjs');
 const { createChatVoice } = require('./chat-voice-host.cjs');
 const { CHAT_VOICE_PATH, allowedChatVoice, chatVoiceResponse } = require('../src/chat-voice-contract.js');
 const { createStudioHost } = require('./genvr-studio-host.cjs');
-const { allowedGenVR, genvrRoute, genvrResponse, GENVR_BYTES, STUDIO_TICKET_PATH, GENVR_WORLD } = require('../src/genvr-contract.js');
+const { allowedGenVR, genvrRoute, genvrResponse, GENVR_BYTES, STUDIO_TICKET_PATH, GENVR_WORLD, GENVR_RUNTIME } = require('../src/genvr-contract.js');
 // GENVR-WORLD-01: one agent turn in a GenVR world may run a coding app; it gets the chat's own deadline window.
 const WORLD_TURN_MS = 300_000;
 const { allowedChannel, channelRoute, channelResponse } = require('../src/agent-connect-contract.js');
@@ -343,7 +345,7 @@ const launchTokenShape = /^[A-Za-z0-9_-]{43}$/;
  * launchToken (desktop app) is the per-launch secret the backend requires on
  * every request; it is added here and never reaches the page.
  */
-function createApplicationServer({ browserController = null, packageRoot = root, channel, stage1ReadOnly = false, upstreamPort = 42521, launchToken = null, timeoutMs = 10000, streamTimeoutMs = CHAT_DEADLINE_MS, streamIdleMs = CHAT_IDLE_MS, runStreamMs = RUN_STREAM_MS, runIdleMs = RUN_IDLE_MS } = {}) {
+function createApplicationServer({ browserController = null, packageRoot = root, genvrRuntimesDir = process.env.GIRRU_APP_RUNTIMES_DIR, channel, stage1ReadOnly = false, upstreamPort = 42521, launchToken = null, timeoutMs = 10000, streamTimeoutMs = CHAT_DEADLINE_MS, streamIdleMs = CHAT_IDLE_MS, runStreamMs = RUN_STREAM_MS, runIdleMs = RUN_IDLE_MS } = {}) {
   if (typeof stage1ReadOnly !== 'boolean') throw Error('Invalid stage1 configuration');
   const validPort = x => Number.isInteger(x) && x >= 1 && x <= 65535;
   if (launchToken !== null && !(typeof launchToken === 'string' && launchTokenShape.test(launchToken))) throw Error('Invalid launch configuration');
@@ -351,12 +353,13 @@ function createApplicationServer({ browserController = null, packageRoot = root,
   if (!Number.isInteger(streamTimeoutMs) || streamTimeoutMs < 1 || streamTimeoutMs > CHAT_DEADLINE_MS || !Number.isInteger(streamIdleMs) || streamIdleMs < 1 || streamIdleMs > CHAT_IDLE_MS) throw Error('Invalid stream limits');
   if (!Number.isInteger(runStreamMs) || runStreamMs < 1 || runStreamMs > RUN_STREAM_MS || !Number.isInteger(runIdleMs) || runIdleMs < 1 || runIdleMs > RUN_IDLE_MS) throw Error('Invalid run stream limits');
   // Live bridge (MCP + local voice) and the owner's private library for the GenVR frame.
-  const studio = createStudioHost({ packageRoot, voiceProvider:generated=>voiceLibrary.shared(generated) });
+  const genvrRuntime = resolveGenvrRuntime({ runtimesDir:typeof genvrRuntimesDir==='string'&&path.isAbsolute(genvrRuntimesDir)?genvrRuntimesDir:undefined, bundledRoot:process.env.GIRRU_GENVR_BUNDLED==='0'?undefined:path.join(packageRoot,'vendor/genvr') });
+  const studio = createStudioHost({ packageRoot, runtimePackage:genvrRuntime?.packageDir??null, voiceProvider:generated=>voiceLibrary.shared(generated) });
   const chatVoice = createChatVoice({ packageRoot, blocked:()=>voiceLibrary.isBusy() });
   const voiceLibrary=createVoiceLibrary({packageRoot,blocked:()=>chatVoice.isBusy()});
-  let studioToken = null;
-  void studio.token().then(t => { studioToken = t; }, () => {});
-  const serveGenVR = createGenVRAssets(packageRoot, () => studioToken);
+  let studioToken = null, genvrRetired = false;
+  void studio.token().then(t => { if(!genvrRetired)studioToken = t; }, () => {});
+  const serveGenVR = createGenVRAssets(packageRoot, () => studioToken, {runtime:genvrRuntime});
   const assets = readCurrent(packageRoot, channel); // Pin validated bytes for this server lifetime.
   const server = http.createServer({ maxHeaderSize: 16384, requestTimeout: 10000, headersTimeout: 10000 }, async (req, res) => {
     for (const [k, v] of Object.entries(HEADERS)) res.setHeader(k, v);
@@ -391,6 +394,20 @@ function createApplicationServer({ browserController = null, packageRoot = root,
     if (stage1ReadOnly && raw.startsWith('/api/') && !stage1Route(req.method, raw)) return send(403, { code: 'stage1_read_only' });
     if (requestPath(raw) === null || raw.length > 2048) return send(400);
     const studioPath = requestPath(raw);
+    const runtimeRequest=studioPath===GENVR_RUNTIME||studioPath.startsWith('/studio-bridge/')||studioPath.startsWith('/studio-library/')||studioPath.startsWith('/genvr/');
+    if(runtimeRequest){
+      const current=resolveGenvrRuntime({runtimesDir:typeof genvrRuntimesDir==='string'&&path.isAbsolute(genvrRuntimesDir)?genvrRuntimesDir:undefined,bundledRoot:process.env.GIRRU_GENVR_BUNDLED==='0'?undefined:path.join(packageRoot,'vendor/genvr')});
+      const ready=!genvrRetired&&!!genvrRuntime&&current?.packageDir===genvrRuntime.packageDir;
+      if(genvrRuntime&&!ready&&!genvrRetired){genvrRetired=true;studioToken=null;void studio.close();}
+      // Local program metadata contains no account state, paths or install-job details.
+      if(studioPath===GENVR_RUNTIME){
+        if(req.method!=='GET')return send(405);
+        if(raw!==GENVR_RUNTIME||req.headers['transfer-encoding']||Number(req.headers['content-length']||0))return send(400);
+        res.setHeader('Cache-Control','no-store');
+        return send(200,{state:ready?(genvrRuntime.source==='installed'?'installed':'bundled'):'missing',version:ready?genvrRuntime.version:null});
+      }
+      if(!ready)return send(503,{code:'unavailable'});
+    }
     if (studioPath.startsWith('/studio-bridge/') || studioPath.startsWith('/studio-library/')) {
       // Long polls, voice generation and library files outlive the API deadline.
       clearTimeout(timer);
@@ -425,7 +442,7 @@ function createApplicationServer({ browserController = null, packageRoot = root,
     const audio = req.method === 'POST' && raw === '/api/chat/transcribe';
     // Agent files are up to 1 MB of text; JSON escaping can double it.
     // KNOW-INDEX-01: a Knowledge PDF or a chat's PDF comes as base64 (10 MB of PDF).
-    const limit = raw===VOICE_LIBRARY_PATH ? 4_200_000 : (req.method === 'POST' && (/^\/api\/agents\/[^/?#]+\/library\/file$/.test(raw) || raw === '/api/memory/documents/read-pdf')) ? READ_PDF_BASE64 + 65536 : meetingsRoute(raw) ? 512 * 1024 : agentLibraryRoute(raw) ? 2_400_000 : notesRoute(raw) ? 4_300_000 : packRoute(raw) ? 2_100_000 : conversationPath(raw)?.kind === 'project-media' ? 44_739_244 + 8192 : genvrRoute(raw) ? GENVR_BYTES + 65536 : audio ? AUDIO_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/images$/.test(raw) ? IMAGE_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/runs$/.test(raw) ? RUN_LIMIT : LIMIT;
+    const limit = raw===VOICE_LIBRARY_PATH ? 4_200_000 : (req.method === 'POST' && (/^\/api\/agents\/[^/?#]+\/library\/file$/.test(raw) || raw === '/api/memory/documents/read-pdf')) ? READ_PDF_BASE64 + 65536 : meetingsRoute(raw) ? 512 * 1024 : agentLibraryRoute(raw) ? 2_400_000 : notesRoute(raw) ? 4_300_000 : packRoute(raw) ? 2_100_000 : conversationPath(raw)?.kind === 'project-media' ? 44_739_244 + 8192 : raw===GENVR_RUNTIME ? 8192 : genvrRoute(raw) ? GENVR_BYTES + 65536 : audio ? AUDIO_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/images$/.test(raw) ? IMAGE_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/runs$/.test(raw) ? RUN_LIMIT : LIMIT;
     if (!Number.isSafeInteger(length) || length < 0 || length > limit) return send(413);
     if (req.headers['content-type'] && !/^application\/json(?:;\s*charset=utf-8)?$/i.test(req.headers['content-type'])) return send(415);
     try {
@@ -541,7 +558,7 @@ function createApplicationServer({ browserController = null, packageRoot = root,
         }
         // The terminal answers input, resize and close with 204: a fixed { ok: true } leaves the bridge.
         if (status === 204 && terminalRoute(raw) && req.method !== 'GET') { response.resume(); return send(200, { ok: true }); }
-        const responseLimit = conversationPath(raw)?.kind === 'project-media' ? 44_739_244 + 8192 : genvrRoute(raw) ? GENVR_BYTES + 65536 : chat ? 16384 : req.method === 'GET' && /^\/api\/chat\/conversations\/[^/?#]+\/images\/[a-f0-9]{32}$/.test(raw) ? IMAGE_LIMIT : RESPONSE_LIMIT;
+        const responseLimit = conversationPath(raw)?.kind === 'project-media' ? 44_739_244 + 8192 : raw===GENVR_RUNTIME ? 8192 : genvrRoute(raw) ? GENVR_BYTES + 65536 : chat ? 16384 : req.method === 'GET' && /^\/api\/chat\/conversations\/[^/?#]+\/images\/[a-f0-9]{32}$/.test(raw) ? IMAGE_LIMIT : RESPONSE_LIMIT;
         if (status >= 300 && status < 400 || response.headers.location || response.headers['set-cookie'] || response.headers['content-encoding'] || !/^application\/json(?:\s*;|$)/i.test(response.headers['content-type'] || '') || Number(response.headers['content-length'] || 0) > responseLimit) return fail();
         const parts = []; let count = 0;
         response.on('data', chunk => { count += chunk.length; if (count > responseLimit) fail(); else parts.push(chunk); });

@@ -8,6 +8,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { genvrRuntime } from '../config/genvr-runtime.js';
 import { dataPath } from '../config/data-root.js';
 import { q, sql, one, run, dialect, type Step } from '../repositories/sql-steps.js';
 import {forUpdate} from '../db/pg/dialect.js';
@@ -100,9 +101,9 @@ export class CentralSkills {
  }
  async installMarkdown(content:string,name:string,origin:string){const prepared=prepareSkillMarkdown(content,name);await this.initialize();return this.store(prepared,origin);}
  async seedBundled(){await this.seedLegacy();await this.seedGenvrSdk();const directory=fileURLToPath(new URL('../../skills/',import.meta.url));for(const entry of await fs.readdir(directory,{withFileTypes:true}).catch(()=>[])){if(!entry.isDirectory())continue;try{const b=await bundle(path.join(directory,entry.name),true);if(!(await q.one('SELECT id FROM central_skills WHERE name=?',b.name)))await this.store(b,'bundled');}catch{/* Invalid optional bundled skills never block startup. */}}}
- /** Skills shipped inside the installed GenVR SDK (core-ui/vendor/genvr): added when new and updated
+ /** Skills shipped inside the optional installed GenVR SDK: added when new and updated
   *  when a newer SDK changes them. Rows the owner imported or edited (other origins) are never replaced. */
- private async seedGenvrSdk(){const directory=process.env.DPRO_GENVR_SKILLS||fileURLToPath(new URL('../../../core-ui/vendor/genvr/package/skills/',import.meta.url));for(const entry of await fs.readdir(directory,{withFileTypes:true}).catch(()=>[])){if(!entry.isDirectory())continue;try{const b=await bundle(path.join(directory,entry.name),true);const row=await q.one<SkillRow>('SELECT * FROM central_skills WHERE name=?',b.name);if(!row)await this.store(b,'genvr-sdk');else if((row.origin==='genvr-sdk'||row.origin==='bundled')&&row.content_hash!==b.hash)await this.store(b,'genvr-sdk',row.content_hash);}catch{/* An invalid SDK skill never blocks startup. */}}}
+ private async seedGenvrSdk(){const runtime=genvrRuntime();const directory=process.env.DPRO_GENVR_SKILLS||(runtime?path.join(runtime.packageDir,'skills'):null);if(!directory)return;for(const entry of await fs.readdir(directory,{withFileTypes:true}).catch(()=>[])){if(!entry.isDirectory())continue;try{const b=await bundle(path.join(directory,entry.name),true);const row=await q.one<SkillRow>('SELECT * FROM central_skills WHERE name=?',b.name);if(!row)await this.store(b,'genvr-sdk');else if((row.origin==='genvr-sdk'||row.origin==='bundled')&&row.content_hash!==b.hash)await this.store(b,'genvr-sdk',row.content_hash);}catch{/* An invalid SDK skill never blocks startup. */}}}
  private async seedLegacy(){const root=dataPath('skills');try{if((await fs.lstat(root)).isSymbolicLink())return;for(const entry of await fs.readdir(root,{withFileTypes:true})){if(!entry.isFile()||!entry.name.endsWith('.md'))continue;try{const clean=redactImportText(await readText(path.join(root,entry.name),true)).text,meta=metadata(clean);if(!(await q.one('SELECT id FROM central_skills WHERE name=?',meta.name)))await this.installMarkdown(clean,meta.name,'existing');}catch{/* Retain invalid legacy files untouched. */}}}catch{/* A fresh workspace has no legacy skill folder. */}}
  startScan(owner:string){if([...this.scans.values()].some(s=>s.owner===owner&&s.status==='scanning'))return [...this.scans.values()].find(s=>s.owner===owner&&s.status==='scanning')!;
   if(this.scans.size>=8){const finished=[...this.scans.values()].find(s=>s.status!=='scanning');if(!finished)throw new SkillLibraryError('scan_busy',409);this.scans.delete(finished.id);}

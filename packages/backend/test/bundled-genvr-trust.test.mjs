@@ -45,3 +45,21 @@ test('only marked tool objects pass the switch; other exec tools are still refus
   assert.equal(isToolObjectAllowedByExecPolicy({ name: 'mcp__other__x', execClass: true }), false);
   assert.equal(isToolObjectAllowedByExecPolicy({ name: 'execute_code' }), false, 'built-in exec tools stay off');
 });
+
+test('migration recognises only managed entries and exact current or historical pinned loaders', async () => {
+ const path=await import('node:path');
+ const {isManagedGenvrLaunch,GENVR_PACKAGE_HASH}=await import('../src/mcp-client/bundled-genvr.ts');
+ const {genvrBundledRoot,genvrRuntimesRoot}=await import('../src/config/genvr-runtime.ts');
+ const {pinnedEntryArgs}=await import('../src/mcp-client/pinned-entry.ts');
+ const old='4d209c9e8fc7028ed5dbcba8b0d38c59a299f433afc3bb69af7d3f75d80afbab';
+ const vendor=path.join(genvrBundledRoot(),'package/dist/mcp.js');
+ const cache=path.join(genvrRuntimesRoot(),'genvr/0.3.0-preview.17-1234abcd/package/dist/mcp.js');
+ const row=args=>({...bundled,args:JSON.stringify(args)});
+ for(const file of [vendor,cache])for(const hash of [old,GENVR_PACKAGE_HASH])assert.equal(isManagedGenvrLaunch(row(pinnedEntryArgs(file,hash))),true);
+ assert.equal(isManagedGenvrLaunch(row([vendor])),true);
+ for(const args of [[cache],pinnedEntryArgs(path.join(genvrRuntimesRoot(),'elsewhere/package/dist/mcp.js'),old),[...pinnedEntryArgs(cache,old),'--inspect'],pinnedEntryArgs(cache,'0'.repeat(64))])assert.equal(isManagedGenvrLaunch(row(args)),false);
+ assert.equal(isManagedGenvrLaunch({...row([vendor]),command:path.join(path.parse(vendor).root,'old-install/node')}),true);
+ const moved=path.join(path.parse(vendor).root,'old-app/core-ui/vendor/genvr/package/dist/mcp.js');
+ assert.equal(isManagedGenvrLaunch({...row(pinnedEntryArgs(moved,old)),command:path.join(path.parse(vendor).root,'old-app/node')}),true);
+ assert.equal(isManagedGenvrLaunch({...row([vendor]),command:'node --eval'}),false);
+});

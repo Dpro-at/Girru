@@ -14,7 +14,7 @@ const icon=(app:WorkspaceApp)=>app.id==='terminal'?'terminal':app.id==='trading'
 const dot=(app:WorkspaceApp)=>app.state==='connected'?'ready':['attention','expired','disconnected'].includes(app.state)?'warn':undefined;
 type TileHandlers={open:()=>void;onAccountConnections:()=>void;onPermissions:()=>void;footer?:MenuItem|null;canOpen?:boolean;remove?:()=>void};
 /** Right-click on a tile (A3): the same actions as its inspector and ⋯ menu, with the same owner-only gates. MCP connections are not apps: they live in Settings › MCP connections. */
-export function tileActions(app:Pick<WorkspaceApp,'id'|'kind'|'name'>,{owner}:{owner:boolean;busy?:boolean},h:TileHandlers):MenuItem[]{
+export function tileActions(app:Pick<WorkspaceApp,'id'|'kind'|'name'>&Partial<Pick<WorkspaceApp,'runtime'|'removable'>>,{owner}:{owner:boolean;busy?:boolean},h:TileHandlers):MenuItem[]{
  if(app.kind==='mcp')return [];
  // SA6: an added app (from the Store or a folder) has no page of its own: its tools are for agents.
  if(app.kind==='added'&&app.id==='browser')return [{label:'Open Browser',icon:'globe',run:h.open,disabled:h.canOpen===false},...(h.footer?['sep' as const,h.footer]:[])];
@@ -23,13 +23,14 @@ export function tileActions(app:Pick<WorkspaceApp,'id'|'kind'|'name'>,{owner}:{o
  if(!owner)return items;
  if(app.id==='genvr')items.push({label:'Account connection…',icon:'contact',run:h.onAccountConnections});
  if(app.id==='terminal'||app.id==='genvr')items.push({label:'Agent permissions…',icon:'shield',run:h.onPermissions});
+ if(app.id==='genvr'&&app.removable&&h.remove)items.push('sep',{label:'Remove',icon:'trash',run:h.remove});
  if(h.footer)items.push('sep',h.footer);
  return items;
 }
 const publicApp:WorkspaceApp={id:'genvr',name:'GenVR',kind:'api',version:null,summary:'Virtual worlds and connected experiences.',state:'included',sourceId:'genvr',permissions:[],tools:0,removable:false};
 /** Code is in the server's app list; it opens only where the desktop app has the editor. */
 export const CODE_ELSEWHERE='Opens in the Girru desktop app that has the editor';
-const stateOf=(app:WorkspaceApp,canCode:boolean,codeMissing=false)=>app.id==='trading'?'Included preview':app.id==='code'&&codeMissing?'Not installed':app.id==='code'&&!canCode?'Desktop app only':app.kind==='added'?(app.origin==='private'?'Private':'From the Store'):states[app.state];
+const stateOf=(app:WorkspaceApp,canCode:boolean,codeMissing=false)=>app.id==='genvr'&&app.runtime==='missing'?'Not installed':app.id==='trading'?'Included preview':app.id==='code'&&codeMissing?'Not installed':app.id==='code'&&!canCode?'Desktop app only':app.kind==='added'?(app.origin==='private'?'Private':'From the Store'):states[app.state];
 
 /** My apps (AA1): the installed apps as big icons, like a launcher. MCP connections are not listed here (Settings › MCP connections). */
 export function WorkspaceApplications({client,active,query,refresh,onOpen,onCode,codeMissing=false,onBrowser,onAccountConnections,onPermissions,footerItem,onRemove}:{client:SessionClient;codeMissing?:boolean;active:boolean;query:string;refresh:number;onOpen:(id:'terminal'|'genvr'|'trading')=>void;onCode?:()=>void;onBrowser?:()=>void;onAccountConnections:()=>void;onPermissions:()=>void;footerItem?:(id:string)=>MenuItem|null;onRemove?:(app:WorkspaceApp)=>void}){
@@ -60,7 +61,7 @@ export function WorkspaceApplications({client,active,query,refresh,onOpen,onCode
  {app?<><div className="apps-inspector-head"><span className="apps-tile-icon" data-app={app.id} aria-hidden="true"><UiIcon name={icon(app)} size={22}/></span><div><h3>{app.name}</h3><p className="apps-inspector-line">{kinds[app.kind]} · {stateOf(app,!!onCode,codeMissing)}</p></div></div><p>{app.summary}</p>
  {app.kind==='added'?<><div className="apps-actions">{app.id==='browser'&&<button className="primary" disabled={!onBrowser} onClick={()=>onBrowser?.()}><UiIcon name="globe" size={15}/>Open Browser</button>}{owner&&onRemove&&<button onClick={()=>onRemove(app)}><UiIcon name="trash" size={15}/>Remove</button>}{owner&&menu([{label:'Agent permissions…',run:onPermissions}])}</div><p className="fine-print">{app.origin==='private'?'It can only make its own tables and gets only the permissions you give it.':'Its tools are for your agents; give them in Agents › Permissions.'}</p></>
  :app.id==='trading'?<TradingInstallView client={client} active={active} onPreview={()=>onOpen('trading')} onPermissions={onPermissions}/>
- :<div className="apps-actions"><button className="primary" disabled={app.id==='code'&&!onCode} title={app.id==='code'&&!onCode?CODE_ELSEWHERE:undefined} onClick={()=>open(app)}><UiIcon name={app.id==='code'&&codeMissing?'download':icon(app)} size={15}/>{app.id==='code'&&codeMissing?'Get Code':`Open ${app.name}`}</button>{owner&&menu([...(app.id==='genvr'?[{label:'Account connection…',run:onAccountConnections}]:[]),...(app.id==='terminal'||app.id==='genvr'?[{label:'Agent permissions…',run:onPermissions}]:[])])}</div>}
+ :<div className="apps-actions"><button className="primary" disabled={app.id==='code'&&!onCode} title={app.id==='code'&&!onCode?CODE_ELSEWHERE:undefined} onClick={()=>open(app)}><UiIcon name={(app.id==='code'&&codeMissing||app.id==='genvr'&&app.runtime==='missing')?'download':icon(app)} size={15}/>{app.id==='genvr'&&app.runtime==='missing'?'Get GenVR':app.id==='code'&&codeMissing?'Get Code':`Open ${app.name}`}</button>{owner&&menu([...(app.id==='genvr'?[{label:'Account connection…',run:onAccountConnections}]:[]),...(app.id==='terminal'||app.id==='genvr'?[{label:'Agent permissions…',run:onPermissions}]:[]),...(app.id==='genvr'&&app.removable&&onRemove?[{label:'Remove',run:()=>onRemove(app)}]:[])])}</div>}
  {app.id==='code'&&!onCode&&<p className="fine-print">{CODE_ELSEWHERE}.</p>}
  {owner&&<section className="apps-may" aria-label="What it may do"><h4>What it may do</h4>{app.permissions.length?<ul>{app.permissions.map(x=><li key={x}>{x}</li>)}</ul>:<p className="fine-print">Nothing listed.</p>}<p className="fine-print">Adding an app never gives its tools to an agent.</p></section>}
  </>:<p className="apps-empty">Choose an app to open it or see what it may do.</p>}

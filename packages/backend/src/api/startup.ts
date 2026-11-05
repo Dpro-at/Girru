@@ -1,5 +1,6 @@
 import { backendPath } from '../config/backend-root.js';
-import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { genvrRuntime } from '../config/genvr-runtime.js';
 /**
  * Backend startup chain (moved out of server.ts so it can be tested).
  *
@@ -123,7 +124,8 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
   const { getSkillsRegistry } = await import('../skills/registry.js');
   const skillsRegistry = getSkillsRegistry();
   // GenVR SDK skills first: an SDK skill wins over an older Girru copy of the same name.
-  await skillsRegistry.load([fileURLToPath(new URL('../../../core-ui/vendor/genvr/package/skills/', import.meta.url)), backendPath('skills')]);
+  const genvr=genvrRuntime();
+  await skillsRegistry.load([...(genvr?[path.join(genvr.packageDir,'skills')]:[]), backendPath('skills')]);
   if (background) skillsRegistry.watch(); // Enable hot reload
   console.log(`[Server] ✅ Loaded ${skillsRegistry.getAll().length} skills\n`);
 
