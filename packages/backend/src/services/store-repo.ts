@@ -83,7 +83,7 @@ export function parsePackage(raw: unknown): StorePackage {
   const files = (p.files as Array<Record<string, unknown>>).map((f) => {
     if (!f || typeof f.path !== 'string' || typeof f.sha256 !== 'string' || !HEX.test(f.sha256) || !Number.isSafeInteger(f.size) || (f.size as number) < 0) throw new TypeError('store package');
     const parts = f.path.split('/');
-    if (parts.length > 8 || !parts.every((x) => SEGMENT.test(x) && !x.endsWith('.') && !WINDOWS_DEVICE.test(x)) || !(PACKAGE_EXT.test(f.path)||f.path==='runtime-packages.npm')) throw new TypeError('store package');
+    if (parts.length > 8 || !parts.every((x) => SEGMENT.test(x) && !x.endsWith('.') && !WINDOWS_DEVICE.test(x)) || !(PACKAGE_EXT.test(f.path)||['runtime-packages.npm','app-host.npm'].includes(f.path))) throw new TypeError('store package');
     if (parts[0].toLowerCase() === 'migrations' && parts[0] !== 'migrations') throw new TypeError('store package');
     // Every supported filesystem must resolve the same reviewed files and directories.
     for (let i = 1; i <= parts.length; i++) {

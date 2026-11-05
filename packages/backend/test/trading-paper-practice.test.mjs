@@ -1,3 +1,4 @@
+import './fixtures/trading-runtime.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';
 import {PaperPracticeStore} from '../src/services/trading-paper-practice.ts';
 function fixture(t){let now=1800000000000;const store=new PaperPracticeStore(()=>now);t.after(()=>store.close());const initial=store.start('owner'),order=(patch={})=>store.order('owner',{sessionId:initial.sessionId,requestId:randomUUID(),symbol:'DEMO-ALPHA',side:'buy',quantity:2,...patch});return {store,initial,order,advance:ms=>now+=ms};}

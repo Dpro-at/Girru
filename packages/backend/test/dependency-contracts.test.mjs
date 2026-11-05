@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAlpacaRest } from '../extensions/trading/src/alpaca-rest.js';
+import { createAlpacaRest } from './fixtures/legacy-apps/extensions/trading/src/alpaca-rest.js';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

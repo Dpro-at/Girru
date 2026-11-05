@@ -1,3 +1,4 @@
+import './fixtures/trading-runtime.mjs';
 // S0-A.1 / S0-A.2 / S0-A.11: global deny-by-default auth gate.
 // Builds the real app (buildServer(), same as server.ts, without listening),
 // enumerates EVERY registered route and checks who may reach it.
@@ -277,7 +278,7 @@ const OWNER_ONLY = [
 const OWNER_OR_ADMIN = [
   ['POST', '/api/marketplace/install'], ['POST', '/api/marketplace/uninstall'], ['POST', '/api/marketplace/process-update/:id'],
   ['POST', '/api/webhooks'], ['POST', '/api/webhooks/:id/test'], ['POST', '/api/webhooks/trigger'], ['GET', '/api/webhooks'],
-  ['POST', '/api/telephony/numbers/purchase'], ['POST', '/api/telephony/calls/make'], ['GET', '/api/telephony/sessions'],
+
   ['GET', '/api/audit/events'], ['GET', '/api/scheduler/jobs'], ['GET', '/api/workflows'],
   ['POST', '/api/channels/:id/send'], ['GET', '/api/channels/whatsapp/qr'],
   ['POST', '/api/plugins/:id/enable'],

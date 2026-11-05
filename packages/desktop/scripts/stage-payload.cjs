@@ -26,7 +26,7 @@ const out = path.join(here, 'payload');
 /** Backend parts the server needs at run time (no tests, no one-off maintenance scripts). */
 const BACKEND_PARTS = ['extensions', 'skills', 'python-scripts'];
 /** Bridge parts: its scripts and the plain-JS contracts it requires. */
-const CORE_UI_SCRIPTS = ['application-server.cjs', 'build-artifacts.cjs', 'preview.cjs', 'memory-response.cjs', 'genvr-assets.cjs', 'genvr-studio-host.cjs', 'genvr-runtime-path.cjs', 'genvr-host.js', 'genvr-avatar-host.js', 'voice-library-host.cjs', 'voice-runtime.cjs', 'chat-voice-host.cjs', 'chat-voice-worker.py', 'portable-voice-host.cjs', 'portable-voice-worker.py', 'portable-voice-models.json'];
+const CORE_UI_SCRIPTS = ['store-app-assets.cjs', 'application-server.cjs', 'build-artifacts.cjs', 'preview.cjs', 'memory-response.cjs', 'genvr-assets.cjs', 'genvr-studio-host.cjs', 'genvr-runtime-path.cjs', 'genvr-host.js', 'genvr-avatar-host.js', 'voice-library-host.cjs', 'voice-runtime.cjs', 'chat-voice-host.cjs', 'chat-voice-worker.py', 'portable-voice-host.cjs', 'portable-voice-worker.py', 'portable-voice-models.json'];
 
 function parseArgs(argv) {
   const options = { node: process.execPath, backendModules: path.join(packages, 'backend', 'node_modules'), rootModules: path.join(packages, '..', 'node_modules'), coreUiDist: path.join(packages, 'core-ui', 'dist') };

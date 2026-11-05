@@ -4,6 +4,23 @@ All notable changes to Dpro Bot.
 
 ---
 
+## Unreleased — optional app payload
+
+- Move Call Center, Trading practice and the existing Puppeteer engine into reviewed Store apps. Keep core authorization, browser URL guards and paper proof/ledger checks. Removal keeps saved data; activation and host replacement may require a restart.
+- Reject portable package path aliases and execute the exact checked migration bytes.
+- Store renderer code is trusted same-origin application code. Browser installation includes no Chrome download or existing profile import.
+
+Payload measurements below use the same local Node, dependency tree and native-pruning inputs. They exclude Electron shell and installer compression; they are not download or installer sizes.
+
+| Local checkpoint | Payload bytes | Decimal MB |
+| --- | ---: | ---: |
+| Compiled production payload (A) | 631,480,905 | 631.5 |
+| GenVR moved (B1) | 381,634,551 | 381.6 |
+| Channels moved (B2) | 295,762,413 | 295.8 |
+| Call Center, Trading and Browser moved (B3–B5) | 255,043,286 | 255.0 |
+
+The final payload is 40,719,127 bytes smaller than B2 and 59.6% smaller than A. These are local measurements, pending published CI and native platform acceptance.
+
 ## [1.3.0] - 2026-02-22
 
 ### 🎉 Complete System Redesign

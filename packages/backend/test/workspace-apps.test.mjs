@@ -16,7 +16,7 @@ test('app inventory is owner-only and rejects query/mutation escape hatches',asy
 test('one inventory joins existing registries without duplicate GenVR or a second installation table',async()=>{
  const tables=()=>db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all();await (await import('../src/services/genvr-account.ts')).genvrConnection('apps-owner');const before=tables();
  const result=await get();assert.equal(result.statusCode,200,result.body);assert.equal(result.headers['cache-control'],'no-store');
- assert.deepEqual(result.json().items.map(x=>[x.id,x.kind]),[['terminal','builtin'],['trading','builtin'],['code','builtin'],['genvr','api']]);assert.equal(result.json().items.find(x=>x.id==='genvr').state,'not_connected');assert.ok(result.json().items.find(x=>x.id==='genvr').permissions.includes('Account access is reviewed in Apps › Accounts'));assert.ok(!JSON.stringify(result.json()).includes('reviewed in Connections'));assert.deepEqual(tables(),before);
+ assert.deepEqual(result.json().items.map(x=>[x.id,x.kind]),[['terminal','builtin'],['code','builtin'],['genvr','api']]);assert.equal(result.json().items.find(x=>x.id==='genvr').state,'not_connected');assert.ok(result.json().items.find(x=>x.id==='genvr').permissions.includes('Account access is reviewed in Apps › Accounts'));assert.ok(!JSON.stringify(result.json()).includes('reviewed in Connections'));assert.deepEqual(tables(),before);
 });
 test('adding, duplicate refusal, disabling and removal reuse the actual MCP registry',async()=>{
  const created=await app.inject({method:'POST',url:'/api/mcp/servers',headers:owner,payload:{name:'sample-app',description:'A synthetic tool connection',transport:'http',url:'http://127.0.0.1:9/mcp'}});

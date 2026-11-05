@@ -1,3 +1,4 @@
+import {storeHostEnabled,markStoreHostStarted} from '../services/store-host-apps.js';
 import { meetingRoutes } from './routes/meetings.js';
 import {workspacePackRoutes} from './routes/workspace-pack.js';
 import {tradingMarketRoutes} from './routes/trading-market.js';
@@ -130,7 +131,7 @@ import { worldBuilderRoutes } from './routes/world-builder.js';
 import { extensionsRoutes } from './routes/extensions.js';
 import { systemRoutes } from './routes/system.js';
 import { appUpdateRoutes } from './routes/app-updates.js';
-import { registerTelephonyRoutes } from './routes/telephony.js';
+import {loadCallCenterRuntime} from '../services/call-center-runtime.js';
 import { agentFilesRoutes } from './routes/agent-files.js';
 import { agentPackagesRoutes } from './routes/agent-packages.js';
 import { registerDashboardRoutes } from './routes/dashboard.js';
@@ -382,13 +383,16 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await fastify.register(skillLibraryRoutes);
   await fastify.register(specialtyTemplateRoutes); // 🛠️ Skills System
   await fastify.register(schedulerDefinitionRoutes);
-  await fastify.register(tradingMarketRoutes);
-  await fastify.register(tradingPaperPracticeRoutes);
-  await fastify.register(tradingPaperReadRoutes,{ledger:options.paperLedger??(()=>null)});
-  await fastify.register(tradingPaperBotRoutes,{ledger:options.paperLedger??(()=>null)});
-  await fastify.register(tradingPaperInstallRoutes,{ledger:options.paperLedger??(()=>null)});
-  await fastify.register(tradingPaperAccountSetupRoutes,{ledger:options.paperLedger??(()=>null)});
-  await fastify.register(tradingPaperRuntimeRoutes,{ledger:options.paperLedger??(()=>null)});
+  if(storeHostEnabled('trading'))markStoreHostStarted('trading');
+  await fastify.register(async scope=>{scope.addHook('preHandler',async(_request,reply)=>{if(!storeHostEnabled('trading'))return reply.code(503).send({code:'app_not_enabled'});});
+  await scope.register(tradingMarketRoutes);
+  await scope.register(tradingPaperPracticeRoutes);
+  await scope.register(tradingPaperReadRoutes,{ledger:options.paperLedger??(()=>null)});
+  await scope.register(tradingPaperBotRoutes,{ledger:options.paperLedger??(()=>null)});
+  await scope.register(tradingPaperInstallRoutes,{ledger:options.paperLedger??(()=>null)});
+  await scope.register(tradingPaperAccountSetupRoutes,{ledger:options.paperLedger??(()=>null)});
+  await scope.register(tradingPaperRuntimeRoutes,{ledger:options.paperLedger??(()=>null)});
+  });
   await fastify.register(schedulerAuthorizationRoutes);
   await fastify.register(schedulerPaperControlRoutes,{ledger:paperScheduleLedger});
   await fastify.register(schedulerRoutes); // ⏰ Scheduler System
@@ -468,7 +472,8 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await fastify.register(worldBuilderRoutes);     // 🏗️  World Builder (Manual Building + Save/Load)
   await fastify.register(extensionsRoutes);    // 🔌 Extensions Management (SDK-based)
   await fastify.register(marketplaceRoutes);   // 🛒 Extension Marketplace (Registry, Install, Reviews)
-  await fastify.register(registerTelephonyRoutes); // ☎️ Telephony / Assistant Center (Call Center)
+  const callCenter=await loadCallCenterRuntime().catch(()=>{fastify.log.warn('Call Center is unavailable; add it again from the Store.');return null;});
+  if(callCenter)await fastify.register(async scope=>{scope.addHook('onRequest',async()=>callCenter.check());await callCenter.routes.registerTelephonyRoutes(scope);});
   await fastify.register(appUpdateRoutes()); // Settings › About and updates (owner)
   await fastify.register(systemRoutes);        // ⚙️ System Operations (Restart, Shutdown)
   await fastify.register(agentFilesRoutes);    // 📝 Agent Files (PERSONALITY.md + MEMORY.md)

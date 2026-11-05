@@ -24,11 +24,10 @@ export const STORE_CONFIG={featured:process.env.GIRRU_STORE_FEATURED||'girru:gen
 /** The apps that come with Girru, as store manifests (the same apps as My apps). */
 const INCLUDED:ReadonlyArray<StoreManifest>=([
  {id:'girru:genvr',name:'GenVR',icon:'globe',category:'worlds',summary:'3D worlds for your agents.',description:'Give your agents a place to live and work: build 3D spaces, walk through them with your team and publish them when you are ready. Uses your GenVR account connection.',permissions:['Uses your GenVR account once you connect it','Publishing a world always waits for your OK']},
- {id:'girru:trading',name:'Trading',icon:'chart',category:'trading',summary:'Practice trading with an agent team.',description:'Paper practice with fictional money and prices: your agents research, propose and keep a journal while nothing real is bought or sold.',permissions:['Practice money only; live orders are not connected','Setting up practice waits for your OK']},
  {id:'girru:terminal',name:'Terminal',icon:'terminal',category:'developer',summary:'Your shell next to your agents.',description:'Command sessions on this computer, beside your chats. Agents only run commands you allow.',permissions:['Uses your computer account when you start a shell']},
  {id:'girru:code',name:'Code',icon:'code',category:'developer',summary:'The project editor beside your chats.',description:'Open a project folder and edit it next to your chats, in the Girru desktop app.',permissions:['Opens only in the Girru desktop app that has the editor','Edits files in the project folder you open']},
 ] as const).map(x=>({...x,kind:'app' as const,source:'girru' as const,maker:'Girru',verified:true,version:null,updated:null,permissions:[...x.permissions],worksWith:[],languages:[]}));
-const INCLUDED_APP:Record<string,string>={'girru:genvr':'genvr','girru:trading':'trading','girru:terminal':'terminal','girru:code':'code'};
+const INCLUDED_APP:Record<string,string>={'girru:genvr':'genvr','girru:terminal':'terminal','girru:code':'code'};
 /** The id of the app a Girru item opens (for the window's Open button). */
 export const includedApp=(id:string)=>INCLUDED_APP[id]??null;
 

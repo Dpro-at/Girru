@@ -183,10 +183,7 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
   await gateway.start();
   console.log('[Server] ✅ Gateway initialized with 2 channels\n');
 
-  // Initialize Telephony Service (Twilio + Google Voice)
-  const { initializeTelephonyService } = await import('../services/telephony-service.js');
-  await initializeTelephonyService();
-  console.log('[Server] ✅ Telephony service initialized\n');
+  // Telephony providers initialize only through the enabled Store app.
 
   // Initialize Inbox System
   const { createInboxSystem } = await import('../inbox/index.js');

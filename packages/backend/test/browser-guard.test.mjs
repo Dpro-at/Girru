@@ -23,7 +23,7 @@ process.env.DATABASE_PATH = join(dir, 'data', 'agent-player.db');
 const quiet = { log: console.log, info: console.info, warn: console.warn };
 console.log = () => {}; console.info = () => {}; console.warn = () => {};
 const { checkBrowserUrl } = await import(join(backendDir, 'src/browser/url-guard.ts'));
-const { BrowserController } = await import(join(backendDir, 'src/browser/controller.ts'));
+const { BrowserController } = await import(join(backendDir, 'test/fixtures/legacy-apps/src/browser/controller.ts'));
 const utils = await import(join(backendDir, 'src/tools/browser/page-utils.ts'));
 
 let controller;

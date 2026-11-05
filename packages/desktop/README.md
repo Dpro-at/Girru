@@ -107,3 +107,9 @@ On AppImage or translocated macOS installations whose Node executable path chang
 ### Agent Connect channels
 
 Channels use the existing Agent Connect package as a separate Store app. The core includes the web channel and a small configuration/security host, with no Agent Connect, Telegram, WhatsApp or Graph provider dependencies in its production payload. Settings › Channels opens the Store when the app is missing. The Store uses pinned npm archives and no install scripts; optional Python providers still need their own explicit setup. Removal stops channels while retaining settings, credentials, delivery history and provider state. Re-adding keeps channel choices and does not switch disabled channels on.
+
+### Optional Call Center, Trading and Browser
+
+The core payload omits Twilio and Puppeteer. Call Center installs its reviewed provider program from the Store; it preserves old phone data through the existing backup-first namespace migration. Trading installs its existing practice renderer while the trusted paper proof and ledger host remain in Girru. Browser installs the existing Puppeteer engine; API/tool grants and public-network restrictions stay in the core. All three use owner-controlled activation in My apps and require a restart when indicated. Removal retains data and permissions and retires active hosts.
+
+Trading renderer code is trusted same-origin application code, not an isolated third-party sandbox. Adding the app does not by itself grant paper execution authority. Browser Get installs only the program and pinned SDK archives, without downloading Chrome or importing browser profiles. A compatible cached browser or absolute operator `GIRRU_BROWSER_EXECUTABLE` is required. The native browser workspace evaluation remains separate.

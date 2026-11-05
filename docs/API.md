@@ -538,3 +538,9 @@ remain in force. Legacy PPT is not supported.
 Format references: [Office Open XML document structure](https://learn.microsoft.com/en-us/office/open-xml/word/structure-of-a-wordprocessingml-document),
 [SpreadsheetML structure](https://learn.microsoft.com/en-us/office/open-xml/spreadsheet/structure-of-a-spreadsheetml-document),
 and [ZIP format specification](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT).
+
+### Optional app hosts
+
+Call Center, Trading and Browser are optional reviewed Store programs. Adding one does not by itself grant agent tools or paper execution authority. Existing paper proof, consent and ledger checks stay in the host. Activation is owner-only on loopback through `GET /api/store/apps/:id/status` and `POST /api/store/apps/:id/activation` with exactly `{enabled:boolean}`; a restart completes lifecycle changes. Removal retains app data and saved permission decisions.
+
+Store backend programs run with Node privileges. Installed Trading renderer code is likewise trusted application code in the application origin, not an isolated third-party sandbox. Its scoped client adapter prevents accidental unrelated calls but is not a JavaScript security boundary. Only install reviewed packages from a trusted Store repository; independent backend owner verification still applies to paper execution.

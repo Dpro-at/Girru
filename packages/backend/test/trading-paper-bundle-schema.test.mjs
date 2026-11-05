@@ -1,3 +1,4 @@
+import './fixtures/trading-runtime.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import Database from 'better-sqlite3';
 const dir=await fs.mkdtemp(path.join(os.tmpdir(),'paper-bundle-schema-'));process.env.AGENT_PLAYER_DATA_DIR=dir;process.env.DATABASE_PATH=path.join(dir,'main.db');
 const {getDatabase,closeDatabase}=await import('../src/db/database.ts');const main=getDatabase();await main.initialize();const db=main.getDb();

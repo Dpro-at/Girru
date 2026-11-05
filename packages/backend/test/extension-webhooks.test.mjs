@@ -15,7 +15,8 @@ import { randomBytes } from 'node:crypto';
 const dir = mkdtempSync(join(tmpdir(), 'ap-extension-webhooks-'));
 const backendDir = process.cwd();
 process.chdir(dir);
-symlinkSync(join(backendDir, 'extensions'), join(dir, 'extensions'), 'dir'); // permission check reads <cwd>/extensions
+const legacyRoot=join(backendDir,'test/fixtures/legacy-apps/extensions');process.env.GIRRU_EXTENSIONS_DIR=legacyRoot;
+symlinkSync(legacyRoot, join(dir, 'extensions'), 'dir'); // permission check reads <cwd>/extensions
 process.env.HOME = dir;
 process.env.DATABASE_PATH = join(dir, '.data', 'agent-player.db');
 process.env.JWT_SECRET = randomBytes(64).toString('hex'); // throwaway, test only
@@ -62,7 +63,7 @@ for (const id of ['call-center', 'trading']) {
 }
 const app = Fastify();
 app.decorate('db', db);
-const runner = new ExtensionRunner(join(backendDir, 'extensions'));
+const runner = new ExtensionRunner(legacyRoot);
 await runner.initialize(app, { register() {}, unregister() {} });
 await app.ready();
 

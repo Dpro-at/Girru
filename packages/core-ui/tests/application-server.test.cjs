@@ -455,3 +455,13 @@ test('local GenVR availability never forwards owner metadata or accepts actions'
  assert.equal((await s.request('/api/genvr/runtime',{headers:{Origin:'https://example.invalid'}})).status,403);
  assert.equal(s.calls.length,0);
 });
+
+test('embedded desktop bridge serves only its selected workspace Store renderer without a backend data env',async t=>{
+ const os=require('node:os'),path=require('node:path'),{createHash}=require('node:crypto');
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'desktop-store-workspaces-'));
+ const make=(name)=>{const dataDir=path.join(root,name),app=path.join(dataDir,'apps','trading'),bytes=Buffer.from(`export const workspace=${JSON.stringify(name)};`);fs.mkdirSync(app,{recursive:true});const sha=createHash('sha256').update(bytes).digest('hex');fs.writeFileSync(path.join(app,'client.js'),bytes);fs.writeFileSync(path.join(app,'.girru-store.json'),JSON.stringify({id:'trading',source:'store',packageSha256:'a'.repeat(64),files:[{path:'client.js',size:bytes.length,sha256:sha}]}));return {dataDir,bytes,sha};};
+ const a=make('selected-a'),b=make('selected-b');
+ const first=await setup(t,undefined,{storeAppsDataDir:a.dataDir}),second=await setup(t,undefined,{storeAppsDataDir:b.dataDir});t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const one=await first.request('/store-apps/trading/client.js?v='+a.sha),two=await second.request('/store-apps/trading/client.js?v='+b.sha);
+ assert.equal(one.status,200);assert.equal(one.text,a.bytes.toString());assert.equal(two.status,200);assert.equal(two.text,b.bytes.toString());assert.equal((await first.request('/store-apps/trading/client.js?v='+b.sha)).status,409);
+});

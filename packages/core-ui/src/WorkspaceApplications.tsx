@@ -1,12 +1,11 @@
 import {useCallback,useEffect,useRef,useState,useSyncExternalStore} from 'react';
 import type {SessionClient} from './session';
 import {UiIcon} from './ui-icons';
-import {TradingInstallView} from './TradingInstallView';
 import {ContextMenu,useMenu} from './desktop-ui';
 import type {MenuItem} from './desktop-ui';
 import {WORKSPACE_APPS_PATH,type WorkspaceApp} from './apps-contract.js';
 
-export const builtinApps=[{id:'trading',name:'Trading preview',icon:'chart',summary:'Local paper practice with fictional money and prices.'},{id:'terminal',name:'Terminal',icon:'terminal',summary:'Command sessions on this computer.'},{id:'genvr',name:'GenVR',icon:'globe',summary:'Virtual worlds and connected experiences.'},{id:'code',name:'Code',icon:'code',summary:'The project editor beside your chats, in the Girru desktop app.'}] as const;
+export const builtinApps=[{id:'terminal',name:'Terminal',icon:'terminal',summary:'Command sessions on this computer.'},{id:'genvr',name:'GenVR',icon:'globe',summary:'Virtual worlds and connected experiences.'},{id:'code',name:'Code',icon:'code',summary:'The project editor beside your chats, in the Girru desktop app.'}] as const;
 const kinds={builtin:'Built-in',mcp:'MCP connection',api:'Account connection',added:'Added app'};
 const states:Record<WorkspaceApp['state'],string>={included:'Included',disabled:'Off',connected:'Connected',connecting:'Connecting…',disconnected:'Disconnected',attention:'Needs attention',not_connected:'Account not connected',expired:'Connect again'};
 const icon=(app:WorkspaceApp)=>app.id==='terminal'?'terminal':app.id==='trading'?'chart':app.id==='genvr'?'globe':app.id==='code'?'code':app.id==='browser'?'globe':app.kind==='added'?'puzzle':'layers';
@@ -18,6 +17,7 @@ export function tileActions(app:Pick<WorkspaceApp,'id'|'kind'|'name'>&Partial<Pi
  if(app.kind==='mcp')return [];
  // SA6: an added app (from the Store or a folder) has no page of its own: its tools are for agents.
  if(app.kind==='added'&&app.id==='browser')return [{label:'Open Browser',icon:'globe',run:h.open,disabled:h.canOpen===false},...(h.footer?['sep' as const,h.footer]:[])];
+ if(app.id==='app:trading')return [{label:'Open Trading',icon:'chart',run:h.open},...(owner&&h.remove?['sep' as const,{label:'Remove',icon:'trash' as const,run:h.remove}]:[])];
  if(app.id==='app:agent-connect')return [{label:'Open Agent Connect',icon:'message',run:h.open},...(owner&&h.remove?['sep' as const,{label:'Remove',icon:'trash' as const,run:h.remove}]:[])];
  if(app.kind==='added')return owner&&h.remove?[{label:'Agent permissions…',icon:'shield',run:h.onPermissions},'sep',{label:'Remove',icon:'trash',run:h.remove}]:[];
  const items:MenuItem[]=[{label:`Open ${app.name}`,icon:'open',run:h.open,disabled:h.canOpen===false}];
@@ -35,6 +35,7 @@ const stateOf=(app:WorkspaceApp,canCode:boolean,codeMissing=false)=>app.id==='ge
 
 /** My apps (AA1): the installed apps as big icons, like a launcher. MCP connections are not listed here (Settings › MCP connections). */
 export function WorkspaceApplications({client,active,query,refresh,onOpen,onCode,codeMissing=false,onBrowser,onAccountConnections,onPermissions,footerItem,onRemove}:{client:SessionClient;codeMissing?:boolean;active:boolean;query:string;refresh:number;onOpen:(id:'channels'|'terminal'|'genvr'|'trading')=>void;onCode?:()=>void;onBrowser?:()=>void;onAccountConnections:()=>void;onPermissions:()=>void;footerItem?:(id:string)=>MenuItem|null;onRemove?:(app:WorkspaceApp)=>void}){
+ const [hostState,setHostState]=useState<{id:string;enabled:boolean;ready:boolean}|null>(null),[hostBusy,setHostBusy]=useState(false),[hostMessage,setHostMessage]=useState('');
  const owner=useSyncExternalStore(client.subscribe,client.getSnapshot,client.getSnapshot).user?.role==='owner';
  const [items,setItems]=useState<WorkspaceApp[]>([]),[phase,setPhase]=useState<'loading'|'ready'|'error'>('loading'),[selected,setSelected]=useState('');
  const {menu:tileMenu,at,close}=useMenu();
@@ -47,7 +48,11 @@ export function WorkspaceApplications({client,active,query,refresh,onOpen,onCode
  useEffect(()=>{if(active&&owner)void load();return()=>{sequence.current++;};},[active,owner,load,refresh]);
  const rows=(owner?items:[publicApp]).filter(x=>`${x.name} ${x.summary}`.toLowerCase().includes(query.trim().toLowerCase()));
  const app=(!owner||phase==='ready')?rows.find(x=>x.id===selected):undefined;
- const open=(item:WorkspaceApp)=>{if(item.id==='app:agent-connect'){onOpen('channels');}else if(item.id==='browser'){onBrowser?.();}else if(item.id==='code'){onCode?.();}else if(item.id==='terminal'||item.id==='trading'||item.id==='genvr')onOpen(item.id);};
+ const hostId=app?.origin==='store'&&['app:call-center','app:trading','browser','app:browser'].includes(app.id)?(app.id.replace(/^app:/,'')):null;
+ const currentHost=useRef(hostId);currentHost.current=hostId;
+ useEffect(()=>{let live=true;setHostState(null);setHostMessage('');if(active&&owner&&hostId)void client.request({method:'GET',path:`/api/store/apps/${hostId}/status`} as never).then(r=>{if(live&&r.status===200)setHostState({id:hostId,...r.body as {enabled:boolean;ready:boolean}});}).catch(()=>{if(live)setHostMessage('App status could not be read.');});return()=>{live=false;};},[active,owner,hostId,client,refresh]);
+ const activateHost=async()=>{if(!hostState||hostBusy)return;const current=hostState;setHostBusy(true);setHostMessage('');try{const r=await client.request({method:'POST',path:`/api/store/apps/${current.id}/activation`,body:{enabled:!current.enabled}} as never);if(r.status!==200)throw Error('unavailable');if(currentHost.current!==current.id)return;setHostState({...current,enabled:!current.enabled});setHostMessage('Restart Girru to finish changing this app. Agent permissions stay separate.');}catch{setHostMessage('The app could not be changed.');}finally{setHostBusy(false);}};
+ const open=(item:WorkspaceApp)=>{if(item.id==='app:trading'){onOpen('trading');}else if(item.id==='app:agent-connect'){onOpen('channels');}else if(item.id==='browser'){onBrowser?.();}else if(item.id==='code'){onCode?.();}else if(item.id==='terminal'||item.id==='trading'||item.id==='genvr')onOpen(item.id);};
  const contextFor=(e:React.MouseEvent|React.KeyboardEvent,x:WorkspaceApp)=>{const items=tileActions(x,{owner},{open:()=>open(x),onAccountConnections,onPermissions,footer:owner?footerItem?.(x.id):null,canOpen:x.id==='browser'?!!onBrowser:x.id!=='code'||!!onCode,remove:onRemove?()=>onRemove(x):undefined});setSelected(x.id);if(items.length)at(e,items);};
  const ordered=rows;
  const move=(e:React.KeyboardEvent<HTMLDivElement>)=>{if(!['ArrowDown','ArrowUp','ArrowLeft','ArrowRight','Home','End'].includes(e.key)||!ordered.length)return;e.preventDefault();const index=ordered.findIndex(x=>x.id===selected),step=e.key==='ArrowDown'||e.key==='ArrowRight'?1:-1,next=e.key==='Home'?0:e.key==='End'?ordered.length-1:Math.max(0,Math.min(ordered.length-1,index+step));setSelected(ordered[next].id);list.current?.querySelectorAll<HTMLButtonElement>('[role=option]')[next]?.focus();};
@@ -60,10 +65,11 @@ export function WorkspaceApplications({client,active,query,refresh,onOpen,onCode
  </div>
  <aside className="apps-inspector" aria-label="Selected application"><button className="apps-back" onClick={()=>setSelected('')}><UiIcon name="arrow-left" size={15}/>Back to apps</button>
  {app?<><div className="apps-inspector-head"><span className="apps-tile-icon" data-app={app.id} aria-hidden="true"><UiIcon name={icon(app)} size={22}/></span><div><h3>{app.name}</h3><p className="apps-inspector-line">{kinds[app.kind]} · {stateOf(app,!!onCode,codeMissing)}</p></div></div><p>{app.summary}</p>
- {app.kind==='added'?<><div className="apps-actions">{app.id==='app:agent-connect'&&<button className="primary" onClick={()=>onOpen('channels')}>Open Agent Connect</button>}{app.id==='browser'&&<button className="primary" disabled={!onBrowser} onClick={()=>onBrowser?.()}><UiIcon name="globe" size={15}/>Open Browser</button>}{owner&&onRemove&&<button onClick={()=>onRemove(app)}><UiIcon name="trash" size={15}/>Remove</button>}{owner&&menu([{label:'Agent permissions…',run:onPermissions}])}</div><p className="fine-print">{app.origin==='private'?'It can only make its own tables and gets only the permissions you give it.':'Its tools are for your agents; give them in Agents › Permissions.'}</p></>
- :app.id==='trading'?<TradingInstallView client={client} active={active} onPreview={()=>onOpen('trading')} onPermissions={onPermissions}/>
+ {app.kind==='added'?<><div className="apps-actions">{hostState&&<button disabled={hostBusy||!hostState.ready&&!hostState.enabled} onClick={()=>void activateHost()}>{hostState.enabled?'Turn off':'Turn on'}</button>}{app.id==='app:trading'&&<button className="primary" onClick={()=>onOpen('trading')}>Open Trading</button>}{app.id==='app:agent-connect'&&<button className="primary" onClick={()=>onOpen('channels')}>Open Agent Connect</button>}{app.id==='browser'&&<button className="primary" disabled={!onBrowser} onClick={()=>onBrowser?.()}><UiIcon name="globe" size={15}/>Open Browser</button>}{owner&&onRemove&&<button onClick={()=>onRemove(app)}><UiIcon name="trash" size={15}/>Remove</button>}{owner&&menu([{label:'Agent permissions…',run:onPermissions}])}</div><p className="fine-print">{app.origin==='private'?'It can only make its own tables and gets only the permissions you give it.':'Its tools are for your agents; give them in Agents › Permissions.'}</p></>
+
  :<div className="apps-actions"><button className="primary" disabled={app.id==='code'&&!onCode} title={app.id==='code'&&!onCode?CODE_ELSEWHERE:undefined} onClick={()=>open(app)}><UiIcon name={(app.id==='code'&&codeMissing||app.id==='genvr'&&app.runtime==='missing')?'download':icon(app)} size={15}/>{app.id==='genvr'&&app.runtime==='missing'?'Get GenVR':app.id==='code'&&codeMissing?'Get Code':`Open ${app.name}`}</button>{owner&&menu([...(app.id==='genvr'?[{label:'Account connection…',run:onAccountConnections}]:[]),...(app.id==='terminal'||app.id==='genvr'?[{label:'Agent permissions…',run:onPermissions}]:[]),...(app.id==='genvr'&&app.removable&&onRemove?[{label:'Remove',run:()=>onRemove(app)}]:[])])}</div>}
  {app.id==='code'&&!onCode&&<p className="fine-print">{CODE_ELSEWHERE}.</p>}
+ {hostMessage&&<p role="status" className="fine-print">{hostMessage}</p>}
  {owner&&<section className="apps-may" aria-label="What it may do"><h4>What it may do</h4>{app.permissions.length?<ul>{app.permissions.map(x=><li key={x}>{x}</li>)}</ul>:<p className="fine-print">Nothing listed.</p>}<p className="fine-print">Adding an app never gives its tools to an agent.</p></section>}
  </>:<p className="apps-empty">Choose an app to open it or see what it may do.</p>}
  </aside></div>

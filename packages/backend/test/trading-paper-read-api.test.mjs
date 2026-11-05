@@ -1,3 +1,4 @@
+import './fixtures/trading-runtime.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';import {mkdtempSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';import {randomBytes} from 'node:crypto';
 const dir=mkdtempSync(join(tmpdir(),'paper-read-api-'));process.env.DATABASE_PATH=join(dir,'auth.db');process.env.AGENT_PLAYER_DATA_DIR=dir;process.env.JWT_SECRET=randomBytes(64).toString('hex');process.env.ENCRYPTION_KEY=randomBytes(32).toString('hex');
 const {getDatabase,closeDatabase}=await import('../src/db/database.ts');const auth=getDatabase();await auth.initialize();
