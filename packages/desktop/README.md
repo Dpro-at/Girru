@@ -37,15 +37,23 @@ npm start
 
 ```sh
 node ../core-ui/scripts/prepare-genvr.cjs <3d-world-sdk-<version>.tgz>  # once: the pinned GenVR SDK (version in core-ui/genvr-sdk.json)
-npm run stage      # copies Node, backend + modules, UI build and the GenVR SDK into payload/
+npm run stage      # compiles the backend and copies Node, runtime modules, UI and GenVR into payload/
 npm run stage:code # optional: bundles the Code editor (Nabu, ../../../nabu-code) into nabu-runtime/
 npm run dist:mac   # DMG + ZIP in release/  (dist:win = NSIS, dist:linux = AppImage)
 ```
 
 Every `dist:*` build first runs `scripts/check-bundle-inputs.cjs`. It stops the build when the payload has no pinned GenVR SDK, because electron-builder skips a missing folder silently and the app would open with a broken GenVR page. The Code editor is a Store app: a release builds without `nabu-runtime/`, and Girru installs Code from the Girru Store (download for this platform, SHA-256 checked, unpacked into Girru's own app folder). A developer build may still bundle it with `npm run stage:code`; the check then stops a build whose `nabu-runtime/` is only partly staged. `npm run stage` also refuses to stage without the GenVR SDK. `stage:code` copies only what the editor needs at run time (~1.6 GB of a several-GB checkout): its production packages, and the built-in extensions minus the ones Girru does not use (assistant, account sign-ins, the editor's own tests).
 
-The local payload copies every installed module (large). Release bundles with
-a pinned, checksummed Node and production-only modules come later. macOS builds
+The payload compiles backend TypeScript to JavaScript at build time and preserves
+its adjacent runtime assets. Packaged startup needs no TypeScript loader. Only
+production packages listed in the backend lockfile are copied; TypeScript, tsx
+and esbuild stay out of the payload, as do stale installed packages and native
+prebuilds for other platforms. Staging requires an already installed TypeScript
+compiler in the backend or core-ui development dependencies; it downloads nothing.
+Installed runtime package paths and versions must match the lockfile; staging
+refuses drift before replacing the previous payload. The bridge uses Node built-ins
+only. Extension Node entries must be JavaScript; their frontend source files are
+build inputs and are not executed by the backend. macOS builds
 use ad-hoc signing only; they are not notarized. Windows builds are unsigned.
 
 ### First open after downloading
