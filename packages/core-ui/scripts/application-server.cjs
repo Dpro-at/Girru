@@ -1,3 +1,5 @@
+const {hostAppRoute,allowedHostApp,hostAppResponse}=require('../src/store-host-app-contract.js');
+const {storeAppAsset}=require('./store-app-assets.cjs');
 const path = require('node:path');
 const {BROWSER_APP_PATH,allowedBrowserApp,browserAppResponse}=require('../src/browser-app-contract.js');
 const {createVoiceLibrary}=require('./voice-library-host.cjs');
@@ -143,6 +145,7 @@ function allowed(method, target, body) {
   if(coverageRoute(target))return allowedCoverage(method,target,body);
   if(workspaceAppsRoute(target))return allowedWorkspaceApps(method,target,body);
   if(appsCatalogueRoute(target))return allowedAppsCatalogue(method,target,body);
+  if(hostAppRoute(target))return allowedHostApp(method,target,body);
   if(storeRoute(target))return allowedStore(method,target,body);
   if(chatAddonsRoute(target))return allowedChatAddons(method,target,body);
   if (approvalRoute(target)) return allowedApproval(method,target,body);
@@ -237,6 +240,7 @@ function project(target, status, body) {
   if(coverageRoute(target))return coverageResponse(status,body);
   if(workspaceAppsRoute(target))return workspaceAppsResponse(status,body);
   if(appsCatalogueRoute(target))return appsCatalogueResponse(status,body);
+  if(hostAppRoute(target))return hostAppResponse(target,status,body);
   if(storeRoute(target))return storeResponse(target,status,body);
   if(chatAddonsRoute(target))return chatAddonsResponse(status,body);
   if (target === '/api/setup/status') return setupStatus(status, body);
@@ -345,7 +349,8 @@ const launchTokenShape = /^[A-Za-z0-9_-]{43}$/;
  * launchToken (desktop app) is the per-launch secret the backend requires on
  * every request; it is added here and never reaches the page.
  */
-function createApplicationServer({ browserController = null, packageRoot = root, genvrRuntimesDir = process.env.GIRRU_APP_RUNTIMES_DIR, channel, stage1ReadOnly = false, upstreamPort = 42521, launchToken = null, timeoutMs = 10000, streamTimeoutMs = CHAT_DEADLINE_MS, streamIdleMs = CHAT_IDLE_MS, runStreamMs = RUN_STREAM_MS, runIdleMs = RUN_IDLE_MS } = {}) {
+function createApplicationServer({ browserController = null, packageRoot = root, genvrRuntimesDir = process.env.GIRRU_APP_RUNTIMES_DIR, storeAppsDataDir, channel, stage1ReadOnly = false, upstreamPort = 42521, launchToken = null, timeoutMs = 10000, streamTimeoutMs = CHAT_DEADLINE_MS, streamIdleMs = CHAT_IDLE_MS, runStreamMs = RUN_STREAM_MS, runIdleMs = RUN_IDLE_MS } = {}) {
+  if(storeAppsDataDir!==undefined&&(typeof storeAppsDataDir!=='string'||!path.isAbsolute(storeAppsDataDir)))throw Error('Invalid Store workspace.');
   if (typeof stage1ReadOnly !== 'boolean') throw Error('Invalid stage1 configuration');
   const validPort = x => Number.isInteger(x) && x >= 1 && x <= 65535;
   if (launchToken !== null && !(typeof launchToken === 'string' && launchTokenShape.test(launchToken))) throw Error('Invalid launch configuration');
@@ -394,6 +399,7 @@ function createApplicationServer({ browserController = null, packageRoot = root,
     if (stage1ReadOnly && raw.startsWith('/api/') && !stage1Route(req.method, raw)) return send(403, { code: 'stage1_read_only' });
     if (requestPath(raw) === null || raw.length > 2048) return send(400);
     const studioPath = requestPath(raw);
+    if(studioPath.startsWith('/store-apps/')){if(!['GET','HEAD'].includes(req.method))return send(405);const asset=storeAppAsset(raw,{dataDir:storeAppsDataDir});if(!asset)return send(404);res.setHeader('Cache-Control','no-store');return send(asset.status,asset.data??null,asset.type);}
     const runtimeRequest=studioPath===GENVR_RUNTIME||studioPath.startsWith('/studio-bridge/')||studioPath.startsWith('/studio-library/')||studioPath.startsWith('/genvr/');
     if(runtimeRequest){
       const current=resolveGenvrRuntime({runtimesDir:typeof genvrRuntimesDir==='string'&&path.isAbsolute(genvrRuntimesDir)?genvrRuntimesDir:undefined,bundledRoot:process.env.GIRRU_GENVR_BUNDLED==='0'?undefined:path.join(packageRoot,'vendor/genvr')});

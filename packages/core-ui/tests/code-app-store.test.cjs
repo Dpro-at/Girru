@@ -7,7 +7,7 @@ test('Code comes from the server app list like Terminal, Trading and GenVR',()=>
  const src=fs.readFileSync(path.join(__dirname,'../src/WorkspaceApplications.tsx'),'utf8');assert.doesNotMatch(src,/codeApp/,'no second client-only Code tile');
 });
 test('Store › Made by Girru lists the apps that come with Girru, Code included',()=>{
- assert.deepEqual(builtinApps.map(x=>x.id).sort(),['code','genvr','terminal','trading']);
+ assert.deepEqual(builtinApps.map(x=>x.id).sort(),['code','genvr','terminal']);
  const ws=fs.readFileSync(path.join(__dirname,'../src/AppsWorkspace.tsx'),'utf8');assert.match(fs.readFileSync(path.join(__dirname,'../../backend/src/services/store-catalogue.ts'),'utf8'),/id:'girru:code'/);assert.match(fs.readFileSync(path.join(__dirname,'../src/SignedInShell.tsx'),'utf8'),/onOpenApp=\{id=>\{if\(id==='browser'\)setPage\('browser'\);else if\(id==='code'\)void \(nativeEditor\?openCode\(\):openCodeInStore\(\)\);else if\(id==='terminal'\)openTerminal\(\);else if\(id==='genvr'\)void openGenvr\(\);else if\(id==='channels'\)openSettings\('channels'\);else setPage\(id\);\}\}/);
 });
 test('without the desktop editor, Open Code is shown but disabled',()=>{

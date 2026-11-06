@@ -2,7 +2,7 @@ import {BrowserWorkspace} from './BrowserWorkspace';
 import {useBrowserApp} from './browser-app';
 import {PersonalityLibrary} from './PersonalityLibrary';
 import {WorkspaceModes,editorBounds,useNabuRuntime} from './WorkspaceModes';
-import {TradingWorkspace} from './TradingWorkspace';
+import {StoreTradingView} from './StoreTradingView';
 import {footerToolItem} from './AppsWorkspace';
 import {StoreWorkspace} from './StoreView';
 import {SpecialtyLibrary} from './SpecialtyLibrary';
@@ -282,7 +282,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
       <section className="page page-ui" hidden={page!=='code'||!!chat}><p role="status" className="fine-print">Select Code in the bottom bar to open or reconnect the project editor.</p></section>
       <section className="page page-browser" hidden={page!=='browser'}><BrowserWorkspace client={client} active={page==='browser'}/></section>
       <section className="page page-store" hidden={page!=='store'}><StoreWorkspace client={client} active={page==='store'} sidebarSlot={slot} request={storeRequest} canBrowser={browser.available&&owner} canCode={nativeEditor&&owner} codeMissing={codeMissing&&owner} onOpenApp={id=>{if(id==='browser')setPage('browser');else if(id==='code')void (nativeEditor?openCode():openCodeInStore());else if(id==='terminal')openTerminal();else if(id==='genvr')void openGenvr();else if(id==='channels')openSettings('channels');else setPage(id);}} onAccounts={()=>openSettings('accounts')} footerItem={owner?id=>footerToolItem(footerPrefsNow,id,x=>footer.toggle(x)):undefined} onPermissions={()=>{if(user.role!=='owner'){setPage('agents');return;}setApprovalsPlace(r=>({place:'perms',n:(r?.n??0)+1}));setPage('approvals');}}/></section>
-      {user.role==='owner'&&<section className="page page-trading" hidden={page!=='trading'}><TradingWorkspace client={client} active={page==='trading'} sidebarSlot={slot} onBack={openMyApps}/></section>}
+      {user.role==='owner'&&<section className="page page-trading" hidden={page!=='trading'}><StoreTradingView client={client} active={page==='trading'} sidebarSlot={slot} onBack={openMyApps} onOpenStore={()=>{setStoreRequest(r=>({updates:false,item:'store:trading',n:(r?.n??0)+1}));setPage('store');}} onPermissions={()=>{setApprovalsPlace(r=>({place:'perms',n:(r?.n??0)+1}));setPage('approvals');}}/></section>}
       <section className="page page-genvr" hidden={page !== 'genvr'}>{genvrOpened&&<GenVRPage key={user.id} client={client} active={page === 'genvr'}/>}</section>
       {page === 'settings' && <section className="page page-settings"><AppSettings key={settingsVisit} mcpOpenId={mcpOpen} onOpenChannelsStore={()=>{setStoreRequest(r=>({updates:false,item:'store:agent-connect',n:(r?.n??0)+1}));setPage('store');}} onOpenStore={local=>openStore(false,local)} initialTab={settingsTab} initialMemoryPane={memoryPane} sidebarSlot={slot} active signedIn client={client} preference={appearance.preference} onTheme={appearance.setPreference} onAccount={() => openSettings('account')} onAgents={() => setPage('agents')} onOpenMemory={() => setPage('memory')} onOpenChat={() => setPage('chat')} onOpenApps={openMyApps} onOpenTool={tool => setPage(tool)} onOpenGenvr={()=>void openGenvr()} onApprovals={() => setPage('approvals')} onBoard={() => setPage('board')} onAgent={id => { setAgentFocus(f => ({ id, n: (f?.n ?? 0) + 1 })); setPage('agents'); }}/></section>}
     </main>

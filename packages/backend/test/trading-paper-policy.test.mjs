@@ -1,3 +1,4 @@
+import './fixtures/trading-runtime.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {admitPaperOrder} from '../src/services/trading-paper-policy.ts';

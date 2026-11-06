@@ -1,3 +1,4 @@
+import {callCenterRuntimeAllowed,loadCallCenterRuntime} from '../services/call-center-runtime.js';
 import { safeConsole } from '../services/safe-error-log.js';
 import { extensionResourcePath } from './resource-path.js';
 /**
@@ -68,6 +69,8 @@ export interface ExtensionApi {
   // Cron/Scheduler registration — for scheduled tasks
   registerCronJob(schedule: string, handler: () => Promise<void>, jobId: string): void;
   unregisterCronJob(jobId: string): void;
+
+  callCenterHost?: Readonly<{load:()=>Promise<any>}>;
 
   // Services — access to core systems
   db: Database;
@@ -172,6 +175,7 @@ export function createExtensionApi(
   return {
     extensionId,
     ...(extensionId==='agent-connect'&&channelHostCapabilityAllowed(db,extensionDir)?{channelHost:Object.freeze({...channelHost,...channelPolicy,loadLibrary:loadChannelLibrary})}:{}),
+    ...(extensionId==='call-center'&&callCenterRuntimeAllowed(db,extensionDir)?{callCenterHost:Object.freeze({load:async()=>{const p=await loadCallCenterRuntime();if(!p)throw Error('Call Center is not enabled.');return p;}})}:{}),
     authorizeChannelRequest(request) {
       const userId = getUserIdFromRequest(request);
       this.authorizeChannelUser(userId);

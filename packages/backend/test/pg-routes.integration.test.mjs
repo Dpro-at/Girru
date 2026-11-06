@@ -92,7 +92,7 @@ if (URL_) {
     routes: {
       evolution: (await import('../src/api/routes/evolution.ts')).default,
       webhooks: (await import('../src/api/routes/webhooks.ts')).webhooksRoutes,
-      telephony: (await import('../src/api/routes/telephony.ts')).registerTelephonyRoutes,
+      telephony: (await import('./fixtures/legacy-apps/src/api/routes/telephony.ts')).registerTelephonyRoutes,
       dashboard: (await import('../src/api/routes/dashboard.ts')).registerDashboardRoutes,
       worldBots: (await import('../src/api/routes/world-bots.ts')).worldBotsRoutes,
       multiverse: (await import('../src/api/routes/multiverse.ts')).multiverseRoutes,

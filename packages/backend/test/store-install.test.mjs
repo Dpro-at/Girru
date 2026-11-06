@@ -4,6 +4,7 @@
 // which adding it again brings back. An app may only make tables named after itself.
 // No network: the Girru Store is a fake. Run: node --import tsx --test test/store-install.test.mjs
 import test from 'node:test';
+import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, existsSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -49,7 +50,7 @@ const { getDatabase } = await import(join(backendDir, 'src/db/database.ts'));
 const db = getDatabase();
 await db.initialize();
 const { readStore, localCatalogue, installFromStore, uninstallFromStore } = await import(join(backendDir, 'src/services/store-catalogue.ts'));
-const { addJob, appTables } = await import(join(backendDir, 'src/services/store-install.ts'));
+const { addJob, appTables, startAdd } = await import(join(backendDir, 'src/services/store-install.ts'));
 const { parsePackage } = await import(join(backendDir, 'src/services/store-repo.ts'));
 
 const store = () => readStore('owner-1', localCatalogue({ home: dir }));
@@ -137,4 +138,52 @@ test('an app may only make tables named after itself; package paths stay inside 
   for (const bad of ['../escape.js', '/etc/passwd.js', 'a/../../b.js', 'run.sh', '.hidden.js']) {
     assert.throws(() => parsePackage({ files: [{ path: 'agentplayer.plugin.json', sha256: 'a'.repeat(64), size: 1 }, { path: bad, sha256: 'b'.repeat(64), size: 1 }], sha256: 'c'.repeat(64) }), bad);
   }
+});
+
+
+test('package paths cannot alias through case folding or Windows name normalization', () => {
+  const listing = paths => ({files:paths.map(path=>({path,sha256:'a'.repeat(64),size:1})),sha256:'b'.repeat(64)});
+  for(const paths of [
+    ['agentplayer.plugin.json','index.js','Index.js'],
+    ['agentplayer.plugin.json','Migrations/002_escape.sql'],
+    ['agentplayer.plugin.json','migrations/a.sql','Migrations/b.sql'],
+    ['agentplayer.plugin.json','AgentPlayer.plugin.json'],
+    ['agentplayer.plugin.json','lib/a.js','LIB/b.js'],
+    ['agentplayer.plugin.json','migrations./escape.sql'],
+    ['agentplayer.plugin.json','CON/escape.sql'],
+    ['agentplayer.plugin.json','aux.js'],
+    ['agentplayer.plugin.json','lib.js','lib.js/nested.json'],
+  ]) assert.throws(()=>parsePackage(listing(paths)),undefined,paths.join(', '));
+  assert.doesNotThrow(()=>parsePackage(listing(['agentplayer.plugin.json','lib/First.js','lib/Second.js'])));
+});
+
+test('a case-aliased migration is refused before program or SQL activation on every platform', async () => {
+  const previous=served;
+  try {
+    served={...pkgFiles(),'Migrations/002_escape.sql':'CREATE TABLE IF NOT EXISTS escaped_case_marker(id INTEGER);'};
+    index=indexFor(served);forget();
+    const result=await new Promise(done=>startAdd('notes',{restart:()=>false,onDone:done}));
+    assert.equal(result.ok,false);assert.equal(table('escaped_case_marker'),false);
+    assert.equal(existsSync(join(data,'apps/notes')),false);
+  }finally{served=previous;index=indexFor(served);forget();}
+});
+
+
+test('SQL execution uses the checked in-memory bytes even if the installed file changes', async () => {
+  const rename=fs.renameSync,previous=served;
+  try {
+    served=pkgFiles();index=indexFor(served);forget();
+    assert.equal(table('app_notes__items'),false,'the migration must create the table during this test');
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM extension_migrations WHERE extension_id='notes' AND filename='001_notes.sql'").get().n,0,'the migration must not be skipped');
+    fs.renameSync=(from,to)=>{
+      const result=rename(from,to);
+      if(String(from).includes('.incoming-notes-')&&to===join(data,'apps/notes'))
+        fs.writeFileSync(join(to,'migrations/001_notes.sql'),'CREATE TABLE IF NOT EXISTS escaped_disk_marker(id INTEGER);');
+      return result;
+    };
+    const result=await new Promise(done=>startAdd('notes',{restart:()=>false,onDone:done}));
+    assert.equal(result.ok,true,result.message);assert.equal(table('app_notes__items'),true);
+    assert.equal(table('escaped_disk_marker'),false,'changed disk SQL is never executed');
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM extension_migrations WHERE extension_id='notes' AND filename='001_notes.sql'").get().n,1);
+  }finally{fs.renameSync=rename;served=previous;index=indexFor(served);forget();}
 });

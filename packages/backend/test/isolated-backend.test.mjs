@@ -253,8 +253,9 @@ test('every file created lands under the data root; cwd, HOME and TMPDIR stay em
   const created = filesUnder(dataDir).map((p) => relative(dataDir, p));
   for (const expected of ['agent-player.db', 'secrets.env', join('audit', 'audit.db'), join('encryption', 'keys.db'),
     join('encryption', 'credentials.db'), 'memory', join('multi-agent', 'orchestrator.db'), join('webhooks', 'webhooks.db'),
-    'gateway', 'credentials', 'uploads', join('browser', 'screenshots'), 'audio']) {
+    'gateway', 'credentials', 'uploads', 'audio']) {
     assert.ok(created.includes(expected), `${expected} in the data root (got ${created.join(', ')})`);
   }
+  assert.equal(existsSync(join(dataDir,'browser','screenshots')),false,'a missing optional Browser app creates no engine storage');
   checkoutData.forEach((dir, i) => assert.deepEqual(snapshot(dir), before[i], `${dir} unchanged`));
 });

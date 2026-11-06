@@ -116,9 +116,9 @@ test('routeAccess "public" is not a level: the extension stays owner/admin', asy
   assert.equal((await call('GET', '/api/ext/open-ext/data', 'u-owner')).statusCode, 200);
 });
 
-test('no real extension declares a blanket public level', () => {
+test('legacy compatibility manifests never declare a blanket public level', () => {
   for (const id of ['call-center', 'trading']) {
-    const manifest = JSON.parse(readFileSync(join(backendDir, 'extensions', id, 'agentplayer.plugin.json'), 'utf8'));
+    const manifest = JSON.parse(readFileSync(join(backendDir, 'test', 'fixtures', 'legacy-apps', 'extensions', id, 'agentplayer.plugin.json'), 'utf8'));
     assert.notEqual(manifest.routeAccess, 'public', id);
     assert.ok(['owner-admin', 'authenticated'].includes(getExtensionRouteAccess(manifest)), id);
   }

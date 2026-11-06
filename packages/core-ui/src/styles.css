@@ -16,7 +16,6 @@
 @import './store.css';
 @import './workspace-modes.css';
 @import "./personality-library.css";
-@import './trading-workspace.css';
 @import './approvals-desktop.css';
 @import './footer.css';
 @import './backups.css';
@@ -2774,9 +2773,6 @@ button.danger-solid { background:var(--danger); color:#fff; }
 .skill-install-sheet pre { white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; padding:12px; border:1px solid var(--border); background:var(--canvas); font:inherit; line-height:1.5; }
 .skill-install-sheet .actions { display:flex; justify-content:flex-end; gap:8px; flex:none; flex-wrap:wrap; }
 .skill-install-sheet .actions button { margin-block:0; }
-/* Selected Trading setup stays within the existing Apps inspector and native decision sheet. */
-.trading-install{min-width:0}.install-status-row{display:flex;align-items:center;gap:8px}.install-status-row>p{flex:1;margin:0}.apps-inspector .install-status-row button{margin:0}.apps-inspector .install-icon{padding:6px;flex:none}.install-menu{position:relative;flex:none}.install-menu summary{display:flex;align-items:center;justify-content:center;cursor:pointer;list-style:none;width:30px;height:30px}.install-menu summary::-webkit-details-marker{display:none}.install-menu summary:focus-visible{outline:2px solid var(--accent)}.install-menu>div{position:absolute;inset-inline-end:0;top:100%;z-index:15;background:var(--surface);border:1px solid var(--border);box-shadow:0 6px 24px #0003;padding:4px;min-width:220px;max-width:calc(100vw - 48px)}.apps-inspector .install-menu button{display:block;width:100%;margin:0;text-align:start;background:transparent;padding:8px}.trading-install-sheet{width:min(680px,calc(100vw - 32px));max-width:calc(100vw - 32px);max-height:calc(100dvh - 96px);box-sizing:border-box;padding:0;overflow:hidden;color:var(--text);background:var(--surface)}.trading-install-sheet[open]{display:flex;flex-direction:column}.trading-install-sheet>header{display:flex;align-items:center;gap:10px;padding:16px;margin:0;border-block-end:1px solid var(--border);flex:none}.trading-install-sheet>header h3{font-size:16px;margin:0;flex:1;outline:none}.trading-install-sheet>header button{margin:0;padding:6px;display:flex;background:transparent}.install-sheet-body{overflow:auto;min-height:0;padding:12px 20px;font-size:13px;line-height:1.7}.install-sheet-body fieldset{margin:0;padding:0;border:0;min-width:0}.install-sheet-body label{display:flex;flex-direction:column;gap:6px}.install-sheet-body .install-check{flex-direction:row;align-items:flex-start;margin:12px 0}.install-sheet-body input[type=checkbox]{width:16px;min-width:16px;height:16px;min-height:16px;flex:none;margin:4px 0}.install-sheet-body input:not([type=checkbox]){width:100%;box-sizing:border-box}.install-consequences{padding-inline-start:20px}.install-technical summary{cursor:pointer;color:var(--muted)}.install-technical dl{font-size:11px}.install-technical dd{margin:4px 0 12px;overflow-wrap:anywhere;user-select:text}.trading-install-sheet>.actions{display:flex;justify-content:flex-end;gap:10px;flex:none;padding:14px 20px;border-block-start:1px solid var(--border);margin:0}.apps-inspector .trading-install-sheet>.actions button{margin:0;display:inline-flex}.trading-install .fine-print{margin-block-start:16px}
-
 /* Apps uses the existing section sidebar and a single selection inspector. */
 .apps-connection-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.apps-connection-actions button{margin:0;padding:7px}.apps-connection-actions .primary{margin-inline-end:auto}.apps-access{margin-block-start:22px;border-block-start:1px solid var(--border);padding-block-start:12px}.apps-access summary{cursor:pointer}.apps-access p{color:var(--muted)}.apps-notice{flex:none;margin:0;padding:8px 16px;border-block-start:1px solid var(--border);font-size:12px;color:var(--muted)}.apps-row strong,.apps-row small{overflow-wrap:anywhere}.apps-toolbar>*{min-width:0}.apps-panes{grid-template-columns:minmax(0,1fr) minmax(280px,360px)}
 @media(max-width:1000px){.apps-panes{grid-template-columns:minmax(0,1fr)}}
@@ -4091,3 +4087,5 @@ label.setup-kind { display:flex; align-items:center; justify-content:flex-start;
 .office-slide-flow { min-block-size:260px; padding:20px; }
 .office-slide-flow .office-slide-item { position:static; inline-size:100%!important; block-size:auto!important; margin-block:10px; }
 .office-slide-flow .office-slide-item img { block-size:auto; max-block-size:300px; }
+
+.store-app-renderer{display:flex;flex-direction:column;height:100%;min-height:0;flex:1}

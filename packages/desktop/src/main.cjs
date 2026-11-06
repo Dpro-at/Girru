@@ -157,7 +157,7 @@ async function startLocal() {
       cwd: path.basename(dataDir()) === '.data' ? path.dirname(dataDir()) : dataDir(),
       dataDir: dataDir(),
       extraEnv: { MCP_SERVERS_DIR: mcpServersDir(), DPRO_BROWSER_CONNECTION_FILE:browserRuntime.connectionFile, AGENT_TERMINAL: 'true', DPRO_SUBSCRIPTION_CHAT: '1', GIRRU_APP_RUNTIMES_DIR: appRuntimesDir(), GIRRU_CODE_RUNTIME_BUNDLED: codeRuntime()?.source === 'bundled' ? '1' : '0', ...(path.basename(dataDir()) === '.data' ? { AGENT_PLAYER_DATA_DIR: undefined } : {}) },
-      createBridge: ({ upstreamPort, launchToken }) => createApplicationServer({ packageRoot: payload.coreUiDir, genvrRuntimesDir:appRuntimesDir(), channel: 'candidate', upstreamPort, launchToken, browserController:browserRuntime }),
+      createBridge: ({ upstreamPort, launchToken }) => createApplicationServer({ packageRoot: payload.coreUiDir, genvrRuntimesDir:appRuntimesDir(), storeAppsDataDir:dataDir(), channel: 'candidate', upstreamPort, launchToken, browserController:browserRuntime }),
       onLog: line => log.write(line),
       onBackendExit: ({ code, signal }) => {
         // Restore and Store runtime changes rebuild both the engine and its UI bridge.

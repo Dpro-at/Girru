@@ -45,7 +45,7 @@ export const sourceChip=(x:Pick<StoreItem,'id'|'source'>)=>x.source==='girru'?(x
 const TINT:Record<string,string>={marketing:'#E07AB0',sales:'#5FB37A',developer:'#9AA4B2',worlds:'#6FD3C7',trading:'#F0C27A',productivity:'#7AA5FF',more:'#B49AF0'};
 const ICONS=new Set<string>(['globe','chart','terminal','code','send','headset','calendar','puzzle','store']);
 // CODE-STORE-01: a Girru app added from the Store (Code) opens like one that comes with Girru.
-const includedApp=(x:StoreItem)=>x.id==='store:agent-connect'&&x.state==='installed'?'channels':(x.state==='included'||(x.state==='installed'&&x.id.startsWith('girru:')))&&x.kind==='app'?x.id.slice(6) as IncludedApp:null;
+const includedApp=(x:StoreItem)=>x.id==='store:trading'&&x.state==='installed'?'trading':x.id==='store:agent-connect'&&x.state==='installed'?'channels':(x.state==='included'||(x.state==='installed'&&x.id.startsWith('girru:')))&&x.kind==='app'?x.id.slice(6) as IncludedApp:null;
 /** Search: every kind and source; names that match first, then the rest of the words. */
 export const matchStore=(items:StoreItem[],query:string)=>{const q=query.trim().toLowerCase();if(!q)return [];const named=(x:StoreItem)=>itemName(x).toLowerCase().includes(q)||x.name.toLowerCase().includes(q);return [...items.filter(named),...items.filter(x=>!named(x)&&`${x.summary} ${x.maker} ${x.description}`.toLowerCase().includes(q))];};
 /** New first (the newest update date; items without one keep the store's order after them), or A–Z by name. */
@@ -124,6 +124,7 @@ export function StoreWorkspace({client,active,sidebarSlot,onOpenApp,request,onPe
    if(!('ok' in r)&&r.code==='has_data'&&r.data){setRemoving({item:x,data:r.data});return;}
    setRemoving(null);onReload();
    if('ok' in r&&x.id==='store:agent-connect'){setMineRefresh(n=>n+1);say(`Agent Connect removed. Your channel settings and history are kept.${r.restart==='auto'?' Girru starts again to finish.':' Restart Girru to finish.'}`);return;}
+   if('ok' in r&&['store:call-center','store:trading','store:browser'].includes(x.id)){setMineRefresh(n=>n+1);say(`${itemName(x)} removed. Its saved data and permissions are kept.${r.restart==='auto'?' Girru starts again to finish.':' Restart Girru to finish.'}`);return;}
    if('ok' in r&&x.id==='girru:genvr'){setMineRefresh(n=>n+1);say(`GenVR removed. Your worlds and account connection are kept. Review agent permissions after re-adding it.${r.restart==='auto'?' Girru starts again to finish.':' Restart Girru to finish.'}`);return;}
    if('ok' in r&&x.id==='girru:code'){say('Code removed. Your projects are not touched.');return;}
    if('ok' in r&&(x.id.startsWith('store:')||x.id.startsWith('private:'))){if(x.id.startsWith('private:'))setMineRefresh(n=>n+1);say(`${itemName(x)} removed${r.copied?'; a copy of its data is saved':''}.${r.restart==='auto'?' Girru starts again to finish.':' It leaves when Girru starts again.'}`);return;}if(!quiet)say('ok' in r?`${itemName(x)} removed.`:r.message||'It could not be removed.','ok' in r?()=>void change(STORE_INSTALL_PATH,{id:x.id,hash:x.hash}).then(onReload):undefined);}

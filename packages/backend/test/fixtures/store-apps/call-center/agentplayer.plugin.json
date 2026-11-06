@@ -1,0 +1,43 @@
+{
+  "id": "call-center",
+  "name": "Call Center",
+  "description": "AI-powered call center with Twilio/Google Voice - Handle inbound/outbound calls with AI agents",
+  "version": "1.1.0",
+  "type": "channel",
+  "author": "Dpro",
+  "main": "index.js",
+  "publicRoutes": [
+    "/webhooks/call-status",
+    "/webhooks/recording-status"
+  ],
+  "permissions": [
+    "network",
+    "database",
+    "tools",
+    "api",
+    "credentials"
+  ],
+  "icon": "phone",
+  "capabilities": {
+    "inbound": true,
+    "outbound": true,
+    "recording": true,
+    "transcription": true,
+    "ivr": true,
+    "workflows": true
+  },
+  "providers": [
+    "twilio",
+    "google"
+  ],
+  "settings": {
+    "requiresCredentials": true,
+    "credentialKeys": [
+      "telephony.twilio.account_sid",
+      "telephony.twilio.auth_token",
+      "telephony.google.project_id",
+      "telephony.google.credentials_json",
+      "telephony.public_url"
+    ]
+  }
+}

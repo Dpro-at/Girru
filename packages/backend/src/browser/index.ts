@@ -10,7 +10,9 @@ export * from './page-utils.js';
 // Re-export getBrowserController explicitly
 export { getBrowserController } from './controller.js';
 
-import { getBrowserController, BrowserController } from './controller.js';
+import { getBrowserController } from './controller.js';
+import type {BrowserController} from './controller-contract.js';
+import {loadBrowserRuntime,browserRuntimeReady,stopBrowserRuntime} from '../services/browser-runtime.js';
 import type { BrowserConfig, BrowserSession, BrowserStats } from './types.js';
 
 let initialized = false;
@@ -19,9 +21,10 @@ let initialized = false;
  * Initialize the browser automation system
  */
 export async function initializeBrowser(): Promise<{
-  controller: BrowserController;
+  controller: BrowserController|null;
 }> {
-  const controller = getBrowserController();
+  const controller = await loadBrowserRuntime();
+  if(!controller)return {controller:null};
 
   initialized = true;
   console.log('[Browser] System initialized');
@@ -52,8 +55,9 @@ export async function closeBrowserSession(sessionId: string): Promise<boolean> {
  */
 export function getBrowserStatus(): {
   initialized: boolean;
-  stats: BrowserStats;
+  stats: BrowserStats|null;
 } {
+  if(!browserRuntimeReady())return {initialized:false,stats:null};
   const controller = getBrowserController();
 
   return {
@@ -66,8 +70,7 @@ export function getBrowserStatus(): {
  * Shutdown browser system
  */
 export async function shutdownBrowser(): Promise<void> {
-  const controller = getBrowserController();
-  await controller.cleanup();
+  await stopBrowserRuntime();
 
   initialized = false;
   console.log('[Browser] System shutdown');

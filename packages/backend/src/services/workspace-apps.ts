@@ -13,7 +13,6 @@ export type WorkspaceApp = {
 };
 export const BUNDLED_APPS:ReadonlyArray<WorkspaceApp> = [
   {id:'terminal',name:'Terminal',kind:'builtin',version:null,summary:'Command sessions on this computer.',state:'included',sourceId:null,permissions:['Host account access when you start a shell'],tools:0,removable:false},
-  {id:'trading',name:'Trading preview',kind:'builtin',version:null,summary:'Local paper practice with fictional money and prices.',state:'included',sourceId:null,permissions:['Paper setup requires owner review','Live orders are not connected'],tools:0,removable:false},
   {id:'code',name:'Code',kind:'builtin',version:null,summary:'The project editor beside your chats, in the Girru desktop app.',state:'included',sourceId:null,permissions:['Opens only in the Girru desktop app that has the editor','Edits files in the project folder you open'],tools:0,removable:false},
 ];
 export interface WorkspaceAppsSources {
@@ -31,7 +30,7 @@ export async function listWorkspaceApps(ownerId:string,sources:WorkspaceAppsSour
   const runtime=sources.genvr?.()??null;
   items.push({id:'genvr',name:'GenVR',kind:'api',version:runtime?.version??null,summary:'Virtual worlds with your existing GenVR account connection.',state:account.status==='error'?'attention':account.status,sourceId:'genvr',permissions:['Account access is reviewed in Apps › Accounts','World publishing needs owner approval'],tools:0,removable:runtime?.source==='installed',runtime:runtime?.source==='installed'?'installed':runtime?.source==='bundled'?'bundled':'missing'});
   // SA6: apps added from the Girru Store or from a folder (private) show in My apps too; their tools are for agents.
-  for(const [id,x] of Object.entries(await (sources.added??installedApps)()))items.push({id:'app:'+id,name:x.name??id,kind:'added',version:x.version,summary:x.source==='private'?'Added from a folder on this computer. Not reviewed by the Girru Store.':'Added from the Girru Store.',state:'included',sourceId:id,permissions:[...(id==='agent-connect'?['Uses existing channel settings and history']:['Makes and uses only its own tables']),'Its tools need a grant for each agent'],tools:0,removable:true,origin:x.source});
+  for(const [id,x] of Object.entries(await (sources.added??installedApps)()))items.push({id:'app:'+id,name:x.name??id,kind:'added',version:x.version,summary:x.source==='private'?'Added from a folder on this computer. Not reviewed by the Girru Store.':'Added from the Girru Store.',state:'included',sourceId:id,permissions:[...(id==='agent-connect'?['Uses existing channel settings and history']:id==='trading'?['Fictional-money practice; no broker or live orders']:['Makes and uses only its own tables']),id==='trading'?'Paper setup and automation require separate owner verification':'Its tools need a grant for each agent'],tools:0,removable:true,origin:x.source});
   const seen=new Set(items.map(x=>x.id));
   for(const server of servers){
     const id='mcp:'+server.id;

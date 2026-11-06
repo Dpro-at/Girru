@@ -1,3 +1,4 @@
+import {loadBrowserRuntime,browserRuntimeReady} from '../../services/browser-runtime.js';
 /**
  * Browser Automation API Routes
  * REST endpoints for web automation
@@ -30,6 +31,8 @@ import {
 } from '../../browser/page-utils.js';
 
 export async function browserRoutes(fastify: FastifyInstance): Promise<void> {
+  await loadBrowserRuntime();
+  fastify.addHook('onRequest',async(request,reply)=>{if(!request.url.startsWith('/api/browser/'))return;if(!browserRuntimeReady())return reply.code(503).send({code:'app_not_enabled'});});
   const prefix = '/api/browser';
 
   // ============ Sessions ============

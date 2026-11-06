@@ -93,7 +93,7 @@ export function addJob(job: string): AddJob | null { return jobs.get(job) ?? nul
 
 /** Start adding a Store app; the window follows the job. */
 export function startAdd(app: string, options: { fetch?: Fetch; runtimeFetch?:RuntimeFetch; restart?: () => boolean; onDone?: (job: AddJob) => void } = {}): AddJob {
-  if(app==='agent-connect'){const active=[...jobs.values()].find(j=>j.app===app&&!j.done);if(active)return active;}
+  if(['agent-connect','call-center','trading','browser'].includes(app)){const active=[...jobs.values()].find(j=>j.app===app&&!j.done);if(active)return active;}
   return trackJob(app, (job) => add(job, options), options.onDone);
 }
 
@@ -135,7 +135,11 @@ async function add(job: AddJob, { fetch: get = globalThis.fetch as unknown as Fe
   job.step = 'checking';
   const plugin = JSON.parse(files.find((f) => f.path === 'agentplayer.plugin.json')!.bytes.toString('utf8')) as { id?: unknown; version?: unknown; main?: unknown };
   if (plugin.id !== id || plugin.version !== item.version || typeof plugin.main !== 'string' || !files.some((f) => f.path === plugin.main)) throw new Error('the package is not this app');
-  const tables = appTables(id, files.filter((f) => f.path.startsWith('migrations/') && f.path.endsWith('.sql')).map((f) => f.bytes.toString('utf8')));
+  if(['agent-connect','call-center','trading','browser'].includes(id)&&plugin.main!=='index.js')throw new Error('The app host requires its reviewed entry point.');
+  const checkedMigrations = files.filter((f) => f.path.startsWith('migrations/') && f.path.endsWith('.sql'));
+  const tables = appTables(id, checkedMigrations.map((f) => f.bytes.toString('utf8')));
+  const migrations = checkedMigrations.filter((f) => f.path.split('/').length === 2)
+    .sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
   // 4. Set it up in the data folder: a new folder, then one rename.
   job.step = 'setting-up';
   const root = installedAppsRoot();
@@ -148,7 +152,14 @@ async function add(job: AddJob, { fetch: get = globalThis.fetch as unknown as Fe
       fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
       fs.writeFileSync(target, f.bytes, { mode: 0o600 });
     }
-    if(id==='agent-connect'){const descriptor=files.find(f=>f.path==='runtime-packages.npm');if(!descriptor)throw Error('Agent Connect has no reviewed runtime list.');await (await import('./store-package-runtime.js')).installRuntimePackages(incoming,descriptor.bytes,runtimeFetch);}
+    if(['agent-connect','call-center','trading','browser'].includes(id)){
+      const descriptor=files.find(f=>f.path===(id==='agent-connect'?'runtime-packages.npm':'app-host.npm'));
+      if(!descriptor)throw Error('The app has no reviewed host descriptor.');
+      const host=JSON.parse(descriptor.bytes.toString('utf8'));
+      if(id!=='agent-connect'&&(host.schema!==1||host.host!==id||host.protocolVersion!==1))throw Error('The app host descriptor is incompatible.');
+      if(id==='agent-connect'||host.packages)await (await import('./store-package-runtime.js')).installRuntimePackages(incoming,descriptor.bytes,runtimeFetch);
+    }
+    fs.writeFileSync(path.join(incoming,'.girru-store.json'),JSON.stringify({source:'store',id,version:item.version,packageSha256:pkg.sha256,files:pkg.files}),{mode:0o600,flag:'wx'});
     const dest = path.join(root, id);
     const old = path.join(root, `.old-${id}-${Date.now()}`);
     const hadOld=fs.existsSync(dest);if(hadOld)fs.renameSync(dest,old);
@@ -157,10 +168,11 @@ async function add(job: AddJob, { fetch: get = globalThis.fetch as unknown as Fe
     // Only its own migrations, recorded as the extension runner records them; then the copy of its data, if one was saved.
     const db = await sql();
     db.transaction(() => {
-      for (const file of migrationFiles(dest)) {
-        const name = path.basename(file);
+      for (const file of migrations) {
+        const name = file.path.slice('migrations/'.length);
         if (db.prepare('SELECT 1 FROM extension_migrations WHERE extension_id = ? AND filename = ?').get(id, name)) continue;
-        db.exec(fs.readFileSync(file, 'utf8'));
+        // Execute the same verified bytes that passed the SQL allowlist, never a disk alias.
+        db.exec(file.bytes.toString('utf8'));
         db.prepare('INSERT INTO extension_migrations (extension_id, filename) VALUES (?, ?)').run(id, name);
       }
     })();
@@ -171,7 +183,7 @@ async function add(job: AddJob, { fetch: get = globalThis.fetch as unknown as Fe
   // 5. Turn it on; its page and tools load when Girru starts again.
   job.step = 'adding';
   const db = await sql(); ensureSettings(db);
-  if(id==='agent-connect')db.prepare(`INSERT INTO extension_configs (extension_id,enabled,updated_at) VALUES (?,0,datetime('now')) ON CONFLICT(extension_id) DO UPDATE SET updated_at=datetime('now')`).run(id);
+  if(['agent-connect','call-center','trading','browser'].includes(id))db.prepare(`INSERT INTO extension_configs (extension_id,enabled,updated_at) VALUES (?,0,datetime('now')) ON CONFLICT(extension_id) DO UPDATE SET updated_at=datetime('now')`).run(id);
   else db.prepare(`INSERT INTO extension_configs (extension_id, enabled, updated_at) VALUES (?, 1, datetime('now')) ON CONFLICT(extension_id) DO UPDATE SET enabled = 1, updated_at = datetime('now')`).run(id);
   db.prepare('INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at').run(KEY(id), JSON.stringify({ name:item.name,version: item.version, packageSha256: pkg.sha256, installedAt: new Date().toISOString() }), Date.now());
   const auto = restart?.() ?? false;
@@ -211,10 +223,12 @@ export async function appData(id: string): Promise<Array<{ table: string; rows: 
 export type RemoveResult = { ok: true; copy: string | null; restart: 'auto' | 'manual' } | { ok: false; code: 'not_found' | 'has_data' | 'refused'; message: string; data?: Array<{ table: string; rows: number }> };
 /** Remove an added app. With rows in its tables, only with confirm: a copy of them is saved first. */
 export async function removeApp(id: string, options: { confirm?: boolean; restart?: () => boolean } = {}): Promise<RemoveResult> {
-  if(id==='agent-connect'&&[...jobs.values()].some(j=>j.app===id&&!j.done))return {ok:false,code:'refused',message:'Wait for Agent Connect to finish adding before removing it.'};
-  if (!ID.test(id) || !(await installedApps())[id]) return { ok: false, code: 'not_found', message: 'This app was not added to Girru.' };
+  if(['agent-connect','call-center','trading','browser'].includes(id)&&[...jobs.values()].some(j=>j.app===id&&!j.done))return {ok:false,code:'refused',message:'Wait for the app to finish adding before removing it.'};
+  const installed=(await installedApps())[id];
+  if (!ID.test(id) || !installed) return { ok: false, code: 'not_found', message: 'This app was not added to Girru.' };
   if(id==='agent-connect'){await (await import('../../extensions/shared/channel-host.js')).stopAllChannels();(await import('../../extensions/shared/channel-library.js')).retireChannelLibrary();}
-  const data = await appData(id);
+  const retained=installed.source==='store'&&['agent-connect','call-center','trading','browser'].includes(id);
+  const data = retained?[]:await appData(id);
   const rows = data.reduce((n, t) => n + t.rows, 0);
   if (rows > 0 && !options.confirm) return { ok: false, code: 'has_data', message: 'It keeps data of its own.', data };
   const db = await sql();
@@ -228,11 +242,15 @@ export async function removeApp(id: string, options: { confirm?: boolean; restar
   }
   db.transaction(() => {
     for (const t of data) db.exec(`DROP TABLE IF EXISTS ${quote(t.table)}`);
-    db.prepare('DELETE FROM extension_migrations WHERE extension_id = ?').run(id);
-    if(id==='agent-connect')db.prepare('UPDATE extension_configs SET enabled=0, updated_at=CURRENT_TIMESTAMP WHERE extension_id=?').run(id);
+    if(!retained)db.prepare('DELETE FROM extension_migrations WHERE extension_id = ?').run(id);
+    if(retained)db.prepare('UPDATE extension_configs SET enabled=0, updated_at=CURRENT_TIMESTAMP WHERE extension_id=?').run(id);
     else db.prepare('DELETE FROM extension_configs WHERE extension_id = ?').run(id);
     db.prepare('DELETE FROM app_settings WHERE key = ?').run(KEY(id));
   })();
+  if(retained&&id==='browser')await (await import('./browser-runtime.js')).stopBrowserRuntime();
+  if(retained&&id==='call-center')await (await import('./call-center-runtime.js')).stopCallCenterRuntime();
+  if(retained&&['call-center','trading','browser'].includes(id))(await import('./store-host-apps.js')).retireStoreHostApp(id as import('./store-host-apps.js').StoreHostApp);
+  if(retained&&id==='call-center')(await import('./call-center-runtime.js')).retireCallCenterRuntime();
   const dir = installedAppDir(id);
   if (dir) fs.rmSync(dir, { recursive: true, force: true });
   return { ok: true, copy, restart: options.restart?.() ? 'auto' : 'manual' };

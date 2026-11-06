@@ -1,3 +1,4 @@
+import {loadBrowserRuntime} from '../../services/browser-runtime.js';
 /**
  * Browser Navigate Tool
  *
@@ -80,6 +81,7 @@ You can optionally wait for specific elements to load or take a screenshot.`,
 
   async execute(rawParams): Promise<ToolResult> {
     const params = rawParams as BrowserNavigateParams;
+    if(!await loadBrowserRuntime())return {error:'app_not_enabled',content:[{type:'text',text:'Add and enable Browser from the Store, then restart Girru.'}]};
     const controller = getBrowserController();
     let sessionId: string | null = null;
 

@@ -17,7 +17,7 @@ async function fixture(t,options={}){
  const transport=async request=>{
   if(request.path==='/api/auth/login')return {status:200,body:{token:'fixture',deviceToken:'d'.repeat(43),user}};if(request.path==='/api/auth/me')return {status:200,body:{user}};
   f.calls.push({method:request.method,path:request.path,body:request.body});
-  if(request.path==='/api/apps')return {status:200,body:{items:[{id:'terminal',name:'Terminal',kind:'builtin',version:null,summary:'Command sessions.',state:'included',sourceId:null,permissions:[],tools:0,removable:false},{id:'trading',name:'Trading preview',kind:'builtin',version:null,summary:'Sample data only.',state:'included',sourceId:null,permissions:[],tools:0,removable:false},{id:'genvr',name:'GenVR',kind:'api',version:null,summary:'Virtual worlds.',state:'not_connected',sourceId:'genvr',permissions:[],tools:0,removable:false}]}};
+  if(request.path==='/api/apps')return {status:200,body:{items:[{id:'terminal',name:'Terminal',kind:'builtin',version:null,summary:'Command sessions.',state:'included',sourceId:null,permissions:[],tools:0,removable:false},{id:'app:trading',name:'Trading',kind:'added',origin:'store',version:'1.0.0',summary:'Sample data only.',state:'included',sourceId:'trading',permissions:[],tools:0,removable:true},{id:'genvr',name:'GenVR',kind:'api',version:null,summary:'Virtual worlds.',state:'not_connected',sourceId:'genvr',permissions:[],tools:0,removable:false}]}};
   if(request.path==='/api/mcp/servers')return {status:200,body:{servers:[]}};
   if(request.path===base)return f.unavailable?{status:503,body:{code:'paper_installation_unavailable'}}:{status:200,body:status()};
   if(request.path===base+'/reviews'){f.reviewCount=(f.reviewCount??0)+1;f.review={ok:true,id:reviewId.slice(0,-1)+String(f.reviewCount),expiresAt:Date.now()+300000,appId:'trading',version:'1.0.0',mode:'paper',...request.body,currentState:f.state,schemaDigest:'b'.repeat(64),schemaVersion:1,implementationId:'bundled.trading.paper.v1',dataEffects:{verifiesSchemaTables:15,createsAccounts:false,seedsCash:false,retainsData:true},runtimeConnected:false,createsAccounts:false,retainsData:true};return {status:200,body:f.review};}
@@ -55,15 +55,14 @@ test('pending apply cannot be dismissed as cancellation; signout clears review a
 test('local demo never grants setup; unavailable still preserves preview and inactive view clears',async t=>{
  const demo=await fixture(t,{mode:'mock'});assert.equal(demo.f.calls.length,0);assert.equal(button(demo.container,'Review paper setup'),undefined);await click(button(demo.container,'Open preview'));assert.deepEqual(demo.f.opens,['trading']);const x=await fixture(t,{unavailable:true});assert.match(text(x.container),/unavailable/);assert.ok(button(x.container,'Try again'));await click(button(x.container,'Open preview'));assert.equal(x.f.calls.filter(r=>r.method==='POST').length,0);await x.render(false);assert.equal(x.container.textContent,'');
 });
-test('Apps integration keeps Terminal GenVR and Trading preview in the existing selected inspector',async t=>{
- const x=await fixture(t,{apps:true});await click([...x.container.querySelectorAll('[role=option]')].find(node=>text(node).startsWith('Terminal')));await click(button(x.container,'Open Terminal'));assert.deepEqual(x.f.opens,['terminal']);const trading=[...x.container.querySelectorAll('[role=option]')].find(node=>text(node).startsWith('Trading preview'));await click(trading);assert.match(text(trading),/Included preview/);assert.equal(x.container.querySelectorAll('.apps-inspector').length,1);assert.ok(button(x.container,'Review paper setup'));await click(button(x.container,'Open preview'));const genvr=[...x.container.querySelectorAll('[role=option]')].find(node=>text(node).startsWith('GenVR'));await click(genvr);await click(button(x.container,'Open GenVR'));assert.deepEqual(x.f.opens,['terminal','trading','genvr']);assert.equal(x.container.querySelectorAll('dialog').length,0);
+test('My apps opens installed Trading without mixing paper verification into its inspector',async t=>{
+ const x=await fixture(t,{apps:true});await click(x.container.querySelector('[data-app="app:trading"][role="option"]'));
+ assert.ok(button(x.container,'Open Trading'));assert.equal(button(x.container,'Review paper setup'),undefined);
+ await click(button(x.container,'Open Trading'));assert.ok(x.f.opens.includes('trading'));
+ assert.equal(x.f.calls.some(c=>c.path.startsWith(base)),false);
 });
-test('Apps keyboard keeps selected More open and prevents search focus escaping a modal sheet',async t=>{
- const x=await fixture(t,{apps:true});await click([...x.container.querySelectorAll('[role=option]')].find(node=>text(node).startsWith('Trading preview')));
- const status=x.container.querySelector('.install-status-row'),summary=status.querySelector('summary');summary.focus();
- await act(async()=>summary.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'F10',shiftKey:true,bubbles:true,cancelable:true})));await flush();assert.equal(summary.parentElement.open,true);
- await click(button(x.container,'Review setup…'));const dialog=x.container.querySelector('dialog'),heading=dialog.querySelector('h3');heading.focus();
- const search=x.container.querySelector('input[aria-label="Search apps"]');await act(async()=>heading.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'f',ctrlKey:true,bubbles:true,cancelable:true})));assert.notEqual(document.activeElement,search);assert.equal(document.activeElement,heading);
- await act(async()=>dialog.dispatchEvent(new dom.window.Event('cancel',{bubbles:true,cancelable:true})));await flush();assert.equal(x.container.querySelector('dialog'),null);
+test('installed Trading has the same Open action in its keyboard context menu',async t=>{
+ const x=await fixture(t,{apps:true});const tile=x.container.querySelector('[data-app="app:trading"][role="option"]');assert.ok(tile);await act(async()=>tile.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'F10',shiftKey:true,bubbles:true,cancelable:true})));await flush();
+ const menu=[...x.container.ownerDocument.querySelectorAll('[role="menu"]')].find(n=>text(n).includes('Open Trading'));assert.ok(menu);assert.match(text(menu),/Open Trading/);assert.doesNotMatch(text(menu),/Review paper setup/);
 });
 test.after(()=>dom.window.close());
