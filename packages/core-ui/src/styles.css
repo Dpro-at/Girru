@@ -3460,7 +3460,12 @@ dialog.company-planner[open] { display:flex; flex-direction:column; }
 .setup-kind[data-on] { box-shadow:inset 0 0 0 2px var(--accent); }
 .setup-kind input { margin:0; accent-color:var(--accent); }
 .setup-mainwork { width:100%; display:flex; align-items:center; gap:10px; padding:9px 10px; border:0; border-radius:10px; text-align:start; color:inherit; background:var(--surface); box-shadow:inset 0 0 0 2px var(--accent); }
-.setup-mainwork > span:nth-of-type(1) { display:flex; flex-direction:column; gap:2px; flex:1; min-width:0; }
+.setup-mainwork > .ag-tile { flex:none; }
+.setup-mainwork > span:not(.ag-tile) { display:flex; flex-direction:column; gap:2px; flex:1; min-width:0; }
+.setup-mainwork > svg { color:var(--accent); flex:none; }
+.setup-mainwork-row { position:relative; }
+.setup-mainwork-row .setup-mainwork > span:not(.ag-tile) { padding-inline-end:72px; }
+.setup-mainwork-change { position:absolute; inset-inline-end:40px; top:50%; transform:translateY(-50%); }
 .setup-mainwork small { color:var(--muted); }
 
 /* First-run window: scroll the question, keep its navigation visible. */
@@ -3549,9 +3554,13 @@ label.setup-kind { display:flex; align-items:center; justify-content:flex-start;
 .first-run-account .setup-pane{width:min(800px,100%);margin:auto}
 .first-run-account .owner-setup>p{text-align:center;color:var(--text-2)}
 .first-run-account .owner-setup>label{margin-top:9px}
-.first-run-shell .setup-kinds{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
-.first-run-shell .setup-kind{border-radius:8px;background:#ffffff04;border:1px solid var(--border);min-height:42px;padding:10px 12px;display:flex;align-items:center;gap:10px}
-.first-run-shell .setup-kind[data-on]{border-color:var(--accent);background:#527dce15}
+.first-run-shell .setup-kinds,.first-run-account .setup-kinds{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.first-run-shell .setup-kind,.first-run-account .setup-kind{border-radius:8px;background:#ffffff04;border:1px solid var(--border);min-height:42px;padding:10px 12px;display:flex;align-items:center;gap:10px}
+.first-run-shell .setup-kind[data-on],.first-run-account .setup-kind[data-on]{border-color:var(--accent);background:#527dce15}
+/* ONBOARD-COMPANYTYPE-01: the kind page also opens before the account exists; its search keeps the icon beside the field. */
+.first-run-account .auth-workspace .setup-search{display:flex;flex-direction:row;align-items:center;gap:8px;margin-block:0;flex-shrink:0}
+.first-run-account .auth-workspace .setup-search input{flex:1;width:auto;min-width:0;margin:0;padding:6px 0;border:0;border-radius:0;background:transparent;box-shadow:none}
+.first-run-account .auth-workspace label.setup-kind{margin-block:0}
 .first-run-shell .setup-departments{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:0}
 .first-run-shell .setup-departments button{background:transparent;border:1px solid var(--border);box-shadow:none;min-height:68px;padding:10px;gap:10px}
 .first-run-shell .setup-departments button[aria-pressed=true]{border-color:#6696ff;background:#527dce15}
