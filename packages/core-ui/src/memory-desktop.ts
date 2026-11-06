@@ -51,7 +51,7 @@ export class MemoryDesktopController extends Store<DesktopState> {
   #undo: Undo[] = [];
   #toastId = 0;
   #ticket = 0;
-  constructor(client: Requester) {
+  constructor(client: Requester, private readonly onRestore: () => void = () => {}) {
     super({ place: 'all', projectView: 'memories', extra: null, groups: null, trash: null, trashOpen: null, design: null, logoOpen: null, databases: null, databaseOpen: null,
       groupItems: {}, pinned: [], toast: null, undoDepth: 0, busy: false, needsMode: 'one', collapsed: [], details: null }, client);
   }
@@ -124,6 +124,7 @@ export class MemoryDesktopController extends Store<DesktopState> {
         else if (r.status === 404 && codeOf(r) !== 'not_found') { this.say('Restore arrives with the next backend update; the memory stays in its history.'); return false; }
       } catch { /* counted */ }
     }
+    if (ok > 0) this.onRestore();
     if (this.getSnapshot().place === 'trash') void this.loadTrash();
     return ok === ids.length;
   }
@@ -152,6 +153,7 @@ export class MemoryDesktopController extends Store<DesktopState> {
     if (!ok) { this.say('It could not be restored.'); return false; }
     this.say(item.kind === 'project' ? 'The project is back with all its memories.' : `Restored to ${drawerName(item.drawer)}.`);
     this.publish({ trashOpen: null });
+    this.onRestore();
     await this.loadTrash();
     return true;
   }

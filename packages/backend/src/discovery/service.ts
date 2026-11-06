@@ -246,25 +246,42 @@ async function notes(home: string, roots: string[]): Promise<Found[]> {
 
 // ---- skills ----
 async function skills(home: string, roots: string[], includeGlobal = true): Promise<Found[]> {
-  const out: Found[] = [];
+  const out: Found[] = [], seen = new Set<string>();
+  let visited = 0;
   const places: { dir: string; origin: string; root: string | null }[] = [
     ...(includeGlobal ? [{ dir: path.join(home, '.claude', 'skills'), origin: 'claude', root: null },
     { dir: path.join(home, '.codex', 'skills'), origin: 'codex', root: null },
-    { dir: path.join(home, '.agents', 'skills'), origin: 'shared', root: null }] : []),
+    { dir: path.join(home, '.agents', 'skills'), origin: 'shared', root: null },
+    { dir: path.join(home, '.claude', 'plugins', 'cache'), origin: 'claude', root: null },
+    { dir: path.join(home, '.codex', 'plugins', 'cache'), origin: 'codex', root: null }] : []),
     ...roots.map((r) => ({ dir: path.join(r, '.claude', 'skills'), origin: 'project', root: r })),
   ];
-  for (const p of places) {
-    let entries; try { entries = await discoveryFs.readdir(p.dir, { withFileTypes: true }); } catch { continue; }
-    for (const e of entries.slice(0, 300)) {
-      if (!e.isDirectory() || e.name.startsWith('.')) continue;
-      const dir = path.join(p.dir, e.name);
-      if (!(await isFile(path.join(dir, 'SKILL.md')))) continue;
+  const visit = async (dir: string, place: typeof places[number], depth: number): Promise<void> => {
+    if (depth > 12 || visited >= 20000 || out.length >= 2000 || seen.has(dir)) return;
+    seen.add(dir);
+    let entries; try { entries = await discoveryFs.readdir(dir, { withFileTypes: true }); } catch { return; }
+    if (entries.some(e => e.name === 'SKILL.md' && e.isFile())) {
       try {
         const b = await skillBundle(dir);
         const st = await discoveryFs.stat(path.join(dir, 'SKILL.md'));
-        out.push({ id: itemId('skill', path.relative(home, dir)), kind: 'skill', name: b.name, from: `${homeRel(home, dir)}${path.sep}SKILL.md`, root: p.root, file: dir, hash: b.hash, updatedAt: st.mtime.toISOString(), skill: { origin: p.origin, description: b.description.slice(0, 400) } });
-      } catch { /* not a valid skill folder */ }
+        out.push({ id: itemId('skill', path.relative(home, dir)), kind: 'skill', name: b.name, from: `${homeRel(home, dir)}${path.sep}SKILL.md`, root: place.root, file: dir, hash: b.hash, updatedAt: st.mtime.toISOString(), skill: { origin: place.origin, description: b.description.slice(0, 400) } });
+      } catch { /* Not a valid skill folder; never execute source files. */ }
+      return;
     }
+    for (const entry of entries) {
+      if (++visited > 20000 || out.length >= 2000) break;
+      if (entry.isSymbolicLink() || !entry.isDirectory() || entry.name.startsWith('.') && entry.name !== '.system'
+        || ['node_modules', 'dist', 'vendor', 'assets', 'models', 'public'].includes(entry.name)) continue;
+      await visit(path.join(dir, entry.name), place, depth + 1);
+    }
+  };
+  for (const place of places) {
+    // Match the library's home confinement and refuse a linked source root.
+    const st = await discoveryFs.lstat(place.dir).catch(() => null);
+    if (!st?.isDirectory() || st.isSymbolicLink()) continue;
+    const real = await discoveryFs.realpath(place.dir).catch(() => null);
+    if (!real || place.root === null && !real.startsWith((await discoveryFs.realpath(home)) + path.sep)) continue;
+    await visit(real, place, 0);
   }
   return out;
 }
@@ -324,7 +341,8 @@ export async function sshHosts(home: string): Promise<Found[]> {
     found.push({ id: itemId('ssh', path.relative(home, publicFile)), kind: 'ssh', name: entry.name, from: `${homeRel(home, publicFile)} · ${fingerprint}${privateExists ? ` · private file ${privateName} (name only)` : ''}`, root: null, file: publicFile, hash: sha(`${keyType} ${keyData} ${privateExists}`), updatedAt: publicText!.mtime,
       ssh: { alias: privateName, host: null, user: null, port: null, key: privateExists ? homeRel(home, privateFile) : null, identity: true } });
   }
-  for (const entry of entries.filter(entry => entry.isFile() && !entry.isSymbolicLink() && /^id_(?:rsa|dsa|ecdsa|ed25519|ecdsa_sk|ed25519_sk)$/.test(entry.name)).slice(0, 200)) {
+  const configuredKeys = new Set(t ? parseSshConfig(t.text).map(host => host.key).filter(Boolean) : []);
+  for (const entry of entries.filter(entry => entry.isFile() && !entry.isSymbolicLink() && (/^id_(?:rsa|dsa|ecdsa|ed25519|ecdsa_sk|ed25519_sk)$/.test(entry.name) || configuredKeys.has(entry.name))).slice(0, 200)) {
     if (entries.some(publicEntry => publicEntry.name === entry.name + '.pub')) continue;
     const privateFile = path.join(directory, entry.name), stat = await discoveryFs.lstat(privateFile).catch(() => null);
     if (!stat?.isFile() || stat.isSymbolicLink()) continue;
