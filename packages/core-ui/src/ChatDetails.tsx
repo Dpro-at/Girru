@@ -15,6 +15,7 @@ import type { UiIconName } from './ui-icons';
 import { ContextMenu, useMenu } from './desktop-ui';
 import type { MenuItem } from './desktop-ui';
 import { turnOutputs } from './turns';
+import { canRevealFolder, revealFolder } from './chat-actions';
 import { answersLabel } from './ChatComposerControls';
 import { ClaudeCodeIcon, CodexIcon, GeminiIcon } from './brand-icons';
 
@@ -42,13 +43,26 @@ export function movePart(order: readonly PanelPart[], id: PanelPart, by: -1 | 1)
 export type Usage = { model: string; tokensIn: number; tokensOut: number; replies: number };
 export type Delegation = { agentId: string; agentName: string; model: string; status: 'started' | 'answered' | 'waiting_approval' | 'failed'; at: string };
 export type Schedule = { every: 'hourly' | 'daily' | 'weekly'; at: string; weekday: number | null; message: string; paused: boolean; nextRun: string };
-export type Connection = { id: string; name: string; enabled: boolean; needsYou: boolean };
+export type Connection = { id: string; name: string; about: string; enabled: boolean; needsYou: boolean };
 /** A coding app (Claude Code, Codex, Gemini) doing a part for an agent of this chat, while it runs. */
 export type CodingApp = { id: string; app: string; agentName: string | null; about: string; startedAt: string };
 type Live = { usage: Usage[]; team: Delegation[]; apps: CodingApp[]; schedule: Schedule | null; connections: Connection[] | null };
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 export const scheduleWords = (s: Schedule) => s.every === 'hourly' ? `Runs every hour at :${s.at.slice(3)}` : s.every === 'daily' ? `Runs every day at ${s.at}` : `Runs every ${WEEKDAYS[s.weekday ?? 0]} at ${s.at}`;
 const kTokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+/** How long something has run, from its start time: 0:42, 12:05, 1:02:09 (empty for a bad or future time). */
+export function elapsed(since: string, now: number): string {
+  const s = Math.floor((now - Date.parse(since)) / 1000);
+  if (!Number.isFinite(s) || s < 0) return '';
+  const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, sec = String(s % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+}
+/** The newest reply whose file changes can still be undone (its message id carries the checkpoint). */
+export function undoTarget(turns: readonly { key: string; role: string; changes?: { undone?: boolean } }[]): string | null {
+  for (let i = turns.length - 1; i >= 0; i--) { const t = turns[i]; if (t.role === 'assistant' && t.changes) return t.changes.undone ? null : t.key; }
+  return null;
+}
+const copy = (text: string) => { void navigator.clipboard?.writeText(text).catch(() => undefined); };
 const localModel = (m: string) => !/^(claude-|subscription:)/.test(m);
 
 /** CH12: the app that answers for a model id (its mark is drawn from brand-icons; a model on this computer gets the chip). */
@@ -93,7 +107,7 @@ function useLive(client: SessionClient | undefined, chatId: string | null, owner
         team: Array.isArray(t?.team) ? t!.team as Delegation[] : [],
         apps: Array.isArray(t?.apps) ? t!.apps as CodingApp[] : [],
         schedule: (s?.schedule as Schedule) ?? null,
-        connections: Array.isArray(c?.servers) && granted ? (c!.servers as Record<string, unknown>[]).filter(x => granted.some(t => t.startsWith(`mcp__${String(x.name)}__`) || t.startsWith(`mcp:${String(x.name)}:`))).map(x => ({ id: String(x.id), name: String(x.name ?? x.id), enabled: x.enabled === true, needsYou: x.enabled === true && (!!x.lastError || x.active === false) })) : null,
+        connections: Array.isArray(c?.servers) && granted ? (c!.servers as Record<string, unknown>[]).filter(x => granted.some(t => t.startsWith(`mcp__${String(x.name)}__`) || t.startsWith(`mcp:${String(x.name)}:`))).map(x => ({ id: String(x.id), name: String(x.name ?? x.id), about: typeof x.description === 'string' ? x.description.trim() : '', enabled: x.enabled === true, needsYou: x.enabled === true && (!!x.lastError || x.active === false) })) : null,
       });
     })();
     return () => { on = false; };
@@ -109,8 +123,9 @@ function useLive(client: SessionClient | undefined, chatId: string | null, owner
   return live;
 }
 
-export function ChatDetails({ controller, client, recall, memoryCard, placeExtra, resultsExtra, onOpenPane, onSettings, onClose, onStop, onSchedule, onAddFolder, onContinue, onSignIn, focusPart, switcher }: {
+export function ChatDetails({ controller, client, recall, memoryCard, placeExtra, resultsExtra, onOpenPane, onSettings, onClose, onStop, onSchedule, onAddFolder, onChooseFolder, onOpenMemory, onContinue, onSignIn, focusPart, switcher }: {
   switcher?: ReactNode; onSignIn?: () => void; onContinue?: () => void; focusPart?: { id: PanelPart; n: number } | null;
+  onChooseFolder?: () => void; onOpenMemory?: () => void;
   controller: ConversationsController; client?: SessionClient; recall?: ChatRecallController | null; memoryCard?: ReactNode; placeExtra?: ReactNode; resultsExtra?: ReactNode;
   onOpenPane: (pane: 'changes' | 'files' | 'terminal', file?: string) => void; onSettings?: () => void; onClose: () => void; onStop: () => void;
   onSchedule: () => void; onAddFolder: () => void;
@@ -126,9 +141,35 @@ export function ChatDetails({ controller, client, recall, memoryCard, placeExtra
   // While a reply runs, look again every few seconds so coding apps an agent starts show up (and leave) in Team.
   const [pulse, setPulse] = useState(0);
   useEffect(() => { if (!s.runId) return; const t = setInterval(() => setPulse(p => p + 1), 4000); return () => clearInterval(t); }, [s.runId]);
+  const [scheduleRevision, setScheduleRevision] = useState(0);
   const chatAgent = s.conversations.find(c => c.id === s.activeId)?.agentId ?? s.agentId ?? s.agents.find(a => a.primary)?.id ?? null;
-  const live = useLive(client, s.activeId, owner, s.turns.length + (s.runId ? 1 : 0), chatAgent, pulse);
+  const live = useLive(client, s.activeId, owner, s.turns.length + (s.runId ? 1 : 0) + scheduleRevision, chatAgent, pulse);
   const subs = s.activeId ? (s.conversations as readonly (typeof s.conversations[number] & { running?: boolean; waiting?: number })[]).filter(c => c.parentId === s.activeId) : [];
+  // CH8: running times (1:12) tick once a second while an agent or a coding app works for this chat.
+  const [now, setNow] = useState(() => Date.now());
+  const ticking = live.team.some(d => d.status === 'started') || live.apps.length > 0;
+  useEffect(() => { if (!ticking) return; setNow(Date.now()); const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, [ticking]);
+  const [notice, setNotice] = useState('');
+  const pause = async (paused: boolean) => {
+    const sc = live.schedule; if (!sc || !s.activeId) return;
+    try {
+      const r = await client?.request({ method: 'PUT', path: `/api/chat/conversations/${s.activeId}/schedule`, body: { every: sc.every, at: sc.at, weekday: sc.weekday, message: sc.message, paused } } as never);
+      setNotice(r?.status === 200 ? '' : 'The schedule did not change. Try again.');
+    } catch { setNotice('No connection. Try again.'); }
+    setScheduleRevision(v => v + 1);
+  };
+  const folderItems = (path: string): MenuItem[] => [
+    ...(canRevealFolder() ? [{ label: navigator.platform.startsWith('Win') ? 'Show in Explorer' : 'Show in Finder', icon: 'open' as const, run: () => revealFolder(path) }] : []),
+    { label: 'Copy path', icon: 'copy', run: () => copy(path) }];
+  const undoId = undoTarget(s.turns);
+  const undo = async () => {
+    if (!undoId || !s.activeId) return;
+    try {
+      const r = await client?.request({ method: 'POST', path: `/api/chat/conversations/${s.activeId}/messages/${undoId}/undo`, body: {} } as never);
+      setNotice(r?.status === 200 ? '' : r?.status === 409 ? 'Some of these files changed since, so nothing was undone.' : 'It did not work. Try again.');
+      if (r?.status === 200) { void controller.refreshGit(); void controller.refreshActive(); }
+    } catch { setNotice('No connection. Try again.'); }
+  };
   const stopApp = (id: string) => { if (!s.activeId) return; void client?.request({ method: 'POST', path: `/api/chat/conversations/${s.activeId}/apps/${id}/stop` } as never).catch(() => undefined).finally(() => setPulse(p => p + 1)); };
   useEffect(() => { void (async () => { try { const r = await client?.request({ method: 'GET', path: PANEL_PATH } as never); if (r?.status === 200) setPrefsState(readPanel((r.body as any)?.panel)); } catch { /* the usual order */ } })(); }, [client]);
   const setPrefs = (p: PanelPrefs) => { setPrefsState(p); void client?.request({ method: 'PUT', path: PANEL_PATH, body: p } as never).catch(() => undefined); };
@@ -160,24 +201,32 @@ export function ChatDetails({ controller, client, recall, memoryCard, placeExtra
     place: { has: true, summary: [project?.folder ?? 'No folder yet', live.schedule && !live.schedule.paused ? scheduleWords(live.schedule).replace('Runs ', '') : ''].filter(Boolean).join(' · '),
       side: owner && project ? <button type="button" className="link-button" onClick={onAddFolder}><UiIcon name="plus" size={11}/>Add a folder</button> : undefined,
       body: <>
-        {project?.folder ? <Row icon="folder" name={project.folder} sub={`Main folder${s.git?.branch ? ` · ${s.git.branch}` : ''}${s.turns.length ? ' · fixed since the first message' : ''}`} ltr/>
-          : <p className="panel-quiet">No folder yet. A chat without a folder works in a private folder of its own.</p>}
-        {project?.folders?.map(f => <Row key={f.path} icon="folder" name={f.path} sub={`Added · ${f.write ? 'read and write' : 'read only'}`} ltr
-          end={owner ? <button type="button" className="link-button" title="Remove this added folder (the files stay)" onClick={() => void controller.editProject(project.id, { name: project.name, folder: project.folder ?? '', repoUrl: project.repoUrl ?? '', folders: (project.folders ?? []).filter(x => x.path !== f.path) })}>Remove</button> : undefined}/>)}
+        {project?.folder ? <Row icon="folder" name={project.folder} sub={`Main folder${s.git?.branch ? ` · ${s.git.branch}` : ''}${s.turns.length ? ' · fixed since the first message' : ''}`} ltr items={folderItems(project.folder)} onMenu={menu.at}/>
+          : <><p className="panel-quiet">No folder yet. A chat without a folder works in a private folder of its own.</p>
+            {owner && onChooseFolder && !s.turns.length && <button type="button" className="link-button panel-add" onClick={onChooseFolder}><UiIcon name="folder" size={12}/>Choose a folder</button>}</>}
+        {project?.folders?.map(f => { const remove = () => void controller.editProject(project.id, { name: project.name, folder: project.folder ?? '', repoUrl: project.repoUrl ?? '', folders: (project.folders ?? []).filter(x => x.path !== f.path) });
+          return <Row key={f.path} icon="folder" name={f.path} sub={`Added · ${f.write ? 'read and write' : 'read only'}`} ltr onMenu={menu.at}
+            items={[...folderItems(f.path), ...(owner ? ['sep' as const, { label: 'Remove from this chat', icon: 'trash' as const, run: remove }] : [])]}
+            end={owner ? <button type="button" className="link-button" title="Remove this added folder (the files stay)" onClick={remove}>Remove</button> : undefined}/>; })}
         {owner && onContinue && s.activeId && s.turns.length > 0 && <button type="button" className="link-button panel-add" onClick={onContinue}><UiIcon name="folder" size={12}/>Continue in another folder…</button>}
         {live.schedule ? <Row icon="clock" name={scheduleWords(live.schedule)} sub={live.schedule.paused ? 'Schedule · paused' : `Schedule · next ${new Date(live.schedule.nextRun).toLocaleString('en', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`}
-          end={owner ? <button type="button" className="link-button" onClick={onSchedule}>Change</button> : undefined}/>
+          onMenu={menu.at} items={owner ? [{ label: 'Change…', icon: 'pencil', run: onSchedule }, { label: live.schedule.paused ? 'Resume' : 'Pause', icon: live.schedule.paused ? 'play' : 'pause', run: () => void pause(!live.schedule!.paused) }] : undefined}
+          end={owner ? <span className="panel-end"><button type="button" className="link-button" onClick={onSchedule}>Change</button> <button type="button" className="link-button" onClick={() => void pause(!live.schedule!.paused)}>{live.schedule.paused ? 'Resume' : 'Pause'}</button></span> : undefined}/>
           : owner && s.activeId ? <button type="button" className="link-button panel-add" onClick={onSchedule}><UiIcon name="clock" size={12}/>Run this chat on a schedule…</button> : null}
       </>, more: placeExtra },
     team: { has: writers.length > 0 || !!running || live.team.length > 0 || live.apps.length > 0 || subs.length > 0, summary: working.length ? `${working.length} working` : waits ? `${waits} waits for you` : teamTitle, tone: working.length ? 'work' : waits ? 'needs' : undefined,
       side: <small className="details-sum">{teamTitle}</small>,
       body: <>
-        <Row face={lead} badge={modelApp(leadModel)} name={lead} sub={<>Leads · {answers(leadModel)}{leadModel === s.model ? answersLabel(s.model, s.models, s.thinking).slice(answersLabel(s.model, s.models, 'normal').length) : ''}</>} end={running && !running.agentId ? <StopButton onStop={onStop}/> : <span className="panel-end">{running ? 'Working' : 'Ready'}</span>}/>
-        {writers.filter(w => w && w !== (conv?.agentId ?? '')).map(w => <Row key={w} face={nameOf(w)} name={nameOf(w)} sub="Wrote a reply here" end={running?.agentId === w ? <StopButton onStop={onStop}/> : undefined}/>)}
+        <Row face={lead} badge={modelApp(leadModel)} name={lead} sub={<>Leads · {answers(leadModel)}{leadModel === s.model ? answersLabel(s.model, s.models, s.thinking).slice(answersLabel(s.model, s.models, 'normal').length) : ''}</>} end={running && !running.agentId ? <span className="panel-end">{running.startedAt ? elapsed(new Date(running.startedAt).toISOString(), now) : ''} <StopButton onStop={onStop}/></span> : <span className="panel-end">{running ? 'Working' : 'Ready'}</span>}
+          onMenu={menu.at} items={[...(running ? [{ label: 'Stop', icon: 'stop' as const, run: onStop }] : []), { label: 'Copy name', icon: 'copy', run: () => copy(lead) }]}/>
+        {writers.filter(w => w && w !== (conv?.agentId ?? '')).map(w => <Row key={w} face={nameOf(w)} name={nameOf(w)} sub="Wrote a reply here" end={running?.agentId === w ? <StopButton onStop={onStop}/> : undefined}
+          onMenu={menu.at} items={[...(running?.agentId === w ? [{ label: 'Stop', icon: 'stop' as const, run: onStop }] : []), { label: 'Copy name', icon: 'copy', run: () => copy(nameOf(w)) }]}/>)}
         {live.team.slice(0, more.has('team') ? 50 : 3).map((d, i) => <Row key={`${d.agentId}-${i}`} face={d.agentName} badge={modelApp(d.model)} name={d.agentName} sub={<>Handed a part · {answers(d.model)}{signedOut(d.model) ? ' · not signed in' : ''}</>} indent
-          end={d.status === 'started' ? <StopButton onStop={onStop}/> : signedOut(d.model) && onSignIn ? <button type="button" className="link-button" title="Sign in to this app in Settings › Replies" onClick={onSignIn}>Sign in…</button> : <span className="panel-end" data-tone={d.status === 'waiting_approval' ? 'needs' : d.status === 'failed' ? 'error' : undefined}>{d.status === 'waiting_approval' && <span className="details-needs-dot" aria-hidden="true"/>}{d.status === 'answered' ? 'Done' : d.status === 'waiting_approval' ? 'Waits for you' : d.status === 'failed' ? 'Failed' : ''}</span>}/>)}
+          onMenu={menu.at} items={[...(d.status === 'started' ? [{ label: 'Stop', icon: 'stop' as const, run: onStop }] : []), { label: 'Copy name', icon: 'copy', run: () => copy(d.agentName) }]}
+          end={d.status === 'started' ? <span className="panel-end">{elapsed(d.at, now)} <StopButton onStop={onStop}/></span> : signedOut(d.model) && onSignIn ? <button type="button" className="link-button" title="Sign in to this app in Settings › Replies" onClick={onSignIn}>Sign in…</button> : <span className="panel-end" data-tone={d.status === 'waiting_approval' ? 'needs' : d.status === 'failed' ? 'error' : undefined}>{d.status === 'waiting_approval' && <span className="details-needs-dot" aria-hidden="true"/>}{d.status === 'answered' ? 'Done' : d.status === 'waiting_approval' ? 'Waits for you' : d.status === 'failed' ? 'Failed' : ''}</span>}/>)}
         {live.apps.map(a => <Row key={a.id} icon="terminal" name={a.app} indent sub={[a.agentName ? `Working for ${a.agentName}` : 'Working', a.about].filter(Boolean).join(' · ')}
-          end={<button type="button" className="row-tool details-stop" aria-label={`Stop ${a.app}`} title={`Stop ${a.app} (only this part)`} onClick={() => stopApp(a.id)}><UiIcon name="stop" size={10}/></button>}/>)}
+          onMenu={menu.at} items={[{ label: `Stop ${a.app}`, icon: 'stop', run: () => stopApp(a.id) }]}
+          end={<span className="panel-end">{elapsed(a.startedAt, now)} <button type="button" className="row-tool details-stop" aria-label={`Stop ${a.app}`} title={`Stop ${a.app} (only this part)`} onClick={() => stopApp(a.id)}><UiIcon name="stop" size={10}/></button></span>}/>)}
         {/* CHAT-ORCH-01 (LW4 §5): this chat's sub-sessions, live; select one to open it. */}
         {subs.length > 0 && <p className="fine-print details-subs">Sessions · {subs.length}</p>}
         {subs.slice(0, 8).map(c => <Row key={c.id} face={nameOf(c.agentId ?? '')} name={c.title || 'Session'} indent sub={`${nameOf(c.agentId ?? '')} · ${c.waiting ? 'Needs you' : c.running ? 'Working' : 'Done'}`} tone={c.waiting ? 'needs' : undefined} onClick={() => void controller.open(c.id)}
@@ -186,16 +235,21 @@ export function ChatDetails({ controller, client, recall, memoryCard, placeExtra
     results: { has: changed > 0 || outputs.length > 0 || !!resultsExtra, summary: changed ? `+${s.git?.added ?? 0} −${s.git?.removed ?? 0}` : `${outputs.length} ${outputs.length === 1 ? 'file' : 'files'}`,
       side: changed ? <button type="button" className="link-button" onClick={() => onOpenPane('changes')}>Review</button> : undefined,
       body: <>
-        {changed > 0 && <Row icon="diff" name={`${changed} ${changed === 1 ? 'file' : 'files'} changed`} sub={`${s.git?.branch ?? 'Working folder'} · not committed`} end={<span className="panel-end"><span className="plus">+{s.git?.added ?? 0}</span> <span className="minus">−{s.git?.removed ?? 0}</span></span>} onClick={() => onOpenPane('changes')}/>}
-        {outputs.slice(-(more.has('results') ? 50 : 3)).reverse().map(o => <Row key={o.path} icon={o.kind === 'edit' ? 'pencil' : 'file'} name={o.path.split('/').at(-1) ?? o.path} sub={o.kind === 'edit' ? 'Changed here' : 'Made in this chat'} onClick={() => onOpenPane('files', o.path)}/>)}
+        {changed > 0 && <Row icon="diff" name={`${changed} ${changed === 1 ? 'file' : 'files'} changed`} sub={`${s.git?.branch ?? 'Working folder'} · not committed`} end={<span className="panel-end"><span className="plus">+{s.git?.added ?? 0}</span> <span className="minus">−{s.git?.removed ?? 0}</span></span>} onClick={() => onOpenPane('changes')}
+          onMenu={menu.at} items={[{ label: 'Review changes', icon: 'diff', run: () => onOpenPane('changes') }, ...(undoId ? [{ label: 'Undo these changes', icon: 'undo' as const, run: () => void undo() }] : [])]}/>}
+        {changed > 0 && undoId && <button type="button" className="link-button panel-add" title="Puts back the files as they were before the last reply that changed them" onClick={() => void undo()}><UiIcon name="undo" size={12}/>Undo these changes</button>}
+        {outputs.slice(-(more.has('results') ? 50 : 3)).reverse().map(o => <Row key={o.path} icon={o.kind === 'edit' ? 'pencil' : 'file'} name={o.path.split('/').at(-1) ?? o.path} sub={o.kind === 'edit' ? 'Changed here' : 'Made in this chat'} onClick={() => onOpenPane('files', o.path)}
+          onMenu={menu.at} items={[{ label: 'Open in Files', icon: 'folder', run: () => onOpenPane('files', o.path) }, { label: 'Copy path', icon: 'copy', run: () => copy(o.path) }]}/>)}
         {resultsExtra}
       </>, more: outputs.length > 3 && !more.has('results') ? <ShowMore n={outputs.length - 3} onClick={() => setMore(new Set([...more, 'results']))}/> : undefined },
-    memory: { has: !!memoryCard || !!trace, summary: trace?.items?.length ? `${trace.items.length} used` : 'Saved from this chat', side: undefined,
+    memory: { has: !!memoryCard || !!trace, summary: trace?.items?.length ? `${trace.items.length} used` : 'Saved from this chat',
+      side: onOpenMemory ? <button type="button" className="link-button" onClick={onOpenMemory}>Open Memory</button> : undefined,
       body: <>{trace && recall ? <ContextCard trace={trace} c={recall}/> : null}{memoryCard}</> },
     mcp: { has: conns.length > 0, summary: conns.some(c => c.needsYou) ? `${conns.filter(c => c.needsYou).length} needs you` : `${conns.length} on`, tone: conns.some(c => c.needsYou) ? 'needs' : undefined,
       side: onSettings ? <button type="button" className="link-button" onClick={onSettings}><UiIcon name="plus" size={11}/>Add</button> : undefined,
       // CH8: each connection with its real mark (vendored, never loaded from the internet) and an amber dot when it needs you.
-      body: <><p className="fine-print details-mcp-who">The connections {lead} may use</p>{conns.slice(0, 3).map(c => <Row key={c.id} icon="tool" logo={serviceMark(c.name) ? <ServiceLogo id={c.name} size={13}/> : undefined} name={c.name} sub={c.needsYou ? 'Needs you' : 'On'} tone={c.needsYou ? 'needs' : undefined}
+      body: <><p className="fine-print details-mcp-who">The connections {lead} may use</p>{conns.slice(0, 3).map(c => <Row key={c.id} icon="tool" logo={serviceMark(c.name) ? <ServiceLogo id={c.name} size={13}/> : undefined} name={c.name} sub={c.needsYou ? 'Needs you' : c.about || 'On'} tone={c.needsYou ? 'needs' : undefined}
+        onMenu={onSettings ? menu.at : undefined} items={onSettings ? [{ label: 'Open in Settings', icon: 'gear', run: onSettings }] : undefined}
         end={c.needsYou ? <span className="details-needs-dot" aria-label="Needs you"/> : undefined}/>)}</>,
       more: onSettings ? <button type="button" className="link-button panel-more" onClick={onSettings}>{conns.length > 3 ? `View all (${conns.length}) in Settings` : 'View all in Settings'}</button> : undefined },
   };
@@ -257,20 +311,35 @@ export function ChatDetails({ controller, client, recall, memoryCard, placeExtra
         {!folded && <div className="details-body">{p.body}{p.more}</div>}
       </section>;
     })}
+    {notice && <p className="panel-quiet" role="alert">{notice}</p>}
     <ContextMenu menu={menu.menu} onClose={menu.close}/>
   </aside>;
 }
 
 /** CH8c: the hidden panel as a thin rail: one icon per part that has something, with a dot. */
-export function DetailsRail({ controller, onOpen }: { controller: ConversationsController; onOpen: (part: PanelPart) => void }) {
+export function DetailsRail({ controller, client, onOpen }: { controller: ConversationsController; client?: SessionClient; onOpen: (part: PanelPart) => void }) {
   const s = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const conv = s.conversations.find(c => c.id === s.activeId);
   const project = controller.activeProject();
   const running = s.turns.some(t => t.role === 'assistant' && t.status === 'running');
+  // The MCP icon needs the owner's connection list (the same read the open panel makes).
+  const owner = client?.getSnapshot().user?.role === 'owner';
+  const [conns, setConns] = useState<{ on: number; needs: number }>({ on: 0, needs: 0 });
+  useEffect(() => {
+    if (!client || !owner) return;
+    let on = true;
+    void client.request({ method: 'GET', path: '/api/mcp/servers' } as never).then(r => {
+      const list = r.status === 200 && Array.isArray((r.body as any)?.servers) ? ((r.body as any).servers as Record<string, unknown>[]).filter(x => x.enabled === true) : [];
+      if (on) setConns({ on: list.length, needs: list.filter(x => !!x.lastError || x.active === false).length });
+    }).catch(() => undefined);
+    return () => { on = false; };
+  }, [client, owner, s.activeId]);
   const items: { id: PanelPart; dot?: 'work' | 'needs'; label: string }[] = [
     { id: 'place', label: `Place${project?.folder ? ` · ${project.name}` : ''}` },
     ...(s.turns.length ? [{ id: 'team' as const, label: running ? 'Team · working' : 'Team', dot: running ? 'work' as const : conv?.waiting ? 'needs' as const : undefined }] : []),
     ...((s.git?.files ?? 0) > 0 || turnOutputs(s.turns).length ? [{ id: 'results' as const, label: 'Results' }] : []),
+    ...(s.turns.some(t => t.role === 'assistant') ? [{ id: 'memory' as const, label: 'From memory' }] : []),
+    ...(conns.on ? [{ id: 'mcp' as const, label: conns.needs ? 'MCP connections · needs you' : 'MCP connections', dot: conns.needs ? 'needs' as const : undefined }] : []),
   ];
   return <nav className="details-rail" aria-label="Side panel (hidden)">
     {items.map(i => <button key={i.id} type="button" className="row-tool" aria-label={i.label} title={`${i.label} (⌥⌘I)`} onClick={() => onOpen(i.id)}>
@@ -278,11 +347,15 @@ export function DetailsRail({ controller, onOpen }: { controller: ConversationsC
   </nav>;
 }
 
-function Row({ icon, logo, face, badge, name, sub, end, onClick, indent, ltr, tone }: { icon?: UiIconName; logo?: ReactNode; face?: string; badge?: ModelApp | null; name: string; sub?: ReactNode; end?: ReactNode; onClick?: () => void; indent?: boolean; ltr?: boolean; tone?: 'needs' }) {
+function Row({ icon, logo, face, badge, name, sub, end, onClick, indent, ltr, tone, items, onMenu }: { icon?: UiIconName; logo?: ReactNode; face?: string; badge?: ModelApp | null; name: string; sub?: ReactNode; end?: ReactNode; onClick?: () => void; indent?: boolean; ltr?: boolean; tone?: 'needs';
+  /** CH8: right-click (or the menu key) on a row: open, copy, show in Finder, stop, remove from this chat. */
+  items?: MenuItem[]; onMenu?: (e: ReactMouseEvent | ReactKeyboardEvent, items: MenuItem[]) => void }) {
+  const context = items?.length && onMenu ? (e: ReactMouseEvent) => onMenu(e, items) : undefined;
   const inner = <>{face ? <span className="details-face" aria-hidden="true"><span className="composer-face">{face.slice(0, 1).toUpperCase()}</span>{badge && <span className="details-face-app" data-app={badge.id}><AppMark app={badge} size={8}/></span>}</span> : logo ? <span className="details-icon">{logo}</span> : icon ? <span className="details-icon"><UiIcon name={icon} size={13}/></span> : null}
     <span className="pop-text"><b dir={ltr ? 'ltr' : 'auto'} title={name}>{name}</b>{sub && <small data-tone={tone}>{sub}</small>}</span>{end}</>;
-  return onClick ? <button type="button" className="details-row" data-indent={indent || undefined} onClick={onClick}>{inner}</button>
-    : <div className="details-row" data-indent={indent || undefined}>{inner}</div>;
+  return onClick ? <button type="button" className="details-row" data-indent={indent || undefined} onClick={onClick} onContextMenu={context}
+      onKeyDown={context && onMenu && items ? e => { if ((e.key === 'F10' && e.shiftKey) || e.key === 'ContextMenu') onMenu(e, items); } : undefined}>{inner}</button>
+    : <div className="details-row" data-indent={indent || undefined} onContextMenu={context}>{inner}</div>;
 }
 function StopButton({ onStop }: { onStop: () => void }) { return <button type="button" className="row-tool details-stop" aria-label="Stop" title="Stop (also stops the helpers it handed work to)" onClick={onStop}><UiIcon name="stop" size={10}/></button>; }
 function ShowMore({ n, onClick }: { n: number; onClick: () => void }) { return <button type="button" className="link-button panel-more" onClick={onClick}>Show {n} more</button>; }
