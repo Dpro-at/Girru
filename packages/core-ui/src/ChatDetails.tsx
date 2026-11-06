@@ -52,7 +52,8 @@ export const scheduleWords = (s: Schedule) => s.every === 'hourly' ? `Runs every
 const kTokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 /** How long something has run, from its start time: 0:42, 12:05, 1:02:09 (empty for a bad or future time). */
 export function elapsed(since: string, now: number): string {
-  const s = Math.floor((now - Date.parse(since)) / 1000);
+  const utc = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(since) ? `${since.replace(' ', 'T')}Z` : since;
+  const s = Math.floor((now - Date.parse(utc)) / 1000);
   if (!Number.isFinite(s) || s < 0) return '';
   const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, sec = String(s % 60).padStart(2, '0');
   return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;

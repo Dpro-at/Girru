@@ -35,6 +35,8 @@ test('contract: usage, team, schedule, stop and panel; a chat in the list carrie
 test('running times read like a clock and never show for a bad or future start', () => {
   const t0 = Date.parse('2026-11-02T10:00:00Z');
   assert.equal(elapsed('2026-11-02T10:00:00Z', t0 + 72_000), '1:12');
+  assert.equal(elapsed('2026-11-02 10:00:00', t0 + 72_000), '1:12', 'SQLite timestamps remain UTC in every client timezone');
+  assert.equal(elapsed('2026-11-02T10:00:00', t0 + 72_000), '1:12');
   assert.equal(elapsed('2026-11-02T10:00:00Z', t0 + 5_000), '0:05');
   assert.equal(elapsed('2026-11-02T10:00:00Z', t0 + 3_729_000), '1:02:09');
   assert.equal(elapsed('not a time', t0), '');
