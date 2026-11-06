@@ -548,3 +548,13 @@ Store backend programs run with Node privileges. Installed Trading renderer code
 ### Discovery after setup
 
 The first-run inventory is a saved scan, not an installation step. Discoverable skills include bounded, non-symlink folders under the coding-app skill roots and plugin caches; `.system` skills are included. Skills are added only after owner review in Library → Skills → From my coding apps (Look again rescans). MCP connections can be rescanned and added in Settings → MCP connections → Found, not added; added connections remain off until explicitly enabled. Settings → SSH keys lists local key metadata, while Terminal → Saved SSH hosts lists aliases from `~/.ssh/config`. Configured custom key filenames without a public half remain visible as metadata only; unconfigured files without a public half cannot be identified reliably as keys. Host aliases and SSH identities are distinct; private key contents are never imported. These section-level scans remain available after first-run setup is complete.
+
+### Company activity during owner setup
+
+`POST /api/setup/admin` accepts optional `companyKind` only when `workspaceType` is `company`. It may be an empty string for general work, a known activity identifier from the company catalogue, or `custom:<text>` with 1–64 trimmed Unicode letters, numbers, spaces, hyphens or underscores. Invalid kinds and kinds supplied for personal workspaces are rejected before creating the owner.
+
+The saved answer is returned by `GET /api/first-run` and reused by the Team step to suggest departments. Existing setups without an answer remain supported. Renaming the company preserves the answer; switching to a personal workspace removes it. This field does not grant tools or change agent permissions.
+
+### Chat details actions
+
+The chat side panel offers schedule Pause/Resume, folder reveal/copy, elapsed times and Undo for the latest reply with file changes. Pause/Resume uses the existing owner-only schedule update with the complete schedule and its `paused` flag. Undo uses the existing message checkpoint endpoint and reports a conflict when files have since changed. File rows open their selected file, and connection rows remain limited to the chat agent's granted MCP connections. Existing sub-session controls and phone setup continue to use their current flows.
