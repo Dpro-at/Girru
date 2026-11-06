@@ -70,7 +70,8 @@ export type SettingsTarget = 'rules' | 'folders' | 'sources' | 'projects' | 'acc
 function useControllers(client: SessionClient) {
   const [c, setC] = useState<{ d: MemoryDesktopController; x: MemoryExplorerController; sc: MemoryScopesController; rv: MemoryReviewController; mv: MemoryMoveController; map: MemoryMapController; ho: MemoryHandoffsController; disc: DiscoveryController; pf: ProjectFilesController; pp: MemoryPeopleController; tr: MemoryTrustController }>();
   useEffect(() => {
-    const d = new MemoryDesktopController(client), x = new MemoryExplorerController(client), sc = new MemoryScopesController(client);
+    const x = new MemoryExplorerController(client), sc = new MemoryScopesController(client);
+    const d = new MemoryDesktopController(client, () => { void x.load(); void sc.load(true); });
     sc.light = true;
     const rv = new MemoryReviewController(client, () => void sc.load(true));
     const mv = new MemoryMoveController(client, (id, drawer) => x.moved(id, drawer));

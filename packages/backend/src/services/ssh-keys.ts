@@ -105,7 +105,7 @@ export async function listSshKeys(home = os.homedir()): Promise<SshKey[]> {
     const hasPrivate = (await discoveryFs.lstat(path.join(dir, privateName)).catch(() => null))?.isFile() === true;
     out.push({ id: idOf(home, file), name: privateName, type: info.type, bits: info.bits, fingerprint: info.fingerprint, comment: info.comment, where: tilde(home, file), folder: dir, hasPublic: true, hasPrivate, hosts: hosts.get(privateName) ?? [], updatedAt: t!.mtime });
   }
-  for (const e of files.filter((f) => PRIVATE_NAME.test(f.name) && !files.some((p) => p.name === f.name + '.pub')).slice(0, 200)) {
+  for (const e of files.filter((f) => (PRIVATE_NAME.test(f.name) || hosts.has(f.name)) && !files.some((p) => p.name === f.name + '.pub')).slice(0, 200)) {
     const file = path.join(dir, e.name), st = await discoveryFs.lstat(file).catch(() => null);
     if (!st?.isFile()) continue;
     out.push({ id: idOf(home, file), name: e.name, type: null, bits: null, fingerprint: null, comment: '', where: tilde(home, file), folder: dir, hasPublic: false, hasPrivate: true, hosts: hosts.get(e.name) ?? [], updatedAt: st.mtime.toISOString() });

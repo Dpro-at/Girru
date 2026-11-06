@@ -220,3 +220,17 @@ test('Settings without a sidebar keeps a short row of sections; the owner sees M
   const memory = renderToStaticMarkup(React.createElement(AppSettings, { signedIn: true, client, preference: 'system', onTheme() {}, onAccount() {}, initialTab: 'memory', initialMemoryPane: 'rules' }));
   if (client.getSnapshot().user.role === 'owner') assert.match(memory, /aria-label="Memory: Rules"/);
 });
+
+test('restoring Trash refreshes dependent memory lists only after a successful mutation', async () => {
+  let refreshes = 0;
+  const b = backend({ 'POST /api/memory/m-1/restore': { status: 200, body: { id: 'm-1', drawer: 'owner' } }, 'DELETE /api/memory/m-1': { status: 200, body: {} }, 'GET /api/memory/trash': { status: 200, body: { items: [], trashDays: 30 } } });
+  const d = new MemoryDesktopController(b, () => { refreshes++; });
+  assert.equal(await d.restore({ id: 'm-1', kind: 'memory', drawer: 'owner' }), true);
+  assert.equal(refreshes, 1, 'Restore invalidates the explorer and sidebar counts without reloading the page');
+  await d.trash([{ id: 'm-1', text: 'trial' }]);
+  await d.undo();
+  assert.equal(refreshes, 2, 'Undo restore also invalidates dependent lists');
+  const failed = new MemoryDesktopController(backend({}), () => { refreshes++; });
+  assert.equal(await failed.restore({ id: 'missing', kind: 'memory', drawer: 'owner' }), false);
+  assert.equal(refreshes, 2, 'a failed restore must not report a successful mutation');
+});
