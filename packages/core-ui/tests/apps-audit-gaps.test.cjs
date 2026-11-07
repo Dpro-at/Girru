@@ -1,6 +1,6 @@
 require('./load.cjs');const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const path=require('node:path');const React=require('../node_modules/react');const {renderToStaticMarkup}=require('../node_modules/react-dom/server');
 const src=name=>fs.readFileSync(path.join(__dirname,'../src',name),'utf8');
-const {PluginsSheet,pluginsLine,matchAddons,addonState}=require('../src/AppsAddons.tsx');const {tileActions}=require('../src/WorkspaceApplications.tsx');const {sourceFacts}=require('../src/SourceCatalogue.tsx');const {scopeWords}=require('../src/ConnectionsSettings.tsx');const {footerToolItem,AppsWorkspace}=require('../src/AppsWorkspace.tsx');const {usualFooter}=require('../src/footer-prefs.ts');
+const {PluginsSheet,pluginsLine,matchAddons,addonState}=require('../src/AppsAddons.tsx');const {tileActions,workspaceFooterItem}=require('../src/WorkspaceApplications.tsx');const {sourceFacts}=require('../src/SourceCatalogue.tsx');const {scopeWords}=require('../src/ConnectionsSettings.tsx');const {footerToolItem,AppsWorkspace}=require('../src/AppsWorkspace.tsx');const {usualFooter}=require('../src/footer-prefs.ts');
 const plugin=(name,extra={})=>({name,source:'codex',kind:'plugin',enabled:true,installed:true,count:0,...extra});
 test('A1: add-ons can be searched from the sidebar by name or label',()=>{
  const items=[plugin('alpha@pub',{label:'Code review'}),plugin('beta@pub'),{...plugin('hooks'),kind:'hook',label:'Session start'}];
@@ -32,14 +32,25 @@ test('A8: GenVR access is shown in plain words, unknown codes pass through',()=>
  assert.equal(scopeWords('worlds:read'),'See your spaces');assert.equal(scopeWords('worlds:write'),'Save worlds as private drafts');assert.equal(scopeWords('worlds:publish'),'Publish only after you agree');assert.equal(scopeWords('worlds:join'),'Join worlds');assert.equal(scopeWords('items:new'),'items:new');
  assert.match(src('ConnectionsSettings.tsx'),/\{scopeWords\(x\)\}/);
 });
-test('S5: GenVR, Terminal and Code rows can be shown in or hidden from the footer',()=>{
+test('S5: owner app rows including Store Browser can be shown in or hidden from the footer',()=>{
  const prefs=usualFooter(),toggled=[];
- for(const id of ['genvr','terminal','code']){const item=footerToolItem(prefs,id,x=>toggled.push(x));assert.equal(item.label,'Show in the footer');assert.equal(item.checked,!prefs.hidden.includes(id));item.run();}
- assert.deepEqual(toggled,['genvr','terminal','code']);assert.equal(footerToolItem(prefs,'mcp',()=>{}),null);
+ for(const id of ['genvr','terminal','code','browser']){const item=footerToolItem(prefs,id,x=>toggled.push(x));assert.equal(item.label,'Show in the footer');assert.equal(item.checked,!prefs.hidden.includes(id));item.run();}
+ assert.deepEqual(toggled,['genvr','terminal','code','browser']);assert.equal(footerToolItem(prefs,'mcp',()=>{}),null);
  assert.equal(footerToolItem({...prefs,hidden:[...prefs.hidden,'genvr']},'genvr',()=>{}).checked,false);assert.equal(footerToolItem({...prefs,hidden:prefs.hidden.filter(x=>x!=='genvr')},'genvr',()=>{}).checked,true);
  assert.match(src('FooterSettings.tsx'),/can be pinned from Apps/);
  const html=renderToStaticMarkup(React.createElement(AppsWorkspace,{client:{getSnapshot:()=>({user:{id:'o',username:'Owner',email:'o@example.test',role:'owner'}})},active:true,onOpen(){},onConnections(){},onPermissions(){}}));
  // Apps is My apps only; the Store is its own footer section. MCP connections, Channels, Accounts and the Tools rows are gone from its sidebar.
  assert.match(html,/>My apps</);assert.doesNotMatch(html.split('</nav>')[0],/>Home<|>Store<|>Updates</);for(const gone of ['MCP connections','Channels','Accounts','Tools','Find more'])assert.doesNotMatch(html.split('</nav>')[0],new RegExp('>'+gone+'<'),gone);
- assert.match(src('WorkspaceApplications.tsx'),/footer:owner\?footerItem\?\.\(x\.id\):null/);
+ const resolved=[];const footer=id=>{resolved.push(id);return footerToolItem(prefs,id,x=>toggled.push(x));};
+ for(const id of ['genvr','terminal','code','browser','app:browser']){
+  const canonical=id==='app:browser'?'browser':id;
+  const item=workspaceFooterItem(true,id,footer);assert.equal(item.label,'Show in the footer');
+  assert.equal(item.checked,!prefs.hidden.includes(canonical));item.run();assert.equal(toggled.at(-1),canonical);
+  assert.equal(footerToolItem({...prefs,hidden:[...prefs.hidden,canonical]},canonical,()=>{}).checked,false);
+  assert.equal(footerToolItem({...prefs,hidden:prefs.hidden.filter(x=>x!==canonical)},canonical,()=>{}).checked,true);
+ }
+ assert.deepEqual(resolved,['genvr','terminal','code','browser','browser']);
+ let memberLookups=0;assert.equal(workspaceFooterItem(false,'app:browser',()=>{memberLookups++;throw Error('Owner-only callback');}),null);assert.equal(memberLookups,0);
+ const actions=tileActions({id:'app:browser',kind:'added',name:'Browser'},{owner:false},{open(){},onPermissions(){},onAccountConnections(){},footer:footer('browser')});assert.deepEqual(actions.map(x=>x.label),['Open Browser']);
+ assert.match(src('WorkspaceApplications.tsx'),/footer:workspaceFooterItem\(owner,x\.id,footerItem\)/);
 });
