@@ -149,7 +149,7 @@ async function startLocal() {
     startupStatus('Preparing your workspace…');
     log = log || openLog(path.join(app.getPath('userData'), 'logs', 'backend.log'));
     const { createApplicationServer } = require(path.join(payload.coreUiDir, 'scripts', 'application-server.cjs'));
-    browserRuntime = browserRuntime || require('./browser-runtime.cjs').createBrowserRuntime({root:process.env.DPRO_BROWSER_ROOT || path.join(process.resourcesPath,'browser'),node:payload.node,profile:process.env.DPRO_BROWSER_PROFILE || path.join(settingsDir(),'browser')});
+    browserRuntime = browserRuntime || require('./browser-runtime.cjs').createBrowserRuntime({root:process.env.DPRO_BROWSER_ROOT,bundled:path.join(process.resourcesPath,'browser'),runtimesDir:appRuntimesDir(),node:payload.node,profile:process.env.DPRO_BROWSER_PROFILE || path.join(settingsDir(),'browser')});
     runtime = createLocalRuntime({
       node: payload.node,
       readyTimeoutMs: 30000,

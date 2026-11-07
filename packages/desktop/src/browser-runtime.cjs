@@ -2,11 +2,13 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const {spawn} = require('node:child_process');
+const {resolveBrowserRuntime}=require('./browser-runtime-path.cjs');
 
 /** Only the trusted desktop process chooses executable and profile locations. */
-function createBrowserRuntime({root, node, profile}) {
+function createBrowserRuntime({root,bundled,runtimesDir,node,profile}) {
+  const selected=()=>resolveBrowserRuntime({root,bundled,runtimesDir});
   const connectionFile = path.join(profile, 'connections', 'owner-runtime.json');
-  let child, starting;
+  let child, starting,activeRoot;
   async function connection() {
     const handle=await fs.open(connectionFile,'r');let value;
     try{const buffer=Buffer.alloc(4097),{bytesRead}=await handle.read(buffer,0,buffer.length,0);if(bytesRead>4096)throw Error('Invalid browser connection');value=JSON.parse(buffer.subarray(0,bytesRead).toString('utf8'));}finally{await handle.close();}
@@ -16,20 +18,21 @@ function createBrowserRuntime({root, node, profile}) {
     return value;
   }
   async function command(body) {
+    const runtime=selected();if(!runtime||child&&activeRoot!==runtime.root)throw Error('Browser runtime unavailable');
     const value = await connection();
     const reply = await fetch(value.url + '/ui', {method:'POST', redirect:'error', headers:{Authorization:'Bearer '+value.token, 'Content-Type':'application/json'}, body:JSON.stringify(body), signal:AbortSignal.timeout(['state','frame'].includes(body.action)?2000:30000)});
     if (!reply.ok) throw Error('Browser unavailable');
     return reply.json();
   }
-  async function available() {
-    try { const manifest = JSON.parse(await fs.readFile(path.join(root, 'runtime', 'package.json'), 'utf8')); return manifest.name === '@girru/browser'; } catch { return false; }
-  }
+  async function available() { return !!selected(); }
   async function status() {
     let running = false;
     try { await command({action:'state'}); running = true; } catch {}
     return {available:await available(), running};
   }
   async function open() {
+    const runtime=selected();if(!runtime)throw Error('Browser runtime unavailable');
+    if(child&&activeRoot!==runtime.root){child.kill('SIGTERM');throw Error('Browser runtime changed; wait for it to stop and open again');}
     const current = await status();
     if (!current.available) throw Error('Browser runtime unavailable');
     if (current.running) {
@@ -37,8 +40,8 @@ function createBrowserRuntime({root, node, profile}) {
       return current;
     }
     if (!starting) starting = (async () => {
-      const processHandle = spawn(node, [path.join(root, 'runtime', 'scripts', 'full-start.cjs')], {cwd:root, env:{...process.env, GIRRU_BROWSER_PROFILE:profile, GIRRU_BROWSER_EMBEDDED:'1'}, stdio:'ignore'});
-      child = processHandle;
+      const processHandle = spawn(node, [path.join(runtime.root, 'runtime', 'scripts', 'full-start.cjs')], {cwd:runtime.root, env:{...process.env, GIRRU_BROWSER_PROFILE:profile, GIRRU_BROWSER_EMBEDDED:'1',...(runtime.executable?{GIRRU_CHROMIUM_EXECUTABLE:runtime.executable}:{})}, stdio:'ignore'});
+      child = processHandle;activeRoot=runtime.root;
       let exited = false;
       processHandle.once('error', () => { exited = true; }); processHandle.once('exit', () => { exited = true; if(child===processHandle)child = undefined; });
       const deadline=Date.now()+60000;
@@ -50,6 +53,6 @@ function createBrowserRuntime({root, node, profile}) {
     })().finally(() => { starting = undefined; });
     return starting;
   }
-  return {connectionFile, status, open, command, async close() { child?.kill('SIGTERM'); }};
+  return {connectionFile, status, open, command, async close() { const owned=child;if(!owned||owned.exitCode!==null)return;await new Promise(resolve=>{const deadline=setTimeout(()=>{owned.kill('SIGKILL');resolve();},4500);owned.once('exit',()=>{clearTimeout(deadline);resolve();});owned.kill('SIGTERM');}); }};
 }
 module.exports = {createBrowserRuntime};

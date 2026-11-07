@@ -1,3 +1,4 @@
+import {BROWSER_ITEM,browserWorkspaceStoreActive,installedBrowserWorkspace,browserWorkspaceReviewHash,installBrowserWorkspace,removeBrowserWorkspace} from './browser-workspace-runtime.js';
 import {withGenvrStopped} from '../mcp-client/genvr-local.js';
 import {createHash} from 'node:crypto';
 import {addonCatalogue} from './addon-catalogue.js';
@@ -42,11 +43,12 @@ const category=(x:unknown):StoreCategoryId=>{const v=typeof x==='string'?x.trim(
 
 /** Today's source: the local catalogues on this computer. Reading never downloads or installs. */
 export function localCatalogue(options:{home?:string;repo?:()=>Promise<RepoRead>}={}):LocalCatalogue{
- let limited:string[]=[],have:Have={installed:new Set(),present:new Set()},asOf:string|null=null,addable=new Set<string>(),code:StoreRuntime|null=null,genvr:StoreRuntime|null=null;
+ let limited:string[]=[],have:Have={installed:new Set(),present:new Set()},asOf:string|null=null,addable=new Set<string>(),code:StoreRuntime|null=null,genvr:StoreRuntime|null=null,browser:StoreRuntime|null=null;
  return {
   addable:()=>addable,
   codeRuntime:()=>code,
   genvrRuntime:()=>genvr,
+  browserRuntime:()=>browser,
   limited:()=>limited,
   have:()=>have,
   asOf:()=>asOf,
@@ -57,7 +59,7 @@ export function localCatalogue(options:{home?:string;repo?:()=>Promise<RepoRead>
    // anything else it lists is shown as "store:<id>" (adding those comes with real installs).
    const repo=await (options.repo??readStoreRepo)().catch(():RepoRead=>({index:null,asOf:null,fresh:false}));
    asOf=repo.asOf;if(!repo.fresh)limited.push('store');
-   code=repo.runtimes?.[CODE_ITEM]??null;
+   code=repo.runtimes?.[CODE_ITEM]??null;browser=repo.runtimes?.[BROWSER_ITEM]??null;
    genvr=repo.runtimes?.[GENVR_ITEM]??null;
    const added=await installedApps();
    for(const [id,x] of Object.entries(added))if(x.source==='store')have.installed.add('store:'+id);
@@ -88,7 +90,7 @@ export function localCatalogue(options:{home?:string;repo?:()=>Promise<RepoRead>
 
 type Have={installed:Set<string>;present:Set<string>};
 /** A source that also knows what this owner already has (installed registry apps, add-ons present on this computer). */
-export type LocalCatalogue=CatalogueSource&{limited:()=>string[];have:()=>Have;asOf?:()=>string|null;addable?:()=>Set<string>;codeRuntime?:()=>StoreRuntime|null;genvrRuntime?:()=>StoreRuntime|null};
+export type LocalCatalogue=CatalogueSource&{limited:()=>string[];have:()=>Have;asOf?:()=>string|null;addable?:()=>Set<string>;codeRuntime?:()=>StoreRuntime|null;genvrRuntime?:()=>StoreRuntime|null;browserRuntime?:()=>StoreRuntime|null};
 
 /**
  * CODE-STORE-01: in the desktop app Code is a Store app. It reads as included when the app
@@ -127,6 +129,11 @@ export async function readStore(ownerId:string,source:LocalCatalogue=localCatalo
  const {installed:registry,present}=source.have();
  const items:StoreEntry[]=index.items.map(x=>{
   const state:StoreState=x.id.startsWith('girru:')?'included':x.id.startsWith('registry:')?(registry.has(x.id)?'installed':'available'):x.id.startsWith('store:')?(registry.has(x.id)?'installed':source.addable?.().has(x.id)?'available':'elsewhere'):'elsewhere';
+  if(x.id==='store:browser'){
+   const runtime=source.browserRuntime?.()??null,platform=runtimePlatform(),archive=platform&&runtime?.archives[platform],installed=installedBrowserWorkspace(),complete=registry.has(x.id)&&!!installed;
+   const state:StoreState=!browserWorkspaceStoreActive()?'elsewhere':complete?'installed':archive&&source.addable?.().has(x.id)?'available':'elsewhere';
+   return {...x,version:runtime?.version??x.version,state,present:complete,update:complete&&archive&&installed!.version!==runtime!.version?runtime!.version:null,hash:browserWorkspaceReviewHash({...x,version:runtime?.version??x.version},runtime)};
+  }
   if(x.id===CODE_ITEM){const c=codeState(source.codeRuntime?.()??null);return {...x,...(c.version?{version:c.version}:{}),state:c.state,present:c.state==='included'||c.state==='installed',update:c.update,hash:consentHash(x)};}
   if(x.id===GENVR_ITEM){const c=genvrState(source.genvrRuntime?.()??null);return {...x,...(c.version?{version:c.version}:{}),state:c.state,present:c.state==='included'||c.state==='installed',update:c.update,hash:consentHash(x)};}
   const update=updates.find(u=>'registry:'+u.extension_id===x.id)?.latest_version??null;
@@ -160,6 +167,14 @@ export async function installFromStore(ownerId:string,id:string,hash:string,opti
   const r=await startCodeInstall({repo:async()=>repo,fetch:options.fetch});
   return r.ok?{ok:true,state:'adding',job:r.job.id}:{ok:false,code:r.code,message:r.message};
  }
+ // The owner workspace needs its full native runtime as well as the separate automation host.
+ if(id==='store:browser'){
+  const repo=await (options.repo??readStoreRepo)(),runtime=repo.runtimes?.[BROWSER_ITEM],item=repo.index?.items.find(x=>x.id===BROWSER_ITEM),platform=runtimePlatform();
+  if(!browserWorkspaceStoreActive()||!runtime||!platform||!runtime.archives[platform]||!item||!repo.packages?.[BROWSER_ITEM])return{ok:false,code:'not_installable',message:'The Store has no full Browser workspace for this desktop yet.'};
+  if(browserWorkspaceReviewHash({...item,id,version:runtime.version},runtime)!==hash)return{ok:false,code:'changed',message:'Browser changed; review its permissions and download again.'};
+  const job=startAdd('browser',{repo:async()=>repo,runtimeFetch:options.fetch,restart:options.restart,finishRuntime:async job=>installBrowserWorkspace(job,runtime,options.fetch)});
+  return{ok:true,state:'adding',job:job.id};
+ }
  // APPS-06: an app from the Girru Store is added by a job the window follows.
  if(id.startsWith('store:')){
   const app=id.slice(6),repo=await (options.repo??readStoreRepo)();
@@ -184,6 +199,7 @@ export async function uninstallFromStore(ownerId:string,id:string,options:{confi
  // SA6: a private app (added from a folder) is removed the same way as a Store app.
  if(id.startsWith('store:')||id.startsWith('private:')){
   const r=await removeApp(id.slice(id.indexOf(':')+1),options);
+  if(r.ok&&id==='store:browser')removeBrowserWorkspace();
   return r.ok?{ok:true,state:'available',copy:r.copy,restart:r.restart}:r;
  }
  const ext=registryId(id);if(!ext)return refuseOther(id);
