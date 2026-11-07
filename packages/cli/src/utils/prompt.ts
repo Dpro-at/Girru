@@ -24,9 +24,10 @@ export function askHidden(question: string): Promise<string> {
     return new Promise((resolve) => {
       const rl = readline.createInterface({ input: stdin, terminal: false });
       rl.once('line', (line) => {
+        // close emits synchronously; settle the entered line before the EOF fallback.
+        resolve(line);
         rl.close();
         process.stdout.write('\n');
-        resolve(line);
       });
       rl.once('close', () => resolve(''));
     });
