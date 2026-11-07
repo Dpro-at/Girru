@@ -16,6 +16,8 @@ export type WirePdf = { path: string; pageCount: number; pages: { page: number; 
 type Load<T> = { phase: 'loading' } | { phase: 'ready'; data: T } | { phase: 'error'; message: string };
 export type PanesState = Readonly<{
   projectId: string | null;
+  reply?:{conversationId:string;messageId:string};
+  focusPath?:string;
   changes?: Load<WireChanges>;
   /** Open diffs, by file path. */
   diffs: Readonly<Record<string, Load<WireDiff>>>;
@@ -65,17 +67,22 @@ export class PanesController {
   private current(id: string) { return !this.#disposed && this.#state.projectId === id; }
 
   async loadChanges() {
-    const id = this.#state.projectId; if (!id) return;
+    const id = this.#state.projectId,reply=this.#state.reply;if(!id&&!reply)return;
     this.publish({ changes: { phase: 'loading' } });
-    const r = await this.get<WireChanges>(`/api/chat/projects/${id}/changes`);
-    if (this.current(id)) this.publish({ changes: r, diffs: {} });
+    const r = await this.get<WireChanges>(reply?`/api/chat/conversations/${reply.conversationId}/messages/${reply.messageId}/changes`:`/api/chat/projects/${id}/changes`);
+    if(!this.#disposed&&this.#state.projectId===id&&this.#state.reply===reply)this.publish({ changes: r, diffs: {} });
+  }
+  clearReply(){if(this.#state.reply)this.publish({reply:undefined,focusPath:undefined,changes:undefined,diffs:{}});}
+  async openReplyDiff(conversationId:string,messageId:string,path:string,changes:WireChanges){
+    if(this.#disposed||!changes.changes.some(file=>file.path===path))return;
+    this.publish({reply:{conversationId,messageId},focusPath:path,changes:{phase:'ready',data:changes},diffs:{}});await this.toggleDiff(path);
   }
   async toggleDiff(path: string) {
-    const id = this.#state.projectId; if (!id) return;
+    const id = this.#state.projectId,reply=this.#state.reply;if(!id&&!reply)return;
     if (this.#state.diffs[path]) { const { [path]: _gone, ...rest } = this.#state.diffs; this.publish({ diffs: rest }); return; }
-    this.publish({ diffs: { ...this.#state.diffs, [path]: { phase: 'loading' } } });
-    const r = await this.get<WireDiff>(panePath(id, 'diff', path));
-    if (this.current(id) && this.#state.diffs[path]) this.publish({ diffs: { ...this.#state.diffs, [path]: r } });
+    const loading={phase:'loading' as const};this.publish({ diffs: { ...this.#state.diffs, [path]: loading } });
+    const r = await this.get<WireDiff>(reply?`/api/chat/conversations/${reply.conversationId}/messages/${reply.messageId}/diff?path=${encodeURIComponent(path)}`:panePath(id!, 'diff', path));
+    if (!this.#disposed&&this.#state.projectId===id&&this.#state.reply===reply&&this.#state.diffs[path]===loading) this.publish({ diffs: { ...this.#state.diffs, [path]: r } });
   }
   async loadFolder(rel = '') {
     const id = this.#state.projectId; if (!id) return;

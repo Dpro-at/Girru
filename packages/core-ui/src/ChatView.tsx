@@ -468,6 +468,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
   };
   const mdActions = { ...(folder ? { openFile: (rel: string) => openBeside(rel) } : {}), ...(folder && client ? { openInCode: (rel: string) => void openInCodeFile(client, joinPath(folder, rel), null, say) } : {}),
     ...(owner && terminal ? { runCommand: runInTerminal, commandRun } : {}), ...(folder ? { folderName: folder.split(/[\\/]/).filter(Boolean).at(-1) } : {}) };
+  useEffect(()=>{panes?.clearReply();},[panes,s.activeId]);
   const moments = { client, conversationId: s.activeId, onOpenApprovals, steps, changeCards, nativeCode:embeddedCode,
     ...(folder ? { onOpenFile: openBeside } : {}), ...(folder && client ? { onFileMenu: (e: React.MouseEvent, rel: string) => fileCtl.at(e, fileMenu(client, joinPath(folder, rel), null, say)) } : {}),
     // CH6/CH10 team moments: Hand it again adds to the box (never sends), Set a model opens the agent, Always allow opens What agents may do.
@@ -475,7 +476,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
     onOpenChat: (id: string) => { void controller.open(id); }, onStopChat: (id: string) => { void controller.stopChat(id); },
     chatState: (id: string) => { const x = s.conversations.find(c => c.id === id) as (typeof s.conversations[number] & { running?: boolean; waiting?: number }) | undefined; return x ? { running: x.running === true, waiting: x.waiting ?? 0, title: x.title ?? undefined } : undefined; }, onDraft: (text: string) => { const d = controller.getSnapshot().draft.trim(); controller.edit(d ? `${d}\n\n${text}` : text); },
     agentAbout: (id?: string) => s.agents.find(a => a.id === id)?.about, subAgentOf: (id?: string) => s.agents.find(a => a.id === id)?.subAgentOf, onStop: () => void controller.stopAll(), agentName: (id?: string) => (id ? s.agents.find(a => a.id === id)?.name ?? id : nameOf(convAgentId)),
-    onSwitchAuto: () => controller.selectModel('auto'), onReviewChanges: () => setPane('changes'), onChanged: () => void controller.refreshGit(), onDecided: () => void controller.pickUpContinuation(),
+    onSwitchAuto: () => controller.selectModel('auto'), onReviewChanges: () => {panes?.clearReply();setPane('changes');}, onReviewFile:(messageId:string,path:string,changes:import('./conversation-contract.js').WireChanges)=>{if(panes&&s.activeId){setPane('changes');void panes.openReplyDiff(s.activeId,messageId,path,changes);}}, onChanged: () => void controller.refreshGit(), onDecided: () => void controller.pickUpContinuation(),
     onStartFresh: (summary: string) => { const title = activeConv?.title ?? 'the last chat'; controller.newChat(); controller.edit(`Continue from “${title}”. ${summary}`.slice(0, 4000)); } };
   return <MarkdownActionsContext.Provider value={mdActions}><MomentsContext.Provider value={moments}><div className="chat-layout" data-code-expanded={embeddedCode&&codeExpanded||undefined} data-panel={pane ?? 'rail'} data-empty={empty || undefined} data-max={(maximized && termOpen) || undefined}>
   {embeddedCode&&<CodeChatResize onResize={()=>setCodeExpanded(false)}/>}

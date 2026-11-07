@@ -7,6 +7,7 @@ import {editReview} from './edit-review';
 // agent changed — and the task list above the box. Each is one sentence and at most one action.
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import type {WireChanges} from './conversation-contract.js';
 import type { SessionClient } from './session';
 import { ChatOrb } from './ChatOrb';
 import type { ChoiceAsk, Part, PlanStep, StartedSession, ToolCall, Turn } from './turns';
@@ -25,7 +26,7 @@ export type Moments = {
   client?: SessionClient; conversationId?: string | null; agentName?: (id?: string) => string;
   /** CH6: an agent's short description, whose sub-agent it is, and the step each delegated agent runs now (while a reply works). */
   agentAbout?: (id?: string) => string | undefined; subAgentOf?: (id?: string) => string | undefined; steps?: readonly { agentId: string; tool: string; at: string }[];
-  onSwitchAuto?: () => void; onStartFresh?: (summary: string) => void; onReviewChanges?: () => void; onChanged?: () => void; onDecided?: () => void; onOpenApprovals?: () => void; onStop?: () => void;
+  onSwitchAuto?: () => void; onStartFresh?: (summary: string) => void; onReviewChanges?: () => void; onReviewFile?:(messageId:string,path:string,changes:WireChanges)=>void; onChanged?: () => void; onDecided?: () => void; onOpenApprovals?: () => void; onStop?: () => void;
   /** CH3 ⇧⌘Z: each changes card on screen, by message id — whether its changes are undone, and its own Redo. */
   changeCards?: Map<string, { undone: boolean; redo: () => void }>;
   /** CH6/CH10 team moments: put text in the box (never sent by itself), open an agent's page, open what an agent may do for one action. */
@@ -270,8 +271,10 @@ function Since({ at }: { at: string }) {
 
 /** CH10 Undo: a reply that changed files offers Review and Undo; afterwards Redo. */
 export function ChangesLine({ turn, messageId }: { turn: Turn; messageId: string }) {
-  const { client, conversationId, onReviewChanges, onChanged, changeCards } = useContext(MomentsContext);
+  const { client, conversationId, onReviewChanges, onReviewFile, onChanged, changeCards } = useContext(MomentsContext);
   const [undone, setUndone] = useState(turn.changes?.undone ?? false);
+  const [files,setFiles]=useState<WireChanges|null>(null),[filesError,setFilesError]=useState(false);
+  useEffect(()=>{let live=true;setFiles(null);setFilesError(false);if(client&&conversationId&&turn.changes?.files&&!turn.changes.unavailable){void client.request({method:'GET',path:`/api/chat/conversations/${conversationId}/messages/${messageId}/changes`} as never).then(response=>{if(!live)return;if(response.status===200)setFiles(response.body as WireChanges);else setFilesError(true);}).catch(()=>{if(live)setFilesError(true);});}return()=>{live=false;};},[client,conversationId,messageId,turn.changes?.files,turn.changes?.unavailable]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const go = async (redo: boolean) => {
@@ -298,6 +301,9 @@ export function ChangesLine({ turn, messageId }: { turn: Turn; messageId: string
   return <div className="moment-card changes" role="note">
     <p><UiIcon name="undo" size={15}/><span>{undone ? `Undone: ${n} ${n === 1 ? 'file is' : 'files are'} back as before.` : `Changed ${n} ${n === 1 ? 'file' : 'files'}`}
       {!undone && turn.changes?.added !== undefined && <> · <span className="diff-add">+{turn.changes.added}</span> <span className="diff-del">−{turn.changes.removed}</span></>}</span></p>
+    {files&&<ul className="reply-change-files" aria-label="Files changed in this reply">{files.changes.map(file=><li key={file.path}><button type="button" disabled={!onReviewFile} title={file.path} onClick={()=>onReviewFile?.(messageId,file.path,files)}><span className="reply-change-path" dir="ltr">{file.path}</span><span className="reply-change-count">{file.added===null||file.removed===null?<span>Binary</span>:<><span className="diff-add">+{file.added}</span><span className="diff-del">−{file.removed}</span></>}</span></button></li>)}</ul>}
+    {files?.truncated&&<p className="moment-hint">Only the first 1000 files are shown.</p>}
+    {!files&&<p className="moment-hint">{filesError?'Saved file list unavailable.':'Loading changed files…'}</p>}
     <div className="moment-actions">
       {!undone && onReviewChanges && <button type="button" className="moment-main" onClick={onReviewChanges}>Review</button>}
       <button type="button" className={undone ? 'moment-main' : 'link-button'} disabled={busy} onClick={() => void go(undone)}>{undone ? 'Redo' : 'Undo these changes'}</button>

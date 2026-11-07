@@ -84,6 +84,8 @@ export function conversationPath(path) {
   if (pm) return uuid(pm[1]) ? { kind: 'project-changes', id: pm[1] } : null;
   pm = /^\/api\/chat\/projects\/([^/?#]+)\/(diff|tree|file|pdf|media|office)(?:\?path=([A-Za-z0-9%._~!*'()-]{0,3000}))?$/.exec(path);
   if (pm) { const rel = paneRel(pm[3]); return uuid(pm[1]) && rel !== null && (rel !== '' || pm[2] === 'tree') ? { kind: `project-${pm[2]}`, id: pm[1], rel } : null; }
+  const saved=/^\/api\/chat\/conversations\/([^/?#]+)\/messages\/([^/?#]+)\/(changes|diff)(?:\?path=([A-Za-z0-9%._~!*'()-]{0,3000}))?$/.exec(path);
+  if(saved){const rel=paneRel(saved[4]);return uuid(saved[1])&&uuid(saved[2])&&(saved[3]==='changes'?saved[4]===undefined:rel!==null&&rel!=='')?{kind:saved[3]==='changes'?'reply-changes':'reply-diff',id:saved[1],messageId:saved[2],rel}:null;}
   let m = /^\/api\/chat\/conversations\/([^/?#]+)$/.exec(path);
   if (m) return uuid(m[1]) ? { kind: 'one', id: m[1] } : null;
   // CHAT-BUILD-01: one page of a long conversation (?limit=N[&before=<message id>]).
@@ -132,7 +134,7 @@ export function allowedConversation(method, path, body) {
   if (p.kind === 'last') return method === 'GET' ? body === undefined : method === 'PUT' && record(body) && onlyKeys(body, ['last']) && (body.last === null || uuid(body.last));
   if (p.kind === 'sidebar') return method === 'GET' ? body === undefined : method === 'PUT' && record(body) && Object.keys(body).length > 0 && onlyKeys(body, ['order', 'hidden', 'folded'])
     && (body.order === undefined || sectionList(body.order)) && (body.hidden === undefined || sectionList(body.hidden)) && (body.folded === undefined || folderList(body.folded));
-  if (method === 'GET') return body === undefined && ['list', 'messages', 'events', 'projects', 'project-git', 'project-pr', 'project-changes', 'project-diff', 'project-tree', 'project-file', 'project-pdf', 'project-media', 'project-office', 'transcribe', 'variables', 'image'].includes(p.kind);
+  if (method === 'GET') return body === undefined && ['list', 'messages', 'events', 'projects', 'project-git', 'project-pr', 'project-changes', 'project-diff', 'reply-changes', 'reply-diff', 'project-tree', 'project-file', 'project-pdf', 'project-media', 'project-office', 'transcribe', 'variables', 'image'].includes(p.kind);
   if (method === 'POST' && p.kind === 'transcribe') return record(body) && onlyKeys(body, ['audio', 'language']) && typeof body.audio === 'string' && body.audio.length > 0 && body.audio.length <= MAX_AUDIO_CHARS && /^[A-Za-z0-9+/]+={0,2}$/.test(body.audio)
     && (body.language === undefined || STT_LANGUAGES.includes(body.language));
   if (method === 'DELETE') return body === undefined && (p.kind === 'one' || p.kind === 'project' || p.kind === 'variable');
@@ -258,14 +260,14 @@ export function conversationResponse(path, status, body) {
   const n = x => (Number.isSafeInteger(x) && x >= 0 ? x : null);
   if (p.kind === 'transcribe') return typeof body.text === 'string' ? { text: body.text.slice(0, 20_000), ms: n(body.ms) ?? 0 }
     : { available: body.available === true, missing: Array.isArray(body.missing) ? body.missing.filter(m => typeof m === 'string').slice(0, 5).map(m => m.slice(0, 40)) : [] };
-  if (p.kind === 'project-changes') {
+  if (p.kind === 'project-changes'||p.kind === 'reply-changes') {
     if (!Array.isArray(body.changes)) throw Error('protocol');
     const statuses = ['modified', 'added', 'deleted', 'renamed', 'untracked'];
     return { branch: typeof body.branch === 'string' ? body.branch.slice(0, 200) : null, truncated: body.truncated === true, notGit: body.notGit === true,
       changes: body.changes.slice(0, 1000).filter(c => record(c) && typeof c.path === 'string' && statuses.includes(c.status))
         .map(c => ({ path: c.path.slice(0, 1024), status: c.status, added: n(c.added), removed: n(c.removed), ...(typeof c.from === 'string' ? { from: c.from.slice(0, 1024) } : {}) })) };
   }
-  if (p.kind === 'project-diff') return { path: str(body.path, 1024), diff: typeof body.diff === 'string' ? body.diff.slice(0, 400_000) : '', truncated: body.truncated === true, binary: body.binary === true, hidden: body.hidden === true };
+  if (p.kind === 'project-diff'||p.kind === 'reply-diff') return { path: str(body.path, 1024), diff: typeof body.diff === 'string' ? body.diff.slice(0, 400_000) : '', truncated: body.truncated === true, binary: body.binary === true, hidden: body.hidden === true };
   if (p.kind === 'project-tree') {
     if (!Array.isArray(body.entries)) throw Error('protocol');
     return { path: str(body.path, 1024), truncated: body.truncated === true,

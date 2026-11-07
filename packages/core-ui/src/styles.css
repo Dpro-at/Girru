@@ -4098,3 +4098,11 @@ label.setup-kind { display:flex; align-items:center; justify-content:flex-start;
 .office-slide-flow .office-slide-item img { block-size:auto; max-block-size:300px; }
 
 .store-app-renderer{display:flex;flex-direction:column;height:100%;min-height:0;flex:1}
+
+/* Per-reply file changes share the existing diff palette and side-panel review. */
+.app-shell .reply-change-files { list-style:none; padding:0; margin:10px -12px 0; border-top:1px solid var(--border, #ffffff18); }
+.app-shell .reply-change-files li + li { border-top:1px solid var(--border, #ffffff18); }
+.app-shell .reply-change-files button { display:flex; align-items:center; gap:14px; width:100%; padding:9px 12px; text-align:left; border:0; border-radius:0; background:transparent; color:inherit; }
+.app-shell .reply-change-files button:hover { background:#ffffff08; }
+.app-shell .reply-change-path { flex:1; min-width:0; overflow-wrap:anywhere; font-size:12px; }
+.app-shell .reply-change-count { display:flex; flex-shrink:0; gap:8px; font-variant-numeric:tabular-nums; font-size:12px; }

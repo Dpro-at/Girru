@@ -55,7 +55,7 @@ import { addApprovalDecidedListener } from '../../tools/approvals.js';
 import { delegationSteps, stopDelegations } from '../../tools/tasks/team.js';
 import { codingRunsFor, stopCodingRun, stopCodingRuns } from '../../services/coding-runs.js';
 import { getPref, setPref } from '../../repositories/user-prefs.js';
-import { CheckpointError, changedFiles, lineCounts, restore, snapshot, snapshotState } from '../../services/chat-checkpoints.js';
+import { CheckpointError, checkpointChanges, checkpointFileDiff, changedFiles, lineCounts, restore, snapshot, snapshotState } from '../../services/chat-checkpoints.js';
 import { changesSomething } from '../../tools/registry.js';
 import { projectPullRequest } from '../../services/github-pr-state.js';
 import { ChatImageError, MAX_IMAGES_PER_MESSAGE, MAX_IMAGE_BYTES, readChatImage, saveChatImage } from '../../services/chat-images.js';
@@ -951,6 +951,16 @@ export async function chatConversationRoutes(fastify: FastifyInstance) {
   });
 
   // CHAT-BUILD-01 stage 5 (CH10): undo (or redo) the files one reply changed. Owner only; refused if they changed since.
+  for(const kind of ['changes','diff'] as const)fastify.get('/api/chat/conversations/:id/messages/:messageId/'+kind,{config:{access:'owner'}},async(request:Req,reply)=>{
+    const c=await findConversation(caller(request),request.params.id!);if(!c)return notFound(reply);
+    const m=await q.one<{checkpoint_before:string|null;checkpoint_after:string|null}>("SELECT checkpoint_before,checkpoint_after FROM chat_messages WHERE id=? AND session_id=? AND role='assistant'",(request.params as any).messageId,c.id);
+    if(!m?.checkpoint_before||!m.checkpoint_after)return notFound(reply);
+    const query=request.query as Record<string,unknown>;
+    if(Object.keys(query).some(key=>kind!=='diff'||key!=='path')||kind==='diff'&&typeof query.path!=='string')return bad(reply,'Invalid file');
+    try{return kind==='changes'?await checkpointChanges(m.checkpoint_before,m.checkpoint_after):await checkpointFileDiff(m.checkpoint_before,m.checkpoint_after,query.path as string);}
+    catch{return reply.code(409).send({error:'Saved changes unavailable',code:'checkpoint_unavailable'});}
+  });
+
   fastify.post('/api/chat/conversations/:id/messages/:messageId/undo', { config: { access: 'owner' } }, async (request: Req, reply) => {
     const c = await findConversation(caller(request), request.params.id!);
     if (!c) return notFound(reply);
