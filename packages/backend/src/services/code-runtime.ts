@@ -182,14 +182,14 @@ function sweep(root: string, keep: string[], leftoversOnly: boolean) {
   }
 }
 
-async function enoughSpace(root: string, size: number) {
+export async function enoughSpace(root: string, size: number, label = 'Code') {
   try {
     const s = await fs.promises.statfs(root);
-    if (Number(s.bavail) * Number(s.bsize) < size * 4) throw Object.assign(new Error('there is not enough free disk space (Code needs about four times its download)'), { space: true });
+    if (Number(s.bavail) * Number(s.bsize) < size * 4) throw Object.assign(new Error(`there is not enough free disk space (${label} needs about four times its download)`), { space: true });
   } catch (error) { if ((error as { space?: boolean }).space) throw error; /* no statfs here: try anyway */ }
 }
 
-async function downloadTo(archive: RuntimeArchive, file: string, get: RuntimeFetch, progress: (n: number) => void): Promise<string> {
+export async function downloadTo(archive: RuntimeArchive, file: string, get: RuntimeFetch, progress: (n: number) => void): Promise<string> {
   const control = new AbortController();
   let timer = setTimeout(() => control.abort(), STALL_MS);
   const fresh = () => { clearTimeout(timer); timer = setTimeout(() => control.abort(), STALL_MS); };

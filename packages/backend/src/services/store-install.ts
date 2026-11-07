@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { installedAppsRoot, installedAppDir } from '../config/backend-root.js';
-import { readStoreRepo, storeBase, type StorePackage } from './store-repo.js';
+import { readStoreRepo, storeBase, type StorePackage, type RepoRead } from './store-repo.js';
 import type {RuntimeFetch} from './code-runtime.js';
 import { workspaceBackupsDir } from './backups.js';
 
@@ -92,7 +92,7 @@ const migrationFiles = (dir: string) => { const m = path.join(dir, 'migrations')
 export function addJob(job: string): AddJob | null { return jobs.get(job) ?? null; }
 
 /** Start adding a Store app; the window follows the job. */
-export function startAdd(app: string, options: { fetch?: Fetch; runtimeFetch?:RuntimeFetch; restart?: () => boolean; onDone?: (job: AddJob) => void } = {}): AddJob {
+export function startAdd(app: string, options: { fetch?: Fetch; runtimeFetch?:RuntimeFetch; repo?:()=>Promise<RepoRead>; finishRuntime?:(job:AddJob,repo:RepoRead)=>Promise<void>; restart?: () => boolean; onDone?: (job: AddJob) => void } = {}): AddJob {
   if(['agent-connect','call-center','trading','browser'].includes(app)){const active=[...jobs.values()].find(j=>j.app===app&&!j.done);if(active)return active;}
   return trackJob(app, (job) => add(job, options), options.onDone);
 }
@@ -111,10 +111,10 @@ export function trackJob(app: string, run: (job: AddJob) => Promise<void>, onDon
 /** A package file path: plain relative segments of letters, digits, '.', '_' and '-' (no absolute paths, no backslashes). */
 const SAFE_PATH = /^[A-Za-z0-9_][A-Za-z0-9._-]*(\/[A-Za-z0-9_][A-Za-z0-9._-]*)*$/;
 
-async function add(job: AddJob, { fetch: get = globalThis.fetch as unknown as Fetch, runtimeFetch, restart }: { fetch?: Fetch; runtimeFetch?:RuntimeFetch; restart?: () => boolean }) {
+async function add(job: AddJob, { fetch: get = globalThis.fetch as unknown as Fetch, runtimeFetch, restart, repo:read=readStoreRepo, finishRuntime }: { fetch?: Fetch; runtimeFetch?:RuntimeFetch; repo?:()=>Promise<RepoRead>; finishRuntime?:(job:AddJob,repo:RepoRead)=>Promise<void>; restart?: () => boolean }) {
   const id = job.app;
   if (!ID.test(id)) throw new Error('unknown app');
-  const repo = await readStoreRepo();
+  const repo = await read();
   const pkg: StorePackage | undefined = repo.packages?.[`girru:${id}`];
   const item = repo.index?.items.find((x) => x.id === `girru:${id}`);
   if (!item || !pkg) throw new Error('it is not in the Girru Store any more');
@@ -186,6 +186,7 @@ async function add(job: AddJob, { fetch: get = globalThis.fetch as unknown as Fe
   if(['agent-connect','call-center','trading','browser'].includes(id))db.prepare(`INSERT INTO extension_configs (extension_id,enabled,updated_at) VALUES (?,0,datetime('now')) ON CONFLICT(extension_id) DO UPDATE SET updated_at=datetime('now')`).run(id);
   else db.prepare(`INSERT INTO extension_configs (extension_id, enabled, updated_at) VALUES (?, 1, datetime('now')) ON CONFLICT(extension_id) DO UPDATE SET enabled = 1, updated_at = datetime('now')`).run(id);
   db.prepare('INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at').run(KEY(id), JSON.stringify({ name:item.name,version: item.version, packageSha256: pkg.sha256, installedAt: new Date().toISOString() }), Date.now());
+  if(finishRuntime)await finishRuntime(job,repo);
   const auto = restart?.() ?? false;
   Object.assign(job, { done: true, ok: true, restart: auto ? 'auto' : 'manual', message: auto ? `${item.name} is added. Girru starts again to finish.` : `${item.name} is added. Start Girru again to finish.` });
 }
