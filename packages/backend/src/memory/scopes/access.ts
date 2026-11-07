@@ -266,6 +266,25 @@ export function effectiveMask(snap: AccessSnapshot, agentId: string, ownMask: nu
   return normalizeMask(chainMask(snap, project, agentId, now) & ownMask & templateMask(snap, agentId));
 }
 
+/** Read-only rule-grid projection, not an authorization decision. The UI may
+ * preview these scope rules, but execution additionally applies own grants,
+ * role templates and delegation narrowing through effectiveMask.
+ * Reuses exactly the runtime rule ordering, expiry and mask normalization.
+ */
+export function projectRuleCell(snap: AccessSnapshot, scopes: readonly string[], targetScope: string,
+  agentId: string | null, kind: AccessColumn, now = Date.now()): { read: boolean; write: boolean; own: boolean } {
+  let mask = ALL;
+  const ix = indexed(snap);
+  for (const scope of scopes) for (const r of ix.base.get(scope) ?? []) mask = applyRule(mask, r);
+  if (agentId) for (const scope of scopes) for (const r of ix.agent.get(agentId)?.get(scope) ?? []) {
+    if (!ended(r, now)) mask = applyRule(mask, r);
+  }
+  mask = normalizeMask(mask);
+  const own = (agentId ? ix.agent.get(agentId)?.get(targetScope) : ix.base.get(targetScope))
+    ?.some(r => r.drawer_kind === kind && (!agentId || !ended(r, now))) ?? false;
+  return { read: !!(mask & READ_BIT(kind)), write: !!(mask & WRITE_BIT(kind)), own };
+}
+
 /**
  * Narrow a run's permissions by the owner's policies for this project
  * (never widens: the result is a subset of `p`).

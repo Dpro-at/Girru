@@ -8,10 +8,11 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import readline from 'readline';
+import { randomUUID } from 'node:crypto';
+import { requestChat } from './chat-client.js';
 
-import { OLLAMA_URL, DEFAULT_OLLAMA_MODEL } from '../llm/ollama.js';
+import { OLLAMA_URL } from '../llm/ollama.js';
 
-const DEFAULT_MODEL = DEFAULT_OLLAMA_MODEL;
 
 const program = new Command();
 
@@ -78,28 +79,22 @@ program
 program
   .command('chat [message]')
   .description('Start interactive chat or send a single message')
-  .option('-m, --model <model>', 'Model to use', DEFAULT_MODEL)
+  .option('-m, --model <model>', 'Model intent (validated by the backend)')
+  .option('--url <url>', 'Loopback backend URL')
   .action(async (message, options) => {
     const model = options.model;
 
-    // Check Ollama connection
-    try {
-      const res = await fetch(`${OLLAMA_URL}/api/tags`);
-      if (!res.ok) throw new Error('Ollama not available');
-    } catch {
-      console.log(chalk.red('Cannot connect to Ollama.'));
-      console.log(chalk.yellow('Make sure Ollama is running: ollama serve'));
-      process.exit(1);
-    }
+    const sessionId = randomUUID();
+    const connection = { sessionId, url: options.url ?? process.env.AGENT_PLAYER_URL, token: process.env.AGENT_PLAYER_TOKEN };
 
-    console.log(chalk.blue(`\nGirru Chat (model: ${model})`));
+    console.log(chalk.blue(`\nGirru Chat (model: ${model ?? 'backend default'})`));
     console.log(chalk.gray('Type "exit" or Ctrl+C to quit\n'));
 
     const messages: { role: string; content: string }[] = [];
 
     // Single message mode
     if (message) {
-      await sendMessage(model, [{ role: 'user', content: message }]);
+      await sendMessage(model, [{ role: 'user', content: message }], connection);
       return;
     }
 
@@ -127,7 +122,7 @@ program
         messages.push({ role: 'user', content: text });
 
         process.stdout.write(chalk.green('Agent: '));
-        const response = await sendMessage(model, messages, true);
+        const response = await sendMessage(model, messages, connection, true);
         messages.push({ role: 'assistant', content: response });
         console.log();
 
@@ -138,57 +133,21 @@ program
     prompt();
   });
 
-// Send message to Ollama and stream response
+// Send intent to the governed backend; terminal owns display and input only.
 async function sendMessage(
-  model: string,
+  model: string | undefined,
   messages: { role: string; content: string }[],
+  connection: { sessionId: string; url?: string; token?: string },
   returnContent = false
 ): Promise<string> {
   try {
-    const res = await fetch(`${OLLAMA_URL}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages, stream: true })
-    });
-
-    if (!res.ok) {
-      console.log(chalk.red(`\nError: ${res.statusText}`));
-      return '';
-    }
-
-    const reader = res.body?.getReader();
-    if (!reader) return '';
-
-    const decoder = new TextDecoder();
-    let fullContent = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n').filter(l => l.trim());
-
-      for (const line of lines) {
-        try {
-          const json = JSON.parse(line);
-          if (json.message?.content) {
-            process.stdout.write(json.message.content);
-            fullContent += json.message.content;
-          }
-        } catch {
-          // Skip
-        }
-      }
-    }
-
-    if (!returnContent) {
-      console.log();
-    }
-
-    return fullContent;
-  } catch (error: any) {
-    console.log(chalk.red(`\nError: ${error.message}`));
+    const content = await requestChat({ model, messages, ...connection });
+    process.stdout.write(content);
+    if (!returnContent) console.log();
+    return content;
+  } catch (error) {
+    console.log(chalk.red(`\n${error instanceof Error ? error.message : 'Chat failed.'}`));
+    process.exitCode = 1;
     return '';
   }
 }

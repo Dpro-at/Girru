@@ -105,7 +105,8 @@ export class AgentCardController {
     if (d.description !== before.description) body.description = d.description;
     if (d.model !== before.model && d.model) {
       const m = this.#state.models?.find(x => x.id === d.model);
-      body.model = d.model; body.provider = m?.provider ?? (/^claude-/.test(d.model) ? 'claude' : 'ollama');
+      if (!m) { this.publish({ notice: 'That model is no longer in the backend catalogue. Reload the model list before saving.' }); return; }
+      body.modelSelection = m.id;
     }
     this.publish({ phase: 'saving' });
     try {
@@ -116,7 +117,7 @@ export class AgentCardController {
         this.publish({ phase: 'ready', agent, notice: 'Someone changed this agent meanwhile. The latest values are shown; your draft is kept — save again to apply it.' });
         return;
       }
-      this.publish({ phase: 'ready', notice: r.status === 400 ? 'The department must be lowercase letters, numbers, spaces, _ or - (up to 64).' : 'The profile was not saved.' });
+      this.publish({ phase: 'ready', notice: record(r.body) && r.body.code === 'invalid_model' ? 'The selected model is no longer available. Reload this page and choose again.' : r.status === 400 ? 'The department must be lowercase letters, numbers, spaces, _ or - (up to 64).' : 'The profile was not saved.' });
     } catch { this.publish({ phase: 'ready', notice: 'The profile was not saved (no connection).' }); }
   }
 

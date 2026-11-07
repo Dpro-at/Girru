@@ -138,9 +138,24 @@ export async function patchConversation(userId: string, id: string, patch: { tit
   if (patch.projectId !== undefined) { fields.push('project_id = ?'); params.push(patch.projectId); }
   if (patch.mode !== undefined) { fields.push('mode = ?'); params.push(patch.mode); }
   if (patch.thinking !== undefined) { fields.push('thinking = ?'); params.push(patch.thinking); }
-  if (patch.queued !== undefined) { fields.push('queued = ?'); params.push(patch.queued.length ? JSON.stringify(patch.queued) : null); }
+  // Queue writes are serialized with admission below; accepted identities cannot reappear.
   if (patch.archived !== undefined) fields.push(patch.archived ? 'archived_at = COALESCE(archived_at, CURRENT_TIMESTAMP)' : 'archived_at = NULL');
-  if (fields.length) await q.run(`UPDATE chat_sessions SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`, ...params, id, userId);
+  if (patch.queued !== undefined) {
+    await sql().tx(function* (): Step<void> {
+      const locked = yield* run('UPDATE chat_sessions SET id=id WHERE id=? AND user_id=?', id, userId);
+      if (locked.changes !== 1) return;
+      const queue: { key: string; text: string }[] = [];
+      const seen = new Set<string>();
+      for (const item of patch.queued!) {
+        if (seen.has(item.key)) continue;
+        seen.add(item.key);
+        const admitted = yield* one('SELECT run_id FROM chat_run_journal WHERE run_id=? AND session_id=? AND user_id=?', item.key, id, userId);
+        const completed = yield* one("SELECT id FROM chat_messages WHERE run_id=? AND session_id=? AND role='user'", item.key, id);
+        if (!admitted && !completed) queue.push(item);
+      }
+      yield* run(`UPDATE chat_sessions SET ${[...fields, 'queued = ?'].join(', ')} WHERE id = ? AND user_id = ?`, ...params, queue.length ? JSON.stringify(queue) : null, id, userId);
+    });
+  } else if (fields.length) await q.run(`UPDATE chat_sessions SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`, ...params, id, userId);
   return findConversation(userId, id);
 }
 

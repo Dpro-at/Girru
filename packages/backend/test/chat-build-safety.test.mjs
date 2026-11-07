@@ -154,7 +154,7 @@ test('an approval the owner decides returns into the chat: the conversation cont
 test('model choice: a picked Claude model is used as picked; only "auto" lets the router choose', async () => {
   const chat = await import(join(backendDir, 'src/api/routes/chat.ts'));
   assert.equal(chat.AUTO_MODEL, 'auto');
-  const src = (await import('node:fs')).readFileSync(join(backendDir, 'src/api/routes/chat.ts'), 'utf8');
+  const src = (await import('node:fs')).readFileSync(join(backendDir, 'src/agent/execution/chat-turn.ts'), 'utf8');
   assert.match(src, /if \(autoModel && \(provider === 'claude' \|\| provider === undefined\)\)/);
   assert.equal(chat.capMiddle('abc', 10), 'abc');
   const capped = chat.capMiddle('A'.repeat(5000) + 'END', 1000);

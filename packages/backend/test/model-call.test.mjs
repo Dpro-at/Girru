@@ -128,8 +128,8 @@ test('static: no file outside the choke point calls a paid model provider from a
   const ALLOWED = {
     'llm/model-call.ts': 'the choke point (gated background calls; interactive usage recorded)',
     'llm/claude-client.ts': 'the provider client itself',
-    'services/task-run-executor.ts': 'builds the agent driver; every step call goes through gatedModelCall',
-    'api/routes/agentic-chat.ts': 'interactive owner chat (not gated, usage recorded)',
+    'agent/execution/task-turn.ts': 'builds the agent driver; every step call goes through gatedModelCall',
+    'agent/execution/cloud-turn.ts': 'interactive owner chat (not gated, usage recorded)',
     'api/routes/settings.ts': 'owner tests an API key',
     'api/routes/agents-status.ts': 'owner checks provider status',
     'services/audio-service.ts': 'interactive transcription / speech requested by a user',
@@ -149,8 +149,8 @@ test('static: no file outside the choke point calls a paid model provider from a
   assert.deepEqual(ledgerUsers, ['llm/model-call.ts', 'services/cost-budget.ts']);
 
   // Background paths use the choke point.
-  for (const rel of ['memory/retrieval.ts', 'memory/weekly-summary.ts', 'services/agent-cron.ts', 'services/task-run-executor.ts']) {
-    assert.match(readFileSync(join(src, rel), 'utf8'), /from '\.\.\/llm\/model-call\.js'/, rel);
+  for (const rel of ['memory/retrieval.ts', 'memory/weekly-summary.ts', 'services/agent-cron.ts', 'agent/execution/task-turn.ts']) {
+    assert.match(readFileSync(join(src, rel), 'utf8'), /from '(?:\.\.\/){1,2}llm\/model-call\.js'/, rel);
   }
   // Evolution is rule-based: no model client at all.
   for (const rel of ['services/agent-evolution-orchestrator.js', 'services/agent-evolution-scheduler.js', 'services/agent-learning-engine.js', 'services/agent-performance-analyzer.js']) {

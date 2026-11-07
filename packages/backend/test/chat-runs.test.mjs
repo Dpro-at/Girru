@@ -386,3 +386,167 @@ test('saved primary subscription source is gated before accepting a run; an expl
   assert.equal(allowed.statusCode,202);await ended(id);
  }finally{db.prepare('UPDATE agents_config SET model=?,provider=? WHERE id=?').run(previous.model,previous.provider,previous.id);if(flag===undefined)delete process.env.DPRO_SUBSCRIPTION_CHAT;else process.env.DPRO_SUBSCRIPTION_CHAT=flag;}
 });
+
+test('conversation target intent is resolved by backend before creation and wins over the picker', async () => {
+  const r = await call('r-owner', 'POST', '/api/chat/conversations', { agentId: 'r-agent', targetMessage: '@Claude Agent please answer' });
+  assert.equal(r.statusCode, 201, r.body);
+  assert.equal(r.json().conversation.agentId, 'r-claude');
+  assert.equal((await call('r-owner', 'POST', '/api/chat/conversations', { targetMessage: 42 })).statusCode, 400);
+});
+
+test('direct authenticated chat and terminal API use canonical mention intent; invalid selected IDs never infer', async () => {
+  bodies.length = 0;
+  script.push([{ message: { content: 'Resolved reply.' } }, { done: true }]);
+  const r = await call('r-owner', 'POST', '/api/chat', { agentId: 'r-agent', targetResolved: true, stream: false, messages: [{ role: 'user', content: '@Claude Agent reply' }] });
+  assert.equal(r.statusCode, 200, r.body);
+  assert.match(bodies[0].messages.find(m => m.role === 'system').content, /Claude Agent/);
+  const before = bodies.length;
+  const missing = await call('r-owner', 'POST', '/api/chat', { agentId: 'removed-fixture', stream: false, messages: [{ role: 'user', content: 'hello' }] });
+  assert.equal(missing.statusCode, 400);
+  assert.equal(bodies.length, before);
+});
+
+test('non-owner mention text cannot select a different conversation agent', async () => {
+  const r = await call('r-other', 'POST', '/api/chat/conversations', { agentId: 'r-agent', targetMessage: '@Claude Agent please answer' });
+  assert.equal(r.statusCode, 201, r.body);
+  assert.equal(r.json().conversation.agentId, 'r-agent');
+});
+
+test('queued admission across two windows consumes once, replays, and stale queue saves cannot resurrect it', async () => {
+  const c = (await call('r-owner', 'POST', '/api/chat/conversations', { agentId: 'r-agent' })).json().conversation;
+  const key = rid(), queued = [{ key, text: 'Queued fixture task' }];
+  assert.equal((await call('r-owner', 'PUT', `/api/chat/conversations/${c.id}`, { queued })).statusCode, 200);
+  script.push([{ message: { content: 'Only once.' } }, { done: true }]);
+  bodies.length = 0;
+  const body = { runId: key, queuedKey: key, message: queued[0].text };
+  const results = await Promise.all([call('r-owner', 'POST', `/api/chat/conversations/${c.id}/runs`, body), call('r-owner', 'POST', `/api/chat/conversations/${c.id}/runs`, body)]);
+  assert.deepEqual(results.map(r => r.statusCode), [202, 202]);
+  await ended(key);
+  assert.equal(bodies.length, 1);
+  const stale = await call('r-owner', 'PUT', `/api/chat/conversations/${c.id}`, { queued });
+  assert.deepEqual(stale.json().conversation.queued ?? [], []);
+  const retry = await call('r-owner', 'POST', `/api/chat/conversations/${c.id}/runs`, body);
+  assert.equal(retry.statusCode, 202);
+  assert.equal(retry.json().replayed, true);
+  assert.equal(bodies.length, 1);
+});
+
+test('cancelled or edited queued content refuses before inference and preserves other waiting messages', async () => {
+  const c = (await call('r-owner', 'POST', '/api/chat/conversations', { agentId: 'r-agent' })).json().conversation;
+  const key = rid(), other = rid();
+  await call('r-owner', 'PUT', `/api/chat/conversations/${c.id}`, { queued: [{ key, text: 'New reviewed text' }, { key: other, text: 'Other waiting text' }] });
+  const before = bodies.length;
+  const edited = await call('r-owner', 'POST', `/api/chat/conversations/${c.id}/runs`, { runId: key, queuedKey: key, message: 'Old unreviewed text' });
+  assert.equal(edited.statusCode, 409, edited.body);
+  assert.equal(edited.json().code, 'queued_turn_changed');
+  assert.equal(bodies.length, before);
+  assert.equal(db.prepare('SELECT 1 FROM chat_run_journal WHERE run_id=?').get(key), undefined);
+  await call('r-owner', 'PUT', `/api/chat/conversations/${c.id}`, { queued: [{ key: other, text: 'Other waiting text' }] });
+  const cancelled = await call('r-owner', 'POST', `/api/chat/conversations/${c.id}/runs`, { runId: key, queuedKey: key, message: 'New reviewed text' });
+  assert.equal(cancelled.statusCode, 409);
+  const queue = (await call('r-owner', 'GET', `/api/chat/conversations/${c.id}/messages`)).json().conversation.queued;
+  assert.deepEqual(queue, [{ key: other, text: 'Other waiting text' }]);
+  assert.equal(bodies.length, before);
+});
+
+test('queue consumption rolls back on journal conflict and survives recovery without repeating work', async () => {
+  const { acceptChatRun, recoverStaleRun } = await import('../src/repositories/chat-recovery.ts');
+  const c = (await call('r-owner', 'POST', '/api/chat/conversations', { agentId: 'r-agent' })).json().conversation;
+  const key = rid(), message = 'Synthetic interrupted queued task';
+  await call('r-owner', 'PUT', `/api/chat/conversations/${c.id}`, { queued: [{ key, text: message }] });
+  const journal = { run_id: key, session_id: c.id, user_id: 'r-owner', agent_id: 'r-agent', started_at: Date.now() - 60000 };
+  await acceptChatRun(journal, message, true, key);
+  assert.equal(db.prepare('SELECT queued FROM chat_sessions WHERE id=?').get(c.id).queued, null);
+  await recoverStaleRun(key);
+  const before = bodies.length;
+  const replay = await call('r-owner', 'POST', `/api/chat/conversations/${c.id}/runs`, { runId: key, queuedKey: key, message });
+  assert.equal(replay.statusCode, 202);
+  assert.equal(replay.json().replayed, true);
+  assert.equal(bodies.length, before);
+  const other = (await call('r-owner', 'POST', '/api/chat/conversations', { agentId: 'r-agent' })).json().conversation;
+  await call('r-owner', 'PUT', `/api/chat/conversations/${other.id}`, { queued: [{ key, text: message }] });
+  await assert.rejects(acceptChatRun({ ...journal, session_id: other.id }, message, true, key));
+  assert.deepEqual(JSON.parse(db.prepare('SELECT queued FROM chat_sessions WHERE id=?').get(other.id).queued), [{ key, text: message }]);
+});
+
+test('queued secrets compare as stable scoped references at admission', async () => {
+  const c = (await call('r-owner', 'POST', '/api/chat/conversations', { agentId: 'r-agent' })).json().conversation;
+  const key = rid(), message = 'Use password: FixtureOnlyQ7W8E9R0';
+  const saved = await call('r-owner', 'PUT', `/api/chat/conversations/${c.id}`, { queued: [{ key, text: message }] });
+  assert.ok(!JSON.stringify(saved.json()).includes('FixtureOnlyQ7W8E9R0'));
+  script.push([{ message: { content: 'Handled.' } }, { done: true }]);
+  const canonical = saved.json().conversation.queued[0].text;
+  const result = await call('r-owner', 'POST', `/api/chat/conversations/${c.id}/runs`, { runId: key, queuedKey: key, message: canonical });
+  assert.equal(result.statusCode, 202, result.body);
+  await ended(key);
+});
+
+test('a refused queued group admission leaves no routing reservation that can trap the corrected item', async () => {
+  const c = (await call('r-owner', 'POST', '/api/chat/conversations', { agentId: 'r-agent' })).json().conversation;
+  const key = rid(), message = '@Run Agent do the reviewed queued task';
+  await call('r-owner', 'PUT', `/api/chat/conversations/${c.id}`, { queued: [{ key, text: message }] });
+  const rejected = await call('r-owner', 'POST', `/api/chat/conversations/${c.id}/runs`, { runId: key, queuedKey: key, message: '@Run Agent old text' });
+  assert.equal(rejected.statusCode, 409, rejected.body);
+  assert.equal(db.prepare('SELECT id FROM chat_reply_rounds WHERE id=?').get(key), undefined);
+  script.push([{ message: { content: 'Reviewed task handled.' } }, { done: true }]);
+  const accepted = await call('r-owner', 'POST', `/api/chat/conversations/${c.id}/runs`, { runId: key, queuedKey: key, message });
+  assert.equal(accepted.statusCode, 202, accepted.body);
+  await ended(key);
+});
+
+
+test('a temporarily refused queued group retries the same identity without losing an owner Stop', async () => {
+  const { dispatchReplyRound, stopReplyRound } = await import(join(backendDir, 'src/services/chat-reply-rounds.ts'));
+  const { startTurn } = await import(join(backendDir, 'src/api/routes/chat-conversations.ts'));
+  const c = (await call('r-owner', 'POST', '/api/chat/conversations', { agentId: 'r-agent' })).json().conversation;
+  const key = rid(), message = '@Run Agent retry after capacity returns';
+  await call('r-owner', 'PUT', `/api/chat/conversations/${c.id}`, { queued: [{ key, text: message }] });
+  const input = { userId: 'r-owner', role: 'owner', c, runId: key, queuedKey: key, message };
+  const before = bodies.length;
+  const denied = await dispatchReplyRound(input, async () => ({ code: 429, body: { code: 'rate_limited' } }));
+  assert.equal(denied.code, 429);
+  assert.equal(bodies.length, before);
+  assert.equal(db.prepare('SELECT run_id FROM chat_run_journal WHERE run_id=?').get(key), undefined);
+  assert.equal(db.prepare('SELECT id FROM chat_reply_rounds WHERE id=?').get(key), undefined, 'unadmitted capacity refusal cannot trap a stable queue key');
+  assert.equal(JSON.parse(db.prepare('SELECT queued FROM chat_sessions WHERE id=?').get(c.id).queued)[0].key, key);
+  const accepted = await dispatchReplyRound(input, startTurn);
+  assert.equal(accepted.code, 202);
+  await ended(key);
+  assert.equal(bodies.length, before + 1, 'same-key retry invokes once after acceptance');
+
+  const stopped = (await call('r-owner', 'POST', '/api/chat/conversations', { agentId: 'r-agent' })).json().conversation;
+  const stoppedKey = rid();
+  await call('r-owner', 'PUT', `/api/chat/conversations/${stopped.id}`, { queued: [{ key: stoppedKey, text: message }] });
+  const stoppedInput = { ...input, c: stopped, runId: stoppedKey, queuedKey: stoppedKey };
+  await dispatchReplyRound(stoppedInput, async () => {
+    assert.equal(await stopReplyRound('r-owner', stoppedKey), true);
+    return { code: 429, body: { code: 'rate_limited' } };
+  });
+  assert.equal(db.prepare('SELECT state FROM chat_reply_rounds WHERE id=?').get(stoppedKey).state, 'paused');
+  const retry = await dispatchReplyRound(stoppedInput, () => { throw new Error('Owner Stop must be preserved'); });
+  assert.equal(retry.body.code, 'group_paused');
+
+  const received = (await call('r-owner', 'POST', '/api/chat/conversations', { agentId: 'r-agent' })).json().conversation;
+  const receiptKey = rid();
+  await call('r-owner', 'PUT', `/api/chat/conversations/${received.id}`, { queued: [{ key: receiptKey, text: message }] });
+  const { acceptChatRun } = await import(join(backendDir, 'src/repositories/chat-recovery.ts'));
+  const receiptInput = { ...input, c: received, runId: receiptKey, queuedKey: receiptKey };
+  await dispatchReplyRound(receiptInput, async () => {
+    await acceptChatRun({ run_id: receiptKey, session_id: received.id, user_id: 'r-owner', agent_id: 'r-agent', started_at: Date.now() }, message, true, receiptKey);
+    return { code: 503, body: { code: 'checkpoint_unavailable' } };
+  });
+  assert.ok(db.prepare('SELECT id FROM chat_reply_rounds WHERE id=?').get(receiptKey), 'an admitted receipt prevents reservation deletion');
+  assert.ok(db.prepare('SELECT run_id FROM chat_run_journal WHERE run_id=?').get(receiptKey));
+  const replay = await dispatchReplyRound(receiptInput, () => { throw new Error('An admitted request cannot be inferred again'); });
+  assert.equal(replay.code, 202);
+  assert.equal(replay.body.replayed, true);
+});
+
+
+test('conversation edits do not interpret creation-only target intent', async () => {
+  const c = (await call('r-owner', 'POST', '/api/chat/conversations', { agentId: 'r-agent' })).json().conversation;
+  const edited = await call('r-owner', 'PUT', `/api/chat/conversations/${c.id}`, { title: 'Renamed fixture', targetMessage: 42 });
+  assert.equal(edited.statusCode, 200, 'legacy conversation edits ignore unknown fields rather than resolving a creation target');
+  assert.equal(edited.json().conversation.title, 'Renamed fixture');
+  assert.equal(edited.json().conversation.agentId, 'r-agent');
+});

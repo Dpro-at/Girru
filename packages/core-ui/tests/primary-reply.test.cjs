@@ -8,8 +8,8 @@ test('saving preserves agent identity and submits only a versioned model/provide
  const agent={id:'primary',name:'Current agent',version:4,model:'old',provider:'old',isPrimary:true};const calls=[];
  const client={request:async r=>{calls.push(r);return {status:200,body:{agent:{...agent,...r.body,version:5}}};}};
  const result=await savePrimaryReply(client,agent,models,'subscription:gemini');assert.equal(result.name,agent.name);
- assert.deepEqual(calls[0],{method:'PUT',path:'/api/agents/primary',body:{expectedVersion:4,model:'subscription:gemini',provider:'subscription'}});
- await savePrimaryReply(client,agent,models,'installed-chat:latest');assert.equal(calls[1].body.provider,'ollama');
+ assert.deepEqual(calls[0],{method:'PUT',path:'/api/agents/primary',body:{expectedVersion:4,modelSelection:'subscription:gemini'}});
+ await savePrimaryReply(client,agent,models,'installed-chat:latest');assert.equal(calls[1].body.modelSelection,'installed-chat:latest');assert.equal(calls[1].body.provider,undefined);
  await assert.rejects(savePrimaryReply(client,agent,models,'not-installed'));assert.equal(calls.length,2);
  await assert.rejects(savePrimaryReply({request:async()=>({status:409})},agent,models,'subscription:codex'),/source_not_saved/);
 });

@@ -1,3 +1,4 @@
+import { canonicalModelSelection, loadModelCatalogue, ModelSelectionError } from '../../services/model-catalogue.js';
 import {LibraryError} from '../../services/personality-library.js';
 /**
  * Agent Configurations API
@@ -30,7 +31,7 @@ import {
 import { SECRET_PLACEHOLDER } from '../../credentials/secret-mask.js';
 import { agentRenamed } from '../../services/task-file.js';
 import { AgentNameInputError, AgentNameTakenError } from '../../services/agent-names.js';
-import { etag } from '../concurrency.js';
+import { etag, expectedVersionFrom, VersionInputError } from '../concurrency.js';
 import { isoUtc } from '../timestamps.js';
 import { OrgError, orgFields, orgRows, setReportsTo, subAgentWork, quickHelperRequester } from '../../services/agent-org.js';
 import { createSubAgent } from '../../services/sub-agents.js';
@@ -168,6 +169,8 @@ export async function agentsConfigRoutes(fastify: FastifyInstance) {
   //   + optional expectedVersion or header If-Match: "<version>". Only the fields
   //   sent are written. role: main | manager | specialist | evaluator | null;
   //   department: <= 64 chars, stored lowercase, or null (400 code invalid_role).
+  //   modelSelection: current catalogue ID, requires a version and excludes raw
+  //   model/provider fields; resolved by the backend after actor/version checks.
   //   A role change never changes the personality (CORE-01d).
   //   409 { code: 'version_conflict', currentVersion, agent } when the version moved on.
   fastify.put<{ Params: { id: string }; Body: unknown }>('/api/agents/:id', async (req, reply) => {
@@ -175,7 +178,24 @@ export async function agentsConfigRoutes(fastify: FastifyInstance) {
     if (!actor) return reply;
     try {
       const before = (req.body as { name?: unknown } | null)?.name !== undefined ? (await agents().getConfig(actor, req.params.id).catch(() => null))?.name : undefined;
-      const updated = await agents().updateConfig(actor, req.params.id, req.body, req.headers['if-match']);
+      let input = req.body;
+      if (input && typeof input === 'object' && !Array.isArray(input) && 'modelSelection' in input) {
+        const choice = input as Record<string, unknown>;
+        if (choice.model !== undefined || choice.provider !== undefined) throw new AgentConfigInputError('Selection cannot be combined with model/provider', 'invalid_model');
+        const current = await agents().getConfig(actor, req.params.id);
+        if (!current) throw new AgentConfigError(404, 'Agent not found');
+        let expected: number | null;
+        try { expected = expectedVersionFrom(choice, req.headers['if-match']); }
+        catch (error) { if (error instanceof VersionInputError) throw new AgentConfigInputError(error.message, 'invalid_version'); throw error; }
+        if (expected === null) throw new AgentConfigInputError('Selection requires expectedVersion', 'invalid_version');
+        if (expected !== current.version) throw new AgentConfigConflictError(current);
+        try {
+          const selected = canonicalModelSelection(choice.modelSelection, (await loadModelCatalogue()).models);
+          const { modelSelection: _intent, ...rest } = choice;
+          input = { ...rest, ...selected };
+        } catch (error) { if (error instanceof ModelSelectionError) throw new AgentConfigInputError('Model is no longer available in the backend catalogue', 'invalid_model'); throw error; }
+      }
+      const updated = await agents().updateConfig(actor, req.params.id, input, req.headers['if-match']);
       // STORE-MAP-01 P10: a new name reaches the task files that name the agent.
       if (before !== undefined && before !== updated.name) await agentRenamed(req.params.id).catch(() => undefined);
       return reply.header('ETag', etag(updated.version)).send({ agent: parseAgent(updated) });
