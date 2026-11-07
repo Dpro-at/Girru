@@ -173,11 +173,17 @@ export function createAgentsMock() {
       const id = request.path.slice('/api/agents/'.length);
       if (request.method === 'GET') return rows.has(id) ? { status: 200, body: { agent: { ...rows.get(id) } } } : { status: 404, body: null };
       if (request.method === 'PUT') {
-        const b = request.body as { name?: string; expectedVersion: number; role?: string | null; department?: string | null; description?: string; model?: string; provider?: string };
+        const b = structuredClone(request.body) as { name?: string; expectedVersion: number; role?: string | null; department?: string | null; description?: string; model?: string; provider?: string; modelSelection?: string };
         if (b.name !== undefined) return update(id, b.name, b.expectedVersion);
         const row = rows.get(id);
         if (!row) return { status: 404, body: null };
         if (b.expectedVersion !== row.version) return { status: 409, body: { code: 'version_conflict', currentVersion: row.version, agent: { ...row } } };
+        if (b.modelSelection !== undefined) {
+          // Fixture backend catalogue, not live inference or authorization.
+          const catalogue: Record<string, string> = { 'qwen-fiction:7b': 'ollama', 'llama-fiction:3b': 'ollama', 'subscription:claude': 'subscription', 'subscription:codex': 'subscription', 'subscription:gemini': 'subscription' };
+          if (!catalogue[b.modelSelection]) return { status: 400, body: { code: 'invalid_model' } };
+          b.model = b.modelSelection; b.provider = catalogue[b.modelSelection];
+        }
         const next = { ...row, version: row.version + 1, ...(b.role !== undefined ? { role: b.role } : {}), ...(b.department !== undefined ? { department: b.department } : {}), ...(b.description !== undefined ? { description: b.description } : {}), ...(b.model !== undefined ? { model: b.model, provider: b.provider } : {}) } as typeof row;
         rows.set(id, next);
         return { status: 200, body: { agent: { ...next } } };

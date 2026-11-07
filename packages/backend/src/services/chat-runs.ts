@@ -70,8 +70,8 @@ export function liveWork(parts: readonly TurnPart[]): { steps?: LiveStep[]; plan
   return { ...(steps.length ? { steps } : {}), ...(plan?.length ? { plan } : {}) };
 }
 
-export type RunFrame = Record<string, unknown> & { type: string };
-export interface RunEvent { seq: number; frame: RunFrame }
+export type { AgentRunFrame as RunFrame, AgentRunEvent as RunEvent } from '../agent/contracts/events.js';
+import type { AgentRunFrame as RunFrame, AgentRunEvent as RunEvent } from '../agent/contracts/events.js';
 export type RunStatus = 'running' | TurnStatus;
 
 /** Notices a turn may show (CHAT-BUILD-01). */

@@ -314,7 +314,7 @@ function project(target, status, body) {
       return { code: 'version_conflict', currentVersion: a.version, agent: a };
     }
     const code = body?.code;
-    return (status === 409 && code === 'name_taken') || (status === 400 && code === 'invalid_version') || (status === 403 && code === 'reserved_agent') ? { code } : null;
+    return (status === 409 && code === 'name_taken') || (status === 400 && ['invalid_version', 'invalid_model'].includes(code)) || (status === 403 && code === 'reserved_agent') ? { code } : null;
   }
   if (status !== 200) {
     const decision = /^\/api\/memory\/proposals\/[A-Za-z0-9-]{1,64}\/(approve|reject)$/.test(target);

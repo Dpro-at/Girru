@@ -56,8 +56,9 @@ export function cardRoute(path) { return cardPath(path) !== null; }
 
 /** PUT /api/agents/:id from the card: the version plus at least one profile field. */
 export function validProfileEdit(b) {
-  if (!record(b) || !onlyKeys(b, ['expectedVersion', 'role', 'department', 'description', 'model', 'provider']) || !version(b.expectedVersion) || Object.keys(b).length < 2) return false;
+  if (!record(b) || !onlyKeys(b, ['expectedVersion', 'role', 'department', 'description', 'model', 'provider', 'modelSelection']) || !version(b.expectedVersion) || Object.keys(b).length < 2) return false;
   if ((b.model === undefined) !== (b.provider === undefined)) return false;
+  if (b.modelSelection !== undefined && (!modelId(b.modelSelection) || b.model !== undefined || b.provider !== undefined)) return false;
   return (b.role === undefined || b.role === null || roles.includes(b.role))
     && (b.model === undefined || modelId(b.model)) && (b.provider === undefined || providers.includes(b.provider))
     && (b.department === undefined || b.department === null || department(b.department))
@@ -159,6 +160,7 @@ export function agentCardResponse(path, status, body) {
           // CORE-PICKER-02: a coding app's own models (Claude Code aliases, the Codex account's list).
           // CH3: think = the model can think longer (the Thinking choice shows); a variant may carry a short note.
           ...(m.think === true ? { think: true } : {}),
+          ...(m.provider === 'subscription' && ['subscription:claude','subscription:codex'].includes(m.id) && m.sessionPrefix === m.id + ':' ? { sessionPrefix: m.sessionPrefix } : {}),
           ...(m.provider === 'subscription' && Array.isArray(m.variants) ? { variants: m.variants.filter(v => record(v) && typeof v.id === 'string' && /^[a-z0-9][a-z0-9.-]{0,40}$/.test(v.id)).slice(0, 20).map(v => ({ id: v.id, label: str(v.label ?? v.id, 40), ...(typeof v.note === 'string' && v.note.trim() ? { note: str(v.note, 60) } : {}) })) } : {}) }));
       return { models: list };
     }

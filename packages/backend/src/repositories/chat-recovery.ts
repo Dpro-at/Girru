@@ -1,3 +1,4 @@
+import { consumeQueuedStep, QueuedTurnChangedError } from './chat-queue.js';
 import { redactImportText } from '../memory/import/redact.js';
 import { orderedId } from './ordered-id.js';
 import { q, sql, one, run, all, type Step } from './sql-steps.js';
@@ -11,9 +12,14 @@ interface SavedStep { id: string; name: string; input: string; output: string | 
 export const RECOVERY_NOTE = 'Work was interrupted by a backend restart. The original request is saved above. Recorded tool results are checkpoints, not a guarantee that external effects completed. An intent without a result has an unknown outcome. Do not repeat earlier actions blindly. Continue by reviewing the checkpoints and the current state; every tool call in this conversation now requires explicit approval.';
 
 /** Accept message and run together before invoking a model or any tool. */
-export async function acceptChatRun(r: JournalRun, message: string, appendUser = true): Promise<void> {
+export { QueuedTurnChangedError } from './chat-queue.js';
+export async function acceptChatRun(r: JournalRun, message: string, appendUser = true, queuedKey?: string): Promise<void> {
   const id = orderedId();
   await sql().tx(function* (): Step<void> {
+    if (queuedKey !== undefined) {
+      if (queuedKey !== r.run_id || !appendUser) throw new QueuedTurnChangedError('queued_turn_changed');
+      yield* consumeQueuedStep(r.user_id, r.session_id, queuedKey, message);
+    }
     yield* run("INSERT INTO chat_run_journal (run_id, session_id, user_id, agent_id, state, started_at) VALUES (?, ?, ?, ?, 'running', ?)", r.run_id, r.session_id, r.user_id, r.agent_id, r.started_at);
     if (appendUser) yield* run("INSERT INTO chat_messages (id, session_id, role, content, run_id, status) VALUES (?, ?, 'user', ?, ?, 'complete')", id, r.session_id, message, r.run_id);
     yield* run('UPDATE chat_sessions SET title = COALESCE(title, ?), updated_at = CURRENT_TIMESTAMP WHERE id = ?', deriveTitle(message), r.session_id);

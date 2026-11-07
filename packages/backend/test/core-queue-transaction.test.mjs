@@ -1,0 +1,76 @@
+// Real repository transactions on a disposable SQLite file or explicitly supplied test PostgreSQL.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { randomBytes, randomUUID } from 'node:crypto';
+const original = process.cwd(), dir = mkdtempSync(join(tmpdir(), 'core-queue-tx-'));
+process.chdir(dir); process.env.HOME = dir;
+mkdirSync(join(dir, '.data'));
+process.env.DATABASE_PATH = join(dir, '.data', 'fixture.db');
+process.env.JWT_SECRET = randomBytes(64).toString('hex');
+process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex');
+process.env.MEMORY_EMBEDDINGS = 'hash'; process.env.MEMORY_GRAPH_MODEL = 'off';
+const pgUrl = process.env.AGENT_PLAYER_PG_TEST_URL;
+if (pgUrl && process.env.CORE_QUEUE_PG_DISPOSABLE !== '1') throw new Error('Explicit disposable PostgreSQL fixture confirmation is required.');
+process.env.AGENT_PLAYER_DB = pgUrl ? 'postgres' : 'sqlite';
+if (pgUrl) process.env.AGENT_PLAYER_PG_URL = pgUrl;
+const { getDatabase, closeDatabase } = await import('../src/db/database.ts');
+await getDatabase({ path: process.env.DATABASE_PATH }).initialize();
+const pool = await import('../src/db/pg/pool.ts');
+if (pgUrl) await (await import('../src/db/pg/migrate.ts')).runPgMigrations(await pool.getPgPool());
+const { q } = await import('../src/repositories/sql-steps.ts');
+const { createConversation, findConversation, patchConversation } = await import('../src/repositories/chat-conversations.ts');
+const { acceptChatRun } = await import('../src/repositories/chat-recovery.ts');
+const owner = 'queue-owner-' + randomUUID();
+await q.run("INSERT INTO users(id,email,username,password_hash,role,status,email_verified) VALUES(?,?,?,'fixture','owner','active',1)", owner, owner + '@example.invalid', owner);
+test.after(async () => { await pool.closePgPool(); closeDatabase(); process.chdir(original); });
+const journal = (c, key) => ({ run_id: key, session_id: c.id, user_id: owner, agent_id: null, started_at: Date.now() });
+const done = key => q.run("UPDATE chat_run_journal SET state='complete' WHERE run_id=?", key);
+
+test('concurrent repository admission consumes exactly once and stale save cannot resurrect its receipt', async () => {
+  const c = await createConversation(owner, {}), key = randomUUID(), message = 'one queued intent';
+  await patchConversation(owner, c.id, { queued: [{ key, text: message }] });
+  const results = await Promise.allSettled([acceptChatRun(journal(c, key), message, true, key), acceptChatRun(journal(c, key), message, true, key)]);
+  assert.equal(results.filter(x => x.status === 'fulfilled').length, 1);
+  assert.equal(Number((await q.one('SELECT COUNT(*) AS n FROM chat_messages WHERE run_id=?', key)).n), 1);
+  await patchConversation(owner, c.id, { queued: [{ key, text: message }] });
+  assert.deepEqual((await findConversation(owner, c.id)).queued ?? [], []);
+  await done(key);
+});
+test('changed/cancelled content refuses and journal conflict rolls queue consumption back', async () => {
+  const a = await createConversation(owner, {}), b = await createConversation(owner, {}), key = randomUUID();
+  await patchConversation(owner, a.id, { queued: [{ key, text: 'reviewed' }] });
+  await assert.rejects(acceptChatRun(journal(a, key), 'changed', true, key), /queued_turn_changed/);
+  assert.equal(await q.one('SELECT run_id FROM chat_run_journal WHERE run_id=?', key), undefined);
+  await acceptChatRun(journal(a, key), 'reviewed', true, key); await done(key);
+  await patchConversation(owner, b.id, { queued: [{ key, text: 'reviewed' }] });
+  await assert.rejects(acceptChatRun(journal(b, key), 'reviewed', true, key));
+  assert.deepEqual((await findConversation(owner, b.id)).queued, [{ key, text: 'reviewed' }]);
+  await patchConversation(owner, b.id, { queued: [] });
+  const absent = randomUUID();
+  await assert.rejects(acceptChatRun(journal(b, absent), 'reviewed', true, absent), /queued_turn_changed/);
+});
+test('racing a stale save against admission preserves a single effect identity and other queued intent', async () => {
+  const c = await createConversation(owner, {}), key = randomUUID(), other = randomUUID();
+  const queue = [{ key, text: 'first' }, { key: other, text: 'second' }];
+  await patchConversation(owner, c.id, { queued: queue });
+  const results = await Promise.allSettled([acceptChatRun(journal(c, key), 'first', true, key), patchConversation(owner, c.id, { queued: queue })]);
+  if (results[0].status === 'rejected') await acceptChatRun(journal(c, key), 'first', true, key);
+  await patchConversation(owner, c.id, { queued: queue });
+  assert.deepEqual((await findConversation(owner, c.id)).queued, [{ key: other, text: 'second' }]);
+  assert.equal(Number((await q.one('SELECT COUNT(*) AS n FROM chat_run_journal WHERE run_id=?', key)).n), 1);
+  await done(key);
+});
+test('cancellation and owner scope remain authoritative under racing admission', async () => {
+  const c = await createConversation(owner, {}), key = randomUUID();
+  await patchConversation(owner, c.id, { queued: [{ key, text: 'cancel race' }] });
+  const results = await Promise.allSettled([patchConversation(owner, c.id, { queued: [] }), acceptChatRun(journal(c, key), 'cancel race', true, key)]);
+  assert.equal(results[0].status, 'fulfilled');
+  assert.deepEqual((await findConversation(owner, c.id)).queued ?? [], []);
+  const count = Number((await q.one('SELECT COUNT(*) AS n FROM chat_run_journal WHERE run_id=?', key)).n);
+  assert.equal(count, results[1].status === 'fulfilled' ? 1 : 0);
+  assert.equal(await patchConversation('outsider-fixture', c.id, { queued: [{ key: randomUUID(), text: 'unauthorized' }] }), undefined);
+  assert.deepEqual((await findConversation(owner, c.id)).queued ?? [], []);
+});

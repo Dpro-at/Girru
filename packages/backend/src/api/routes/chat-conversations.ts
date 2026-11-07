@@ -1,3 +1,5 @@
+import { runEventWire } from '../../agent/contracts/events.js';
+import { preferredMention } from '../../agent/context/target.js';
 import { meetingAttendanceChat } from '../../services/meeting-attendance.js';
 import { dispatchReplyRound, replyRoundStatus, replyRoundWriter, stopReplyRound } from '../../services/chat-reply-rounds.js';
 import { assertMeetingWriter, invalidateMeetingSummary, MeetingError } from '../../services/meetings.js';
@@ -8,7 +10,7 @@ import {projectFolders} from '../../services/project-folder-picker.js';
  *
  *   GET    /api/chat/conversations                 the caller's conversations (pinned first)
  *   GET    /api/chat/search?q=&projectId=&limit=   the caller's conversations containing q, grouped, newest first (CHAT-PRO-02 D)
- *   POST   /api/chat/conversations                 { title?, agentId? } → new conversation
+ *   POST   /api/chat/conversations                 { title?, agentId?, targetMessage? } → new conversation (owner mention intent resolved by backend)
  *   PUT    /api/chat/conversations/:id             { title?, pinned? }
  *   DELETE /api/chat/conversations/:id
  *   GET    /api/chat/conversations/:id/messages    turns with their work + the running run id
@@ -43,11 +45,12 @@ import {
 } from '../../repositories/chat-conversations.js';
 import { ProjectPathError, gitChanges, gitFileDiff, listFolder, readFolderFile, readFolderPdf, readFolderMedia, readFolderOffice } from '../../repositories/project-files.js';
 import { MAX_AUDIO_BYTES, STT_LANGUAGES, SttError, sttSetup, transcribe } from '../../services/local-stt.js';
-import { acceptChatRun, approvalResultsSince, recoverChatRuns, recoverStaleRun, needsRecoveryReview, journalContext, finishChatRun, recoveryApprovalResults } from '../../repositories/chat-recovery.js';
+import { QueuedTurnChangedError, acceptChatRun, approvalResultsSince, recoverChatRuns, recoverStaleRun, needsRecoveryReview, journalContext, finishChatRun, recoveryApprovalResults } from '../../repositories/chat-recovery.js';
 import { withChatRun, type ChatRunContext } from '../../services/chat-run-context.js';
 import { chatRuns, MAX_RUNNING_PER_USER, type RunEvent } from '../../services/chat-runs.js';
 import { openSseStream } from '../../services/chat-sse.js';
-import { AUTO_MODEL, executeChatTurn } from './chat.js';
+import { AUTO_MODEL } from '../../agent/execution/chat-turn.js';
+import { executeChatTurn } from '../../agent/public.js';
 import { addApprovalDecidedListener } from '../../tools/approvals.js';
 import { delegationSteps, stopDelegations } from '../../tools/tasks/team.js';
 import { codingRunsFor, stopCodingRun, stopCodingRuns } from '../../services/coding-runs.js';
@@ -188,7 +191,7 @@ interface TurnStart { code: number; body: Record<string, unknown>; retryAfter?: 
  * Starts one turn of a saved conversation (checked input). Shared by POST runs and by the
  * continuation after the owner decides a waiting approval (CHAT-BUILD-01).
  */
-export async function startTurn(t: { userId: string; role: string; c: Conversation; runId: string; message: string; displayMessage?: string; model?: string; agentId?: string; images?: string[]; continuationMessageId?: string; onFinished?: (status: string) => Promise<void>; participantReply?: boolean; participantContext?: string; canStart?: () => Promise<boolean> }): Promise<TurnStart> {
+export async function startTurn(t: { userId: string; role: string; c: Conversation; runId: string; message: string; queuedKey?: string; displayMessage?: string; model?: string; agentId?: string; images?: string[]; continuationMessageId?: string; onFinished?: (status: string) => Promise<void>; participantReply?: boolean; participantContext?: string; canStart?: () => Promise<boolean> }): Promise<TurnStart> {
   const { userId, c } = t;
   const b = { runId: t.runId, message: t.message, model: t.model, agentId: t.agentId };
   const send = (code: number, body: Record<string, unknown>): TurnStart => ({ code, body });
@@ -235,7 +238,7 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
     if (t.canStart && !await t.canStart()) return send(409, { code: 'group_paused' });
     // Marked as starting before the row exists, so a parallel request never takes it for a stale row.
     starting.add(b.runId);
-    try { await acceptChatRun(journal, displayed.text, !continuation); return null; } catch {
+    try { await acceptChatRun(journal, displayed.text, !continuation, t.queuedKey); return null; } catch (error) {
       starting.delete(b.runId);
       // Unique run/session indexes arbitrate racing starts across awaits.
       const active = chatRuns.activeFor(c.id);
@@ -245,6 +248,7 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
       if (used) return used.session_id === c.id && used.user_id === userId ? replay() : send(409, { code: 'run_id_reused' });
       const held = await q.one<{ run_id: string }>("SELECT run_id FROM chat_run_journal WHERE session_id = ? AND state = 'running'", c.id).catch(() => undefined);
       if (held) return send(409, { code: 'conversation_busy', runId: held.run_id });
+      if (error instanceof QueuedTurnChangedError) return send(409, { code: 'queued_turn_changed' });
       return send(503, { code: 'checkpoint_unavailable' });
     }
   };
@@ -308,7 +312,7 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
       void refreshSummaries({ sessionId: c.id, userId, turns }).catch(() => 0);
     },
     execute: (runReply) => withChatRun(runContext, () => executeChatTurn(runReply, {
-      agentId: resolvedReplyAgent, messages, stream: true, sessionId: c.id, userId, uiSet: 'chat',
+      targetResolved: true, agentId: resolvedReplyAgent, messages, stream: true, sessionId: c.id, userId, uiSet: 'chat',
       runId: b.runId, conversation: { turns }, handoff,
       ...(images.length ? { images: images.map((i) => ({ type: i.type, data: i.bytes.toString('base64'), name: i.name, file: i.file })) } : {}),
       ...(project?.folders.some((f) => f.write) ? { writeFolders: project.folders.filter((f) => f.write).map((f) => f.path) } : {}),
@@ -636,6 +640,14 @@ export async function chatConversationRoutes(fastify: FastifyInstance) {
     if (b.title !== undefined && (typeof b.title !== 'string' || b.title.length > TITLE_CHARS)) return bad(reply, 'title must be text of at most 120 characters');
     if (b.agentId !== undefined && b.agentId !== null && (typeof b.agentId !== 'string' || !AGENT_ID.test(b.agentId))) return bad(reply, 'invalid agentId');
     if (b.projectId !== undefined && b.projectId !== null && (typeof b.projectId !== 'string' || !(await findProject(caller(request), b.projectId)))) return bad(reply, 'unknown project');
+    if (b.targetMessage !== undefined && (typeof b.targetMessage !== 'string' || b.targetMessage.length > MESSAGE_CHARS)) return bad(reply, 'invalid target message');
+    if (b.targetMessage !== undefined && (request as any).chatUserRole === 'owner') {
+      try {
+        const team = await agentNames();
+        b.agentId = preferredMention(b.targetMessage, [...team].map(([id, name]) => ({ id, name }))) ?? b.agentId;
+      } catch { return reply.code(400).send({ code: 'ambiguous_group_mentions', error: 'Choose the intended agent.' }); }
+    }
+
     // CHAT-BUILD-01 stage 3: Mode and Thinking chosen before the first message are saved with the new chat itself.
     if (b.mode !== undefined && !(CHAT_MODES as readonly unknown[]).includes(b.mode)) return bad(reply, 'mode must be auto, ask, accept_edits or plan');
     if (b.thinking !== undefined && !(CHAT_THINKING as readonly unknown[]).includes(b.thinking)) return bad(reply, 'thinking must be quick, normal or deep');
@@ -657,6 +669,7 @@ export async function chatConversationRoutes(fastify: FastifyInstance) {
     // CH5: the folder is fixed after the first message; moving keeps working only between projects on the same folder
     // (Continue in another folder… starts a new chat for anything else).
     if (b.projectId !== undefined && await folderFixed(caller(request), request.params.id!, b.projectId)) return reply.code(409).send({ code: 'folder_fixed', error: 'This chat already worked in its folder. Continue in another folder starts a new chat there.' });
+    if (b.queued !== undefined && new Set(b.queued.map((item: { key: string }) => item.key)).size !== b.queued.length) return bad(reply, 'queued keys must be unique');
     const c = await patchConversation(caller(request), request.params.id!, { title: cleanTitle(b.title), pinned: b.pinned, projectId: b.projectId, model: b.model, archived: b.archived, mode: b.mode, thinking: b.thinking, queued: b.queued === undefined ? undefined : await queuedSafe(caller(request), request.params.id!, b.queued) });
     return c ? { conversation: c } : notFound(reply);
   });
@@ -719,12 +732,13 @@ export async function chatConversationRoutes(fastify: FastifyInstance) {
     if (typeof b.runId !== 'string' || !ID.test(b.runId)) return bad(reply, 'runId must be 8-128 characters (A-Z, a-z, 0-9, _ . : -)');
     if (typeof b.message !== 'string' || !b.message.trim() || b.message.length > MESSAGE_CHARS) return bad(reply, 'message must be 1-100000 characters');
     if (b.model !== undefined && (typeof b.model !== 'string' || !MODEL.test(b.model))) return bad(reply, 'invalid model');
+    if (b.queuedKey !== undefined && (typeof b.queuedKey !== 'string' || !ID.test(b.queuedKey) || b.queuedKey !== b.runId)) return bad(reply, 'queuedKey must equal runId');
     // CHAT-PRO-02 I: another agent of the team may write this reply (owner only: other users talk to the conversation's agent).
     if (b.agentId !== undefined && (typeof b.agentId !== 'string' || !AGENT_ID.test(b.agentId))) return bad(reply, 'invalid agentId');
     if (b.images !== undefined && (!Array.isArray(b.images) || b.images.length > MAX_IMAGES_PER_MESSAGE || b.images.some((id: unknown) => !readChatImage(c.id, id)))) return bad(reply, `images must be up to ${MAX_IMAGES_PER_MESSAGE} images saved with this chat`);
-    if ((request as any).chatUserRole==='owner') { try { const attendance=await meetingAttendanceChat(userId,c.id,b.runId,b.message);if(attendance)return reply.code(attendance.code).send(attendance.body); } catch(error) { if(error instanceof MeetingError)return reply.code(error.status).send({code:error.code,error:error.message});throw error; } }
+    if ((request as any).chatUserRole==='owner') { try { const attendance=await meetingAttendanceChat(userId,c.id,b.runId,b.message,b.queuedKey);if(attendance)return reply.code(attendance.code).send(attendance.body); } catch(error) { if(error instanceof QueuedTurnChangedError)return reply.code(409).send({code:'queued_turn_changed'});if(error instanceof MeetingError)return reply.code(error.status).send({code:error.code,error:error.message});throw error; } }
     try { await assertMeetingWriter(userId, c.id, b.agentId ?? c.agentId); } catch (error) { if(error instanceof MeetingError) return reply.code(error.status).send({code:error.code,error:error.message});throw error; }
-    const input = { userId, role: (request as any).chatUserRole, c, runId: b.runId, message: b.message, model: b.model, agentId: b.agentId, images: b.images };
+    const input = { userId, role: (request as any).chatUserRole, c, runId: b.runId, message: b.message, queuedKey: b.queuedKey, model: b.model, agentId: b.agentId, images: b.images };
     const out = await dispatchReplyRound(input, startTurn) ?? await startTurn(input);
     if (out.code === 202) await invalidateMeetingSummary(userId, c.id);
     if (out.retryAfter) reply.header('Retry-After', out.retryAfter);
@@ -918,7 +932,7 @@ export async function chatConversationRoutes(fastify: FastifyInstance) {
     if (!Number.isSafeInteger(after) || after < 0) return bad(reply, 'after must be a whole number');
     const raw = reply.raw;
     openSseStream(raw);
-    const send = (e: RunEvent) => { if (!raw.writableEnded) raw.write(`id: ${e.seq}\ndata: ${JSON.stringify({ seq: e.seq, ...e.frame })}\n\n`); };
+    const send = (e: RunEvent) => { if (!raw.writableEnded) raw.write(`id: ${e.seq}\ndata: ${JSON.stringify(runEventWire(e))}\n\n`); };
     const backlog = run.since(after);
     backlog.forEach(send);
     if (run.status !== 'running') { raw.end(); return reply; }

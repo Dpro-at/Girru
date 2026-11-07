@@ -1,3 +1,4 @@
+import { consumeQueuedStep, QueuedTurnChangedError } from '../repositories/chat-queue.js';
 /** Owner commands change attendance, never the participants' source data or chat history. */
 import { scrypt, createHash } from 'node:crypto';
 import { q, sql, one, all, run, type Step } from '../repositories/sql-steps.js';
@@ -44,7 +45,7 @@ const digest = (data: unknown, request: string): Promise<string> => new Promise(
 const bad = (message: string): never => { throw new MeetingError(400, 'invalid_meeting', message); };
 const conflict = (message: string): never => { throw new MeetingError(409, 'meeting_conflict', message); };
 
-export async function changeMeetingAttendance(owner: string, id: string, raw: unknown, chat?: { runId: string; message: string }) {
+export async function changeMeetingAttendance(owner: string, id: string, raw: unknown, chat?: { runId: string; message: string; queuedKey?: string }) {
   const b = raw as Record<string, any>;
   if (!b || typeof b !== 'object' || Array.isArray(b) || Object.keys(b).some(key => !['requestId','expectedVersion','mode','selection'].includes(key)) || !meetingId(b.requestId) || !Number.isSafeInteger(b.expectedVersion) || !['invite','dismiss','keep','replace'].includes(b.mode)) throw new MeetingError(400,'invalid_meeting','Invalid attendance command');
   const selection = selectionInput(b.selection), hash = await digest({ mode: b.mode, selection }, b.requestId);
@@ -61,6 +62,10 @@ export async function changeMeetingAttendance(owner: string, id: string, raw: un
     if (old) { if (old.meeting_id!==id || old.owner_id!==owner || old.request_digest!==hash) conflict('Attendance request was already used');return{receipt:old,replayed:true,session:row.conversation_id,active:null,coordinator}; }
     if (!['active','paused'].includes(row.state) || Number(row.version)!==b.expectedVersion) conflict('Reload the meeting before changing attendance');
     if (chat && (yield* one('SELECT run_id FROM chat_run_journal WHERE run_id=?',chat.runId))) conflict('This chat request was already used');
+    if (chat?.queuedKey !== undefined) {
+      if (chat.queuedKey !== chat.runId) throw new QueuedTurnChangedError('queued_turn_changed');
+      yield* consumeQueuedStep(owner, row.conversation_id, chat.queuedKey, message);
+    }
     const available = yield* all<{id:string;department:string|null;role:string|null}>('SELECT id,department,role FROM agents_config ORDER BY id LIMIT 5001');
     const selected = available.filter(a => (selection.mode==='all' || selection.mode==='agents' && selection.agentIds.includes(a.id) || selection.mode==='departments' && selection.departments.includes(a.department?.toLowerCase()??'')) && (!selection.headsOnly || a.role==='manager' || a.role==='main'));
     if (selection.mode==='agents' && selected.length!==selection.agentIds.length || selection.mode==='departments' && selection.departments.some(d=>!selected.some(a=>a.department?.toLowerCase()===d)) || !selected.length) bad('The requested participants are unavailable');
@@ -96,7 +101,7 @@ export async function changeMeetingAttendance(owner: string, id: string, raw: un
   return{meeting:await getMeeting(owner,id),joined:Number(result.receipt.joined),left:Number(result.receipt.left_count),present:Number(result.receipt.present),replayed:result.replayed};
 }
 
-export async function meetingAttendanceChat(owner: string, session: string, runId: string, message: string) {
+export async function meetingAttendanceChat(owner: string, session: string, runId: string, message: string, queuedKey?: string) {
   const row=await q.one<Row>('SELECT * FROM meetings WHERE owner_id=? AND conversation_id=?',owner,session);if(!row)return null;
   const departments=await q.all<{name:string}>("SELECT DISTINCT lower(department) AS name FROM agents_config WHERE department IS NOT NULL");
   const command=attendanceCommand(message,departments.map(d=>d.name));if(!command)return null;if(command==='clarify')throw new MeetingError(400,'attendance_needs_scope','Specify the department and whether it should join, leave or stay.');
@@ -105,7 +110,7 @@ export async function meetingAttendanceChat(owner: string, session: string, runI
     const coordinator=fresh.coordinator_agent_id??(await q.one<{id:string}>('SELECT id FROM agents_config WHERE is_primary=1 ORDER BY id LIMIT 1'))?.id??(await q.one<{agent_id:string}>('SELECT agent_id FROM chat_sessions WHERE id=?',session))?.agent_id;
     if(!coordinator)throw new MeetingError(400,'invalid_meeting','Meeting coordinator is unavailable');
     const requestId=createHash('sha256').update(runId).digest('hex');
-    await changeMeetingAttendance(owner,row.id,{requestId,expectedVersion:Number(fresh.version),mode:command.mode,selection:command.hostOnly?{mode:'agents',agentIds:[coordinator],departments:[],headsOnly:false}:command.selection},{runId,message});
+    await changeMeetingAttendance(owner,row.id,{requestId,expectedVersion:Number(fresh.version),mode:command.mode,selection:command.hostOnly?{mode:'agents',agentIds:[coordinator],departments:[],headsOnly:false}:command.selection},{runId,message,queuedKey});
     const saved=await listConversationMessages(session);
     return{code:202,body:{runId,completed:true,userMessage:saved.find(m=>m.runId===runId&&m.role==='user'),assistantMessage:saved.find(m=>m.runId===runId&&m.role==='assistant')}};
   });

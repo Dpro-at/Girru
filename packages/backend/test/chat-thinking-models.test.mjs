@@ -21,11 +21,11 @@ test('a model that says it cannot think gets no level; unknown capabilities keep
 });
 
 test('the model list marks what can think: Claude, Claude Code, Codex and Gemini, local models by their own capabilities', () => {
-  const src = readFileSync(new URL('../src/api/routes/models.ts', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('../src/services/model-catalogue.ts', import.meta.url), 'utf8');
   assert.match(src, /variants:await subscriptionVariants\(kind\),think:true\}/);
   assert.match(src, /m\.capabilities\.includes\('thinking'\) \? \{ think: true \}/);
   assert.doesNotMatch(src.slice(src.indexOf('// 3. Add OpenAI models')), /think:/);
-  const chat = readFileSync(new URL('../src/api/routes/chat.ts', import.meta.url), 'utf8');
+  const chat = readFileSync(new URL('../src/agent/execution/chat-turn.ts', import.meta.url), 'utf8');
   assert.match(chat, /\.\.\.chatThinkFor\(thinking, thinkCaps\)/);
 });
 
@@ -60,7 +60,7 @@ test('a bad thinking value never reaches the command line', () => {
     assert.equal(vals.length, 1, `${kind} ${t}`);
     assert.ok(['low', 'high', 'model_reasoning_effort="low"', 'model_reasoning_effort="high"'].includes(vals[0]), `${kind} ${t}`);
   }
-  const src = readFileSync(new URL('../src/api/routes/chat.ts', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('../src/agent/execution/chat-turn.ts', import.meta.url), 'utf8');
   assert.match(src, /images:seen,thinking:currentChatRun\(\)\?\.thinking(,agentId:selectedAgent\?\.id\?\?null)?\}/, 'the chat passes its saved level, not user text');
 });
 
@@ -77,7 +77,7 @@ test('Claude API: Deep turns use bounded extended thinking; Quick and Normal sen
   assert.equal(claudeMessageBody('m', msgs, { thinking: { budgetTokens: 1e9 } }).thinking.budget_tokens, CLAUDE_DEEP_THINKING_BUDGET, 'the budget is bounded');
   assert.equal(claudeMessageBody('m', msgs, { thinking: { budgetTokens: 5 } }).thinking.budget_tokens, 1024);
   assert.equal(claudeMessageBody('m', msgs, { thinking: { budgetTokens: NaN } }).thinking, undefined);
-  const agentic = readFileSync(new URL('../src/api/routes/agentic-chat.ts', import.meta.url), 'utf8');
+  const agentic = readFileSync(new URL('../src/agent/execution/cloud-turn.ts', import.meta.url), 'utf8');
   assert.match(agentic, /thinking: claudeThinkingFor\(currentChatRun\(\)\?\.thinking\)/);
 });
 

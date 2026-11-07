@@ -21,8 +21,8 @@ import { contractPrompt, getTaskContract } from './task-contracts.js';
 import { backgroundPaidPurposes, modelCall, type PaidProviderConfig } from '../llm/model-call.js';
 import { executeTaskRun, type AgentRow } from './task-run-executor.js';
 import { storeP4Enabled } from './store-p4.js';
-import { resolveAgentContext } from './agent-context/resolve.js';
-import { renderSystemPrompt } from './agent-context/render.js';
+import { resolveAgentContext } from '../agent/context/resolve.js';
+import { renderSystemPrompt } from '../agent/context/render.js';
 
 const HEARTBEAT_OK_TOKEN = 'HEARTBEAT_OK';
 const HEARTBEAT_ACK_MAX_CHARS = 300;
