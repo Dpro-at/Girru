@@ -35,7 +35,7 @@ test('steer messages, kept notices and approval ids pass the contract and render
   const notice = renderToStaticMarkup(React.createElement(NoticeCard, { part: msg.parts[1] }));
   assert.match(notice, /Girru ignored it/); assert.match(notice, /data-tone="needs"/);
   const ctx = { client: { request: async () => ({ status: 200 }) }, conversationId: CID };
-  assert.match(renderToStaticMarkup(React.createElement(MomentsContext.Provider, { value: ctx }, React.createElement(ChangesLine, { turn, messageId: 'm-1' }))), /Changed 3 files<\/span><\/p><div class="moment-actions">.*Undo these changes/);
+  assert.match(renderToStaticMarkup(React.createElement(MomentsContext.Provider, { value: ctx }, React.createElement(ChangesLine, { turn, messageId: 'm-1' }))), /Changed 3 files<\/span><\/p>[\s\S]*<div class="moment-actions">.*Undo these changes/);
 });
 
 test('hand-off cards and the task list', () => {

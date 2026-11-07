@@ -142,6 +142,8 @@ export function createConversationsMock(options: { stepMs?: number } = {}) {
       const pr: Proj = { id: `proj-${String(++n).padStart(8, '0')}`, name: body!.name.trim(), slug: body!.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-'), folder: body?.folder || null, repoUrl: body?.repoUrl || null };
       projects.set(pr.id, pr); return { status: 201, body: { project: pr } };
     }
+    if(p.kind==='reply-changes')return{status:200,body:{branch:null,notGit:false,truncated:false,changes:[{path:'src/app.ts',status:'modified',added:2,removed:1},{path:'notes/plan.md',status:'added',added:3,removed:0}]}};
+    if(p.kind==='reply-diff')return{status:200,body:{path:p.rel,diff:'@@ -1 +1,2 @@\n-old\n+new\n+added\n',binary:false,hidden:false,truncated:false}};
     if (p.kind === 'project-changes' || p.kind === 'project-diff' || p.kind === 'project-tree' || p.kind === 'project-file') {
       const pr = projects.get(p.id);
       if (!pr) return { status: 404, body: { code: 'not_found' } };

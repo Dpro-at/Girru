@@ -29,12 +29,14 @@ export function ChangesPane({ panes, client, folder }: { panes: PanesController;
   const box = useRef<HTMLDivElement>(null); const [width, setWidth] = useState(Infinity);
   useEffect(() => { const b = box.current; if (!b || typeof ResizeObserver === 'undefined') return; const o = new ResizeObserver(() => setWidth(b.clientWidth || Infinity)); o.observe(b); setWidth(b.clientWidth || Infinity); return () => o.disconnect(); }, [s.projectId]);
   const narrow = width < SPLIT_MIN_WIDTH, view: DiffViewName = s.diffView === 'split' && !narrow ? 'split' : 'unified';
-  if (!s.projectId) return <p className="pane-empty">Pick a project with a folder to see its changes.</p>;
+  useEffect(()=>{if(s.focusPath){const row=Array.from(box.current?.querySelectorAll<HTMLElement>('[data-reply-path]')??[]).find(row=>row.dataset.replyPath===s.focusPath);row?.scrollIntoView?.({block:'nearest'});}},[s.focusPath,s.diffs]);
+  if (!s.projectId&&!s.reply) return <p className="pane-empty">Pick a project with a folder to see its changes.</p>;
   const c = s.changes;
   const data = c?.phase === 'ready' ? c.data : null;
   const total = data?.changes.reduce((t, x) => [t[0] + (x.added ?? 0), t[1] + (x.removed ?? 0)], [0, 0]);
   return <div className="pane" aria-label="Changes" ref={box} data-diff={view}>
     <div className="pane-head">
+      {s.reply&&<span className="pane-branch">Changes in this reply</span>}
       {/* CH4: the branch on the left, the line counts on the right. */}
       {data?.branch && <span className="pane-branch" dir="ltr" title={`${data.changes.length} ${data.changes.length === 1 ? 'file' : 'files'} changed`}><UiIcon name="branch" size={13}/>{data.branch}</span>}
       {data && total && data.changes.length > 0 && <span className="pane-sum"><span className="plus">+{total[0]}</span> <span className="minus">−{total[1]}</span></span>}
@@ -50,7 +52,7 @@ export function ChangesPane({ panes, client, folder }: { panes: PanesController;
       : <ul className="change-list">{c.data.changes.map(f => {
         const d = s.diffs[f.path]; const slash = f.path.lastIndexOf('/');
         const abs = client && folder && f.status !== 'deleted' ? joinPath(folder, f.path) : null;
-        return <li key={f.path} data-open={d ? true : undefined} className="dk-file-row" onContextMenu={abs ? e => fm.at(e, fileMenu(client!, abs, firstLine(f.path), say)) : undefined}>
+        return <li key={f.path} data-reply-path={f.path} data-open={d ? true : undefined} className="dk-file-row" onContextMenu={abs ? e => fm.at(e, fileMenu(client!, abs, firstLine(f.path), say)) : undefined}>
           <button type="button" className="change-row" aria-expanded={!!d} onClick={() => void panes.toggleDiff(f.path)} title={f.from ? `${f.from} → ${f.path}` : f.path}>
             <UiIcon name="chevron" size={11}/>
             <span className="change-status" data-status={f.status} aria-label={f.status}>{STATUS[f.status]}</span>
