@@ -55,7 +55,7 @@ test('who sees images: Codex and Claude Code the chat\'s files; Gemini none (the
  assert.deepEqual(await chatImagesSeenBy('subscription:gemini',files),[]);
  const fake=join(dataDir,'chat-images',chat,`${'f'.repeat(32)}.png`);writeFileSync(fake,'not an image');
  assert.deepEqual(await chatImagesSeenBy('subscription:claude',[fake]),[],'a file that is not an image is not shown');
- const route=readFileSync(new URL('../src/api/routes/chat.ts',import.meta.url),'utf8');
+ const route=readFileSync(new URL('../src/agent/execution/chat-turn.ts',import.meta.url),'utf8');
  assert.match(route,/const seen=await chatImagesSeenBy\(subscriptionSource,input\.images\?\.map\(i=>i\.file\)\);\n\s*if\(input\.images\?\.length&&!seen\.length\)\{currentChatRun\(\)\?\.notice\?\.\('images_not_seen'/);
  assert.match(route,/images:seen,thinking/);
 });

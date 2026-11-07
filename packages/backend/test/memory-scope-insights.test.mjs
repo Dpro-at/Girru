@@ -583,7 +583,7 @@ test('11. task runs: the owner\'s inherited access narrows the run (not policies
   assert.ok(!run.getContext().permissions.memoryRead.includes('experience'), 'the owner\'s company rule applies');
   const before = await createAgentToolsRegistry({ workspaceDir: dir, userId: 'ms-writer', agentId: 'ms-writer', sessionId: 'cron-t2' });
   assert.ok(before.getContext().permissions.memoryRead.includes('experience'), 'without the owner nothing narrowed it (the old behaviour)');
-  const src = readFileSync(join(backendDir, 'src/services/task-run-executor.ts'), 'utf8');
+  const src = readFileSync(join(backendDir, 'src/agent/execution/task-turn.ts'), 'utf8');
   assert.match(src, /accessOwnerId: accessOwner/, 'the executor passes the run owner');
   await access([{ op: 'clear_rule', scope: 'company', drawerKind: 'experience' }]);
 });

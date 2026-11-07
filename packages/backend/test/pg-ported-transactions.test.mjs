@@ -49,7 +49,7 @@ export const PORTED = [
   'src/services/evolution-proposals.ts',
   'src/services/task-runs.ts',
   'src/services/task-contracts.ts',
-  'src/services/task-run-executor.ts',
+  'src/agent/execution/task-turn.ts',
   'src/services/cost-budget.ts',
   'src/services/small-agent.ts',
   'src/services/agent-cron.ts',
@@ -80,7 +80,7 @@ export const PORTED = [
   'src/services/memory-enrichment.ts',
   'src/services/memory-quality-scorer.ts',
   // B2.2b-4: remaining readers of ported tables
-  'src/api/routes/chat.ts',
+  'src/agent/execution/chat-turn.ts',
   'src/api/routes/multi-agent.ts',
   'src/tools/tasks/task-create.tool.ts',
   'src/tools/tasks/task-list.tool.ts',
