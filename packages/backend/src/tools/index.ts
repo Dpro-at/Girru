@@ -1,3 +1,5 @@
+import {teamAdminTools} from './tasks/team-admin.js';
+import {mainAdminEligible,mainAdminEligibleSync} from './tasks/team-admin-authority.js';
 import {specialtyLibraryTool,specialtyApplyTool} from './specialties.js';
 import { teamListTool, teamDelegateTool, teamDelegateToolP8, teamResultsTool } from './tasks/team.js';
 import { quickHelperTool, quickHelperResultTool } from './tasks/quick-helper.js';
@@ -127,6 +129,7 @@ const extensionTools: Tool[] = [];
 /** Built-in tools, in registration order. */
 const CORE_TOOLS: Tool[] = [
   teamListTool, teamDelegateTool, teamResultsTool, quickHelperTool, quickHelperResultTool,
+  ...teamAdminTools,
   specialtyLibraryTool, specialtyApplyTool,
   execTool, readTool, writeTool, editTool, webFetchTool, executeCodeTool,
   browserNavigateTool, browserScreenshotTool, browserExtractTool, browserInteractTool,
@@ -217,7 +220,7 @@ function runScope(context: ToolExecutionContext): RunScope {
  * throws when an agentId is given; use createAgentToolsRegistry).
  */
 export function createToolsRegistry(context: ToolExecutionContext): ToolsRegistry {
-  context={...context,memoryDrawers:narrowProjectMemorySync(context)};
+  context={...context,memoryDrawers:narrowProjectMemorySync(context),teamAdminAvailable:mainAdminEligibleSync(context)};
   // MCP tools: the cache or a synchronous SQLite read; on PostgreSQL the
   // cache only (B2.2c; use createAgentToolsRegistry to get them for sure).
   const registry = buildToolsRegistry(context, getMcpToolsSync());
@@ -241,7 +244,7 @@ export function createToolsRegistry(context: ToolExecutionContext): ToolsRegistr
  * drivers; B2.2b-3). Use it wherever the caller can await.
  */
 export async function createAgentToolsRegistry(context: ToolExecutionContext): Promise<ToolsRegistry> {
-  context={...context,memoryDrawers:await narrowProjectMemory(context)};
+  context={...context,memoryDrawers:await narrowProjectMemory(context),teamAdminAvailable:await mainAdminEligible(context)};
   const registry = buildToolsRegistry(context, await getMcpTools());
   if (!context.grants) {
     registry.updateContext({

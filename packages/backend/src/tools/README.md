@@ -275,3 +275,34 @@ export const myTool: Tool = {
 - Full tool reference: [docs/TOOLS.md](../../../../docs/TOOLS.md)
 - Tool template: [TOOL_TEMPLATE.ts](./TOOL_TEMPLATE.ts)
 - Storage map: [docs/architecture/storage-map.md](../../../../docs/architecture/storage-map.md)
+
+
+## Owner-approved team administration
+
+`team_admin_read` reads safe agent settings, available model/department choices,
+personality and specialty libraries, current assignments and impact previews.
+`team_agent_create` creates a permanent agent, and `team_agent_update` updates a
+safe configuration subset with `expectedVersion`. Both use the same repository
+commands as the owner UI. Model selection resolves through the server catalogue.
+Credentials, grants, primary status, schedules and reserved local-agent settings
+are not accepted.
+
+`team_personality_apply` creates/edits library templates and assigns/tunes them.
+`team_specialty_apply` creates/edits templates and links/unlinks specialties using
+the existing specialty service. Existing `specialty_apply` is also restricted to
+this management scope. Linked-template changes retain the existing revision,
+impact-confirmation and locked-personality checks. Assignments never grant tools.
+There are no management delete or archive actions.
+
+Management is offered only to the live primary agent in the owner's own active
+chat, with explicit grants. Delegations, background tasks, sub-agents, archived
+chats and channel turns cannot administer the team. Execution revalidates these
+facts even when an offering hint is stale. Every mutation always consumes a
+one-time owner approval, including when Settings mode is Allow. A registry-bound,
+nonserialized owner-command capability allows only that approved command to use
+the owner UI repository authority; the original agent actor is retained for audit.
+Ordinary agent actors and global repository scope rules are unchanged.
+
+No new management grants are assigned automatically. The owner enables them for
+the primary agent through the existing tool-permissions UI. In chat and the
+Approvals page, requests use the existing review cards and show the exact draft.

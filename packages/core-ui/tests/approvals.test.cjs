@@ -24,3 +24,11 @@ test('the short request view never hides or cuts data before allowing',()=>{cons
  assert.equal(paramView({userName:'a',user_name:'b'}).complete,false);
  assert.equal(paramView(Object.fromEntries(Array.from({length:41},(_,i)=>['k'+i,i]))).complete,false);
 });
+
+test('team management approvals show clear actions and preserve the reviewed draft',()=>{
+ const {requestTitle,paramView}=require('../src/ApprovalPage.tsx');
+ const titles={team_agent_create:'Create a team agent',team_agent_update:'Update an agent’s settings',team_personality_apply:'Change a personality or its assignment',team_specialty_apply:'Change a specialty or its assignment'};
+ for(const [name,title] of Object.entries(titles))assert.equal(requestTitle(name,'settings'),title);
+ const reviewed=paramView({agentId:'fictional-agent',draft:{name:'Design helper',expectedVersion:3}});
+ assert.equal(reviewed.complete,true);assert.match(JSON.stringify(reviewed.rows),/Design helper/);assert.match(JSON.stringify(reviewed.rows),/expectedVersion/);
+});

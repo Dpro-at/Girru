@@ -1,3 +1,4 @@
+import {isTeamAdminTool,mainAdminEligible,bindOwnerCommand,TEAM_ADMIN_WRITES} from './tasks/team-admin-authority.js';
 /**
  * Tools Registry
  *
@@ -110,7 +111,8 @@ export class ToolsRegistry {
     const policy = this.context.toolPolicy;
     const grants = this.grants();
     return Array.from(this.tools.values()).filter((tool) =>
-      isToolObjectAllowedByExecPolicy(tool)
+      (!isTeamAdminTool(tool)||this.context.teamAdminAvailable===true)
+      && isToolObjectAllowedByExecPolicy(tool)
       && (!policy || isToolAllowedInChannel(policy, tool))
       && (isSelfOnly(tool) ? selfOnlyOffered(tool, this.context) : isToolGranted(grants, tool.name) || chatFolderFile(tool, this.context))
       && modeFor(this.context.permissions, tool) !== 'off'
@@ -168,6 +170,7 @@ export class ToolsRegistry {
       };
     }
 
+    if(isTeamAdminTool(tool)&&!await mainAdminEligible(this.context))return {content:[{type:'text',text:'Only the primary agent in the owner chat can administer the team.'}],error:'team_admin_forbidden'};
     // SECURITY (S1.2): only tools granted to this agent run, even if the model emits others
     const grantRefused = (isSelfOnly(tool) && selfOnlyOffered(tool, this.context)) || chatFolderFile(tool, this.context) ? null : grantCallRefusal(this.grants(), toolName, tool, params);
     if (grantRefused) {
@@ -222,7 +225,10 @@ export class ToolsRegistry {
     if ((chatMode === 'ask' || chatMode === 'plan' || (chatMode === 'accept_edits' && !isFileEdit(tool))) && changesSomething(tool)) category = category ?? modeCategory ?? 'other';
     // CHAT-LIVE-01 (LW6): "Auto" changes the chat folder's real files only after the owner allows it (the mode text promises it).
     if (chatMode !== 'accept_edits' && chatFolderFile(tool, this.context)) category = category ?? modeCategory ?? 'other';
-    if (category && (reviewerRequired || !isConfinedChannelReply(policy, toolName)) && !consumeApprovalTicket(options.approvalTicket, toolName)) {
+    if(isTeamAdminTool(tool)&&TEAM_ADMIN_WRITES.has(toolName))category='settings';
+    let approvalConsumed=false;
+    if(category&&(reviewerRequired||!isConfinedChannelReply(policy,toolName)))approvalConsumed=consumeApprovalTicket(options.approvalTicket,toolName);
+    if (category && (reviewerRequired || !isConfinedChannelReply(policy, toolName)) && !approvalConsumed) {
       try {
         return await requestApproval(tool, params, this.context, category);
       } catch (error: any) {
@@ -245,7 +251,9 @@ export class ToolsRegistry {
       secrets = usesSecret ? await resolveSecretRefs(this.context.userId!, params) : { value: params, used: [] };
       const checkpoint = currentChatRun();
       const intent = checkpoint ? await checkpoint.beforeTool(toolName, params) : undefined;
-      const scrubbed = scrubSecretValues(await tool.execute(secrets.value, { ...this.context, actor: await actorFromToolContextAsync(this.context) }), secrets.used);
+      let executionContext:ToolExecutionContext={...this.context,actor:await actorFromToolContextAsync(this.context)};
+      if(isTeamAdminTool(tool))executionContext=await bindOwnerCommand(executionContext,toolName,approvalConsumed);
+      const scrubbed = scrubSecretValues(await tool.execute(secrets.value,executionContext),secrets.used);
       // CHAT-BUILD-01 stage 5 (CH10): text read from pages, files or emails that tries to give orders is data; the owner sees what was tried.
       const tried = injectedOrder(scrubbed);
       if (tried) currentChatRun()?.notice?.('injection', tried);
