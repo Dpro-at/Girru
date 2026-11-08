@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "source": "packages/display-renderer/src",
+  "files": {
+    "catalogue": "bc474820df9895fc485135bb309f462503196d6a38bb4c16acae36936553c0ce",
+    "contract": "e1f6c756b88795f3d5a26a923ba11ead024d8ec961ea7e114a9e8a5572480be5"
+  }
+}
