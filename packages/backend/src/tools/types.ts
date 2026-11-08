@@ -25,6 +25,7 @@ export interface ToolParameter {
 
 export interface ToolParameters {
   type: 'object';
+  additionalProperties?: boolean;
   properties: Record<string, ToolParameter>;
   required?: string[];
   examples?: Array<Record<string, any>>; // Professional examples for better AI understanding
@@ -133,4 +134,6 @@ export interface ToolExecutionContext {
    * (repositories/actor.ts actorFromToolContext). Repositories take it first.
    */
   actor?: import('../repositories/actor.js').Actor;
+  /** Server-derived offering hint only; execution revalidates the owner and primary chat. */
+  teamAdminAvailable?: boolean;
 }

@@ -43,6 +43,7 @@ export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'executed' | 'f
 
 /** Built-in and known tools that always need approval. */
 export const APPROVAL_REQUIRED_TOOLS: Readonly<Record<string, ApprovalCategory>> = {
+  team_agent_create:'settings',team_agent_update:'settings',team_personality_apply:'settings',team_specialty_apply:'settings',
   // sending messages on the owner's behalf
   telegram_send: 'message',
   discord_send: 'message',
