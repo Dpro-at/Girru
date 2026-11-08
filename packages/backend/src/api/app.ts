@@ -1,3 +1,4 @@
+import {reportRoutes} from './routes/reports.js';
 import {storeHostEnabled,markStoreHostStarted} from '../services/store-host-apps.js';
 import { meetingRoutes } from './routes/meetings.js';
 import {workspacePackRoutes} from './routes/workspace-pack.js';
@@ -360,6 +361,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await fastify.register(storeRoutes,{home:process.env.DPRO_ADDON_METADATA_HOME});
   await fastify.register(chatRoutes);
   await fastify.register(meetingRoutes);
+  await fastify.register(reportRoutes);
   await fastify.register(chatConversationRoutes); // saved conversations + resumable runs (CHAT-REBUILD-01)
   await fastify.register(agentHandoffRoutes); // CORE-MEM-HANDOFF: the agents' handoff notes (owner only)
   await fastify.register(storeP8Routes); // STORE-MAP-01 P8: registers nothing while GIRRU_STORE_P8 is off

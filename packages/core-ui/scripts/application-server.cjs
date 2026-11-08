@@ -1,3 +1,4 @@
+const {reportsRoute,allowedReports,reportsResponse}=require('../src/reports-contract.js');
 const {hostAppRoute,allowedHostApp,hostAppResponse}=require('../src/store-host-app-contract.js');
 const {storeAppAsset}=require('./store-app-assets.cjs');
 const path = require('node:path');
@@ -163,6 +164,7 @@ function allowed(method, target, body) {
   if (backupsRoute(target)) return allowedBackups(method, target, body);
   if (chartPrefsRoute(target)) return allowedChartPrefs(method, target, body);
   if (departmentsRoute(target)) return allowedDepartments(method, target, body);
+  if(reportsRoute(target))return allowedReports(method,target,body);
   if (meetingsRoute(target)) return allowedMeetings(method,target,body);
   if (firstRunRoute(target)) return allowedFirstRun(method, target, body);
   if (phoneRoute(target)) return allowedPhone(method, target, body);
@@ -265,6 +267,7 @@ function project(target, status, body) {
   if (backupsRoute(target)) return backupsResponse(target, status, body);
   if (chartPrefsRoute(target)) return chartPrefsResponse(status, body);
   if (departmentsRoute(target)) return departmentsResponse(status, body, target);
+  if(reportsRoute(target))return reportsResponse(target,status,body);
   if (meetingsRoute(target)) return meetingsResponse(target,status,body);
   if (firstRunRoute(target)) return firstRunResponse(target, status, body);
   if (phoneRoute(target)) return phoneResponse(target, status, body);
