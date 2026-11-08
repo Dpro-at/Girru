@@ -1,3 +1,4 @@
+import {admitReportRun,finishReportRun,reportCanStart,reconcileReportAttempts,recordReportApprovalDecision,decidedReportApprovals,resumeReportAfterApproval,isBoardReport,captureBoardReport} from '../../services/reports.js';
 import { runEventWire } from '../../agent/contracts/events.js';
 import { preferredMention } from '../../agent/context/target.js';
 import { meetingAttendanceChat } from '../../services/meeting-attendance.js';
@@ -192,6 +193,7 @@ interface TurnStart { code: number; body: Record<string, unknown>; retryAfter?: 
  * continuation after the owner decides a waiting approval (CHAT-BUILD-01).
  */
 export async function startTurn(t: { userId: string; role: string; c: Conversation; runId: string; message: string; queuedKey?: string; displayMessage?: string; model?: string; agentId?: string; images?: string[]; continuationMessageId?: string; onFinished?: (status: string) => Promise<void>; participantReply?: boolean; participantContext?: string; canStart?: () => Promise<boolean> }): Promise<TurnStart> {
+  await ensureChatRecovery();
   const { userId, c } = t;
   const b = { runId: t.runId, message: t.message, model: t.model, agentId: t.agentId };
   const send = (code: number, body: Record<string, unknown>): TurnStart => ({ code, body });
@@ -289,7 +291,7 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
   if (t.canStart && !await t.canStart()) { await recoverStaleRun(b.runId).catch(() => false); return send(409, { code: 'group_paused' }); }
   chatRuns.start({
     runId: b.runId, userId, sessionId: c.id, agentId: b.agentId ?? null,
-    onFinished: t.onFinished,
+    onFinished: async status=>{await t.onFinished?.(status);await continueDecidedReportApprovals(t.userId,c.id);},
     // A failed checkpoint leaves the outcome unknown: close the row as interrupted (later turns ask before every tool).
     onUnstored: async () => { await recoverStaleRun(b.runId); },
     onPersisted: async status => {
@@ -339,11 +341,15 @@ export function panelPrefs(x: unknown): { order: string[]; folded: string[]; dif
 
 /** CHAT-BUILD-01 stage 4: a scheduled message goes to its chat like a typed one (same owner gates and Mode). */
 export async function sendScheduled(userId: string, sessionId: string, message: string, runKey: string): Promise<boolean> {
+  await ensureChatRecovery();
   const c = await findConversation(userId, sessionId);
   const user = await q.one<{ role: string; status: string }>('SELECT role, status FROM users WHERE id = ?', userId);
   if (!c || c.archived || !user || user.status !== 'active' || user.role !== 'owner' || chatRuns.activeFor(c.id)) return false;
   try { await assertMeetingWriter(userId,c.id,c.agentId); } catch(error) { if(error instanceof MeetingError)return false; throw error; }
-  const out = await startTurn({ userId, role: user.role, c, runId: runKey.slice(0, 128), message, ...(c.model ? { model: c.model } : {}) });
+  let report;try{report=await admitReportRun(userId,sessionId,runKey.slice(0,128),true);}catch{return false;}
+  if(report&&isBoardReport(report.row)){try{await captureBoardReport(userId,report.row.id,runKey.slice(0,128),true);return true;}catch{await finishReportRun(userId,sessionId,runKey.slice(0,128),'failed').catch(()=>null);return false;}}
+  const out = await startTurn({ userId, role: user.role, c, runId: runKey.slice(0, 128), message:report?.message??message, ...(c.model ? { model: c.model } : {}),...(report?{agentId:report.row.agent_id,canStart:()=>reportCanStart(userId,report.row.id,Number(report.row.revision),true),onFinished:(status:string)=>finishReportRun(userId,sessionId,runKey.slice(0,128),status)}:{}) });
+  if(report&&out.code!==202)await finishReportRun(userId,sessionId,runKey.slice(0,128),'refused');
   if(out.code===202)await invalidateMeetingSummary(userId,c.id);
   return out.code === 202;
 }
@@ -472,17 +478,23 @@ export async function continueAfterApproval(approvalId: string): Promise<TurnSta
   const a = await q.one<{ user_id: string | null; session_id: string | null; agent_id: string | null }>('SELECT user_id, session_id, agent_id FROM tool_approvals WHERE id = ?', approvalId);
   if (!a?.user_id || !a.session_id) return null;
   const c = await findConversation(a.user_id, a.session_id);
-  if (!c || chatRuns.activeFor(c.id)) return null;
-  const waiting = await q.one("SELECT id FROM tool_approvals WHERE user_id = ? AND session_id = ? AND status = 'pending' LIMIT 1", a.user_id, c.id);
+  if (!c) return null;
+  await recordReportApprovalDecision(approvalId);
+  if (chatRuns.activeFor(c.id)) return null;
+  const waiting = await q.one("SELECT id FROM tool_approvals WHERE user_id = ? AND session_id = ? AND status IN ('pending','approved') LIMIT 1", a.user_id, c.id);
   if (waiting) return null;
   const user = await q.one<{ role: string; status: string }>('SELECT role, status FROM users WHERE id = ?', a.user_id);
   if (!user || user.status !== 'active' || user.role === 'guest') return null;
-  const out = await startTurn({ userId: a.user_id, role: user.role, c, runId: `approval-${approvalId}`.slice(0, 128), message: CONTINUE_MESSAGE + openPlanReminder(await listConversationMessages(c.id)), ...(c.model ? { model: c.model } : {}) });
+  await ensureChatRecovery();const reportRunId=`approval-${approvalId}`.slice(0,128);let report;try{report=await resumeReportAfterApproval(a.user_id,c.id,reportRunId);}catch{return null;}if(report===false)return null;
+  const out = await startTurn({ userId: a.user_id, role: user.role, c, runId: reportRunId, message: CONTINUE_MESSAGE + openPlanReminder(await listConversationMessages(c.id)), ...(c.model ? { model: c.model } : {}),...(report?{agentId:report.row.agent_id,canStart:()=>reportCanStart(a.user_id!,report.row.id,Number(report.row.revision)),onFinished:(status:string)=>finishReportRun(a.user_id!,c.id,reportRunId,status)}:{}) });
+  if(report&&out.code!==202)await finishReportRun(a.user_id,c.id,reportRunId,'refused');
   console.log('[ChatRuns] Continue after approval', { approvalId, status: out.code });
   return out;
 }
 
+async function continueDecidedReportApprovals(owner?:string,session?:string){for(const d of await decidedReportApprovals(owner,session))await continueAfterApproval(d.approval_id).catch(()=>null);}
 let recoveryReady: Promise<unknown> | undefined;
+export async function ensureChatRecovery(){recoveryReady??=recoverChatRuns().catch(err=>{recoveryReady=undefined;throw err;});await recoveryReady;}
 let approvalListener = false;
 /** Runs accepted into the journal whose in-memory run is not registered yet (not stale). */
 const starting = new Set<string>();
@@ -505,7 +517,7 @@ export async function chatConversationRoutes(fastify: FastifyInstance) {
   if (!approvalListener) {
     approvalListener = true; addApprovalDecidedListener((id) => { void continueAfterApproval(id).catch(() => null); });
     // CHAT-BUILD-01 stage 4: chats on a schedule, checked once a minute while the background is on.
-    if (backgroundEnabled()) setInterval(() => { void runDueSchedules(sendScheduled).catch(() => 0); void runDueCardSchedules(runScheduledCard).catch(() => 0); }, 60_000).unref();
+    if (backgroundEnabled()) setInterval(() => { void ensureChatRecovery().then(async()=>{await reconcileReportAttempts();await continueDecidedReportApprovals();await runDueSchedules(sendScheduled);}).catch(()=>null); void runDueCardSchedules(runScheduledCard).catch(() => 0); }, 60_000).unref();
   }
   fastify.addHook('preHandler', async (request, reply) => {
     const user = authenticateActiveUser(request);
@@ -513,8 +525,7 @@ export async function chatConversationRoutes(fastify: FastifyInstance) {
     (request as any).chatUserId = user.id;
     (request as any).chatUserRole = user.role;
     // PostgreSQL migrations finish in startup after plugin registration.
-    recoveryReady ??= recoverChatRuns().catch(err => { recoveryReady = undefined; throw err; });
-    await recoveryReady;
+    await ensureChatRecovery();
   });
   const notFound = (reply: FastifyReply) => reply.code(404).send({ error: 'Not found', code: 'not_found' });
   const bad = (reply: FastifyReply, error: string) => reply.code(400).send({ error, code: 'invalid_request' });

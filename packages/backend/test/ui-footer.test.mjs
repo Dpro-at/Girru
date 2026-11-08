@@ -39,7 +39,8 @@ const call = (method, who, payload) => app.inject({ method, url: '/api/me/footer
 test('footer: usual footer first, each person saves their own, unknown values refused', async () => {
   assert.equal((await call('GET')).statusCode, 401);
   const first = (await call('GET', 'ft-owner')).json().footer;
-  assert.deepEqual(first.order.slice(0, 8), ['chat', 'agents', 'library', 'board', 'runs', 'memory', 'approvals', 'store']);
+  assert.deepEqual(first.order.slice(0, 9), ['chat', 'agents', 'library', 'board', 'runs', 'reports', 'memory', 'approvals', 'store']);
+  assert.ok(!first.hidden.includes('reports'), 'Reports shows by default');
   assert.ok(!first.hidden.includes('runs'), 'RUNS-01: Runs shows by default');
   assert.ok(first.hidden.includes('skills') && !first.hidden.includes('chat') && !first.hidden.includes('library'));
   assert.ok(!first.order.includes('mcp'));
@@ -51,7 +52,7 @@ test('footer: usual footer first, each person saves their own, unknown values re
   assert.notDeepEqual((await call('GET', 'ft-user')).json().footer.hidden, ['board']);
   const moved = (await call('PUT', 'ft-owner', { order: ['store', 'chat'] })).json().footer;
   assert.deepEqual(moved.order.slice(0, 2), ['store', 'chat']);
-  assert.equal(moved.order.length, 15);
+  assert.equal(moved.order.length, 16);
   assert.ok(moved.order.includes('runs'), 'RUNS-01: Runs is a footer section');
   assert.ok(moved.order.includes('browser'), 'Browser remains available after reordering an older footer');
   assert.equal((await call('PUT', 'ft-owner', { order: ['apps'] })).statusCode, 400, 'SA6: Apps is no footer section any more');

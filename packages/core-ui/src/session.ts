@@ -1,3 +1,4 @@
+import {reportsRoute,allowedReports,reportsResponse} from './reports-contract.js';
 import {hostAppRoute,allowedHostApp,hostAppResponse} from './store-host-app-contract.js';
 import {BROWSER_APP_PATH,allowedBrowserApp,browserAppResponse} from './browser-app-contract.js';
 import {VOICE_LIBRARY_PATH,allowedVoiceLibrary,voiceLibraryResponse} from './voice-library-contract.js';
@@ -155,6 +156,7 @@ export function allowedRequest(method: string, path: string, body?: unknown): bo
   if (backupsRoute(path)) return allowedBackups(method, path, body);
   if (chartPrefsRoute(path)) return allowedChartPrefs(method, path, body);
   if (departmentsRoute(path)) return allowedDepartments(method, path, body);
+  if(reportsRoute(path))return allowedReports(method,path,body);
   if (meetingsRoute(path)) return allowedMeetings(method, path, body);
   if (firstRunRoute(path)) return allowedFirstRun(method, path, body);
   if (phoneRoute(path)) return allowedPhone(method, path, body);
@@ -265,6 +267,7 @@ function projectResponse(path: string, response: WireResponse): WireResponse {
   if (backupsRoute(path)) return { status: response.status, body: backupsResponse(path, response.status, response.body) };
   if (chartPrefsRoute(path)) return { status: response.status, body: chartPrefsResponse(response.status, response.body) };
   if (departmentsRoute(path)) return { status: response.status, body: departmentsResponse(response.status, response.body, path) };
+  if(reportsRoute(path))return {status:response.status,body:reportsResponse(path,response.status,response.body)};
   if (meetingsRoute(path)) return { status: response.status, body: meetingsResponse(path, response.status, response.body) };
   if (firstRunRoute(path)) return { status: response.status, body: firstRunResponse(path, response.status, response.body) };
   if (phoneRoute(path)) return { status: response.status, body: phoneResponse(path, response.status, response.body) };
@@ -601,7 +604,7 @@ export class SessionClient {
     if ((conversationRoute(request.path) || chatSearchRoute(request.path) || chatExportRoute(request.path) || chatSecretsRoute(request.path)) && this.#state.user?.role === 'guest') throw new SessionFailure('blocked');
     if (request.path === CLEANUP_PATH && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if (worldRoute(request.path) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
-    if ((meetingsRoute(request.path) || marketRoute(request.path) || practiceRoute(request.path) || packRoute(request.path) || workspaceAppsRoute(request.path) || sourceCatalogueRoute(request.path) || appsCatalogueRoute(request.path) || storeRoute(request.path) || hostAppRoute(request.path) || chatAddonsRoute(request.path) || request.path === '/api/chat/project-folders' || approvalRoute(request.path) || connectionsRoute(request.path) || libraryPath(request.path) || templatePath(request.path) || mcpImportPath(request.path) || sshKeysRoute(request.path) || channelRoute(request.path) || connectorRoute(request.path) || localImportRoute(request.path) || chatBoardRoute(request.path) || chatMemoryRoute(request.path)) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
+    if ((reportsRoute(request.path) || meetingsRoute(request.path) || marketRoute(request.path) || practiceRoute(request.path) || packRoute(request.path) || workspaceAppsRoute(request.path) || sourceCatalogueRoute(request.path) || appsCatalogueRoute(request.path) || storeRoute(request.path) || hostAppRoute(request.path) || chatAddonsRoute(request.path) || request.path === '/api/chat/project-folders' || approvalRoute(request.path) || connectionsRoute(request.path) || libraryPath(request.path) || templatePath(request.path) || mcpImportPath(request.path) || sshKeysRoute(request.path) || channelRoute(request.path) || connectorRoute(request.path) || localImportRoute(request.path) || chatBoardRoute(request.path) || chatMemoryRoute(request.path)) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if ((memoryDesktopRoute(request.path) || memoryPagesRoute(request.path) || memoryRecallRoute(request.path) || memoryBridgeRoute(request.path) || projectFilesRoute(request.path) || taskLinksRoute(request.path) || personRoute(request.path) || trustRoute(request.path) || docIndexRoute(request.path) || projectTrustRoute(request.path) || codeOpenRoute(request.path) || discoveryRoute(request.path)) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if (terminalRoute(request.path) && (this.#state.user?.role !== 'owner' || terminalPath(request.path)?.kind === 'stream')) throw new SessionFailure('blocked');
     if (request.method === 'PUT' && !conversationRoute(request.path) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
