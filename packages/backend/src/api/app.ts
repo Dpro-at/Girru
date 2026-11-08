@@ -63,6 +63,10 @@ import { schedulerAuthorizationRoutes } from './routes/scheduler-authorization.j
 import { schedulerRoutes } from './routes/scheduler.js';
 import {schedulerPaperControlRoutes} from './routes/scheduler-paper-control.js';
 import { memoryRoutes } from './routes/memory.js';
+import {mcpChatRoutes} from './routes/mcp-chat.js';
+import {workspaceControlRoutes} from './routes/workspace-control.js';
+import {workspaceDraftRoutes} from './routes/workspace-drafts.js';
+import { mcpMemoryProposalRoutes } from './routes/mcp-memory-proposals.js';
 import { memoryFilesRoutes } from './routes/memory-files.js';
 import { memoryLearningRoutes } from './routes/memory-learning.js';
 import { memoryDoctorRoutes } from './routes/memory-doctor.js';
@@ -399,6 +403,10 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await fastify.register(schedulerPaperControlRoutes,{ledger:paperScheduleLedger});
   await fastify.register(schedulerRoutes); // ⏰ Scheduler System
   await fastify.register(memoryRoutes); // 🧠 Memory System
+  await fastify.register(mcpChatRoutes);
+  await fastify.register(workspaceControlRoutes);
+  await fastify.register(workspaceDraftRoutes);
+  await fastify.register(mcpMemoryProposalRoutes);
   await fastify.register(memoryFilesRoutes); // CORE-04: owner-only memory files + reviewed proposals
   await fastify.register(memoryLearningRoutes); // CORE-05: owner-only weekly learning summary
   await fastify.register(memoryDoctorRoutes); // CORE-MEM-DOCTOR: owner-only health check + confirmed fixes

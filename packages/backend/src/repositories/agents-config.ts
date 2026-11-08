@@ -128,7 +128,7 @@ export interface AgentConfigsRepository {
   getConfig(actor: Actor | null | undefined, id: string): Promise<AgentConfigRow | null>;
   suggestName(actor: Actor | null | undefined, input: { language?: unknown; exclude?: unknown }): Promise<NameSuggestion>;
   createConfig(actor: Actor | null | undefined, input: AgentConfigInput): Promise<AgentConfigRow>;
-  updateConfig(actor: Actor | null | undefined, id: string, input: unknown, ifMatch?: unknown): Promise<AgentConfigRow>;
+  updateConfig(actor: Actor | null | undefined, id: string, input: unknown, ifMatch?: unknown, guard?:()=>Step<void>): Promise<AgentConfigRow>;
   setPrimary(actor: Actor | null | undefined, id: string): Promise<void>;
   duplicateConfig(actor: Actor | null | undefined, id: string): Promise<AgentConfigRow>;
   deleteConfig(actor: Actor | null | undefined, id: string): Promise<void>;
@@ -188,7 +188,7 @@ function adminFor(actor: Actor | null | undefined, id: string): Actor {
  * of AGENT_ROLES, or null / '' for none; department is normalized lowercase,
  * at most 64 characters, or null. 400 code `invalid_role` otherwise.
  */
-function roleAndDepartment(body: { role?: unknown; department?: unknown }): { role: AgentRole | null; department: string | null } {
+export function roleAndDepartment(body: { role?: unknown; department?: unknown }): { role: AgentRole | null; department: string | null } {
   try {
     let role: AgentRole | null = null;
     if (body.role !== undefined && body.role !== null && body.role !== '') {
@@ -291,7 +291,7 @@ export const agentConfigs: AgentConfigsRepository = {
     return (await row(id)) as AgentConfigRow;
   },
 
-  async updateConfig(actor, id, raw, ifMatch) {
+  async updateConfig(actor, id, raw, ifMatch, guard) {
     const a = adminFor(actor, id);
     if (raw !== undefined && raw !== null && (typeof raw !== 'object' || Array.isArray(raw))) {
       throw new AgentConfigInputError('Body must be a JSON object');
@@ -349,6 +349,7 @@ export const agentConfigs: AgentConfigsRepository = {
     const LOST = Symbol('version_conflict');
     try {
       await sql().tx(function* () {
+        if(guard)yield* guard();
         const d = yield* dialect();
         if (renamed) yield* reserveAgentName(name, id, { reason: 'rename', reservedBy: a.userId });
         if (sets.length) {

@@ -117,7 +117,7 @@ test('initialize and tools/list over stdio', async () => {
     assert.match(init.result.instructions, /spawn_small_agent/);
     const list = await srv.request('tools/list', {});
     const tools = list.result.tools;
-    assert.deepEqual(tools.map((t) => t.name), ['meetings', 'workspace_settings', 'trading_practice', 'workspace_apps', 'workspace_store', 'agents', 'chats', 'workspace_approvals', 'workspace_rules', 'workspace_tasks', 'workspace_runs', 'workspace_footer', 'account_settings', 'workspace_backups', 'skill_library', 'personality_library', 'specialty_library', 'spawn_small_agent', 'get_result', 'list_runs', 'list_handoffs', 'read_handoff', 'edit_handoff']);
+    assert.deepEqual(tools.map((t) => t.name), ['workspace_memory', 'workspace_reports', 'workspace_drafts', 'workspace_control', 'meetings', 'workspace_settings', 'trading_practice', 'workspace_apps', 'workspace_store', 'agents', 'chats', 'workspace_approvals', 'workspace_rules', 'workspace_tasks', 'workspace_runs', 'workspace_footer', 'account_settings', 'workspace_backups', 'skill_library', 'personality_library', 'specialty_library', 'spawn_small_agent', 'get_result', 'list_runs', 'list_handoffs', 'read_handoff', 'edit_handoff']);
     const spawnTool = tools.find(t=>t.name==='spawn_small_agent');
     assert.deepEqual(spawnTool.inputSchema.required, ['task']);
     assert.deepEqual(Object.keys(spawnTool.inputSchema.properties).sort(), ['drawers', 'kind', 'max_steps', 'read_dir', 'task', 'tools']);
@@ -397,4 +397,18 @@ test('handoff notes: list, read and edit through the owner-only API; a non-owner
   } finally {
     await srv2.stop();
   }
+});
+
+test('stdio publishes schemas that admit bounded chat reads and explicit confirmed sends',async()=>{
+ const {default:Ajv}=await import('ajv');const validator=new Ajv({strict:false,allowUnionTypes:true});
+ const ctx=setup(),srv=startServer(ctx,{FAKE_SCENARIO:'chat'});
+ try{await srv.initialize();const tools=(await srv.request('tools/list',{})).result.tools,chat=tools.find(t=>t.name==='chats'),rules=tools.find(t=>t.name==='workspace_rules');
+  for(const field of ['body','before','limit'])assert.ok(Object.hasOwn(chat.inputSchema.properties,field));
+  for(const field of ['id','agentId','projectId'])assert.ok(Object.hasOwn(rules.inputSchema.properties,field));
+  const valid=validator.compile(chat.inputSchema),read={operation:'messages',id:'chat-0001',before:'message-0002',limit:1},body={requestId:'request-1',message:'Synthetic confirmed request',agentId:'synthetic-agent',projectId:null,confirmed:true},send={operation:'send',id:'chat-0001',body};
+  assert.equal(valid(read),true,JSON.stringify(valid.errors));assert.equal(valid(send),true,JSON.stringify(valid.errors));assert.equal(valid({...send,body:{...body,confirmed:false}}),false);assert.equal(valid({...send,body:{...body,userId:'foreign'}}),false);
+  const stored=await srv.callTool('chats',read);assert.notEqual(stored.isError,true,JSON.stringify(stored));assert.equal(stored.structuredContent.messages[0].id,'message-0001');
+  const admitted=await srv.callTool('chats',send);assert.notEqual(admitted.isError,true,JSON.stringify(admitted));assert.equal(admitted.structuredContent.runId,'synthetic-admission');
+  const calls=fetchLog(ctx);assert.ok(calls.some(c=>c.url.endsWith('/messages?before=message-0002&limit=1')));assert.deepEqual(calls.find(c=>c.url.endsWith('/chat-0001/send')).body,body);noToken(srv);
+ }finally{await srv.stop();rmSync(ctx.dir,{recursive:true,force:true});}
 });

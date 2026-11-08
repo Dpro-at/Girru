@@ -1,4 +1,6 @@
+import {workspaceControlApplyTool,teamControlApplyTool} from './tasks/workspace-control.js';
 import {displayCatalogueTool} from './display-catalogue.js';
+import {reportPublishTool} from './tasks/report-publication.js';
 import {teamAdminTools} from './tasks/team-admin.js';
 import {mainAdminEligible,mainAdminEligibleSync} from './tasks/team-admin-authority.js';
 import {specialtyLibraryTool,specialtyApplyTool} from './specialties.js';
@@ -130,7 +132,7 @@ const extensionTools: Tool[] = [];
 /** Built-in tools, in registration order. */
 const CORE_TOOLS: Tool[] = [
   teamListTool, teamDelegateTool, teamResultsTool, quickHelperTool, quickHelperResultTool,
-  ...teamAdminTools,displayCatalogueTool,
+  ...teamAdminTools,workspaceControlApplyTool,teamControlApplyTool,reportPublishTool,displayCatalogueTool,
   specialtyLibraryTool, specialtyApplyTool,
   execTool, readTool, writeTool, editTool, webFetchTool, executeCodeTool,
   browserNavigateTool, browserScreenshotTool, browserExtractTool, browserInteractTool,

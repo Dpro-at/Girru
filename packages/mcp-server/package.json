@@ -1,7 +1,7 @@
 {
   "name": "@agent-player/mcp-server",
   "version": "0.1.0",
-  "description": "Girru MCP server: lets Claude Code / Codex hand light tasks to the small local agent",
+  "description": "Authenticated local Girru workspace tools, scoped memory and owner-approved control for MCP clients",
   "type": "module",
   "main": "dist/index.js",
   "bin": {

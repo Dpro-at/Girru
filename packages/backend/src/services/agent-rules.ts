@@ -15,7 +15,7 @@
  */
 import { isOutsideProject } from '../memory/project-trust.js';
 import { randomUUID } from 'node:crypto';
-import { q } from '../repositories/sql-steps.js';
+import {q,sql,one,run,lockName,type Step} from '../repositories/sql-steps.js';
 
 export type RuleWho = 'all' | 'departments' | 'agents';
 export type RuleStatus = 'active' | 'suggested' | 'dismissed' | 'deleted';
@@ -379,4 +379,22 @@ export async function ruleConflicts(rules: readonly AgentRule[], call: CheckCall
   if (checkedLists.size > 200) checkedLists.clear();
   checkedLists.set(key, found);
   return { conflicts: found, checked: true };
+}
+
+/** Exact-version owner-reviewed sink; existing rule normalization, locks and history remain authoritative. */
+export async function applyReviewedRule(owner:string,id:string,input:unknown,expectedVersion:number,guard:()=>Step<void>){
+ const patch=checkRule(input,expectedVersion>0);
+ return sql().tx(function*(){yield* lockName('reviewed-rule:'+id);yield* guard();
+  const current=yield* one<Row>('SELECT * FROM agent_rules WHERE id=?',id);
+  if(expectedVersion===0){if(current)throw new RuleInputError('The rule already exists');const v=patch as RuleInput;
+   if(v.projectId&&!(yield* one('SELECT id FROM chat_projects WHERE id=? AND user_id=?',v.projectId,owner)))throw new RuleInputError('Project unavailable');
+   if(Number((yield* one<{n:number}>("SELECT COUNT(*) AS n FROM agent_rules WHERE status IN ('active','suggested')"))?.n)>=MAX_RULES)throw new RuleInputError('Rule limit reached');
+   const targets=normalTargets(v.who,v.targets);yield* run("INSERT INTO agent_rules(id,text,condition,project_id,who,targets,paused,status,source,created_by,created_at) VALUES(?,?,?,?,?,?,?,'active','owner',?,?)",id,v.text,v.when,v.projectId,v.who,JSON.stringify(targets),v.paused?1:0,owner,stamp());return {id,version:1};
+  }
+  if(!current||current.version!==expectedVersion||!['active','suggested'].includes(current.status)||isLocked(current.shipped_key))throw new RuleInputError('Rule changed or is locked');
+  const v=patch,project=v.projectId!==undefined?v.projectId:current.project_id;if(project&&!(yield* one('SELECT id FROM chat_projects WHERE id=? AND user_id=?',project,owner)))throw new RuleInputError('Project unavailable');
+  const who=v.who??current.who,targets=normalTargets(who,v.targets??(v.who&&v.who!==current.who?[]:list(current.targets)));
+  if(current.status==='active')yield* run('INSERT INTO agent_rule_versions(rule_id,version,text,condition,project_id,who,targets,paused) VALUES(?,?,?,?,?,?,?,?)',id,current.version,current.text,current.condition,current.project_id,current.who,current.targets,current.paused);
+  const updated=yield* run("UPDATE agent_rules SET text=?,condition=?,project_id=?,who=?,targets=?,paused=?,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND version=?",v.text??current.text,v.when!==undefined?v.when:current.condition,project,who,JSON.stringify(targets),v.paused!==undefined?(v.paused?1:0):current.paused,id,expectedVersion);if(updated.changes!==1)throw new RuleInputError('Rule changed');return {id,version:expectedVersion+1};
+ },{immediate:true});
 }
