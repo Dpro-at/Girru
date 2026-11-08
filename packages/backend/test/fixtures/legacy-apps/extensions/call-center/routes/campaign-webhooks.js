@@ -8,6 +8,9 @@ import { getDatabase } from '../../../../../../src/db/index.js';
 import { getCampaignManager } from '../services/campaign-manager.js';
 
 const router = Router();
+const escapeXml = value => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+const callbackUrl = (route, contactId) => escapeXml((process.env.BACKEND_URL || 'http://localhost:41522').replace(/\/$/, '') + route + encodeURIComponent(String(contactId)));
+
 
 /**
  * POST /api/ext/call-center/campaign-webhook/:contactId
@@ -64,9 +67,9 @@ router.post('/campaign-webhook/:contactId', async (req, res) => {
 
       twiml = `
         <Response>
-          <Say voice="Polly.Zeina" language="ar-SA">${message}</Say>
-          <Gather numDigits="1" action="${process.env.BACKEND_URL || 'http://localhost:41522'}/api/ext/call-center/campaign-response/${contactId}" timeout="10">
-            <Say voice="Polly.Zeina" language="ar-SA">${gatherPrompt}</Say>
+          <Say voice="Polly.Zeina" language="ar-SA">${escapeXml(message)}</Say>
+          <Gather numDigits="1" action="${callbackUrl('/api/ext/call-center/campaign-response/', contactId)}" timeout="10">
+            <Say voice="Polly.Zeina" language="ar-SA">${escapeXml(gatherPrompt)}</Say>
           </Gather>
           <Say voice="Polly.Zeina" language="ar-SA">شكراً لك.</Say>
           <Hangup/>
@@ -76,9 +79,9 @@ router.post('/campaign-webhook/:contactId', async (req, res) => {
       // AI mode - connect to agent
       twiml = `
         <Response>
-          <Say voice="Polly.Zeina" language="ar-SA">${message}</Say>
+          <Say voice="Polly.Zeina" language="ar-SA">${escapeXml(message)}</Say>
           <Say voice="Polly.Zeina" language="ar-SA">يرجى الانتظار، سيتم توصيلك بمستشار.</Say>
-          <Redirect>${process.env.BACKEND_URL || 'http://localhost:41522'}/api/ext/call-center/ai-connect/${contactId}</Redirect>
+          <Redirect>${callbackUrl('/api/ext/call-center/ai-connect/', contactId)}</Redirect>
         </Response>
       `;
     }
@@ -143,7 +146,7 @@ router.post('/campaign-response/:contactId', async (req, res) => {
 
     const twiml = `
       <Response>
-        <Say voice="Polly.Zeina" language="ar-SA">${message}</Say>
+        <Say voice="Polly.Zeina" language="ar-SA">${escapeXml(message)}</Say>
         <Hangup/>
       </Response>
     `;
