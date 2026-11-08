@@ -10,7 +10,11 @@ const pin = { VERSION: '9.9.9-test', SHA256: 'a'.repeat(64) };
 const write = (file, text) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text); };
 
 test('a core installer builds without runtimes; optional developer copies must be complete', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'girru-bundle-inputs-'));
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'girru-bundle-inputs-'));
+  const root = path.join(base, 'desktop');
+  fs.mkdirSync(root);
+  const identity = path.join(base, 'identity', 'src', 'google.cjs');
+  write(identity, 'module.exports = {};');
   try {
     const problems = bundleProblems(root, pin);
     assert.deepEqual(problems, []);
@@ -31,5 +35,7 @@ test('a core installer builds without runtimes; optional developer copies must b
     write(path.join(root, 'nabu-runtime', 'nabu', 'runtime.json'), JSON.stringify({ protocolVersion: 1, entry: 'dpro/editor-runtime.mjs' }));
     assert.deepEqual(bundleProblems(root, pin), []);
     assert.equal(codeRuntimeState(root), 'ready');
-  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    fs.unlinkSync(identity);
+    assert.match(bundleProblems(root, pin)[0], /identity verifier is missing/);
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
 });

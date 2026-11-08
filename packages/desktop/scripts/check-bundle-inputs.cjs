@@ -36,6 +36,7 @@ function codeRuntimeState(desktop = path.resolve(__dirname, '..')) {
 /** Problems with the staged inputs, as short reasons (empty = ready). */
 function bundleProblems(desktop = path.resolve(__dirname, '..'), pin = require('../../core-ui/scripts/prepare-genvr.cjs')) {
   const problems = [];
+  if (!fs.existsSync(path.join(desktop, '..', 'identity', 'src', 'google.cjs'))) problems.push('shared Google identity verifier is missing from the source resource mapping');
   const { VERSION, SHA256 } = pin;
   let manifest = null;
   try { manifest = JSON.parse(fs.readFileSync(path.join(desktop, 'payload', 'core-ui', 'vendor', 'genvr', 'manifest.json'), 'utf8')); } catch { /* not staged */ }

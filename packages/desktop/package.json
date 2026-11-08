@@ -57,6 +57,13 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "../identity/src",
+        "to": "identity/src",
+        "filter": [
+          "google.cjs"
+        ]
       }
     ],
     "asar": true,
