@@ -12,13 +12,13 @@ const id=(v:unknown):v is string=>typeof v==='string'&&/^[A-Za-z0-9_-]{1,100}$/.
 const object=(v:unknown):v is Record<string,any>=>!!v&&typeof v==='object'&&!Array.isArray(v);
 const text=(v:unknown,max:number)=>{if(typeof v!=='string'||!v.trim()||v.length>max)return bad();return v.trim();};
 async function assertOwner(owner:string){const user=await q.one<{role:string;status:string}>('SELECT role,status FROM users WHERE id=?',owner);if(user?.role!=='owner'||user.status!=='active')throw new ReportError(403,'report_forbidden');}
-function* ownerStep(owner:string):Step<void>{const user=yield* one<{role:string;status:string}>('SELECT role,status FROM users WHERE id=?',owner);if(user?.role!=='owner'||user.status!=='active')throw new ReportError(403,'report_forbidden');}
+export function* ownerStep(owner:string):Step<void>{const user=yield* one<{role:string;status:string}>('SELECT role,status FROM users WHERE id=?',owner);if(user?.role!=='owner'||user.status!=='active')throw new ReportError(403,'report_forbidden');}
 export type ReportSection={id:string;title:string;size:'compact'|'wide';importance:'low'|'normal'|'high';preferredType:string;boardView?:BoardReportView};
 function presentation(v:unknown):{source?:'agent'|'project_tasks';sections:ReportSection[]}{
  if(!object(v)||Object.keys(v).some(k=>!['source','sections'].includes(k))||v.source!==undefined&&!['agent','project_tasks'].includes(v.source)||!Array.isArray(v.sections)||!v.sections.length||v.sections.length>24)return bad();
  const seen=new Set<string>();return {...(v.source?{source:v.source}:{}),sections:v.sections.map((r:any)=>{if(!object(r)||Object.keys(r).some(k=>!['id','title','size','importance','preferredType','boardView'].includes(k))||!id(r.id)||seen.has(r.id)||!['compact','wide'].includes(r.size)||!['low','normal','high'].includes(r.importance)||!['Card','Text','Metric','Table','BarChart','LineChart','PieChart','Timeline'].includes(r.preferredType))return bad();if(v.source==='project_tasks'?typeof r.boardView!=='string'||!Object.hasOwn(BOARD_REPORT_VIEWS,r.boardView)||r.preferredType!==BOARD_REPORT_VIEWS[r.boardView as BoardReportView]:r.boardView!==undefined)return bad();seen.add(r.id);return {...r,title:text(r.title,160)} as ReportSection;})};
 }
-type ReportRow={id:string;owner_id:string;session_id:string;title:string;instructions:string;agent_id:string;project_id:string|null;revision:number;presentation_json:string;latest_snapshot_id:string|null;status:string;last_error:string|null;request_hash:string};
+export type ReportRow={id:string;owner_id:string;session_id:string;title:string;instructions:string;agent_id:string;project_id:string|null;revision:number;presentation_json:string;latest_snapshot_id:string|null;status:string;last_error:string|null;request_hash:string};
 async function accessible(owner:string,row:ReportRow){
  const user=await q.one<{role:string;status:string}>('SELECT role,status FROM users WHERE id=?',owner);if(user?.role!=='owner'||user.status!=='active')return missing();
  const c=await findConversation(owner,row.session_id);if(!c||c.archived||(c.agentId??null)!==row.agent_id||(c.projectId??null)!==(row.project_id??null))return missing();
@@ -27,6 +27,14 @@ async function accessible(owner:string,row:ReportRow){
 }
 export async function reportRow(owner:string,key:string){if(!id(key))return missing();const row=await q.one<ReportRow>('SELECT * FROM display_reports WHERE owner_id=? AND id=?',owner,key);return row?accessible(owner,row):missing();}
 function view(r:ReportRow){return {id:r.id,title:r.title,instructions:r.instructions,agentId:r.agent_id,projectId:r.project_id,revision:Number(r.revision),presentation:JSON.parse(r.presentation_json),status:r.status,lastError:r.last_error,conversationId:r.session_id};}
+/** Transaction-local publication admission reuses the same owner/session/project association checks. */
+export function* reportScopeStep(owner:string,row:ReportRow):Step<void>{
+ yield* ownerStep(owner);const d=yield* dialect();
+ const c=yield* one<{agent_id:string|null;project_id:string|null;archived_at:string|null}>('SELECT agent_id,project_id,archived_at FROM chat_sessions WHERE user_id=? AND id=?'+forUpdate(d),owner,row.session_id);
+ if(!c||c.archived_at||c.agent_id!==row.agent_id||(c.project_id??null)!==(row.project_id??null))return missing();
+ if(row.project_id&&!(yield* one('SELECT id FROM chat_projects WHERE user_id=? AND id=?'+forUpdate(d),owner,row.project_id)))return missing();
+ if(!(yield* one('SELECT id FROM agents_config WHERE id=?',row.agent_id)))return missing();
+}
 export async function listReports(owner:string){await assertOwner(owner);const rows=await q.all<ReportRow>('SELECT * FROM display_reports WHERE owner_id=? ORDER BY updated_at DESC,id LIMIT 100',owner),result=[];for(const row of rows){try{await accessible(owner,row);result.push(view(row));}catch(e){if(!(e instanceof ReportError))throw e;}}return {reports:result};}
 export async function readReport(owner:string,key:string,snapshotId?:string){
  const r=await reportRow(owner,key);if(snapshotId!==undefined&&!id(snapshotId))return bad();
@@ -34,7 +42,8 @@ export async function readReport(owner:string,key:string,snapshotId?:string){
  if(snapshotId&&!snapshot)return missing();
  const history=await q.all('SELECT id,captured_at AS "capturedAt",definition_revision AS revision FROM display_report_snapshots WHERE owner_id=? AND report_id=? ORDER BY captured_at DESC,id DESC LIMIT 50',owner,key);
  const schedule=await q.one<any>('SELECT paused,next_run,last_result,calendar_json FROM chat_schedules WHERE user_id=? AND session_id=?',owner,r.session_id);
- return {report:view(r),snapshot:snapshot?{id:snapshot.id,runId:snapshot.run_id,revision:Number(snapshot.definition_revision),presentation:JSON.parse(snapshot.presentation_json),sections:JSON.parse(snapshot.sections_json),capturedAt:snapshot.captured_at}:null,history,schedule:schedule?.calendar_json?{calendar:JSON.parse(schedule.calendar_json),paused:!!schedule.paused,nextRun:schedule.next_run,lastResult:schedule.last_result}:null};
+ const provenance=snapshot?await q.one('SELECT source_kind AS \"sourceKind\",published_at AS \"publishedAt\" FROM display_report_publications WHERE owner_id=? AND snapshot_id=?',owner,snapshot.id):null;
+ return {report:view(r),snapshot:snapshot?{id:snapshot.id,runId:snapshot.run_id,revision:Number(snapshot.definition_revision),presentation:JSON.parse(snapshot.presentation_json),sections:JSON.parse(snapshot.sections_json),capturedAt:snapshot.captured_at,...(provenance?{provenance}:{} )}:null,history,schedule:schedule?.calendar_json?{calendar:JSON.parse(schedule.calendar_json),paused:!!schedule.paused,nextRun:schedule.next_run,lastResult:schedule.last_result}:null};
 }
 export async function saveReport(owner:string,key:string|null,input:unknown){
  await assertOwner(owner);
@@ -63,7 +72,7 @@ export async function admitReportRun(owner:string,session:string,runId:string,sc
  if(scheduled){const schedule=await q.one<{paused:number}>('SELECT paused FROM chat_schedules WHERE user_id=? AND session_id=?',owner,session);if(!schedule||schedule.paused)throw new ReportError(409,'report_schedule_paused');}
  let replayed=false;await sql().tx(function*(){yield* lockName('report:'+row.id);yield* ownerStep(owner);const old=yield* one<any>('SELECT * FROM display_report_attempts WHERE report_id=? AND run_id=? AND owner_id=?',row.id,runId,owner);if(old){if(expectedRevision!==undefined&&Number(old.definition_revision)!==expectedRevision)return conflict();replayed=true;return;}if(expectedRevision!==undefined&&Number(row.revision)!==expectedRevision)return conflict();const active=yield* one('SELECT run_id FROM display_report_attempts WHERE report_id=? AND state IN (?,?,?)',row.id,'starting','running','waiting');if(active)throw new ReportError(409,'report_busy');const current=yield* run('UPDATE display_reports SET status=?,last_error=NULL WHERE owner_id=? AND id=? AND revision=?','running',owner,row.id,row.revision);if(!current.changes)return conflict();const baseline=yield* approvalBaseline(owner,session);yield* run('INSERT INTO display_report_attempts(report_id,run_id,owner_id,definition_revision,approval_baseline_json,state,started_at) VALUES(?,?,?,?,?,?,?)',row.id,runId,owner,row.revision,baseline,'starting',new Date().toISOString());},{immediate:true});return {row,message:reportPrompt(row),replayed};
 }
-function resultSections(textValue:string,layout:{sections:ReportSection[]}){
+export function resultSections(textValue:string,layout:{sections:ReportSection[]}){
  if(textValue.length>128000)return bad();let payload:any;try{payload=JSON.parse(textValue.trim().replace(/^```(?:json)?\s*/,'').replace(/\s*```$/,''));}catch{return bad();}
  if(!object(payload)||payload.schemaVersion!==1||Object.keys(payload).some(k=>!['schemaVersion','sections'].includes(k))||!Array.isArray(payload.sections)||payload.sections.length!==layout.sections.length)return bad();
  const seen=new Set<string>();for(const s of payload.sections){if(!object(s)||Object.keys(s).some(k=>!['id','document','sourceLabel','dataAsOf'].includes(k))||!layout.sections.some(x=>x.id===s.id)||seen.has(s.id))return bad();seen.add(s.id);}

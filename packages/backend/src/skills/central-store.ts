@@ -69,14 +69,14 @@ export class CentralSkills {
   }catch{throw new SkillLibraryError('skill_unavailable',503);}
  }
  private async trustedRoot(){await fs.mkdir(this.root,{recursive:true,mode:0o700});if((await fs.lstat(this.root)).isSymbolicLink())throw new SkillLibraryError('storage_unavailable',503);this.root=await fs.realpath(this.root);await fs.mkdir(path.join(this.root,'objects'),{recursive:true,mode:0o700});if((await fs.lstat(path.join(this.root,'objects'))).isSymbolicLink())throw new SkillLibraryError('storage_unavailable',503);}
- private async store(b:Bundle,origin:string,expected?:string,review?:{expectedId:string|null;expectedRevision:number;guard:()=>Step<void>}){
+ private async store(b:Bundle,origin:string,expected?:string,review?:{expectedId:string|null;expectedRevision:number;generatedId?:string;guard:()=>Step<void>}){
   const work=this.tail.then(async()=>{
    const existing=await q.one<SkillRow>('SELECT * FROM central_skills WHERE name=?',b.name);const duplicate=await q.one<SkillRow>('SELECT * FROM central_skills WHERE content_hash=?',b.hash);if(duplicate&&!review)return {skill:duplicate,duplicate:true};
    if(existing&&existing.content_hash!==expected)throw new SkillLibraryError('version_conflict',409);
    await this.trustedRoot();const folder=path.join(this.root,'objects',b.hash);let present=false;try{present=(await fs.lstat(folder)).isDirectory();}catch{}
    if(present&&(await bundle(folder)).hash!==b.hash)throw new SkillLibraryError('storage_unavailable',503);
    if(!present){const temporary=path.join(this.root,'objects','pending-'+randomUUID());await fs.mkdir(temporary,{mode:0o700});for(const file of b.files){const destination=path.join(temporary,file.path);await fs.mkdir(path.dirname(destination),{recursive:true,mode:0o700});const handle=await fs.open(destination,'wx',0o600);try{await handle.writeFile(file.content);await handle.sync();}finally{await handle.close();}}await fs.rename(temporary,folder);await syncDirectory(path.join(this.root,'objects'));}
-   const id=existing?.id??randomUUID();const result=await sql().tx(function*():Step<number>{
+   const id=existing?.id??review?.generatedId??randomUUID();const result=await sql().tx(function*():Step<number>{
     if(review){
      yield* review.guard();const d=yield* dialect();
      const actual=yield* one<SkillRow>('SELECT * FROM central_skills WHERE name=?'+forUpdate(d),b.name);
@@ -96,8 +96,8 @@ export class CentralSkills {
  }
  async installPortable(name:string,files:{path:string;content:string}[]){const b=this.validatePortable(name,files);await this.initialize();return this.store(b,'shared-workspace');}
  /** Internal source-update sink: immutable Markdown files, guarded row CAS, no assignments. */
- async installReviewedPortable(name:string,files:{path:string;content:string}[],expected:{id:string|null;revision:number;hash:string|null},guard:()=>Step<void>){
-  const b=this.validatePortable(name,files);await this.initialize();return this.store(b,'owner-reviewed-source',expected.hash??undefined,{expectedId:expected.id,expectedRevision:expected.revision,guard});
+ async installReviewedPortable(name:string,files:{path:string;content:string}[],expected:{id:string|null;revision:number;hash:string|null;generatedId?:string},guard:()=>Step<void>){
+  const b=this.validatePortable(name,files);await this.initialize();return this.store(b,'owner-reviewed-source',expected.hash??undefined,{expectedId:expected.id,expectedRevision:expected.revision,generatedId:expected.generatedId,guard});
  }
  async installMarkdown(content:string,name:string,origin:string){const prepared=prepareSkillMarkdown(content,name);await this.initialize();return this.store(prepared,origin);}
  async seedBundled(){await this.seedLegacy();await this.seedGenvrSdk();const directory=fileURLToPath(new URL('../../skills/',import.meta.url));for(const entry of await fs.readdir(directory,{withFileTypes:true}).catch(()=>[])){if(!entry.isDirectory())continue;try{const b=await bundle(path.join(directory,entry.name),true);if(!(await q.one('SELECT id FROM central_skills WHERE name=?',b.name)))await this.store(b,'bundled');}catch{/* Invalid optional bundled skills never block startup. */}}}
@@ -140,9 +140,10 @@ export class CentralSkills {
  /** Which agents have each skill (read only; agents without any skill are left out). */
  async usage(){await this.initialize();const rows=await q.all<{skill_id:string;agent_id:string}>('SELECT skill_id,agent_id FROM central_agent_skills ORDER BY skill_id,agent_id');const map=new Map<string,string[]>();for(const r of rows){const list=map.get(r.skill_id)??[];list.push(r.agent_id);map.set(r.skill_id,list);}return {usage:[...map].map(([skillId,agentIds])=>({skillId,agentIds}))};}
  async assignments(agentId:string){const row=await q.one<{revision:number}>('SELECT revision FROM central_skill_assignments WHERE agent_id=?',agentId);return {revision:row?.revision??0,selected:(await q.all<{skill_id:string}>('SELECT skill_id FROM central_agent_skills WHERE agent_id=? ORDER BY skill_id',agentId)).map(r=>r.skill_id)};}
- async assign(agentId:string,ids:string[],revision:number){return sql().tx(function*():Step<{revision:number}>{
+ async assign(agentId:string,ids:string[],revision:number,guard?:()=>Step<void>){return sql().tx(function*():Step<{revision:number}>{
+  if(guard)yield* guard();
   const current=yield* one<{revision:number}>('SELECT revision FROM central_skill_assignments WHERE agent_id=?',agentId);if((current?.revision??0)!==revision)throw new SkillLibraryError('version_conflict',409);
-  for(const id of ids)if(!(yield* one('SELECT id FROM central_skills WHERE id=?',id)))throw new SkillLibraryError('skill_not_found',404);
+  const locking=forUpdate(yield* dialect());for(const id of [...ids].sort())if(!(yield* one('SELECT id FROM central_skills WHERE id=?'+locking,id)))throw new SkillLibraryError('skill_not_found',404);
   if(current){const updated=yield* run('UPDATE central_skill_assignments SET revision=revision+1 WHERE agent_id=? AND revision=?',agentId,revision);if(!updated.changes)throw new SkillLibraryError('version_conflict',409);}else yield* run('INSERT INTO central_skill_assignments(agent_id,revision) VALUES(?,1)',agentId);
   yield* run('DELETE FROM central_agent_skills WHERE agent_id=?',agentId);for(const id of ids)yield* run('INSERT INTO central_agent_skills(agent_id,skill_id) VALUES(?,?)',agentId,id);return {revision:revision+1};
  });}

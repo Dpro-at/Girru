@@ -25,9 +25,9 @@ test('chats: list and projects read the sidebar; writes go to the one chat with 
  assert.deepEqual(calls.filter(c=>c.method==='PUT').map(c=>c.body),[{title:'New name'},{pinned:true},{archived:false},{projectId:null},{mode:'ask'},{thinking:'deep'}]);
 });
 
-test('chats: bad input is refused before the backend; deleting and reading messages are not offered',async()=>{
+test('chats: bad input is refused before the backend; deletion and invalid message bounds are refused',async()=>{
  const {calls,backend}=fake();
- for(const input of [{operation:'delete',id:CID},{operation:'messages',id:CID},{operation:'rename',id:'../x',title:'a'},{operation:'rename',id:CID,title:''},{operation:'pin',id:CID,pinned:'yes'},{operation:'archive',id:CID},{operation:'move',id:CID,projectId:'a/b'},{operation:'list',id:CID},{operation:'set_mode',id:CID,mode:'accept_edits'},{operation:'variables',projectId:'../x'}]){
+ for(const input of [{operation:'delete',id:CID},{operation:'messages',id:CID,limit:21},{operation:'rename',id:'../x',title:'a'},{operation:'rename',id:CID,title:''},{operation:'pin',id:CID,pinned:'yes'},{operation:'archive',id:CID},{operation:'move',id:CID,projectId:'a/b'},{operation:'list',id:CID},{operation:'set_mode',id:CID,mode:'accept_edits'},{operation:'variables',projectId:'../x'}]){
   const r=await callTool('chats',input,{backend});assert.equal(r.isError,true,JSON.stringify(input));
  }
  assert.equal(calls.length,0);

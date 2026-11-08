@@ -54,11 +54,11 @@ export class PersonalityLibrary {
  async read(id:string){return sql().read(readStep(id));}
  async versions(id:string){return sql().read((function*(){yield* readStep(id,true);return yield* all<{revision:number;profile_json:string;created_at:string}>('SELECT revision,profile_json,created_at FROM personality_library_versions WHERE personality_id=? ORDER BY revision DESC',id);})());}
  async preview(id:string,raw:unknown){const input=check(raw);only(input,['revision','profile']);const p=validateProfile(input.profile);return sql().tx(function*(){yield* lockName('personality-library');yield* seedLibraryStep();const e=yield* readStep(id);if(e.revision!==input.revision)throw new LibraryError('version_conflict',409);return impact(e,p,yield* snapshot(id));},{immediate:true});}
- async save(actor:string,id:string,raw:unknown){
+ async save(actor:string,id:string,raw:unknown,guard?:()=>Step<void>){
   const input=check(raw);only(input,['revision','profile','confirmation']);const p=validateProfile(input.profile);
   if(!idOk(id)||['team','blend','assigned'].includes(id)||!Number.isSafeInteger(input.revision)||input.revision<0)throw new LibraryError('invalid_input');
   return sql().tx(function*(){
-   yield* lockName('personality-library');yield* seedLibraryStep();
+   yield* lockName('personality-library');yield* seedLibraryStep();if(guard)yield* guard();
    const exists=yield* one<Row>('SELECT * FROM personality_library WHERE id=?',id);
    if(!exists){if(input.revision!==0)throw new LibraryError('version_conflict',409);yield* run('INSERT INTO personality_library(id,revision,profile_json) VALUES(?,1,?)',id,JSON.stringify(p));}
    else{
@@ -85,10 +85,10 @@ export class PersonalityLibrary {
  }
  async assignment(agentId:string){return sql().tx(function*(){if(!idOk(agentId))throw new LibraryError('invalid_id');const l=yield* one<Link>('SELECT * FROM agent_personality_links WHERE agent_id=?',agentId);if(!l)return null;const current=yield* currentPersonalityStep(agentId);if(!current)return null;const style=yield* one<{profile_json:string|null}>('SELECT profile_json FROM agent_personality_profile_versions WHERE agent_id=? AND version=?',agentId,current.version);const profile=validateProfile(JSON.parse(style?.profile_json??l.profile_json));return {id:l.personality_id,revision:l.revision,linked:!!l.linked,profile:{...profile,traits:current.traits,dialect:current.dialect}};});}
 
- async assign(actor:string,agentId:string,raw:unknown){
+ async assign(actor:string,agentId:string,raw:unknown,guard?:()=>Step<void>){
   const input=check(raw);only(input,['id','revision','expectedVersion','linked']);
   if(!idOk(agentId)||!idOk(input.id)||!Number.isSafeInteger(input.expectedVersion)||typeof input.linked!=='boolean')throw new LibraryError('invalid_input');
-  return sql().tx(function*(){yield* lockName('personality-library');yield* seedLibraryStep();const e=yield* readStep(input.id);if(e.revision!==input.revision)throw new LibraryError('version_conflict',409);
+  return sql().tx(function*(){yield* lockName('personality-library');yield* seedLibraryStep();if(guard)yield* guard();const e=yield* readStep(input.id);if(e.revision!==input.revision)throw new LibraryError('version_conflict',409);
    const current=yield* currentPersonalityStep(agentId,{lock:true});if(!current)throw new LibraryError('not_found',404);
    if(current.locked)throw new LibraryError('personality_locked',409);if(current.version!==input.expectedVersion)throw new LibraryError('version_conflict',409);
    const traits={...e.profile.traits};for(const k of current.lockedTraits)traits[k]=current.traits[k];

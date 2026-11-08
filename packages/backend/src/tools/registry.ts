@@ -1,3 +1,5 @@
+import {consumeControlTicket,bindControlCommand} from './control-command.js';
+import {workspaceControlApplyTool,isWorkspaceControlTool} from './tasks/workspace-control.js';
 import {isTeamAdminTool,mainAdminEligible,bindOwnerCommand,TEAM_ADMIN_WRITES} from './tasks/team-admin-authority.js';
 /**
  * Tools Registry
@@ -171,8 +173,10 @@ export class ToolsRegistry {
     }
 
     if(isTeamAdminTool(tool)&&!await mainAdminEligible(this.context))return {content:[{type:'text',text:'Only the primary agent in the owner chat can administer the team.'}],error:'team_admin_forbidden'};
+    // A genuine owner-approval ticket admits this one internal no-agent builtin; never a default grant.
+    let controlCapability=tool===workspaceControlApplyTool&&!this.context.agentId&&!this.context.sessionId&&!policy?consumeControlTicket(options.approvalTicket,toolName):null;
     // SECURITY (S1.2): only tools granted to this agent run, even if the model emits others
-    const grantRefused = (isSelfOnly(tool) && selfOnlyOffered(tool, this.context)) || chatFolderFile(tool, this.context) ? null : grantCallRefusal(this.grants(), toolName, tool, params);
+    const grantRefused = controlCapability ? null : (isSelfOnly(tool) && selfOnlyOffered(tool, this.context)) || chatFolderFile(tool, this.context) ? null : grantCallRefusal(this.grants(), toolName, tool, params);
     if (grantRefused) {
       console.warn(`[ToolsRegistry] ⛔ Refused ungranted tool for agent ${this.context.agentId ?? '(none)'}: ${toolName}`);
       return grantRefused;
@@ -205,7 +209,8 @@ export class ToolsRegistry {
     // CHAT-SECRETS-01: a call that uses a key-store reference runs only for the
     // owning user, never in a channel turn, and always after the owner's approval.
     // Tools that keep text in Girru's own stores (memory, board, tasks, plan) get the reference itself.
-    const usesSecret = !KEEPS_TEXT.test(toolName) && hasSecretRef(params);
+    const controlText=isWorkspaceControlTool(tool)||(toolName==='team_admin_read'&&params.action==='control_preview');
+    const usesSecret = !controlText && !KEEPS_TEXT.test(toolName) && hasSecretRef(params);
     if (usesSecret && (policy || !this.context.userId)) {
       return {
         content: [{ type: 'text', text: `Tool "${toolName}" was not run: saved secrets can only be used in the owner's own chat.` }],
@@ -226,8 +231,8 @@ export class ToolsRegistry {
     // CHAT-LIVE-01 (LW6): "Auto" changes the chat folder's real files only after the owner allows it (the mode text promises it).
     if (chatMode !== 'accept_edits' && chatFolderFile(tool, this.context)) category = category ?? modeCategory ?? 'other';
     if(isTeamAdminTool(tool)&&TEAM_ADMIN_WRITES.has(toolName))category='settings';
-    let approvalConsumed=false;
-    if(category&&(reviewerRequired||!isConfinedChannelReply(policy,toolName)))approvalConsumed=consumeApprovalTicket(options.approvalTicket,toolName);
+    let approvalConsumed=!!controlCapability;
+    if(category&&!approvalConsumed&&(reviewerRequired||!isConfinedChannelReply(policy,toolName))){if(isWorkspaceControlTool(tool)){controlCapability=consumeControlTicket(options.approvalTicket,toolName);approvalConsumed=!!controlCapability;}else approvalConsumed=consumeApprovalTicket(options.approvalTicket,toolName);}
     if (category && (reviewerRequired || !isConfinedChannelReply(policy, toolName)) && !approvalConsumed) {
       try {
         return await requestApproval(tool, params, this.context, category);
@@ -253,6 +258,7 @@ export class ToolsRegistry {
       const intent = checkpoint ? await checkpoint.beforeTool(toolName, params) : undefined;
       let executionContext:ToolExecutionContext={...this.context,actor:await actorFromToolContextAsync(this.context)};
       if(isTeamAdminTool(tool))executionContext=await bindOwnerCommand(executionContext,toolName,approvalConsumed);
+      if(isWorkspaceControlTool(tool)){if(!controlCapability)throw Error('control_approval_required');executionContext=await bindControlCommand(executionContext,controlCapability);}
       const scrubbed = scrubSecretValues(await tool.execute(secrets.value,executionContext),secrets.used);
       // CHAT-BUILD-01 stage 5 (CH10): text read from pages, files or emails that tries to give orders is data; the owner sees what was tried.
       const tried = injectedOrder(scrubbed);

@@ -103,15 +103,15 @@ export class SpecialtyTemplates{
    }else yield* run('DELETE FROM agent_specialties WHERE agent_id=? AND template_id=?',input.agentId,id);
   },{immediate:true});return this.agents(id);
  }
- async assign(ownerId:string,id:string,input:unknown){
+ async assign(ownerId:string,id:string,input:unknown,guard?:()=>Step<void>,summaryOnly=false){
   if(!uuid(id)||!object(input)||!keys(input,['revision','agentIds','expectedAgentIds'])||!Number.isSafeInteger(input.revision)||!Array.isArray(input.agentIds)||!Array.isArray(input.expectedAgentIds)||input.agentIds.length>1000||input.expectedAgentIds.length>1000||![...input.agentIds,...input.expectedAgentIds].every(v=>text(v,100)&&!!v&&v!=='small-local-agent')||new Set(input.agentIds).size!==input.agentIds.length||new Set(input.expectedAgentIds).size!==input.expectedAgentIds.length)throw new TemplateError('invalid_input');
-  await sql().tx(function*(){const d=yield* dialect();const template=yield* one<Row>('SELECT * FROM specialty_templates WHERE id=?'+forUpdate(d),id);if(!template||template.revision!==input.revision)throw new TemplateError('version_conflict',409);
+  await sql().tx(function*(){if(guard)yield* guard();const d=yield* dialect();const template=yield* one<Row>('SELECT * FROM specialty_templates WHERE id=?'+forUpdate(d),id);if(!template||template.revision!==input.revision)throw new TemplateError('version_conflict',409);
    const current=yield* all<{agent_id:string}>('SELECT agent_id FROM agent_specialties WHERE template_id=? ORDER BY agent_id',id);
    if(stable(current.map(a=>a.agent_id))!==stable([...input.expectedAgentIds].sort()))throw new TemplateError('links_changed',409);
    for(const agentId of [...input.agentIds].sort()){if(!(yield* one('SELECT id FROM agents_config WHERE id=?'+forUpdate(d),agentId)))throw new TemplateError('not_found',404);const count=yield* one<{n:number}>('SELECT COUNT(*) n FROM agent_specialties WHERE agent_id=?',agentId);if((count?.n??0)>=10&&!current.some(a=>a.agent_id===agentId))throw new TemplateError('specialty_limit',409);}
    for(const row of current)if(!input.agentIds.includes(row.agent_id))yield* run('DELETE FROM agent_specialties WHERE agent_id=? AND template_id=?',row.agent_id,id);
    for(const agentId of input.agentIds)yield* run('INSERT INTO agent_specialties(agent_id,template_id,linked_by) VALUES(?,?,?) ON CONFLICT(agent_id,template_id) DO NOTHING',agentId,id,ownerId);
-  },{immediate:true});return this.agents(id);
+  },{immediate:true});return summaryOnly?{templateId:id,revision:input.revision,agentIds:[...input.agentIds]}:this.agents(id);
  }
  async save(id:string,raw:unknown,guard?:()=>Step<void>,preserveConfig?:TemplateConfig){
   // A coming-soon specialty is saved like a new one (revision 0) once the owner writes its instructions; then it is a normal, ready specialty.
@@ -122,7 +122,7 @@ export class SpecialtyTemplates{
   const content=await this.content(raw.instructions);
   if(!uuid(id))throw new TemplateError('invalid_input');
   if(preserveConfig!==undefined&&raw.revision===0)throw new TemplateError('invalid_input');
-  if(raw.revision===0){const inserted=await q.run('INSERT INTO specialty_templates(id,name,department,description,revision,content_hash,config_json) VALUES(?,?,?,?,1,?,?) ON CONFLICT(id) DO NOTHING',id,raw.name.trim(),raw.department.trim(),raw.description,content,JSON.stringify(config));if(inserted.changes!==1)throw new TemplateError('version_conflict',409);}
+  if(raw.revision===0){await sql().tx(function*(){if(guard)yield* guard();const inserted=yield* run('INSERT INTO specialty_templates(id,name,department,description,revision,content_hash,config_json) VALUES(?,?,?,?,1,?,?) ON CONFLICT(id) DO NOTHING',id,raw.name.trim(),raw.department.trim(),raw.description,content,JSON.stringify(config));if(inserted.changes!==1)throw new TemplateError('version_conflict',409);});}
   else {await sql().tx(function*(){const d=yield* dialect();const current=yield* one<Row>('SELECT * FROM specialty_templates WHERE id=?'+forUpdate(d),id);if(!current||current.revision!==raw.revision)throw new TemplateError('version_conflict',409);
    if(preserveConfig!==undefined&&stable(JSON.parse(current.config_json))!==stable(preserveConfig))throw new TemplateError('configuration_changed',409);
    if(guard)yield* guard();

@@ -3,7 +3,7 @@ import {one,sql,sqliteSync,type Step} from '../../repositories/sql-steps.js';
 import {userActor,type Actor} from '../../repositories/actor.js';
 
 export const TEAM_ADMIN_READ='team_admin_read';
-export const TEAM_ADMIN_WRITES=new Set(['specialty_apply','team_agent_create','team_agent_update','team_personality_apply','team_specialty_apply']);
+export const TEAM_ADMIN_WRITES=new Set(['team_control_apply','report_publish','specialty_apply','team_agent_create','team_agent_update','team_personality_apply','team_specialty_apply']);
 export const isTeamAdminName=(name:string)=>name===TEAM_ADMIN_READ||TEAM_ADMIN_WRITES.has(name);
 export const isTeamAdminTool=(tool:Tool)=>!tool.extensionId&&!tool.mcp&&isTeamAdminName(tool.name);
 /** Model parameters never participate in determining administrative authority. */

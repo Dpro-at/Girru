@@ -43,6 +43,8 @@ export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'executed' | 'f
 
 /** Built-in and known tools that always need approval. */
 export const APPROVAL_REQUIRED_TOOLS: Readonly<Record<string, ApprovalCategory>> = {
+  workspace_control_apply:'settings', // Internal executor: only a real owner approval ticket admits it.
+  team_control_apply:'settings',
   team_agent_create:'settings',team_agent_update:'settings',team_personality_apply:'settings',team_specialty_apply:'settings',
   // sending messages on the owner's behalf
   telegram_send: 'message',
@@ -346,7 +348,8 @@ export async function requestApproval(
   tool: Tool,
   params: Record<string, any>,
   context: ToolExecutionContext,
-  category: ApprovalCategory
+  category: ApprovalCategory,
+  onStored?: (approvalId:string)=>import('../repositories/sql-steps.js').Step<void>
 ): Promise<ToolResult> {
   const agentId = context.agentId ?? null;
   const pending = await sql().read((function* () {
@@ -370,7 +373,7 @@ export async function requestApproval(
   const origin = policy
     ? JSON.stringify({ channel: policy.channel, conversationId: policy.conversationId, allowedDestinations: policy.allowedDestinations })
     : null;
-  await sql().read(run(`
+  await sql().tx(function*(){yield* run(`
     INSERT INTO tool_approvals (id, status, agent_id, user_id, session_id, tool_name, category,
       params_encrypted, params_iv, params_tag, params_preview, origin, delegated_from,
       params_hash, params_salt, preview_truncated, run_scope, run_id, run_step)
@@ -381,7 +384,7 @@ export async function requestApproval(
     context.delegatedFrom?.length ? JSON.stringify(context.delegatedFrom) : null,
     hash, salt, truncated ? 1 : 0, canonicalJson(runScope),
     runScope.runId ?? null, runScope.runStep ?? null,
-  ));
+  );if(onStored)yield* onStored(id);});
   console.log(`[Approvals] ⏸️  Pending approval ${id} for ${tool.name} (agent ${agentId ?? '(none)'})`);
 
   return {

@@ -8,5 +8,7 @@ test('footer MCP tool reads and changes only the footer route, never Settings',a
  assert.equal(calls.length,before);
  assert.ok(TOOL_DEFINITIONS.some(t=>t.name==='workspace_footer'));
  assert.notEqual((await callTool('workspace_footer',{operation:'set',hidden:['library']},{backend})).isError,true);assert.deepEqual(calls.at(-1).body,{hidden:['library']});
+ assert.notEqual((await callTool('workspace_footer',{operation:'set',order:['reports','chat']},{backend})).isError,true);assert.deepEqual(calls.at(-1).body,{order:['reports','chat']});
+ assert.match(TOOL_DEFINITIONS.find(t=>t.name==='workspace_footer').description,/reports/);
  assert.match(TOOL_DEFINITIONS.find(t=>t.name==='workspace_footer').description,/library/);
 });

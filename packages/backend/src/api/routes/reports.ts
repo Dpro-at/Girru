@@ -1,3 +1,4 @@
+import {publishPreparedReport} from '../../services/report-publication.js';
 import type {FastifyInstance} from 'fastify';
 import {createHash} from 'node:crypto';
 import {authorizeActiveRoleAsync} from '../../auth/route-guards.js';
@@ -10,6 +11,7 @@ export async function reportRoutes(app:FastifyInstance,options:{start?:StartTurn
  register('POST','/api/reports',async(owner,r)=>saveReport(owner,null,r.body));
  register('GET','/api/reports/:id',async(owner,r)=>{if(Object.keys(r.query??{}).some(k=>k!=='snapshotId'))throw new ReportError(400,'invalid_report');return readReport(owner,r.params.id,r.query?.snapshotId);});
  register('PUT','/api/reports/:id',async(owner,r)=>saveReport(owner,r.params.id,r.body));
+ register('POST','/api/reports/:id/publish',async(owner,r)=>publishPreparedReport(owner,r.params.id,r.body));
  register('PUT','/api/reports/:id/schedule',async(owner,r)=>setReportSchedule(owner,r.params.id,r.body));
  register('POST','/api/reports/:id/run',async(owner,r)=>{
   if(!r.body||typeof r.body!=='object'||Array.isArray(r.body)||Object.keys(r.body).some((k:string)=>!['requestId','expectedRevision'].includes(k))||typeof r.body.requestId!=='string'||!/^[A-Za-z0-9_-]{1,100}$/.test(r.body.requestId)||!Number.isSafeInteger(r.body.expectedRevision)||r.body.expectedRevision<1)throw new ReportError(400,'invalid_report');
