@@ -1,3 +1,4 @@
+import {ComputerDevicesProvider} from './ComputerDevices';
 import {AppUpdateNotice} from './AppUpdateNotice';
 import {ReportsPage} from './ReportsPage';
 import {BrowserWorkspace} from './BrowserWorkspace';
@@ -235,7 +236,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
     browser:{available:owner&&browser.available,current:page==='browser',run:go('browser'),parent:'store'},terminal:entry('terminal',owner,openTerminal,undefined,'store'),code:entry('code',owner&&(nativeEditor||codeMissing),nativeEditor?openCode:openCodeInStore,undefined,'store'),skills:entry('skills',owner,go('skills'),undefined,'library'),personalities:entry('personalities',owner,go('personalities'),undefined,'library'),specialties:entry('specialties',owner,go('specialties'),undefined,'library')};
 
   const sidebarShown = rail && (page === 'chat' || ownSidebar);
-  return <div className="shell app-shell" data-theme={theme} data-rail={sidebarShown ? 'open' : 'closed'} data-section={page} lang="en" dir="ltr">
+  return <ComputerDevicesProvider key={user.id} client={client} enabled={owner && mode==='live'}><div className="shell app-shell" data-theme={theme} data-rail={sidebarShown ? 'open' : 'closed'} data-section={page} lang="en" dir="ltr">
     <header className="titlebar">
       {browser.problem&&<span role="alert">{browser.problem}</span>}<WorkspaceModes onModeChange={mode=>{if(mode==='code')setPage('code');else if(page==='code')setPage('chat');}}/>
       <div className="titlebar-tools">
@@ -288,7 +289,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
       <section className="page page-store" hidden={page!=='store'}><StoreWorkspace client={client} active={page==='store'} sidebarSlot={slot} request={storeRequest} canBrowser={browser.available&&owner} canCode={nativeEditor&&owner} codeMissing={codeMissing&&owner} onOpenApp={id=>{if(id==='browser')setPage('browser');else if(id==='code')void (nativeEditor?openCode():openCodeInStore());else if(id==='terminal')openTerminal();else if(id==='genvr')void openGenvr();else if(id==='channels')openSettings('channels');else setPage(id);}} onAccounts={()=>openSettings('accounts')} footerItem={owner?id=>footerToolItem(footerPrefsNow,id,x=>footer.toggle(x)):undefined} onPermissions={()=>{if(user.role!=='owner'){setPage('agents');return;}setApprovalsPlace(r=>({place:'perms',n:(r?.n??0)+1}));setPage('approvals');}}/></section>
       {user.role==='owner'&&<section className="page page-trading" hidden={page!=='trading'}><StoreTradingView client={client} active={page==='trading'} sidebarSlot={slot} onBack={openMyApps} onOpenStore={()=>{setStoreRequest(r=>({updates:false,item:'store:trading',n:(r?.n??0)+1}));setPage('store');}} onPermissions={()=>{setApprovalsPlace(r=>({place:'perms',n:(r?.n??0)+1}));setPage('approvals');}}/></section>}
       <section className="page page-genvr" hidden={page !== 'genvr'}>{genvrOpened&&<GenVRPage key={user.id} client={client} active={page === 'genvr'}/>}</section>
-      {page === 'settings' && <section className="page page-settings"><AppSettings key={settingsVisit} mcpOpenId={mcpOpen} onOpenChannelsStore={()=>{setStoreRequest(r=>({updates:false,item:'store:agent-connect',n:(r?.n??0)+1}));setPage('store');}} onOpenStore={local=>openStore(false,local)} initialTab={settingsTab} initialMemoryPane={memoryPane} sidebarSlot={slot} active signedIn client={client} preference={appearance.preference} onTheme={appearance.setPreference} onAccount={() => openSettings('account')} onAgents={() => setPage('agents')} onOpenMemory={() => setPage('memory')} onOpenChat={() => setPage('chat')} onOpenApps={openMyApps} onOpenTool={tool => setPage(tool)} onOpenGenvr={()=>void openGenvr()} onApprovals={() => setPage('approvals')} onBoard={() => setPage('board')} onAgent={id => { setAgentFocus(f => ({ id, n: (f?.n ?? 0) + 1 })); setPage('agents'); }}/></section>}
+      {page === 'settings' && <section className="page page-settings"><AppSettings onOpenDeviceChat={id=>{void chat?.open(id);setPage('chat');}} key={settingsVisit} mcpOpenId={mcpOpen} onOpenChannelsStore={()=>{setStoreRequest(r=>({updates:false,item:'store:agent-connect',n:(r?.n??0)+1}));setPage('store');}} onOpenStore={local=>openStore(false,local)} initialTab={settingsTab} initialMemoryPane={memoryPane} sidebarSlot={slot} active signedIn client={client} preference={appearance.preference} onTheme={appearance.setPreference} onAccount={() => openSettings('account')} onAgents={() => setPage('agents')} onOpenMemory={() => setPage('memory')} onOpenChat={() => setPage('chat')} onOpenApps={openMyApps} onOpenTool={tool => setPage(tool)} onOpenGenvr={()=>void openGenvr()} onApprovals={() => setPage('approvals')} onBoard={() => setPage('board')} onAgent={id => { setAgentFocus(f => ({ id, n: (f?.n ?? 0) + 1 })); setPage('agents'); }}/></section>}
     </main>
     <ShellFooter controller={footer} settingsCurrent={page==='settings'} settingsAlert={backupFailed?'the last backup failed':undefined} onSettings={()=>backupFailed?openSettings('backups'):setPage('settings')} onCustomize={()=>openSettings('general')}
       status={mode === 'mock' ? <span className="status-item"><span className={`status-dot ${mode}`} aria-hidden="true"/>Offline practice — fictional data</span>
@@ -298,7 +299,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
     {owner && mode === 'live' && <NewPhoneNotice client={client} onSettings={() => openSettings('phone')}/>}
     <CommandPalette open={palette} commands={commands} onClose={() => setPalette(false)}
       search={chat && search && user.role !== 'guest' ? { controller: search.palette, onOpen: (id, messageId) => { void chat.openAt(id, messageId); setPage('chat'); } } : undefined}/>
-  </div>;
+  </div></ComputerDevicesProvider>;
 }
 
 const noopSubscribe = () => () => {};

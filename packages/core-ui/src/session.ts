@@ -1,3 +1,5 @@
+import {googleAuthRoute,allowedGoogleAuth,googleAuthResponse} from './google-auth-contract.js';
+import {computerRoute,allowedComputer,computerResponse} from './computer-contract.js';
 import {reportsRoute,allowedReports,reportsResponse} from './reports-contract.js';
 import {hostAppRoute,allowedHostApp,hostAppResponse} from './store-host-app-contract.js';
 import {BROWSER_APP_PATH,allowedBrowserApp,browserAppResponse} from './browser-app-contract.js';
@@ -95,7 +97,7 @@ export type User = Readonly<{ id: string; email: string; username: string; role:
 /** What the UI calls the account: the name typed at setup, else the user name. */
 export const displayName = (u: User): string => u.name ?? u.username;
 type BoundaryNotice = 'published_password' | 'account_inactive' | 'rate_limited' | 'origin_not_allowed' | 'host_not_allowed';
-export type SessionState = Readonly<{ mode: Mode; epoch: number; retryAfterSeconds?: number; setup?: 'checking' | 'required' | 'login' | 'unavailable'; phase: 'signed-out' | 'signing-in' | 'verifying' | 'recovery-codes' | 'authenticated' | 'signing-out'; verification?:Readonly<{method:'totp'|'recovery';expiresAt:number}>; user?: User; notice?: BoundaryNotice | 'invalid' | 'denied' | 'limited' | 'unavailable' | 'expired' | 'logout-confirmed' | 'logout-unknown' | 'recovered' }>;
+export type SessionState = Readonly<{ mode: Mode; epoch: number; retryAfterSeconds?: number; setup?: 'checking' | 'required' | 'login' | 'unavailable'; phase: 'signed-out' | 'signing-in' | 'verifying' | 'recovery-codes' | 'authenticated' | 'signing-out'; verification?:Readonly<{method:'totp'|'recovery';expiresAt:number;provider?:'google'}>; user?: User; notice?: BoundaryNotice | 'invalid' | 'denied' | 'limited' | 'unavailable' | 'expired' | 'logout-confirmed' | 'logout-unknown' | 'recovered' }>;
 import { SessionFailure } from './session-failure';
 export { SessionFailure } from './session-failure';
 export interface WireRequest { method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; path: string; body?: unknown; headers: Readonly<Record<string, string>>; signal: AbortSignal }
@@ -117,6 +119,8 @@ function user(value: unknown): User {
 }
 // Reject before URL normalization. No generic URL, header, key or mutation escape hatch.
 export function allowedRequest(method: string, path: string, body?: unknown): boolean {
+  if(googleAuthRoute(path))return allowedGoogleAuth(method,path,body);
+  if(computerRoute(path))return allowedComputer(method,path,body);
   if(path===VOICE_LIBRARY_PATH)return allowedVoiceLibrary(method,path,body);
   if(upgradeRoute(path))return allowedUpgrade(method,path,body);
   if(packRoute(path))return allowedPack(method,path,body);
@@ -216,6 +220,8 @@ function boundaryNotice(response: WireResponse): BoundaryNotice | undefined {
 
 // Preserve only reviewed machine codes at the decision endpoint, never error text.
 function safeResponse(path: string, response: WireResponse): WireResponse {
+  if(googleAuthRoute(path))return {status:response.status,body:googleAuthResponse(path,response.status,response.body)};
+  if(computerRoute(path))return {status:response.status,body:computerResponse(path,response.status,response.body)};
   const projected = projectResponse(path, response);
   const delay = response.status === 429 ? retryAfterSeconds(response.retryAfterSeconds) : undefined;
   return delay === undefined ? projected : { ...projected, retryAfterSeconds: delay };
@@ -346,7 +352,7 @@ export function createSameOriginTransport(origin: string, fetcher: typeof fetch)
     const keys = Object.keys(request.headers);
     const chat = request.path === '/api/chat';
     const runEvents = request.method === 'GET' && (conversationPath(request.path)?.kind === 'events' || terminalPath(request.path)?.kind === 'stream');
-    const expected = ['/api/auth/login', '/api/setup/status', OWNER_SETUP_PATH].includes(request.path) ? [] : chat ? ['Authorization', 'Idempotency-Key'] : ['Authorization'];
+    const expected = (googleAuthRoute(request.path)&&!request.path.startsWith('/api/auth/google/link') || ['/api/auth/login', '/api/setup/status', OWNER_SETUP_PATH].includes(request.path)) ? [] : chat ? ['Authorization', 'Idempotency-Key'] : ['Authorization'];
     if (keys.length !== expected.length || keys.some(k => !expected.includes(k)) || expected.some(k => !Object.prototype.hasOwnProperty.call(request.headers, k))
       || (expected.includes('Authorization') && (request.headers.Authorization.length > 8200 || !/^Bearer [A-Za-z0-9._~-]+$/.test(request.headers.Authorization)))
       || (chat && !validKey(request.headers['Idempotency-Key']))) throw new SessionFailure('blocked');
@@ -354,7 +360,7 @@ export function createSameOriginTransport(origin: string, fetcher: typeof fetch)
       const response = await fetcher(origin + request.path, {
         method: request.method, body: request.body === undefined ? undefined : JSON.stringify(request.body),
         headers: { Accept: chat || runEvents ? 'text/event-stream' : 'application/json', ...(request.body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(shell ? {} : request.headers) },
-        signal: request.signal, credentials: !shell && (['/api/auth/login', '/api/auth/logout'].includes(request.path) || request.headers.Authorization === 'Bearer dpro-remembered-session') ? 'same-origin' : 'omit', mode: 'same-origin', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer',
+        signal: request.signal, credentials: !shell && (['/api/auth/login', '/api/auth/logout','/api/auth/google/finish'].includes(request.path) || request.headers.Authorization === 'Bearer dpro-remembered-session') ? 'same-origin' : 'omit', mode: 'same-origin', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer',
       });
       if (response.redirected || response.type === 'opaqueredirect' || (response.url && response.url !== origin + request.path) || (response.status >= 300 && response.status < 400)) throw new SessionFailure('blocked');
       if (runEvents && response.status === 200) {
@@ -429,7 +435,8 @@ export class SessionClient {
     this.#device = undefined; this.#deviceBinding = undefined; this.#nextKeep = undefined;
     this.#reset(mode, 'signed-out');
   }
-  cancel() { this.#reset(this.#state.mode, 'signed-out', this.#state.phase === 'signing-out' ? 'logout-unknown' : undefined,this.#state.setup==='login'?'login':undefined); }
+  cancel() {const flow=this.#googleFlow,pendingNonce=this.#googlePendingNonce;this.#googleFlow=undefined;this.#googlePendingNonce=undefined;this.#reset(this.#state.mode,'signed-out',this.#state.phase==='signing-out'?'logout-unknown':undefined,this.#state.setup==='login'?'login':undefined);if(flow||pendingNonce)void this.transports.live?.({method:'POST',path:'/api/auth/google/cancel',body:{...(flow?{flowId:flow.flowId}:{}),clientNonce:flow?.clientNonce??pendingNonce},headers:{},signal:AbortSignal.timeout(10000)}).catch(()=>{});}
+
   async #send(method: WireRequest['method'], path: string, body: unknown, token: string | undefined, epoch: number, signal?: AbortSignal, observeResponse?: (response: WireResponse) => void): Promise<WireResponse> {
     const mode = this.#state.mode;
     if (mode === 'fixture' || !allowedRequest(method, path, body)) throw new SessionFailure('blocked');
@@ -496,16 +503,37 @@ export class SessionClient {
     }
     return { ok: true };
   }
+  #googlePendingNonce:string|undefined;
+  #googleFlow:{flowId:string;clientNonce:string;setupToken?:string}|undefined;
+  async loginGoogle(setup?:{setupToken:string;name:string;workspaceType?:'individual'|'company';companyName?:string;companyKind?:string}){
+    if(this.#state.mode!=='live'||this.#state.phase!=='signed-out'||(setup?this.#state.setup!=='required':this.#state.setup!=='login'))return;
+    const keep=this.#nextKeep;this.#reset('live','signing-in',undefined,this.#state.setup);const epoch=this.#state.epoch;
+    const bytes=new Uint8Array(32);crypto.getRandomValues(bytes);const clientNonce=btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replaceAll('=','');
+    this.#googlePendingNonce=clientNonce;try{const started=await this.#send('POST','/api/auth/google/start',{kind:setup?'setup':'signin',clientNonce,...setup},undefined,epoch);
+      if(started.status!==200||!record(started.body)||typeof started.body.flowId!=='string')throw Error();
+      const flow={flowId:started.body.flowId,clientNonce,...(setup?{setupToken:setup.setupToken}:{})};this.#googleFlow=flow;this.#googlePendingNonce=undefined;
+      for(let n=0;n<240;n++){if(epoch!==this.#state.epoch)return;const status=await this.#send('POST','/api/auth/google/status',{flowId:flow.flowId,clientNonce},undefined,epoch);if(status.status!==200||!record(status.body)||status.body.state==='failed')throw Error();if(status.body.state==='ready'){await this.#finishGoogle(flow,epoch,keep);return;}await new Promise(resolve=>setTimeout(resolve,1000));}throw Error();
+    }catch{if(epoch===this.#state.epoch)this.#reset('live','signed-out','unavailable',this.#state.setup);}
+  }
+  async #finishGoogle(flow:{flowId:string;clientNonce:string;setupToken?:string},epoch:number,keep:TokenKeep|undefined,verification?:{challenge:string;nonce:string;code:string},recovery=false){
+    const response=await this.#send('POST','/api/auth/google/finish',{...flow,...(verification?{verification}:{}),...(recovery?{recovery:true}:{})},undefined,epoch);
+    if(epoch!==this.#state.epoch)return;if(response.status!==200)throw Error();const continuation=loginContinuation(response.body);
+    if(continuation){if('verificationRequired' in continuation){if(continuation.expiresAt<=Date.now()||continuation.expiresAt>Date.now()+305000||continuation.verificationMethod!==(recovery?'recovery':'totp'))throw Error();this.#verification={email:'',challenge:continuation.challenge,nonce:continuation.nonce,method:continuation.verificationMethod,expiresAt:continuation.expiresAt};this.#googleFlow=flow;this.#publish({...this.#state,phase:'verifying',verification:{method:continuation.verificationMethod,expiresAt:continuation.expiresAt,provider:'google'}});return;}if(!recovery||!verification)throw Error();this.#googleFlow=undefined;keep?.save(null);this.#reset('live','signed-out','recovered','login');return;}
+    if(recovery||!record(response.body)||typeof response.body.token!=='string'||!validDeviceToken(response.body.deviceToken))throw Error();const loginUser=user(response.body.user),token=response.body.token;const me=await this.#send('GET','/api/auth/me',undefined,token,epoch);if(epoch!==this.#state.epoch)return;if(me.status!==200||!record(me.body))throw Error();const current=user(me.body.user);if(current.id!==loginUser.id)throw Error();this.#googleFlow=undefined;this.#token=token;this.#keep=keep;keep?.save(token);this.#publish({mode:'live',phase:'authenticated',epoch,user:current});
+  }
+  async #continueGoogle(verification?:{challenge:string;nonce:string;code:string},recovery=false){const flow=this.#googleFlow;if(!flow)return;const keep=this.#nextKeep;this.#publish({...this.#state,phase:'signing-in'});const epoch=this.#state.epoch;try{await this.#finishGoogle(flow,epoch,keep,verification,recovery);}catch{if(epoch===this.#state.epoch)this.#reset('live','signed-out','unavailable','login');}}
   async login(email:string,password:string){return this.#login(email,password);}
   async startRecovery(password:string){
     const pending=this.#verification;
     if(!pending||this.#state.phase!=='verifying')return;
+    if(this.#state.verification?.provider==='google')return this.#continueGoogle(undefined,true);
     return this.#login(pending.email,password,undefined,true);
   }
   async completeVerification(password:string,code:string){
     const pending=this.#verification;
     if(!pending||this.#state.phase!=='verifying')return;
     if(pending.expiresAt<=Date.now()){this.#reset(this.#state.mode,'signed-out','expired',this.#state.setup);return;}
+    if(this.#state.verification?.provider==='google')return this.#continueGoogle({challenge:pending.challenge,nonce:pending.nonce,code},pending.method==='recovery');
     return this.#login(pending.email,password,{challenge:pending.challenge,nonce:pending.nonce,code},pending.method==='recovery');
   }
   async #login(email: string, password: string,verification?:{challenge:string;nonce:string;code:string},recovery=false) {
@@ -587,7 +615,7 @@ export class SessionClient {
   request = async (request: Request, signal?: AbortSignal): Promise<WireResponse> => {
     if (!this.#token || this.#state.phase !== 'authenticated') throw new SessionFailure('blocked');
     // The public adapter transport cannot call login/logout or add arbitrary request fields.
-    if (request.path === '/api/setup/status' || request.path === OWNER_SETUP_PATH || request.path === '/api/chat' || request.path === '/api/auth/login' || request.path === '/api/auth/logout' || Object.keys(request).some(k => !['method', 'path', 'body'].includes(k))) throw new SessionFailure('blocked');
+    if (googleAuthRoute(request.path)&&!request.path.startsWith('/api/auth/google/link') || request.path === '/api/setup/status' || request.path === OWNER_SETUP_PATH || request.path === '/api/chat' || request.path === '/api/auth/login' || request.path === '/api/auth/logout' || Object.keys(request).some(k => !['method', 'path', 'body'].includes(k))) throw new SessionFailure('blocked');
     if((verificationRoute(request.path)||reviewerRoute(request.path))&&this.#state.user?.role==='guest')throw new SessionFailure('blocked');
     if(upgradeRoute(request.path)&&this.#state.user?.role!=='owner')throw new SessionFailure('blocked');
     if(skillInstallRoute(request.path)&&this.#state.user?.role!=='owner')throw new SessionFailure('blocked');

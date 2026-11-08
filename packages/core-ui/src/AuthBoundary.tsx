@@ -93,7 +93,7 @@ function SessionWorkspace({ client, setupCode, initialPage }: { client: SessionC
   return <PublicShell setup={state.setup} initialPage={state.setup === 'required' ? 'account' : initialPage} accountStep={state.setup === 'required'||state.phase==='signing-in'||!!state.verification||!!state.notice}><section className="auth-workspace" aria-label="Account sign-in" lang="en" dir="ltr">
     {state.setup !== 'required' && <h1>Girru · {state.mode === 'mock' ? 'Offline login exercise' : 'Account'}</h1>}
     {state.notice && <p role="status">{notices[state.notice]}{retryAfterNotice(state.retryAfterSeconds)}</p>}
-    {(state.phase === 'verifying'||state.phase==='signing-in') && state.verification ? <VerificationForm client={client} method={state.verification.method} busy={state.phase==='signing-in'}/> : state.phase === 'authenticated' && state.user ? null : state.phase === 'signed-out' && state.setup === 'required' ? <OwnerSetup client={client} setupCode={setupCode} initialPage={initialPage}/> : state.phase === 'signing-out' ? <><p role="status">Signing out on all devices…</p><button onClick={() => client.cancel()}>Clear locally; server outcome remains unknown</button></> : state.phase === 'signed-out' && state.setup !== 'login' ? <section aria-label="Setup discovery">
+    {(state.phase === 'verifying'||state.phase==='signing-in') && state.verification ? <VerificationForm client={client} method={state.verification.method} google={state.verification.provider==='google'} busy={state.phase==='signing-in'}/> : state.phase === 'authenticated' && state.user ? null : state.phase === 'signed-out' && state.setup === 'required' ? <OwnerSetup client={client} setupCode={setupCode} initialPage={initialPage}/> : state.phase === 'signing-out' ? <><p role="status">Signing out on all devices…</p><button onClick={() => client.cancel()}>Clear locally; server outcome remains unknown</button></> : state.phase==='signing-in'&&state.setup==='required'?<section aria-label="Google account setup"><p role="status">Continue with Google in your browser…</p><button onClick={()=>client.cancel()}>Cancel</button></section>: state.phase === 'signed-out' && state.setup !== 'login' ? <section aria-label="Setup discovery">
       <p role="status">{state.setup === 'checking' ? 'Checking installation setup…' : state.setup === 'unavailable' ? 'Setup status unavailable. Sign-in is withheld; no automatic retry was sent.'
         : 'Check installation setup before signing in. No request has been sent automatically.'}</p>
       <p>Discovery does not verify an account, installation identity, or system readiness.</p>
@@ -108,6 +108,7 @@ function SessionWorkspace({ client, setupCode, initialPage }: { client: SessionC
       <label htmlFor="auth-password">Password</label><input id="auth-password" type="password" name={state.mode === 'live' ? 'password' : undefined} autoComplete={state.mode === 'live' ? 'current-password' : 'off'} required value={password} onChange={e => setPassword(e.target.value)} disabled={state.phase === 'signing-in'}/>
       {state.mode === 'live' && <DevQuickLogin disabled={state.phase === 'signing-in'} onFill={(a) => { setEmail(a.email); setPassword(a.password); }}/>}
       <button className="primary" disabled={state.phase === 'signing-in'}>Sign in</button>
+      {state.mode==='live'&&<button type="button" disabled={state.phase==='signing-in'} onClick={()=>void client.loginGoogle()}>Sign in with Google</button>}
       {state.phase === 'signing-in' && <button type="button" onClick={() => client.cancel()}>Cancel sign-in</button>}
     </form>}
     {state.setup !== 'required' && <p>Settings credentials remain masked-only; no credential values are fetched.</p>}
@@ -124,18 +125,18 @@ function RecoveryCodes({client}:{client:SessionClient}){
   {!discard?<><button className="primary" disabled={!saved} onClick={()=>client.finishRecoveryCodes()}>Continue to sign in</button><button onClick={()=>setDiscard(true)}>Discard codes</button></>:<div role="alert"><p>Discard these codes? They cannot be shown again.</p><button className="primary" onClick={()=>client.finishRecoveryCodes()}>Discard and sign in</button><button onClick={()=>setDiscard(false)}>Keep saving codes</button></div>}
  </section>;
 }
-function VerificationForm({client,method,busy}:{client:SessionClient;method:'totp'|'recovery';busy:boolean}){
+function VerificationForm({client,method,busy,google=false}:{client:SessionClient;method:'totp'|'recovery';busy:boolean;google?:boolean}){
  const [password,setPassword]=useState(''),[code,setCode]=useState('');
  const recovery=method==='recovery';
  return <form className="auth-verification" aria-label={recovery?'Recover account':'Verify sign-in'} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();client.cancel();}}} onSubmit={event=>{
   event.preventDefault();const submittedPassword=password,submittedCode=code;setPassword('');setCode('');void client.completeVerification(submittedPassword,submittedCode);
  }}>
   <fieldset disabled={busy}><h2>{recovery?'Recover your account':'Verify your sign-in'}</h2>
-  <p>{recovery?'This resets your authenticator and signs out every device. You will need to sign in again.':'Enter the code from your authenticator. Confirm your password to finish.'}</p>
-  <label htmlFor="verification-password">Password</label><input id="verification-password" type="password" autoComplete="current-password" value={password} required maxLength={4096} onChange={event=>setPassword(event.target.value)}/>
+  <p>{recovery?'This resets your authenticator and signs out every device. You will need to sign in again.':google?'Enter the code from your authenticator.':'Enter the code from your authenticator. Confirm your password to finish.'}</p>
+  {!google&&<><label htmlFor="verification-password">Password</label><input id="verification-password" type="password" autoComplete="current-password" value={password} required maxLength={4096} onChange={event=>setPassword(event.target.value)}/></>}
   <label htmlFor="verification-code">{recovery?'Recovery code':'Verification code'}</label><input id="verification-code" type="text" inputMode={recovery?'text':'numeric'} autoComplete="one-time-code" autoCapitalize="none" spellCheck={false} value={code} pattern={recovery?'[a-f0-9]{32}':'[0-9]{6}'} maxLength={recovery?32:6} required onChange={event=>setCode(event.target.value.trim())}/>
   <button className="primary" type="submit">{recovery?'Reset authenticator':'Verify'}</button>
-  {!recovery&&<button type="button" disabled={!password} title="Enter your password first" onClick={()=>{const submitted=password;setPassword('');setCode('');void client.startRecovery(submitted);}}>Use a recovery code</button>}
+  {!recovery&&<button type="button" disabled={!google&&!password} title={google?'Use a recovery code':'Enter your password first'} onClick={()=>{const submitted=password;setPassword('');setCode('');void client.startRecovery(submitted);}}>Use a recovery code</button>}
   </fieldset>{busy&&<p role="status">Verifying…</p>}<button type="button" onClick={()=>client.cancel()}><UiIcon name="log-out"/>Back to sign in</button>
  </form>;
 }
@@ -203,6 +204,8 @@ function OwnerSetup({ client, setupCode, initialPage }: { client: SessionClient;
     <p>You are the owner of this workspace. Your information stays on this computer.</p>
     {notice && !['invalid_email','weak_password','missing_fields'].includes(notice) && <p role="alert">{ownerSetupNotices[notice]}</p>}
     <label htmlFor="owner-name">Your name</label><input id="owner-name" required maxLength={100} autoComplete="name" value={name} onChange={e => setName(e.target.value)} disabled={busy}/>
+    <button type="button" disabled={busy||!name.trim()} onClick={()=>void client.loginGoogle({setupToken:code,name:name.trim(),workspaceType,...(workspaceType==='company'?{companyName,companyKind}:{})})}>Create account with Google</button>
+    <p>Google verifies your identity and email. Your workspace stays on this computer.</p>
     <label htmlFor="owner-email">Email <span className="owner-field-hint">You sign in with it. Nothing is sent anywhere.</span></label><input id="owner-email" type="email" name="username" required maxLength={320} autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} disabled={busy}/>
     {notice === 'invalid_email' && <p className="owner-field-error" role="alert">{ownerSetupNotices[notice]}</p>}
     <label htmlFor="owner-password">Password <span className="owner-field-hint">At least 12 characters</span></label>

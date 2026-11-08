@@ -1,3 +1,4 @@
+import {deviceSqlBefore,deviceSqlAfter} from '../devices/storage.js';
 /**
  * SQL steps (B2.2b-3): one copy of a module's database logic for both
  * drivers, including multi-statement transactions.
@@ -169,18 +170,19 @@ const mainSqlite = (): SqliteHandle => getDatabase();
 function sqliteOp(op: Op, h: SqliteHandle): unknown {
   if (op.kind === 'dialect') return 'sqlite';
   if (op.kind === 'tx') return h.getDb().transaction(() => driveSync(op.body(), h))();
-  const stmt = h.prepare(op.sql);
-  if (op.kind === 'one') return stmt.get(...op.params);
-  if (op.kind === 'all') return stmt.all(...op.params);
-  return { changes: stmt.run(...op.params).changes };
+  const prepared=deviceSqlBefore(op);const stmt=h.prepare(prepared.sql);
+  if(op.kind==='one')return deviceSqlAfter(op,stmt.get(...prepared.params));
+  if(op.kind==='all')return deviceSqlAfter(op,stmt.all(...prepared.params));
+  return {changes:stmt.run(...prepared.params).changes};
 }
 
 async function pgOp(op: Op): Promise<unknown> {
   if (op.kind === 'dialect') return 'postgres';
   if (op.kind === 'tx') return withPgTransaction(() => driveAsync(op.body()));
-  if (op.kind === 'one') return pgOne(op.sql, ...op.params);
-  if (op.kind === 'all') return pgAll(op.sql, ...op.params);
-  return { changes: (await pgRun(op.sql, ...op.params)).changes };
+  const prepared=deviceSqlBefore(op);
+  if(op.kind==='one')return deviceSqlAfter(op,await pgOne(prepared.sql,...prepared.params));
+  if(op.kind==='all')return deviceSqlAfter(op,await pgAll(prepared.sql,...prepared.params));
+  return {changes:(await pgRun(prepared.sql,...prepared.params)).changes};
 }
 
 /** Drive a step synchronously on SQLite. */

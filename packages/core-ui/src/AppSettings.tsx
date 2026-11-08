@@ -1,3 +1,4 @@
+import {ComputerDevices} from './ComputerDevices';
 import {VoiceSettings} from './VoiceSettings';
 import {FooterSettings} from './FooterSettings';
 import {ChatNoticeSettings} from './ChatNoticeSettings';
@@ -31,7 +32,7 @@ import { McpSection } from './ToolSections';
 import type { UiIconName } from './ui-icons';
 /** Places that are sections of their own; their Settings rows open them. MCP connections stays in Settings with its places nested, like Memory. */
 type Tool='mcp'|'library';
-type Place='voice'|'general'|'account'|'replies'|'move'|'permissions'|'verification'|'approval-rules'|'keys'|'ssh-keys'|'accounts'|'channels'|'phone'|'memory'|'departments'|'apps'|Tool|'backups'|'about';
+type Place='voice'|'general'|'account'|'replies'|'move'|'permissions'|'verification'|'approval-rules'|'keys'|'ssh-keys'|'accounts'|'channels'|'phone'|'computers'|'memory'|'departments'|'apps'|Tool|'backups'|'about';
 /** Old names ('models', 'sharing', 'connections') still open their places. */
 export type SettingsTab=Place|'models'|'sharing'|'connections';
 type Row={value:Place;label:string;icon:UiIconName;words:string;note?:string;jump?:boolean};
@@ -49,6 +50,7 @@ const ROWS:Record<Place,Row>={
  keys:{value:'keys',label:'Saved keys',icon:'key',words:'secrets tokens passwords key store older chats',note:'Keys you pasted in chats, kept encrypted on this computer.'},
  accounts:{value:'accounts',label:'Accounts',icon:'contact',words:'connections accounts genvr world account connect disconnect test publication',note:'Accounts connected to this workspace.'},
  channels:{value:'channels',label:'Channels',icon:'message',words:'messaging services telegram discord whatsapp trusted senders conversations automatic replies',note:'Messaging services and trusted senders.'},
+ computers:{value:'computers',label:'Devices',icon:'screen',words:'computers devices task target remote linked',note:'Choose where your tasks run.'},
  phone:{value:'phone',label:'Phone',icon:'mobile',words:'phone mobile iphone android pair qr code app relay wi-fi forget signed in',note:'Use Girru from your phone.'},
  mcp:{value:'mcp',label:'MCP connections',icon:'tool',words:'mcp connections connectors tools servers add import coding apps genvr-local',note:'Tools your agents reach through MCP servers.'},
  memory:{value:'memory',label:'Memory',icon:'database',words:MEMORY_PANES.map(p=>p.label).join(' ')+' memory rules sources access',note:'Memory rules, sources and access.'},
@@ -69,7 +71,7 @@ const ROWS:Record<Place,Row>={
  * Memory has its own sub-places); without a slot (signed out, tests) the same
  * places sit on the left of the page.
  */
-export function AppSettings({ onOpenChannelsStore,onOpenStore, signedIn, preference, onTheme, onAccount, onAgents, client, aboutOnly = false, initialTab = 'general', initialMemoryPane = 'rules', sidebarSlot, active = true, onOpenMemory, onOpenChat, onOpenApps, onOpenTool, onOpenGenvr, onApprovals, onBoard, onAgent, mcpOpenId }: { onOpenChannelsStore?:()=>void;onOpenStore?: (local: 'claude-code' | 'codex') => void; signedIn: boolean; preference: ThemePreference; onTheme: (v: ThemePreference) => void; onAccount: () => void; onAgents?: () => void; client?: SessionClient; aboutOnly?: boolean; initialTab?: SettingsTab; initialMemoryPane?: MemorySettingsPane; sidebarSlot?: HTMLElement | null; active?: boolean; onOpenMemory?: () => void; onOpenChat?: () => void; onOpenApps?: () => void; onOpenTool?: (tool: Tool) => void; onOpenGenvr?: () => void; onApprovals?: () => void; onBoard?: () => void; onAgent?: (id: string) => void; mcpOpenId?: string }) {
+export function AppSettings({ onOpenDeviceChat,onOpenChannelsStore,onOpenStore, signedIn, preference, onTheme, onAccount, onAgents, client, aboutOnly = false, initialTab = 'general', initialMemoryPane = 'rules', sidebarSlot, active = true, onOpenMemory, onOpenChat, onOpenApps, onOpenTool, onOpenGenvr, onApprovals, onBoard, onAgent, mcpOpenId }: { onOpenDeviceChat?:(id:string)=>void;onOpenChannelsStore?:()=>void;onOpenStore?: (local: 'claude-code' | 'codex') => void; signedIn: boolean; preference: ThemePreference; onTheme: (v: ThemePreference) => void; onAccount: () => void; onAgents?: () => void; client?: SessionClient; aboutOnly?: boolean; initialTab?: SettingsTab; initialMemoryPane?: MemorySettingsPane; sidebarSlot?: HTMLElement | null; active?: boolean; onOpenMemory?: () => void; onOpenChat?: () => void; onOpenApps?: () => void; onOpenTool?: (tool: Tool) => void; onOpenGenvr?: () => void; onApprovals?: () => void; onBoard?: () => void; onAgent?: (id: string) => void; mcpOpenId?: string }) {
   const named=(t:SettingsTab):Place=>t==='models'?'replies':t==='sharing'?'move':t==='connections'?'accounts':t;
   const [query,setQuery]=useState('');const search=useRef<HTMLInputElement>(null);
   const info=useAppInfo();const [tab,setTab]=useState<Place>(named(initialTab));
@@ -83,7 +85,7 @@ export function AppSettings({ onOpenChannelsStore,onOpenStore, signedIn, prefere
   const groups:{name:string;keys:Place[]}[]=live?[
     {name:'Application',keys:['general','account','replies',...ownerOnly(['voice','move'])]},
     {name:'Security',keys:[...ownerOnly(['permissions']),...(user?.role!=='guest'?['verification' as const]:[]),...ownerOnly(['approval-rules']),'keys',...ownerOnly(['ssh-keys'])]},
-    {name:'Connections',keys:ownerOnly(['accounts','channels','phone',...(client?['mcp' as const]:[]),'memory'])},
+    {name:'Connections',keys:ownerOnly(['accounts','channels','phone','computers',...(client?['mcp' as const]:[]),'memory'])},
     {name:'Workspace',keys:[...ownerOnly(['departments']),...(onOpenApps?['apps' as const]:[]),...(onOpenTool?ownerOnly(['library']):[])]},
     {name:'',keys:[...ownerOnly(['backups']),'about']},
   ]:[{name:'Application',keys:['general','account','replies']},{name:'',keys:['about']}];
@@ -130,6 +132,7 @@ export function AppSettings({ onOpenChannelsStore,onOpenStore, signedIn, prefere
       {active_==='accounts'&&owner&&<ConnectionsSettings client={client!} onOpenGenvr={onOpenGenvr}/>}
       {active_==='departments'&&owner&&<DepartmentsSettings client={client!} onAgent={onAgent}/>}
       {active_==='channels'&&owner&&<AgentConnectSettings client={client!} onOpenStore={onOpenChannelsStore}/>}
+      {active_==='computers'&&owner&&<ComputerDevices client={client!} onOpenChat={onOpenDeviceChat} onApprovals={onApprovals}/>}
       {active_==='phone'&&owner&&<PhoneSettings client={client!} active={active}/>}
       {active_==='memory'&&owner&&<MemorySettings client={client!} pane={pane} onOpenMemory={onOpenMemory}/>}
       {active_==='mcp'&&owner&&<McpSection client={client!} active={active} nav={mcpNav} openId={mcpOpenId} onOpenAgents={onAgents}/>}

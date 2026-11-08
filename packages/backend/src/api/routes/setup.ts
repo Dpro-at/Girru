@@ -1,3 +1,4 @@
+import {createFirstOwner} from '../../repositories/first-owner.js';
 import { dataPath, dataRoot } from '../../config/data-root.js';
 import { validSetupEmail } from '../../auth/setup-input.js';
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
@@ -279,19 +280,7 @@ export default async function setupRoutes(fastify: FastifyInstance) {
       // Create the owner with active status and verified email.
       // Re-check inside one transaction so two parallel requests cannot both
       // create an owner (PostgreSQL: under a transaction-scoped lock on the name).
-      const created = await sql().tx(function* () {
-        yield* lockName('setup:first-owner');
-        if (yield* one(OWNER_EXISTS_SQL)) return false;
-        // users.created_at / updated_at are DATETIME columns: CURRENT_TIMESTAMP
-        // gives the same 'YYYY-MM-DD HH:MM:SS' (UTC) value as datetime('now').
-        yield* run(`
-          INSERT INTO users (id, email, username, password_hash, full_name, role, status, email_verified, created_at, updated_at, token_version)
-          VALUES (?, ?, ?, ?, ?, 'owner', 'active', 1, ${nowTs(sql().dialect)}, ${nowTs(sql().dialect)}, 1)
-        `, userId, email, username, passwordHash, name);
-        // FIRSTRUN-01: the new owner goes through AI tools, Local model and Team once.
-        yield* startFirstRunStep(userId, body.workspaceType as 'individual' | 'company' | undefined, body.companyName as string | undefined, body.companyKind as string | undefined);
-        return true;
-      }, { immediate: true });
+      const created=await createFirstOwner({id:userId,name,email,passwordHash,workspaceType:body.workspaceType as 'individual'|'company'|undefined,companyName:body.companyName as string|undefined,companyKind:body.companyKind as string|undefined});
 
       if (!created) {
         return reply.status(403).send({

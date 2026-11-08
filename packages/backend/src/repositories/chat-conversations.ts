@@ -121,10 +121,14 @@ export async function findConversation(userId: string, id: string): Promise<Conv
   return r ? toConversation(r) : undefined;
 }
 
-export async function createConversation(userId: string, input: { title?: string | null; agentId?: string | null; projectId?: string | null; model?: string; mode?: ChatMode; thinking?: ChatThinking; parentId?: string | null }): Promise<Conversation> {
-  const id = randomUUID();
-  await q.run('INSERT INTO chat_sessions (id, user_id, title, model, agent_id, project_id, mode, thinking, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+export function* createConversationStep(userId: string, input: { title?: string | null; agentId?: string | null; projectId?: string | null; model?: string; mode?: ChatMode; thinking?: ChatThinking; parentId?: string | null }, id: string = randomUUID()): Step<string> {
+  yield* run('INSERT INTO chat_sessions (id, user_id, title, model, agent_id, project_id, mode, thinking, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     id, userId, input.title?.trim() || null, input.model || 'default', input.agentId || null, input.projectId || null, input.mode ?? null, input.thinking ?? null, input.parentId || null);
+  return id;
+}
+
+export async function createConversation(userId: string, input: { title?: string | null; agentId?: string | null; projectId?: string | null; model?: string; mode?: ChatMode; thinking?: ChatThinking; parentId?: string | null }): Promise<Conversation> {
+  const id = await sql().tx(() => createConversationStep(userId, input));
   return (await findConversation(userId, id))!;
 }
 
@@ -372,4 +376,10 @@ export function gitInfo(folder: string): Promise<GitInfo> {
           branchUrl: onBranch && upstream ? `${base}/tree/${enc(onBranch)}` : null,
           compareUrl: onBranch && defaultBranch && onBranch !== defaultBranch ? `${base}/compare/${enc(defaultBranch)}...${enc(onBranch)}?expand=1` : null } : null };
     });
+}
+
+/** Selected imported text is history, never a provider run, system message or tool checkpoint. */
+export async function importConversationMessages(owner:string,session:string,peer:string,logicalId:string,messages:{id:string;role:'user'|'assistant';content:string}[],options?:{guard?:()=>Step<void>;create?:{title:string;agentId:string;projectId:string|null};projectId?:string|null}):Promise<void>{
+ const {createHash}=await import('node:crypto');const {redactImportText}=await import('../memory/import/redact.js');
+ await sql().tx(function*(){if(options?.guard)yield* options.guard();if(options?.create)yield* createConversationStep(owner,{...options.create,mode:'ask'},session);const c=yield* one<{project_id:string|null}>('SELECT project_id FROM chat_sessions WHERE id=? AND user_id=?',session,owner);if(options?.projectId!==undefined&&c?.project_id!==options.projectId)throw Error('computer_chat_mapping_changed');if(!c)throw Error('computer_chat_unavailable');for(const m of messages){if(!['user','assistant'].includes(m.role)||m.content.length>16000||redactImportText(m.content).total)throw Error('computer_message_refused');const id='shared-'+createHash('sha256').update(peer+'\n'+logicalId+'\n'+m.id).digest('hex').slice(0,48);const old=yield* one<{content:string;role:string;session_id:string}>('SELECT content,role,session_id FROM chat_messages WHERE id=?',id);if(old){if(old.content!==m.content||old.role!==m.role||old.session_id!==session)throw Error('computer_imported_message_changed');continue;}yield* run("INSERT INTO chat_messages(id,session_id,role,content,run_id,status) VALUES(?,?,?,?,NULL,'complete')",id,session,m.role,m.content);}yield* run('UPDATE chat_sessions SET updated_at=CURRENT_TIMESTAMP WHERE id=?',session);});
 }

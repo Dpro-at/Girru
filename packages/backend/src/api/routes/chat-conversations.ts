@@ -192,7 +192,7 @@ interface TurnStart { code: number; body: Record<string, unknown>; retryAfter?: 
  * Starts one turn of a saved conversation (checked input). Shared by POST runs and by the
  * continuation after the owner decides a waiting approval (CHAT-BUILD-01).
  */
-export async function startTurn(t: { userId: string; role: string; c: Conversation; runId: string; message: string; queuedKey?: string; displayMessage?: string; model?: string; agentId?: string; images?: string[]; continuationMessageId?: string; onFinished?: (status: string) => Promise<void>; participantReply?: boolean; participantContext?: string; canStart?: () => Promise<boolean> }): Promise<TurnStart> {
+export async function startTurn(t: { userId: string; role: string; c: Conversation; runId: string; message: string; queuedKey?: string; displayMessage?: string; model?: string; agentId?: string; images?: string[]; continuationMessageId?: string; onFinished?: (status: string) => Promise<void>; participantReply?: boolean; participantContext?: string; canStart?: () => Promise<boolean>; effectFence?:()=>Promise<boolean> }): Promise<TurnStart> {
   await ensureChatRecovery();
   const { userId, c } = t;
   const b = { runId: t.runId, message: t.message, model: t.model, agentId: t.agentId };
@@ -288,6 +288,7 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
     chatMode: c.mode ?? 'auto', thinking: c.thinking ?? 'normal', ...(project?.folders.length ? { readRoots: project.folders.map((f) => f.path) } : {}),
     // CHAT-BUILD-01 stage 5: Steer now, and notices from tools (text that tried to give orders).
     takeSteers: () => chatRuns.get(b.runId)?.takeSteers() ?? [], notice: (code, text) => chatRuns.get(b.runId)?.notice(code, text) };
+  if(t.effectFence){const beforeTool=runContext.beforeTool.bind(runContext);runContext.beforeTool=async(name,params)=>{if(!await t.effectFence!()){chatRuns.get(b.runId)?.requestStop();throw Error('device_execution_fenced');}return beforeTool(name,params);};}
   if (t.canStart && !await t.canStart()) { await recoverStaleRun(b.runId).catch(() => false); return send(409, { code: 'group_paused' }); }
   chatRuns.start({
     runId: b.runId, userId, sessionId: c.id, agentId: b.agentId ?? null,

@@ -72,6 +72,8 @@ export const PUBLIC_ROUTES: ReadonlySet<string> = new Set([
   key('POST', '/api/setup/complete'),
   key('POST', '/api/setup/python'),
   key('POST', '/api/auth/login'),
+  key('GET','/api/auth/google/status'),
+  key('POST','/api/auth/google/start'),key('POST','/api/auth/google/status'),key('POST','/api/auth/google/finish'),key('POST','/api/auth/google/cancel'),
   // MCP-01b: HMAC proof of the install's identity for local clients (no data, no secret).
   key('GET', '/api/instance'),
   // MEM-BRIDGE-01: the dpro-memory MCP server. Loopback only; the session needs the

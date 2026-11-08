@@ -61,7 +61,7 @@ function redactor(secrets) {
  * cwd, env (from backendEnv), secrets (values to redact), onLog(line), onExit({ code, signal }) after ready,
  * spawn (tests), readyTimeoutMs.
  */
-function startBackend({ node, args, cwd, env, secrets = [], onLog = () => {}, onExit = () => {}, spawn = nodeSpawn, readyTimeoutMs = READY_TIMEOUT_MS, signal }) {
+function startBackend({ node, args, cwd, env, secrets = [], onLog = () => {}, onExit = () => {}, spawn = nodeSpawn, readyTimeoutMs = READY_TIMEOUT_MS, signal, deviceCustody }) {
   const redact = redactor([env.AGENT_PLAYER_LAUNCH_TOKEN, ...secrets]);
   const tail = [];
   const log = line => {
@@ -82,6 +82,8 @@ function startBackend({ node, args, cwd, env, secrets = [], onLog = () => {}, on
     });
     stream.on('end', () => { if (rest) log(rest); rest = ''; });
   }
+  let custodyPending=0,custodyLastId=0;
+  child.on('message',async message=>{if(!deviceCustody||!message||message.type!=='device-custody-request')return;if(!Number.isSafeInteger(message.id)||message.id<=custodyLastId||custodyPending>=8||typeof message.operation!=='string'||JSON.stringify(message).length>270000)return;custodyLastId=message.id;custodyPending++;try{const result=await deviceCustody(message.operation,message.input);if(child.connected)child.send({type:'device-custody-response',id:message.id,result});}catch(error){if(child.connected)child.send({type:'device-custody-response',id:message.id,error:/^device_[a-z_]+$/.test(error?.message??'')?error.message:'device_custody_refused'});}finally{custodyPending--;}});
   let exited = false;
   let timedOut = false;
   const exitedPromise = new Promise(resolve => child.once('exit', (code, signal) => { exited = true; resolve({ code, signal }); }));

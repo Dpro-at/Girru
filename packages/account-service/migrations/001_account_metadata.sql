@@ -1,0 +1,13 @@
+-- Account/device metadata only; encrypted work payloads have no table in this service.
+CREATE TABLE IF NOT EXISTS service_state(singleton INTEGER PRIMARY KEY CHECK(singleton=1),revision INTEGER NOT NULL,epoch TEXT NOT NULL,state_hash TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY,issuer TEXT NOT NULL,subject TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN ('active','disabled')),security_epoch INTEGER NOT NULL,registry_version INTEGER NOT NULL,created_at INTEGER NOT NULL,reset_required INTEGER NOT NULL DEFAULT 0,bootstrap_device_id TEXT,UNIQUE(issuer,subject));
+CREATE TABLE IF NOT EXISTS devices(id TEXT PRIMARY KEY,account_id TEXT NOT NULL REFERENCES accounts(id),public_key TEXT NOT NULL,label TEXT NOT NULL,os_family TEXT NOT NULL,app_version TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN ('pending','approved','revoked')),device_epoch INTEGER NOT NULL,registered_at INTEGER NOT NULL,approved_by TEXT,enrollment_hash TEXT NOT NULL,enrollment_expires_at INTEGER NOT NULL,UNIQUE(account_id,public_key));
+CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,account_id TEXT NOT NULL REFERENCES accounts(id),device_id TEXT NOT NULL REFERENCES devices(id),access_hash TEXT NOT NULL UNIQUE,refresh_hash TEXT NOT NULL UNIQUE,family_id TEXT NOT NULL,account_epoch INTEGER NOT NULL,device_epoch INTEGER NOT NULL,service_epoch TEXT NOT NULL,auth_time INTEGER NOT NULL,issued_at INTEGER NOT NULL,last_used_at INTEGER NOT NULL,access_expires_at INTEGER NOT NULL,absolute_expires_at INTEGER NOT NULL,revoked_at INTEGER);
+CREATE TABLE IF NOT EXISTS spent_refresh(hash TEXT PRIMARY KEY,family_id TEXT NOT NULL,account_id TEXT NOT NULL,device_id TEXT NOT NULL,expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS challenges(hash TEXT PRIMARY KEY,purpose TEXT NOT NULL,public_key TEXT NOT NULL,account_id TEXT,device_id TEXT,session_id TEXT,operation TEXT NOT NULL,body_hash TEXT NOT NULL,created_at INTEGER NOT NULL,expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS security_audit(id TEXT PRIMARY KEY,event TEXT NOT NULL,account_id TEXT,device_id TEXT,outcome TEXT NOT NULL,created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS sessions_account ON sessions(account_id,device_id);
+CREATE INDEX IF NOT EXISTS challenges_expiry ON challenges(expires_at);
+CREATE INDEX IF NOT EXISTS security_audit_expiry ON security_audit(created_at);
+
+CREATE TABLE IF NOT EXISTS device_freshness(account_id TEXT NOT NULL REFERENCES accounts(id),device_id TEXT NOT NULL REFERENCES devices(id),namespace_hash TEXT NOT NULL,generation INTEGER NOT NULL,sequence INTEGER NOT NULL,membership_hash TEXT,PRIMARY KEY(account_id,device_id,namespace_hash));

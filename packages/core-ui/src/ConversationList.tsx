@@ -1,3 +1,4 @@
+import {ComputerExecutionBadge} from './ComputerDevices';
 import { ProjectSheet } from './ChatComposerControls';
 import { OutsideTag, useOutsideProjects } from './outside-projects';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -137,7 +138,7 @@ export function ConversationList({ controller, onOpen, search, onNewChat, onAddT
         onClick={() => open(c)} onContextMenu={(e: ReactMouseEvent) => menu.at(e, rowItems(c))} onKeyDown={e => keyMenu(e, rowItems(c))}
         draggable={s.access !== 'denied' && s.projects.length > 0} onDragStart={e => { e.dataTransfer.setData(CHAT_DRAG, c.id); e.dataTransfer.effectAllowed = 'move'; }}>
         <span className="chat-row-type" aria-label={c.meeting ? 'Meeting' : c.schedule ? 'Scheduled chat' : 'Chat'} title={c.meeting ? `Meeting · ${c.meeting.state === 'completed' ? 'Finished' : c.meeting.state}` : c.schedule ? 'Scheduled chat' : 'Chat'}><UiIcon name={c.meeting ? 'users' : c.schedule ? 'calendar' : 'message'} size={12}/></span>
-        <span className="chat-row-name" dir="auto">{title(c)}</span>
+        <span className="chat-row-name" dir="auto">{title(c)}<ComputerExecutionBadge sessionId={c.id}/></span>
         {(c.running || (c.id === s.activeId && !!s.runId)) && <span className="chat-row-working" title="Working now" aria-label="Working now"/>}
         {c.waiting ? <span className="chat-row-waits" title={`${c.waiting} ${c.waiting === 1 ? 'approval waits' : 'approvals wait'} for you`} aria-label={`${c.waiting} waiting for you`}>{c.waiting}</span> : null}
         <span className="chat-row-time">{c.schedule?.next ?? shortTime(c.updatedAt)}</span>

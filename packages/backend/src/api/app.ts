@@ -1,3 +1,8 @@
+import {dproAccountRoutes} from './routes/dpro-account.js';
+import {googleAuthRoutes} from './routes/google-auth.js';
+import {deviceEnrollmentRoutes} from './routes/device-enrollment.js';
+import {bindComputerApplication,type ComputerApplication} from '../devices/application.js';
+import {deviceCoopRoutes} from './routes/device-coop.js';
 import {reportRoutes} from './routes/reports.js';
 import {storeHostEnabled,markStoreHostStarted} from '../services/store-host-apps.js';
 import { meetingRoutes } from './routes/meetings.js';
@@ -159,6 +164,8 @@ import { registerGlobalErrorHandler } from './error-handler.js';
 import { registerLaunchToken } from './launch-token.js';
 
 export interface BuildServerOptions {
+  /** Explicit server-provisioned authority/custody. Never accepted from a request or environment flag. */
+  computerApplication?:ComputerApplication;
   /** Explicit provisioned ledger dependency; never created from a read request. */
   paperLedger?:()=>PaperDatabase.Database|null;
   /** Separate immutable opt-in for a server-owned paper-only scheduler; never inferred from paperLedger. */
@@ -404,6 +411,11 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await fastify.register(schedulerRoutes); // ⏰ Scheduler System
   await fastify.register(memoryRoutes); // 🧠 Memory System
   await fastify.register(mcpChatRoutes);
+  if(options.computerApplication){const unbind=bindComputerApplication(options.computerApplication);fastify.addHook('onClose',async()=>{await options.computerApplication!.stop();unbind();});}
+  await fastify.register(deviceCoopRoutes,{application:options.computerApplication});
+  await fastify.register(deviceEnrollmentRoutes);
+  await fastify.register(dproAccountRoutes);
+  await fastify.register(googleAuthRoutes);
   await fastify.register(workspaceControlRoutes);
   await fastify.register(workspaceDraftRoutes);
   await fastify.register(mcpMemoryProposalRoutes);

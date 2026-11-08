@@ -1,3 +1,6 @@
+import {computerSyncApplyTool} from '../devices/sync-tool.js';
+import {computerTaskAcceptTool} from '../devices/tool.js';
+import {consumeComputerTicket,bindComputerApproval} from '../devices/approval.js';
 import {consumeControlTicket,bindControlCommand} from './control-command.js';
 import {workspaceControlApplyTool,isWorkspaceControlTool} from './tasks/workspace-control.js';
 import {isTeamAdminTool,mainAdminEligible,bindOwnerCommand,TEAM_ADMIN_WRITES} from './tasks/team-admin-authority.js';
@@ -165,6 +168,7 @@ export class ToolsRegistry {
       }
     }
 
+    if((toolName==='computer_task_accept'&&tool!==computerTaskAcceptTool||toolName==='computer_sync_apply'&&tool!==computerSyncApplyTool))return {content:[{type:'text',text:'Computer task builtin identity required.'}],error:'computer_builtin_required'};
     if (!tool) {
       return {
         content: [{ type: 'text', text: `Error: Tool "${toolName}" not found` }],
@@ -209,7 +213,7 @@ export class ToolsRegistry {
     // CHAT-SECRETS-01: a call that uses a key-store reference runs only for the
     // owning user, never in a channel turn, and always after the owner's approval.
     // Tools that keep text in Girru's own stores (memory, board, tasks, plan) get the reference itself.
-    const controlText=isWorkspaceControlTool(tool)||(toolName==='team_admin_read'&&params.action==='control_preview');
+    const controlText=(tool===computerTaskAcceptTool||tool===computerSyncApplyTool)||isWorkspaceControlTool(tool)||(toolName==='team_admin_read'&&params.action==='control_preview');
     const usesSecret = !controlText && !KEEPS_TEXT.test(toolName) && hasSecretRef(params);
     if (usesSecret && (policy || !this.context.userId)) {
       return {
@@ -231,8 +235,9 @@ export class ToolsRegistry {
     // CHAT-LIVE-01 (LW6): "Auto" changes the chat folder's real files only after the owner allows it (the mode text promises it).
     if (chatMode !== 'accept_edits' && chatFolderFile(tool, this.context)) category = category ?? modeCategory ?? 'other';
     if(isTeamAdminTool(tool)&&TEAM_ADMIN_WRITES.has(toolName))category='settings';
+    let computerCapability:ReturnType<typeof consumeComputerTicket>=null;
     let approvalConsumed=!!controlCapability;
-    if(category&&!approvalConsumed&&(reviewerRequired||!isConfinedChannelReply(policy,toolName))){if(isWorkspaceControlTool(tool)){controlCapability=consumeControlTicket(options.approvalTicket,toolName);approvalConsumed=!!controlCapability;}else approvalConsumed=consumeApprovalTicket(options.approvalTicket,toolName);}
+    if(category&&!approvalConsumed&&(reviewerRequired||!isConfinedChannelReply(policy,toolName))){if(isWorkspaceControlTool(tool)){controlCapability=consumeControlTicket(options.approvalTicket,toolName);approvalConsumed=!!controlCapability;}else if((tool===computerTaskAcceptTool||tool===computerSyncApplyTool)){computerCapability=consumeComputerTicket(options.approvalTicket,toolName);approvalConsumed=!!computerCapability;}else approvalConsumed=consumeApprovalTicket(options.approvalTicket,toolName);}
     if (category && (reviewerRequired || !isConfinedChannelReply(policy, toolName)) && !approvalConsumed) {
       try {
         return await requestApproval(tool, params, this.context, category);
@@ -259,6 +264,7 @@ export class ToolsRegistry {
       let executionContext:ToolExecutionContext={...this.context,actor:await actorFromToolContextAsync(this.context)};
       if(isTeamAdminTool(tool))executionContext=await bindOwnerCommand(executionContext,toolName,approvalConsumed);
       if(isWorkspaceControlTool(tool)){if(!controlCapability)throw Error('control_approval_required');executionContext=await bindControlCommand(executionContext,controlCapability);}
+      if((tool===computerTaskAcceptTool||tool===computerSyncApplyTool)){if(!computerCapability)throw Error('computer_approval_required');executionContext=bindComputerApproval(executionContext,computerCapability);}
       const scrubbed = scrubSecretValues(await tool.execute(secrets.value,executionContext),secrets.used);
       // CHAT-BUILD-01 stage 5 (CH10): text read from pages, files or emails that tries to give orders is data; the owner sees what was tried.
       const tried = injectedOrder(scrubbed);

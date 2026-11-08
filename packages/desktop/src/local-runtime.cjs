@@ -38,7 +38,7 @@ function closeServer(server) {
  * onLog(line), onBackendExit(result) (unexpected stop after start), extraEnv, baseEnv, spawn, readyTimeoutMs.
  */
 function createLocalRuntime(options) {
-  const { node, args, cwd, dataDir, createBridge, onLog = () => {}, onBackendExit = () => {}, extraEnv, baseEnv, spawn, readyTimeoutMs } = options;
+  const { node, args, cwd, dataDir, createBridge, onLog = () => {}, onBackendExit = () => {}, extraEnv, baseEnv, spawn, readyTimeoutMs,deviceCustody } = options;
   let backend = null, bridge = null, state = 'idle';
   let startupAbort, pendingBackend;
 
@@ -53,7 +53,7 @@ function createLocalRuntime(options) {
       const uiPort = await listen(bridge);
       const origin = `http://${HOST}:${uiPort}`;
       const launch = () => (pendingBackend = startBackend({
-        node, args, cwd, spawn, readyTimeoutMs, onLog, signal: startupAbort.signal,
+        node, args, cwd, spawn, readyTimeoutMs, onLog,deviceCustody, signal: startupAbort.signal,
         env: backendEnv({ base: baseEnv, dataDir, token, allowedOrigin: origin, extra: extraEnv }),
         onExit: result => { if (state === 'running') onBackendExit(result); },
       }));

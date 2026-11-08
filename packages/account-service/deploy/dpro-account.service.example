@@ -1,0 +1,38 @@
+[Unit]
+Description=Dpro account and device metadata service
+After=network.target
+
+[Service]
+Type=simple
+User=dpro-account
+Group=dpro-account
+WorkingDirectory=/opt/girru-account-source
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/dpro-account/service.env
+ExecStart=/usr/bin/node --import tsx packages/account-service/src/main.ts --database /var/lib/dpro-account/metadata.sqlite --epoch-root ${DPRO_ACCOUNT_EPOCH_ROOT} --origin ${DPRO_ACCOUNT_ORIGIN} --port ${DPRO_ACCOUNT_PORT} --client-id ${DPRO_ACCOUNT_GOOGLE_CLIENT_ID} --confirm-independent-epoch
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+UMask=0077
+StateDirectory=dpro-account
+StateDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/dpro-account
+# Replace this path and the matching environment value with the independently
+# retained epoch root. Keep it outside database backup/restore sets.
+ReadWritePaths=/srv/dpro-account-epoch
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

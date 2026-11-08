@@ -1,3 +1,5 @@
+import {readDproAccountProof,readDproNativeProof,type DproNativeProof,type DproAccountProof} from '../accounts/client.js';
+import {readGoogleAccountProof,type GoogleAccountProof} from '../auth/google-proof.js';
 /**
  * Accounts and sessions (B1.6, part of the identity repository): creating
  * accounts, signing in, ending sessions and changing the password.
@@ -60,6 +62,9 @@ export interface IdentityAuthRepository {
   creatableRoles(actor: Actor | null | undefined): Promise<string[]>;
   createAccount(actor: Actor | null | undefined, input: AccountInput, validatePassword: (p: string) => { valid: boolean; error?: string }): Promise<SafeUser>;
   signIn(email: string, password: string, verification?:LoginVerification, mode?:'totp'|'recovery'): Promise<SignInResult>;
+  signInGoogle(userId:string,proof:GoogleAccountProof,mappingVersion:number,binding:string,verification?:LoginVerification,mode?:'totp'|'recovery'):Promise<SignInResult>;
+  reauthenticateDproIdentity(userId:string,proof:DproAccountProof|DproNativeProof,binding:string,verification?:LoginVerification):Promise<SignInResult>;
+  reauthenticateGoogleLink(userId:string,proof:GoogleAccountProof,password:string,binding:string,verification?:LoginVerification):Promise<SignInResult>;
   /** Ends every session of the account; returns its username. */
   endSessions(actor: Actor | null | undefined): Promise<{ username?: string }>;
   /** 'ok', or 'no_user' / 'wrong_password' (route answers 401). */
@@ -84,6 +89,37 @@ function accountId(actor: Actor | null | undefined): string {
  * runs on SQLite (sqliteUsersStore) and PostgreSQL (pgUsersStore).
  */
 export function createIdentityAuth(users: UsersStore): IdentityAuthRepository {
+  async function finishSignIn(user:User,verification:LoginVerification|undefined,mode:'totp'|'recovery',external?:{kind:'signin'|'link'|'dpro';identity:Pick<ReturnType<typeof readGoogleAccountProof>,'issuer'|'subject'|'bindingNonce'>;mappingVersion:number;binding:string}):Promise<SignInResult>{
+      const who={userId:user.id,username:user.username};if(!['totp','recovery'].includes(mode))return {status:'bad_password',...who};
+      const tokenVersion=(user as {token_version?:number}).token_version||1;
+      const outcome=await sql().tx(function*(){
+        yield* lockName('verification-enrollment:'+user.id);
+        const d=yield* dialect();
+        if(external&&external.kind!=='link'){const mapping=yield* one<any>('SELECT user_id,mapping_version FROM user_identity_providers WHERE issuer=? AND subject=?'+forUpdate(d),external.identity.issuer,external.identity.subject);if(!mapping||mapping.user_id!==user.id||Number(mapping.mapping_version)!==external.mappingVersion)return {kind:'refused'} as const;}
+        const current=yield* one<{token_version:number;status:string;email_verified:number}>(`SELECT token_version,status,email_verified FROM users WHERE id=?${forUpdate(d)}`,user.id);
+        if(!current||Number(current.token_version)!==tokenVersion||current.status!=='active'||!Number(current.email_verified))return {kind:'refused'} as const;
+        const factor=yield* one<{version:number;enabled:number}>('SELECT version,enabled FROM verification_factors WHERE user_id=?',user.id);
+        if(factor&&Number(factor.enabled)===1){
+          if(!verification)return {kind:'challenge',version:Number(factor.version)} as const;
+          if(typeof verification.nonce!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(verification.nonce))return {kind:'refused'} as const;
+          const binding={userId:user.id,purpose:mode==='recovery'?'recovery' as const:'login' as const,sessionHash:external&&mode==='recovery'?loginHash(JSON.stringify([verification.nonce,external.binding,external.identity.issuer,external.identity.subject,external.mappingVersion])):loginHash(verification.nonce),operationHash:mode==='recovery'?factorRevocationOperation(user.id,Number(factor.version),'recovery'):(external?loginHash(JSON.stringify(['google-account-v1',external.kind,user.id,external.identity.issuer,external.identity.subject,external.identity.bindingNonce,external.mappingVersion,external.binding])):loginHash(JSON.stringify(['login-v1',user.id]))),tokenVersion,factorVersion:Number(factor.version)};
+          if(mode==='recovery')return (yield* revokeFactorStep(verification.challenge,binding,verification.code,'recovery',Date.now()))?{kind:'recovered'} as const:{kind:'refused'} as const;
+          if(!(yield* factorChallengeStep(verification.challenge,binding,verification.code,'totp',Date.now())))return {kind:'refused'} as const;
+        }else if(verification||mode==='recovery')return {kind:'refused'} as const;
+        return {kind:'ok',token:generateToken(user.id,tokenVersion)} as const;
+      });
+      if(outcome.kind==='recovered')return {status:'recovered'};
+      if(outcome.kind==='refused')return {status:'bad_password',...who};
+      if(outcome.kind==='challenge'){
+        const nonce=randomBytes(32).toString('base64url');
+        try{
+          const issued=await issueChallenge({userId:user.id,purpose:mode==='recovery'?'recovery':'login',sessionHash:external&&mode==='recovery'?loginHash(JSON.stringify([nonce,external.binding,external.identity.issuer,external.identity.subject,external.mappingVersion])):loginHash(nonce),operationHash:mode==='recovery'?factorRevocationOperation(user.id,outcome.version,'recovery'):(external?loginHash(JSON.stringify(['google-account-v1',external.kind,user.id,external.identity.issuer,external.identity.subject,external.identity.bindingNonce,external.mappingVersion,external.binding])):loginHash(JSON.stringify(['login-v1',user.id]))),tokenVersion,factorVersion:outcome.version});
+          return {status:'verification_required',challenge:issued.token,nonce,expiresAt:issued.expiresAt,verificationMethod:mode};
+        }catch(error){if(error instanceof VerificationChallengeLimitError)return {status:'verification_limited'};throw error;}
+      }
+      await users.updateLastLogin(user.id);
+      return {status:'ok',user:users.safeUser(user),token:outcome.token};
+  }
   const repo: IdentityAuthRepository = {
     async creatableRoles(actor) {
       const a = requireAdmin(actor);
@@ -132,34 +168,15 @@ export function createIdentityAuth(users: UsersStore): IdentityAuthRepository {
       if (user.status !== 'active') return { status: 'inactive', ...who };
       if (!user.email_verified) return { status: 'unverified', ...who };
       if (isPublishedDefaultPassword(given)) return { status: 'published_password', ...who };
-      if(!['totp','recovery'].includes(mode))return {status:'bad_password',...who};
-      const tokenVersion=(user as {token_version?:number}).token_version||1;
-      const outcome=await sql().tx(function*(){
-        yield* lockName('verification-enrollment:'+user.id);
-        const d=yield* dialect();
-        const current=yield* one<{token_version:number;status:string;email_verified:number}>(`SELECT token_version,status,email_verified FROM users WHERE id=?${forUpdate(d)}`,user.id);
-        if(!current||Number(current.token_version)!==tokenVersion||current.status!=='active'||!Number(current.email_verified))return {kind:'refused'} as const;
-        const factor=yield* one<{version:number;enabled:number}>('SELECT version,enabled FROM verification_factors WHERE user_id=?',user.id);
-        if(factor&&Number(factor.enabled)===1){
-          if(!verification)return {kind:'challenge',version:Number(factor.version)} as const;
-          if(typeof verification.nonce!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(verification.nonce))return {kind:'refused'} as const;
-          const binding={userId:user.id,purpose:mode==='recovery'?'recovery' as const:'login' as const,sessionHash:loginHash(verification.nonce),operationHash:mode==='recovery'?factorRevocationOperation(user.id,Number(factor.version),'recovery'):loginHash(JSON.stringify(['login-v1',user.id])),tokenVersion,factorVersion:Number(factor.version)};
-          if(mode==='recovery')return (yield* revokeFactorStep(verification.challenge,binding,verification.code,'recovery',Date.now()))?{kind:'recovered'} as const:{kind:'refused'} as const;
-          if(!(yield* factorChallengeStep(verification.challenge,binding,verification.code,'totp',Date.now())))return {kind:'refused'} as const;
-        }else if(verification||mode==='recovery')return {kind:'refused'} as const;
-        return {kind:'ok',token:generateToken(user.id,tokenVersion)} as const;
-      });
-      if(outcome.kind==='recovered')return {status:'recovered'};
-      if(outcome.kind==='refused')return {status:'bad_password',...who};
-      if(outcome.kind==='challenge'){
-        const nonce=randomBytes(32).toString('base64url');
-        try{
-          const issued=await issueChallenge({userId:user.id,purpose:mode==='recovery'?'recovery':'login',sessionHash:loginHash(nonce),operationHash:mode==='recovery'?factorRevocationOperation(user.id,outcome.version,'recovery'):loginHash(JSON.stringify(['login-v1',user.id])),tokenVersion,factorVersion:outcome.version});
-          return {status:'verification_required',challenge:issued.token,nonce,expiresAt:issued.expiresAt,verificationMethod:mode};
-        }catch(error){if(error instanceof VerificationChallengeLimitError)return {status:'verification_limited'};throw error;}
-      }
-      await users.updateLastLogin(user.id);
-      return {status:'ok',user:users.safeUser(user),token:outcome.token};
+      return finishSignIn(user,verification,mode);
+    },
+
+    async signInGoogle(userId,proof,mappingVersion,binding,verification,mode='totp'){
+      const identity=readGoogleAccountProof(proof),user=await users.findById(userId);if(!user)return {status:'unknown'};const who={userId:user.id,username:user.username};if(isSystemAccount(user.id))return {status:'system',...who};if(user.status!=='active')return {status:'inactive',...who};if(!user.email_verified)return {status:'unverified',...who};return finishSignIn(user,verification,mode,{kind:'signin',identity,mappingVersion,binding});
+    },
+    async reauthenticateDproIdentity(userId,proof,binding,verification){const trusted=proof.purpose==='dpro-native-proof'?readDproNativeProof(proof):readDproAccountProof(proof),user=await users.findById(userId);if(!user)return {status:'unknown'};const who={userId:user.id,username:user.username};if(isSystemAccount(user.id))return {status:'system',...who};if(user.status!=='active')return {status:'inactive',...who};if(!user.email_verified)return {status:'unverified',...who};const mapping=await sql().read(one<any>('SELECT user_id,mapping_version FROM user_identity_providers WHERE issuer=? AND subject=?',trusted.identity.issuer,trusted.identity.subject));if(mapping?.user_id!==userId)return {status:'bad_password',...who};return finishSignIn(user,verification,'totp',{kind:'dpro',identity:{issuer:trusted.identity.issuer,subject:trusted.identity.subject,bindingNonce:trusted.bindingNonce},mappingVersion:Number(mapping.mapping_version),binding});},
+    async reauthenticateGoogleLink(userId,proof,password,binding,verification){
+      const identity=readGoogleAccountProof(proof),user=await users.findById(userId);if(!user)return {status:'unknown'};const who={userId:user.id,username:user.username};if(!await users.verifyPassword(user,password))return {status:'bad_password',...who};if(isSystemAccount(user.id))return {status:'system',...who};if(user.status!=='active')return {status:'inactive',...who};if(!user.email_verified)return {status:'unverified',...who};if(isPublishedDefaultPassword(password))return {status:'published_password',...who};return finishSignIn(user,verification,'totp',{kind:'link',identity,mappingVersion:0,binding});
     },
 
     async endSessions(actor) {

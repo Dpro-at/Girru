@@ -1,0 +1,5 @@
+/** Device possession uses the existing g1 signed-command verifier and one-use server challenges. */
+import {CommandVerifier,type SignedCommand} from '../phone/protocol/e2e.js';
+import {canonical,canonicalPublicKey,digest,servicePeerId,ACCOUNT_PROTOCOL,type ChallengeRow} from './protocol.js';
+export function accountProofBody(origin:string,challenge:string,operation:string,payload:unknown){return canonical({protocol:ACCOUNT_PROTOCOL,origin,challenge,operation,bodyHash:digest(canonical(payload))});}
+export function verifyDeviceProof(origin:string,challenge:ChallengeRow,nonce:string,command:SignedCommand,payload:unknown){const publicKey=canonicalPublicKey(challenge.public_key),verifier=new CommandVerifier(servicePeerId(origin));verifier.addDevice(publicKey.key,{lifetimeDays:null});const result=verifier.verify(command),expected=accountProofBody(origin,nonce,challenge.operation,payload);if(!result.ok||command.device!==publicKey.id||result.body!==expected||challenge.body_hash&&challenge.body_hash!==digest(canonical(payload)))throw Error('account_device_proof_invalid');}

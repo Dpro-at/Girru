@@ -14,8 +14,11 @@ export const RECOVERY_NOTE = 'Work was interrupted by a backend restart. The ori
 /** Accept message and run together before invoking a model or any tool. */
 export { QueuedTurnChangedError } from './chat-queue.js';
 export async function acceptChatRun(r: JournalRun, message: string, appendUser = true, queuedKey?: string): Promise<void> {
+  await sql().tx(() => acceptChatRunStep(r, message, appendUser, queuedKey));
+}
+
+export function* acceptChatRunStep(r: JournalRun, message: string, appendUser = true, queuedKey?: string): Step<void> {
   const id = orderedId();
-  await sql().tx(function* (): Step<void> {
     if (queuedKey !== undefined) {
       if (queuedKey !== r.run_id || !appendUser) throw new QueuedTurnChangedError('queued_turn_changed');
       yield* consumeQueuedStep(r.user_id, r.session_id, queuedKey, message);
@@ -23,7 +26,6 @@ export async function acceptChatRun(r: JournalRun, message: string, appendUser =
     yield* run("INSERT INTO chat_run_journal (run_id, session_id, user_id, agent_id, state, started_at) VALUES (?, ?, ?, ?, 'running', ?)", r.run_id, r.session_id, r.user_id, r.agent_id, r.started_at);
     if (appendUser) yield* run("INSERT INTO chat_messages (id, session_id, role, content, run_id, status) VALUES (?, ?, 'user', ?, ?, 'complete')", id, r.session_id, message, r.run_id);
     yield* run('UPDATE chat_sessions SET title = COALESCE(title, ?), updated_at = CURRENT_TIMESTAMP WHERE id = ?', deriveTitle(message), r.session_id);
-  });
 }
 
 export async function needsRecoveryReview(sessionId: string): Promise<boolean> {
@@ -115,7 +117,11 @@ async function recoverRun(r: JournalRun): Promise<boolean> {
 
 /** RUNS-01: the end time and, for a run that did not complete, the run's error code (the Runs section's "why"). */
 export async function finishChatRun(runId: string, status: string, errorCode: string | null = null): Promise<void> {
-  await q.run("UPDATE chat_run_journal SET state = ?, ended_at = ?, error_code = ? WHERE run_id = ? AND state = 'running'", status, Date.now(), status === 'complete' ? null : errorCode, runId);
+  await sql().read(finishChatRunStep(runId, status, errorCode));
+}
+
+export function* finishChatRunStep(runId: string, status: string, errorCode: string | null = null): Step<void> {
+  yield* run("UPDATE chat_run_journal SET state = ?, ended_at = ?, error_code = ? WHERE run_id = ? AND state = 'running'", status, Date.now(), status === 'complete' ? null : errorCode, runId);
 }
 
 

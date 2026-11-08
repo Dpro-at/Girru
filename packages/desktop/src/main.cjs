@@ -11,6 +11,7 @@
  * - Quit (menu, Cmd/Ctrl+Q, last window closed) stops the backend first.
  */
 const electron = require('electron');
+let desktopDeviceCustody=null;
 const { app, BrowserWindow, Menu, ipcMain, session, shell, dialog } = electron;
 const fs = require('node:fs');
 const path = require('node:path');
@@ -150,7 +151,10 @@ async function startLocal() {
     log = log || openLog(path.join(app.getPath('userData'), 'logs', 'backend.log'));
     const { createApplicationServer } = require(path.join(payload.coreUiDir, 'scripts', 'application-server.cjs'));
     browserRuntime = browserRuntime || require('./browser-runtime.cjs').createBrowserRuntime({root:process.env.DPRO_BROWSER_ROOT,bundled:path.join(process.resourcesPath,'browser'),runtimesDir:appRuntimesDir(),node:payload.node,profile:process.env.DPRO_BROWSER_PROFILE || path.join(settingsDir(),'browser')});
+    desktopDeviceCustody=desktopDeviceCustody||require('./device-custody.cjs').createDeviceCustody({root:path.join(settingsDir(),'device-custody'),safeStorage:electron.safeStorage});
+    const deviceBroker=require('./device-broker.cjs').createDeviceBroker({selectInstalledClient:async clientId=>{const selected=await dialog.showOpenDialog(mainWindow,{title:'Configure Dpro Google sign-in',message:'Select the Dpro Desktop OAuth JSON. It stays in this computer’s protected vault.',properties:['openFile'],filters:[{name:'Google Desktop OAuth JSON',extensions:['json']}]});if(selected.canceled||selected.filePaths.length!==1)return null;return require('./google-client-config.cjs').readInstalledClient(selected.filePaths[0],clientId);},accountOrigin:process.env.GIRRU_ACCOUNT_ORIGIN??null,custody:desktopDeviceCustody,profileDataRoot:dataDir(),managedWitnessRoot:path.join(settingsDir(),'device-witness-metadata'),confirmLeaseRecovery:async()=>{const r=await dialog.showMessageBox(mainWindow,{type:'warning',buttons:['Cancel','Review stopped process lease'],defaultId:0,cancelId:0,message:'Recover device custody only after the other Girru process has stopped.',detail:'The app will refuse a live or unknown process. This does not restore device membership or resume tasks.'});return r.response===1;},openExternal:url=>shell.openExternal(url)});
     runtime = createLocalRuntime({
+      deviceCustody:deviceBroker,
       node: payload.node,
       readyTimeoutMs: 30000,
       args: backendArgs(payload.backendDir),
@@ -517,6 +521,7 @@ app.on('before-quit', event => {
       try { await session.defaultSession.cookies.flushStore(); session.defaultSession.flushStorageData(); }
       catch { log?.write('Session storage could not be flushed before shutdown.'); }
       await stopLocal();
+      await desktopDeviceCustody?.close();
     }
     return true;
   })

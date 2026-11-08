@@ -1,17 +1,17 @@
 import {auditMcpOutcome} from './mcp-audit.js';
 /** Publish already-prepared display data, without a provider run, file read or authority from JSON. */
 import {createHash,randomUUID} from 'node:crypto';
-import {one,run,sql,lockName} from '../repositories/sql-steps.js';
+import {one,run,sql,lockName,type Step} from '../repositories/sql-steps.js';
 import {ReportError,reportRow,reportScopeStep,resultSections,type ReportRow} from './reports.js';
 const object=(v:unknown):v is Record<string,any>=>!!v&&typeof v==='object'&&!Array.isArray(v);
 const id=(v:unknown):v is string=>typeof v==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(v);
 const bad=():never=>{throw new ReportError(400,'invalid_report_publication');};
 function canonical(value:any):string{if(value===null||typeof value!=='object')return JSON.stringify(value);if(Array.isArray(value))return '['+value.map(canonical).join(',')+']';return '{'+Object.keys(value).sort().map(k=>JSON.stringify(k)+':'+canonical(value[k])).join(',')+'}';}
-async function publishPreparedReportInner(owner:string,key:string,input:unknown){
+async function publishPreparedReportInner(owner:string,key:string,input:unknown,effectGuard?:()=>Step<void>){
  if(!object(input)||Object.keys(input).some(k=>!['requestId','expectedRevision','projectId','sections'].includes(k))||!id(input.requestId)||!Number.isSafeInteger(input.expectedRevision)||input.expectedRevision<1||!Object.hasOwn(input,'projectId')||(input.projectId!==null&&!id(input.projectId))||!Array.isArray(input.sections)||Buffer.byteLength(JSON.stringify(input))>60000)return bad();
  const report=await reportRow(owner,key);if((report.project_id??null)!==input.projectId)throw new ReportError(404,'report_not_found');
  const fingerprint=createHash('sha256').update(canonical({expectedRevision:input.expectedRevision,projectId:input.projectId,sections:input.sections})).digest('hex');
- return sql().tx(function*(){
+ return sql().tx(function*(){if(effectGuard)yield* effectGuard();
   yield* lockName('report:'+key);
   const current=yield* one<ReportRow>('SELECT * FROM display_reports WHERE owner_id=? AND id=?',owner,key);if(!current)throw new ReportError(404,'report_not_found');yield* reportScopeStep(owner,current);
   if((current.project_id??null)!==input.projectId)throw new ReportError(404,'report_not_found');
@@ -30,4 +30,4 @@ async function publishPreparedReportInner(owner:string,key:string,input:unknown)
  });
 }
 
-export async function publishPreparedReport(owner:string,key:string,input:unknown){try{const receipt=await publishPreparedReportInner(owner,key,input);auditMcpOutcome(owner,'report_publication.prepare','report',key,receipt.replayed?'replayed':'published');return receipt;}catch(error){auditMcpOutcome(owner,'report_publication.prepare','report',key,'refused',error instanceof ReportError?error.status:500);throw error;}}
+export async function publishPreparedReport(owner:string,key:string,input:unknown,effectGuard?:()=>Step<void>){try{const receipt=await publishPreparedReportInner(owner,key,input,effectGuard);auditMcpOutcome(owner,'report_publication.prepare','report',key,receipt.replayed?'replayed':'published');return receipt;}catch(error){auditMcpOutcome(owner,'report_publication.prepare','report',key,'refused',error instanceof ReportError?error.status:500);throw error;}}

@@ -1,3 +1,4 @@
+import {DproAccountPanel} from './DproAccountPanel';
 import { DiscoveryStream } from './DiscoveryStream';
 import { SetupOrb } from './SetupOrb';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
@@ -121,7 +122,7 @@ export function FirstRunSetup({ client, initialStep, workspaceType: initialType,
     {step !== 'discovery' && <SetupOrb/>}
     <SetupSteps current={step === 'discovery' ? 'Your files' : step === 'tools' ? 'AI tools' : step === 'model' ? 'Local model' : step === 'phone' ? 'Phone' : 'Team'}/>
     {stepNotice && <p className="setup-note" role="alert">{stepNotice}</p>}
-    {step === 'discovery' && <DiscoveryStep client={client} onNext={() => go('tools')}/>}
+    {step === 'discovery' && <><DproAccountPanel client={client} firstRun/><DiscoveryStep client={client} onNext={() => go('tools')}/></>}
     {step === 'tools' && <ToolsStep client={client} terminal={terminal} onSignedIn={setSignedIn} onNext={() => go('model')}/>}
     {step === 'model' && <ModelStep client={client} terminal={terminal} canSkip={signedIn} onBack={() => go('tools')} onNext={() => go('team')}/>}
     {step === 'team' && <TeamStep client={client} workspaceType={workspaceType} companyKind={workspaceType === 'company' ? companyKind : undefined} ready={teamReady} onReady={() => setTeamReady(true)} onBack={() => go('model')} onDone={() => setStep('phone')}/>}

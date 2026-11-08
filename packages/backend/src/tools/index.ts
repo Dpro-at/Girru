@@ -1,3 +1,6 @@
+import {computerNativeTools} from '../devices/native.js';
+import {computerSyncApplyTool} from '../devices/sync-tool.js';
+import {syntheticComputerTools} from '../devices/tool.js';
 import {workspaceControlApplyTool,teamControlApplyTool} from './tasks/workspace-control.js';
 import {displayCatalogueTool} from './display-catalogue.js';
 import {reportPublishTool} from './tasks/report-publication.js';
@@ -278,7 +281,7 @@ function buildToolsRegistry(context: ToolExecutionContext, mcpTools: Tool[]): To
   const registry = new ToolsRegistry(context);
 
   // Register core tools (CLI bridges gemini_cli/claude_cli stay unregistered)
-  for (const tool of CORE_TOOLS) {
+  for (const tool of [...CORE_TOOLS,...syntheticComputerTools(),computerSyncApplyTool,...computerNativeTools]) {
     registry.register(tool);
   }
 
