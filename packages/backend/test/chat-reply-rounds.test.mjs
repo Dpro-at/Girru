@@ -216,3 +216,26 @@ test('project edits wait before Ask approval, apply exact reviewed text and reje
  for(const path of ['../outside.txt','.env','secret.key'])assert.throws(()=>checkedFileEdit(folder,path,'','no'));
 });
 test.after(async()=>{await app.close();});
+
+test('meeting invitations call only current attendees once, coordinate first, and preserve normal/named routing',async()=>{
+ const M=await backendModule('src/services/meetings.ts');
+ const m=await M.createMeeting('r-owner',{requestId:rid(),title:'Everyday invitations',objective:'Check a short response',selection:{mode:'agents',agentIds:['r-hayden','r-charlie'],departments:[],headsOnly:false}}),c={id:m.conversationId};
+ for(const text of ['الكل هنا؟','شنو رأيكم بالخطة؟']){
+  const first=bodies.length,key=rid();script.push(answer('Coordinator acknowledgement'),answer('Charlie contribution'),answer('Hayden contribution'));
+  const out=await group(c,text,key);assert.equal(out.statusCode,202,out.body);assert.equal(out.json().replyRound.total,3);await done(c);
+  const rows=(await call('r-owner','GET',`/api/chat/conversations/${c.id}/messages`)).json().messages;
+  assert.deepEqual(rows.filter(m=>m.role==='assistant').slice(-3).map(m=>m.agentId),['r-agent','r-charlie','r-hayden']);assert.equal(bodies.length,first+3);
+  const retry=await group(c,text,key);assert.equal(retry.json().replayed,true);assert.equal(bodies.length,first+3);
+ }
+ for(const [text,expected] of [['قسم التسويق شنو رايكم؟','r-hayden'],['رايكم يا قسم التسويق؟','r-hayden'],['مدير قسم التطوير جاهز؟','r-charlie'],['هيدن كيفك؟','r-hayden']]){
+  const first=bodies.length;script.push(answer('One attendee answers'));const out=await group(c,text);assert.equal(out.statusCode,202,out.body);assert.equal(out.json().replyRound.total,1);await done(c);assert.equal(bodies.length,first+1);
+  assert.equal((await R.listConversationMessages(c.id)).filter(m=>m.role==='assistant').at(-1).agentId,expected);
+ }
+ const first=bodies.length,key=rid();script.push(answer('Only coordinator'));assert.equal((await group(c,'لخص الخطة',key)).statusCode,202);await ended(key);assert.equal(bodies.length,first+1);assert.equal((await R.listConversationMessages(c.id)).filter(m=>m.role==='assistant').at(-1).agentId??'r-agent','r-agent');
+ const roleKey=rid();script.push(answer('Which manager do you mean?'));await group(c,'المدير موجود؟',roleKey);await ended(roleKey);assert.equal(bodies.length,first+2);
+ // An absent department never pulls outsiders into the meeting.
+ const absentKey=rid();script.push(answer('No sales attendee'));await group(c,'قسم المبيعات جاهزين؟',absentKey);await ended(absentKey);assert.equal(bodies.length,first+3);
+ // Dismissed participants are absent from subsequent invitations.
+ await (await backendModule('src/services/meeting-attendance.ts')).changeMeetingAttendance('r-owner',m.id,{requestId:rid(),expectedVersion:(await M.getMeeting('r-owner',m.id)).version,mode:'dismiss',selection:{mode:'agents',agentIds:['r-hayden'],departments:[],headsOnly:false}});
+ script.push(answer('Coordinator'),answer('Charlie'));const out=await group(c,'وينكم؟');assert.equal(out.json().replyRound.total,2);await done(c);assert.equal(bodies.length,first+5);
+});

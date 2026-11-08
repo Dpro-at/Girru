@@ -14,9 +14,8 @@ import { MeetingError, getMeeting, meetingId, meetingLock, selectionInput, type 
 type Command = { mode: 'invite' | 'dismiss' | 'keep' | 'replace'; selection: Selection; hostOnly?: boolean };
 type Row = { id: string; owner_id: string; conversation_id: string; state: string; version: number; active_run_id: string | null; coordinator_agent_id: string | null };
 type Receipt = { id: string; meeting_id: string; owner_id: string; request_digest: string; joined: number; left_count: number; present: number; result_version: number };
-const deptAliases: Record<string, string[]> = {
-  development: ['تطوير','برمجة'], marketing: ['تسويق'], sales: ['مبيعات'], support: ['دعم','خدمة العملاء'], finance: ['مالية','محاسبة'], security: ['امن','حماية'], research: ['بحث','بحوث','ابحاث'], operations: ['عمليات','تشغيل'], design: ['تصميم'], data: ['بيانات'], legal: ['قانون','قانونية'], hr: ['موارد بشرية','توظيف'], people: ['موارد بشرية','توظيف'], education: ['تعليم'], engineering: ['هندسة'], creative: ['ابداع','انتاج ابداعي'],
-};
+import {meetingDepartmentAliases as deptAliases} from './meeting-department-aliases.js';
+
 const tokens = (text: string) => (addressText(text).match(/[\p{L}\p{N}]+/gu) ?? []).map(word => word.replace(/^[وف]?ال/u, ''));
 export function attendanceCommand(message: string, departments: string[]): Command | 'clarify' | null {
   const text = addressText(message), parts = tokens(message), normalized = ' ' + parts.join(' ') + ' ';

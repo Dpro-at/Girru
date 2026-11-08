@@ -1,3 +1,4 @@
+import {meetingAudience} from './meeting-reply-intent.js';
 import { mentionedAgents } from '../agent/context/target.js';
 /** Group replies use the original agent runtime, one writer at a time. */
 import { randomUUID } from 'node:crypto';
@@ -52,6 +53,15 @@ async function requestedParticipants(input: RoundTurn): Promise<{ ids: string[] 
   }
   if (collectiveReply(input.message)) return { ids: roster.map(person => person.id), context };
   const selection = conversationalSelection(input.message, roster, input.agentId);
+  if ((!selection.ids || selection.address==='group') && !selection.ambiguous) {
+    const meeting=await q.one<{id:string}>("SELECT id FROM meetings WHERE owner_id=? AND conversation_id=? AND state='active'",input.userId,input.c.id);
+    if(meeting){
+      const specialties=await q.all<{agent_id:string;name:string}>('SELECT s.agent_id,t.name FROM agent_specialties s JOIN specialty_templates t ON t.id=s.template_id JOIN meeting_participants p ON p.agent_id=s.agent_id WHERE p.meeting_id=? AND p.attending=1',meeting.id);
+      const audience=meetingAudience(input.message,roster.map(person=>({...person,specialties:specialties.filter(s=>s.agent_id===person.id).map(s=>s.name)})));
+      if(audience?.ambiguous)return {ids:[],context:context+'\nAsk which of these present participants the owner means; do not start several model replies for a singular job title (data): '+JSON.stringify(audience.ambiguous)};
+      if(audience)return {ids:audience.ids,context:context+(audience.ids.length?'\nThe owner explicitly invited these current meeting participants to reply. The coordinator answers first when included, then each selected attendee once in turn. For a presence check give a brief acknowledgement; for an opinion give your own concise contribution. Do not claim somebody is absent merely because they have not spoken yet. Do not request another automatic round.':'\nNo current attendee matches this department or job. Explain that; do not invite absent agents or pretend to speak for them.')};
+    }
+  }
   if (selection.ambiguous) return { ids: null, context: context + '\nAsk the owner to choose between these matching participants (data): ' + JSON.stringify(selection.ambiguous) };
   if (selection.others || selection.followup) {
     const questions=await q.all<{id:string;run_id:string;content:string}>("SELECT id,run_id,content FROM chat_messages WHERE session_id=? AND role='user' ORDER BY id DESC LIMIT 21",input.c.id);
