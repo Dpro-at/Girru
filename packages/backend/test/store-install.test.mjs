@@ -187,3 +187,17 @@ test('SQL execution uses the checked in-memory bytes even if the installed file 
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM extension_migrations WHERE extension_id='notes' AND filename='001_notes.sql'").get().n,1);
   }finally{fs.renameSync=rename;served=previous;index=indexFor(served);forget();}
 });
+
+
+test('incoming package writes are exclusive and cannot replace a planted symlink', async t=>{
+ const original=fs.writeFileSync,previous=served,outside=join(dir,'unrelated-marker.txt');let planted=false,unavailable=false;
+ original(outside,'keep synthetic marker');
+ try{
+  served=pkgFiles();index=indexFor(served);forget();
+  fs.writeFileSync=(target,bytes,options)=>{
+   if(!planted&&String(target).includes('.incoming-notes-')&&String(target).endsWith(join('index.js'))){try{fs.symlinkSync(outside,target);planted=true;}catch(error){if(process.platform==='win32'&&['EPERM','EACCES','ENOTSUP'].includes(error.code))unavailable=true;throw error;}}
+   return original(target,bytes,options);
+  };
+  const result=await new Promise(done=>startAdd('notes',{restart:()=>false,onDone:done}));if(unavailable){t.skip('Windows symlink creation privilege unavailable; planted-symlink case not exercised');return;}assert.equal(planted,true);assert.equal(result.ok,false);assert.equal(readFileSync(outside,'utf8'),'keep synthetic marker');
+ }finally{fs.writeFileSync=original;served=previous;index=indexFor(served);forget();}
+});

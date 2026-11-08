@@ -144,13 +144,13 @@ async function add(job: AddJob, { fetch: get = globalThis.fetch as unknown as Fe
   job.step = 'setting-up';
   const root = installedAppsRoot();
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });
-  const incoming = path.join(root, `.incoming-${id}-${randomUUID().slice(0, 8)}`);
+  const incoming = fs.mkdtempSync(path.join(root, `.incoming-${id}-`));
   try {
     for (const f of files) {
       const target = path.join(incoming, ...f.path.split('/'));
       if (!target.startsWith(incoming + path.sep)) throw new Error('a file path leaves the app folder');
       fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
-      fs.writeFileSync(target, f.bytes, { mode: 0o600 });
+      fs.writeFileSync(target, f.bytes, { mode: 0o600, flag: 'wx' });
     }
     if(['agent-connect','call-center','trading','browser'].includes(id)){
       const descriptor=files.find(f=>f.path===(id==='agent-connect'?'runtime-packages.npm':'app-host.npm'));

@@ -43,7 +43,7 @@ test('the moved page shows the orb before the account exists and keeps an earlie
   assert.match(html, /What does your company do\?/);
   assert.match(html, /setup-intro/);
   assert.match(html, /value="Robot repair"/, 'going back keeps the typed specialty');
-  for (const k of COMPANY_KIND_CHOICES) assert.ok(html.includes(k.label.replace(/,/g, ',')), k.label);
+  for (const k of COMPANY_KIND_CHOICES) assert.ok(html.includes(k.label), k.label);
   assert.doesNotMatch(renderToStaticMarkup(React.createElement(KindStep, props)), /setup-intro/, 'inside the Team step it has no orb of its own');
 });
 

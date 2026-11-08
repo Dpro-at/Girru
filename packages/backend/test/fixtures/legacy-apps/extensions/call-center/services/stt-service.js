@@ -3,8 +3,6 @@
  * Handles transcription for all supported providers
  */
 
-const fs = require('fs');
-const path = require('path');
 const FormData = require('form-data');
 const { getProvider } = require('../config/stt-providers.js');
 
@@ -12,7 +10,7 @@ class SttService {
   /**
    * Transcribe audio to text using specified provider
    * @param {Object} options
-   * @param {Buffer|string} options.audio - Audio buffer or file path
+   * @param {Buffer} options.audio - Uploaded audio bytes (local paths are never accepted)
    * @param {string} options.provider - Provider ID (openai, google, azure, twilio, deepgram, assemblyai)
    * @param {string} options.language - Language code (optional)
    * @param {string} options.apiKey - API key (if required)
@@ -33,8 +31,11 @@ class SttService {
       throw new Error(`API key required for provider: ${provider}`);
     }
 
-    // Convert file path to buffer if needed
-    const audioBuffer = typeof audio === 'string' ? fs.readFileSync(audio) : audio;
+    // The upload route supplies bytes. Never interpret caller input as a local file path.
+    if (!Buffer.isBuffer(audio) || audio.length === 0 || audio.length > 25 * 1024 * 1024) {
+      throw new TypeError('Audio must be uploaded bytes between 1 byte and 25 MiB');
+    }
+    const audioBuffer = Buffer.from(audio);
 
     // Route to appropriate provider
     switch (provider) {
