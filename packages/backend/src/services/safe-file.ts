@@ -40,6 +40,8 @@ export class SafeFileError extends Error {
 }
 
 export interface SafeWriteOptions {
+  /** Explicit binary artifacts use the same path/link/CAS checks; all existing writers remain UTF-8. */
+  encoding?: 'utf8' | 'binary';
   /** Largest text allowed, in bytes (default 1 MB). */
   maxBytes?: number;
   /** File mode for a new file (default 0o644); an existing file keeps its own. */
@@ -219,7 +221,7 @@ export function safeWriteFile(folder: string, relative: string, text: string | B
   const limit = platform === 'win32' ? WIN_MAX_PATH : POSIX_MAX_PATH;
   // The temp name is longer than the target's; it has to fit too.
   if (abs.length + 40 > limit) throw new SafeFileError('path_too_long', `${relative}: the full path is longer than this system allows`);
-  const bytes = checkText(text, maxBytes, relative);
+  const bytes = opts.encoding==='binary' ? (()=>{if(!Buffer.isBuffer(text)||text.length>maxBytes)throw new SafeFileError('too_large','Invalid bounded binary artifact');return text;})() : checkText(text, maxBytes, relative);
 
   const { dir, stat: dirStat } = checkDirs(root, parts.slice(0, -1), opts.createDirs !== false);
   removeStaleTemps(dir, name);

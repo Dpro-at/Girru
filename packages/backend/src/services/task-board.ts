@@ -411,11 +411,11 @@ export function renameColumn(ownerId: string, boardId: string, columnId: string,
   }, { immediate: true });
 }
 
-export function createCard(ownerId: string, boardId: string, body: Record<string, unknown>, opts: { conversationId?: string } = {}): Promise<BoardCard> {
+export function createCard(ownerId: string, boardId: string, body: Record<string, unknown>, opts: { conversationId?: string; guard?:()=>Step<void> } = {}): Promise<BoardCard> {
   return sql().tx(() => createCardSteps(ownerId, boardId, body, opts), { immediate: true });
 }
 
-export function* createCardSteps(ownerId: string, boardId: string, body: Record<string, unknown>, opts: { conversationId?: string } = {}): Step<BoardCard> {
+export function* createCardSteps(ownerId: string, boardId: string, body: Record<string, unknown>, opts: { conversationId?: string; guard?:()=>Step<void> } = {}): Step<BoardCard> {
   onlyKeys(body, ['columnId', 'title', 'description', 'priority', 'dueDate', 'agents', 'departments', 'type', 'startDate', 'cover', 'labels']);
   const title = line(body.title, 'title', MAX_TITLE);
   const type = body.type === undefined ? 'task' : cardType(body.type);
@@ -429,6 +429,7 @@ export function* createCardSteps(ownerId: string, boardId: string, body: Record<
   const deps = body.departments === undefined ? [] : departments(body.departments);
   datesOk(start, due);
     const d = yield* dialect();
+    if(opts.guard)yield* opts.guard();
     yield* boardRow(ownerId, boardId);
     const col = yield* columnOf(boardId, body.columnId);
     const total = yield* one<{ n: number }>('SELECT COUNT(*) AS n FROM board_cards WHERE board_id = ?', boardId);
@@ -448,7 +449,7 @@ export function* createCardSteps(ownerId: string, boardId: string, body: Record<
  * with the current card. Moving: `columnId` and optional `beforeCardId`
  * (null or absent = end of the column).
  */
-export function updateCard(ownerId: string, boardId: string, cardId: string, body: Record<string, unknown>): Promise<BoardCard> {
+export function updateCard(ownerId: string, boardId: string, cardId: string, body: Record<string, unknown>, effectGuard?:()=>Step<void>): Promise<BoardCard> {
   onlyKeys(body, ['expectedVersion', 'title', 'description', 'priority', 'dueDate', 'agents', 'departments', 'columnId', 'beforeCardId', 'archived', 'type', 'startDate', 'cover', 'labels']);
   const expected = body.expectedVersion;
   if (typeof expected !== 'number' || !Number.isInteger(expected) || expected < 1) throw new BoardError(400, 'invalid_version', 'expectedVersion is required');
@@ -470,7 +471,7 @@ export function updateCard(ownerId: string, boardId: string, cardId: string, bod
   const agents = body.agents === undefined ? undefined : idList(body.agents, 'agents', MAX_CARD_AGENTS);
   const deps = body.departments === undefined ? undefined : departments(body.departments);
   if (body.beforeCardId !== undefined && body.beforeCardId !== null && typeof body.beforeCardId !== 'string') throw bad('beforeCardId must be a card id or null');
-  return sql().tx(function* () {
+  return sql().tx(function* () {if(effectGuard)yield* effectGuard();
     const d = yield* dialect();
     yield* boardRow(ownerId, boardId);
     const card = yield* one<{ version: number; column_id: string; start_date: string | null; due_date: string | null; archived: number }>('SELECT version, column_id, start_date, due_date, archived FROM board_cards WHERE id = ? AND board_id = ?', cardId, boardId);

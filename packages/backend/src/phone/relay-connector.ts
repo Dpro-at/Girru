@@ -84,6 +84,9 @@ export class RelayConnector {
     return this.raw({ t: 'send', to, env });
   }
 
+  /** A bounded existing pairing mailbox; never a durable task queue. */
+  sendPairing(pairingId:string,env:string):boolean {if(!this.ready||!/^p_[A-Za-z0-9_-]{43}$/.test(pairingId)||env.length>64000)return false;return this.raw({t:'send',pairing:pairingId,env});}
+
   stop(): void {
     this.wanted = false;
     this.close();

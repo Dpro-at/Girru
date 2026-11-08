@@ -1,3 +1,4 @@
+import {workspaceDevicesDefinition,workspaceDevicesTool} from './domains/devices.js';
 import {workspaceControlDefinition,workspaceControlTool,ControlInputError} from './domains/control.js';
 import {workspaceDraftsDefinition,workspaceDraftsTool,DraftInputError} from './domains/drafts.js';
 import {workspaceReportsDefinition,workspaceReportsTool,ReportsInputError} from './domains/reports.js';
@@ -50,6 +51,7 @@ export const TOOL_DEFINITIONS = [
   workspaceMemoryDefinition,
   workspaceReportsDefinition,
   workspaceDraftsDefinition,
+  workspaceDevicesDefinition,
   workspaceControlDefinition,
   {
     name:'meetings',title:'Department meetings',
@@ -358,6 +360,7 @@ export async function callTool(name: string, rawArgs: unknown, deps: HandlerDeps
   try {
     const args = obj(rawArgs);
     switch (name) {
+      case 'workspace_devices': {const out=await workspaceDevicesTool(args,deps.backend);return ok(out.message,out.data);}
       case 'workspace_control': {const out=await workspaceControlTool(args,deps.backend);return ok(out.message,out.data);}
       case 'workspace_drafts': {const out=await workspaceDraftsTool(args,deps.backend);return ok(out.message,out.data);}
       case 'workspace_reports': {const out=await workspaceReportsTool(args,deps.backend);return ok(out.message,out.data);}

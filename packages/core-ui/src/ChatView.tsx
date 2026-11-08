@@ -1,3 +1,5 @@
+import {ComputerTaskRequest} from './ComputerTaskRequest';
+import {ComputerExecutionBadge} from './ComputerDevices';
 import { ChatVoice } from './ChatVoice';
 import { useOutsideProjects } from './outside-projects';
 import {CodeChatResize} from './CodeChatResize';
@@ -483,7 +485,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
   <div className="chat-screen" onDragOver={e=>{if(e.dataTransfer.types.includes('Files'))e.preventDefault();}} onDrop={e=>{if(e.dataTransfer.files.length){e.preventDefault();void onFiles(e.dataTransfer.files);}}}>
     {embeddedCode&&<div className="code-chat-heading"><strong>{activeConv?.title||'Chat'}</strong><button type="button" className="tool" aria-label={codeExpanded?'Narrow chat':'Expand chat'} aria-expanded={codeExpanded} title={codeExpanded?'Narrow chat':'Expand chat'} onClick={()=>setCodeExpanded(v=>!v)}><UiIcon name="expand" size={14}/></button></div>}
     {/* CH1: the chat's tools sit in the window's title bar (Terminal · Add to board · ⋯ · side panel); no second bar. */}
-    {active && titleSlot && createPortal(<span className="chat-title-tools" role="toolbar" aria-label="This chat">
+    {active && titleSlot && createPortal(<span className="chat-title-tools" role="toolbar" aria-label="This chat"><ComputerExecutionBadge sessionId={s.activeId}/>{client&&s.activeId&&owner&&<ComputerTaskRequest client={client} conversationId={s.activeId}/>}
       {pane === null && s.activeId && s.turns.length > 0 && <TitleFaces names={chatPeople(s.turns, convAgentId, nameOf)} onOpen={() => openPart('team')}/>}
       {client && s.activeId && s.threadPhase !== 'loading' && <ExportMenu key={s.activeId} client={client} conversationId={s.activeId} disabled={running} openKey={exportKey} bare/>}
       {terminal && owner && <button type="button" className="tool" aria-pressed={termOpen} aria-label="Terminal" title={termOpen ? 'Hide the terminal (⌃`)' : 'Terminal (⌃`)'} onClick={() => setTermOpen(v => !v)}><UiIcon name="terminal" size={15}/></button>}

@@ -1,3 +1,4 @@
+import {computerRoute,allowedComputer,computerResponse} from './computer-contract.js';
 import {reportsRoute,allowedReports,reportsResponse} from './reports-contract.js';
 import {hostAppRoute,allowedHostApp,hostAppResponse} from './store-host-app-contract.js';
 import {BROWSER_APP_PATH,allowedBrowserApp,browserAppResponse} from './browser-app-contract.js';
@@ -117,6 +118,7 @@ function user(value: unknown): User {
 }
 // Reject before URL normalization. No generic URL, header, key or mutation escape hatch.
 export function allowedRequest(method: string, path: string, body?: unknown): boolean {
+  if(computerRoute(path))return allowedComputer(method,path,body);
   if(path===VOICE_LIBRARY_PATH)return allowedVoiceLibrary(method,path,body);
   if(upgradeRoute(path))return allowedUpgrade(method,path,body);
   if(packRoute(path))return allowedPack(method,path,body);
@@ -216,6 +218,7 @@ function boundaryNotice(response: WireResponse): BoundaryNotice | undefined {
 
 // Preserve only reviewed machine codes at the decision endpoint, never error text.
 function safeResponse(path: string, response: WireResponse): WireResponse {
+  if(computerRoute(path))return {status:response.status,body:computerResponse(path,response.status,response.body)};
   const projected = projectResponse(path, response);
   const delay = response.status === 429 ? retryAfterSeconds(response.retryAfterSeconds) : undefined;
   return delay === undefined ? projected : { ...projected, retryAfterSeconds: delay };

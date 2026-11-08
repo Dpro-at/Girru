@@ -1,3 +1,4 @@
+import {ComputerExecutionBadge} from './ComputerDevices';
 import {useCallback,useEffect,useMemo,useRef,useState,useSyncExternalStore} from 'react';
 import type {ReactNode} from 'react';
 import {createPortal} from 'react-dom';
@@ -204,7 +205,7 @@ function RunInspector({notes,run,detail,failed,onOpenRun,onStop,onRetry,onOpen,o
  const opens=run.link.sessionId?'Open chat':run.agentId?'Open agent':null;
  return <div className="runs-insp">
   <p className="runs-insp-kind">{KIND[run.kind].label} · {STATE[run.state].label}<span className="runs-insp-tools">{detail&&<button type="button" className="tool" aria-label="Copy details" title="Copy details (⌘⇧C)" onClick={()=>onCopy(detail.copy)}><UiIcon name="copy" size={14}/></button>}</span></p>
-  <h3>{run.title}</h3>
+  <h3>{run.title}</h3><ComputerExecutionBadge sessionId={run.link.sessionId} runId={run.id}/>
   <dl className="runs-facts">
    <dt>Started by</dt><dd>{STARTED[run.startedBy]??'You'}</dd>
    {(run.agentName||run.agentId)&&<><dt>Agent</dt><dd><Face id={run.agentId} name={run.agentName} size={18}/>{run.agentId?<button type="button" className="link" onClick={()=>onAgent(run.agentId!)}>{run.agentName??'Agent'}</button>:run.agentName}</dd></>}
