@@ -1,3 +1,4 @@
+import {assertNoDefaultMemoryAccess} from '../memory/encryption/execution-context.js';
 /**
  * Database Module - Real SQLite with better-sqlite3
  * Central access point for all database operations
@@ -38,6 +39,7 @@ let repositories: Repositories | null = null;
  * Get all repository instances
  */
 export function getRepositories(): Repositories {
+  assertNoDefaultMemoryAccess();
   if (!repositories) {
     const db = getDatabase();
     repositories = {

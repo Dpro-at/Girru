@@ -97,9 +97,9 @@ function memoryError(reply: import('fastify').FastifyReply, err: unknown) {
   return sendScopeError(reply, err);
 }
 
-export async function memoryRoutes(fastify: FastifyInstance) {
+export async function memoryRoutes(fastify: FastifyInstance,options:{skipLegacyInitialization?:boolean}={}) {
   // Initialize storage
-  await getMemoryStorage().initialize();
+  if(!options.skipLegacyInitialization)await getMemoryStorage().initialize();
 
   // Encapsulated to this plugin: applies to the memory routes only.
   fastify.addHook('preHandler', async (request, reply) => {

@@ -122,3 +122,17 @@ test('turning the switch off moves the keys back to slugs', async () => {
   const [none] = await keys.moveProjectKeys('slug');
   assert.equal(none.direction, 'none');
 });
+
+test('released encryption hold keeps generation through key rewrite; active hold blocks reattachment',async()=>{
+ const H=await import(join(backendDir,'src/memory/encryption/projection-hold.ts'));
+ const E=await import(join(backendDir,'src/memory/outbox/events.ts'));
+ const from='synthetic-hold-source',to='synthetic-hold-destination';
+ const scope=await E.enableScope(OWNER,{id:from,slug:from});
+ const hold=await sql().tx(()=>H.claimEncryptedProjectionHoldStep(OWNER,scope));
+ await assert.rejects(sql().tx(()=>keys.rewriteStep(OWNER,from,to)),/encrypted projections are held/);
+ await sql().tx(()=>H.releaseEncryptedProjectionHoldStep(OWNER,scope,hold.id,hold.generation));
+ await sql().tx(()=>keys.rewriteStep(OWNER,from,to));
+ const moved=get('SELECT * FROM memory_encryption_projection_holds WHERE owner_id=? AND scope=?',OWNER,'project:'+to);
+ assert.equal(moved.generation,hold.generation);assert.equal(moved.state,'released');
+ assert.equal(get('SELECT * FROM memory_encryption_projection_holds WHERE owner_id=? AND scope=?',OWNER,scope),undefined);
+});

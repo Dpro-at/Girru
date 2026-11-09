@@ -1,3 +1,4 @@
+import {assertNoDefaultMemoryAccess} from './encryption/execution-context.js';
 import { readRegularFile, FileReadError } from '../services/read-regular-file.js';
 /**
  * Memory files (CORE-04): the database is canonical; every drawer can be
@@ -74,7 +75,7 @@ export type MemoryChange =
 export interface MemoryProposal {
   id: string;
   userId: string;
-  agentId: string;
+  agentId: string|null;
   drawer: DrawerRef;
   drawerId: string;
   baseHash: string;
@@ -82,7 +83,7 @@ export interface MemoryProposal {
   changes: MemoryChange[];
   status: 'pending' | 'approved' | 'rejected' | 'stale' | 'cancelled';
   /** upload/file: edited export (CORE-04); learning/agent: important learned item or agent change (CORE-05); import: imported text (CLI-02). */
-  source: 'upload' | 'file' | 'learning' | 'agent' | 'import';
+  source: 'upload' | 'file' | 'learning' | 'agent' | 'import' | 'owner';
   note: string | null;
   createdBy: string;
   createdAt: string;
@@ -337,7 +338,7 @@ function currentMemories(userId: string, drawer: DrawerRef): Step<Memory[]> {
  * Transaction lock for one drawer of one user (PostgreSQL): a change that
  * reads the drawer's content or revision and then writes runs alone.
  */
-function* lockDrawer(userId: string, drawer: DrawerRef): Step<void> {
+export function* lockDrawer(userId: string, drawer: DrawerRef): Step<void> {
   yield* lockName(`memory-drawer:${userId}:${drawerId(drawer)}`);
 }
 
@@ -354,6 +355,7 @@ export interface DrawerFileView {
 
 /** The export text of a drawer (no write). */
 export function viewDrawerFile(userId: string, agentId: string, drawer: DrawerRef): Promise<DrawerFileView> {
+  assertNoDefaultMemoryAccess();
   return sql().read(viewDrawerFileStep(userId, agentId, drawer));
 }
 
@@ -382,6 +384,7 @@ async function refuseNonRegular(file: string): Promise<boolean> {
 
 /** Write a drawer's export file (DB -> file only). */
 export async function exportDrawerFile(userId: string, agentId: string, drawer: DrawerRef): Promise<DrawerFileView> {
+  assertNoDefaultMemoryAccess();
   const view = await viewDrawerFile(userId, agentId, drawer);
   const file = drawerFilePath(agentId, userId, view.drawer);
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -398,6 +401,7 @@ export async function exportDrawerFile(userId: string, agentId: string, drawer: 
  * Best effort: the database stays canonical. Returns the agents re-exported.
  */
 export async function exportDrawerFileIfPresent(userId: string, drawer: DrawerRef): Promise<string[]> {
+  assertNoDefaultMemoryAccess();
   const done: string[] = [];
   let agents: string[] = [];
   try { agents = await fs.readdir(agentsRoot()); } catch { return done; }
@@ -422,6 +426,7 @@ export async function exportDrawerFileIfPresent(userId: string, drawer: DrawerRe
  * re-exported and the files left alone because they were edited.
  */
 export async function refreshUntouchedExports(userId: string, drawer: DrawerRef): Promise<{ reexported: string[]; edited: string[] }> {
+  assertNoDefaultMemoryAccess();
   const out = { reexported: [] as string[], edited: [] as string[] };
   let agents: string[] = [];
   try { agents = await fs.readdir(agentsRoot()); } catch { return out; }
@@ -443,6 +448,7 @@ export async function refreshUntouchedExports(userId: string, drawer: DrawerRef)
 
 /** Read the exported file of a drawer as it is on disk (owner edited it). */
 export async function readDrawerFile(userId: string, agentId: string, drawer: DrawerRef): Promise<string> {
+  assertNoDefaultMemoryAccess();
   const file = drawerFilePath(agentId, userId, drawer);
   if (!(await refuseNonRegular(file))) throw new MemoryFileError('This drawer has not been exported yet', 404);
   try {
@@ -834,7 +840,7 @@ export async function approveProposal(
   // the approval is committed, so a file problem never fails the response).
   for (const m of removed) await bestEffort('removing a memory copy', () => storage.removeMarkdownCopy(m));
   for (const m of written) await bestEffort('writing a memory copy', () => storage.writeMarkdownCopy(m));
-  await bestEffort('re-exporting the drawer', () => exportDrawerFile(userId, proposal.agentId, drawer));
+  if(proposal.agentId!==null){const exportAgentId=proposal.agentId;await bestEffort('re-exporting the drawer', () => exportDrawerFile(userId, exportAgentId, drawer));}
   // STORE-MAP-01 P9b (MD1, MD3): the text's own source, plus the owner's approval when the owner
   // decided it (not a scope rule, a reviewer agent or an automatic import).
   if (storeP9bEnabled()) {
@@ -894,3 +900,6 @@ export async function drawerVersions(userId: string, drawer: DrawerRef, limit = 
   `, userId, drawer.kind, drawer.key || '', Math.max(1, Math.min(1000, limit))));
   return rows.map((r: any) => ({ ...r, createdAt: isoUtc(r.createdAt) }));
 }
+
+/** Internal adapter for already authenticated/decrypted proposal rows. */
+export {rowToProposal as memoryProposalFromRow};

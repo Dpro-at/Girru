@@ -1,3 +1,5 @@
+import {readRegularFile} from '../../services/read-regular-file.js';
+import {assertNoProtectedDatabaseAlias} from '../../memory/encryption/protected-filesystem.js';
 import type { FastifyInstance } from 'fastify';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -28,7 +30,8 @@ export async function claudeLocalRoutes(fastify: FastifyInstance): Promise<void>
 
     try {
       const statsPath = path.join(getClaudeDir(), 'stats-cache.json');
-      const raw = await fs.readFile(statsPath, 'utf-8');
+      assertNoProtectedDatabaseAlias(statsPath);
+      const raw = (await readRegularFile(statsPath,8*1024*1024)).data.toString('utf8');
       const stats = JSON.parse(raw);
       return reply.send({ available: true, stats });
     } catch (err: any) {
@@ -152,7 +155,8 @@ export async function claudeLocalRoutes(fastify: FastifyInstance): Promise<void>
 
       const filePath = path.join(getClaudeDir(), 'projects', slug, `${id}.jsonl`);
       try {
-        const raw = await fs.readFile(filePath, 'utf-8');
+        assertNoProtectedDatabaseAlias(filePath);
+      const raw = (await readRegularFile(filePath,32*1024*1024)).data.toString('utf8');
         // Parse each line as JSON
         const messages = raw
           .split('\n')
@@ -215,7 +219,8 @@ export async function claudeLocalRoutes(fastify: FastifyInstance): Promise<void>
 
       try {
         const filePath = path.join(getClaudeDir(), 'plans', name);
-        const content = await fs.readFile(filePath, 'utf-8');
+        assertNoProtectedDatabaseAlias(filePath);
+        const content = (await readRegularFile(filePath,32*1024*1024)).data.toString('utf8');
         return reply.send({ available: true, name, content });
       } catch {
         return reply.status(404).send({ error: 'Plan not found' });
@@ -242,7 +247,8 @@ export async function claudeLocalRoutes(fastify: FastifyInstance): Promise<void>
       const filePath = path.join(getClaudeDir(), 'projects', slug, `${id}.jsonl`);
       let raw: string;
       try {
-        raw = await fs.readFile(filePath, 'utf-8');
+        assertNoProtectedDatabaseAlias(filePath);
+        raw = (await readRegularFile(filePath,32*1024*1024)).data.toString('utf8');
       } catch {
         return reply.status(404).send({ error: 'Session not found' });
       }

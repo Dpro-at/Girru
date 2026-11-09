@@ -1,10 +1,11 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,mkdirSync,readFileSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomBytes} from 'node:crypto';
-const backend=process.cwd(),temporary=mkdtempSync(join(tmpdir(),'computer-pilot-'));
+const backend = backendFixtureFileURLToPath(new URL('../',import.meta.url)),temporary=mkdtempSync(join(tmpdir(),'computer-pilot-'));
 process.env.HOME=temporary;process.env.AGENT_PLAYER_CONFIG_DIR=join(temporary,'config');process.env.DATABASE_PATH=join(temporary,'receiver.db');process.env.JWT_SECRET=randomBytes(64).toString('hex');process.env.ENCRYPTION_KEY=randomBytes(32).toString('hex');process.env.NODE_ENV='test';process.env.AGENT_PLAYER_BACKGROUND='off';
 const quiet=()=>{};console.log=quiet;console.info=quiet;console.warn=quiet;
 const {getDatabase}=await import('../src/db/database.ts');

@@ -23,6 +23,7 @@ The public definitions in `src/tools.ts` (and domain modules) and `publicToolCat
 | `workspace_drafts` | Owner review drafts | `context`, `prepare`, `list`, `read` |
 | `workspace_reports` | Reports and prepared display results | `list`, `read`, `create`, `update`, `publish` |
 | `workspace_memory` | Scoped memory and prepared proposals | `search`, `read`, `versions`, `status`, `reviews`, `review`, `propose_add`, `propose_update` |
+| `workspace_devices` | Owned computer status, confirmed task requests and selected portable synchronization; target approvals remain required | `status`, `sync`, `request_task`, `cancel_task`, `select_sync` |
 | `meetings` | Department meetings | `list`, `read`, `departments`, `participants`, `create`, `draft` |
 | `workspace_settings` | Portable workspace settings | `export`, `preview`, `import` |
 | `trading_practice` | Local paper trading practice | `read`, `start`, `order`, `step`, `stop`, `end` |

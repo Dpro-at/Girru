@@ -1,3 +1,5 @@
+import {consumeCurrentEncryptedMemoryScope} from '../encryption/consumer-host.js';
+import {selectedMemoryExecution} from '../encryption/execution-context.js';
 /**
  * Pinned facts per scope (MEM-SCALE-01): short facts the owner pins to the
  * company, a department or a project. The context of every reply in that
@@ -137,11 +139,10 @@ export function scopeFactAccess(p: { memoryRead: readonly string[]; scopeRead?: 
 }
 
 /** pinnedFactsBlock with the facts it holds (MEM-CACHE-01 context pack and reply trace). */
-export async function pinnedFactsForReply(ownerId: string | null | undefined, projectSlug?: string | null, allow: { company: boolean; project: boolean; department?: boolean } = { company: true, project: true }): Promise<ReplyPinnedFacts> {
+async function pinnedFactsForReplyCurrent(ownerId: string | null | undefined, projectSlug?: string | null, allow: { company: boolean; project: boolean; department?: boolean } = { company: true, project: true }): Promise<ReplyPinnedFacts> {
+  const selected=selectedMemoryExecution();if(selected){if(!ownerId)throw new Error('encrypted_memory_unavailable');return selected.pinned(ownerId,projectSlug,allow);}
   if (!ownerId) return { text: '', facts: [] };
   return sql().read((function* () {
-    const sections: Array<{ title: string; facts: string[] }> = [];
-    const used: ReplyPinnedFacts['facts'] = [];
     // Company facts follow the owner drawer, department and project facts the project drawer.
     const company = allow.company ? yield* listStep(ownerId, { kind: 'company', id: '' }) : [];
     let dept: { title: string; facts: PinnedFact[] } | null = null;
@@ -153,6 +154,13 @@ export async function pinnedFactsForReply(ownerId: string | null | undefined, pr
       if (allow.department !== false) dept = { title: `Department "${d?.name ?? GENERAL_NAME}"`, facts: yield* listStep(ownerId, { kind: 'department', id: d?.id ?? GENERAL_DEPARTMENT }) };
       project = { title: `Project "${p.name}"`, facts: yield* listStep(ownerId, { kind: 'project', id: p.slug }) };
     }
+    return renderScopedPinnedFacts(company,dept,project);
+  })());
+}
+
+/** Shared existing scope priority and prompt budget; callers supply already-authorized facts. */
+export function renderScopedPinnedFacts(company:PinnedFact[],dept:{title:string;facts:PinnedFact[]}|null,project:{title:string;facts:PinnedFact[]}|null):ReplyPinnedFacts{
+  const sections:Array<{title:string;facts:string[]}>=[],used:ReplyPinnedFacts['facts']=[];
     let budget = MAX_PINNED_BLOCK_CHARS;
     const take = (facts: PinnedFact[]): Array<{ line: string; fact: PinnedFact }> => {
       const out: Array<{ line: string; fact: PinnedFact }> = [];
@@ -181,5 +189,6 @@ export async function pinnedFactsForReply(ownerId: string | null | undefined, pr
         ...sections.map((s) => `${s.title}:\n${s.facts.join('\n')}`)].join('\n'),
       facts: used,
     };
-  })());
 }
+
+export function pinnedFactsForReply(...args:Parameters<typeof pinnedFactsForReplyCurrent>):ReturnType<typeof pinnedFactsForReplyCurrent>{return consumeCurrentEncryptedMemoryScope(()=>pinnedFactsForReplyCurrent(...args));}

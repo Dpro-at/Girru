@@ -1,3 +1,5 @@
+import {consumeCurrentEncryptedMemoryScope} from '../encryption/consumer-host.js';
+import {assertNoDefaultMemoryAccess,selectedMemoryExecution} from '../encryption/execution-context.js';
 /**
  * Document recall (KNOW-INDEX-01; GIRRU_DOC_INDEX): the chunks of the turn's
  * documents that answer the message, with the file and page to cite.
@@ -63,7 +65,9 @@ const ensured = new Set<string>();
 const ensuredProjects = new Set<string>();
 
 /** The sources this turn may read, with their revisions (two small queries; no chunk text). */
-export async function docScopes(input: { userId: string; drawers: readonly DrawerRef[]; agentId?: string | null }): Promise<DocScopes> {
+async function docScopesCurrent(input: { userId: string; drawers: readonly DrawerRef[]; agentId?: string | null }): Promise<DocScopes> {
+  const selected=selectedMemoryExecution();if(selected)return selected.documentScopes(input);
+  assertNoDefaultMemoryAccess();
   const empty: DocScopes = { sources: [], token: '' };
   if (!docIndexEnabled() || input.drawers.length === 0) return empty;
   const keys = input.drawers.filter((d) => d.kind === 'project' && d.key).map((d) => d.key!);
@@ -120,7 +124,9 @@ async function load(source: DocScopes['sources'][number]): Promise<Loaded> {
 /** Drop the in-process chunk cache (tests; a forgotten source). */
 export function clearDocRecallCache(): void { cache.clear(); ensured.clear(); ensuredProjects.clear(); }
 
-export async function docRecall(input: { userId: string; query: string; limit?: number; scopes: DocScopes }): Promise<{ items: DocHit[]; reliable: boolean; best: number }> {
+async function docRecallCurrent(input: { userId: string; query: string; limit?: number; scopes: DocScopes }): Promise<{ items: DocHit[]; reliable: boolean; best: number }> {
+  const selected=selectedMemoryExecution();if(selected)return selected.documentRecall(input);
+  assertNoDefaultMemoryAccess();
   const none = { items: [], reliable: false, best: 0 };
   const query = input.query.trim().slice(0, 2000);
   if (!docIndexEnabled() || !query || !input.scopes.sources.length) return none;
@@ -164,3 +170,7 @@ export function citeOf(h: Pick<DocHit, 'file' | 'page' | 'heading'>): string {
   if (h.page !== null) return `${h.file}, page ${h.page}`;
   return h.heading ? `${h.file} › ${h.heading}` : h.file;
 }
+
+export function docScopes(...args:Parameters<typeof docScopesCurrent>):ReturnType<typeof docScopesCurrent>{return consumeCurrentEncryptedMemoryScope(()=>docScopesCurrent(...args));}
+
+export function docRecall(...args:Parameters<typeof docRecallCurrent>):ReturnType<typeof docRecallCurrent>{return consumeCurrentEncryptedMemoryScope(()=>docRecallCurrent(...args));}

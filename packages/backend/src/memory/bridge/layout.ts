@@ -1,3 +1,4 @@
+import {assertNoDefaultMemoryAccess} from '../encryption/execution-context.js';
 /**
  * STORE-MAP-01 P7: the project folder layout, planned and then written in one
  * step with a preview (GIRRU_STORE_P7, needs the one Girru section of P2).
@@ -116,12 +117,14 @@ function summary(projectId: string, folder: string, files: LayoutFile[]): Layout
 
 /** Dry run: every file the layout would create or change, and why a file cannot be written. */
 export async function layoutPreview(ownerId: string, projectId: unknown): Promise<LayoutPreview> {
+  assertNoDefaultMemoryAccess();
   const p = await plan(ownerId, projectId);
   return summary(p.project.id, p.folder, p.files);
 }
 
 /** Write the layout the owner saw (all-or-nothing on conflicts) and keep it in sync from now on. */
 export async function layoutApply(ownerId: string, projectId: unknown, input: { previewHash?: unknown; confirm?: unknown }, actor = 'owner'): Promise<LayoutPreview> {
+  assertNoDefaultMemoryAccess();
   if (input?.confirm !== true) throw new BridgeError('Send confirm: true after reviewing the preview', 400, 'confirm_required');
   if (typeof input.previewHash !== 'string') throw new BridgeError('previewHash is required');
   const p = await plan(ownerId, projectId);

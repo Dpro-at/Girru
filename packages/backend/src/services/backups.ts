@@ -1,3 +1,4 @@
+import {createUnprotectedReadStream,assertNoRawProtectedMemoryCopy,assertMemoryFilesystemAccess} from '../memory/encryption/protected-filesystem.js';
 /**
  * Automatic backup (BACKUP-01, board Backup1). Like a cron job: every day at 03:00
  * (or as soon as the computer is awake after that) and before every update, Girru
@@ -264,7 +265,8 @@ function signed(m: Manifest): boolean {
 }
 async function sha256(file: string): Promise<string> {
   const h = createHash('sha256');
-  await pipeline(fs.createReadStream(file), h);
+  assertMemoryFilesystemAccess(file);
+  await pipeline(createUnprotectedReadStream(file), h);
   return h.digest('hex');
 }
 /** Before a restore: the signature, and every stored file a plain file with its recorded hash. */
@@ -352,6 +354,7 @@ async function sqliteCopy(src: string, dest: string, counts?: { tables: number; 
  * when the backup was made. Nothing in the data folder is touched.
  */
 export async function restoreTest(dir: string, main: Entry, expected: { tables: number; memories: number } | null): Promise<RestoreTest> {
+  assertNoRawProtectedMemoryCopy();
   const at = new Date().toISOString();
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'girru-restore-test-'));
   try {
@@ -405,6 +408,7 @@ let running: Promise<BackupInfo> | null = null;
 
 /** Make one backup now. One at a time: a second call waits for the running one. */
 export function backUpNow(kind: BackupKind = 'manual', now: Date = new Date()): Promise<BackupInfo> {
+  assertNoRawProtectedMemoryCopy();
   if (!BACKUP_KINDS.includes(kind)) return Promise.reject(new BackupError(400, 'invalid_kind', 'Unknown backup kind'));
   if (running) return running;
   running = make(kind, now).finally(() => { running = null; });
@@ -544,6 +548,7 @@ export async function backupHolds(id: string, rel: string): Promise<boolean> {
 
 /** Ask for a restore: back up now, then leave the marker for the next start. The caller restarts. */
 export async function requestRestore(id: string): Promise<{ undoId: string }> {
+  assertNoRawProtectedMemoryCopy();
   const b = getBackup(id);
   if (!b.checked) throw new BackupError(409, 'not_checked', 'This backup did not pass its check, so it cannot be restored');
   const m = readManifest(b.dir);
@@ -563,6 +568,7 @@ async function gunzipTo(src: string, dest: string) {
  * removed first, so a restore that fails never repeats. Returns what happened.
  */
 export async function applyPendingRestore(): Promise<{ id: string; ok: boolean; error?: string } | null> {
+  assertNoRawProtectedMemoryCopy();
   const marker = path.join(dataRoot(), RESTORE_MARKER);
   const ask = readJson<{ id?: unknown; folder?: unknown }>(marker);
   if (!ask) return null;

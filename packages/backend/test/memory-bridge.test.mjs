@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // MEM-BRIDGE-01: Girru memory is the one brain for Claude Code, Codex, Gemini CLI and Antigravity.
 //  - a fact approved in Girru appears in the managed AGENTS.md brief and in the MCP read tools;
 //  - owner text outside Girru's markers stays byte for byte; no secret reaches any written file;
@@ -15,7 +16,7 @@ import { join, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 import { switchValueOn } from './helpers/switches.mjs';
-const backendDir = process.cwd();
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-bridge-')));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });
 process.chdir(dir);

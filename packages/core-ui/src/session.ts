@@ -1,6 +1,7 @@
 import {googleAuthRoute,allowedGoogleAuth,googleAuthResponse} from './google-auth-contract.js';
 import {computerRoute,allowedComputer,computerResponse} from './computer-contract.js';
 import {reportsRoute,allowedReports,reportsResponse} from './reports-contract.js';
+import {encryptionRoute,allowedEncryption,encryptionResponse} from './memory-encryption-contract.js';
 import {hostAppRoute,allowedHostApp,hostAppResponse} from './store-host-app-contract.js';
 import {BROWSER_APP_PATH,allowedBrowserApp,browserAppResponse} from './browser-app-contract.js';
 import {VOICE_LIBRARY_PATH,allowedVoiceLibrary,voiceLibraryResponse} from './voice-library-contract.js';
@@ -135,6 +136,7 @@ export function allowedRequest(method: string, path: string, body?: unknown): bo
   if(scheduleAuthorizationRoute(path))return allowedScheduleAuthorization(method,path,body);
   if(reviewerRoute(path))return allowedReviewer(method,path,body);
   if(verificationRoute(path))return allowedVerification(method,path,body);
+  if(encryptionRoute(path))return allowedEncryption(method,path,body);
   if(coverageRoute(path))return allowedCoverage(method,path,body);
   if(tradingPaperRoute(path))return allowedTradingPaper(method,path,body);
   if(schedulerRoute(path))return allowedScheduler(method,path,body);
@@ -243,6 +245,7 @@ function projectResponse(path: string, response: WireResponse): WireResponse {
   if(scheduleAuthorizationRoute(path))return {status:response.status,body:scheduleAuthorizationResponse(path,response.status,response.body)};
   if(reviewerRoute(path))return {status:response.status,body:reviewerResponse(path,response.status,response.body)};
   if(verificationRoute(path))return {status:response.status,body:verificationResponse(path,response.status,response.body)};
+  if(encryptionRoute(path))return {status:response.status,body:encryptionResponse(response.status,response.body,path)};
   if(coverageRoute(path))return {status:response.status,body:coverageResponse(response.status,response.body)};
   if(tradingPaperRoute(path))return {status:response.status,body:tradingPaperResponse(path,response.status,response.body)};
   if(schedulerRoute(path))return {status:response.status,body:schedulerResponse(path,response.status,response.body)};

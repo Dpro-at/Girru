@@ -1,3 +1,5 @@
+import {assertNoLegacyMemoryFileAccess} from '../encryption/consumer-host.js';
+import {assertNoDefaultMemoryAccess} from '../encryption/execution-context.js';
 /**
  * Document index (KNOW-INDEX-01; GIRRU_DOC_INDEX). Background only.
  *
@@ -64,6 +66,8 @@ export interface SourceRow {
 const toSource = (r: SourceRow): SourceRow => ({ ...r, enabled: num<number>(r.enabled), revision: num<number>(r.revision), files: num<number>(r.files), chunks: num<number>(r.chunks), unreadable: num<number>(r.unreadable), limited: num<number>(r.limited) });
 
 export async function getSource(sourceId: string): Promise<SourceRow | null> {
+  assertNoLegacyMemoryFileAccess();
+  assertNoDefaultMemoryAccess();
   const r = await sql().read(one<SourceRow>('SELECT * FROM doc_index_sources WHERE id = ?', sourceId));
   return r ? toSource(r) : null;
 }
@@ -78,6 +82,8 @@ function* deleteSourceIndexStep(sourceId: string): Step<void> {
  * off. Off forgets that source's index at once (files are never touched).
  */
 export async function setDocSource(ownerId: string, kind: unknown, refId: unknown, enabled: unknown): Promise<SourceRow> {
+  assertNoLegacyMemoryFileAccess();
+  assertNoDefaultMemoryAccess();
   if (kind !== 'project' && kind !== 'agent') throw new DocIndexError(400, 'invalid_kind');
   if (typeof enabled !== 'boolean') throw new DocIndexError(400, 'invalid_enabled');
   if (typeof refId !== 'string' || !refId) throw new DocIndexError(400, 'invalid_ref');
@@ -105,6 +111,8 @@ export async function setDocSource(ownerId: string, kind: unknown, refId: unknow
 
 /** The agent's knowledge source, created (on) the first time its recall needs it. */
 export async function ensureAgentSource(ownerId: string, agentId: string): Promise<string | null> {
+  assertNoLegacyMemoryFileAccess();
+  assertNoDefaultMemoryAccess();
   if (!validAgentFileId(agentId)) return null;
   const id = sourceIdOf(ownerId, 'agent', agentId);
   const d = sql().dialect;
@@ -122,6 +130,8 @@ export async function ensureAgentSource(ownerId: string, agentId: string): Promi
  * untrusted data in recall, and secrets are skipped as everywhere.
  */
 export async function ensureProjectSources(ownerId: string): Promise<string[]> {
+  assertNoLegacyMemoryFileAccess();
+  assertNoDefaultMemoryAccess();
   const rows = await sql().read(all<{ id: string }>(`
     SELECT p.id FROM chat_projects p
      WHERE p.user_id = ? AND p.folder IS NOT NULL
@@ -138,6 +148,8 @@ export async function ensureProjectSources(ownerId: string): Promise<string[]> {
 
 /** A Knowledge file of this agent changed (Agent › Files): its sources look again soon. */
 export async function agentKnowledgeChanged(agentId: string): Promise<void> {
+  assertNoLegacyMemoryFileAccess();
+  assertNoDefaultMemoryAccess();
   if (!docIndexEnabled() || !validAgentFileId(agentId)) return;
   const rows = await sql().read(all<{ id: string }>(`SELECT id FROM doc_index_sources WHERE kind = 'agent' AND ref_id = ? AND enabled = 1`, agentId));
   for (const r of rows) {
@@ -227,6 +239,8 @@ export interface IndexReport { sourceId: string; state: string; files: number; c
 
 /** One run of one source (see the header). */
 export async function indexSource(sourceId: string, opts: { embedder?: EmbeddingService } = {}): Promise<IndexReport> {
+  assertNoLegacyMemoryFileAccess();
+  assertNoDefaultMemoryAccess();
   const base: IndexReport = { sourceId, state: 'ready', files: 0, changed: 0, removed: 0, unreadable: 0, chunks: 0, reembedded: 0, limited: false };
   if (!docIndexEnabled()) return { ...base, skipped: 'off' };
   const source = await getSource(sourceId);
@@ -342,6 +356,8 @@ const lastQueued = new Map<string, number>();
 
 /** Index one source in the background (one run at a time in this process; never awaited by a reply). */
 export function queueDocIndex(sourceId: string, opts: { minIntervalMs?: number } = {}): void {
+  assertNoLegacyMemoryFileAccess();
+  assertNoDefaultMemoryAccess();
   if (!docIndexEnabled() || queued.has(sourceId)) return;
   const last = lastQueued.get(sourceId) ?? 0;
   if (opts.minIntervalMs && Date.now() - last < opts.minIntervalMs) return;
@@ -352,11 +368,14 @@ export function queueDocIndex(sourceId: string, opts: { minIntervalMs?: number }
 
 /** Wait until every queued run is done (tests, shutdown). */
 export async function docIndexIdle(): Promise<void> {
+  assertNoDefaultMemoryAccess();
   for (let i = 0; i < 50 && queued.size; i++) await chain.catch(() => undefined);
 }
 
 /** Every enabled source of an owner, one after another (the scheduled job; resumes an interrupted run). */
 export async function indexOwner(ownerId: string): Promise<IndexReport[]> {
+  assertNoLegacyMemoryFileAccess();
+  assertNoDefaultMemoryAccess();
   if (!docIndexEnabled()) return [];
   await ensureProjectSources(ownerId);
   const rows = await sql().read(all<{ id: string }>('SELECT id FROM doc_index_sources WHERE owner_id = ? AND enabled = 1 ORDER BY id', ownerId));
@@ -374,6 +393,8 @@ export interface SourceStatus {
 
 /** The index status of an owner's sources (paths shown relative to their folder; no file text). */
 export async function docIndexStatus(ownerId: string): Promise<SourceStatus[]> {
+  assertNoLegacyMemoryFileAccess();
+  assertNoDefaultMemoryAccess();
   const sources = (await sql().read(all<SourceRow>('SELECT * FROM doc_index_sources WHERE owner_id = ? ORDER BY kind, ref_id', ownerId))).map(toSource);
   const bad = await sql().read(all<{ source_id: string; display_path: string; reason: string | null }>(
     `SELECT source_id, display_path, reason FROM doc_index_files WHERE owner_id = ? AND status = 'unreadable' ORDER BY display_path LIMIT 500`, ownerId));
@@ -398,6 +419,8 @@ export interface ProjectDocs {
  * are the owner's own folders; no file text.
  */
 export async function documentsView(ownerId: string): Promise<{ projects: ProjectDocs[]; agents: { sources: number; files: number; unreadable: Array<{ file: string; reason: string }>; state: string | null } }> {
+  assertNoLegacyMemoryFileAccess();
+  assertNoDefaultMemoryAccess();
   for (const id of await ensureProjectSources(ownerId)) queueDocIndex(id);
   const status = await docIndexStatus(ownerId);
   const projects = await sql().read(all<{ id: string; name: string; folder: string | null; extra_folders: string | null; mine: number | null }>(`

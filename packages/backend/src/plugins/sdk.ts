@@ -1,3 +1,4 @@
+import {assertNoProtectedDatabaseAlias,readNonDatabaseFileSync} from '../memory/encryption/protected-filesystem.js';
 import {htmlToText} from './html-text.js';
 import {callCenterRuntimeAllowed,loadCallCenterRuntime} from '../services/call-center-runtime.js';
 import { safeConsole } from '../services/safe-error-log.js';
@@ -415,7 +416,8 @@ export function createExtensionApi(
           throw new Error(`Migration file not found: ${absolutePath}`);
         }
 
-        const sql = readFileSync(absolutePath, 'utf-8');
+        assertNoProtectedDatabaseAlias(absolutePath);
+        const sql = readNonDatabaseFileSync(absolutePath, 'utf-8');
         db.exec(sql);
 
         // Track migration
@@ -659,7 +661,8 @@ export function createExtensionApi(
         const locale = file.replace('.json', '');
         const filePath = extensionResourcePath(extensionDir, join(localeDir, file));
         try {
-          const translations = JSON.parse(readFileSync(filePath, 'utf-8'));
+          assertNoProtectedDatabaseAlias(filePath);
+          const translations = JSON.parse(readNonDatabaseFileSync(filePath, 'utf-8'));
           registerExtensionBackendTranslations(extensionId, locale, translations);
           safeConsole.log(`[ExtensionApi:${extensionId}] 🌐 Loaded ${locale} translations (${Object.keys(translations).length} keys)`);
         } catch (err) {

@@ -141,6 +141,7 @@ function startupStatus(status) {
   mainWindow.webContents.send('dpro:startup-status', status);
 }
 
+let nativeControlEnrollment=null,nativeControlAuthority=null,nativeControlRoot=null,nativeControlLease=null;
 async function startLocal() {
   await showPage('starting.html', { status: 'Checking the installation files…' });
   try {
@@ -153,8 +154,16 @@ async function startLocal() {
     browserRuntime = browserRuntime || require('./browser-runtime.cjs').createBrowserRuntime({root:process.env.DPRO_BROWSER_ROOT,bundled:path.join(process.resourcesPath,'browser'),runtimesDir:appRuntimesDir(),node:payload.node,profile:process.env.DPRO_BROWSER_PROFILE || path.join(settingsDir(),'browser')});
     desktopDeviceCustody=desktopDeviceCustody||require('./device-custody.cjs').createDeviceCustody({root:path.join(settingsDir(),'device-custody'),safeStorage:electron.safeStorage});
     const deviceBroker=require('./device-broker.cjs').createDeviceBroker({selectInstalledClient:async clientId=>{const selected=await dialog.showOpenDialog(mainWindow,{title:'Configure Dpro Google sign-in',message:'Select the Dpro Desktop OAuth JSON. It stays in this computer’s protected vault.',properties:['openFile'],filters:[{name:'Google Desktop OAuth JSON',extensions:['json']}]});if(selected.canceled||selected.filePaths.length!==1)return null;return require('./google-client-config.cjs').readInstalledClient(selected.filePaths[0],clientId);},accountOrigin:process.env.GIRRU_ACCOUNT_ORIGIN??'https://relay.girru.net/identity/v1',custody:desktopDeviceCustody,profileDataRoot:dataDir(),managedWitnessRoot:path.join(settingsDir(),'device-witness-metadata'),confirmLeaseRecovery:async()=>{const r=await dialog.showMessageBox(mainWindow,{type:'warning',buttons:['Cancel','Review stopped process lease'],defaultId:0,cancelId:0,message:'Recover device custody only after the other Girru process has stopped.',detail:'The app will refuse a live or unknown process. This does not restore device membership or resume tasks.'});return r.response===1;},openExternal:url=>shell.openExternal(url)});
+    if(nativeControlAuthority&&nativeControlRoot!==dataDir()){nativeControlAuthority.close();nativeControlAuthority=null;nativeControlRoot=null;nativeControlLease=null;}
+    if(!nativeControlAuthority){nativeControlAuthority=require('./memory-native-control.cjs').createNativeControlAuthority({root:dataDir(),settingsDirectory:settingsDir(),protector:electron.safeStorage,enrollment:nativeControlEnrollment,platform:process.platform});nativeControlRoot=dataDir();}
+    const nativeControl=nativeControlLease??await nativeControlAuthority.resolve();nativeControlLease=nativeControl;nativeControlEnrollment=null;
+    const memoryCatalogPermission=nativeControl.kind==='new-app-owned-control'?nativeControlAuthority.catalogPermission():null;
+    const memoryOwnerFactory=nativeControl.kind==='new-app-owned-control'?require('./memory-native-owner-runtime.cjs').createMemoryNativeOwnerRuntime({dialog,protector:electron.safeStorage,getWindow:()=>mainWindow,platform:process.platform,catalogPermission:memoryCatalogPermission,catalogDirectory:memoryCatalogPermission.catalogDirectory,catalogWitnessDirectory:memoryCatalogPermission.catalogWitnessDirectory,forbiddenRoots:[...new Set([dataDir(),...discovered.map(entry=>entry.dir).filter(value=>typeof value==='string'&&path.isAbsolute(value)),path.join(settingsDir(),'device-custody'),path.join(settingsDir(),'browser'),appRuntimesDir()])]}):undefined;
+    const controlLaunchId=require('node:crypto').randomBytes(32).toString('base64url');
     runtime = createLocalRuntime({
       deviceCustody:deviceBroker,
+      memoryOwnerFactory,
+      memoryControlBootstrap:async()=>{if(nativeControl.kind!=='new-app-owned-control')return {control:null,selection:{selected:false,profileId:null,mode:'none'}};if(!nativeControl.isCurrent())throw new Error('memory_control_bootstrap_unavailable');const selection=await memoryOwnerFactory.selectionState(),control=await nativeControlAuthority.bootstrap({launchId:controlLaunchId});if(!nativeControl.isCurrent())throw new Error('memory_control_bootstrap_unavailable');return {control,selection};},
       node: payload.node,
       readyTimeoutMs: 30000,
       args: backendArgs(payload.backendDir),
@@ -213,7 +222,7 @@ async function applyMode() {
       await scanData();
       let decision = discovery.decide(discovered, readSelection());
       try { const saved = JSON.parse(fs.readFileSync(path.join(settingsDir(), 'workspace.json'), 'utf8')); if (saved.newWorkspace === true && saved.dir.startsWith(path.join(settingsDir(), 'workspaces') + path.sep) && discovered.find(r => r.dir === saved.dir)?.state === 'unconfigured') decision = { kind: 'existing', dir: saved.dir }; } catch { /* no confirmed new workspace */ }
-      if (decision.kind === 'new') selectedData = require('./workspace-selection.cjs').createWorkspace(settingsDir());
+      if (decision.kind === 'new') {const allocated=require('./memory-native-control.cjs').allocateNativeControlWorkspace(settingsDir());selectedData=allocated.root;nativeControlEnrollment=allocated.proof;}
       else if (decision.kind === 'existing') selectedData = decision.dir;
       else return showPage('welcome.html');
       if (!readSelection()) {
@@ -342,8 +351,7 @@ ipcMain.handle('dpro:select-data', async (event, dir) => {
 });
 ipcMain.handle('dpro:new-workspace', async (event, confirmed) => {
   if (!fromWelcome(event) || confirmed !== true) return { ok: false };
-  selectedData = path.join(settingsDir(), 'workspaces', require('node:crypto').randomUUID());
-  fs.mkdirSync(selectedData, { recursive: true, mode: 0o700 });
+  const allocated=require('./memory-native-control.cjs').allocateNativeControlWorkspace(settingsDir());selectedData=allocated.root;nativeControlEnrollment=allocated.proof;
   const file = path.join(settingsDir(), 'workspace.json');
   fs.writeFileSync(file, JSON.stringify({ dir: selectedData, newWorkspace: true }), { mode: 0o600 });
   await startLocal(); return { ok: true };
@@ -522,6 +530,7 @@ app.on('before-quit', event => {
       catch { log?.write('Session storage could not be flushed before shutdown.'); }
       await stopLocal();
       await desktopDeviceCustody?.close();
+      nativeControlAuthority?.close();nativeControlAuthority=null;nativeControlRoot=null;nativeControlLease=null;
     }
     return true;
   })

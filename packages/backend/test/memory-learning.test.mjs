@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // CORE-05: mixed learning approval (routine saved, important -> proposal),
 // versioning of every API/tool change, weekly summary.
 // Run: node --import tsx --test test/memory-learning.test.mjs
@@ -11,17 +12,19 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 import { switchValueOn } from './helpers/switches.mjs';
-const backendDir = process.cwd();
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-memlearn-'));
 mkdirSync(join(dir, '.data'), { recursive: true });
 process.chdir(dir);
 process.env.HOME = dir;
 process.env.DATABASE_PATH = join(dir, '.data', 'agent-player.db');
+process.env.AGENT_PLAYER_DATA_DIR = join(dir, '.data');
 process.env.JWT_SECRET = randomBytes(64).toString('hex'); // throwaway, test only
 process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway, test only
 delete process.env.MEMORY_SUMMARY_MODEL;
 delete process.env.OUTSIDER_AGENT_MEMORY;
 
+process.env.OLLAMA_URL = 'http://127.0.0.1:11434'; // Matches the intercepted URL below; no server is contacted.
 // The extraction model is stubbed: only the local Ollama generate URL answers.
 let extraction = [];
 const outbound = [];

@@ -144,6 +144,10 @@ export interface TeamInstance {
 
 /** Task definition */
 export interface Task {
+  /** Server-recorded delegation provenance; absence never means owner-created. */
+  spawnDepth?: number;
+  spawnedBy?: string;
+  origin?: string;
   /** Unique task ID */
   id: string;
   /** Task title */

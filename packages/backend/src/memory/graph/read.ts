@@ -1,3 +1,5 @@
+import {selectedMemoryExecution} from '../encryption/execution-context.js';
+import {legacyGraphView} from '../encryption/legacy-graph-view.js';
 /**
  * Graph reads (CORE-MEM-GRAPH) for the owner's graph view and the
  * memory_graph agent tool: entities, links, one entity with its links and
@@ -55,6 +57,7 @@ const preview = (s: string) => { const t = String(s || '').replace(/\s+/g, ' ').
 
 /** Entities in scope, most attached memories first. `q` filters by name, `kind` by kind. */
 export async function listEntities(scope: GraphScope, opts: { q?: unknown; kind?: unknown; limit?: unknown } = {}): Promise<GraphEntity[]> {
+  const selected=selectedMemoryExecution();if(selected)return selected.projectLegacyGraph(scope,(bundle,memories)=>legacyGraphView(bundle,memories).listEntities(opts));
   if (!(await graphTablesExist())) return [];
   if (scope.drawers && scope.drawers.length === 0) return [];
   const inScope = scopedMemoryIds(scope);
@@ -90,6 +93,7 @@ async function linkCount(scope: GraphScope, entityId: string): Promise<number> {
 
 /** Links in scope (all statuses unless `status`), optionally of one entity. */
 export async function listLinks(scope: GraphScope, opts: { status?: unknown; entityId?: string; ids?: readonly string[]; limit?: unknown } = {}): Promise<GraphLink[]> {
+  const selected=selectedMemoryExecution();if(selected)return selected.projectLegacyGraph(scope,(bundle,memories)=>legacyGraphView(bundle,memories).listLinks(opts));
   if (!(await graphTablesExist())) return [];
   if (scope.drawers && scope.drawers.length === 0) return [];
   const inScope = scopedMemoryIds(scope);
@@ -126,6 +130,7 @@ export async function listLinks(scope: GraphScope, opts: { status?: unknown; ent
 
 /** Attached memories of an entity in scope, oldest first. */
 export async function entityTimeline(scope: GraphScope, entityId: string, limit: unknown = 200): Promise<TimelineEntry[]> {
+  const selected=selectedMemoryExecution();if(selected)return selected.projectLegacyGraph(scope,(bundle,memories)=>legacyGraphView(bundle,memories).entityTimeline(entityId,limit));
   const inScope = scopedMemoryIds(scope);
   const rows = await sql().read(all<{ id: string; created_at: string; kind: string; key: string; type: string; content: string }>(`
     SELECT id, created_at, ${DRAWER_KIND_SQL} AS kind, ${DRAWER_KEY_SQL} AS key, type, content FROM memories
@@ -137,6 +142,7 @@ export async function entityTimeline(scope: GraphScope, entityId: string, limit:
 
 /** One entity in scope with its links and timeline; null when not visible in scope. */
 export async function entityDetail(scope: GraphScope, entityId: string): Promise<{ entity: GraphEntity; links: GraphLink[]; timeline: TimelineEntry[] } | null> {
+  const selected=selectedMemoryExecution();if(selected)return selected.projectLegacyGraph(scope,(bundle,memories)=>legacyGraphView(bundle,memories).entityDetail(entityId));
   if (!(await graphTablesExist()) || typeof entityId !== 'string' || !entityId) return null;
   const row = await sql().read(one<{ id: string; kind: string; name: string; aliases: string; updated_at: string }>(
     'SELECT id, kind, name, aliases, updated_at FROM memory_graph_entities WHERE id = ? AND user_id = ?', entityId, scope.userId));
@@ -174,6 +180,7 @@ export interface MemoryEntities {
  * a drawer outside the scope, an archived project).
  */
 export async function memoryEntities(scope: GraphScope, memoryId: string): Promise<MemoryEntities | null> {
+  const selected=selectedMemoryExecution();if(selected)return selected.projectLegacyGraph(scope,(bundle,memories)=>legacyGraphView(bundle,memories).memoryEntities(memoryId));
   if (typeof memoryId !== 'string' || !/^[A-Za-z0-9_.:@-]{1,128}$/.test(memoryId)) return null;
   const inScope = scopedMemoryIds(scope);
   const visible = await sql().read(one<{ id: string }>(`SELECT id FROM memories WHERE id = ? AND id IN (${inScope.sql})`, memoryId, ...inScope.params));

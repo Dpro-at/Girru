@@ -1,9 +1,12 @@
-// CRITICAL: must stay the first import. Loads .env, then the generated
-// secrets from .data/secrets.env (INST-02), before any other module runs.
-import '../config/load-env.js';
-
-// Everything else loads only after load-env has finished. load-env waits for a
-// pending restore (BACKUP-01, FD4a "Restore and open") with a top-level await;
-// a static import here would be evaluated meanwhile, open the database first
-// and keep using the replaced file. So the server itself is a dynamic import.
+// The private native ownership plan precedes configuration and every database initializer.
+import {receiveNativeStartupPlan} from '../memory/encryption/native-startup-handshake.js';
+import {reserveNativeStartupExclusions} from '../memory/encryption/native-startup-exclusion.js';
+import {bindNativeProcessStartup} from '../memory/encryption/native-process-startup.js';
+const plan=await receiveNativeStartupPlan();
+const exclusion=plan?.control?reserveNativeStartupExclusions(plan.control):null;
+// Pending restore and generated secrets finish before any application store opens.
+await import('../config/load-env.js');
+if(plan?.control){const {createNormalNativeBootstrap}=await import('../memory/encryption/normal-native-bootstrap.js');bindNativeProcessStartup(await createNormalNativeBootstrap(plan));}
+else bindNativeProcessStartup(null);
+exclusion?.release();
 await import('./server-main.js');

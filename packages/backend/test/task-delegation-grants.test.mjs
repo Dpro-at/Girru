@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url';
 // S1.2 fix: the delegation origin of a task (who spawned it, its parent task)
 // is recorded server-side and never taken from model input. A task without a
 // recorded origin that the owner did not create through the API runs with at
@@ -13,7 +14,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 import { switchValueOn } from './helpers/switches.mjs';
-const backendDir = process.cwd();
+const backendDir = fileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-delegation-'));
 mkdirSync(join(dir, '.data'), { recursive: true });
 process.chdir(dir);

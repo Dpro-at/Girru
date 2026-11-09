@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url';
 // BOARD-01: the company task board. Owner only; columns, cards (priority,
 // agents, departments, due date), versioned moves, comments, archive.
 // Run: node --import tsx --test test/task-board.test.mjs
@@ -9,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-const backendDir = process.cwd();
+const backendDir = fileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-board-'));
 mkdirSync(join(dir, '.data'), { recursive: true });
 process.chdir(dir);

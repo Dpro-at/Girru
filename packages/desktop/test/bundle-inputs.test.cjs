@@ -15,6 +15,9 @@ test('a core installer builds without runtimes; optional developer copies must b
   fs.mkdirSync(root);
   const identity = path.join(base, 'identity', 'src', 'google.cjs');
   write(identity, 'module.exports = {};');
+  const proofCodec = path.join(base, 'identity', 'src', 'memory-native-proof.cjs');
+  write(proofCodec, 'module.exports = {};');
+  write(path.join(base, 'identity', 'src', 'memory-native-owner-wire.cjs'), 'module.exports = {};');
   try {
     const problems = bundleProblems(root, pin);
     assert.deepEqual(problems, []);
@@ -35,6 +38,9 @@ test('a core installer builds without runtimes; optional developer copies must b
     write(path.join(root, 'nabu-runtime', 'nabu', 'runtime.json'), JSON.stringify({ protocolVersion: 1, entry: 'dpro/editor-runtime.mjs' }));
     assert.deepEqual(bundleProblems(root, pin), []);
     assert.equal(codeRuntimeState(root), 'ready');
+    fs.unlinkSync(proofCodec);
+    assert.match(bundleProblems(root, pin)[0], /memory proof codec is missing/);
+    write(proofCodec, 'module.exports = {};');
     fs.unlinkSync(identity);
     assert.match(bundleProblems(root, pin)[0], /identity verifier is missing/);
   } finally { fs.rmSync(base, { recursive: true, force: true }); }

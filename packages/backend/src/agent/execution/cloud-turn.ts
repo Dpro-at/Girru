@@ -1,3 +1,4 @@
+import {assertRunAdmission,beforeAdmittedModel,executeAdmittedTool,admitToolBatch} from './run-admission-entry.js';
 import { safeConsole } from '../../services/safe-error-log.js';
 /**
  * Claude Streaming Chat Handler with Agentic Tool Loop
@@ -104,6 +105,7 @@ export async function streamChatClaude(
   fileReadRoot?: string,
   uiSet: 'full' | 'chat' = 'full'
 ): Promise<AgentReply> {
+  assertRunAdmission();
   console.log('[Chat] 🚀 Starting Claude agentic stream');
   const startedAt = Date.now();
   safeConsole.log('[Chat]   Model:', model);
@@ -233,6 +235,7 @@ export async function streamChatClaude(
     // Call Claude with automatic retry on rate limit errors
     async function callWithRetry(msgs: any[], attempt = 0): Promise<any> {
       try {
+        await beforeAdmittedModel();
         const r = await claude.sendMessage(msgs, {
           systemPrompt: agenticSystemPrompt,
           tools: tools.length > 0 ? tools : undefined,
@@ -309,11 +312,13 @@ export async function streamChatClaude(
       });
 
       // Execute all tools IN PARALLEL and collect results (order preserved by Promise.all)
+      await beforeAdmittedModel();
+      admitToolBatch(response.toolCalls.map((call:any)=>call.tool));
       const toolResults = await Promise.all(
         response.toolCalls.map(async (toolCall: any) => {
           console.log(`[Chat] ⚙️  Executing (parallel): ${toolCall.tool}`);
           try {
-            const result = await toolsRegistry.execute(toolCall.tool, toolCall.arguments);
+            const result = await executeAdmittedTool(toolsRegistry,toolCall.tool, toolCall.arguments);
 
             let resultContent: any[];
             if (result.content) {
@@ -379,7 +384,7 @@ export async function streamChatClaude(
     // Auto-cleanup: always hide the desktop indicator when the task ends
     // (in case Claude forgot to call hide_indicator before giving its final reply)
     try {
-      await toolsRegistry.execute('desktop_control', { action: 'hide_indicator' });
+      await executeAdmittedTool(toolsRegistry,'desktop_control', { action: 'hide_indicator' });
     } catch {
       // Silently ignore — indicator may already be hidden or desktop_control unavailable
     }

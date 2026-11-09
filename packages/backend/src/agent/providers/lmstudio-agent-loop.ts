@@ -54,7 +54,9 @@ export interface LmStudioLoopOptions {
   /** STORE-MAP-01 P2b (adaptive budget): characters of one tool result given back to the model. */
   toolOutputChars?: number;
   /** STORE-MAP-01 P2b (adaptive budget): called with the messages before every model call (shortens them to fit). */
-  beforeStep?: (messages: { role: string; content: unknown }[]) => void;
+  beforeStep?: (messages: { role: string; content: unknown }[]) => void | Promise<void>;
+  /** Trusted boundary before any calls in a potentially parallel batch execute. */
+  beforeTools?: (names: readonly string[]) => void | Promise<void>;
 }
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}\n… ${s.length - n} more characters` : s);
@@ -88,12 +90,13 @@ export async function runLmStudioAgentLoop(o: LmStudioLoopOptions): Promise<Agen
       step++;
       // CHAT-BUILD-01 stage 5 (Steer now): the owner's messages sent while it works go in before this step.
       for (const text of currentChatRun()?.takeSteers?.() ?? []) messages.push({ role: 'user', content: text });
-      o.beforeStep?.(messages as { role: string; content: unknown }[]);
+      await o.beforeStep?.(messages as { role: string; content: unknown }[]);
       const { content, calls: asked } = await streamOne();
       if (!asked.length) { answer = content; break; }
       const calls = o.callCap ? planCalls(asked, o.callCap).run : asked;
       messages.push({ role: 'assistant', content, tool_calls: calls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.args) } })) });
       o.write({ type: 'tool_start', step, tools: calls.map((c) => ({ id: c.id, name: c.name, input: clip(JSON.stringify(c.args), TOOL_INPUT_CHARS) })) });
+      await o.beforeTools?.(asked.map(call=>call.name));
       const { results, skippedNote } = await runStepCalls(asked, o.execute, now, o.callCap);
       if (o.signal.aborted) throw new Aborted();
       o.write({ type: 'tool_result', step, results: results.map((r) => ({ id: r.id, name: r.name, output: clip(r.text, TOOL_OUTPUT_CHARS), isError: r.isError, ms: r.ms })) });

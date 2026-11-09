@@ -1,9 +1,12 @@
+import {storedRunAllowsTool} from '../memory/encryption/stored-run-tool-policy.js';
 import {computerSyncApplyTool} from '../devices/sync-tool.js';
 import {computerTaskAcceptTool} from '../devices/tool.js';
 import {consumeComputerTicket,bindComputerApproval} from '../devices/approval.js';
 import {consumeControlTicket,bindControlCommand} from './control-command.js';
 import {workspaceControlApplyTool,isWorkspaceControlTool} from './tasks/workspace-control.js';
 import {isTeamAdminTool,mainAdminEligible,bindOwnerCommand,TEAM_ADMIN_WRITES} from './tasks/team-admin-authority.js';
+import {selectedMemoryExecution} from '../memory/encryption/execution-context.js';
+import {redactSelectedMemoryToolResult} from '../memory/encryption/tool-result.js';
 /**
  * Tools Registry
  *
@@ -116,7 +119,8 @@ export class ToolsRegistry {
     const policy = this.context.toolPolicy;
     const grants = this.grants();
     return Array.from(this.tools.values()).filter((tool) =>
-      (!isTeamAdminTool(tool)||this.context.teamAdminAvailable===true)
+      storedRunAllowsTool(tool.name)
+      && (!isTeamAdminTool(tool)||this.context.teamAdminAvailable===true)
       && isToolObjectAllowedByExecPolicy(tool)
       && (!policy || isToolAllowedInChannel(policy, tool))
       && (isSelfOnly(tool) ? selfOnlyOffered(tool, this.context) : isToolGranted(grants, tool.name) || chatFolderFile(tool, this.context))
@@ -149,7 +153,10 @@ export class ToolsRegistry {
     params: Record<string, any>,
     options: { approvalTicket?: unknown } = {}
   ): Promise<ToolResult> {
+    if(!storedRunAllowsTool(toolName))return {content:[{type:'text',text:'Background consent does not authorize semantic memory changes. Request an owner review.'}],error:'background_semantic_memory_write_not_authorized'};
     const tool = this.tools.get(toolName);
+    const selectedMemory=selectedMemoryExecution();
+    if(selectedMemory&&(!this.context.encryptedMemory||!(toolName.startsWith('memory_')||['handoff_save','handoff_read','run_note'].includes(toolName))))return{content:[{type:'text',text:'This tool needs an explicit selected-profile adapter.'}],error:'encrypted_memory_adapter_required'};
     if (currentChatRun()?.failed) return { content: [{ type: 'text', text: 'Checkpoint failed. No further tools will run; review the unknown outcome before continuing.' }], error: 'Checkpoint unavailable' };
 
     // SECURITY: exec-class tools are refused unless enabled by server env (S0-Q.5)
@@ -215,7 +222,7 @@ export class ToolsRegistry {
     // Tools that keep text in Girru's own stores (memory, board, tasks, plan) get the reference itself.
     const controlText=(tool===computerTaskAcceptTool||tool===computerSyncApplyTool)||isWorkspaceControlTool(tool)||(toolName==='team_admin_read'&&params.action==='control_preview');
     const usesSecret = !controlText && !KEEPS_TEXT.test(toolName) && hasSecretRef(params);
-    if (usesSecret && (policy || !this.context.userId)) {
+    if (usesSecret && (selectedMemory || policy || !this.context.userId)) {
       return {
         content: [{ type: 'text', text: `Tool "${toolName}" was not run: saved secrets can only be used in the owner's own chat.` }],
         error: 'Secret reference refused',
@@ -265,12 +272,15 @@ export class ToolsRegistry {
       if(isTeamAdminTool(tool))executionContext=await bindOwnerCommand(executionContext,toolName,approvalConsumed);
       if(isWorkspaceControlTool(tool)){if(!controlCapability)throw Error('control_approval_required');executionContext=await bindControlCommand(executionContext,controlCapability);}
       if((tool===computerTaskAcceptTool||tool===computerSyncApplyTool)){if(!computerCapability)throw Error('computer_approval_required');executionContext=bindComputerApproval(executionContext,computerCapability);}
-      const scrubbed = scrubSecretValues(await tool.execute(secrets.value,executionContext),secrets.used);
+      // Apply existing control/device capabilities before dispatching selected memory storage.
+      const memoryBound=this.context.encryptedMemory&&(toolName.startsWith('memory_')||['handoff_save','handoff_read','run_note'].includes(toolName));
+      const executed=memoryBound?await this.context.encryptedMemory!.execute(toolName,secrets.value,executionContext):await tool.execute(secrets.value,executionContext);
+      const scrubbed = scrubSecretValues(executed,secrets.used);
       // CHAT-BUILD-01 stage 5 (CH10): text read from pages, files or emails that tries to give orders is data; the owner sees what was tried.
       const tried = injectedOrder(scrubbed);
       if (tried) currentChatRun()?.notice?.('injection', tried);
       // CHAT-SECRETS-02: other secrets in the result (a read .env, a printed token) go to the key store too.
-      const result = await vaultToolResult(this.context, scrubbed);
+      const result = selectedMemory?redactSelectedMemoryToolResult(scrubbed):await vaultToolResult(this.context, scrubbed);
       if (checkpoint && intent) await checkpoint.afterTool(intent, result);
 
       console.log(`[ToolsRegistry] ✅ Tool executed successfully`);
@@ -279,7 +289,7 @@ export class ToolsRegistry {
       // A call that used a saved secret never logs or returns the raw error (it may echo the value).
       const message = scrubSecretValues(String(error?.message ?? error), secrets.used);
       console.error('[ToolsRegistry] Tool execution failed', { tool: toolName });
-      return await vaultToolResult(this.context, {
+      const failure:ToolResult = {
         content: [
           {
             type: 'text',
@@ -287,7 +297,7 @@ export class ToolsRegistry {
           },
         ],
         error: message,
-      });
+      };return selectedMemory?redactSelectedMemoryToolResult(failure):await vaultToolResult(this.context,failure);
     }
   }
 

@@ -1,3 +1,4 @@
+import {assertNoDefaultMemoryAccess,selectedMemoryExecution} from '../encryption/execution-context.js';
 /**
  * Memory knowledge graph store (CORE-MEM-GRAPH): writes the graph of one
  * memory, removes it again, prunes orphans, and the owner's link review.
@@ -191,6 +192,7 @@ export function* writeMemoryGraphStep(memory: Memory, hash: string, ex: GraphExt
 
 /** Extract (outside any transaction) and write the graph of one memory. */
 export async function indexMemoryGraph(memory: Memory, opts: { force?: boolean } = {}): Promise<IndexResult> {
+  assertNoDefaultMemoryAccess();
   if (!(await graphTablesExist())) return { status: 'gone' };
   const hash = contentHash(memory.content);
   if (!opts.force) {
@@ -216,6 +218,8 @@ let queue: Promise<unknown> = Promise.resolve();
  * is sent to the model here.
  */
 export function onMemorySaved(memory: Memory): void {
+  // Selected profiles admit graph additions only through explicit encrypted review.
+  if(selectedMemoryExecution())return;
   if (!memory?.id || !memory.userId || typeof memory.content !== 'string') return;
   const snapshot = { ...memory };
   queue = queue.then(() => indexMemoryGraph(snapshot)).catch((err) => {
@@ -234,6 +238,7 @@ export function graphIdle(): Promise<void> {
  * then prune. Owner job (routes) and tests.
  */
 export async function syncMemoryGraph(userId: string, limit = 200): Promise<{ indexed: number; unchanged: number; pruned: { links: number; entities: number } }> {
+  assertNoDefaultMemoryAccess();
   await graphIdle();
   if (!(await graphTablesExist())) return { indexed: 0, unchanged: 0, pruned: { links: 0, entities: 0 } };
   const { getMemoryStorage } = await import('../storage.js');
@@ -257,6 +262,7 @@ export async function syncMemoryGraph(userId: string, limit = 200): Promise<{ in
 
 /** Owner review of a pending link: approve -> active, reject -> rejected. Null when not pending. */
 export async function decideLink(userId: string, linkId: string, decision: 'approve' | 'reject', decidedBy: string): Promise<{ id: string; status: LinkStatus } | null> {
+  const selected=selectedMemoryExecution();if(selected){const result=await selected.mutateLegacyGraph({scope:{userId},action:{kind:'decide-link',linkId,decision},actorId:decidedBy});if(!('status' in result))throw Error('Encrypted graph decision unavailable');return result;}
   if (typeof linkId !== 'string' || !linkId) return null;
   const status: LinkStatus = decision === 'approve' ? 'active' : 'rejected';
   const res = await sql().tx(function* () {

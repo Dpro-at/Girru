@@ -1,3 +1,5 @@
+import {selectedEncryptedOwnerRuntime,consumeCurrentEncryptedMemoryScope} from '../encryption/consumer-host.js';
+import {selectedMemoryExecution} from '../encryption/execution-context.js';
 /**
  * Reply recall trace (MEM-CACHE-01, migration 111): what one chat turn put
  * into its context — the owner's pinned scope facts, memories (pinned /
@@ -104,6 +106,7 @@ export async function indexTraceUses(userId: string, batch = 500): Promise<numbe
 
 /** How many replies of this user used each memory (ids not used are left out). */
 export async function memoryUseCounts(userId: string, memoryIds: readonly string[]): Promise<Map<string, number>> {
+  const encrypted=await selectedEncryptedOwnerRuntime(userId);if(encrypted){const result=new Map<string,number>(),requested=[...new Set(memoryIds)].filter(id=>ID.test(id)).slice(0,500);for(let offset=0;offset<requested.length;offset+=200)for(const row of await encrypted.ownerTrust(requested.slice(offset,offset+200)))if(row.uses>0)result.set(row.id,row.uses);return result;}
   const ids = [...new Set(memoryIds)].filter((id) => ID.test(id)).slice(0, 500);
   if (!ids.length || !(await usesTableReady())) return new Map();
   await indexTraceUses(userId);
@@ -121,6 +124,7 @@ export interface MemoryUsage {
 
 /** The replies of this user that used one memory. */
 export async function memoryUsage(userId: string, memoryId: string, limit = 10): Promise<MemoryUsage> {
+  const encrypted=await selectedEncryptedOwnerRuntime(userId);if(encrypted)return encrypted.ownerMemoryUsage(memoryId,Math.max(1,Math.min(50,limit)));
   if (!ID.test(memoryId) || !(await usesTableReady())) return { usedIn: 0, lastUsedAt: null, recent: [] };
   await indexTraceUses(userId);
   const n = Number((await sql().read(one<{ n: number }>('SELECT COUNT(*) AS n FROM memory_recall_uses WHERE user_id = ? AND memory_id = ?', userId, memoryId)))?.n ?? 0);
@@ -131,7 +135,8 @@ export async function memoryUsage(userId: string, memoryId: string, limit = 10):
   return { usedIn: n, lastUsedAt: rows[0]?.created_at ?? null, recent: rows.map((r) => ({ runId: r.run_id, sessionId: r.session_id, agentId: r.agent_id, at: r.created_at })) };
 }
 
-export async function saveTrace(t: TraceRecord): Promise<void> {
+async function saveTraceCurrent(t: TraceRecord): Promise<void> {
+  const selected=selectedMemoryExecution();if(selected){await selected.trace(t);return;}
   if (!ID.test(t.runId) || !(await tableReady())) return;
   const createdAt = new Date().toISOString();
   const uses = await usesTableReady();
@@ -152,7 +157,8 @@ export async function saveTrace(t: TraceRecord): Promise<void> {
 }
 
 /** Time to the first word of the reply, once per run. */
-export async function setTraceTtft(runId: string, ms: number): Promise<void> {
+async function setTraceTtftCurrent(runId: string, ms: number): Promise<void> {
+  const selected=selectedMemoryExecution();if(selected){await selected.traceTiming(runId,ms);return;}
   if (!ID.test(runId) || !(await tableReady())) return;
   await sql().read(run('UPDATE memory_recall_traces SET ttft_ms = ? WHERE run_id = ? AND ttft_ms IS NULL', Math.max(0, Math.round(ms)), runId));
 }
@@ -270,6 +276,7 @@ async function view(row: TraceRow): Promise<TraceView> {
 
 /** The trace of one run of this user, or undefined. */
 export async function traceForRun(userId: string, runId: string): Promise<TraceView | undefined> {
+  const encrypted=await selectedEncryptedOwnerRuntime(userId);if(encrypted)return encrypted.ownerTrace(runId);
   if (!ID.test(runId) || !(await tableReady())) return undefined;
   const row = await sql().read(one<TraceRow>('SELECT * FROM memory_recall_traces WHERE run_id = ? AND user_id = ?', runId, userId));
   return row ? view(row) : undefined;
@@ -277,6 +284,7 @@ export async function traceForRun(userId: string, runId: string): Promise<TraceV
 
 /** The trace of one assistant message of this user's own conversation, or undefined. */
 export async function traceForMessage(userId: string, messageId: string): Promise<TraceView | undefined> {
+  const encrypted=await selectedEncryptedOwnerRuntime(userId);if(encrypted)return encrypted.ownerMessageTrace(messageId);
   if (!ID.test(messageId) || !(await tableReady())) return undefined;
   const msg = await sql().read(one<{ run_id: string | null }>(`
     SELECT m.run_id FROM chat_messages m JOIN chat_sessions s ON s.id = m.session_id
@@ -286,6 +294,7 @@ export async function traceForMessage(userId: string, messageId: string): Promis
 
 /** Numbers over the user's last `limit` stored turns. */
 export async function traceMetrics(userId: string, limit = 200) {
+  const encrypted=await selectedEncryptedOwnerRuntime(userId);if(encrypted)return encrypted.ownerTraceMetrics(limit);
   if (!(await tableReady())) return { turns: 0, packHitRate: null, avgPackChars: null, avgPromptTokens: null, ttftMs: { p50: null, p90: null } };
   const rows = await sql().read(all<{ pack_hit: number; pack_chars: number; prompt_tokens: number; ttft_ms: number | null }>(
     'SELECT pack_hit, pack_chars, prompt_tokens, ttft_ms FROM memory_recall_traces WHERE user_id = ? ORDER BY created_at DESC, run_id DESC LIMIT ?', userId, limit));
@@ -307,3 +316,6 @@ export async function deleteSessionTraces(sessionId: string): Promise<void> {
   if (await usesTableReady()) await sql().read(run('DELETE FROM memory_recall_uses WHERE run_id IN (SELECT run_id FROM memory_recall_traces WHERE session_id = ?)', sessionId));
   await sql().read(run('DELETE FROM memory_recall_traces WHERE session_id = ?', sessionId));
 }
+
+export function saveTrace(...args:Parameters<typeof saveTraceCurrent>):ReturnType<typeof saveTraceCurrent>{return consumeCurrentEncryptedMemoryScope(()=>saveTraceCurrent(...args));}
+export function setTraceTtft(...args:Parameters<typeof setTraceTtftCurrent>):ReturnType<typeof setTraceTtftCurrent>{return consumeCurrentEncryptedMemoryScope(()=>setTraceTtftCurrent(...args));}

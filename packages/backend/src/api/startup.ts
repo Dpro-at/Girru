@@ -1,3 +1,4 @@
+import {isEncryptedMemoryServer} from '../memory/encryption/server-mode.js';
 import { backendPath } from '../config/backend-root.js';
 import path from 'node:path';
 import { genvrRuntime } from '../config/genvr-runtime.js';
@@ -56,6 +57,10 @@ export const BACKGROUND_JOBS: ReadonlyArray<{ id: string; off: string }> = [
 ];
 
 export async function initializeBackend(fastify: FastifyInstance): Promise<StartupSummary> {
+  // Explicit encrypted runtimes supply their already-selected runner/custody and start through
+  // app hooks. Legacy bootstrap must not initialize defaults, replay a permissive ledger,
+  // import agent notes, backfill vectors, or start plaintext projection/summary workers.
+  if(isEncryptedMemoryServer(fastify))return{background:false,skills:0,jobs:0,channels:0,dockerAvailable:false};
   const background = backgroundEnabled();
   if (!background) console.log('[Server] AGENT_PLAYER_BACKGROUND=off: no schedulers, timers, watchers or probes\n');
   {
@@ -81,9 +86,10 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
   console.log('[Server] ✅ Database initialized\n');
 
   // STORE-MAP-01 P3: project memory keys follow the switch (ids while on, slugs again when it goes off),
-  // before anything reads memory. Small set-based updates; a failure is logged and start-up goes on.
+  // before anything reads memory. Refuse startup on failure: writers must not use a new
+  // key mode while durable projection holds or project rows still use the old mode.
   const { moveProjectKeys } = await import('../memory/project-keys.js');
-  await moveProjectKeys().catch((err) => console.warn('[Store P3] project keys not moved:', (err as Error)?.message));
+  await moveProjectKeys();
   // STORE-MAP-01 P3: the one list of departments and its ids (small tables; idempotent; before the first request).
   if ((await import('../services/store-p3.js')).storeP3Enabled()) {
     const { syncDepartments } = await import('../services/departments.js');

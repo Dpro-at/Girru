@@ -1,3 +1,4 @@
+import {assertMemoryFilesystemAccess} from '../../memory/encryption/protected-filesystem.js';
 /**
  * Read Tool
  *
@@ -36,6 +37,7 @@ const intOr = (v: unknown, d: number | undefined, min: number, max: number) => {
 };
 
 function listFolder(real: string, rel: string): ToolResult {
+  assertMemoryFilesystemAccess(real);
   const rows: string[] = [];
   let total = 0;
   for (const e of fs.readdirSync(real, { withFileTypes: true }).sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))) {

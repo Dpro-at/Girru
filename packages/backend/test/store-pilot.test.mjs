@@ -409,3 +409,27 @@ test('resolved context: an agent without project memory access gets no project f
   assert.equal(closed.data.handoff, '', 'no project handoff without project memory access');
   assert.ok(!closed.drawers.some((d) => d.kind === 'project'));
 });
+
+test('projection barrier waits for an already-staged real writer before copy cleanup',async()=>{
+  await P.runBriefProjection(scope,{force:true,overwrite:true});await save('A synthetic staged projection must finish before forget cleanup.');
+  let enteredResolve,releaseResolve;const entered=new Promise(resolve=>{enteredResolve=resolve;}),release=new Promise(resolve=>{releaseResolve=resolve;});let cleanupRan=false;
+  const writing=P.runBriefProjection(scope,{force:true,beforeRename:async()=>{enteredResolve();await release;}});await entered;
+  const cleanup=P.withBriefProjectionBarrier(scope,async()=>{cleanupRan=true;writeFileSync(brief,'SYNTHETIC_POST_FORGET_VIEW');});
+  await Promise.resolve();assert.equal(cleanupRan,false);releaseResolve();
+  try{await writing;await cleanup;assert.equal(cleanupRan,true);assert.equal(readFileSync(brief,'utf8'),'SYNTHETIC_POST_FORGET_VIEW');}finally{await P.runBriefProjection(scope,{force:true,overwrite:true});}
+});
+
+test('durable encrypted hold blocks force rebuild and detects a hold inserted after render',async()=>{
+ const {sqliteStepsOn}=await import(join(backendDir,'src/repositories/sql-steps.ts')),{claimEncryptedProjectionHoldStep,releaseEncryptedProjectionHoldStep}=await import(join(backendDir,'src/memory/encryption/projection-hold.ts')),runner=sqliteStepsOn(db.getDb());
+ await P.runBriefProjection(scope,{force:true,overwrite:true});const before=readFileSync(brief,'utf8');let hold;
+ try{hold=await P.withBriefProjectionBarrier(scope,()=>runner.tx(()=>claimEncryptedProjectionHoldStep(OWNER,scope)));assert.equal((await P.runBriefProjection(scope,{force:true,overwrite:true})).reason,'encrypted projection hold');assert.equal(readFileSync(brief,'utf8'),before);
+ await runner.tx(()=>releaseEncryptedProjectionHoldStep(OWNER,scope,hold.id,hold.generation));const old=hold;hold=await runner.tx(()=>claimEncryptedProjectionHoldStep(OWNER,scope));await assert.rejects(runner.tx(()=>releaseEncryptedProjectionHoldStep(OWNER,scope,old.id,old.generation)));await runner.tx(()=>releaseEncryptedProjectionHoldStep(OWNER,scope,hold.id,hold.generation));hold=undefined;
+ await save('A staged synthetic quote must not be written while a durable hold is set.');const late=await P.runBriefProjection(scope,{force:true,overwrite:true,beforeRename:async()=>{hold=await runner.tx(()=>claimEncryptedProjectionHoldStep(OWNER,scope));}});assert.equal(late.wrote,false);assert.equal(late.reason,'encrypted projection hold');assert.equal(readFileSync(brief,'utf8'),before);
+ }finally{if(hold)await runner.tx(()=>releaseEncryptedProjectionHoldStep(OWNER,scope,hold.id,hold.generation));await P.runBriefProjection(scope,{force:true,overwrite:true});}
+});
+
+test('durable hold blocks managed-file apply, unified write and owner sync without changing consent',async()=>{
+ const B=await import(join(backendDir,'src/memory/bridge/service.ts')),{patchFolder,folderSettings}=await import(join(backendDir,'src/memory/bridge/store.ts')),{sqliteStepsOn}=await import(join(backendDir,'src/repositories/sql-steps.ts')),{claimEncryptedProjectionHoldStep,releaseEncryptedProjectionHoldStep}=await import(join(backendDir,'src/memory/encryption/projection-hold.ts')),runner=sqliteStepsOn(db.getDb()),file=join(folder,'AGENTS.md');
+ writeFileSync(file,'SYNTHETIC_OWNER_NOTES');await patchFolder(OWNER,project.id,{filesEnabled:true,backflowEnabled:true,confirmed:true});const consent=await folderSettings(OWNER,project.id),hold=await P.withBriefProjectionBarrier(scope,()=>runner.tx(()=>claimEncryptedProjectionHoldStep(OWNER,scope)));
+ try{const PF=await import(join(backendDir,'src/memory/bridge/project-files.ts'));for(const name of ['AGENTS.md','.girru/brief.md'])await assert.rejects(PF.useGirruVersion(OWNER,project.id,name),error=>error.code==='encrypted_hold');await assert.rejects(PF.undoUseGirru(OWNER,project.id,'synthetic-token'),error=>error.code==='encrypted_hold');await assert.rejects(B.filesApply(OWNER,project.id,{confirm:true,previewHash:'synthetic'}),error=>error instanceof B.BridgeError&&error.status===409&&error.code==='encrypted_hold');await assert.rejects(B.writeUnifiedSection(project.id),error=>error instanceof B.BridgeError&&error.status===409&&error.code==='encrypted_hold');assert.ok((await B.syncOwner(OWNER)).conflicts>=1);assert.equal(readFileSync(file,'utf8'),'SYNTHETIC_OWNER_NOTES');const after=await folderSettings(OWNER,project.id);assert.equal(after.filesEnabled,consent.filesEnabled);assert.equal(after.backflowEnabled,consent.backflowEnabled);}finally{await runner.tx(()=>releaseEncryptedProjectionHoldStep(OWNER,scope,hold.id,hold.generation));}
+});

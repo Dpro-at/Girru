@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // CORE-07: forgetting. "Forget this" removes a memory from search, the hybrid
 // index, readable copies, exports, version text, proposals and summaries;
 // only a tombstone stays. Retention rules are an explicit owner job.
@@ -10,12 +11,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-const backendDir = process.cwd();
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-memforget-'));
 mkdirSync(join(dir, '.data'), { recursive: true });
 process.chdir(dir);
 process.env.HOME = dir;
 process.env.DATABASE_PATH = join(dir, '.data', 'agent-player.db');
+process.env.AGENT_PLAYER_DATA_DIR = join(dir, '.data');
 process.env.JWT_SECRET = randomBytes(64).toString('hex'); // throwaway, test only
 process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway, test only
 delete process.env.MEMORY_SUMMARY_MODEL;
@@ -133,7 +135,7 @@ test('setup: memory in search, hybrid index, versions, copies, exports, proposal
   const found = (await call('POST', '/api/memory/search', 'mg-owner', { query: 'Zephyr kayak harbour', limit: 20 })).json().results;
   assert.ok(found.some((r) => r.memory.id === target.id));
   assert.ok(dbText().includes(SECRET));
-  assert.ok(existsSync(join(dir, '../../.data/memory/mg-owner', `fact-${target.id}.md`)), 'per-memory copy written');
+  assert.ok(existsSync(join(dir, '.data/memory/mg-owner', `fact-${target.id}.md`)), 'per-memory copy written');
   pref = await create('mg-owner', 'Owner prefers green tea', { type: 'preference' });
 });
 
@@ -167,7 +169,7 @@ test('forget: gone from search, index, copies, exports, versions, proposals, sum
     assert.ok(!text.includes(SECRET) && !text.includes(target.id), agent);
     assert.ok(text.includes('Alpha deploys on Tuesdays'));
   }
-  assert.ok(!existsSync(join(dir, '../../.data/memory/mg-owner', `fact-${target.id}.md`)));
+  assert.ok(!existsSync(join(dir, '.data/memory/mg-owner', `fact-${target.id}.md`)));
 
   // Versions: only a tombstone (id, time, actor), no text.
   const v = db.prepare('SELECT change, type, content, importance_score, created_by, reason FROM memory_versions WHERE memory_id = ?').all(target.id).map((r) => ({ ...r }));

@@ -3,6 +3,7 @@
  */
 
 import jwt from 'jsonwebtoken';
+import {privateJwtKey} from './private-jwt-context.js';
 import {randomUUID} from 'node:crypto';
 import { z } from 'zod';
 import type { FastifyRequest } from 'fastify';
@@ -29,7 +30,9 @@ export class JwtPayloadError extends Error {}
  * Get JWT secret from environment
  * SECURITY: Lazy loading to ensure .env is loaded first
  */
-function getJwtSecret(): string {
+function getJwtSecret(): string | Buffer {
+    const ownedChildKey = privateJwtKey();
+    if (ownedChildKey) return ownedChildKey;
     if (!process.env.JWT_SECRET) {
         throw new Error('FATAL: JWT_SECRET is not set. It is generated into .data/secrets.env on server start (or run "agent-player setup").');
     }

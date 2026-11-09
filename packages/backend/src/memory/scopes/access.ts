@@ -1,3 +1,4 @@
+import {invalidateEncryptedRunAdmissions} from '../encryption/run-invalidation.js';
 /**
  * Memory access by inheritance (MEM-SCALE-01).
  *
@@ -150,7 +151,7 @@ const RULES_SQL = `SELECT id, scope_kind, scope_id, agent_id, drawer_kind, read_
   ORDER BY created_at, id`;
 const rulesTable = (column: AccessColumn) => (isScopeColumn(column) ? 'memory_access_scope_rules' : 'memory_access_rules');
 
-function* loadSnapshotStep(ownerId: string): Step<AccessSnapshot> {
+export function* loadSnapshotStep(ownerId: string): Step<AccessSnapshot> {
   const version = Number((yield* one<{ version: number }>('SELECT version FROM memory_access_versions WHERE owner_id = ?', ownerId))?.version ?? 0);
   const rules = yield* all<RuleRow>(RULES_SQL, ownerId, ownerId);
   const trows = yield* all<TemplateRow>('SELECT id, name, memory_read, memory_write, scope_read, scope_write FROM memory_role_templates WHERE owner_id = ? ORDER BY norm_name, id', ownerId);
@@ -188,6 +189,7 @@ export function accessSnapshotSync(ownerId: string): AccessSnapshot {
 }
 
 export function invalidateAccess(ownerId?: string): void {
+  invalidateEncryptedRunAdmissions(ownerId);
   if (ownerId) cache.delete(ownerId); else cache.clear();
 }
 

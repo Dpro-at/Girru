@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url';
 // TASKPAGE-02: the full task page — people and agents with roles, checklist owners and dates,
 // sub-tasks, "waits for" (never a circle), release, follow, every chat's replies and file
 // changes (with the diff) in one activity line, what the chats spent. Owner only.
@@ -11,7 +12,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
-const backendDir = process.cwd();
+const backendDir = fileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-task-page-'));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });
 process.chdir(dir);

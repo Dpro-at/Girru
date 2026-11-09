@@ -1,3 +1,4 @@
+import {assertProtectedMemoryFileDescriptor,closeProtectedMemoryFileDescriptor} from '../../memory/encryption/protected-filesystem.js';
 import fs from 'node:fs';
 import { isUtf8 } from 'node:buffer';
 import { q } from '../../repositories/sql-steps.js';
@@ -26,6 +27,7 @@ export function checkedFileEdit(root: string, input: unknown, before: unknown, a
   const { real, rel } = resolveReadPath(root, input);
   const fd = fs.openSync(real, fs.constants.O_RDWR | (fs.constants.O_NOFOLLOW ?? 0));
   try {
+    assertProtectedMemoryFileDescriptor(fd);
     const stat = fs.fstatSync(fd);
     if (!stat.isFile() || stat.nlink !== 1 || stat.size > MAX_EDIT_BYTES) throw Error('A small, regular, unlinked text file is required');
     const bytes = Buffer.alloc(stat.size + 1); let size = 0;
@@ -38,7 +40,7 @@ export function checkedFileEdit(root: string, input: unknown, before: unknown, a
     while (written < output.length) { const n = fs.writeSync(fd, output, written, output.length - written, written); if (!n) throw Error('The file could not be written completely'); written += n; }
     fs.ftruncateSync(fd, output.length); fs.fsyncSync(fd);
     return { path: rel, size: output.length };
-  } finally { fs.closeSync(fd); }
+  } finally { closeProtectedMemoryFileDescriptor(fd,()=>fs.closeSync(fd)); }
 }
 
 export const editTool: Tool = {

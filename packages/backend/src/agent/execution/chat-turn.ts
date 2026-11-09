@@ -1,3 +1,5 @@
+import {consumeAdmittedMemory,scopeAdmittedMemory} from './run-admission-entry.js';
+import {withRunAdmission,beforeAdmittedModel,taintRunAdmission,observeAdmittedContext,executeAdmittedTool,admittedModelStep,beforeAdmittedTools,runInputDigest} from './run-admission-entry.js';
 import { preferredMention } from '../context/target.js';
 import { subscriptionToolLoop } from './subscription-turn.js';
 import { teamContext } from '../../services/agent-org.js';
@@ -360,8 +362,15 @@ export async function executeChatTurn(reply: AgentReply, input: ChatTurnInput): 
     const notices: string[] = [];
     const savedReplyAgent=agentId?await getAgentById(agentId):await getPrimaryAgent();
     if (agentId && !savedReplyAgent) return reply.code(400).send({ code: 'unknown_agent', error: 'Unknown agent.' });
+    return withRunAdmission({runId:input.runId??currentChatRun()?.runId??'',ownerId:userId,agentId:savedReplyAgent?.id??'',sessionId,kind:'chat',inputDigest:runInputDigest({runId:input.runId??currentChatRun()?.runId??null,sessionId,userId,agent:savedReplyAgent,messages,conversation:input.conversation??null,images:input.images??[],memoryContext:bodyMemoryContext??null,systemPrompt:systemPrompt??null,systemPromptAppend:rawPromptAppend??null,handoff:input.handoff??null,model:requestedModel??null,fileReadRoot:input.fileReadRoot??null,writeFolders:input.writeFolders??[]}),unknownSources:[
+      ...(messages.length!==1||messages[0]?.role!=='user'||input.conversation?.turns.length?['unverified-chat-history']:[]),
+      ...(bodyMemoryContext?['client-memory-context']:[]),...(systemPrompt||rawPromptAppend?['unversioned-prompt-input']:[]),
+      ...(input.handoff?['prior-handoff-input']:[]),...(input.images?.length?['unverified-image-source']:[]),
+      'unversioned-agent-configuration',
+    ]},async()=>{
     const subscriptionSource=model||savedReplyAgent?.model;
     if(subscriptionModel(subscriptionSource)){
+      taintRunAdmission('external-coding-app-context');
       const owner=await sql().read(one<{role:string}>('SELECT role FROM users WHERE id=?',userId));
       if(!subscriptionEnabled()||owner?.role!=='owner'||input.channelTurn||!input.fileReadRoot)return reply.code(403).send({code:'forbidden'});
       const abort=new AbortController();reply.raw.once?.('close',()=>{if(!reply.raw.writableEnded)abort.abort();});
@@ -371,11 +380,13 @@ export async function executeChatTurn(reply: AgentReply, input: ChatTurnInput): 
         if(!selectedAgent)throw Error('agent_context_unavailable');
         // STORE-MAP-01 P2 (CX6, AG1): the one resolved context; guides by name (read with guide_read through Girru's tools).
         // P4 (D16): with the personality record on, coding apps use the same one context.
-        const p2Context=oneContextEnabled()?await resolveAgentContext({agentId:selectedAgent.id,entry:'coding_app',ownerId:userId,sessionId}):null;
-        const context=p2Context?renderCodingAppInstructions(p2Context):await subscriptionAgentContext(selectedAgent.id,{sessionId});
+        let p2Context:Awaited<ReturnType<typeof resolveAgentContext>>|null=null;
         let drawers=await withoutArchivedDrawers(userId,chatTurnDrawers(true,memoryScope));
         // STORE-MAP-01 P9 (PRIV2): a coding app is not on this computer; places that stay here are left out.
         if(storeP9Enabled())drawers=(await cloudSafeDrawers(userId,drawers)).drawers;
+        const codingMemoryScope={userId,agentId:selectedAgent.id,drawers,project:drawers.find(d=>d.kind==='project')?.key??null,delegatedFrom:[],audience:'owner' as const,runId:input.runId??currentChatRun()?.runId};
+        if(oneContextEnabled())p2Context=await scopeAdmittedMemory(codingMemoryScope,()=>resolveAgentContext({agentId:selectedAgent.id,entry:'coding_app',ownerId:userId,sessionId}));
+        const context=p2Context?renderCodingAppInstructions(p2Context):await scopeAdmittedMemory(codingMemoryScope,()=>subscriptionAgentContext(selectedAgent.id,{sessionId}));
         // CHAT-BUILD-01: the coding app gets the newest turns plus summaries of older ones and a bounded
         // set of top memories, instead of the whole conversation on every turn (plan usage).
         const lines=(list:readonly {role:string;content:unknown}[])=>list.map(m=>`${m.role}: ${messageText(m.content as ChatMessage['content'])}`).join('\n\n');
@@ -385,11 +396,11 @@ export async function executeChatTurn(reply: AgentReply, input: ChatTurnInput): 
           catch(err){safeConsole.log('[Chat] Conversation summaries unavailable',safeErrorFields(err));}
         }
         let memoryText='';
-        try{const readable=await readableDrawers(selectedAgent.id,drawers,userId);memoryText=(await contextPack({userId,agentId:selectedAgent.id,drawers:readable,persona:'',scopeFacts:null,handoff:input.handoff??null})).text.trim();}
+        try{const readable=await readableDrawers(selectedAgent.id,drawers,userId);const selectedPack=await consumeAdmittedMemory({userId,agentId:selectedAgent.id,drawers:readable,project:readable.find(d=>d.kind==='project')?.key??null,delegatedFrom:[],audience:'owner',runId:input.runId??currentChatRun()?.runId},()=>contextPack({userId,agentId:selectedAgent.id,drawers:readable,persona:'',scopeFacts:null,handoff:input.handoff??null}));observeAdmittedContext(selectedPack.items);memoryText=selectedPack.text.trim();}
         catch(err){safeConsole.log('[Chat] Memory context unavailable',safeErrorFields(err));}
         // STORE-MAP-01 pilot (CX6): the pilot agent's coding-app reply also gets its pinned facts and the
         // project's newest handoff (Girru agents and coding tools), as data, from the one resolved context.
-        if(p2Context||isPilotAgent(selectedAgent.id)){try{const data=renderMemoryData(p2Context??await resolveAgentContext({agentId:selectedAgent.id,entry:'coding_app',ownerId:userId,sessionId}));if(data)memoryText=memoryText?`${data}\n\n${memoryText}`:data;}
+        if(p2Context||isPilotAgent(selectedAgent.id)){try{const data=renderMemoryData(p2Context??await scopeAdmittedMemory(codingMemoryScope,()=>resolveAgentContext({agentId:selectedAgent.id,entry:'coding_app',ownerId:userId,sessionId})));if(data)memoryText=memoryText?`${data}\n\n${memoryText}`:data;}
           catch(err){safeConsole.log('[Chat] Pilot context unavailable',safeErrorFields(err));}}
         // SUB3: with P2 the memory part has a token budget (counted like every other prompt part), not a character cap.
         if(memoryText)history=`${p2Context?capTokens(memoryText,CODING_APP_MEMORY_TOKENS):capMiddle(memoryText,SUBSCRIPTION_MEMORY_CHARS)}\n\n${history}`;
@@ -412,8 +423,8 @@ export async function executeChatTurn(reply: AgentReply, input: ChatTurnInput): 
           tools:onDemand?onDemand.definitions():allTools,
           ...(onDemand?{isOffered:(name:string)=>onDemand.has(name)}:{}),
           // CHAT-BUILD-01 stage 3: "Accept edits" lets the coding app edit files in the chat's folders (its write folders too).
-          reply:prompt=>runSubscription(subscriptionSource,input.fileReadRoot!,prompt,abort.signal,{...(currentChatRun()?.chatMode==='accept_edits'?{editsOnly:true,addDirs:input.writeFolders??[]}:{appToolsOnly:true}),images:seen,thinking:currentChatRun()?.thinking,agentId:selectedAgent?.id??null}),
-          execute:(name,args)=>{toolStep++;if(!reply.raw.writableEnded)reply.raw.write(`data: ${JSON.stringify({type:'tool_start',step:toolStep,tools:[{id:`subscription-${toolStep}`,name,input:JSON.stringify(args)}]})}\n\n`);return onDemand?onDemand.execute(name,args,(n,a)=>registry.execute(n,a)):registry.execute(name,args);},
+          reply:async prompt=>{await beforeAdmittedModel();return runSubscription(subscriptionSource,input.fileReadRoot!,prompt,abort.signal,{...(currentChatRun()?.chatMode==='accept_edits'?{editsOnly:true,addDirs:input.writeFolders??[]}:{appToolsOnly:true}),images:seen,thinking:currentChatRun()?.thinking,agentId:selectedAgent?.id??null});},
+          execute:(name,args)=>{toolStep++;if(!reply.raw.writableEnded)reply.raw.write(`data: ${JSON.stringify({type:'tool_start',step:toolStep,tools:[{id:`subscription-${toolStep}`,name,input:JSON.stringify(args)}]})}\n\n`);return onDemand?onDemand.execute(name,args,(n,a)=>executeAdmittedTool(registry,n,a)):executeAdmittedTool(registry,name,args);},
           onTool:(name,result)=>{if(!reply.raw.writableEnded)reply.raw.write(`data: ${JSON.stringify({type:'tool_result',step:toolStep,results:[{id:`subscription-${toolStep}`,name,output:result.content.filter(b=>b.type==='text').map(b=>b.text??'').join('\n').slice(0,2000),isError:!!result.error}]})}\n\n`);},
         });
         for(const content of chunkText(answer,ANSWER_FRAME_BYTES))if(!reply.raw.writableEnded)reply.raw.write(`data: ${JSON.stringify({content,done:false})}\n\n`);
@@ -488,7 +499,7 @@ export async function executeChatTurn(reply: AgentReply, input: ChatTurnInput): 
           : { memoryRead: ['owner', 'project'] };
         let allow = scopeFactAccess(perms, memoryDrawers.some((d) => d.kind === 'owner'));
         if (p9Cloud) allow = await cloudSafePinnedAllow(userId, pinnedProject ?? withheldLocal.find((d) => d.kind === 'project')?.key ?? null, allow);
-        if (allow.company || allow.project) pinnedFacts = await pinnedFactsForReply(userId, pinnedProject, allow);
+        if (allow.company || allow.project) pinnedFacts = await consumeAdmittedMemory({userId,agentId:agentConfig?.id??'',drawers:memoryDrawers,project:pinnedProject,delegatedFrom:[],audience:channelTurn?'outsider':'owner',runId:input.runId??currentChatRun()?.runId},()=>pinnedFactsForReply(userId,pinnedProject,allow));
       } catch { pinnedFacts = { text: '', facts: [] }; }
     }
 
@@ -500,7 +511,7 @@ export async function executeChatTurn(reply: AgentReply, input: ChatTurnInput): 
         // The generated settings block is a readable export; the database values are used instead.
         personalityContent = stripPersonalityExport(await readPersonality(agentConfig.id));
         // STORE-MAP-01 P5: the agent's own notes from its drawer once imported (else the file), framed as data below.
-        memoryFileContent = includeAgentMemory ? await agentMemoryForPrompt(agentConfig.id) : '';
+        memoryFileContent = includeAgentMemory ? await consumeAdmittedMemory({userId,agentId:agentConfig.id,drawers:memoryDrawers,project:pinnedProject,delegatedFrom:[],audience:channelTurn?'outsider':'owner',runId:input.runId??currentChatRun()?.runId},()=>agentMemoryForPrompt(agentConfig!.id)) : '';
         console.log(`[Chat] 📝 Loaded PERSONALITY.md (${personalityContent.length} chars) and MEMORY.md (${memoryFileContent.length} chars) for agent ${agentConfig.name}`);
       } catch (err) {
         console.log('[Chat] No agent files found, using database system_prompt');
@@ -513,7 +524,7 @@ export async function executeChatTurn(reply: AgentReply, input: ChatTurnInput): 
     let resolvedSystemPrompt = '';
     // P4 (T7, D16): the personality record and the job text reach chat through the same one context.
     if (oneContextEnabled() && agentConfig?.id && agentConfig.id !== 'small-local-agent') {
-      const ctx = await resolveAgentContext({ agentId: agentConfig.id, entry: channelTurn ? 'channel' : 'chat', ownerId: userId, sessionId, instructionsOverride: systemPrompt ?? null });
+      const ctx = await scopeAdmittedMemory({userId,agentId:agentConfig.id,drawers:memoryDrawers,project:pinnedProject,delegatedFrom:[],audience:channelTurn?'outsider':'owner',runId:input.runId??currentChatRun()?.runId},()=>resolveAgentContext({agentId:agentConfig!.id,entry:channelTurn?'channel':'chat',ownerId:userId,sessionId,instructionsOverride:systemPrompt??null}));
       resolvedSystemPrompt = renderSystemPrompt(ctx, { data: false });
       if (memoryFileContent) resolvedSystemPrompt += frameUntrustedMemory(memoryFileContent,'agent');
     } else {
@@ -567,10 +578,14 @@ export async function executeChatTurn(reply: AgentReply, input: ChatTurnInput): 
     try {
       const drawers = await readableDrawers(agentConfig?.id, memoryDrawers, userId);
       loadedDrawers = drawers;
-      pack = await contextPack({ userId, agentId: agentConfig?.id ?? null, drawers, persona: resolvedSystemPrompt, scopeFacts: pinnedFacts, handoff: includeAgentMemory && !channelTurn ? input.handoff ?? null : null });
-      resolvedSystemPrompt = pack.text;
-      recall = await messageRecall({ userId, drawers, query: messageText(lastUser?.content), pack, agentId: agentConfig?.id ?? null });
+      pack = await consumeAdmittedMemory({userId,agentId:agentConfig?.id??'',drawers,project:drawers.find(d=>d.kind==='project')?.key??null,delegatedFrom:[],audience:channelTurn?'outsider':'owner',runId:input.runId??currentChatRun()?.runId},()=>contextPack({userId,agentId:agentConfig?.id??null,drawers,persona:resolvedSystemPrompt,scopeFacts:pinnedFacts,handoff:includeAgentMemory&&!channelTurn?input.handoff??null:null}));
+      const admittedPack=pack;
+      observeAdmittedContext(admittedPack.items);
+      resolvedSystemPrompt = admittedPack.text;
+      recall = await consumeAdmittedMemory({userId,agentId:agentConfig?.id??'',drawers,project:drawers.find(d=>d.kind==='project')?.key??null,delegatedFrom:[],audience:channelTurn?'outsider':'owner',runId:input.runId??currentChatRun()?.runId},()=>messageRecall({userId,drawers,query:messageText(lastUser?.content),pack:admittedPack,agentId:agentConfig?.id??null}));
+      observeAdmittedContext(recall.items);
     } catch (err) {
+      taintRunAdmission('incomplete-memory-context');
       safeConsole.log('[Chat] Memory context unavailable', safeErrorFields(err));
       // STORE-MAP-01 P9 (FAIL4, AG8): the reply goes on without memory, says so when it matters, never invents it.
       if (storeP9Enabled() && includeAgentMemory) {
@@ -670,7 +685,7 @@ export async function executeChatTurn(reply: AgentReply, input: ChatTurnInput): 
     if (traceRun) {
       const promptTokens = estimateTokens(resolvedSystemPrompt) + estimateTokens(systemPromptAppend ?? '')
         + turnMessages.reduce((n, m) => n + estimateTokens(messageText(m.content)), 0);
-      await saveTrace({
+      await consumeAdmittedMemory({userId,agentId:agentConfig?.id??'',drawers:loadedDrawers,project:loadedDrawers.find(d=>d.kind==='project')?.key??null,delegatedFrom:[],audience:'owner',runId:traceRun},()=>saveTrace({
         runId: traceRun, userId, sessionId, agentId: agentConfig?.id ?? null,
         items: [...(pack?.items ?? []), ...recall.items],
         context: {
@@ -689,11 +704,11 @@ export async function executeChatTurn(reply: AgentReply, input: ChatTurnInput): 
           },
         },
         packHit: !!pack?.hit, packChars: pack?.memoryChars ?? 0, promptTokens,
-      }).catch((err) => safeConsole.log('[Chat] Recall trace not stored', safeErrorFields(err)));
+      })).catch((err) => safeConsole.log('[Chat] Recall trace not stored', safeErrorFields(err)));
     }
     if (stream) watchFirstWord(reply.raw as any, turnStartedAt, (ms) => {
       recordTtft(ms);
-      if (traceRun) void setTraceTtft(traceRun, ms).catch(() => {});
+      if (traceRun) void consumeAdmittedMemory({userId,agentId:agentConfig?.id??'',drawers:loadedDrawers,project:loadedDrawers.find(d=>d.kind==='project')?.key??null,delegatedFrom:[],audience:'owner',runId:traceRun},()=>setTraceTtft(traceRun,ms)).catch(()=>{});
     });
     // CHAT-PRO-02 G: an LM Studio turn needs an LM Studio model id (`lmstudio:<name>`).
     if (resolvedProvider === 'lmstudio' && !lmStudioModelName(resolvedModel)) return reply.status(400).send({ error: 'Pick an LM Studio model', code: 'invalid_model' });
@@ -713,6 +728,7 @@ export async function executeChatTurn(reply: AgentReply, input: ChatTurnInput): 
     if (stream) for (const n of notices) if (!reply.raw.writableEnded) reply.raw.write(n);
 
     try {
+      await beforeAdmittedModel();
       if (stream) {
         return await streamChat(reply, resolvedModel, resolvedProvider, resolvedApiKey, turnMessages, resolvedTemp, resolvedMaxTokens, sessionId, resolvedSystemPrompt, systemPromptAppend, userId, chatContext, toolPolicy, agentConfig?.id, memoryDrawers, input.fileReadRoot, input.uiSet, autoModel, p2bWindow);
       } else {
@@ -733,6 +749,7 @@ export async function executeChatTurn(reply: AgentReply, input: ChatTurnInput): 
       // SECURITY: Use centralized error handler to prevent info disclosure (H-09)
       return handleError(reply, error, 'internal', '[Chat] Chat request failed');
     }
+    });
 }
 
 /** One short prompt block that names the model and where it runs (CORE-MODEL-02). */
@@ -897,7 +914,7 @@ async function streamChat(
   const p2b = p2bWindow && isLocalTurnProvider(provider) ? prepareLocalTurn({
     window: p2bWindow, tools: tools as ToolDef[], systemHead: resolvedSmartPrompt ?? '',
     systemTail: uiSpecPrompt(planLocalBudget(p2bWindow.tokens).tier === 'small' ? 'chat' : uiSet),
-    messages: ollamaMessages.filter((m) => m.role !== 'system'), maxTokens, run: (name, args) => toolsRegistry.execute(name, args),
+    messages: ollamaMessages.filter((m) => m.role !== 'system'), maxTokens, run: (name, args) => executeAdmittedTool(toolsRegistry,name, args),
   }) : null;
   if (p2b) {
     ollamaMessages.length = 0;
@@ -1018,6 +1035,7 @@ You: [Present results with \`\`\`spec blocks showing temperature, conditions, et
       const geminiFullPrompt = geminiSystemParts
         ? `${geminiSystemParts}\n\n---\n\nUser: ${userText}`
         : userText;
+      await beforeAdmittedModel();
       const result = await geminiCliTool.execute({ prompt: geminiFullPrompt });
       const text = result.content?.[0]?.text || '(no response)';
       const geminiModel = (result.details as any)?.model || 'gemini-2.0-flash';
@@ -1048,6 +1066,7 @@ You: [Present results with \`\`\`spec blocks showing temperature, conditions, et
       const claudeFullPrompt = customSystemPrompt
         ? `${customSystemPrompt}\n\nUser: ${userText}`
         : userText;
+      await beforeAdmittedModel();
       const result = await claudeCliTool.execute({
         prompt: claudeFullPrompt,
         model: model || undefined,
@@ -1087,12 +1106,13 @@ You: [Present results with \`\`\`spec blocks showing temperature, conditions, et
         model: generic ? openAiLocalModelName(model) : lmStudioModelName(model),
         messages: ollamaMessages.map((m) => ({ role: m.role === 'system' ? 'system' as const : m.role === 'assistant' ? 'assistant' as const : 'user' as const, content: messageText(m.content), ...(m.images?.length ? { images: m.images } : {}) })),
         tools,
-        execute: p2b ? p2b.execute : (name, args) => toolsRegistry.execute(name, args),
+        execute: p2b ? p2b.execute : (name, args) => executeAdmittedTool(toolsRegistry,name, args),
         write: (frame) => { if (!reply.raw.writableEnded) reply.raw.write(`data: ${JSON.stringify(frame)}\n\n`); },
         signal: lmAbort.signal,
         temperature,
         maxTokens: p2b ? p2b.maxTokens : maxTokens,
-        ...(p2b ? { toolSet: p2b.toolSet, callCap: p2b.callCap, maxSteps: p2b.maxSteps, toolOutputChars: p2b.toolOutputChars, beforeStep: p2b.beforeStep } : {}),
+        ...(p2b ? { toolSet: p2b.toolSet, callCap: p2b.callCap, maxSteps: p2b.maxSteps, toolOutputChars: p2b.toolOutputChars } : {}),
+        beforeStep: admittedModelStep(p2b?.beforeStep),beforeTools:beforeAdmittedTools,
       } });
       console.log('[Chat] ✅ LM Studio turn ended', { steps: result.steps, chars: result.answer.length, aborted: result.aborted, ms: Date.now() - lmStarted });
     } catch (err) {
@@ -1127,8 +1147,9 @@ You: [Present results with \`\`\`spec blocks showing temperature, conditions, et
       model,
       messages: ollamaMessages.map((m) => ({ role: m.role, content: messageText(m.content), ...(m.images?.length ? { images: m.images.map((i) => i.data) } : {}) })),
       tools,
-      execute: p2b ? p2b.execute : (name, args) => toolsRegistry.execute(name, args),
-      ...(p2b ? { toolSet: p2b.toolSet, callCap: p2b.callCap, maxSteps: p2b.maxSteps, toolOutputChars: p2b.toolOutputChars, beforeStep: p2b.beforeStep } : {}),
+      execute: p2b ? p2b.execute : (name, args) => executeAdmittedTool(toolsRegistry,name, args),
+      ...(p2b ? { toolSet: p2b.toolSet, callCap: p2b.callCap, maxSteps: p2b.maxSteps, toolOutputChars: p2b.toolOutputChars } : {}),
+        beforeStep: admittedModelStep(p2b?.beforeStep),beforeTools:beforeAdmittedTools,
       write: (frame) => { if (!reply.raw.writableEnded) reply.raw.write(`data: ${JSON.stringify(frame)}\n\n`); },
       signal: upstreamAbort.signal,
       temperature,
@@ -1247,11 +1268,11 @@ async function nonStreamChat(
   if (p2bWindow && isLocalTurnProvider(provider)) {
     const p2b = prepareLocalTurn({
       window: p2bWindow, tools: tools as ToolDef[], systemHead: finalSystemPromptNS ?? '',
-      messages: ollamaMessages.filter((m) => m.role !== 'system'), maxTokens, run: (name, args) => toolsRegistryNS.execute(name, args),
+      messages: ollamaMessages.filter((m) => m.role !== 'system'), maxTokens, run: (name, args) => executeAdmittedTool(toolsRegistryNS,name, args),
     });
     console.log('[Chat] P2b local turn (one piece)', localTurnLog(p2b));
     const msgs = [{ role: 'system' as const, content: p2b.system }, ...p2b.messages.map((m) => ({ role: m.role === 'assistant' ? 'assistant' as const : 'user' as const, content: messageText(m.content) }))];
-    const common = { execute: p2b.execute, write: () => {}, signal: AbortSignal.timeout(180_000), temperature, maxTokens: p2b.maxTokens, tools: [], toolSet: p2b.toolSet, callCap: p2b.callCap, maxSteps: p2b.maxSteps, toolOutputChars: p2b.toolOutputChars, beforeStep: p2b.beforeStep };
+    const common = { execute: p2b.execute, write: () => {}, signal: AbortSignal.timeout(180_000), temperature, maxTokens: p2b.maxTokens, tools: [], toolSet: p2b.toolSet, callCap: p2b.callCap, maxSteps: p2b.maxSteps, toolOutputChars: p2b.toolOutputChars, beforeStep: admittedModelStep(p2b.beforeStep),beforeTools:beforeAdmittedTools };
     const ended = beginLocalReply(model);
     try {
       const result = provider === 'ollama'
@@ -1274,7 +1295,8 @@ async function nonStreamChat(
   // Gemini CLI provider (non-stream path)
   if (provider === 'gemini-cli') {
     console.log('[Chat] 🤖 Using Gemini CLI bridge (non-stream)');
-    const result = await geminiCliTool.execute({ prompt: userText });
+    await beforeAdmittedModel();
+      const result = await geminiCliTool.execute({ prompt: userText });
     const text = result.content?.[0]?.text || '(no response)';
     return reply.send({ message: { role: 'assistant', content: text } });
   }
@@ -1282,7 +1304,8 @@ async function nonStreamChat(
   // Claude CLI provider (non-stream path)
   if (provider === 'claude-cli') {
     console.log('[Chat] 🔧 Using Claude Code CLI bridge (non-stream)');
-    const result = await claudeCliTool.execute({
+    await beforeAdmittedModel();
+      const result = await claudeCliTool.execute({
       prompt: userText,
       model: model || undefined,
       timeout: 180000
@@ -1300,6 +1323,7 @@ async function nonStreamChat(
         messages: ollamaMessages.map((m) => ({ role: m.role === 'system' ? 'system' as const : m.role === 'assistant' ? 'assistant' as const : 'user' as const, content: messageText(m.content) })),
         tools: [],
         execute: async () => ({ content: [] }),
+        beforeStep:admittedModelStep(),beforeTools:beforeAdmittedTools,
         write: () => {},
         signal: AbortSignal.timeout(180_000),
         temperature,
@@ -1311,6 +1335,7 @@ async function nonStreamChat(
     }
   }
 
+  await beforeAdmittedModel();
   const response = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

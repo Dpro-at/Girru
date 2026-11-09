@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // CORE-MEM-GRAPH: memory knowledge graph. Entities + typed links are built on
 // every memory save (local model, deterministic fallback); recall follows
 // links from the names in a request; drawers apply at every step; forgetting
@@ -13,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-const backendDir = process.cwd();
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-memgraph-'));
 mkdirSync(join(dir, '.data'), { recursive: true });
 process.chdir(dir);

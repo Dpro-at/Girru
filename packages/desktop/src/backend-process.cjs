@@ -61,7 +61,7 @@ function redactor(secrets) {
  * cwd, env (from backendEnv), secrets (values to redact), onLog(line), onExit({ code, signal }) after ready,
  * spawn (tests), readyTimeoutMs.
  */
-function startBackend({ node, args, cwd, env, secrets = [], onLog = () => {}, onExit = () => {}, spawn = nodeSpawn, readyTimeoutMs = READY_TIMEOUT_MS, signal, deviceCustody }) {
+function startBackend({ node, args, cwd, env, secrets = [], onLog = () => {}, onExit = () => {}, spawn = nodeSpawn, readyTimeoutMs = READY_TIMEOUT_MS, signal, deviceCustody, memoryOwnerFactory, memoryControlBootstrap }) {
   const redact = redactor([env.AGENT_PLAYER_LAUNCH_TOKEN, ...secrets]);
   const tail = [];
   const log = line => {
@@ -87,6 +87,24 @@ function startBackend({ node, args, cwd, env, secrets = [], onLog = () => {}, on
   let exited = false;
   let timedOut = false;
   const exitedPromise = new Promise(resolve => child.once('exit', (code, signal) => { exited = true; resolve({ code, signal }); }));
+  let controlReady=false;
+  child.on('message',message=>{if(message?.type!=='memory-control-ready')return;if(controlReady||message.v!==1||Object.keys(message).sort().join()!=='type,v'||typeof memoryControlBootstrap!=='function'){child.kill();return;}controlReady=true;void Promise.resolve().then(()=>memoryControlBootstrap()).then(plan=>{if(!child.connected||exited)throw new Error('memory_control_bootstrap_unavailable');child.send({v:1,type:'memory-control-bootstrap',plan});}).catch(()=>child.kill());});
+  let memoryOwner=null,ownerReady=false;
+  const ownerBinding={launchId:newLaunchToken(),epoch:newLaunchToken()};
+  if(memoryOwnerFactory!==undefined){
+    if(typeof memoryOwnerFactory!=='function'){child.kill();throw new Error('memory_owner_channel_unavailable');}
+    memoryOwner=memoryOwnerFactory({binding:ownerBinding,send:message=>new Promise((resolve,reject)=>{if(!child.connected)return reject(new Error('memory_owner_channel_unavailable'));child.send(message,error=>error?reject(error):resolve());}),childIsCurrent:()=>!exited&&child.connected,stopChild:()=>stopChild(child,()=>exited,exitedPromise,STOP_GRACE_MS)});
+    if(!memoryOwner||typeof memoryOwner.handleMessage!=='function'||typeof memoryOwner.close!=='function'){child.kill();throw new Error('memory_owner_channel_unavailable');}
+    child.on('message',message=>{
+      if(message?.type==='memory-owner-ready'){
+        if(ownerReady||message.v!==1||Object.keys(message).sort().join()!=='type,v'){void memoryOwner.close();return;}
+        ownerReady=true;child.send({v:1,type:'memory-owner-bootstrap',binding:ownerBinding});return;
+      }
+      if(['memory-owner-channel','memory-background-epoch-revoke'].includes(message?.type))void memoryOwner.handleMessage(message).catch(()=>memoryOwner.close());
+    });
+    child.once('exit',()=>{void memoryOwner.close();});
+  }
+
 
   return new Promise((resolve, reject) => {
     let ready = false, failed = false;

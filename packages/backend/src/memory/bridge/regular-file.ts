@@ -1,3 +1,4 @@
+import {assertNoProtectedDatabaseAlias,assertProtectedMemoryFileDescriptor,closeProtectedMemoryFileDescriptor} from '../encryption/protected-filesystem.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -26,9 +27,11 @@ export function confinedPath(root: string, relative: string): string {
 export function readRegularFile(root: string, relative: string, limit: number): { bytes: Buffer; mode: number } {
   const file = confinedPath(root, relative);
   let fd:number;
+  assertNoProtectedDatabaseAlias(file);
   try{fd=fs.openSync(file,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW??0)|(fs.constants.O_NONBLOCK??0));}
   catch(error){if((error as NodeJS.ErrnoException).code==='ELOOP')throw notRegular('Not a regular file');throw error;}
   try {
+    assertProtectedMemoryFileDescriptor(fd);
     const opened=fs.fstatSync(fd),entry=fs.lstatSync(file);
     if(!opened.isFile()||!entry.isFile()||entry.isSymbolicLink()||entry.dev!==opened.dev||entry.ino!==opened.ino)throw notRegular('File changed during open');
     if (opened.size > limit) throw Object.assign(new Error('File is too large'), { code: 'EFBIG' });
@@ -41,5 +44,5 @@ export function readRegularFile(root: string, relative: string, limit: number): 
     }
     if (length > limit) throw Object.assign(new Error('File is too large'), { code: 'EFBIG' });
     return { bytes: bytes.subarray(0, length), mode: opened.mode & 0o777 };
-  } finally { fs.closeSync(fd); }
+  } finally { closeProtectedMemoryFileDescriptor(fd,()=>fs.closeSync(fd)); }
 }

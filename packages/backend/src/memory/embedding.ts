@@ -133,6 +133,7 @@ class OllamaProvider implements EmbeddingProvider {
       const input = texts.slice(i, i + MAX_BATCH);
       const res = await fetch(`${this.baseUrl}/api/embed`, {
         method: 'POST',
+        redirect: 'error',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: this.model, input }),
         signal: AbortSignal.timeout(OLLAMA_TIMEOUT_MS),

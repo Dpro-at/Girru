@@ -1,3 +1,4 @@
+import {assertRunEntryAvailable} from './run-admission-entry.js';
 /** Public backend execution boundary. Entry adapters must authenticate/admit the
  * command first. Each strategy retains its sensitive-boundary authorization;
  * an accepted command is never a grant. Lazy wiring avoids domain import cycles.
@@ -13,6 +14,7 @@ export type AgentExecutionCommand =
 export function executeAgent(command: Extract<AgentExecutionCommand, { strategy: 'durable' }>): Promise<AttemptResult>;
 export function executeAgent(command: Extract<AgentExecutionCommand, { strategy: 'chat' }>): Promise<unknown>;
 export async function executeAgent(command: AgentExecutionCommand): Promise<unknown> {
+  assertRunEntryAvailable();
   switch (command.strategy) {
     case 'chat': return (await import('./chat-turn.js')).executeChatTurn(command.reply, command.input);
     case 'durable': return (await import('./task-turn.js')).executeTaskRun(command.runId, command.worker);

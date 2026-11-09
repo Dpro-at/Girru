@@ -12,7 +12,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { all, one, run, sql, type Step } from '../repositories/sql-steps.js';
+import { all, one, run, sql, tableExists, lockName, type Step } from '../repositories/sql-steps.js';
 import { storeP3Enabled } from '../services/store-p3.js';
 
 export type KeyedBy = 'slug' | 'id';
@@ -54,7 +54,16 @@ export function* keyStateStep(ownerId: string): Step<KeyedBy> {
   return r?.keyed_by === 'id' ? 'id' : 'slug';
 }
 
+function* assertProjectionKeysMovableStep(ownerId:string):Step<void>{
+  yield* lockName('encrypted-projection-owner:'+ownerId);
+  if (yield* tableExists('memory_encryption_projection_holds')) {
+    const held = yield* one("SELECT 1 AS held FROM memory_encryption_projection_holds WHERE owner_id=? AND state='held' LIMIT 1", ownerId);
+    if (held) throw new Error('Project key migration refused while encrypted projections are held');
+  }
+}
+
 export function* rewriteStep(ownerId: string, from: string, to: string): Step<number> {
+  yield* assertProjectionKeysMovableStep(ownerId);
   let n = 0;
   for (const k of KEYED) {
     const a = k.prefix ? k.prefix + from : from;
@@ -62,6 +71,9 @@ export function* rewriteStep(ownerId: string, from: string, to: string): Step<nu
     const owned = k.owner ? ` AND ${k.owner} = ?` : '';
     const args = k.owner ? [ownerId] : [];
     n += (yield* run(`UPDATE ${k.table} SET ${k.col} = ? WHERE ${k.col} = ?${owned}${k.where ? ` AND ${k.where}` : ''}`, b, a, ...args)).changes;
+  }
+  if(yield* tableExists('memory_encryption_projection_holds')) {
+    n += (yield* run("UPDATE memory_encryption_projection_holds SET scope=? WHERE owner_id=? AND scope=? AND state='released'",`project:${to}`,ownerId,`project:${from}`)).changes;
   }
   // Cache revisions are counters: a fresh process has no cache, so the new scope may start over.
   yield* run('DELETE FROM memory_cache_revisions WHERE user_id = ? AND scope = ?', ownerId, `project:${to}`);
@@ -88,6 +100,7 @@ export interface MoveReport { direction: 'to_id' | 'to_slug' | 'none'; projects:
 
 /** Rewrites one owner's project keys to ids (to: 'id') or back to slugs (to: 'slug'). Idempotent. */
 export function* moveProjectKeysStep(ownerId: string, to: KeyedBy): Step<MoveReport> {
+  yield* assertProjectionKeysMovableStep(ownerId);
   const now = yield* keyStateStep(ownerId);
   const report: MoveReport = { direction: 'none', projects: 0, rows: 0, created: 0 };
   if (to === 'id') {

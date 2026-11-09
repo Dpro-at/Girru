@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // MEM-SCALE-01: memory at scale. Scope tree (company -> department ->
 // project, people, agents) with counts and health; pinned facts loaded first;
 // project lifecycle with preview + confirm (archive = never recalled, merge,
@@ -14,7 +15,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 import { switchValueOn } from './helpers/switches.mjs';
-const backendDir = process.cwd();
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-memscale-'));
 mkdirSync(join(dir, '.data'), { recursive: true });
 process.chdir(dir);

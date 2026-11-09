@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const ts = require('../node_modules/typescript');
+const codeWithoutComments = source => { const scanner = ts.createScanner(ts.ScriptTarget.Latest, true, ts.LanguageVariant.JSX, source), tokens = []; while (scanner.scan() !== ts.SyntaxKind.EndOfFileToken) tokens.push(scanner.getTokenText()); return tokens.join(' '); };
 const React = require('react');
 const { renderToStaticMarkup } = require('react-dom/server');
 const { App } = require('../src/App.tsx');
@@ -136,6 +138,8 @@ test('entry source exception rejects direct calls, alternate origins, missing gu
   ]) assert.throws(() => assertEntryBinding(changed));
 });
 test('source boundary: only injected session transport may network; no browser storage or HTML sinks', () => {
+  assert.doesNotMatch(codeWithoutComments('/** A report never performs a fetch. */ const value=1;'), /\bfetch\b/);
+  for (const actual of ['fetch(target)', 'const request = fetch;', 'const url = \"https://example.invalid\";']) assert.match(codeWithoutComments(actual), /\bfetch\b|https?:\/\//);
   for (const name of fs.readdirSync(path.join(root, 'src'), { recursive: true }).filter(name => /\.(?:tsx?|c?js|css)$/.test(name) && fs.statSync(path.join(root, 'src', name)).isFile())) {
     let source = fs.readFileSync(path.join(root, 'src', name), 'utf8');
     // Only a validated, non-sensitive theme preference may persist in browser storage.
@@ -149,6 +153,18 @@ test('source boundary: only injected session transport may network; no browser s
       const addresses = [...new Set(source.match(/https?:\/\/[^']*/g) ?? [])].sort();
       assert.deepEqual(addresses, ['http://', 'https://', 'https://www.google.com/search?q=']);
       source = source.replace(/https?:\/\/[^']*/g, '');
+    }
+    if (name === 'DproAccountPanel.tsx') {
+      // This is a user-entered service URL placeholder; requests still use the injected session transport.
+      assert.deepEqual(source.match(/https?:\/\/[^"]+/g), ['https://your-host/identity/v1']);
+      assert.match(source, /await client\.request\(/);
+      source = source.replace('https://your-host/identity/v1', 'owner-entered-service-placeholder');
+    }
+    if (name === 'reports-contract.js') {
+      // A fixed reserved base parses relative report routes; it is never a network destination.
+      assert.deepEqual(source.match(/https?:\/\/[^']+/g), ['https://local.invalid']);
+      assert.match(source, /new URL\(path,'https:\/\/local\.invalid'\)/);
+      source = source.replace('https://local.invalid', 'relative-report-route-base');
     }
     if (name === 'PublisherSources.tsx') {
       // Fixed publisher navigation links are user-opened anchors, never transport targets.
@@ -181,7 +197,7 @@ test('source boundary: only injected session transport may network; no browser s
       source = source.replace(/https?:\/\/[^']+/g, 'xml-namespace');
     }
     if (name === 'entry-client.ts') assertEntryBinding(source);
-    else if (name !== 'session.ts') assert.doesNotMatch(source, /\bfetch\b|https?:\/\//, name);
+    else if (name !== 'session.ts') assert.doesNotMatch(codeWithoutComments(source), /\bfetch\b|https?:\/\//, name);
     else { assert.match(source, /fetcher: typeof fetch/); assert.doesNotMatch(source, /\bfetch\s*\(/); }
   }
   const css = fs.readFileSync(path.join(root, 'src/styles.css'), 'utf8');
