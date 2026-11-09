@@ -506,9 +506,11 @@ export class SessionClient {
     }
     return { ok: true };
   }
+  /** Whether Google sign-in works on this installation (the desktop app's key store is there). */
+  async googleAvailable():Promise<boolean>{if(this.#state.mode!=='live')return false;try{const r=await this.#send('GET','/api/auth/google/status',undefined,undefined,this.#state.epoch);return r.status===200&&record(r.body)&&r.body.available===true;}catch{return false;}}
   #googlePendingNonce:string|undefined;
   #googleFlow:{flowId:string;clientNonce:string;setupToken?:string}|undefined;
-  async loginGoogle(setup?:{setupToken:string;name:string;workspaceType?:'individual'|'company';companyName?:string;companyKind?:string}){
+  async loginGoogle(setup?:{setupToken:string;name?:string;workspaceType?:'individual'|'company';companyName?:string;companyKind?:string}){
     if(this.#state.mode!=='live'||this.#state.phase!=='signed-out'||(setup?this.#state.setup!=='required':this.#state.setup!=='login'))return;
     const keep=this.#nextKeep;this.#reset('live','signing-in',undefined,this.#state.setup);const epoch=this.#state.epoch;
     const bytes=new Uint8Array(32);crypto.getRandomValues(bytes);const clientNonce=btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replaceAll('=','');

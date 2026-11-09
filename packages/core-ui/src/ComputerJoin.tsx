@@ -4,10 +4,12 @@ import {Sheet} from './desktop-ui';
 import {QrImage} from './PhonePairing';
 import {UiIcon} from './ui-icons';
 import type {UiIconName} from './ui-icons';
+import {useContinuity, useShareByDefault} from './ComputerStart';
+import {computerIcon} from './ComputerLook';
 
 /** Adding a computer (DEVICES-PROJECT-01 B2, boards CP1, CP2, CP7, CP9c): plain words, pictures instead of codes. */
 const root = '/api/computers/account';
-type Status = {desktopAvailable?: boolean; connected?: boolean; googleLinked?: boolean; view?: {deviceStatus?: string; devices?: {id: string; label: string; status: string}[]} | null; pairing?: {self: {waiting: boolean; approver: string | null; code: string | null; changed?: boolean} | null; requests: {deviceId: string; label: string; osFamily: string; code: string | null; publicKey?: string; elsewhere: boolean; changed?: boolean}[]; addedWithCode: {deviceId: string; label: string; publicKey: string; checkCode: string}[]; twoFactorFailuresToday?: number; thisComputerCheck?: string} | null};
+export type Status = {desktopAvailable?: boolean; configured?: boolean; connected?: boolean; active?: boolean; googleLinked?: boolean; workspaces?: {id: string; label: string; mode: string; state: string; sourceDeviceId?: string | null}[]; coverage?: {category: string; label: string; available: boolean; continuity: boolean}[]; view?: {deviceId?: string; deviceStatus?: string; devices?: {id: string; label: string; status: string; presence?: string; osFamily?: string; publicKey?: string; appVersion?: string}[]} | null; pairing?: {self: {waiting: boolean; approver: string | null; code: string | null; changed?: boolean} | null; requests: {deviceId: string; label: string; osFamily: string; code: string | null; publicKey?: string; elsewhere: boolean; changed?: boolean}[]; addedWithCode: {deviceId: string; label: string; publicKey: string; checkCode: string}[]; twoFactorFailuresToday?: number; thisComputerCheck?: string} | null};
 
 /** Plain words for the account service's answers (one name per thing; never a code on screen). */
 export function computerAccountWords(code: string) {
@@ -31,7 +33,7 @@ export function computerAccountWords(code: string) {
   };
   return words[code] ?? 'That did not work. Try again in a moment.';
 }
-async function call(client: SessionClient, path: string, body?: unknown) {
+export async function call(client: SessionClient, path: string, body?: unknown) {
   const r = await client.request(body === undefined ? {method: 'GET', path} : {method: 'POST', path, body});
   if (r.status !== 200) throw Error((r.body as {code?: string})?.code ?? 'computer_request_refused');
   return r.body as any;
@@ -69,13 +71,26 @@ export function AddThisComputer({client, status}: {client: SessionClient; status
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const current = useRef(flow); current.current = flow;
-  useEffect(() => { if (!flow || flow.ready) return; let live = true; const t = setInterval(() => { void call(client, root + '/flow/status', {flowId: flow.flowId, clientNonce: flow.clientNonce}).then(r => { if (!live) return; if (r.state === 'ready') { clearInterval(t); setFlow({...flow, ready: true}); void finish({...flow, ready: true}); } else if (r.state === 'failed') { clearInterval(t); setFlow(null); setNotice('Google sign-in did not finish. Try again.'); } }).catch(() => { clearInterval(t); setFlow(null); setNotice('The sign-in took too long. Start again.'); }); }, 1500); return () => { live = false; clearInterval(t); }; }, [flow?.flowId]);
+  useEffect(() => { if (!flow || flow.ready) return; let live = true; const t = setInterval(() => { void call(client, root + '/flow/status', {flowId: flow.flowId, clientNonce: flow.clientNonce}).then(r => { if (!live) return; if (r.state === 'ready') { clearInterval(t); setFlow({...flow, ready: true}); void finish({...flow, ready: true}); } else if (r.state === 'failed') { clearInterval(t); setFlow(null); setNotice('Sign-in did not finish. Nothing changed. Sign in again when you are ready.'); } }).catch(() => { clearInterval(t); setFlow(null); setNotice('The sign-in took too long. Start again.'); }); }, 1500); return () => { live = false; clearInterval(t); }; }, [flow?.flowId]);
   const run = async (fn: () => Promise<void>) => { setBusy(true); setNotice(''); try { await fn(); } catch (e) { setNotice(computerAccountWords((e as Error).message)); } finally { setBusy(false); } };
   const start = () => run(async () => { const bytes = crypto.getRandomValues(new Uint8Array(32)); const clientNonce = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); const r = await call(client, root + '/flow/start', {kind: 'connect', clientNonce, label: name.trim() || 'Computer', confirmed: true}); setFlow({flowId: r.flowId, clientNonce}); });
   async function finish(f = current.current, verification?: {challenge: string; nonce: string; code: string}) { if (!f) return; await run(async () => { const r = await call(client, root + '/flow/finish', {flowId: f.flowId, clientNonce: f.clientNonce, ...(verification ? {verification} : {})}); if (r.verificationRequired) { setVerify({challenge: r.challenge, nonce: r.nonce}); return; } setVerify(null); setFlow(null); }); }
   const join = () => run(async () => { await call(client, root + '/join-with-code', {code: code.trim(), confirmed: true}); setCode(''); });
 
   const waiting = status?.connected && status.view?.deviceStatus === 'pending';
+  // CP7b/CP7c: a wait that ends without a Yes says why, in one sentence, with one way on.
+  const waitStarted = useRef<number | null>(null);
+  const [ended, setEnded] = useState<'refused' | 'late' | null>(null);
+  useEffect(() => {
+    if (waiting) { if (waitStarted.current === null) waitStarted.current = Date.now(); setEnded(null); return; }
+    if (waitStarted.current !== null && status !== undefined && status?.view?.deviceStatus !== 'approved') { setEnded(Date.now() - waitStarted.current >= 9 * 60_000 ? 'late' : 'refused'); waitStarted.current = null; }
+  }, [waiting, status?.view?.deviceStatus]);
+  if (ended && !flow) return <div className="computer-join" role="alert">
+    <span className="computer-start-done is-warn"><UiIcon name={ended === 'late' ? 'clock' : 'close'} size={24}/></span>
+    <h2>{ended === 'late' ? 'Nobody added this computer in time' : 'This computer was not added'}</h2>
+    <p>{ended === 'late' ? 'The request ended after 10 minutes. Open Girru on one of your other computers first, then try again.' : 'Your other computer said No, or the pictures were different. Start again; if it happens again, someone else may be using your account — change your Google password.'}</p>
+    <div className="setup-actions"><button type="button" className="primary" onClick={() => { setEnded(null); void start(); }}>{ended === 'late' ? 'Try again' : 'Start again'}</button></div>
+  </div>;
   if (waiting) {
     const self = status?.pairing?.self;
     return <div className="computer-join">
@@ -115,7 +130,7 @@ export function ComputerJoinRequests({client, status}: {client: SessionClient; s
   return <section aria-label="New computers" className="computer-join-requests">
     <p className="section-label">Needs you</p>
     {reqs.map(r => <div key={r.deviceId} className="computer-task" role="group" aria-label={`Add ${r.label}`}>
-      <UiIcon name="user-plus" size={16}/>
+      <UiIcon name={computerIcon(null, r.deviceId, r.osFamily)} size={16}/>
       <span className="computer-task-text"><b>Add “{r.label}” to your account?</b><small>{r.changed ? 'This request changed after you answered it, so it stopped for safety. Start again on the new computer.' : r.elsewhere ? 'Another of your computers is answering this.' : r.code ? 'Check the new computer shows these same pictures. Only add a computer you own.' : 'Getting the pictures ready…'}</small>{r.code && <ComputerPictures code={r.code}/>}</span>
       {!r.elsewhere && !r.changed && <span className="computer-task-actions"><button type="button" disabled={busy === r.deviceId} onClick={() => void answer(r, false)}>No, it’s not me</button><button type="button" className="primary" disabled={busy === r.deviceId || !r.code} onClick={() => void answer(r, true)}>Yes, add it</button></span>}
     </div>)}
@@ -129,9 +144,13 @@ export function ComputerJoinRequests({client, status}: {client: SessionClient; s
 export function ComputerJoinNotice({client, enabled, onOpen}: {client: SessionClient; enabled: boolean; onOpen: () => void}) {
   const status = useAccountStatus(client, enabled);
   const [hidden, setHidden] = useState('');
+  useShareByDefault(client, status);
+  const [continuity] = useContinuity(client, status);
   const r = status?.pairing?.requests?.find(x => !x.elsewhere);
+  const same = continuity.find(x => x.state === 'pending');
+  if ((!r || hidden === r.deviceId) && same && hidden !== same.id) return <div className="computer-join-notice" role="status"><UiIcon name="copy" size={16}/><span><b>{same.label ?? 'Your new computer'} wants to start the same as this one</b><small>Your agents, rules and projects</small></span><button type="button" className="primary" onClick={() => { setHidden(same.id); onOpen(); }}>Review</button><button type="button" className="tool" aria-label="Later" title="Later" onClick={() => setHidden(same.id)}><UiIcon name="close" size={13}/></button></div>;
   if (!r || hidden === r.deviceId) return null;
-  return <div className="computer-join-notice" role="status"><UiIcon name="screen" size={16}/><span><b>New computer: {r.label}</b><small>Wants to join your account</small></span><button type="button" className="primary" onClick={() => { setHidden(r.deviceId); onOpen(); }}>Review</button><button type="button" className="tool" aria-label="Later" title="Later" onClick={() => setHidden(r.deviceId)}><UiIcon name="close" size={13}/></button></div>;
+  return <div className="computer-join-notice" role="status"><UiIcon name={computerIcon(null, r.deviceId, r.osFamily)} size={16}/><span><b>New computer: {r.label}</b><small>Wants to join your account</small></span><button type="button" className="primary" onClick={() => { setHidden(r.deviceId); onOpen(); }}>Review</button><button type="button" className="tool" aria-label="Later" title="Later" onClick={() => setHidden(r.deviceId)}><UiIcon name="close" size={13}/></button></div>;
 }
 
 /** Settings › Computers › Account and safety: the Dpro account's own two-step sign-in (D11). */

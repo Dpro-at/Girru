@@ -1,6 +1,7 @@
 import {ComputerDevicesProvider} from './ComputerDevices';
 import { ComputersSection } from './ComputersSection';
 import { ComputerJoinNotice } from './ComputerJoin';
+import { ComputersFooterStatus, useComputerNotices } from './ComputerActivity';
 import {AppUpdateNotice} from './AppUpdateNotice';
 import {ReportsPage} from './ReportsPage';
 import {BrowserWorkspace} from './BrowserWorkspace';
@@ -102,6 +103,8 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
   useEffect(() => { void window.dproApp?.setSetupWindow?.(false).catch(() => {}); }, []);
   const state = useSyncExternalStore(client.subscribe, client.getSnapshot, client.getSnapshot);
   const [page, setPage] = useState<Page>('chat');
+  // CP11c: a system notice when a sent task finishes or another computer needs Allow.
+  useComputerNotices(client.getSnapshot().user?.role === 'owner' && client.getSnapshot().mode === 'live', () => setPage('computers'));
   const [genvrOpened,setGenvrOpened]=useState(false);
   const genvrOpenSeq=useRef(0);
   useEffect(()=>{genvrOpenSeq.current++;return()=>{genvrOpenSeq.current++;};},[page,state.user?.id,state.user?.role]);
@@ -277,7 +280,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
       <section className="page page-agents" hidden={page !== 'agents'}><AgentsDestination client={client} active={page === 'agents'} onPersonalities={()=>setPage('personalities')} onSpecialties={()=>setPage('specialties')} onSkills={()=>setPage('skills')} sidebarSlot={slot} onOpenMcp={()=>setPage('mcp')} onOpenApprovals={()=>setPage('approvals')} focusAgent={agentFocus} onChat={agentId => { if (chat) { chat.newChat(); chat.selectAgent(agentId); } setPage('chat'); }} onOpenMemory={agentId => { if (agentId) setMemoryFocus(f => ({ scope: `agent:${agentId}`, n: (f?.n ?? 0) + 1 })); setPage('memory'); }}/></section>
       <section className="page page-board" hidden={page !== 'board'}>{board && <TaskBoard controller={board} sidebarSlot={slot} active={page === 'board'} onOpenChat={id => { void chat?.open(id); setPage('chat'); }} onOpenMemory={to => { setMemoryFocus(f => ('handoffs' in to ? { handoffs: true as const, n: (f?.n ?? 0) + 1 } : { scope: to.scope, n: (f?.n ?? 0) + 1 })); setPage('memory'); }}/>}</section>
       {user.role==='owner'&&<section className="page page-reports" hidden={page!=='reports'}><ReportsPage onOpenCard={(boardId,cardId)=>{setPage('board');void board?.reveal(boardId,cardId);}} key={user.id} client={client} active={page==='reports'} sidebarSlot={slot} agents={chatState?.agents??[]} projects={chatState?.projects??[]} onOpenChat={id=>{void chat?.open(id);setPage('chat');}}/></section>}
-      {user.role!=='guest'&&<section className="page page-runs" hidden={page!=='runs'}><RunsDestination client={client} active={page==='runs'} sidebarSlot={slot} request={runsRequest} agents={chatState?.agents??[]} projects={chatState?.projects??[]} models={chatState?.models??[]} onOpenChat={id=>{void chat?.open(id);setPage('chat');}} onOpenCard={(boardId,cardId)=>{setPage('board');void board?.reveal(boardId,cardId);}} onOpenAgent={id=>{setAgentFocus(f=>({id,n:(f?.n??0)+1}));setPage('agents');}} onOpenApprovals={()=>setPage('approvals')} onOpenConnections={()=>openSettings('channels')}/></section>}
+      {user.role!=='guest'&&<section className="page page-runs" hidden={page!=='runs'}><RunsDestination client={client} active={page==='runs'} onOpenComputers={owner && mode === 'live' ? () => setPage('computers') : undefined} sidebarSlot={slot} request={runsRequest} agents={chatState?.agents??[]} projects={chatState?.projects??[]} models={chatState?.models??[]} onOpenChat={id=>{void chat?.open(id);setPage('chat');}} onOpenCard={(boardId,cardId)=>{setPage('board');void board?.reveal(boardId,cardId);}} onOpenAgent={id=>{setAgentFocus(f=>({id,n:(f?.n??0)+1}));setPage('agents');}} onOpenApprovals={()=>setPage('approvals')} onOpenConnections={()=>openSettings('channels')}/></section>}
       {user.role!=='guest'&&<section className="page page-approvals" hidden={page!=='approvals'}><ApprovalsWorkspace client={client} active={page==='approvals'} placeRequest={approvalsPlace} slot={slot} onDecision={decided} onAccount={()=>openSettings('account')} pendingCount={pendingApprovals.count} onAgent={id=>{setAgentFocus(f=>({id,n:(f?.n??0)+1}));setPage('agents');}}/></section>}
       <section className="page page-ui mem-desk" hidden={page !== 'memory'}><MemoryWindow client={client} active={page === 'memory'} focus={memoryFocus} sidebarSlot={slot} onOpenChat={id => { void chat?.open(id); setPage('chat'); }} onOpenCard={(boardId, cardId) => { setPage('board'); void board?.reveal(boardId, cardId); }} onOpenSettings={openMemorySettings}/></section>
       {user.role === 'owner' && <>
@@ -299,7 +302,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
     <ShellFooter controller={footer} settingsCurrent={page==='settings'} settingsAlert={backupFailed?'the last backup failed':undefined} onSettings={()=>backupFailed?openSettings('backups'):setPage('settings')} onCustomize={()=>openSettings('general')}
       status={mode === 'mock' ? <span className="status-item"><span className={`status-dot ${mode}`} aria-hidden="true"/>Offline practice — fictional data</span>
         : <span className="status-item status-dot-only" title="Connected · this installation" aria-label="Connected · this installation" role="img"><span className={`status-dot ${mode}`} aria-hidden="true"/></span>}
-      extra={<>{owner && mode === 'live' && <AppUpdateNotice onOpen={()=>openSettings('about')}/>}{isDeveloperBuild(client) && <button className="status-item statusbar-button" onClick={() => client.selectMode('fixture')} title="Clears this local session; the server sign-in stays until you sign out">Leave to fixture</button>}{owner && mode === 'live' && <FooterHelperPill client={client}/>}</>}
+      extra={<>{owner && mode === 'live' && <ComputersFooterStatus onOpen={() => setPage('computers')}/>}{owner && mode === 'live' && <AppUpdateNotice onOpen={()=>openSettings('about')}/>}{isDeveloperBuild(client) && <button className="status-item statusbar-button" onClick={() => client.selectMode('fixture')} title="Clears this local session; the server sign-in stays until you sign out">Leave to fixture</button>}{owner && mode === 'live' && <FooterHelperPill client={client}/>}</>}
       entries={footerEntries}/>
     {owner && mode === 'live' && <NewPhoneNotice client={client} onSettings={() => openSettings('phone')}/>}
     {owner && mode === 'live' && page !== 'computers' && <ComputerJoinNotice client={client} enabled={owner && mode === 'live'} onOpen={() => setPage('computers')}/>}

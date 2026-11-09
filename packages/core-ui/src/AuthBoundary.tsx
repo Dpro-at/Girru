@@ -18,6 +18,8 @@ import { SetupSteps } from './FirstRunSetup';
 import { WorkspaceTypeStep, type WorkspaceType } from './WorkspaceTypeStep';
 import { KindStep } from './CompanyWizard';
 import { COMPANY_KIND_CHOICES } from './company-kinds.js';
+import { DproMark } from './DproMark';
+import { writeSetupEntry } from './ComputerStart';
 
 const notices = {
   recovered:'Authenticator reset. Sign in again, then set up two-step verification in Settings.',
@@ -171,6 +173,10 @@ function OwnerSetup({ client, setupCode, initialPage }: { client: SessionClient;
   const [workspaceType, setWorkspaceType] = useState<WorkspaceType>();
   const [companyName, setCompanyName] = useState<string>();
   const [chooseType, setChooseType] = useState(true);
+  // DEVICES-PROJECT-01 (CP1a): the welcome asks one thing, Create account or Sign in; both go through Google.
+  const [welcome, setWelcome] = useState(true);
+  const [google, setGoogle] = useState<boolean | null>(null);
+  useEffect(() => { let live = true; void client.googleAvailable().then(v => { if (live) setGoogle(v); }); return () => { live = false; }; }, [client]);
   // ONBOARD-COMPANYTYPE-01: "What does your company do?" right after the company name.
   const [askKind, setAskKind] = useState(false);
   const [companyKind, setCompanyKind] = useState<string>();
@@ -179,6 +185,18 @@ function OwnerSetup({ client, setupCode, initialPage }: { client: SessionClient;
   const code = setupCode ?? '';
   const hasSetupLink = SETUP_CODE.test(code);
   const [busy, setBusy] = useState(false); const [notice, setNotice] = useState<keyof typeof ownerSetupNotices | null>(null);
+  const withGoogle = (signin: boolean) => { writeSetupEntry(signin ? 'signin' : null); void client.loginGoogle({ setupToken: code }); };
+  if (welcome && hasSetupLink) return <section className="setup-pane setup-welcome" aria-label="Welcome to Girru">
+    <span className="public-mark" aria-hidden="true"><DproMark/></span>
+    <h1>Welcome to Girru</h1>
+    <p>Your company of AI agents, on this computer.</p>
+    <div className="setup-welcome-actions">
+      <button type="button" className="primary" disabled={google === false} onClick={() => withGoogle(false)}>Create account</button>
+      <button type="button" disabled={google === false} onClick={() => withGoogle(true)}>Sign in</button>
+    </div>
+    <p className="fine-print">{google === false ? 'Google sign-in is not ready on this computer.' : 'Your browser opens for Google. Your chats, files and agents stay on your computers.'}</p>
+    {google === false && <button type="button" className="link-button" onClick={() => { writeSetupEntry(null); setWelcome(false); }}>Use an email and password instead</button>}
+  </section>;
   if (chooseType) return <WorkspaceTypeStep value={workspaceType} companyName={companyName} onNext={(type, name) => { setWorkspaceType(type); setCompanyName(name); setChooseType(false); setAskKind(type === 'company'); if (type !== 'company') setCompanyKind(undefined); }}/>;
   if (askKind) return <KindStep orb workspaceType="company" value={companyKind} query={kindQuery} busy={false} more={0}
     kinds={COMPANY_KIND_CHOICES.filter(k => k.label.toLowerCase().includes(kindQuery.trim().toLowerCase()))} onQuery={setKindQuery} onMore={() => undefined}

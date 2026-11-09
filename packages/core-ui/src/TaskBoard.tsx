@@ -1,4 +1,6 @@
-import {ComputerExecutionBadge} from './ComputerDevices';
+import {ComputerExecutionBadge, useComputerOverview} from './ComputerDevices';
+import {ComputerTaskRequest} from './ComputerTaskRequest';
+import {ContextMenu, useMenu} from './desktop-ui';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { DragEvent, ReactNode } from 'react';
 import {createPortal} from 'react-dom';
@@ -180,8 +182,20 @@ function BoardColumn({ col, controller, busy }: { col: Column; controller: Board
 
 function CardTile({ card, controller }: { card: Card; controller: BoardController }) {
   const overdue = card.dueDate !== null && card.dueDate < new Date().toISOString().slice(0, 10);
+  // CP5: right-click › Send to computer opens the one Send a task sheet with this card and its title.
+  const menu = useMenu();
+  const computers = useComputerOverview();
+  const [sending, setSending] = useState(false);
+  const canSend = !!computers?.devices.some(d => d.state !== 'revoked') && (!!computers.configured || computers.testOnly);
+  const boardId = controller.getSnapshot().boardId;
   return <article className="board-card" data-priority={card.priority} data-repeat={card.repeat ? true : undefined} draggable
-    onDragStart={e => { e.dataTransfer.setData(DRAG_TYPE, card.id); e.dataTransfer.effectAllowed = 'move'; }}>
+    onDragStart={e => { e.dataTransfer.setData(DRAG_TYPE, card.id); e.dataTransfer.effectAllowed = 'move'; }}
+    onContextMenu={e => menu.at(e, [
+      { label: 'Open', icon: 'open', shortcut: '↩', run: () => void controller.openCard(card.id) },
+      ...(canSend && boardId ? [{ label: 'Send to computer…', icon: 'send' as const, run: () => setSending(true) }] : []),
+    ])}>
+    <ContextMenu menu={menu.menu} onClose={menu.close}/>
+    {sending && boardId && <ComputerTaskRequest client={controller.client} card={{ boardId, cardId: card.id, cardVersion: card.version }} title={card.description ? `${card.title}\n\n${card.description}`.slice(0, 8000) : card.title} openNow onClosed={() => setSending(false)}/>}
     {card.cover && <span className="board-cover" data-color={card.cover} aria-hidden="true"/>}
     <button type="button" className="board-card-open" onClick={() => void controller.openCard(card.id)} aria-label={`Open ${cardTypeLabel[card.type].toLowerCase()} ${card.title}`}>
       {card.labels.length > 0 && <span className="board-labels">{card.labels.map(id => { const l = controller.getSnapshot().labels.find(x => x.id === id); return l ? <span key={id} className="board-label" data-color={l.color}>{l.name}</span> : null; })}</span>}
