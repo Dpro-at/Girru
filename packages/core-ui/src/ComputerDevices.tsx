@@ -3,6 +3,8 @@ import type { SessionClient } from './session';
 import type { ComputerOverview } from './computer-contract.js';
 import { UiIcon } from './ui-icons';
 const Computers = createContext<ComputerOverview | null>(null);
+/** The answer when this installation has no computer account yet. */
+const NOT_SET_UP: ComputerOverview = { testOnly: false, configured: false, productionEnrollment: { enabled: false, reason: 'not_set_up' }, self: null, devices: [], attempts: [], dispatchOptions: [] };
 export function ComputerDevicesProvider({ client, enabled, children }: {
     client: SessionClient;
     enabled: boolean;
@@ -13,7 +15,8 @@ export function ComputerDevicesProvider({ client, enabled, children }: {
 } let current = true; let timer: ReturnType<typeof setInterval> | undefined; const load = async () => { try {
     const r = await client.request({ method: 'GET', path: '/api/computers' });
     if (current) {
-        const next = r.status === 200 ? r.body as ComputerOverview : null;
+        // Not set up yet (no Dpro account on this installation): say so and stop asking every 2 seconds.
+        const next = r.status === 200 ? r.body as ComputerOverview : r.status === 400 || r.status === 404 || r.status === 409 ? NOT_SET_UP : null;
         setView(next);
         if (next && !next.testOnly && !next.configured && timer)
             clearInterval(timer);
