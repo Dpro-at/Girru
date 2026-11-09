@@ -10,6 +10,7 @@ import {Sheet, ContextMenu, useMenu, type MenuItem} from './desktop-ui';
 import {COMPUTER_ICONS, computerIcon, computerName, useComputerLook, type ComputerIconKey} from './ComputerLook';
 import {AddThisComputer, ComputerJoinRequests, useAccountStatus} from './ComputerJoin';
 import {ContinuityRequests} from './ComputerStart';
+import {AllowTask} from './ComputerTaskRules';
 import {UiIcon} from './ui-icons';
 
 /** Tasks that wait for this computer's owner to allow them. */
@@ -110,7 +111,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
       <header className="computers-head">
         <span className="computers-tile"><UiIcon name={isSelf ? iconOf(self?.id ?? '') : iconOf(device?.id ?? '', device?.publicKey)} size={22}/></span>
         <span className="computers-title"><h2>{name}</h2><small>{status}</small></span>
-        {!isSelf && device && <ComputerTaskRequest key={sending} client={client} presetTarget={device.id} label="Send a task" openNow={sending === device.id} onClosed={() => setSending('')}/>}
+        {!isSelf && device && <ComputerTaskRequest key={sending} client={client} presetTarget={device.id} label="Send a task" openNow={sending === device.id || undefined} onClosed={() => setSending('')}/>}
         {(isSelf ? self : device) && <button type="button" className="tool" title="More" aria-label="More" onClick={e => menu.at(e, isSelf ? menuForSelf() : menuFor(device!))}><UiIcon name="more" size={15}/></button>}
         <button type="button" className="tool" title={inspector ? 'Hide details' : 'Show details'} aria-label={inspector ? 'Hide details' : 'Show details'} aria-pressed={inspector} onClick={() => setInspector(v => !v)}><UiIcon name="inspector" size={15}/></button>
       </header>
@@ -119,7 +120,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
       {isSelf && <ComputerJoinRequests client={client} status={account}/>}
       {isSelf && <ContinuityRequests client={client} status={account}/>}
       {needs.length > 0 && <section aria-label="Needs you"><p className="section-label">Needs you</p><div className="computer-list" role="list">
-        {needs.map(a => row(a, <><ComputerTaskTiming client={client} taskId={a.taskId} onPrepared={onApprovals}/><button type="button" onClick={onApprovals}>Open Approvals</button></>))}
+        {needs.map(a => row(a, <>{a.approvalId ? <AllowTask client={client} approvalId={a.approvalId} sourceName={nameOf(a.sourceDevice, a.sourceName)} onDone={setNotice} onApprovals={onApprovals}/> : <button type="button" onClick={onApprovals}>Open Approvals</button>}<ComputerTaskTiming client={client} taskId={a.taskId} onPrepared={onApprovals}/></>))}
       </div></section>}
       <section aria-label="Working on"><p className="section-label">Working on</p>
         {working.length ? <div className="computer-list" role="list">

@@ -61,3 +61,18 @@
 .computer-icon-choice{display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 4px;border-radius:10px;background:var(--surface);border:1px solid var(--border);color:var(--accent,#3B7BF6);font:inherit;cursor:pointer}
 .computer-icon-choice small{color:var(--muted);font-size:11px}
 .computer-icon-choice.is-on{border-color:var(--accent,#3B7BF6);background:var(--subtle)}
+.computer-allow{display:flex;align-items:center;gap:8px}
+.computer-allow-always{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.computer-task-rules{display:flex;flex-direction:column;gap:10px}
+.computer-rule-add{display:flex;flex-direction:column;gap:6px;padding:10px;border-radius:10px;border:1px solid var(--border)}
+.computer-rule-pick{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.computer-version{border-color:var(--ap-warn,#C26A00)}
+.computer-to{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}
+.computer-to-item{display:flex;align-items:center;gap:7px;height:34px;padding:0 10px;border-radius:7px;background:var(--surface);border:1px solid var(--border);color:inherit;font:inherit;cursor:pointer;min-width:0}
+.computer-to-item span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+.computer-to-item small{color:var(--muted);font-size:11px}
+.computer-to-item.is-on{border-color:var(--accent,#3B7BF6);background:var(--subtle)}
+.computer-later{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.computer-later button{display:inline-flex;align-items:center;gap:6px}
+.computer-later button.is-on{border-color:var(--accent,#3B7BF6)}
+.computer-send-later{margin-right:auto}

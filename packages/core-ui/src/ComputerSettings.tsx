@@ -7,13 +7,15 @@ import {computerIcon, computerName, useComputerLook} from './ComputerLook';
 import {ComputerEnrollment} from './ComputerEnrollment';
 import {ComputerLinkControls, ComputerDirectControls} from './ComputerLinkControls';
 import {ComputerSyncWorkspace} from './ComputerSyncWorkspace';
+import {ComputerTaskRules} from './ComputerTaskRules';
 import {UiIcon} from './ui-icons';
 import type {UiIconName} from './ui-icons';
 
-/** Settings › Computers places (board CP6). “Tasks from other computers” arrives with B4. */
-export type ComputerSettingsPane = 'mine' | 'share' | 'connection' | 'account';
+/** Settings › Computers places (board CP6). */
+export type ComputerSettingsPane = 'mine' | 'tasks' | 'share' | 'connection' | 'account';
 export const COMPUTER_SETTINGS_PANES: ReadonlyArray<{key: ComputerSettingsPane; label: string; icon: UiIconName; note: string}> = [
   {key: 'mine', label: 'My computers', icon: 'screen', note: 'Your computers, the ones waiting to be added, and Forget.'},
+  {key: 'tasks', label: 'Tasks from other computers', icon: 'inbox', note: 'What this computer does when another of your computers sends it a task.'},
   {key: 'share', label: 'What they share', icon: 'link', note: 'What your computers keep the same.'},
   {key: 'connection', label: 'Connection', icon: 'wifi', note: 'Same Wi‑Fi first; otherwise over the internet, end-to-end encrypted.'},
   {key: 'account', label: 'Account and safety', icon: 'shield', note: 'Your Dpro account, recovery and history.'},
@@ -27,7 +29,7 @@ export function ComputerSettings({client, pane, onApprovals}: {client: SessionCl
   const usable = !!view && (view.testOnly || !!view.configured);
   const place = COMPUTER_SETTINGS_PANES.find(p => p.key === pane)!;
   const account = useAccountStatus(client, pane === 'mine');
-  const {look} = useComputerLook(client, pane === 'mine');
+  const {look} = useComputerLook(client, pane === 'mine' || pane === 'tasks');
   const os = (publicKey?: string, self = false) => account?.view?.devices?.find(d => self ? d.id === account?.view?.deviceId : !!publicKey && d.publicKey === publicKey)?.osFamily;
   return <div className="phone-settings computer-settings">
     <div className="phone-main">
@@ -48,6 +50,7 @@ export function ComputerSettings({client, pane, onApprovals}: {client: SessionCl
         <ComputerLinkControls client={client} view={view} onNotice={setNotice}/>
         <p className="fine-print">To forget a computer, select it in Computers and choose More › Forget this computer.</p>
       </>}
+      {pane === 'tasks' && usable && view && <ComputerTaskRules client={client} deviceNames={Object.fromEntries(devices.map(d => [d.id, computerName(look, d.id, d.name)]))}/>}
       {pane === 'share' && usable && view && <ComputerSyncWorkspace client={client} devices={view.devices} onApprovals={onApprovals}/>}
       {pane === 'connection' && usable && view && (devices.length
         ? devices.map(d => <section key={d.id} className="computer-connection" aria-label={d.name}><p className="section-label"><UiIcon name="screen" size={13}/> {d.name} · {computerPathLabel(d.path)}</p><ComputerDirectControls client={client} view={view} device={d} onNotice={setNotice}/></section>)

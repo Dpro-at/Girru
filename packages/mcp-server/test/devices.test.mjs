@@ -21,3 +21,13 @@ test('agents can read new computers waiting to join, never answer for the owner'
  for(const op of ['approve_join','answer_join','keep_added','twofactor'])await assert.rejects(()=>workspaceDevicesTool({operation:op,confirmed:true},backend));
  assert.ok(workspaceDevicesDefinition.description.includes('owner’s decision'));
 });
+test('agents read task rules, may only make them stricter, and see the free computer first (CP6, CP4)',async()=>{
+ const calls=[];const backend={request:async(method,path,body)=>{calls.push({method,path,body});if(path==='/api/auth/me')return {user:{role:'owner',status:'active'}};if(path==='/api/computers')return {devices:[{id:'off',name:'Air',state:'offline',dispatchOptions:[]},{id:'pc',name:'Office PC',state:'available',capacity:{limit:3,active:0},dispatchOptions:[{id:'p',label:'Girru app',agentBinding:'a',modelBinding:'m'}]}]};return {rule:'ask',projects:{},always:[]};}};
+ const s=await workspaceDevicesTool({operation:'suggest_target'},backend);assert.equal(s.data.computers[0].id,'pc');assert.equal(s.data.computers[0].projects[0].label,'Girru app');
+ await workspaceDevicesTool({operation:'task_rules'},backend);assert.equal(calls.at(-1).path,'/api/computers/task-rules');
+ await workspaceDevicesTool({operation:'set_task_rules',change:{rule:'refuse'},confirmed:true},backend);assert.deepEqual(calls.at(-1),{method:'POST',path:'/api/computers/task-rules',body:{rule:'refuse'}});
+ await assert.rejects(()=>workspaceDevicesTool({operation:'set_task_rules',change:{rule:'auto'},confirmed:true},backend),/owner/);
+ await assert.rejects(()=>workspaceDevicesTool({operation:'set_task_rules',change:{always:{source:'pc',projectId:'p',on:true}},confirmed:true},backend));
+ await assert.rejects(()=>workspaceDevicesTool({operation:'set_task_rules',change:{rule:'ask'}},backend));
+ await workspaceDevicesTool({operation:'rename_computer',deviceId:'pc',icon:'windows-pc',confirmed:true},backend);assert.deepEqual(calls.at(-1),{method:'POST',path:'/api/computers/look',body:{deviceId:'pc',icon:'windows-pc'}});
+});
