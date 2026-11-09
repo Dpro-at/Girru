@@ -73,6 +73,8 @@ export interface Tool {
 
 export interface ToolExecutionContext {
   workspaceDir: string;
+  /** Trusted server injection only; memory tool calls must never fall back to plaintext while bound. */
+  encryptedMemory?:{execute:(toolName:string,params:Record<string,unknown>,context:ToolExecutionContext)=>Promise<ToolResult>};
   timeout?: number;
   userId?: string;
   /**

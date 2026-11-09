@@ -1,3 +1,4 @@
+import {assertMemoryFilesystemAccess,hasProtectedMemoryFilesystem,readUnprotectedFileSync} from '../../memory/encryption/protected-filesystem.js';
 import { safeConsole } from '../../services/safe-error-log.js';
 /**
  * Database Management API Routes
@@ -88,8 +89,9 @@ export async function databaseRoutes(fastify: FastifyInstance) {
   // B2.2c: on PostgreSQL the SQLite-only surfaces answer 501 (after the
   // owner-only auth gate, which runs on onRequest).
   fastify.addHook('preHandler', async (request, reply) => {
-    if (dbDriver() !== 'postgres') return;
     const route = request.routeOptions?.url;
+    if(hasProtectedMemoryFilesystem()&&route&&SQLITE_ONLY_DATABASE_ROUTES.has(route))return reply.code(503).send({code:'encrypted_control_raw_admin_unavailable'});
+    if (dbDriver() !== 'postgres') return;
     if (route && SQLITE_ONLY_DATABASE_ROUTES.has(route)) {
       return reply.code(501).send(NOT_SUPPORTED_ON_POSTGRES);
     }
@@ -292,7 +294,8 @@ export async function databaseRoutes(fastify: FastifyInstance) {
         });
       }
 
-      const fileStream = readFileSync(backupPath);
+      assertMemoryFilesystemAccess(backupPath);
+      const fileStream = readUnprotectedFileSync(backupPath);
       reply.header('Content-Disposition', `attachment; filename="${filename}"`);
       reply.header('Content-Type', 'application/octet-stream');
       return reply.send(fileStream);

@@ -1,3 +1,10 @@
+import {storedRunModelPolicyHash} from '../../memory/encryption/stored-run-control.js';
+import {drawerId} from '../../memory/drawers.js';
+import {isEncryptedMemoryProfileSelected} from '../../memory/encryption/consumer-host.js';
+import {currentStoredRunPrincipal} from '../../memory/encryption/stored-run-principal.js';
+import {withStoredRunControl,withStoredRunClaim,withStoredRunHeartbeat,canClaimStoredRun,StoredRunConsentUnavailable,StoredRunOperationInterrupted,releaseStoredRunForConsent,markStoredRunExecutionStarted} from './stored-run-entry.js';
+import {scopeAdmittedMemory} from './run-admission-entry.js';
+import {withRunAdmission,beforeAdmittedModel,executeAdmittedTool,admitToolBatch,runInputDigest} from './run-admission-entry.js';
 import { agentSkillsPrompt } from '../../skills/central-store.js';
 import { HANDOFF_NOTE } from '../../memory/handoff/store.js';
 import { isPilotAgent } from '../../memory/outbox/pilot.js';
@@ -277,6 +284,7 @@ async function gatedStepCall(driver: ModelDriver, messages: LoopMessage[], runId
   let gated;
   try {
     // R2.2: the shared gate of src/llm/model-call.ts (reserve -> call -> record / release).
+    await beforeAdmittedModel();
     gated = await gatedModelCall({
       provider: driver.provider,
       model: driver.model,
@@ -286,7 +294,7 @@ async function gatedStepCall(driver: ModelDriver, messages: LoopMessage[], runId
       runId,
       stepIndex,
       runLimitCents: run?.max_cost_cents ?? null,
-    }, () => driver.call(messages));
+    }, () => {markStoredRunExecutionStarted();return driver.call(messages);});
   } catch (err) {
     if (err instanceof CostBudgetError) throw new BudgetExceededError('cost', err.message);
     throw err;
@@ -319,33 +327,43 @@ export async function taskRunBasePrompt(agent: Pick<AgentRow, 'id' | 'name' | 's
 async function distillTaskRun(runId: string): Promise<void> {
   try {
     const row = await sql().read(one<{ task_id: string; agent_id: string; user_id: string | null }>('SELECT task_id, agent_id, user_id FROM task_runs WHERE id = ?', runId));
-    const ownerId = row ? await taskRunOwner(row.user_id) : undefined;
+    const stored=currentStoredRunPrincipal();
+    if(stored&&(!row||row.user_id!==stored.control.ownerId||row.agent_id!==stored.control.agentId||row.task_id!==stored.control.taskId))throw Error('encrypted_background_run_inputs_changed');
+    const ownerId=stored?.control.ownerId??(row?await taskRunOwner(row.user_id):undefined);
     if (!row || !ownerId) return;
     const { distillRun } = await import('../../memory/handoff/run-notes.js');
     const { taskRunScope } = await import('../../memory/handoff/scope.js');
-    await distillRun({ ownerId, runKind: 'task', runId }, { scope: await taskRunScope(row), agentId: row.agent_id });
+    const scope=await taskRunScope(row);
+    if(stored)await scopeAdmittedMemory({userId:stored.control.ownerId,agentId:stored.control.agentId,drawers:stored.control.drawers,project:stored.control.project,delegatedFrom:stored.control.delegatedFrom,audience:'owner',runId},()=>distillRun({ownerId,runKind:'task',runId},{scope,agentId:row.agent_id}));
+    else await distillRun({ ownerId, runKind: 'task', runId }, { scope, agentId: row.agent_id });
   } catch (err) { console.warn('[TaskRun] working notes not distilled', { runId, error: (err as Error)?.message }); }
 }
 
-export async function executeTaskRun(runId: string, owner: string = WORKER_ID): Promise<AttemptResult> {
+export function executeTaskRun(runId: string, owner: string = WORKER_ID): Promise<AttemptResult> {return withStoredRunControl(()=>executeClaimedTaskRun(runId,owner));}
+async function executeClaimedTaskRun(runId:string,owner:string):Promise<AttemptResult>{
+  if(!await canClaimStoredRun(runId))return {status:'not_claimed',reason:'native-background-delegation-required'};
   const lease = await claimRun(runId, owner);
   if (!lease) return { status: 'not_claimed' };
 
-  let lost = false;
+  let lost = false, heartbeatPending=false,heartbeatDeadline=Date.now()+runDefaults().leaseMs;
+  const finalizer:{run?:()=>Promise<AttemptResult>}={};
   // Fire-and-forget renewal: always on the pool, never inside a transaction
   // that happens to be open when the timer was created (B2.2b-3).
   const hb = setInterval(() => {
-    outsidePgTransaction(() => heartbeat(lease)).then((ok) => { if (!ok) lost = true; }, () => { lost = true; });
+    if(heartbeatPending)return;heartbeatPending=true;
+    void Promise.resolve().then(()=>withStoredRunHeartbeat(heartbeatDeadline,()=>outsidePgTransaction(async()=>{const ok=await heartbeat(lease);if(ok){const actual=await getRun(runId);if(!actual||actual.lease_owner!==lease.owner||actual.lease_generation!==lease.generation||!actual.lease_expires_at)return false;heartbeatDeadline=actual.lease_expires_at;}return ok;}))).then(ok=>{if(!ok)lost=true;},()=>{lost=true;}).finally(()=>{heartbeatPending=false;});
   }, runDefaults().heartbeatMs);
   hb.unref?.();
 
-  const run = (await getRun(runId))!;
+  const run = await getRun(runId);
+  if(!run){clearInterval(hb);return {status:'lease_lost'};}
+  if(run.lease_expires_at)heartbeatDeadline=run.lease_expires_at;
   const taskId = run.task_id;
   const orchestrator = getOrchestrator();
 
   const fail = async (reason: string, agentId: string, noRetry = false): Promise<AttemptResult> => {
     if (!(await finishAttempt(lease, 'failed', reason))) return { status: 'lease_lost' };
-    if (storeP8Enabled()) await distillTaskRun(runId);
+    if (storeP8Enabled()&&!isEncryptedMemoryProfileSelected()) await distillTaskRun(runId);
     // A cost refusal would only be refused again: never auto-retry it.
     orchestrator.failTask(taskId, reason, { noRetry: noRetry || (await hasToolSteps(runId)) });
     await logActivity({ agentId, taskId, actionType: 'task_failed', summary: reason.slice(0, 200) });
@@ -357,13 +375,22 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
     if (!agent) return await fail(`Agent "${run.agent_id}" no longer exists.`, run.agent_id);
     if (!orchestrator.getTask(taskId)) return await fail(`Task ${taskId} no longer exists.`, agent.id);
 
+    const admittedResult=await withStoredRunClaim(runId,owner,async()=>{
+    const stored=currentStoredRunPrincipal();
+    if(stored&&(run.user_id!==stored.control.ownerId||run.agent_id!==stored.control.agentId||run.task_id!==stored.control.taskId||runInputDigest([run.input_encrypted,run.input_iv,run.input_tag])!==stored.control.inputDigest||runInputDigest([run.contract_encrypted,run.contract_iv,run.contract_tag])!==stored.control.contractDigest))throw Error('encrypted_background_run_inputs_changed');
+    if(stored&&(stored.control.definitionScope.modelPolicyHash!==storedRunModelPolicyHash(agent)))throw Error('encrypted_background_agent_configuration_changed');
+    if(stored&&!['ollama','lmstudio'].includes(agent.provider))throw Error('encrypted_background_local_model_required');
+    const prompt=await runPrompt(run);
+    const lineageOwner=stored?.control.ownerId??await taskRunOwner(run.user_id).catch(()=>undefined);
+    return withRunAdmission<AttemptResult>({runId,ownerId:lineageOwner??'',agentId:agent.id,kind:'task',inputDigest:runInputDigest({runId,taskId,ownerId:lineageOwner??null,agent,prompt,inputCipher:run.input_encrypted,inputIV:run.input_iv,inputTag:run.input_tag,contractCipher:run.contract_encrypted,contractIV:run.contract_iv,contractTag:run.contract_tag}),unknownSources:['persisted-task-history','unversioned-agent-configuration']},async()=>{
+    try {
     const isSmall = agent.id === SMALL_AGENT_ID;
     const contract: TaskContract | null = await runContract(run);
     // SECURITY (S1.2): the agent's current grants, intersected with every
     // agent this task was delegated from; re-checked on every attempt.
     // MEM-GAPS-02: the owner's inherited memory access narrows the run (not
     // policies of a "user" named like the agent, which never exist).
-    const accessOwner = await taskRunOwner(run.user_id).catch(() => undefined);
+    const accessOwner = stored?.control.ownerId??await taskRunOwner(run.user_id).catch(() => undefined);
     const registry = await createAgentToolsRegistry({
       userId: agent.id,
       ...(accessOwner ? { accessOwnerId: accessOwner } : {}),
@@ -371,8 +398,9 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
       workspaceDir: process.cwd(),
       agentId: agent.id,
       taskId,
-      delegatedFrom: delegatingAgents(taskId),
+      delegatedFrom: [...(stored?.control.delegatedFrom??delegatingAgents(taskId))],
     });
+    if(stored)registry.updateContext({memoryDrawers:[...stored.control.drawers]});
     let driver: ModelDriver;
     let systemPrompt: string;
     let smallTemp: number | undefined;
@@ -387,15 +415,16 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
       // MCP-01b: `read` only in the owner-chosen directory (or the agent's own
       // workspace); prompt, model and sampling are the built-in ones, never
       // the editable agents_config row.
-      registry.updateContext({ grants: scope.grants, memoryDrawers: scope.memoryDrawers, userId: scope.userId ?? undefined, fileReadRoot: scope.fileReadRoot });
+      registry.updateContext({ grants: scope.grants, memoryDrawers: stored?scope.memoryDrawers.filter(d=>stored.control.drawers.some(allowed=>drawerId(allowed)===drawerId(d))):scope.memoryDrawers, userId: scope.userId ?? undefined, fileReadRoot: scope.fileReadRoot });
       factsOwner = scope.userId;
       systemPrompt = smallAgentSystemPrompt();
       smallTemp = scope.temperature;
+      if(stored&&!providerIsLocal('ollama',scope.model))throw Error('encrypted_background_local_model_required');
       driver = ollamaDriver({ ...agent, model: scope.model, temperature: scope.temperature, max_tokens: scope.maxTokens }, systemPrompt, registry.getToolsForAPI());
     } else {
       // SECURITY (S1.1): key from the credential authority (agent's own key,
       // then the historical cron fallback row); never another agent's key.
-      const apiKey = agent.provider === 'claude'
+      const apiKey = !stored&&agent.provider === 'claude'
         ? await resolveProviderApiKey('claude', { agentId: agent.id, noGlobal: true, legacySettingsRow: 'claude_api_key' })
         : '';
       // Without a Claude key (or for an agent set to the local model) the run
@@ -404,12 +433,17 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
       if (!apiKey) {
         const wanted = agent.provider === 'claude' || !agent.model ? DEFAULT_OLLAMA_MODEL : agent.model;
         localModel = await resolveLocalModel(wanted, DEFAULT_OLLAMA_MODEL);
+        if(stored&&!providerIsLocal('ollama',localModel))throw Error('encrypted_background_local_model_required');
         console.log('[TaskRun] No Claude key for this agent; using the local model', { agentId: agent.id, model: localModel });
       }
-      systemPrompt = await taskRunBasePrompt(agent, run, storeP9Enabled() && (!localModel || !providerIsLocal('ollama', localModel)));
+      const promptCloud=storeP9Enabled()&&(!localModel||!providerIsLocal('ollama',localModel));
+      let promptDrawers=contract?.allowedDrawers?contractRunDrawers(contract,toolMemoryDrawers(registry.getContext())):toolMemoryDrawers(registry.getContext());
+      if(promptCloud&&accessOwner)promptDrawers=(await cloudSafeDrawers(accessOwner,promptDrawers)).drawers;
+      const promptScope={userId:accessOwner??'',agentId:agent.id,drawers:promptDrawers,project:promptDrawers.find(d=>d.kind==='project')?.key??null,delegatedFrom:delegatingAgents(taskId),audience:'owner' as const,runId};
+      systemPrompt = await scopeAdmittedMemory(promptScope,()=>taskRunBasePrompt(agent,run,promptCloud));
       // CORE-MEM-HANDOFF: the agent's newest note for this board task, and how to leave the next one.
       // A contract that names its tools, or a delegated task, leaves the handoff tools out, so the note on using them too.
-      const handoff = await taskHandoffText(run).catch(() => '');
+      const handoff = await scopeAdmittedMemory(promptScope,()=>taskHandoffText(run)).catch(() => '');
       const handoffTools = !contract?.allowedTools && delegatingAgents(taskId).length === 0;
       const parts = [handoff, handoffTools ? HANDOFF_NOTE : ''].filter(Boolean);
       if (parts.length) systemPrompt += `\n\n${parts.join('\n\n')}`;
@@ -422,7 +456,6 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
         driver = claudeDriver(claudeClient, agent, systemPrompt, registry.getToolsForAPI());
       }
     }
-    const prompt = await runPrompt(run);
     // R1: the contract pinned on the run narrows tools and drawers for this
     // attempt (never wider than the agent's grants now).
     if (contract?.allowedTools) {
@@ -439,10 +472,10 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
     if (p9Cloud) registry.updateContext({ memoryDrawers: (await cloudSafeDrawers(factsOwner!, toolMemoryDrawers(registry.getContext()))).drawers });
     // MEM-SCALE-01: the owner's pinned facts of the task's scope (company /
     // department / project), only what this agent may read in this run.
-    const facts = await taskRunPinnedFacts({
-      ownerId: factsOwner, agentId: agent.id, taskId, delegatedFrom: delegatingAgents(taskId),
+    const facts = await scopeAdmittedMemory({userId:factsOwner??'',agentId:agent.id,drawers:toolMemoryDrawers(registry.getContext()),project:toolMemoryDrawers(registry.getContext()).find(d=>d.kind==='project')?.key??null,delegatedFrom:delegatingAgents(taskId),audience:'owner',runId},()=>taskRunPinnedFacts({
+      ownerId: factsOwner, agentId: agent.id, taskId, delegatedFrom: [...(stored?.control.delegatedFrom??delegatingAgents(taskId))],
       drawers: toolMemoryDrawers(registry.getContext()), drawersNarrowed: !!contract?.allowedDrawers, cloud: p9Cloud,
-    });
+    }));
     if (facts) systemPrompt += `\n\n${facts}`;
     if (contract?.allowedTools || contract?.allowedDrawers || facts) {
       // Rebuild the driver so the model is only offered the narrowed tools (and gets the facts).
@@ -492,6 +525,8 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
         }
         loopMessages.push(driver.assistantMessage(response));
 
+        await beforeAdmittedModel();
+        admitToolBatch(response.toolCalls.map(tool=>tool.tool));
         const toolResults: Array<{ id: string; tool: string; result: ToolResult; text: string }> = [];
         for (const toolCall of response.toolCalls) {
           if (lost) throw new LeaseLostError();
@@ -503,11 +538,12 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
             input: toolCall.arguments ?? {},
             idempotent: isIdempotentTool(tool, needsApproval),
             run: async (key, index) => {
+              markStoredRunExecutionStarted();
               registry.updateContext({ taskRun: { runId, stepIndex: index, idempotencyKey: key } });
               try {
                 return taskTools
-                  ? await taskTools.execute(toolCall.tool, toolCall.arguments ?? {}, (name, args) => registry.execute(name, args))
-                  : await registry.execute(toolCall.tool, toolCall.arguments ?? {});
+                  ? await taskTools.execute(toolCall.tool, toolCall.arguments ?? {}, (name, args) => executeAdmittedTool(registry,name, args))
+                  : await executeAdmittedTool(registry,toolCall.tool, toolCall.arguments ?? {});
               } finally {
                 registry.updateContext({ taskRun: undefined });
               }
@@ -545,23 +581,21 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
     }
 
     if (verdict) await setRunVerification(lease, verdict.status, verdict.reasons);
-    // The run is recorded completed first (fenced): a crash after this point
-    // never runs the task again.
-    if (!(await finishAttempt(lease, 'completed', null, finalContent.slice(0, 500)))) return { status: 'lease_lost' };
     // STORE-MAP-01 P8 (D27): the run's working notes become its handoff (when it wrote none) and lesson suggestions.
     if (storeP8Enabled()) await distillTaskRun(runId);
+    try { await executeAdmittedTool(registry,'desktop_control', { action: 'hide_indicator' }); } catch { /* ignore */ }
+    finalizer.run=async()=>{
+    if (!(await finishAttempt(lease, 'completed', null, finalContent.slice(0, 500)))) return { status: 'lease_lost' };
     if (verdict?.status === 'failed_verification') {
       const reason = `verification failed: ${verdict.reasons.join('; ')}`.slice(0, 500);
       orchestrator.failTask(taskId, reason, { noRetry: true });
       await logActivity({ agentId: agent.id, taskId, actionType: 'task_failed', summary: reason.slice(0, 200) });
-      try { await registry.execute('desktop_control', { action: 'hide_indicator' }); } catch { /* ignore */ }
       return { status: 'completed', output: finalContent, reason, verification: 'failed_verification' };
     }
     if (verdict?.status === 'needs_review') {
       // Held for the owner / a large agent: POST /api/task-runs/:id/review.
       orchestrator.holdTaskForReview(taskId, { output: finalContent });
       await logActivity({ agentId: agent.id, taskId, actionType: 'task_completed', summary: `Waiting for review: ${finalContent.slice(0, 180)}` });
-      try { await registry.execute('desktop_control', { action: 'hide_indicator' }); } catch { /* ignore */ }
       return { status: 'completed', output: finalContent, verification: 'needs_review' };
     }
     orchestrator.completeTask(taskId, { output: finalContent });
@@ -574,9 +608,15 @@ export async function executeTaskRun(runId: string, owner: string = WORKER_ID): 
     }
     await logActivity({ agentId: agent.id, taskId, actionType: 'task_completed', summary: finalContent.slice(0, 200) });
     recreateIfRecurring(taskId, agent.id);
-    try { await registry.execute('desktop_control', { action: 'hide_indicator' }); } catch { /* ignore */ }
-    return { status: 'completed', output: finalContent, ...(verdict ? { verification: verdict.status } : {}) };
+    return { status: 'completed' as const, output: finalContent, ...(verdict ? { verification: verdict.status } : {}) };
+    };
+    return {status:'completed',output:finalContent};
+    }catch(error){if(storeP8Enabled())await distillTaskRun(runId);throw error;}
+    });},lease);
+    const finish=finalizer.run;return finish?await finish():admittedResult;
   } catch (err: any) {
+    if(err instanceof StoredRunOperationInterrupted)return {status:'not_claimed',reason:'native-background-delegation-required'};
+    if(err instanceof StoredRunConsentUnavailable){if(!await releaseStoredRunForConsent(lease))return {status:'lease_lost'};return {status:'not_claimed',reason:'native-background-delegation-required'};}
     if (err instanceof LeaseLostError) {
       console.warn(`[TaskRun] ⚠️  Run ${runId}: lease lost; another worker owns it now`);
       return { status: 'lease_lost' };
@@ -642,7 +682,8 @@ let rescan = false;
  * was decided, then claim every claimable run. Returns how many attempts
  * this pass executed.
  */
-export async function recoverTaskRuns(owner: string = WORKER_ID): Promise<number> {
+export function recoverTaskRuns(owner: string = WORKER_ID): Promise<number> {return withStoredRunControl(()=>recoverTaskRunsInControl(owner));}
+async function recoverTaskRunsInControl(owner:string):Promise<number>{
   if (scanning) { rescan = true; return scanning; }
   scanning = (async () => {
     let n = 0;

@@ -16,6 +16,7 @@ if (!process.env.NODE_ENV) {
 
 import path from 'node:path';
 import { buildServer } from './app.js';
+import {nativeProcessStartup} from '../memory/encryption/native-process-startup.js';
 import { initializeBackend } from './startup.js';
 import { onRestartRequest, RESTART_EXIT_CODE } from './restart-request.js';
 import { config } from '../config/index.js';
@@ -38,7 +39,8 @@ const PORT = config.port;
 const HOST = config.host;
 
 // STORE-MAP-01 P3: the database opens inside buildServer; a start-up problem is reported for the desktop.
-const fastify = await buildServer().catch((err) => { if (reportStartProblem(err)) process.exit(START_PROBLEM_EXIT); throw err; });
+const nativeStartup=nativeProcessStartup();
+const fastify = await (nativeStartup?nativeStartup.runOperation(()=>buildServer(nativeStartup.buildOptions)):buildServer()).catch((err) => { if (reportStartProblem(err)) process.exit(START_PROBLEM_EXIT); throw err; });
 
 /** Python availability for audio features (a startup probe: skipped with background off). */
 async function probePython(): Promise<string> {
@@ -73,12 +75,12 @@ async function start() {
     console.log('[Server] 🚀 Initializing backend systems...\n');
 
     try{await recoverSubscriptionProcesses();}catch{console.warn('[Subscription] Process recovery unavailable; unverified groups were not signalled.');}
-    const summary = await initializeBackend(fastify);
+    const summary = await (nativeStartup?nativeStartup.runOperation(()=>initializeBackend(fastify)):initializeBackend(fastify));
 
     // RUN-ISO ISO-1: re-check the data tree after every store was opened.
     if (process.env[ISOLATED_ENV] === '1') assertSafeIsolatedTree(path.resolve(dataRoot()));
 
-    await fastify.listen({ port: PORT, host: HOST });
+    if(nativeStartup)await nativeStartup.runOperation(()=>fastify.listen({port:PORT,host:HOST}));else await fastify.listen({port:PORT,host:HOST});
 
     // RUN-ISO / INSTALLER-05: tell the isolated launcher or the desktop app
     // (IPC only, no secrets) that we listen, with the real port (PORT=0 = random).
@@ -155,7 +157,9 @@ async function shutdown(code = 0): Promise<void> {
     await stopLocalImports();
     // MODELS-01-INSTALL: a download in progress stops; it goes on at the next start.
     await import('../memory/helper.js').then((m) => m.stopMemoryHelper()).catch(() => undefined);
+    await nativeStartup?.prepareShutdown();
     await fastify.close();
+    await nativeStartup?.close();
     // B2.2b-2: audit rows still being written (PostgreSQL inserts are not
     // awaited by the request) get a short, bounded chance to land.
     if (!(await flushAuditWritesWithin(SHUTDOWN_AUDIT_FLUSH_MS))) {

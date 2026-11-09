@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url';
 // CORE-08: durable task runs — kill/restart test.
 // A task runs in a child process (test/fixtures/task-run-runner.mjs) on a
 // throwaway DB; the child is killed with SIGKILL mid-run, a new process
@@ -12,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-const backendDir = process.cwd();
+const backendDir = fileURLToPath(new URL('../',import.meta.url));
 const runnerPath = join(backendDir, 'test', 'fixtures', 'task-run-runner.mjs');
 const dir = mkdtempSync(join(tmpdir(), 'ap-task-runs-'));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });

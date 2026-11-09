@@ -1,3 +1,4 @@
+import {assertNoDefaultMemoryAccess} from '../encryption/execution-context.js';
 /**
  * Memory bridge operations (MEM-BRIDGE-01), shared by the owner-only REST API,
  * the owner's agent tools and the dpro-memory MCP server:
@@ -14,7 +15,10 @@ import { designBlock, getDesign } from '../project-design.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { q } from '../../repositories/sql-steps.js';
+import { q,sql } from '../../repositories/sql-steps.js';
+import {encryptedProjectionHeldStep} from '../encryption/projection-hold.js';
+import {projectScope} from '../outbox/events.js';
+import {withBriefProjectionBarrier} from '../outbox/projection.js';
 import type { Project } from '../../repositories/chat-conversations.js';
 import { findProject, listProjects } from '../../repositories/chat-conversations.js';
 import { getMemoryStorage } from '../storage.js';
@@ -41,7 +45,6 @@ import {
   allFolderSettings, audit, auditLog, bridgeOwner, setCompanyFacts, clientEnabled, clientStates, folderSettings, lastCalls, listRegistrations, patchFolder,
   projectForFolder, saveBridgeHandoff, setClientEnabled, copyAppHandoffStep,
 } from './store.js';
-import { sql } from '../../repositories/sql-steps.js';
 
 export class BridgeError extends Error {
   constructor(message: string, readonly status = 400, readonly code = 'invalid_request') { super(message); }
@@ -123,7 +126,10 @@ export async function cleanUpTools(ownerId: string) {
   return { undone: r.undone.map((u) => ({ id: u.registration.id, client: u.registration.client, mode: u.mode })), failed: r.failed };
 }
 
+async function assertManagedProjectionAllowed(project:Project){if(await sql().read(encryptedProjectionHeldStep(projectScope(project))))throw new ManagedFileError('Encrypted memory projection hold',409,'encrypted_hold');}
+
 export async function filesPreview(ownerId: string, projectId: unknown): Promise<FilesPreview> {
+  assertNoDefaultMemoryAccess();
   const p = await ownProject(ownerId, projectId);
   const f = await folderSettings(ownerId, p.id);
   const extras = await extrasOf(p.id);
@@ -132,16 +138,21 @@ export async function filesPreview(ownerId: string, projectId: unknown): Promise
 
 /** Owner confirm per folder: writes the previewed files and keeps them in sync from now on. */
 export async function filesApply(ownerId: string, projectId: unknown, input: { previewHash?: unknown; confirm?: unknown }, actor = 'owner'): Promise<FilesPreview> {
+  assertNoDefaultMemoryAccess();
   if (input?.confirm !== true) throw new BridgeError('Send confirm: true after reviewing the preview', 400, 'confirm_required');
   if (typeof input.previewHash !== 'string') throw new BridgeError('previewHash is required');
   const p = await ownProject(ownerId, projectId);
+  return wrap(()=>withBriefProjectionBarrier(projectScope(p),async()=>{
+    await assertManagedProjectionAllowed(p);
   const f = await folderSettings(ownerId, p.id);
   const brief = await projectBrief(ownerId, p);
   const extras = await extrasOf(p.id);
+  await assertManagedProjectionAllowed(p);
   const result = await wrap(() => applyFiles(p.id, brief, p.folder, f.gitExclude, input.previewHash as string, extras));
   await patchFolder(ownerId, p.id, { filesEnabled: true, briefHash: sectionHash(brief, extras), confirmed: true, written: true });
   await audit(ownerId, 'files-written', { projectId: p.id, note: `${result.changes} file(s) by ${actor}` });
   return result;
+  }));
 }
 
 export async function setFolder(ownerId: string, projectId: unknown, patch: { filesEnabled?: unknown; backflowEnabled?: unknown; gitExclude?: unknown; companyFacts?: unknown }, actor = 'owner') {
@@ -166,6 +177,7 @@ export async function setFolder(ownerId: string, projectId: unknown, patch: { fi
 }
 
 export async function backflowNow(ownerId: string, projectId: unknown, actor = 'owner'): Promise<BackflowResult> {
+  assertNoDefaultMemoryAccess();
   const p = await ownProject(ownerId, projectId);
   const r = await runBackflow(ownerId, p, { home: where().home });
   await audit(ownerId, 'backflow-run', { projectId: p.id, note: `${r.proposed} proposal(s) by ${actor}` });
@@ -173,10 +185,12 @@ export async function backflowNow(ownerId: string, projectId: unknown, actor = '
 }
 
 export async function registrationPreview(_ownerId: string, c: unknown) {
+  assertNoDefaultMemoryAccess();
   return wrap(() => previewRegistration(client(c), where()));
 }
 
 export async function registrationApply(ownerId: string, c: unknown, input: { previewHash?: unknown; confirm?: unknown }, actor = 'owner') {
+  assertNoDefaultMemoryAccess();
   const cl = client(c);
   const r = await wrap(() => applyRegistration(ownerId, cl, input ?? {}, where()));
   await setClientEnabled(ownerId, cl, true);
@@ -185,6 +199,7 @@ export async function registrationApply(ownerId: string, c: unknown, input: { pr
 }
 
 export async function registrationUndo(ownerId: string, id: unknown, actor = 'owner') {
+  assertNoDefaultMemoryAccess();
   if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/.test(id)) throw new BridgeError('Not found', 404, 'not_found');
   const r = await wrap(() => undoRegistration(ownerId, id));
   await setClientEnabled(ownerId, r.registration.client, false);
@@ -213,19 +228,24 @@ export { auditLog };
  * only) when the brief changed; back-flow runs where the owner turned it on.
  */
 export async function syncOwner(ownerId: string): Promise<{ written: number; proposed: number; conflicts: number }> {
+  assertNoDefaultMemoryAccess();
   const out = { written: 0, proposed: 0, conflicts: 0 };
   for (const f of await allFolderSettings(ownerId)) {
     const p = await findProject(ownerId, f.projectId);
     if (!p?.folder) continue;
     // REPO-TRUST-01: an outside project keeps its folder as it is (no brief written, no back-flow).
     if (await isOutsideProject(ownerId, p.id)) continue;
-    if (f.filesEnabled) {
+    await withBriefProjectionBarrier(projectScope(p),async()=>{
+      if(await sql().read(encryptedProjectionHeldStep(projectScope(p)))){out.conflicts++;return;}
+      const current=await folderSettings(ownerId,p.id);
+    if (current.filesEnabled) {
       const brief = await projectBrief(ownerId, p);
       const extras = await extrasOf(p.id);
       const h = sectionHash(brief, extras);
-      if (h !== f.briefHash) {
+      if (h !== current.briefHash) {
         try {
-          const r = applyFiles(p.id, brief, p.folder, f.gitExclude, null, extras);
+          await assertManagedProjectionAllowed(p);
+          const r = applyFiles(p.id, brief, p.folder, current.gitExclude, null, extras);
           await patchFolder(ownerId, p.id, { briefHash: h, written: true });
           if (r.changes) { out.written += r.changes; await audit(ownerId, 'files-synced', { projectId: p.id, note: `${r.changes} file(s)` }); }
         } catch (err) {
@@ -235,7 +255,8 @@ export async function syncOwner(ownerId: string): Promise<{ written: number; pro
         }
       }
     }
-    if (f.backflowEnabled) out.proposed += (await runBackflow(ownerId, p, { home: where().home })).proposed;
+    if (current.backflowEnabled) out.proposed += (await runBackflow(ownerId, p, { home: where().home })).proposed;
+    });
   }
   return out;
 }
@@ -256,6 +277,7 @@ export async function syncOwner(ownerId: string): Promise<{ written: number; pro
  * Every step is audited ('automatic'). Never throws.
  */
 export async function autoConnect(ownerId: string, allowed: boolean): Promise<{ registered: BridgeClient[]; folders: string[]; conflicts: number }> {
+  assertNoDefaultMemoryAccess();
   const out = { registered: [] as BridgeClient[], folders: [] as string[], conflicts: 0 };
   if (!allowed) return out;
   const w = where();
@@ -282,15 +304,20 @@ export async function autoConnect(ownerId: string, allowed: boolean): Promise<{ 
   const outside = await outsideProjectIds(ownerId);
   for (const p of (await listProjects(ownerId)).filter((x) => x.folder && !known.has(x.id) && !outside.has(x.id))) {
     try {
+      await withBriefProjectionBarrier(projectScope(p),async()=>{
+      await assertManagedProjectionAllowed(p);
       const brief = await projectBrief(ownerId, p);
       const extras = await extrasOf(p.id);
+      await assertManagedProjectionAllowed(p);
       applyFiles(p.id, brief, p.folder, true, null, extras);
       await patchFolder(ownerId, p.id, { filesEnabled: true, briefHash: sectionHash(brief, extras), confirmed: true, written: true });
       await audit(ownerId, 'files-written', { projectId: p.id, note: 'automatic' });
       out.folders.push(p.id);
+      });
     } catch (err) {
       if (!(err instanceof ManagedFileError)) { console.warn('[Memory bridge] automatic files failed:', (err as Error)?.message); continue; }
       out.conflicts++;
+      if(err.code==='encrypted_hold')continue;
       await patchFolder(ownerId, p.id, { filesEnabled: false });
       await audit(ownerId, 'files-conflict', { projectId: p.id, note: `automatic: ${err.message}` });
     }
@@ -324,16 +351,23 @@ async function sectionInputs(projectId: string): Promise<{ ownerId: string; proj
 
 /** P2: what writing the one Girru section would do (reads only). */
 export async function unifiedPreview(projectId: string, _opts: { rulesWritten?: boolean } = {}): Promise<FilesPreview> {
+  assertNoDefaultMemoryAccess();
   const i = await sectionInputs(projectId);
   return wrap(async () => previewFiles(projectId, i.brief, i.project.folder, i.gitExclude, i.extras));
 }
 
 /** P2: write the one Girru section (the rules writer calls this after a rule change or the owner's button). */
 export async function writeUnifiedSection(projectId: string): Promise<FilesPreview> {
+  assertNoDefaultMemoryAccess();
+  const owner=await q.one<{user_id:string}>('SELECT user_id FROM chat_projects WHERE id=?',projectId);const project=owner?await findProject(owner.user_id,projectId):undefined;if(!project)throw new BridgeError('Not found',404,'not_found');
+  return wrap(()=>withBriefProjectionBarrier(projectScope(project),async()=>{
+  await assertManagedProjectionAllowed(project);
   const i = await sectionInputs(projectId);
+  await assertManagedProjectionAllowed(i.project);
   const r = await wrap(async () => applyFiles(projectId, i.brief, i.project.folder, i.gitExclude, null, i.extras));
   if (i.brief) await patchFolder(i.ownerId, projectId, { briefHash: sectionHash(i.brief, i.extras), written: true });
   return r;
+  }));
 }
 
 // --- MCP server ------------------------------------------------------------

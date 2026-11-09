@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // MEM-UX-02 backend: exported memory files follow the database in the
 // background (never over the owner's edits), and coding apps + project folders
 // connect on their own once the owner allowed reading this computer (backup and
@@ -12,7 +13,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 import { switchValueOn } from './helpers/switches.mjs';
-const backendDir = process.cwd();
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-memsync-')));
 mkdirSync(join(dir, '.data'), { recursive: true });
 process.chdir(dir);

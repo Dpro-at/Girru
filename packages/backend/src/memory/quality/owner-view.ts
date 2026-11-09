@@ -1,3 +1,5 @@
+import {selectedMemoryExecution} from '../encryption/execution-context.js';
+import type {EncryptedOpenQuestion} from '../encryption/questions-gateway.js';
 /**
  * What the owner sees of the memory quality engine (STORE-MAP-01 P9b screens,
  * boards P9b-1 to P9b-3; GIRRU_STORE_P9B). Read and act on the records the
@@ -234,8 +236,11 @@ const questionOf = (r: any): OpenQuestion => ({
   resolvedMemoryId: r.resolved_memory_id ?? null, endsAt: new Date(new Date(r.asked_at).getTime() + OPEN_QUESTION_DAYS * 86_400_000).toISOString(),
 });
 
+const selectedQuestionOf=(value:EncryptedOpenQuestion):OpenQuestion=>questionOf({id:value.id,question:value.question,agent_id:value.agentId,status:value.status,asked_at:value.askedAt,resolved_at:value.resolvedAt,resolved_memory_id:value.resolvedMemoryId});
+
 /** The questions of the last QUESTION_KEEP_DAYS days: waiting first, then newest (questions past their time read "expired"). */
 export async function openQuestions(userId: string): Promise<OpenQuestion[]> {
+ const selected=selectedMemoryExecution();if(selected){const since=Date.now()-QUESTION_KEEP_DAYS*86400000,expired=Date.now()-OPEN_QUESTION_DAYS*86400000;return(await selected.questions(userId)).filter(row=>Date.parse(row.askedAt)>=since).sort((a,b)=>b.askedAt.localeCompare(a.askedAt)||a.id.localeCompare(b.id)).slice(0,200).map(row=>selectedQuestionOf(row.status==='open'&&Date.parse(row.askedAt)<expired?{...row,status:'expired'}:row)).sort((a,b)=>Number(a.status!=='open')-Number(b.status!=='open'));}
   if (!(await ready())) return [];
   const since = new Date(Date.now() - QUESTION_KEEP_DAYS * 86_400_000).toISOString();
   const expired = new Date(Date.now() - OPEN_QUESTION_DAYS * 86_400_000).toISOString();
@@ -246,6 +251,7 @@ export async function openQuestions(userId: string): Promise<OpenQuestion[]> {
 }
 
 async function question(userId: string, id: string): Promise<OpenQuestion> {
+ const selected=selectedMemoryExecution();if(selected){const rows=await selected.questions(userId,id);if(rows.length!==1)throw notFound();return selectedQuestionOf(rows[0]);}
   const r = await sql().read(one<any>('SELECT * FROM memory_open_questions WHERE id = ? AND user_id = ?', id, userId));
   if (!r) throw notFound();
   return questionOf(r);
@@ -253,6 +259,7 @@ async function question(userId: string, id: string): Promise<OpenQuestion> {
 
 /** The answer was saved as memory `memoryId`: the question is resolved by it. */
 export async function resolveQuestion(userId: string, id: string, memoryId: string): Promise<OpenQuestion> {
+ const selected=selectedMemoryExecution();if(selected){const result=await selected.mutateQuestion(userId,id,'resolve',memoryId);if(!('question'in result))throw notFound();return selectedQuestionOf(result);}
   if (!(await ready())) throw notFound();
   const q = await question(userId, id);
   // Saving the answer may already have resolved it by its words (pipeline.ts): then it is resolved by the same memory.
@@ -264,7 +271,7 @@ export async function resolveQuestion(userId: string, id: string, memoryId: stri
 
 /** An open question, or a TrustViewError (answering needs one that still waits). */
 export async function waitingQuestion(userId: string, id: string): Promise<OpenQuestion> {
-  if (!(await ready())) throw notFound();
+  if (!selectedMemoryExecution()&&!(await ready())) throw notFound();
   const q = await question(userId, id);
   if (q.status !== 'open' || q.endsAt < new Date().toISOString()) throw new TrustViewError('This question is not waiting any more', 409, 'not_open');
   return q;
@@ -275,6 +282,7 @@ const undoKey = (userId: string, id: string) => `${userId}\u0000${id}`;
 
 /** Forget a question (no confirmation; Undo brings it back for UNDO_MS). */
 export async function forgetQuestion(userId: string, id: string): Promise<{ id: string; undo: true }> {
+ const selected=selectedMemoryExecution();if(selected){const result=await selected.mutateQuestion(userId,id,'delete');if(!('undo'in result))throw notFound();return result;}
   if (!(await ready())) throw notFound();
   const row = await sql().read(one<Record<string, unknown>>('SELECT * FROM memory_open_questions WHERE id = ? AND user_id = ?', id, userId));
   if (!row) throw notFound();
@@ -287,6 +295,7 @@ export async function forgetQuestion(userId: string, id: string): Promise<{ id: 
 
 /** Undo of forgetQuestion (within UNDO_MS, same account). */
 export async function restoreQuestion(userId: string, id: string): Promise<OpenQuestion> {
+ const selected=selectedMemoryExecution();if(selected){const result=await selected.mutateQuestion(userId,id,'restore');if(!('question'in result))throw notFound();return selectedQuestionOf(result);}
   if (!(await ready())) throw notFound();
   const k = undoKey(userId, id);
   const kept = forgotten.get(k);

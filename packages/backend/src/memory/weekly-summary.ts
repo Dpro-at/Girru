@@ -55,7 +55,27 @@ function drawerOf(kind: string, key: string): DrawerRef | null {
 }
 
 /** Build the digest for one user (no writes). */
-export async function buildWeeklyDigest(userId: string, now = new Date(), days = SUMMARY_DAYS): Promise<WeeklyDigest> {
+export interface WeeklyDigestInputRows {
+ drawers:ReadonlyArray<DrawerRef & {count:number}>;
+ rows:ReadonlyArray<{memory_id:string;drawer_kind:string;drawer_key:string;change:'create'|'update'|'delete'|'forget';created_at:string;current:string|null}>;
+ pending:ReadonlyArray<{drawer_kind:string;drawer_key:string;n:number}>;
+}
+export async function buildWeeklyDigest(userId:string,now=new Date(),days=SUMMARY_DAYS):Promise<WeeklyDigest>{
+ const end=now.toISOString(),start=new Date(now.getTime()-days*24*60*60*1000).toISOString();
+ const drawers=await sql().read(listDrawersStep(userId));
+  const rows = await sql().read(all<{ memory_id: string; drawer_kind: string; drawer_key: string; change: 'create' | 'update' | 'delete' | 'forget'; created_at: string; current: string | null }>(`
+    SELECT v.memory_id, v.drawer_kind, v.drawer_key, v.change, v.created_at, m.content AS current
+      FROM memory_versions v LEFT JOIN memories m ON m.id = v.memory_id AND m.user_id = v.user_id
+     WHERE v.user_id = ? AND v.created_at >= ? AND v.created_at <= ? AND v.change IN ('create', 'update', 'delete', 'forget')
+     ORDER BY v.created_at ASC, v.memory_id, v.version
+  `, userId, start, end));
+  const pending = await sql().read(all<{ drawer_kind: string; drawer_key: string; n: number }>(`
+    SELECT drawer_kind, drawer_key, COUNT(*) AS n FROM memory_file_proposals
+     WHERE user_id = ? AND status = 'pending' GROUP BY 1, 2
+  `, userId));
+ return buildWeeklyDigestFromRows(userId,now,days,{drawers,rows,pending});
+}
+export function buildWeeklyDigestFromRows(userId:string,now:Date,days:number,data:WeeklyDigestInputRows):WeeklyDigest {
   const end = now.toISOString();
   const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
   const byDrawer = new Map<string, DrawerDigest>();
@@ -66,16 +86,11 @@ export async function buildWeeklyDigest(userId: string, now = new Date(), days =
     return entry;
   };
 
-  for (const d of await sql().read(listDrawersStep(userId))) {
+  for (const d of data.drawers) {
     get(d.key ? { kind: d.kind, key: d.key } : { kind: d.kind }).total = d.count;
   }
 
-  const rows = await sql().read(all<{ memory_id: string; drawer_kind: string; drawer_key: string; change: 'create' | 'update' | 'delete' | 'forget'; created_at: string; current: string | null }>(`
-    SELECT v.memory_id, v.drawer_kind, v.drawer_key, v.change, v.created_at, m.content AS current
-      FROM memory_versions v LEFT JOIN memories m ON m.id = v.memory_id AND m.user_id = v.user_id
-     WHERE v.user_id = ? AND v.created_at >= ? AND v.created_at <= ? AND v.change IN ('create', 'update', 'delete', 'forget')
-     ORDER BY v.created_at ASC, v.memory_id, v.version
-  `, userId, start, end));
+  const rows=data.rows;
   for (const r of rows) {
     const d = drawerOf(r.drawer_kind, r.drawer_key);
     if (!d) continue;
@@ -89,10 +104,7 @@ export async function buildWeeklyDigest(userId: string, now = new Date(), days =
     e.items.push({ memoryId: r.memory_id, change: r.change, preview: r.change === 'delete' ? null : preview(r.current), at: r.created_at });
   }
 
-  const pending = await sql().read(all<{ drawer_kind: string; drawer_key: string; n: number }>(`
-    SELECT drawer_kind, drawer_key, COUNT(*) AS n FROM memory_file_proposals
-     WHERE user_id = ? AND status = 'pending' GROUP BY 1, 2
-  `, userId));
+  const pending=data.pending;
   for (const p of pending) {
     const d = drawerOf(p.drawer_kind, p.drawer_key);
     if (d) get(d).pending = p.n;

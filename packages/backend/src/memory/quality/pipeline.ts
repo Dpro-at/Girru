@@ -1,3 +1,5 @@
+import {assertNoLegacyMemoryAccess} from '../encryption/consumer-host.js';
+import {selectedMemoryExecution} from '../encryption/execution-context.js';
 /**
  * One write pipeline for every source (STORE-MAP-01 P9b, MD1; GIRRU_STORE_P9B).
  *
@@ -94,6 +96,7 @@ const nowIso = () => new Date().toISOString();
  * confidence is shown.
  */
 export async function stored(memories: ReadonlyArray<Memory | null | undefined>, sources: ReadonlyArray<TrustSource & { label?: string }>): Promise<void> {
+  assertNoLegacyMemoryAccess();
   const list = memories.filter((m): m is Memory => !!m && !!m.id);
   if (!list.length || !sources.length || !storeP9bEnabled() || !(await trustTablesReady())) return;
   const at = nowIso();
@@ -122,6 +125,7 @@ function* provenanceStep(id: string, sources: ReadonlyArray<TrustSource>): Step<
 
 /** Step 4: the same fact again from (maybe) another source: it corroborates the known memory. */
 export async function corroborated(userId: string, memoryId: string, source: TrustSource & { label?: string }): Promise<void> {
+  assertNoLegacyMemoryAccess();
   if (!storeP9bEnabled() || !(await trustTablesReady())) return;
   const m = await getMemoryStorage().getOwned(userId, memoryId).catch(() => null);
   if (!m) return;
@@ -165,6 +169,7 @@ async function markState(id: string, state: 'ready' | 'failed', flags?: string[]
 
 /** Enrich one stored memory (see the module comment). Exported for the quality job. */
 export async function enrichOne(userId: string, id: string): Promise<void> {
+  assertNoLegacyMemoryAccess();
   const storage = getMemoryStorage();
   const m = await storage.getOwned(userId, id);
   if (!m || !m.drawer) { await markState(id, 'failed'); return; }
@@ -205,6 +210,7 @@ async function sourcesOf(memoryId: string): Promise<TrustSource[]> {
 
 /** Memories still "pending" (a restart emptied the in-process queue): queued again, at most `limit`. */
 export async function requeuePending(userId: string, limit = 200): Promise<number> {
+  assertNoLegacyMemoryAccess();
   if (!(await trustTablesReady())) return 0;
   const rows = await sql().read(all<{ memory_id: string }>(
     `SELECT memory_id FROM memory_trust WHERE user_id = ? AND enrich_state = 'pending' ORDER BY created_at LIMIT ?`, userId, limit));
@@ -254,6 +260,7 @@ async function resolveOpenQuestions(userId: string, memories: readonly Memory[],
 
 /** Record that the agent asks the owner this question (once). Returns the open question, new or already asked. */
 export async function askOnce(userId: string, agentId: string | null, question: string, questionHash: string): Promise<{ id: string; alreadyAsked: boolean } | null> {
+ const selected=selectedMemoryExecution();if(selected)return selected.askQuestion(userId,agentId,question);
   if (!(await trustTablesReady())) return null;
   const since = new Date(Date.now() - OPEN_QUESTION_DAYS * 86_400_000).toISOString();
   return sql().tx(function* (): Step<{ id: string; alreadyAsked: boolean }> {
@@ -272,6 +279,7 @@ export async function askOnce(userId: string, agentId: string | null, question: 
 
 /** Expire open questions and delete old expired or resolved ones (the weekly usage job; askOnce does the same). */
 export async function cleanQuestions(userId: string): Promise<void> {
+  assertNoLegacyMemoryAccess();
   if (!(await trustTablesReady())) return;
   const since = new Date(Date.now() - OPEN_QUESTION_DAYS * 86_400_000).toISOString();
   const keep = new Date(Date.now() - QUESTION_KEEP_DAYS * 86_400_000).toISOString();

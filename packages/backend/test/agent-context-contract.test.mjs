@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // STORE-MAP-01 P2 contract (CX6, AG1, AG6): what every entry point gives the same agent.
 // With GIRRU_STORE_P2 off nothing changes (the known gaps are pinned here: chat drops the hired
 // instructions, task runs drop the owner rules, skills go in as full text). With it on:
@@ -18,7 +19,7 @@ import { randomBytes } from 'node:crypto';
 import { offeredNames, expectedNumCtx, expectedNumPredict, p2bOn } from './helpers/p2b.mjs';
 
 import { switchValueOn, clearEnv } from './helpers/switches.mjs';
-const backendDir = process.cwd();
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-context-contract-')));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });
 process.chdir(dir);

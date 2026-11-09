@@ -1,3 +1,4 @@
+import {createUnprotectedReadStream,assertMemoryFilesystemAccess} from '../../memory/encryption/protected-filesystem.js';
 import { dataPath } from '../../config/data-root.js';
 import type { FastifyInstance } from 'fastify';
 import { handleError } from '../error-handler.js';
@@ -116,7 +117,8 @@ export async function registerAudioRoutes(fastify: FastifyInstance) {
       }
 
       // Stream the file
-      const stream = fs.createReadStream(audioPath);
+      assertMemoryFilesystemAccess(audioPath);
+      const stream = createUnprotectedReadStream(audioPath);
 
       return reply
         .type('audio/mpeg')

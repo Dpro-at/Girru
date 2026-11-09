@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // MODELS-01-INSTALL (GIRRU_MEMORY_HELPER): the memory helper installs itself in the background.
 //  - off: nothing runs, nothing is fetched, no health row, the routes answer 404;
 //  - start-up never waits for it (OPS3);
@@ -19,7 +20,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
-const backendDir = process.cwd();
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const load = (rel) => import(pathToFileURL(join(backendDir, rel)).href);
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-memory-helper-')));
 mkdirSync(join(dir, '.data'), { recursive: true });

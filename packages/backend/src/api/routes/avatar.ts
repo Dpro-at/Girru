@@ -1,3 +1,4 @@
+import {assertMemoryFilesystemAccess,readUnprotectedFileSync} from '../../memory/encryption/protected-filesystem.js';
 import { dataPath } from '../../config/data-root.js';
 import type { FastifyInstance } from 'fastify';
 import { lockName, one, q, run, sql, type Step } from '../../repositories/sql-steps.js';
@@ -383,7 +384,8 @@ export async function registerAvatarRoutes(fastify: FastifyInstance) {
         if (cues) lipsyncHeader = JSON.stringify(cues);
       }
 
-      const audioBuffer = fs.readFileSync(audioPath);
+      assertMemoryFilesystemAccess(audioPath);
+      const audioBuffer = readUnprotectedFileSync(audioPath);
 
       return reply
         .header('Content-Type', 'audio/mpeg')
@@ -412,7 +414,8 @@ export async function registerAvatarRoutes(fastify: FastifyInstance) {
 
       if (!fs.existsSync(audioPath)) return reply.status(500).send({ error: 'Audio file not found' });
 
-      const audioBuffer = fs.readFileSync(audioPath);
+      assertMemoryFilesystemAccess(audioPath);
+      const audioBuffer = readUnprotectedFileSync(audioPath);
       return reply.header('Content-Type', 'audio/mpeg').send(audioBuffer);
     } catch (error: any) {
       fastify.log.error('TTS error:', error);
@@ -473,7 +476,8 @@ export async function registerAvatarRoutes(fastify: FastifyInstance) {
         '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
       };
       const mime = mimeMap[ext] || 'application/octet-stream';
-      const buffer = fs.readFileSync(filePath);
+      assertMemoryFilesystemAccess(filePath);
+      const buffer = readUnprotectedFileSync(filePath);
       return reply
         .header('Content-Type', mime)
         .header('Cache-Control', 'public, max-age=86400')

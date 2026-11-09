@@ -1,3 +1,4 @@
+import {assertMemoryFilesystemAccess,assertProtectedMemoryFileDescriptor,closeProtectedMemoryFileDescriptor} from '../../memory/encryption/protected-filesystem.js';
 /**
  * File-tool sandbox (S1.6).
  *
@@ -177,6 +178,7 @@ function denyReasonForComponents(parts: string[]): string | null {
 
 /** Deny-list check on a path relative to the root and on the absolute real path. */
 export function denyReason(relFromRoot: string, absolute?: string): string | null {
+  if(absolute)try{assertMemoryFilesystemAccess(absolute);}catch{return 'native-owned memory and control files are off limits';}
   const relParts = relFromRoot.split(/[\\/]+/).filter(Boolean);
   const r = denyReasonForComponents(relParts);
   if (r) return r;
@@ -240,8 +242,10 @@ export const MAX_SCAN_BYTES = 32 * 1024 * 1024;
  * file, no symlink at the last step, at most MAX_SCAN_BYTES, not binary.
  */
 export function sandboxedReadText(real: string, maxBytes = MAX_SCAN_BYTES): string {
+  assertMemoryFilesystemAccess(real);
   const fd = fs.openSync(real, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
   try {
+    assertProtectedMemoryFileDescriptor(fd);
     const st = fs.fstatSync(fd);
     if (!st.isFile()) throw new FileSandboxError('Not a regular file', 'not_a_file');
     if (st.size > maxBytes) throw new FileSandboxError(`File is too large to read (${st.size} bytes, max ${maxBytes})`, 'too_large');
@@ -251,7 +255,7 @@ export function sandboxedReadText(real: string, maxBytes = MAX_SCAN_BYTES): stri
     if (buf.subarray(0, Math.min(off, 8192)).includes(0)) throw new FileSandboxError('Not a text file', 'not_a_file');
     return buf.subarray(0, off).toString('utf-8');
   } finally {
-    fs.closeSync(fd);
+    closeProtectedMemoryFileDescriptor(fd,()=>fs.closeSync(fd));
   }
 }
 
@@ -260,6 +264,7 @@ export function sandboxedReadFile(root: string, input: unknown, maxBytes = MAX_R
   const { real, rel } = resolveReadPath(root, input);
   const fd = fs.openSync(real, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
   try {
+    assertProtectedMemoryFileDescriptor(fd);
     const st = fs.fstatSync(fd);
     if (!st.isFile()) throw new FileSandboxError('Not a regular file', 'not_a_file');
     if (st.size > maxBytes) throw new FileSandboxError(`File is too large (${st.size} bytes, max ${maxBytes})`, 'too_large');
@@ -272,7 +277,7 @@ export function sandboxedReadFile(root: string, input: unknown, maxBytes = MAX_R
     }
     return { content: buf.subarray(0, off).toString('utf-8'), rel, size: off, modified: st.mtime };
   } finally {
-    fs.closeSync(fd);
+    closeProtectedMemoryFileDescriptor(fd,()=>fs.closeSync(fd));
   }
 }
 
@@ -318,13 +323,15 @@ export function sandboxedWriteFile(root: string, input: unknown, content: unknow
   if (existing?.isSymbolicLink()) throw new FileSandboxError('Refusing to write through a symbolic link', 'denied');
   if (existing && !existing.isFile()) throw new FileSandboxError('Not a regular file', 'not_a_file');
 
-  const fd = fs.openSync(finalPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | (fs.constants.O_NOFOLLOW ?? 0), 0o600);
+  assertMemoryFilesystemAccess(finalPath);
+  const fd = fs.openSync(finalPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | (fs.constants.O_NOFOLLOW ?? 0), 0o600);
   try {
+    assertProtectedMemoryFileDescriptor(fd);fs.ftruncateSync(fd,0);
     fs.writeSync(fd, content, 0, 'utf-8');
     const st = fs.fstatSync(fd);
     return { rel, size: st.size, modified: st.mtime };
   } finally {
-    fs.closeSync(fd);
+    closeProtectedMemoryFileDescriptor(fd,()=>fs.closeSync(fd));
   }
 }
 

@@ -1,3 +1,4 @@
+import {assertMemoryFilesystemAccess,readUnprotectedFileSync} from '../../memory/encryption/protected-filesystem.js';
 /**
  * World Builder Routes
  * CRUD operations for world builder data
@@ -40,7 +41,8 @@ export async function worldBuilderRoutes(fastify: FastifyInstance) {
             const fs = await import('fs');
 
             if (fs.existsSync(fullPath)) {
-              const content = fs.readFileSync(fullPath, 'utf-8');
+              assertMemoryFilesystemAccess(fullPath);
+              const content = readUnprotectedFileSync(fullPath, 'utf-8');
               const data = JSON.parse(content);
               objects = data.objects || [];
             }

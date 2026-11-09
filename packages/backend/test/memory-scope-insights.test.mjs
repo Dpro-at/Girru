@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // Memory backend gaps from the memory boards (MEM-GAPS-02):
 //  - "used in N replies" per memory (reply trace -> memory_recall_uses), and
 //    the drawers a reply did not load and why;
@@ -21,7 +22,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-const backendDir = process.cwd();
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-mem-insights-'));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });
 process.chdir(dir);

@@ -93,6 +93,9 @@ function stage(options) {
 
   for (const part of BACKEND_PARTS) copy(path.join(backend, part), path.join(out, 'backend', part), noSecrets);
   compileBackend(path.join(backend, 'src'), path.join(out, 'backend', 'src'), ts, compiler);
+  // The selected Node child shares only the closed proof codec, never native custody or credentials.
+  fs.mkdirSync(path.join(out, 'identity', 'src'), { recursive: true });
+  for (const shared of ['memory-native-proof.cjs', 'memory-native-owner-wire.cjs']) fs.copyFileSync(path.join(packages, 'identity', 'src', shared), path.join(out, 'identity', 'src', shared));
   assertCompiledRuntime(path.join(out, 'backend', 'src'), ts);
   const manifest = JSON.parse(fs.readFileSync(path.join(backend, 'package.json'), 'utf8'));
   // Development still uses tsx; the shipped server is JavaScript and needs no loader.

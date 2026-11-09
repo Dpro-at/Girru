@@ -1,3 +1,4 @@
+import {assertNoDefaultMemoryAccess} from '../encryption/execution-context.js';
 /**
  * Back-flow (MEM-BRIDGE-01): what Claude Code, Codex, Gemini CLI or
  * Antigravity write into their OWN memory files for a known project comes
@@ -65,6 +66,7 @@ const pointerOnly = (s: string) => s.split('\n').every((l) => !l.trim() || /^@\S
 export interface BackflowResult { files: number; proposed: number; known: number; skipped: number; proposalIds: string[] }
 
 export async function runBackflow(ownerId: string, project: Project, opts: { home?: string } = {}): Promise<BackflowResult> {
+  assertNoDefaultMemoryAccess();
   const out: BackflowResult = { files: 0, proposed: 0, known: 0, skipped: 0, proposalIds: [] };
   if (!project.folder) return out;
   // REPO-TRUST-01: someone else's CLAUDE.md / AGENTS.md never become memory proposals.

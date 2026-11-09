@@ -19,6 +19,7 @@ mkdirSync(join(dir, '.data'), { recursive: true });
 process.chdir(cwd);
 process.env.HOME = dir;
 process.env.DATABASE_PATH = join(dir, '.data', 'agent-player.db');
+process.env.AGENT_PLAYER_DATA_DIR = join(dir, '.data');
 process.env.JWT_SECRET = randomBytes(64).toString('hex'); // throwaway, test only
 process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway, test only
 process.env.OLLAMA_URL = 'http://127.0.0.1:9'; // never reached: fetch is stubbed

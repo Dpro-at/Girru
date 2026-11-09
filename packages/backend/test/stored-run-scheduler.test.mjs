@@ -1,0 +1,6 @@
+/** Deferred scheduler authority-boundary fixtures; no native approval, identity, or model execution. */
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {installStoredRunScheduler,createScheduledEncryptedRun,bindApprovedQueuedStoredRuns} from '../src/agent/execution/stored-run-scheduler.ts';
+test('a serialized definition cannot reach native parent lookup or create a run',async()=>{const remove=installStoredRunScheduler({runner:{dialect:'sqlite',read(){assert.fail('unbranded definition reached SQL');}},describe:async()=>Object.freeze({purpose:'stored-run-definition',ownerId:'claimed-owner',isCurrent:()=>true}),matchingParent:async()=>{assert.fail('unbranded definition reached native authority');},inspectParent:()=>null});try{await assert.rejects(createScheduledEncryptedRun({kind:'task',taskId:'synthetic-task'},'synthetic-task'));}finally{remove();}});
+test('queued run binding cannot accept DTO owner/grant metadata in place of both originals',async()=>{const remove=installStoredRunScheduler({runner:{dialect:'sqlite',read(){assert.fail('forged source reached SQL');}},describe:async()=>({}),matchingParent:async()=>({}),inspectParent:()=>null});try{await assert.rejects(bindApprovedQueuedStoredRuns({purpose:'stored-run-definition',isCurrent:()=>true},{grantId:'forged',ownerId:'owner',isCurrent:()=>true}));}finally{remove();}});

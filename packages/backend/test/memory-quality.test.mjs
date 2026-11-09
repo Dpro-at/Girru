@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // CORE-MEM-TOPIC / CORE-MEM-CONFLICT / CORE-MEM-DOCTOR: stable topic keys,
 // conflict surfacing with keep new / keep old / keep both, memory doctor.
 // Run: node --import tsx --test test/memory-quality.test.mjs
@@ -10,7 +11,7 @@ import { join } from 'node:path';
 import { randomBytes, createHash } from 'node:crypto';
 
 import { switchValueOn } from './helpers/switches.mjs';
-const backendDir = process.cwd();
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-memquality-'));
 mkdirSync(join(dir, '.data'), { recursive: true });
 process.chdir(dir);

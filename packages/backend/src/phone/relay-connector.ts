@@ -108,6 +108,7 @@ export class RelayConnector {
     this.readyTimer = setTimeout(() => { try { ws.close(); } catch { /* closing */ } }, this.opts.readyTimeoutMs ?? 15_000);
     this.readyTimer.unref?.();
     ws.addEventListener('message', (e) => {
+      if(this.ws!==ws||!this.wanted)return;
       let frame: Record<string, unknown>;
       try {
         const v: unknown = JSON.parse(typeof e.data === 'string' ? e.data : '');

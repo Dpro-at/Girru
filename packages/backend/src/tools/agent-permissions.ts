@@ -119,7 +119,7 @@ function fromRow(r: Row): AgentPermissions {
   };
 }
 
-function* loadStep(agentId: string): Step<AgentPermissions> {
+export function* loadStep(agentId: string): Step<AgentPermissions> {
   const r = yield* one<Row>('SELECT agent_id, memory_read, memory_write, shared_memory, modes, version FROM agent_permissions WHERE agent_id = ?', agentId);
   return r ? fromRow(r) : legacyPermissions(agentId);
 }

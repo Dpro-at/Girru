@@ -1,3 +1,4 @@
+import {assertNoDefaultMemoryAccess} from '../encryption/execution-context.js';
 /**
  * Safe import pipeline (CLI-02; docs/design/IMPORT.md "Release 1 minimum",
  * D-IMPORT-ROLLOUT). One pipeline for the web UI and the CLI.
@@ -400,6 +401,7 @@ function* batchRow(userId: string, id: string, lock = false): Step<BatchRow> {
 
 /** Previews not committed in time are expired and their sanitized text removed. */
 export async function sweepExpired(userId: string): Promise<number> {
+  assertNoDefaultMemoryAccess();
   const now = new Date().toISOString();
   const ids = (await sql().read(all<{ id: string }>(`SELECT id FROM memory_import_batches WHERE user_id = ? AND status = 'preview' AND expires_at < ?`, userId, now))).map((r) => r.id);
   for (const id of ids) {
@@ -413,6 +415,7 @@ export async function sweepExpired(userId: string): Promise<number> {
 }
 
 export async function getPreview(userId: string, id: string, version?: number): Promise<PreviewView> {
+  assertNoDefaultMemoryAccess();
   await sweepExpired(userId);
   const b = await sql().read(batchRow(userId, id));
   const v = version ?? b.latest_version;
@@ -433,6 +436,7 @@ export async function getPreview(userId: string, id: string, version?: number): 
 }
 
 export async function listImports(userId: string): Promise<any[]> {
+  assertNoDefaultMemoryAccess();
   await sweepExpired(userId);
   const rows = await sql().read(all<BatchRow & { summary: string | null }>(`
     SELECT b.*, p.summary FROM memory_import_batches b
@@ -460,6 +464,7 @@ export interface CreatePreviewInput {
 }
 
 export async function createPreview(userId: string, input: CreatePreviewInput): Promise<PreviewView> {
+  assertNoDefaultMemoryAccess();
   await sweepExpired(userId);
   const source = (input.source ?? 'text') as SourceKind;
   if (!SOURCE_KINDS.includes(source)) throw new ImportError(`source must be one of ${SOURCE_KINDS.join(', ')}`);
@@ -580,6 +585,7 @@ export interface ReviseInput {
 }
 
 export async function revisePreview(userId: string, id: string, input: ReviseInput): Promise<PreviewView> {
+  assertNoDefaultMemoryAccess();
   await sweepExpired(userId);
   const b = await sql().read(batchRow(userId, id));
   const { files, items } = await sql().read(requireLatest(b, input.version, input.contentHash));
@@ -673,6 +679,7 @@ function proposalNote(source: SourceKind, file: PreviewFile | undefined, item: P
 }
 
 export async function commitPreview(userId: string, id: string, input: { version?: unknown; contentHash?: unknown; operationKey?: unknown; confirm?: unknown }): Promise<CommitReceipt> {
+  assertNoDefaultMemoryAccess();
   await sweepExpired(userId);
   if (typeof input.operationKey !== 'string' || !OP_KEY.test(input.operationKey)) {
     throw new ImportError('operationKey (16-128 letters, digits, - or _) is required');
@@ -746,6 +753,7 @@ export interface CancelResult {
 }
 
 export async function cancelImport(userId: string, id: string): Promise<CancelResult> {
+  assertNoDefaultMemoryAccess();
   await sweepExpired(userId);
   return sql().tx(function* (): Step<CancelResult> {
     const d = yield* dialect();

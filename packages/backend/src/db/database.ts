@@ -1,3 +1,5 @@
+import {wrapSqliteControlConnection,assertSqliteControlOpen} from './sqlite-control-fence.js';
+import {assertNoDefaultMemoryAccess} from '../memory/encryption/execution-context.js';
 /**
  * Real Database Manager using better-sqlite3
  * Replaces the temporary in-memory database
@@ -27,7 +29,9 @@ export class DatabaseManager {
   private config: DatabaseConfig;
 
   constructor(config: DatabaseConfig) {
+    assertNoDefaultMemoryAccess();
     this.config = config;
+    assertSqliteControlOpen(config.path);
 
     // Ensure database directory exists
     const dbDir = dirname(config.path);
@@ -36,10 +40,10 @@ export class DatabaseManager {
     }
 
     // Initialize database
-    this.db = new Database(config.path, {
+    this.db = wrapSqliteControlConnection(new Database(config.path, {
       readonly: config.readonly || false,
       verbose: config.verbose ? console.log : undefined
-    });
+    }));
 
     // SECURITY: Set restrictive file permissions on database file (L-05)
     // chmod 600 = read/write for owner only (rw-------)
@@ -288,6 +292,7 @@ export class DatabaseManager {
    * Get database instance
    */
   getDb(): Database.Database {
+    assertNoDefaultMemoryAccess();
     return this.db;
   }
 
@@ -295,6 +300,7 @@ export class DatabaseManager {
    * Backwards compatibility: Execute SQL (alias for getDb().exec())
    */
   exec(sql: string): Database.Database {
+    assertNoDefaultMemoryAccess();
     return this.db.exec(sql);
   }
 
@@ -302,6 +308,7 @@ export class DatabaseManager {
    * Backwards compatibility: Prepare statement (alias for getDb().prepare())
    */
   prepare(sql: string): Database.Statement {
+    assertNoDefaultMemoryAccess();
     return this.db.prepare(sql);
   }
 
@@ -309,6 +316,7 @@ export class DatabaseManager {
    * Execute a query
    */
   query<T = any>(sql: string, ...params: any[]): T[] {
+    assertNoDefaultMemoryAccess();
     return this.db.prepare(sql).all(...params) as T[];
   }
 
@@ -316,6 +324,7 @@ export class DatabaseManager {
    * Execute a query and return first result
    */
   queryOne<T = any>(sql: string, ...params: any[]): T | undefined {
+    assertNoDefaultMemoryAccess();
     return this.db.prepare(sql).get(...params) as T | undefined;
   }
 
@@ -323,6 +332,7 @@ export class DatabaseManager {
    * Execute an insert/update/delete
    */
   execute(sql: string, ...params: any[]): Database.RunResult {
+    assertNoDefaultMemoryAccess();
     return this.db.prepare(sql).run(...params);
   }
 
@@ -330,6 +340,7 @@ export class DatabaseManager {
    * Begin a transaction
    */
   transaction<T>(fn: () => T): T {
+    assertNoDefaultMemoryAccess();
     return this.db.transaction(fn)();
   }
 
@@ -337,6 +348,7 @@ export class DatabaseManager {
    * Close database connection
    */
   close(): void {
+    assertNoDefaultMemoryAccess();
     this.db.close();
     console.log('[Database] Connection closed');
   }
@@ -423,6 +435,7 @@ export class SqliteOnPostgresError extends Error {}
  * (a tool that deliberately opens a SQLite file, e.g. a data copy) opens one.
  */
 export function getDatabase(config?: DatabaseConfig): DatabaseManager {
+  assertNoDefaultMemoryAccess();
   if (!dbInstance) {
     if (!config && dbDriver() === 'postgres') {
       throw new SqliteOnPostgresError('The main SQLite database is not used on PostgreSQL (AGENT_PLAYER_DB=postgres)');

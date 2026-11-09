@@ -1,3 +1,4 @@
+import {assertNoDefaultMemoryAccess} from './encryption/execution-context.js';
 /**
  * Memory hybrid index on PostgreSQL (B2.2b-4).
  *
@@ -271,6 +272,9 @@ let pgIndexer: PgMemoryIndexer | null = null;
 
 /** The PostgreSQL hybrid index (AGENT_PLAYER_DB=postgres). */
 export function getPgMemoryIndexer(config?: Partial<MemoryConfig>): PgMemoryIndexer {
+  assertNoDefaultMemoryAccess();
   if (!pgIndexer) pgIndexer = new PgMemoryIndexer(config);
   return pgIndexer;
 }
+
+for(const [name,descriptor] of Object.entries(Object.getOwnPropertyDescriptors(PgMemoryIndexer.prototype))){if(name==='constructor'||typeof descriptor.value!=='function')continue;const original=descriptor.value;Object.defineProperty(PgMemoryIndexer.prototype,name,{...descriptor,value:function(this:PgMemoryIndexer,...args:unknown[]){assertNoDefaultMemoryAccess();return original.apply(this,args);}});}

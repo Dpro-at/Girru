@@ -1,3 +1,4 @@
+import {createUnprotectedReadStream,assertMemoryFilesystemAccess,assertNoRawProtectedMemoryCopy} from '../../memory/encryption/protected-filesystem.js';
 /**
  * Database Statistics API
  * Provides real-time statistics about the database
@@ -161,6 +162,7 @@ export async function databaseStatsRoutes(fastify: FastifyInstance) {
 
     // Create backup
     fastify.post('/api/database/backup', async (request, reply) => {
+        assertNoRawProtectedMemoryCopy();
         try {
             if (dbDriver() === 'postgres') return reply.status(501).send(NOT_SUPPORTED_ON_POSTGRES);
             const { copyFileSync, mkdirSync } = await import('fs');
@@ -252,7 +254,8 @@ export async function databaseStatsRoutes(fastify: FastifyInstance) {
             }
 
             const stats = statSync(backupPath);
-            const stream = createReadStream(backupPath);
+            assertMemoryFilesystemAccess(backupPath);
+            const stream = createUnprotectedReadStream(backupPath);
 
             reply.header('Content-Type', 'application/octet-stream');
             reply.header('Content-Disposition', `attachment; filename="${filename}"`);

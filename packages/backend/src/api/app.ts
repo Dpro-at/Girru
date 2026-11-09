@@ -1,9 +1,16 @@
+import type {createNativeRequestContext} from '../memory/encryption/native-request-context.js';
+import {nativeMemoryOwnerRoutes,type NativeMemoryPreparationService} from './routes/native-memory-owner.js';
 import {dproAccountRoutes} from './routes/dpro-account.js';
 import {googleAuthRoutes} from './routes/google-auth.js';
 import {deviceEnrollmentRoutes} from './routes/device-enrollment.js';
 import {bindComputerApplication,type ComputerApplication} from '../devices/application.js';
 import {deviceCoopRoutes} from './routes/device-coop.js';
 import {reportRoutes} from './routes/reports.js';
+import type {createEncryptedMemoryBridgeAdapter} from '../memory/encryption/bridge-adapter.js';
+import {bindEncryptedMemoryServer} from '../memory/encryption/server-mode.js';
+import {registerEncryptedMemoryRoutes,registerEncryptedMemoryLegacyGuard} from './routes/encrypted-memory.js';
+import {registerEncryptedMemoryRuntimeHooks,createEncryptedMemoryRuntime} from '../memory/encryption/runtime-host.js';
+import {registerEncryptedForgetLifecycleHooks,type EncryptedForgetLifecycle} from '../memory/encryption/forget-lifecycle.js';
 import {storeHostEnabled,markStoreHostStarted} from '../services/store-host-apps.js';
 import { meetingRoutes } from './routes/meetings.js';
 import {workspacePackRoutes} from './routes/workspace-pack.js';
@@ -164,8 +171,19 @@ import { registerGlobalErrorHandler } from './error-handler.js';
 import { registerLaunchToken } from './launch-token.js';
 
 export interface BuildServerOptions {
+  /** Actual SAME-control-process private native service; absent stays unavailable. */
+  nativeMemoryPreparation?:NativeMemoryPreparationService;
+  nativeOwnedControl?:{isCurrent:()=>boolean;verifyIsolation:()=>Promise<void>};
+  nativeRequestAdmission?:ReturnType<typeof createNativeRequestContext>;
+  getEncryptedMemoryRuntime?:()=>ReturnType<typeof createEncryptedMemoryRuntime>|null;
+  isEncryptedMemorySelected?:()=>boolean;
   /** Explicit server-provisioned authority/custody. Never accepted from a request or environment flag. */
   computerApplication?:ComputerApplication;
+  /** Explicit unlocked isolated-profile dependency; absent means encrypted lifecycle stays inactive. */
+  memoryForgetLifecycle?:EncryptedForgetLifecycle;
+  /** Explicit selected-profile runtime with supplied custody; never built from environment/default data. */
+  encryptedMemoryRuntime?:ReturnType<typeof createEncryptedMemoryRuntime>;
+  encryptedMemoryBridge?:ReturnType<typeof createEncryptedMemoryBridgeAdapter>;
   /** Explicit provisioned ledger dependency; never created from a read request. */
   paperLedger?:()=>PaperDatabase.Database|null;
   /** Separate immutable opt-in for a server-owned paper-only scheduler; never inferred from paperLedger. */
@@ -179,6 +197,9 @@ export function redactUrlSecrets(url: string): string {
 }
 
 export async function buildServer(options: BuildServerOptions = {}): Promise<FastifyInstance> {
+  if(options.encryptedMemoryBridge&&!options.encryptedMemoryRuntime)throw new Error('Encrypted bridge requires an explicit encrypted runtime');
+  if(options.memoryForgetLifecycle&&options.encryptedMemoryRuntime)throw new Error('Choose one encrypted memory lifecycle');
+  if(options.memoryForgetLifecycle&&(process.env.AGENT_PLAYER_READONLY==='1'||process.env.AGENT_PLAYER_BACKGROUND==='off'))throw new Error('Encrypted memory lifecycle is disabled by the server isolation policy');
   const paperScheduleLedger=options.paperScheduleLedger??null;
   const fastify = Fastify({
     // Cold skill/template seeding can exceed Fastify's 10-second default on Windows.
@@ -201,9 +222,20 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     }
   });
 
+  if(options.nativeOwnedControl)fastify.addHook('onReady',async()=>{if(!options.nativeOwnedControl!.isCurrent())throw new Error('owned_control_unavailable');await options.nativeOwnedControl!.verifyIsolation();});
+  registerLaunchToken(fastify);
+  options.nativeRequestAdmission?.register(fastify);
+  if(options.memoryForgetLifecycle)registerEncryptedForgetLifecycleHooks(fastify,options.memoryForgetLifecycle);
+  if(options.nativeOwnedControl){if(!options.nativeOwnedControl.isCurrent())throw new Error('owned_control_unavailable');bindEncryptedMemoryServer(fastify);registerEncryptedMemoryLegacyGuard(fastify,false);}
+  if(options.encryptedMemoryRuntime){
+    bindEncryptedMemoryServer(fastify);
+    registerEncryptedMemoryRuntimeHooks(fastify,options.encryptedMemoryRuntime);
+    registerEncryptedMemoryLegacyGuard(fastify,Boolean(options.encryptedMemoryBridge));
+  }
+
   // INSTALLER-05: inside the desktop app every request needs the per-launch
   // token; registered first so no other hook or route runs without it.
-  registerLaunchToken(fastify);
+
 
   // RUN-ISO stage 1: with AGENT_PLAYER_READONLY=1 only reads, login/logout
   // and first-run setup pass. Registered first, before every other hook and
@@ -219,7 +251,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   // before the route plugins below, because the memory and credential routes
   // create their tables at registration; otherwise a later migration fails
   // with "duplicate column" and the server cannot start on an empty data dir.
-  if (dbDriver() === 'sqlite') {
+  if (dbDriver() === 'sqlite'&&!options.nativeOwnedControl) {
     const { initializeDatabase } = await import('../db/index.js');
     await initializeDatabase();
   }
@@ -376,9 +408,10 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await fastify.register(chatConversationRoutes); // saved conversations + resumable runs (CHAT-REBUILD-01)
   await fastify.register(agentHandoffRoutes); // CORE-MEM-HANDOFF: the agents' handoff notes (owner only)
   await fastify.register(storeP8Routes); // STORE-MAP-01 P8: registers nothing while GIRRU_STORE_P8 is off
-  await fastify.register(memoryBridgeRoutes); // MEM-BRIDGE-01: owner API + the dpro-memory MCP server's two loopback routes
+  if(options.encryptedMemoryRuntime||options.getEncryptedMemoryRuntime)await registerEncryptedMemoryRoutes(fastify,options.getEncryptedMemoryRuntime??options.encryptedMemoryRuntime!,{isEncryptedMemorySelected:options.isEncryptedMemorySelected});
+  await fastify.register(memoryBridgeRoutes,{encryptedMemoryBridge:options.encryptedMemoryBridge}); // MEM-BRIDGE-01: owner API + the dpro-memory MCP server's two loopback routes
   await fastify.register(storeP9Routes); // STORE-MAP-01 P9: 404 while GIRRU_STORE_P9 is off
-  await fastify.register(storeP9bRoutes); // STORE-MAP-01 P9b screens: 404 while GIRRU_STORE_P9B is off
+  await fastify.register(storeP9bRoutes,{getEncryptedMemoryRuntime:options.getEncryptedMemoryRuntime,isEncryptedMemorySelected:options.isEncryptedMemorySelected}); // STORE-MAP-01 P9b screens: 404 while GIRRU_STORE_P9B is off
   await fastify.register(projectTrustRoutes); // REPO-TRUST-01: 404 while GIRRU_REPO_TRUST is off
   await fastify.register(docIndexRoutes); // KNOW-INDEX-01: 404 while GIRRU_DOC_INDEX is off
   await fastify.register(codeOpenRoutes); // CODE-OPEN-01
@@ -409,7 +442,8 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await fastify.register(schedulerAuthorizationRoutes);
   await fastify.register(schedulerPaperControlRoutes,{ledger:paperScheduleLedger});
   await fastify.register(schedulerRoutes); // ⏰ Scheduler System
-  await fastify.register(memoryRoutes); // 🧠 Memory System
+  await fastify.register(nativeMemoryOwnerRoutes,{service:options.nativeMemoryPreparation});
+  await fastify.register(memoryRoutes,{skipLegacyInitialization:Boolean(options.nativeOwnedControl)}); // 🧠 Memory System
   await fastify.register(mcpChatRoutes);
   if(options.computerApplication){const unbind=bindComputerApplication(options.computerApplication);fastify.addHook('onClose',async()=>{await options.computerApplication!.stop();unbind();});}
   await fastify.register(deviceCoopRoutes,{application:options.computerApplication});

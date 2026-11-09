@@ -1,3 +1,5 @@
+import {MemoryCipherError} from '../../memory/encryption/envelope.js';
+import type {createEncryptedMemoryBridgeAdapter} from '../../memory/encryption/bridge-adapter.js';
 /**
  * Memory bridge for coding agents (MEM-BRIDGE-01).
  *
@@ -65,11 +67,12 @@ type Req = FastifyRequest<{ Params: Record<string, string>; Querystring: Record<
 const bodyOf = (r: { body?: unknown }): Record<string, any> => (r.body && typeof r.body === 'object' && !Array.isArray(r.body) ? r.body as Record<string, any> : {});
 
 function fail(reply: FastifyReply, err: unknown) {
+  if(err instanceof MemoryCipherError)return reply.code(403).send({error:'Encrypted memory bridge unavailable',code:'encrypted_memory_unavailable'});
   if (err instanceof BridgeError || err instanceof CapabilityError || err instanceof TaskTrustError || err instanceof PlaceSettingsError || err instanceof BoardError) return reply.code(err.status).send({ error: err.message, code: err.code });
   throw err;
 }
 
-export async function memoryBridgeRoutes(fastify: FastifyInstance) {
+export async function memoryBridgeRoutes(fastify: FastifyInstance,options:{encryptedMemoryBridge?:ReturnType<typeof createEncryptedMemoryBridgeAdapter>}={}) {
   const config = { access: 'owner' as const };
   const owner = (request: FastifyRequest, reply: FastifyReply) => authorizeActiveRole(request, reply, OWNER_ONLY);
   /** Runs `fn` for the owner; BridgeError -> its status. */
@@ -156,12 +159,12 @@ export async function memoryBridgeRoutes(fastify: FastifyInstance) {
 
   fastify.post('/api/memory-bridge/mcp/session', async (request: Req, reply) => {
     if (!local(request, reply)) return reply;
-    try { return await openSession(bodyOf(request).client, bodyOf(request).nonce, bodyOf(request).proof); } catch (err) { return fail(reply, err); }
+    try { if(options.encryptedMemoryBridge){const b=bodyOf(request);return await options.encryptedMemoryBridge.openSession({client:b.client,nonce:b.nonce,proof:b.proof});}return await openSession(bodyOf(request).client, bodyOf(request).nonce, bodyOf(request).proof); } catch (err) { return fail(reply, err); }
   });
 
   fastify.post('/api/memory-bridge/mcp/call', async (request: Req, reply) => {
     if (!local(request, reply)) return reply;
     const b = bodyOf(request);
-    try { return await mcpCall(b.client, request.headers[BRIDGE_TOKEN_HEADER], b.cwd, b.tool, b.args ?? {}, request.headers[CAPABILITY_HEADER]); } catch (err) { return fail(reply, err); }
+    try { if(options.encryptedMemoryBridge){const token=request.headers[BRIDGE_TOKEN_HEADER],capability=request.headers[CAPABILITY_HEADER];if(typeof token!=='string'||typeof capability!=='string')return reply.code(401).send({error:'Capability required',code:'unauthenticated'});return await options.encryptedMemoryBridge.call({client:b.client,sessionToken:token,capabilityToken:capability,cwd:b.cwd,tool:b.tool,args:b.args??{}});}return await mcpCall(b.client, request.headers[BRIDGE_TOKEN_HEADER], b.cwd, b.tool, b.args ?? {}, request.headers[CAPABILITY_HEADER]); } catch (err) { return fail(reply, err); }
   });
 }

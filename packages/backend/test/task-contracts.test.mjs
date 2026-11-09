@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url';
 // R1: task contracts and result verification.
 // Contract validation at task create (400, never wider than the agent's
 // grants), deterministic verification (verified / failed_verification /
@@ -15,7 +16,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 import { switchValueOn } from './helpers/switches.mjs';
-const backendDir = process.cwd();
+const backendDir = fileURLToPath(new URL('../',import.meta.url));
 const runnerPath = join(backendDir, 'test', 'fixtures', 'task-run-runner.mjs');
 const dir = mkdtempSync(join(tmpdir(), 'ap-task-contracts-'));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });

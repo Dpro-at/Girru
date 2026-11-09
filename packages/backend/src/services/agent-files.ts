@@ -1,3 +1,4 @@
+import {assertNoLegacyMemoryFileAccess,isEncryptedMemoryProfileSelected} from '../memory/encryption/consumer-host.js';
 /**
  * Agent Files Service
  *
@@ -85,7 +86,7 @@ export async function initializeAgentDir(agentId: string): Promise<void> {
   await agentDirectory(knowledge);
   for(const name of ['docs','templates','data'])await agentDirectory(path.join(knowledge,name));
   await createAgentDefault(path.join(dir,'PERSONALITY.md'),getDefaultPersonality());
-  await createAgentDefault(path.join(dir,'MEMORY.md'),getDefaultMemory());
+  if(!isEncryptedMemoryProfileSelected())await createAgentDefault(path.join(dir,'MEMORY.md'),getDefaultMemory());
 }
 
 /** Read only the fixed profile file; a bad entry is never replaced by defaults. */
@@ -146,11 +147,12 @@ async function loadMemory(agentId:string):Promise<MemorySnapshot>{
   return {content:clean+(truncated?'\n\n[MEMORY CUT]':''),hash:truncated?null:digest(raw),truncated,redacted:clean!==text};
  }finally{await handle.close();}
 }
-export async function readMemorySnapshot(agentId:string):Promise<MemorySnapshot>{try{return await loadMemory(agentId);}catch{throw Error('memory_unavailable');}}
+export async function readMemorySnapshot(agentId:string):Promise<MemorySnapshot>{assertNoLegacyMemoryFileAccess();try{return await loadMemory(agentId);}catch{throw Error('memory_unavailable');}}
 export async function readMemory(agentId:string):Promise<string>{return (await readMemorySnapshot(agentId)).content;}
 async function syncDir(dir:string){const handle=await fs.open(dir,'r');try{await handle.sync();}finally{await handle.close();}}
 /** Explicit expected-hash owner write; callers must enforce owner authentication and reviewed intent. */
 export async function writeMemoryCAS(agentId:string,content:string,expectedHash:string|null):Promise<MemorySnapshot>{
+ assertNoLegacyMemoryFileAccess();
  if(typeof content!=='string'||Buffer.byteLength(content,'utf8')>MEMORY_LIMIT||!(expectedHash===null||typeof expectedHash==='string'&&/^[a-f0-9]{64}$/.test(expectedHash)))throw Error('memory_write_invalid');
  const clean=redactImportText(content).text;if(Buffer.byteLength(clean,'utf8')>MEMORY_LIMIT)throw Error('memory_write_invalid');
  const dir=await checkedMemoryDir(agentId,true);if(!dir)throw Error('memory_unavailable');
@@ -180,6 +182,7 @@ export async function writeMemoryCAS(agentId:string,content:string,expectedHash:
  * linked, too large or not ours are skipped, never followed.
  */
 export async function readMemoryHistory(agentId:string):Promise<{hash:string;content:string;appliedAt:number|null}[]>{
+ assertNoLegacyMemoryFileAccess();
  const dir=await checkedMemoryDir(agentId);if(!dir)return [];
  const versions=path.join(dir,'.memory-versions'),events=path.join(versions,'events');
  async function json(file:string):Promise<any|null>{

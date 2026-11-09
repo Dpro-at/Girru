@@ -127,13 +127,15 @@ test('client disconnect cancels in-flight upstream', async t => {
   await entered; req.destroy(); await closed; assert.equal(s.calls.length,1);
 });
 test('validated static candidate allows only local media and same-origin microphone; fixture entry unchanged; no query live toggle', async t => {
-  const before = fs.readFileSync(require('node:path').join(__dirname,'../dist/current.json'));
+  const currentFile = require('node:path').join(__dirname,'../dist/current.json');
+  const currentBytes = () => fs.existsSync(currentFile) ? fs.readFileSync(currentFile) : null;
+  const before = currentBytes();
   const s = await setup(t);
   // Native fetch adds no Authorization to static requests.
   const response = await fetch(s.origin); assert.equal(response.status,200); assert.equal(response.headers.get('content-security-policy'),HEADERS['Content-Security-Policy']);
   assert.equal((await fetch(s.origin+'/?live=true')).status,400);
   assert.match(fs.readFileSync(require('node:path').join(__dirname,'../src/main.tsx'),'utf8'),/<App\/>/);
-  assert.deepEqual(fs.readFileSync(require('node:path').join(__dirname,'../dist/current.json')),before);
+  assert.deepEqual(currentBytes(),before);
   assert.equal(s.calls.length,0);
 });
 test('strict listener conflict leaves original owned listener functioning', async t => {

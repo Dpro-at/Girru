@@ -74,7 +74,9 @@ export interface OllamaLoopOptions {
   /** STORE-MAP-01 P2b (adaptive budget): characters of one tool result given back to the model. */
   toolOutputChars?: number;
   /** STORE-MAP-01 P2b (adaptive budget): called with the messages before every model call (shortens them to fit). */
-  beforeStep?: (messages: { role: string; content: unknown }[]) => void;
+  beforeStep?: (messages: { role: string; content: unknown }[]) => void | Promise<void>;
+  /** Trusted boundary before any calls in a potentially parallel batch execute. */
+  beforeTools?: (names: readonly string[]) => void | Promise<void>;
 }
 
 /**
@@ -125,7 +127,7 @@ export async function runOllamaAgentLoop(o: OllamaLoopOptions): Promise<AgentLoo
       step++;
       // CHAT-BUILD-01 stage 5 (Steer now): the owner's messages sent while it works go in before this step.
       for (const text of currentChatRun()?.takeSteers?.() ?? []) messages.push({ role: 'user', content: text });
-      o.beforeStep?.(messages as { role: string; content: unknown }[]);
+      await o.beforeStep?.(messages as { role: string; content: unknown }[]);
       const { content, thinking, calls: asked } = await streamOne();
       // A small local model sometimes ends with no text at all: right after its tools (seen on
       // qwen3:4b after memory_save) or after thinking only. Ask once for the short answer, so the
@@ -139,6 +141,7 @@ export async function runOllamaAgentLoop(o: OllamaLoopOptions): Promise<AgentLoo
       const calls = o.callCap ? planCalls(asked, o.callCap).run : asked;
       messages.push({ role: 'assistant', content, ...(thinking ? { thinking } : {}), tool_calls: calls.map((c) => ({ function: { name: c.name, arguments: c.args } })) });
       o.write({ type: 'tool_start', step, tools: calls.map((c) => ({ id: c.id, name: c.name, input: clip(JSON.stringify(c.args), TOOL_INPUT_CHARS) })) });
+      await o.beforeTools?.(asked.map(call=>call.name));
       const { results, skippedNote } = await runStepCalls(asked, o.execute, now, o.callCap);
       if (o.signal.aborted) throw new Aborted();
       o.write({ type: 'tool_result', step, results: results.map((r) => ({ id: r.id, name: r.name, output: clip(r.text, TOOL_OUTPUT_CHARS), isError: r.isError, ms: r.ms })) });

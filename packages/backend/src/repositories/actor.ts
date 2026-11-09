@@ -1,3 +1,5 @@
+import {selectedMemoryExecution} from '../memory/encryption/execution-context.js';
+import {one as selectedOne} from './sql-steps.js';
 /**
  * Actor: who is acting (B1-core).
  *
@@ -99,6 +101,7 @@ function activeRole(userId: string): ActorRole {
 
 /** activeRole on the configured driver (B2.2b). Any error -> 'none' (fails closed). */
 export async function activeRoleAsync(userId: string): Promise<ActorRole> {
+  const selected=selectedMemoryExecution();if(selected){if(userId!==selected.ownerId)return 'none';try{return roleOfRow(await selected.runner.read(selectedOne<{role:string;status:string}>('SELECT role,status FROM users WHERE id=?',userId)));}catch{return 'none';}}
   if (dbDriver() !== 'postgres') return activeRole(userId);
   try {
     return roleOfRow(await pgOne<{ role: string; status: string }>('SELECT role, status FROM users WHERE id = ?', userId));
