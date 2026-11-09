@@ -57,3 +57,7 @@
 .computer-start-done{width:56px;height:56px;border-radius:50%;display:grid;place-items:center;background:var(--subtle);color:var(--ap-dot-allow,#3BB273)}
 .computer-join-steps{justify-content:center}
 .computer-start-done.is-warn{color:var(--ap-warn,#C26A00)}
+.computer-icons{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.computer-icon-choice{display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 4px;border-radius:10px;background:var(--surface);border:1px solid var(--border);color:var(--accent,#3B7BF6);font:inherit;cursor:pointer}
+.computer-icon-choice small{color:var(--muted);font-size:11px}
+.computer-icon-choice.is-on{border-color:var(--accent,#3B7BF6);background:var(--subtle)}

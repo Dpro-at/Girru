@@ -4,11 +4,12 @@ import {Sheet} from './desktop-ui';
 import {QrImage} from './PhonePairing';
 import {UiIcon} from './ui-icons';
 import type {UiIconName} from './ui-icons';
-import {useContinuity, useShareByDefault, ContinuityRequests} from './ComputerStart';
+import {useContinuity, useShareByDefault} from './ComputerStart';
+import {computerIcon} from './ComputerLook';
 
 /** Adding a computer (DEVICES-PROJECT-01 B2, boards CP1, CP2, CP7, CP9c): plain words, pictures instead of codes. */
 const root = '/api/computers/account';
-export type Status = {desktopAvailable?: boolean; configured?: boolean; connected?: boolean; active?: boolean; googleLinked?: boolean; workspaces?: {id: string; label: string; mode: string; state: string; sourceDeviceId?: string | null}[]; coverage?: {category: string; label: string; available: boolean; continuity: boolean}[]; view?: {deviceId?: string; deviceStatus?: string; devices?: {id: string; label: string; status: string; presence?: string; osFamily?: string}[]} | null; pairing?: {self: {waiting: boolean; approver: string | null; code: string | null; changed?: boolean} | null; requests: {deviceId: string; label: string; osFamily: string; code: string | null; publicKey?: string; elsewhere: boolean; changed?: boolean}[]; addedWithCode: {deviceId: string; label: string; publicKey: string; checkCode: string}[]; twoFactorFailuresToday?: number; thisComputerCheck?: string} | null};
+export type Status = {desktopAvailable?: boolean; configured?: boolean; connected?: boolean; active?: boolean; googleLinked?: boolean; workspaces?: {id: string; label: string; mode: string; state: string; sourceDeviceId?: string | null}[]; coverage?: {category: string; label: string; available: boolean; continuity: boolean}[]; view?: {deviceId?: string; deviceStatus?: string; devices?: {id: string; label: string; status: string; presence?: string; osFamily?: string; publicKey?: string; appVersion?: string}[]} | null; pairing?: {self: {waiting: boolean; approver: string | null; code: string | null; changed?: boolean} | null; requests: {deviceId: string; label: string; osFamily: string; code: string | null; publicKey?: string; elsewhere: boolean; changed?: boolean}[]; addedWithCode: {deviceId: string; label: string; publicKey: string; checkCode: string}[]; twoFactorFailuresToday?: number; thisComputerCheck?: string} | null};
 
 /** Plain words for the account service's answers (one name per thing; never a code on screen). */
 export function computerAccountWords(code: string) {
@@ -129,7 +130,7 @@ export function ComputerJoinRequests({client, status}: {client: SessionClient; s
   return <section aria-label="New computers" className="computer-join-requests">
     <p className="section-label">Needs you</p>
     {reqs.map(r => <div key={r.deviceId} className="computer-task" role="group" aria-label={`Add ${r.label}`}>
-      <UiIcon name="user-plus" size={16}/>
+      <UiIcon name={computerIcon(null, r.deviceId, r.osFamily)} size={16}/>
       <span className="computer-task-text"><b>Add “{r.label}” to your account?</b><small>{r.changed ? 'This request changed after you answered it, so it stopped for safety. Start again on the new computer.' : r.elsewhere ? 'Another of your computers is answering this.' : r.code ? 'Check the new computer shows these same pictures. Only add a computer you own.' : 'Getting the pictures ready…'}</small>{r.code && <ComputerPictures code={r.code}/>}</span>
       {!r.elsewhere && !r.changed && <span className="computer-task-actions"><button type="button" disabled={busy === r.deviceId} onClick={() => void answer(r, false)}>No, it’s not me</button><button type="button" className="primary" disabled={busy === r.deviceId || !r.code} onClick={() => void answer(r, true)}>Yes, add it</button></span>}
     </div>)}
@@ -149,7 +150,7 @@ export function ComputerJoinNotice({client, enabled, onOpen}: {client: SessionCl
   const same = continuity.find(x => x.state === 'pending');
   if ((!r || hidden === r.deviceId) && same && hidden !== same.id) return <div className="computer-join-notice" role="status"><UiIcon name="copy" size={16}/><span><b>{same.label ?? 'Your new computer'} wants to start the same as this one</b><small>Your agents, rules and projects</small></span><button type="button" className="primary" onClick={() => { setHidden(same.id); onOpen(); }}>Review</button><button type="button" className="tool" aria-label="Later" title="Later" onClick={() => setHidden(same.id)}><UiIcon name="close" size={13}/></button></div>;
   if (!r || hidden === r.deviceId) return null;
-  return <div className="computer-join-notice" role="status"><UiIcon name="screen" size={16}/><span><b>New computer: {r.label}</b><small>Wants to join your account</small></span><button type="button" className="primary" onClick={() => { setHidden(r.deviceId); onOpen(); }}>Review</button><button type="button" className="tool" aria-label="Later" title="Later" onClick={() => setHidden(r.deviceId)}><UiIcon name="close" size={13}/></button></div>;
+  return <div className="computer-join-notice" role="status"><UiIcon name={computerIcon(null, r.deviceId, r.osFamily)} size={16}/><span><b>New computer: {r.label}</b><small>Wants to join your account</small></span><button type="button" className="primary" onClick={() => { setHidden(r.deviceId); onOpen(); }}>Review</button><button type="button" className="tool" aria-label="Later" title="Later" onClick={() => setHidden(r.deviceId)}><UiIcon name="close" size={13}/></button></div>;
 }
 
 /** Settings › Computers › Account and safety: the Dpro account's own two-step sign-in (D11). */

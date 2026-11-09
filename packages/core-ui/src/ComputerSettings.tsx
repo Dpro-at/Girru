@@ -2,7 +2,8 @@ import {useState} from 'react';
 import type {SessionClient} from './session';
 import {useComputerOverview, computerStateLabel, computerPathLabel} from './ComputerDevices';
 import {DproAccountPanel} from './DproAccountPanel';
-import {AccountTwoFactor, ThisComputerCheck} from './ComputerJoin';
+import {AccountTwoFactor, ThisComputerCheck, useAccountStatus} from './ComputerJoin';
+import {computerIcon, computerName, useComputerLook} from './ComputerLook';
 import {ComputerEnrollment} from './ComputerEnrollment';
 import {ComputerLinkControls, ComputerDirectControls} from './ComputerLinkControls';
 import {ComputerSyncWorkspace} from './ComputerSyncWorkspace';
@@ -25,6 +26,9 @@ export function ComputerSettings({client, pane, onApprovals}: {client: SessionCl
   const devices = (view?.devices ?? []).filter(d => d.state !== 'revoked');
   const usable = !!view && (view.testOnly || !!view.configured);
   const place = COMPUTER_SETTINGS_PANES.find(p => p.key === pane)!;
+  const account = useAccountStatus(client, pane === 'mine');
+  const {look} = useComputerLook(client, pane === 'mine');
+  const os = (publicKey?: string, self = false) => account?.view?.devices?.find(d => self ? d.id === account?.view?.deviceId : !!publicKey && d.publicKey === publicKey)?.osFamily;
   return <div className="phone-settings computer-settings">
     <div className="phone-main">
       <header className="phone-head"><div><h2 className="settings-page-title">{place.label}</h2><p className="settings-page-desc">{place.note}</p></div></header>
@@ -37,8 +41,8 @@ export function ComputerSettings({client, pane, onApprovals}: {client: SessionCl
       {pane !== 'account' && !usable && <div className="phone-empty"><UiIcon name="screen" size={24}/><b>Sign in to your Dpro account first</b><p>Then your computers show here. Open Account and safety.</p></div>}
       {pane === 'mine' && usable && view && <>
         <div className="phone-list" role="list" aria-label="My computers">
-          {view.self && <div className="phone-row" role="listitem"><span className="phone-tile"><UiIcon name="screen" size={16}/></span><span className="phone-row-text"><b>{view.self.name}</b><small>This computer</small></span></div>}
-          {devices.map(d => <div key={d.id} className="phone-row" role="listitem"><span className="phone-tile"><UiIcon name="screen" size={16}/></span><span className="phone-row-text"><b>{d.name}</b><small>{computerStateLabel(d.state)} · {computerPathLabel(d.path)}</small></span></div>)}
+          {view.self && <div className="phone-row" role="listitem"><span className="phone-tile"><UiIcon name={computerIcon(look, view.self.id, os(undefined, true))} size={16}/></span><span className="phone-row-text"><b>{computerName(look, view.self.id, view.self.name)}</b><small>This computer</small></span></div>}
+          {devices.map(d => <div key={d.id} className="phone-row" role="listitem"><span className="phone-tile"><UiIcon name={computerIcon(look, d.id, os(d.publicKey))} size={16}/></span><span className="phone-row-text"><b>{computerName(look, d.id, d.name)}</b><small>{computerStateLabel(d.state)} · {computerPathLabel(d.path)}</small></span></div>)}
         </div>
         <ThisComputerCheck client={client}/>
         <ComputerLinkControls client={client} view={view} onNotice={setNotice}/>
