@@ -42,7 +42,7 @@ export function ComputerSettings({client, pane, onApprovals}: {client: SessionCl
         <DproAccountPanel client={client}/>
         <details><summary>Older way to add computers</summary><ComputerEnrollment client={client}/></details>
       </>}
-      {pane !== 'account' && !usable && <div className="phone-empty"><UiIcon name="screen" size={24}/><b>Sign in to your Dpro account first</b><p>Then your computers show here. Open Account and safety.</p></div>}
+      {pane !== 'account' && pane !== 'tasks' && !usable && <div className="phone-empty"><UiIcon name="screen" size={24}/><b>Sign in to your Dpro account first</b><p>Then your computers show here. Open Account and safety.</p></div>}
       {pane === 'mine' && usable && view && <>
         <div className="phone-list" role="list" aria-label="My computers">
           {view.self && <div className="phone-row" role="listitem"><span className="phone-tile"><UiIcon name={computerIcon(look, view.self.id, os(undefined, true))} size={16}/></span><span className="phone-row-text"><b>{computerName(look, view.self.id, view.self.name)}</b><small>This computer</small></span></div>}
@@ -52,7 +52,7 @@ export function ComputerSettings({client, pane, onApprovals}: {client: SessionCl
         <ComputerLinkControls client={client} view={view} onNotice={setNotice}/>
         <p className="fine-print">To forget a computer, select it in Computers and choose More › Forget this computer.</p>
       </>}
-      {pane === 'tasks' && usable && view && <ComputerTaskRules client={client} deviceNames={Object.fromEntries(devices.map(d => [d.id, computerName(look, d.id, d.name)]))}/>}
+      {pane === 'tasks' && <ComputerTaskRules client={client} deviceNames={Object.fromEntries((devices ?? []).map(d => [d.id, computerName(look, d.id, d.name)]))}/>}
       {pane === 'share' && usable && view && <>
         <ComputerShare client={client}/>
         <details><summary>Share one item with one computer…</summary><ComputerSyncWorkspace client={client} devices={view.devices} onApprovals={onApprovals}/></details>

@@ -63,6 +63,8 @@ const { allowedChartPrefs, chartPrefsRoute, chartPrefsResponse } = require('../s
 const { allowedDepartments, departmentsRoute, departmentsResponse } = require('../src/departments-contract.js');
 const { allowedFirstRun, firstRunRoute, firstRunResponse } = require('../src/first-run-contract.js');
 const { allowedPhone, phoneRoute, phoneResponse } = require('../src/phone-contract.js');
+// DEVICES-PROJECT-01: Computers and the Dpro account (owner only; the backend checks owner, loopback and desktop custody).
+const { allowedComputer, computerRoute, computerResponse } = require('../src/computer-contract.js');
 const { allowedAgentRules, agentRulesRoute, agentRulesResponse } = require('../src/agent-rules-contract.js');
 const { allowedOrg, orgRoute, orgResponse, orgFields } = require('../src/org-contract.js');
 const { allowedLibrary: allowedAgentLibrary, libraryRoute: agentLibraryRoute, libraryResponse: agentLibraryResponse } = require('../src/agent-library-contract.js');
@@ -168,6 +170,7 @@ function allowed(method, target, body) {
   if (meetingsRoute(target)) return allowedMeetings(method,target,body);
   if (firstRunRoute(target)) return allowedFirstRun(method, target, body);
   if (phoneRoute(target)) return allowedPhone(method, target, body);
+  if (computerRoute(target)) return allowedComputer(method, target, body);
   if (agentRulesRoute(target)) return allowedAgentRules(method, target, body);
   if (orgRoute(target)) return allowedOrg(method, target, body);
   if (agentLibraryRoute(target)) return allowedAgentLibrary(method, target, body);
@@ -271,6 +274,7 @@ function project(target, status, body) {
   if (meetingsRoute(target)) return meetingsResponse(target,status,body);
   if (firstRunRoute(target)) return firstRunResponse(target, status, body);
   if (phoneRoute(target)) return phoneResponse(target, status, body);
+  if (computerRoute(target)) return computerResponse(target, status, body);
   if (agentRulesRoute(target)) return agentRulesResponse(target, status, body);
   if (orgRoute(target)) return orgResponse(target, status, body);
   if (agentLibraryRoute(target)) return agentLibraryResponse(target, status, body);

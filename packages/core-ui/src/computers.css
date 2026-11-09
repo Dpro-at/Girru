@@ -46,9 +46,9 @@
 .setup-welcome-actions{display:flex;flex-direction:column;gap:8px;width:260px}
 .setup-welcome-actions button{height:36px}
 .computer-start-choices{display:flex;flex-direction:column;gap:8px}
-.computer-start-choice{display:flex;align-items:flex-start;gap:12px;padding:12px;border-radius:10px;text-align:left;background:var(--surface);border:1px solid var(--border);color:inherit;font:inherit;cursor:pointer}
+.computer-start-choice{display:flex;align-items:flex-start;justify-content:flex-start;gap:12px;width:100%;padding:12px;border-radius:10px;text-align:left;background:var(--surface);border:1px solid var(--border);color:inherit;font:inherit;cursor:pointer}
 .computer-start-choice.is-on{border-color:var(--accent,#3B7BF6);background:var(--subtle)}
-.computer-start-choice span{display:flex;flex-direction:column;gap:3px}
+.computer-start-choice span{display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left}
 .computer-start-choice small{color:var(--muted)}
 .computer-start-tile{width:32px;height:32px;border-radius:8px;display:grid!important;place-items:center;flex:none;background:var(--subtle);color:var(--accent,#3B7BF6)}
 .computer-start-list{display:flex;flex-direction:column;gap:6px}
@@ -80,3 +80,8 @@
 .computer-switch i{width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s}
 .computer-switch.is-on{background:var(--accent,#3B7BF6)}
 .computer-switch.is-on i{transform:translateX(14px)}
+.computer-task-rules .computers-label{max-width:560px}
+.computer-task-rules .computer-start-choices{max-width:560px}
+.computer-start-choice .computer-start-tile{display:grid;place-items:center;align-items:center;justify-content:center}
+.setup-welcome .public-mark{width:64px;height:64px;display:grid;place-items:center}
+.setup-welcome .public-mark svg{width:56px;height:56px}
