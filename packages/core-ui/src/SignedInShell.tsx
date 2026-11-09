@@ -1,4 +1,6 @@
 import {ComputerDevicesProvider} from './ComputerDevices';
+import { ComputersSection } from './ComputersSection';
+import { ComputerJoinNotice } from './ComputerJoin';
 import {AppUpdateNotice} from './AppUpdateNotice';
 import {ReportsPage} from './ReportsPage';
 import {BrowserWorkspace} from './BrowserWorkspace';
@@ -53,12 +55,12 @@ import type { Command } from './CommandPalette';
 import { accountRoleLabel, isDeveloperBuild } from './developer-build';
 import { setCodeHost, setCodeInstall } from './code-open';
 
-type Page = 'reports' | 'browser' | 'rules' | 'code' | 'trading' | 'library' | 'apps' | 'store' | 'approvals' | 'chat' | 'genvr' | 'agents' | 'board' | 'runs' | 'memory' | 'skills' | 'mcp' | 'terminal' | 'account' | 'settings' | 'about' | 'specialties' | 'personalities';
+type Page = 'computers' | 'reports' | 'browser' | 'rules' | 'code' | 'trading' | 'library' | 'apps' | 'store' | 'approvals' | 'chat' | 'genvr' | 'agents' | 'board' | 'runs' | 'memory' | 'skills' | 'mcp' | 'terminal' | 'account' | 'settings' | 'about' | 'specialties' | 'personalities';
 /** The section a page is a place of: its "← back" on top of the sidebar goes there. */
 const placeParent: Partial<Record<Page, 'library' | 'store' | 'settings'>> = { personalities: 'library', specialties: 'library', skills: 'library', rules: 'library', terminal: 'store' };
 const PARENT_LABEL: Record<'library' | 'store' | 'settings', string> = { library: 'Library', store: 'Store', settings: 'Settings' };
 /** Sections that own the sidebar with their own places (the chat list shows only in Chat). */
-const OWN_SIDEBAR: ReadonlyArray<Page> = ['rules', 'memory', 'settings', 'agents', 'library', 'skills', 'mcp', 'terminal','specialties','personalities','board','runs','reports','approvals','apps','store','trading'];
+const OWN_SIDEBAR: ReadonlyArray<Page> = ['computers', 'rules', 'memory', 'settings', 'agents', 'library', 'skills', 'mcp', 'terminal','specialties','personalities','board','runs','reports','approvals','apps','store','trading'];
 const pages: ReadonlyArray<{ key: Page; label: string; icon: IconName | 'board' | 'book' | 'play' }> = [
   { key: 'chat', label: 'Chat', icon: 'message-circle' },
   { key: 'agents', label: 'Agents', icon: 'user' },
@@ -212,6 +214,8 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
     ...pages.filter(p=>p.key!=='genvr'&&(p.key!=='approvals'||user.role!=='guest')&&(p.key!=='runs'||user.role!=='guest')&&(!['library','reports'].includes(p.key)||user.role==='owner')).map(p => ({ id: `go-${p.key}`, group: 'Go to', label: p.label, icon:p.icon==='board'||p.icon==='book'||p.icon==='play'?<UiIcon name={p.icon} size={14}/>:<Icon name={p.icon}/>, run: () => setPage(p.key) })),
     ...tools.map(t=>({...t,id:'tool-'+t.id,group:'Tools',keywords:t.id==='terminal'?'console shell':t.id==='genvr'?'spaces worlds':'editor'})),
     ...libraryCommands,
+    // DEVICES-PROJECT-01 (CP3): my other computers, owner only.
+    ...(user.role==='owner'&&mode==='live'?[{id:'go-computers',group:'Go to',label:'Computers',keywords:'computers other computer devices linked send task add a computer',icon:<UiIcon name="screen" size={14}/>,run:()=>setPage('computers')},{id:'settings-computers',group:'Settings',label:'Settings › Computers',keywords:'computers account wi-fi recover forget share',icon:<UiIcon name="screen" size={14}/>,run:()=>openSettings('computers')}]:[]),
     // RUNS-01: the schedules moved from Settings to Runs › Scheduled; the old words still find them.
     ...(user.role!=='guest'?[{id:'scheduled-tasks',group:'Runs',label:'Runs › Scheduled',keywords:'scheduled tasks schedules cron automation paused active settings',icon:<UiIcon name="calendar" size={14}/>,run:()=>openRuns('scheduled')},{id:'runs-failed',group:'Runs',label:'Runs › Failed or stopped',keywords:'failed stopped errors why bug log',icon:<UiIcon name="alert" size={14}/>,run:()=>openRuns('failed')},{id:'runs-waiting',group:'Runs',label:'Runs › Waiting',keywords:'waiting approval needs you',icon:<UiIcon name="hourglass" size={14}/>,run:()=>openRuns('waiting')}]:[]),
     {id:'store-mine',group:'Store',label:'Store › My apps',keywords:'apps installed terminal trading genvr private',icon:<UiIcon name="layers" size={14}/>,run:openMyApps},
@@ -226,13 +230,13 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
   const active = chatState?.conversations.find(c => c.id === chatState.activeId);
   // CHAT-BUILD-01 stage 2 (CH1): the top bar names the chat and, muted, its project (hover = full path; a click opens Details › Place).
   const activeProject = active?.projectId ? chatState?.projects.find(p => p.id === active.projectId) : undefined;
-  const pageTitle = page === 'browser'?'Browser':page === 'rules'?'Rules':page === 'code'?'Code':page === 'store'?'Store':page === 'library'?'Library':page === 'personalities'?'Personalities':page === 'trading'?'Trading':page === 'specialties'?'Specialties':page === 'chat' && active ? (active.title || 'Chat') : page === 'skills' ? 'Skills' : page === 'mcp' ? 'MCP connections' : page === 'terminal' ? 'Terminal' : pages.find(p => p.key === page)?.label ?? '';
+  const pageTitle = page === 'computers'?'Computers':page === 'browser'?'Browser':page === 'rules'?'Rules':page === 'code'?'Code':page === 'store'?'Store':page === 'library'?'Library':page === 'personalities'?'Personalities':page === 'trading'?'Trading':page === 'specialties'?'Specialties':page === 'chat' && active ? (active.title || 'Chat') : page === 'skills' ? 'Skills' : page === 'mcp' ? 'MCP connections' : page === 'terminal' ? 'Terminal' : pages.find(p => p.key === page)?.label ?? '';
   const footer=footerFor(client);
   const {prefs:footerPrefsNow}=useSyncExternalStore(footer.subscribe,footer.getSnapshot,footer.getSnapshot);
   const browser=useBrowserApp(client,user.role==='owner');
   const owner=user.role==='owner',go=(p:Page)=>()=>setPage(p);
   const entry=(id:Page,available=true,run=go(id),badge?:string,parent?:FooterSection):FooterEntry=>({available,current:page===id,run,badge,parent});
-  const footerEntries:Record<FooterSection,FooterEntry>={chat:entry('chat'),agents:entry('agents'),library:{...entry('library',owner),current:page==='library'||page==='rules'},board:entry('board'),runs:entry('runs',user.role!=='guest'),reports:entry('reports',owner),memory:entry('memory'),approvals:entry('approvals',user.role!=='guest',go('approvals'),pendingApprovals.count?(pendingApprovals.count===100?'100+':String(pendingApprovals.count)):undefined),store:entry('store',true,go('store')),genvr:entry('genvr',true,()=>void openGenvr(),undefined,'store'),
+  const footerEntries:Record<FooterSection,FooterEntry>={computers:entry('computers',owner&&mode==='live'),chat:entry('chat'),agents:entry('agents'),library:{...entry('library',owner),current:page==='library'||page==='rules'},board:entry('board'),runs:entry('runs',user.role!=='guest'),reports:entry('reports',owner),memory:entry('memory'),approvals:entry('approvals',user.role!=='guest',go('approvals'),pendingApprovals.count?(pendingApprovals.count===100?'100+':String(pendingApprovals.count)):undefined),store:entry('store',true,go('store')),genvr:entry('genvr',true,()=>void openGenvr(),undefined,'store'),
     browser:{available:owner&&browser.available,current:page==='browser',run:go('browser'),parent:'store'},terminal:entry('terminal',owner,openTerminal,undefined,'store'),code:entry('code',owner&&(nativeEditor||codeMissing),nativeEditor?openCode:openCodeInStore,undefined,'store'),skills:entry('skills',owner,go('skills'),undefined,'library'),personalities:entry('personalities',owner,go('personalities'),undefined,'library'),specialties:entry('specialties',owner,go('specialties'),undefined,'library')};
 
   const sidebarShown = rail && (page === 'chat' || ownSidebar);
@@ -288,6 +292,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
       <section className="page page-browser" hidden={page!=='browser'}><BrowserWorkspace client={client} active={page==='browser'}/></section>
       <section className="page page-store" hidden={page!=='store'}><StoreWorkspace client={client} active={page==='store'} sidebarSlot={slot} request={storeRequest} canBrowser={browser.available&&owner} canCode={nativeEditor&&owner} codeMissing={codeMissing&&owner} onOpenApp={id=>{if(id==='browser')setPage('browser');else if(id==='code')void (nativeEditor?openCode():openCodeInStore());else if(id==='terminal')openTerminal();else if(id==='genvr')void openGenvr();else if(id==='channels')openSettings('channels');else setPage(id);}} onAccounts={()=>openSettings('accounts')} footerItem={owner?id=>footerToolItem(footerPrefsNow,id,x=>footer.toggle(x)):undefined} onPermissions={()=>{if(user.role!=='owner'){setPage('agents');return;}setApprovalsPlace(r=>({place:'perms',n:(r?.n??0)+1}));setPage('approvals');}}/></section>
       {user.role==='owner'&&<section className="page page-trading" hidden={page!=='trading'}><StoreTradingView client={client} active={page==='trading'} sidebarSlot={slot} onBack={openMyApps} onOpenStore={()=>{setStoreRequest(r=>({updates:false,item:'store:trading',n:(r?.n??0)+1}));setPage('store');}} onPermissions={()=>{setApprovalsPlace(r=>({place:'perms',n:(r?.n??0)+1}));setPage('approvals');}}/></section>}
+      {user.role==='owner'&&mode==='live'&&<section className="page page-computers" hidden={page!=='computers'}><ComputersSection client={client} active={page==='computers'} sidebarSlot={slot} onOpenChat={id=>{void chat?.open(id);setPage('chat');}} onApprovals={()=>setPage('approvals')} onSettings={()=>openSettings('computers')}/></section>}
       <section className="page page-genvr" hidden={page !== 'genvr'}>{genvrOpened&&<GenVRPage key={user.id} client={client} active={page === 'genvr'}/>}</section>
       {page === 'settings' && <section className="page page-settings"><AppSettings onOpenDeviceChat={id=>{void chat?.open(id);setPage('chat');}} key={settingsVisit} mcpOpenId={mcpOpen} onOpenChannelsStore={()=>{setStoreRequest(r=>({updates:false,item:'store:agent-connect',n:(r?.n??0)+1}));setPage('store');}} onOpenStore={local=>openStore(false,local)} initialTab={settingsTab} initialMemoryPane={memoryPane} sidebarSlot={slot} active signedIn client={client} preference={appearance.preference} onTheme={appearance.setPreference} onAccount={() => openSettings('account')} onAgents={() => setPage('agents')} onOpenMemory={() => setPage('memory')} onOpenChat={() => setPage('chat')} onOpenApps={openMyApps} onOpenTool={tool => setPage(tool)} onOpenGenvr={()=>void openGenvr()} onApprovals={() => setPage('approvals')} onBoard={() => setPage('board')} onAgent={id => { setAgentFocus(f => ({ id, n: (f?.n ?? 0) + 1 })); setPage('agents'); }}/></section>}
     </main>
@@ -297,6 +302,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
       extra={<>{owner && mode === 'live' && <AppUpdateNotice onOpen={()=>openSettings('about')}/>}{isDeveloperBuild(client) && <button className="status-item statusbar-button" onClick={() => client.selectMode('fixture')} title="Clears this local session; the server sign-in stays until you sign out">Leave to fixture</button>}{owner && mode === 'live' && <FooterHelperPill client={client}/>}</>}
       entries={footerEntries}/>
     {owner && mode === 'live' && <NewPhoneNotice client={client} onSettings={() => openSettings('phone')}/>}
+    {owner && mode === 'live' && page !== 'computers' && <ComputerJoinNotice client={client} enabled={owner && mode === 'live'} onOpen={() => setPage('computers')}/>}
     <CommandPalette open={palette} commands={commands} onClose={() => setPalette(false)}
       search={chat && search && user.role !== 'guest' ? { controller: search.palette, onOpen: (id, messageId) => { void chat.openAt(id, messageId); setPage('chat'); } } : undefined}/>
   </div></ComputerDevicesProvider>;

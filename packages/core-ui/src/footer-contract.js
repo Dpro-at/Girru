@@ -4,10 +4,10 @@
 // Settings is not a section here: its gear always stays.
 
 export const FOOTER_PATH = '/api/me/footer';
-export const FOOTER_SECTIONS = ['chat', 'agents', 'library', 'board', 'runs', 'reports', 'memory', 'approvals', 'store', 'genvr', 'terminal', 'code', 'browser', 'skills', 'personalities', 'specialties'];
+export const FOOTER_SECTIONS = ['chat', 'agents', 'library', 'board', 'runs', 'reports', 'memory', 'approvals', 'store', 'computers', 'genvr', 'terminal', 'code', 'browser', 'skills', 'personalities', 'specialties'];
 /** The usual footer: eight sections (Runs next to Board, RUNS-01); the rest live as places inside Library and the Store. MCP connections live in Settings. */
 export const DEFAULT_FOOTER = Object.freeze({ order: FOOTER_SECTIONS, hidden: ['genvr', 'terminal', 'code', 'browser', 'skills', 'personalities', 'specialties'], iconsOnly: false, approvalsWhenWaiting: true });
-const ADDED_AFTER = { library: 'agents', runs: 'board', reports:'runs' };
+const ADDED_AFTER = { library: 'agents', runs: 'board', reports:'runs', computers:'store' };
 /** SA6: Apps became Store › My apps; an older saved order keeps the Store where Apps was. */
 const renamed = id => id === 'apps' ? 'store' : id;
 const KEYS = ['order', 'hidden', 'iconsOnly', 'approvalsWhenWaiting'];

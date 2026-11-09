@@ -9,7 +9,7 @@ Group=dpro-account
 WorkingDirectory=/opt/girru-account-source
 Environment=NODE_ENV=production
 EnvironmentFile=/etc/dpro-account/service.env
-ExecStart=/usr/bin/node --import tsx packages/account-service/src/main.ts --database /var/lib/dpro-account/metadata.sqlite --epoch-root ${DPRO_ACCOUNT_EPOCH_ROOT} --origin ${DPRO_ACCOUNT_ORIGIN} --port ${DPRO_ACCOUNT_PORT} --client-id ${DPRO_ACCOUNT_GOOGLE_CLIENT_ID} --confirm-independent-epoch
+ExecStart=/usr/bin/node --import tsx packages/account-service/src/main.ts --database /var/lib/dpro-account/metadata.sqlite --epoch-root ${DPRO_ACCOUNT_EPOCH_ROOT} --origin ${DPRO_ACCOUNT_ORIGIN} --port ${DPRO_ACCOUNT_PORT} --client-id ${DPRO_ACCOUNT_GOOGLE_CLIENT_ID} --confirm-independent-epoch --secret-key-file /var/lib/dpro-account-keys/totp.key
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=20

@@ -38,7 +38,7 @@ const RULES_REFUSED='Adding, changing, pausing, deleting rules and using or dism
 const TASK_OPS=['list','get','activity','continue','sort','people','checklist','schedule'];
 /** TASKLOG-01: turning a project's task file on or off, and moving or editing cards, stay with the owner in the app. */
 const TASKS_REFUSED='Turning a project\u2019s task file on or off is done by the owner in Agents \u203a Rules (the files sheet); moving, editing and archiving cards is done on the Board. This tool reads tasks (list, get, activity) and, on the owner\u2019s instruction, continues one, sends one waiting in To sort to a department, puts people or agents on it, adds, ticks or gives checklist items, and sets how it repeats.';
-const FOOTER_IDS=['chat','agents','library','board','runs','reports','memory','approvals','store','genvr','terminal','code','browser','skills','personalities','specialties'];
+const FOOTER_IDS=['chat','agents','library','board','runs','reports','memory','approvals','store','computers','genvr','terminal','code','browser','skills','personalities','specialties'];
 /** RUNS-01: read everything that runs; Stop and Retry go through the same backend gates as in the app. */
 const RUN_OPS=['list','get','schedules','schedule_runs','schedule_task','stop','retry'];
 const RUN_PLACES=['running','waiting','finished','failed'];
@@ -113,7 +113,7 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name:'workspace_footer',title:'Footer sections',
-    description:'Owner-session only. Read or change which sections the Girru window footer shows, their order, icons only, and whether Approvals comes back when something waits. Sections: chat, agents, library (Personalities, Specialties and Skills), board, runs (everything that runs, and the schedules), reports, memory, approvals, apps, store, genvr, terminal, code, skills, personalities, specialties. MCP connections, channels, accounts and departments are places in Settings, not footer sections. Settings always stays and cannot be hidden; hidden sections stay in the command box (⌘K). Change only when the owner asks. The open window picks the change up when it is next focused.',
+    description:'Owner-session only. Read or change which sections the Girru window footer shows, their order, icons only, and whether Approvals comes back when something waits. Sections: chat, agents, library (Personalities, Specialties and Skills), board, runs (everything that runs, and the schedules), reports, memory, approvals, apps, store, computers (your other computers: who is free, what needs you, what each works on), genvr, terminal, code, skills, personalities, specialties. MCP connections, channels, accounts and departments are places in Settings, not footer sections. Settings always stays and cannot be hidden; hidden sections stay in the command box (⌘K). Change only when the owner asks. The open window picks the change up when it is next focused.',
     inputSchema:{type:'object',properties:{operation:{type:'string',enum:['read','set']},order:{type:'array',maxItems:FOOTER_IDS.length,items:{type:'string',enum:FOOTER_IDS}},hidden:{type:'array',maxItems:FOOTER_IDS.length,items:{type:'string',enum:FOOTER_IDS}},iconsOnly:{type:'boolean'},approvalsWhenWaiting:{type:'boolean'}},required:['operation'],additionalProperties:false},
   },
   {
