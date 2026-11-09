@@ -25,3 +25,17 @@
 .computers-field span{display:flex;align-items:center;gap:8px}
 .computers-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;height:100%}
 @media (max-width:900px){.computers,.computers[data-inline-sidebar="true"]{grid-template-columns:minmax(0,1fr)}.computers-inspector{border-left:0;border-top:1px solid var(--border)}}
+/* B2: adding a computer, pictures, Yes/No, notice. */
+.computer-join{display:flex;flex-direction:column;gap:12px;max-width:520px;margin:24px auto;text-align:left}
+.computer-join h2{margin:0;font-size:20px}
+.computer-steps{display:flex;gap:16px;font-size:12px;color:var(--muted);margin:0}
+.computer-steps b{color:inherit}
+.computer-join-list{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px}
+.computer-join-code{display:flex;align-items:flex-end;gap:10px}
+.computer-pictures{display:flex;flex-direction:column;gap:6px;margin:6px 0}
+.computer-pictures-row{display:flex;gap:10px}
+.computer-picture{width:52px;height:52px;border-radius:12px;display:grid;place-items:center;background:var(--subtle)}
+.computer-join-requests{display:flex;flex-direction:column;gap:8px}
+.computer-join-notice{position:fixed;right:16px;bottom:44px;z-index:40;display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:var(--surface);border:1px solid var(--border);box-shadow:0 12px 30px rgba(0,0,0,.25)}
+.computer-join-notice span{display:flex;flex-direction:column}
+.computer-join-notice small{color:var(--muted)}

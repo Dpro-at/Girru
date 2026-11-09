@@ -1,5 +1,6 @@
 import {ComputerDevicesProvider} from './ComputerDevices';
 import { ComputersSection } from './ComputersSection';
+import { ComputerJoinNotice } from './ComputerJoin';
 import {AppUpdateNotice} from './AppUpdateNotice';
 import {ReportsPage} from './ReportsPage';
 import {BrowserWorkspace} from './BrowserWorkspace';
@@ -301,6 +302,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
       extra={<>{owner && mode === 'live' && <AppUpdateNotice onOpen={()=>openSettings('about')}/>}{isDeveloperBuild(client) && <button className="status-item statusbar-button" onClick={() => client.selectMode('fixture')} title="Clears this local session; the server sign-in stays until you sign out">Leave to fixture</button>}{owner && mode === 'live' && <FooterHelperPill client={client}/>}</>}
       entries={footerEntries}/>
     {owner && mode === 'live' && <NewPhoneNotice client={client} onSettings={() => openSettings('phone')}/>}
+    {owner && mode === 'live' && page !== 'computers' && <ComputerJoinNotice client={client} enabled={owner && mode === 'live'} onOpen={() => setPage('computers')}/>}
     <CommandPalette open={palette} commands={commands} onClose={() => setPalette(false)}
       search={chat && search && user.role !== 'guest' ? { controller: search.palette, onOpen: (id, messageId) => { void chat.openAt(id, messageId); setPage('chat'); } } : undefined}/>
   </div></ComputerDevicesProvider>;

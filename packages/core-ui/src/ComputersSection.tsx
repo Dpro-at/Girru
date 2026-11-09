@@ -7,6 +7,7 @@ import {ComputerTaskRequest} from './ComputerTaskRequest';
 import {ComputerTaskTiming} from './ComputerTaskTiming';
 import {ComputerLinkControls} from './ComputerLinkControls';
 import {Sheet} from './desktop-ui';
+import {AddThisComputer, ComputerJoinRequests, useAccountStatus} from './ComputerJoin';
 import {UiIcon} from './ui-icons';
 
 /** Tasks that wait for this computer's owner to allow them. */
@@ -29,6 +30,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   onSettings: () => void;
 }) {
   const view = useComputerOverview();
+  const account = useAccountStatus(client, active);
   const [selected, setSelected] = useState('');
   const [adding, setAdding] = useState(false);
   const [forget, setForget] = useState(false);
@@ -77,7 +79,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
 
   let main: ReactNode;
   if (!view) main = <div className="dk-empty"><p role="status">Reading your computers…</p></div>;
-  else if (!usable) main = <div className="dk-empty computers-empty"><UiIcon name="screen" size={28}/><b>Use Girru on your other computers</b><p>Sign in to your Dpro account first. Your agents can then send work to your other computers.</p><button type="button" className="primary" onClick={onSettings}>Open Settings › Computers</button></div>;
+  else if (!usable || account?.view?.deviceStatus === 'pending') main = <div className="computers-main"><AddThisComputer client={client} status={account}/></div>;
   else if (!devices.length && isSelf && !needs.length) main = <div className="dk-empty computers-empty"><UiIcon name="screen" size={28}/><b>Your agents can also work on your other computers</b><p>Install Girru there and sign in with the same account.</p><button type="button" className="primary" onClick={() => setAdding(true)}>Add a computer</button></div>;
   else {
     const name = isSelf ? self?.name ?? 'This computer' : device?.name ?? 'Computer';
@@ -91,6 +93,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
         <button type="button" className="tool" title={inspector ? 'Hide details' : 'Show details'} aria-label={inspector ? 'Hide details' : 'Show details'} aria-pressed={inspector} onClick={() => setInspector(v => !v)}><UiIcon name="inspector" size={15}/></button>
       </header>
       {notice && <p role="status" className="fine-print">{notice}</p>}
+      {isSelf && <ComputerJoinRequests client={client} status={account}/>}
       {needs.length > 0 && <section aria-label="Needs you"><p className="section-label">Needs you</p><div className="computer-list" role="list">
         {needs.map(a => row(a, <><ComputerTaskTiming client={client} taskId={a.taskId} onPrepared={onApprovals}/><button type="button" onClick={onApprovals}>Open Approvals</button></>))}
       </div></section>}
@@ -116,8 +119,8 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
     {main}
     {inspectorPane}
     {adding && <Sheet title="Add a computer" onClose={() => setAdding(false)}>
-      <p className="fine-print">Install Girru on the other computer and sign in with the same account. Then allow it here.</p>
-      {view && <ComputerLinkControls client={client} view={view} onNotice={setNotice}/>}
+      <ol className="computer-join-list"><li>Install Girru on the other computer.</li><li>Choose Computers › Continue with Google there, with the same Google account.</li><li>This computer then asks “Add it to your account?” with pictures to compare.</li></ol>
+      {view && <details><summary>Older way, with a code to copy</summary><ComputerLinkControls client={client} view={view} onNotice={setNotice}/></details>}
     </Sheet>}
     {forget && device && <Sheet title={`Forget “${device.name}”?`} onClose={() => setForget(false)} actions={<><button type="button" onClick={() => setForget(false)}>Cancel</button><button type="button" className="danger" onClick={() => void forgetNow()}>Forget this computer</button></>}>
       <p>It can no longer send or take tasks. To use it again, add it again.</p>

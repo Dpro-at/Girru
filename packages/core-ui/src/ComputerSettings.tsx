@@ -2,6 +2,7 @@ import {useState} from 'react';
 import type {SessionClient} from './session';
 import {useComputerOverview, computerStateLabel, computerPathLabel} from './ComputerDevices';
 import {DproAccountPanel} from './DproAccountPanel';
+import {AccountTwoFactor} from './ComputerJoin';
 import {ComputerEnrollment} from './ComputerEnrollment';
 import {ComputerLinkControls, ComputerDirectControls} from './ComputerLinkControls';
 import {ComputerSyncWorkspace} from './ComputerSyncWorkspace';
@@ -30,6 +31,7 @@ export function ComputerSettings({client, pane, onApprovals}: {client: SessionCl
       {notice && <p role="status" className="fine-print">{notice}</p>}
       {pane === 'account' && <>
         <DproAccountPanel client={client}/>
+        <AccountTwoFactor client={client}/>
         <details><summary>Older way to add computers</summary><ComputerEnrollment client={client}/></details>
       </>}
       {pane !== 'account' && !usable && <div className="phone-empty"><UiIcon name="screen" size={24}/><b>Sign in to your Dpro account first</b><p>Then your computers show here. Open Account and safety.</p></div>}

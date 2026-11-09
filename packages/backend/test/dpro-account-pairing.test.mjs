@@ -9,8 +9,9 @@ test('Yes on the first computer adds the second; both computed the same pictures
  let mine,theirs;
  await until(async()=>{const sa=await a.request('status'),sb=await b.request('status');mine=sb.pairing?.self?.code;theirs=sa.pairing?.requests?.[0];return !!mine&&!!theirs?.code;});
  assert.match(mine,/^[a-f0-9]{12}$/);assert.equal(theirs.code,mine,'both computers show the same pictures');
- await assert.rejects(()=>a.request('approve-request',{deviceId:theirs.deviceId,confirmed:false}));
- assert.deepEqual(await a.request('approve-request',{deviceId:theirs.deviceId,confirmed:true}),{approved:true});
+ await assert.rejects(()=>a.request('approve-request',{deviceId:theirs.deviceId,comparisonCode:theirs.code,publicKey:theirs.publicKey,confirmed:false}));
+ await assert.rejects(()=>a.request('approve-request',{deviceId:theirs.deviceId,comparisonCode:'0'.repeat(12),publicKey:theirs.publicKey,confirmed:true}),/comparison_changed/,'Yes counts only for the pictures shown');
+ assert.deepEqual(await a.request('approve-request',{deviceId:theirs.deviceId,comparisonCode:theirs.code,publicKey:theirs.publicKey,confirmed:true}),{approved:true});
  await until(async()=>{const s=await b.request('status');return s.view?.deviceStatus==='approved'&&s.pairing?.self===null;});
 });
 test('the account authenticator code adds a third computer, and the first computer is told',async()=>{
@@ -23,5 +24,8 @@ test('the account authenticator code adds a third computer, and the first comput
  await assert.rejects(()=>c.request('join-with-code',{code:'000000',confirmed:true}));
  assert.deepEqual(await c.request('join-with-code',{code:now(),confirmed:true}),{joined:true});
  assert.equal((await c.request('status')).view.deviceStatus,'approved');
- await until(async()=>((await a.request('status')).pairing?.addedWithCode??[]).some(x=>x.deviceId===(c.lastDeviceId??x.deviceId)));
+ const cid=(await c.request('status')).view.deviceId;let item;await until(async()=>{item=((await a.request('status')).pairing?.addedWithCode??[]).find(x=>x.deviceId===cid);return !!item;});
+ await assert.rejects(()=>a.request('keep-added',{deviceId:cid,publicKey:'x',confirmed:true}),/comparison_changed/);
+ assert.deepEqual(await a.request('keep-added',{deviceId:cid,publicKey:item.publicKey,confirmed:true}),{kept:true},'only Keep pins a computer added with the code');
+ await until(async()=>!((await a.request('status')).pairing?.addedWithCode??[]).some(x=>x.deviceId===cid));
 });
