@@ -1,4 +1,6 @@
 import {DproAccountPanel} from './DproAccountPanel';
+import {JoinStart, JoinReady, quietDiscovery, readSetupEntry, writeSetupEntry, setupRoad} from './ComputerStart';
+import {useAccountStatus} from './ComputerJoin';
 import { DiscoveryStream } from './DiscoveryStream';
 import { SetupOrb } from './SetupOrb';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
@@ -98,6 +100,21 @@ export function FirstRunSetup({ client, initialStep, workspaceType: initialType,
     finally { setSavingType(false); }
   };
   const [signedIn, setSignedIn] = useState(false);
+  // DEVICES-PROJECT-01 (CP1–CP2): “Sign in” on the welcome joins an account that may already have computers.
+  const [chosen, setEntry] = useState(readSetupEntry);
+  const [alone, setAlone] = useState(false);
+  const account = useAccountStatus(client);
+  const entry = alone ? null : chosen ?? setupRoad(account);
+  const [joined, setJoined] = useState<{ from: string; comes: string; name: string } | null>(null);
+  const [joinReady, setJoinReady] = useState(false);
+  const [preparing, setPreparing] = useState(false);
+  const startSame = async () => {
+    setPreparing(true);
+    await quietDiscovery(client);
+    setPreparing(false);
+    await go('tools');
+  };
+  useEffect(() => { if (entry === 'same' && step === 'discovery' && !preparing) void startSame(); }, [entry, step]);
   const terminal = useSetupTerminal(client);
   useEffect(() => { void window.dproApp?.setSetupWindow?.(true).catch(() => {}); }, []);
   // "Skip" on the local model needs a signed-in subscription, also when setup continues at that step.
@@ -108,17 +125,40 @@ export function FirstRunSetup({ client, initialStep, workspaceType: initialType,
     if (response?.status === 200) setStep(s);
     else setStepNotice('Could not save this step. Try again before continuing.');
   };
+  // CP7a: where the system has no key store (Windows today), say once that memory is not encrypted yet.
+  const [plainNote, setPlainNote] = useState<'show' | 'seen' | null>(null);
   const finish = async () => {
+    if (plainNote === null) {
+      const info = await window.dproApp?.info?.().catch(() => null);
+      if (info?.memoryEncrypted === false) { setPlainNote('show'); return; }
+    }
+    await finishAfterNote();
+  };
+  const finishAfterNote = async () => {
     let chatId: string | null = null;
     try { const r = await client.request({ method: 'POST', path: '/api/first-run/finish' } as never); chatId = (r.body as { conversationId?: string } | null)?.conversationId ?? null; } catch { /* the workspace opens anyway */ }
     void window.dproApp?.setSetupWindow?.(false).catch(() => {});
+    writeSetupEntry(null);
     onDone(chatId);
   };
   // Team → Phone stays on this page: the backend does not store the phone step yet, so it is not saved.
   const [teamReady, setTeamReady] = useState(false);
   const appearance = useAppTheme();
+  if (plainNote === 'show') return <div className="shell app-shell first-run-shell" data-theme={appearance.theme} lang="en" dir="ltr"><main className="first-run-setup" aria-label="Set up Girru">
+    <section className="computer-join" aria-label="Memory on this computer"><span className="computer-start-done"><UiIcon name="info" size={26}/></span>
+      <h2>Memory on this computer is not encrypted</h2>
+      <p>This system has no key store Girru can use yet. Your work runs normally; Girru will offer to encrypt when it can.</p>
+      <div className="setup-actions"><button type="button" className="primary" onClick={() => { setPlainNote('seen'); void finishAfterNote(); }}>OK</button></div></section>
+  </main></div>;
   return <div className="shell app-shell first-run-shell" data-theme={appearance.theme} lang="en" dir="ltr"><main className="first-run-setup" aria-label="Set up Girru">
-    {!workspaceType || (workspaceType === 'company' && !companyName) ? <WorkspaceTypeStep value={workspaceType} companyName={companyName} busy={savingType} notice={typeNotice} onNext={(type, name) => void chooseType(type, name)}/> : <>
+    {entry === 'signin' ? <JoinStart client={client} onFresh={() => { writeSetupEntry(null); setEntry(null); setAlone(true); }} onSame={(from, comes, name) => { writeSetupEntry('same'); setJoined({ from, comes, name }); setEntry('same'); }}/>
+    : entry === 'same' ? <>
+      {stepNotice && <p className="setup-note" role="alert">{stepNotice}</p>}
+      {joinReady ? <JoinReady name={joined?.name ?? 'This computer'} from={joined?.from ?? 'your other computer'} comes={joined?.comes ?? ''} onOpen={() => void finish()}/>
+        : step === 'discovery' ? <p role="status" className="setup-note">{preparing ? 'Getting this computer ready…' : 'One moment…'}</p>
+        : <><p className="computer-steps computer-join-steps"><span>1 Added</span><span>2 What comes</span><b>3 AI tools</b><span>4 Open Girru</span></p><ToolsStep client={client} terminal={terminal} onSignedIn={setSignedIn} onNext={() => setJoinReady(true)}/></>}
+    </>
+    : !workspaceType || (workspaceType === 'company' && !companyName) ? <WorkspaceTypeStep value={workspaceType} companyName={companyName} busy={savingType} notice={typeNotice} onNext={(type, name) => void chooseType(type, name)}/> : <>
     {step !== 'discovery' && <SetupOrb/>}
     <SetupSteps current={step === 'discovery' ? 'Your files' : step === 'tools' ? 'AI tools' : step === 'model' ? 'Local model' : step === 'phone' ? 'Phone' : 'Team'}/>
     {stepNotice && <p className="setup-note" role="alert">{stepNotice}</p>}

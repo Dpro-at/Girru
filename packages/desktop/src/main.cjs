@@ -434,7 +434,7 @@ function navigate(destination) {
 }
 ipcMain.handle('dpro:app-info', event => {
   if (!mainWindow || event.sender !== mainWindow.webContents || !appOrigin) return null;
-  return { version: app.getVersion(), connection: loadSettings(settingsDir()).mode };
+  return { version: app.getVersion(), connection: loadSettings(settingsDir()).mode, memoryEncrypted: nativeControlLease ? nativeControlLease.kind === 'new-app-owned-control' : null };
 });
 // MACAPP-01: updates of the installed app (Settings › About and updates). Only the main
 // window's own Girru page may ask; installing backs up first and replaces the app.

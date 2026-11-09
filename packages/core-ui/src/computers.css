@@ -40,3 +40,20 @@
 .computer-join-notice span{display:flex;flex-direction:column}
 .computer-join-notice small{color:var(--muted)}
 .computer-check-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;letter-spacing:.06em}
+/* B2: welcome and “how should this computer start” (boards CP1a, CP2b–CP2d). */
+.setup-welcome{display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;max-width:420px;margin:48px auto}
+.setup-welcome h1{margin:0;font-size:24px}
+.setup-welcome-actions{display:flex;flex-direction:column;gap:8px;width:260px}
+.setup-welcome-actions button{height:36px}
+.computer-start-choices{display:flex;flex-direction:column;gap:8px}
+.computer-start-choice{display:flex;align-items:flex-start;gap:12px;padding:12px;border-radius:10px;text-align:left;background:var(--surface);border:1px solid var(--border);color:inherit;font:inherit;cursor:pointer}
+.computer-start-choice.is-on{border-color:var(--accent,#3B7BF6);background:var(--subtle)}
+.computer-start-choice span{display:flex;flex-direction:column;gap:3px}
+.computer-start-choice small{color:var(--muted)}
+.computer-start-tile{width:32px;height:32px;border-radius:8px;display:grid!important;place-items:center;flex:none;background:var(--subtle);color:var(--accent,#3B7BF6)}
+.computer-start-list{display:flex;flex-direction:column;gap:6px}
+.computer-start-item{display:flex;align-items:center;gap:8px}
+.computer-start-item.muted{color:var(--muted)}
+.computer-start-done{width:56px;height:56px;border-radius:50%;display:grid;place-items:center;background:var(--subtle);color:var(--ap-dot-allow,#3BB273)}
+.computer-join-steps{justify-content:center}
+.computer-start-done.is-warn{color:var(--ap-warn,#C26A00)}

@@ -8,6 +8,7 @@ import {ComputerTaskTiming} from './ComputerTaskTiming';
 import {ComputerLinkControls} from './ComputerLinkControls';
 import {Sheet} from './desktop-ui';
 import {AddThisComputer, ComputerJoinRequests, useAccountStatus} from './ComputerJoin';
+import {ContinuityRequests} from './ComputerStart';
 import {UiIcon} from './ui-icons';
 
 /** Tasks that wait for this computer's owner to allow them. */
@@ -94,6 +95,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
       </header>
       {notice && <p role="status" className="fine-print">{notice}</p>}
       {isSelf && <ComputerJoinRequests client={client} status={account}/>}
+      {isSelf && <ContinuityRequests client={client} status={account}/>}
       {needs.length > 0 && <section aria-label="Needs you"><p className="section-label">Needs you</p><div className="computer-list" role="list">
         {needs.map(a => row(a, <><ComputerTaskTiming client={client} taskId={a.taskId} onPrepared={onApprovals}/><button type="button" onClick={onApprovals}>Open Approvals</button></>))}
       </div></section>}

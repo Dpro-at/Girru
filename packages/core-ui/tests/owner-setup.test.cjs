@@ -90,12 +90,14 @@ test('refusals keep the user signed out with a fixed code; setup_complete moves 
   assert.equal(s.client.getSnapshot().setup, 'login');
 });
 
-test('screen: first run asks individual or company before requesting credentials', async () => {
+test('screen: the welcome asks Create account or Sign in before any credentials (CP1a)', async () => {
   const s = clientFor(createLoginMock(undefined, 'first-run')); s.client.selectMode('mock'); await s.client.discoverSetup();
   const html = render(s.client);
-  assert.match(html, /Who is Girru for/);
-  assert.match(html, /For myself/);
-  assert.match(html, /For a company/);
+  assert.match(html, /Welcome to Girru/);
+  assert.match(html, /Your company of AI agents, on this computer\./);
+  assert.match(html, />Create account</);
+  assert.match(html, />Sign in</);
+  assert.doesNotMatch(html, /Who is Girru for/, 'individual or company is asked in the first run, after Google');
   assert.doesNotMatch(html, /type="password"|owner-email/);
   assert.doesNotMatch(html, /Repeat the password|Check setup again|Setup code received/);
   assert.ok(!html.includes(CODE), 'code not rendered');
