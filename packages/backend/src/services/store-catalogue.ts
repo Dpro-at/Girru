@@ -183,7 +183,7 @@ export async function installFromStore(ownerId:string,id:string,hash:string,opti
   if(consentHash({id,version:x.version,permissions:x.permissions})!==hash)return {ok:false,code:'changed',message:'This app changed since you saw it. Read what it asks for again.'};
   // SA6: never replace a private app that has the same id.
   if((await installedApps())[app]?.source==='private')return {ok:false,code:'refused',message:'You have a private app with the same name. Remove it in My apps first.'};
-  const job:AddJob=startAdd(app,{restart:options.restart});
+  const job:AddJob=startAdd(app,{repo:async()=>repo,restart:options.restart});
   return {ok:true,state:'adding',job:job.id};
  }
  const ext=registryId(id);if(!ext)return refuseOther(id);

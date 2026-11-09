@@ -13,6 +13,8 @@ Read its README and CONTRIBUTING before editing. Generate `index.json` with `nod
 
 Installable apps carry `apps/<id>/package/agentplayer.plugin.json` and the referenced JavaScript entry. The standard extension package validator in `packages/backend/src/services/store-repo.ts` limits packages to 300 files / 5 MiB and specified file types. Separate native-runtime archives and runtime dependencies use different contracts; do not apply the extension-package limit or manifest to those artifacts. App migrations are restricted to creating the app's own namespaced tables/indexes. Verify current rules in that repository and Girru's installer before packaging.
 
+Installers keep the owner-reviewed catalogue snapshot through the download. Package responses are read with manifest-size bounds and redirects refused, then sealed as private verified-file receipts. Only those receipts may write to the private staging directory; public objects or copied receipts cannot authorize file writes. Size and SHA-256 checks are repeated before descriptor-backed exclusive writes. Downloaded package code remains a trust decision, not sanitized user content.
+
 Discovery is not installation, and installation is not an agent tool grant. A listing cannot supply a new native runtime capability. Mark previews truthfully; do not advertise an unimplemented host integration as installable.
 
 For a cross-repository change, document the minimum compatible host/package version, integrity metadata, test evidence and release order. See [ecosystem map](../ecosystem/repositories.md).
