@@ -1,0 +1,27 @@
+/* Computers section (DEVICES-PROJECT-01, board CP3): list, main, inspector. */
+.computers{display:grid;grid-template-columns:minmax(0,1fr) 300px;height:100%;min-height:0}
+.computers[data-inspector="closed"]{grid-template-columns:minmax(0,1fr)}
+.computers[data-inline-sidebar="true"]{grid-template-columns:240px minmax(0,1fr) 300px}
+.computers[data-inline-sidebar="true"][data-inspector="closed"]{grid-template-columns:240px minmax(0,1fr)}
+.computers-label{display:flex;align-items:center;justify-content:space-between}
+.computer-dot{width:8px;height:8px;border-radius:50%;flex:none;box-sizing:border-box}
+.computer-dot.on{background:var(--ap-dot-allow,#3BB273)}
+.computer-dot.off{border:1.5px solid var(--muted,#8A95AA)}
+.computers-main{display:flex;flex-direction:column;gap:14px;padding:22px 26px;min-width:0;overflow:auto}
+.computers-head{display:flex;align-items:center;gap:12px}
+.computers-tile{width:42px;height:42px;border-radius:10px;display:grid;place-items:center;background:var(--subtle,#1C2332);color:var(--accent,#3B7BF6);flex:none}
+.computers-title{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
+.computers-title h2{margin:0;font-size:17px}
+.computers-title small{color:var(--muted)}
+.computer-list{display:flex;flex-direction:column;gap:6px}
+.computer-task{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:10px;background:var(--surface);border:1px solid var(--border)}
+.computer-task-text{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
+.computer-task-text b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.computer-task-text small{color:var(--muted)}
+.computer-task-actions{display:flex;gap:6px;flex:none}
+.computers-inspector{border-left:1px solid var(--border);padding:18px 16px;display:flex;flex-direction:column;gap:14px;overflow:auto}
+.computers-field{display:flex;flex-direction:column;gap:4px}
+.computers-field small{color:var(--muted)}
+.computers-field span{display:flex;align-items:center;gap:8px}
+.computers-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;height:100%}
+@media (max-width:900px){.computers,.computers[data-inline-sidebar="true"]{grid-template-columns:minmax(0,1fr)}.computers-inspector{border-left:0;border-top:1px solid var(--border)}}

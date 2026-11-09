@@ -22,6 +22,7 @@
 @import './visual-fixes.css';
 @import './runs.css';
 @import './phone.css';
+@import './computers.css';
 @import './memory-helper.css';
 :root { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif; font-size: 13px; line-height: 1.5; }
 * { box-sizing: border-box; }

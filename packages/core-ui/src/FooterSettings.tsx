@@ -6,7 +6,7 @@ import {footerFor,footerSections} from './footer-prefs';
 import {useNabuRuntime} from './WorkspaceModes';
 import type {FooterSection} from './footer-prefs';
 
-const ownerOnly:ReadonlyArray<FooterSection>=['library','terminal','code','skills','personalities','specialties'];
+const ownerOnly:ReadonlyArray<FooterSection>=['library','computers','terminal','code','skills','personalities','specialties'];
 
 /** SH3b: Settings › General › Footer. Tick to show, drag to reorder; saves at once. */
 export function FooterSettings({client}:{client:SessionClient}){
