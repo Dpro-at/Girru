@@ -5,7 +5,7 @@
  * “Allow automatically” still goes through the normal approval record, so every run is
  * recorded the same way; a reviewer quorum or verification can still stop it.
  */
-import { getPref, setPref } from '../repositories/user-prefs.js';
+import { getPref, setPrefReviewed } from '../repositories/user-prefs.js';
 
 export type TaskRule = 'ask' | 'auto' | 'refuse';
 export const TASK_RULES: readonly TaskRule[] = ['ask', 'auto', 'refuse'];
@@ -32,19 +32,29 @@ export function taskRulesChangeOk(x: unknown): x is { rule?: TaskRule; project?:
 }
 
 export async function readTaskRules(ownerId: string) { return taskRules(await getPref(ownerId, 'computer-task-rules')); }
-export async function changeTaskRules(ownerId: string, change: unknown): Promise<TaskRules> {
+/** The rules after one change, made whole; refused when making it whole would drop an entry (full lists). */
+export function applyTaskRulesChange(rules: TaskRules, change: unknown): TaskRules {
   if (!taskRulesChangeOk(change)) throw Error('computer_task_rules_invalid');
-  const rules = await readTaskRules(ownerId);
-  if (change.rule) rules.rule = change.rule;
-  if (change.project) { if (change.project.rule) rules.projects[change.project.id] = change.project.rule; else delete rules.projects[change.project.id]; }
+  const next: TaskRules = { rule: rules.rule, projects: { ...rules.projects }, always: rules.always.map(a => ({ ...a })) };
+  if (change.rule) next.rule = change.rule;
+  if (change.project) { if (change.project.rule) next.projects[change.project.id] = change.project.rule; else delete next.projects[change.project.id]; }
   if (change.always) {
     const { source, projectId, on } = change.always;
-    rules.always = rules.always.filter(a => a.source !== source || a.projectId !== projectId);
-    if (on) rules.always.push({ source, projectId });
+    next.always = next.always.filter(a => a.source !== source || a.projectId !== projectId);
+    if (on) next.always.push({ source, projectId });
   }
-  const saved = taskRules(rules);
-  if (change.project?.rule && !(change.project.id in saved.projects) || change.always?.on && saved.always.length >= 200 && !saved.always.some(a => a.source === change.always!.source && a.projectId === change.always!.projectId)) throw Error('computer_task_rules_full');
-  await setPref(ownerId, 'computer-task-rules', saved);
+  const saved = taskRules(next);
+  if (Object.keys(saved.projects).length !== Object.keys(next.projects).length || saved.always.length !== next.always.length) throw Error('computer_task_rules_full');
+  return saved;
+}
+/** Saves one change; with `tighten`, only when no computer and project would be allowed more (checked on the exact value saved). */
+export async function changeTaskRules(ownerId: string, change: unknown, tighten = false): Promise<TaskRules> {
+  // One reviewed write: the value checked is the value saved, and a change in between is refused.
+  const stored = await getPref(ownerId, 'computer-task-rules');
+  const rules = taskRules(stored);
+  const saved = applyTaskRulesChange(rules, change);
+  if (tighten && !isStricter(rules, saved)) throw Error('computer_task_rules_owner_only');
+  await setPrefReviewed(ownerId, 'computer-task-rules', saved, stored ?? null);
   return saved;
 }
 
@@ -59,11 +69,9 @@ export function decideTask(rules: TaskRules, source: string, projectId: string):
 const STRICT: Record<TaskRule, number> = { auto: 0, ask: 1, refuse: 2 };
 /** True when no computer and project would be allowed more after the change (agents may only tighten). */
 export function changeIsStricter(rules: TaskRules, change: unknown): boolean {
-  if (!taskRulesChangeOk(change)) return false;
-  const after = taskRules(JSON.parse(JSON.stringify(rules)));
-  if (change.rule) after.rule = change.rule;
-  if (change.project) { if (change.project.rule) after.projects[change.project.id] = change.project.rule; else delete after.projects[change.project.id]; }
-  if (change.always) { after.always = after.always.filter(a => a.source !== change.always!.source || a.projectId !== change.always!.projectId); if (change.always.on) after.always.push({ source: change.always.source, projectId: change.always.projectId }); }
+  try { return isStricter(rules, applyTaskRulesChange(rules, change)); } catch { return false; }
+}
+function isStricter(rules: TaskRules, after: TaskRules): boolean {
   const projects = new Set([...Object.keys(rules.projects), ...Object.keys(after.projects), ...rules.always.map(a => a.projectId), ...after.always.map(a => a.projectId), '\u0000any']);
   const sources = new Set([...rules.always.map(a => a.source), ...after.always.map(a => a.source), '\u0000any']);
   for (const p of projects) for (const s of sources) if (STRICT[decideTask(after, s, p)] < STRICT[decideTask(rules, s, p)]) return false;

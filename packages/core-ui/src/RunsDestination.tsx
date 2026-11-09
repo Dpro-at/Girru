@@ -1,3 +1,4 @@
+import {ComputerRunsRows} from './ComputerActivity';
 import {ComputerExecutionBadge} from './ComputerDevices';
 import {useCallback,useEffect,useMemo,useRef,useState,useSyncExternalStore} from 'react';
 import type {ReactNode} from 'react';
@@ -49,7 +50,7 @@ const hue=(id:string|null)=>{let h=0;for(const c of id??'girru')h=(h*31+c.charCo
 function Face({id,name,size=20}:{id:string|null;name:string|null;size?:number}){return id?<span className="runs-face" title={name??'Agent'} style={{inlineSize:size,blockSize:size,background:`hsl(${hue(id)} 45% 42%)`,fontSize:Math.round(size*.45)}} aria-hidden="true">{initial(name)}</span>:<span className="runs-face runs-face-girru" title="Girru" aria-hidden="true" style={{inlineSize:size,blockSize:size}}><UiIcon name="gear" size={Math.round(size*.6)}/></span>;}
 function State({state}:{state:RunState}){const s=STATE[state];return <span className="st-state runs-state" data-state={s.tone}><i aria-hidden="true"/>{s.label}</span>;}
 
-export function RunsDestination({client,active,sidebarSlot,request,agents=[],projects=[],models=[],onOpenChat,onOpenCard,onOpenAgent,onOpenApprovals,onOpenConnections}:{client:SessionClient;active:boolean;sidebarSlot?:HTMLElement|null;request?:{place:RunsPlace;n:number}|null;agents?:readonly AgentChoice[];projects?:readonly Project[];models?:readonly ModelOption[];onOpenChat:(id:string)=>void;onOpenCard:(boardId:string,cardId:string)=>void;onOpenAgent:(id:string)=>void;onOpenApprovals:()=>void;onOpenConnections?:()=>void}){
+export function RunsDestination({client,active,sidebarSlot,request,agents=[],projects=[],models=[],onOpenChat,onOpenCard,onOpenAgent,onOpenApprovals,onOpenConnections,onOpenComputers}:{onOpenComputers?:()=>void;client:SessionClient;active:boolean;sidebarSlot?:HTMLElement|null;request?:{place:RunsPlace;n:number}|null;agents?:readonly AgentChoice[];projects?:readonly Project[];models?:readonly ModelOption[];onOpenChat:(id:string)=>void;onOpenCard:(boardId:string,cardId:string)=>void;onOpenAgent:(id:string)=>void;onOpenApprovals:()=>void;onOpenConnections?:()=>void}){
  const session=useSyncExternalStore(client.subscribe,client.getSnapshot,client.getSnapshot);
  const owner=session.phase==='authenticated'&&session.user?.role==='owner';
  const p8=useStoreP8(client);
@@ -146,6 +147,7 @@ export function RunsDestination({client,active,sidebarSlot,request,agents=[],pro
    </header>
    {error&&<p role="alert" className="runs-error">{error}</p>}
    {(filter.agent||filter.project)&&<p className="runs-filter-note">Only {[filter.agent&&seen.agents.get(filter.agent),filter.project&&seen.projects.get(filter.project)].filter(Boolean).join(' · ')} <button type="button" className="link" onClick={()=>setFilter({})}>Show all</button></p>}
+   {(place==='running'||place==='waiting')&&<ComputerRunsRows waiting={place==='waiting'} onOpen={()=>onOpenComputers?.()}/>}
    <div className="runs-list" ref={list} role="listbox" aria-label={placeLabel}>
     {scheduled?(schedules===null?(!error&&<p role="status" className="fine-print">Loading schedules…</p>):!shownSchedules.length?<Empty place={place} searching={!!debounced||showPaused!=='all'} onClear={()=>{setQuery('');setShowPaused('all');}} onNew={owner?()=>setNewSchedule(true):undefined}/>:
      shownSchedules.map(s=><button key={s.id} type="button" role="option" aria-selected={selected===s.id} aria-current={selected===s.id?'true':undefined} className="runs-row runs-row-two" onClick={()=>setSelected(s.id)}>

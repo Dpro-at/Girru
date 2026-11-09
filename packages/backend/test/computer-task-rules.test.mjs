@@ -48,3 +48,11 @@ test('review fixes: Don’t accept for all wins over always-allow; agents may on
   assert.equal(changeIsStricter(ask, {always: {source: 'pc', projectId: 'p3', on: true}}), false);
   assert.equal(changeIsStricter(taskRules({rule: 'auto', projects: {p: 'ask'}, always: []}), {project: {id: 'p', rule: null}}), false);
 });
+
+test('the checked value is the saved value: a change that would be cut off is refused', async () => {
+  const {applyTaskRulesChange} = await import('../src/devices/task-rules.ts');
+  const full = taskRules({rule: 'ask', projects: Object.fromEntries(Array.from({length: 500}, (_, i) => ['p' + i, 'refuse'])), always: []});
+  assert.equal(Object.keys(full.projects).length, 500);
+  assert.throws(() => applyTaskRulesChange(full, {project: {id: 'new', rule: 'refuse'}}), /computer_task_rules_full/);
+  assert.equal(applyTaskRulesChange(full, {project: {id: 'p1', rule: null}}).projects.p1, undefined);
+});
