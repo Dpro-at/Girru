@@ -7,7 +7,7 @@ import type {UiIconName} from './ui-icons';
 
 /** Adding a computer (DEVICES-PROJECT-01 B2, boards CP1, CP2, CP7, CP9c): plain words, pictures instead of codes. */
 const root = '/api/computers/account';
-type Status = {connected?: boolean; googleLinked?: boolean; view?: {deviceStatus?: string; devices?: {id: string; label: string; status: string}[]} | null; pairing?: {self: {waiting: boolean; approver: string | null; code: string | null} | null; requests: {deviceId: string; label: string; osFamily: string; code: string | null; publicKey?: string; elsewhere: boolean}[]; addedWithCode: {deviceId: string; label: string; publicKey: string}[]} | null};
+type Status = {desktopAvailable?: boolean; connected?: boolean; googleLinked?: boolean; view?: {deviceStatus?: string; devices?: {id: string; label: string; status: string}[]} | null; pairing?: {self: {waiting: boolean; approver: string | null; code: string | null} | null; requests: {deviceId: string; label: string; osFamily: string; code: string | null; publicKey?: string; elsewhere: boolean}[]; addedWithCode: {deviceId: string; label: string; publicKey: string}[]} | null};
 
 /** Plain words for the account service's answers (one name per thing; never a code on screen). */
 export function computerAccountWords(code: string) {
@@ -25,6 +25,8 @@ export function computerAccountWords(code: string) {
     account_device_unavailable: 'That request has ended.',
     account_pairing_taken: 'Another of your computers is already answering this request.',
     account_device_pending: 'This computer is still waiting to be added.',
+    account_desktop_required: 'Open the Girru app on this computer to add it. A browser window can’t keep the computer’s key safe.',
+    account_local_desktop_required: 'Open the Girru app on this computer to add it.',
   };
   return words[code] ?? 'That did not work. Try again in a moment.';
 }
@@ -35,7 +37,8 @@ async function call(client: SessionClient, path: string, body?: unknown) {
 }
 /** The Dpro account status, read every few seconds while shown. */
 export function useAccountStatus(client: SessionClient, enabled = true) {
-  const [status, setStatus] = useState<Status | null>(null);
+  // undefined while reading; null when this window cannot reach the account (a browser, or no desktop app).
+  const [status, setStatus] = useState<Status | null | undefined>(undefined);
   useEffect(() => { if (!enabled) return; let live = true; const load = async () => { try { const s = await call(client, root); if (live) setStatus(s); } catch { if (live) setStatus(null); } }; void load(); const t = setInterval(() => void load(), 3000); return () => { live = false; clearInterval(t); }; }, [client, enabled]);
   return status;
 }
@@ -56,7 +59,7 @@ export function ComputerPictures({code}: {code: string}) {
 }
 
 /** On a new computer (CP1b–CP1c): sign in, then wait for a Yes on another computer — or use the account's authenticator code. */
-export function AddThisComputer({client, status}: {client: SessionClient; status: Status | null}) {
+export function AddThisComputer({client, status}: {client: SessionClient; status: Status | null | undefined}) {
   const [name, setName] = useState('');
   const [flow, setFlow] = useState<{flowId: string; clientNonce: string; ready?: boolean} | null>(null);
   const [verify, setVerify] = useState<{challenge: string; nonce: string} | null>(null);
@@ -91,7 +94,8 @@ export function AddThisComputer({client, status}: {client: SessionClient; status
     <p>Sign in with the same Google account you use for Girru on your other computer.</p>
     <label className="phone-field"><span>Give this computer a name</span><input value={name} maxLength={64} placeholder="Office PC" onChange={e => setName(e.target.value)}/></label>
     {verify ? <div className="computer-join-code"><label className="phone-field"><span>Code from your authenticator app</span><input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))}/></label><button type="button" className="primary" disabled={busy || code.length !== 6} onClick={() => void finish(current.current, {...verify, code: code.trim()})}>Continue</button></div>
-      : <button type="button" className="primary" disabled={busy || !!flow} onClick={() => void start()}>{flow ? 'Waiting for Google…' : 'Continue with Google'}</button>}
+      : <button type="button" className="primary" disabled={busy || !!flow || status === null || status?.desktopAvailable === false} onClick={() => void start()}>{flow ? 'Waiting for Google…' : 'Continue with Google'}</button>}
+    {(status === null || status?.desktopAvailable === false) && <p role="status">Open the Girru app on this computer to add it. A browser window can’t keep the computer’s key safe.</p>}
     {flow && <button type="button" className="link-button" onClick={() => { void call(client, root + '/flow/cancel', {flowId: flow.flowId, clientNonce: flow.clientNonce}).catch(() => {}); setFlow(null); }}>Cancel</button>}
     {notice && <p role="status">{notice}</p>}
     <p className="fine-print">Your browser opens for Google. Your chats, files and agents are never sent to Dpro.</p>
@@ -99,7 +103,7 @@ export function AddThisComputer({client, status}: {client: SessionClient; status
 }
 
 /** On a computer you already use (CP2a): Yes / No for a new computer, with the same pictures it shows. */
-export function ComputerJoinRequests({client, status}: {client: SessionClient; status: Status | null}) {
+export function ComputerJoinRequests({client, status}: {client: SessionClient; status: Status | null | undefined}) {
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState('');
   const reqs = status?.pairing?.requests ?? [], added = status?.pairing?.addedWithCode ?? [];
