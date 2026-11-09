@@ -34,3 +34,17 @@ test('computer pictures and names: known pictures, short plain names (CP9c)', ()
   assert.equal(computerLookChangeOk({deviceId: 'a'}), false);
   assert.equal(computerLookChangeOk({deviceId: 'a/b', icon: 'linux'}), false);
 });
+
+test('review fixes: Don’t accept for all wins over always-allow; agents may only tighten', async () => {
+  const {changeIsStricter} = await import('../src/devices/task-rules.ts');
+  const r = taskRules({rule: 'refuse', projects: {}, always: [{source: 'mac', projectId: 'p'}]});
+  assert.equal(decideTask(r, 'mac', 'p'), 'refuse');
+  const ask = taskRules({rule: 'ask', projects: {p1: 'refuse'}, always: [{source: 'mac', projectId: 'p2'}]});
+  assert.equal(changeIsStricter(ask, {rule: 'refuse'}), true);
+  assert.equal(changeIsStricter(ask, {rule: 'auto'}), false);
+  assert.equal(changeIsStricter(ask, {project: {id: 'p1', rule: null}}), false, 'removing a Don’t accept exception loosens it');
+  assert.equal(changeIsStricter(ask, {project: {id: 'p1', rule: 'ask'}}), false);
+  assert.equal(changeIsStricter(ask, {always: {source: 'mac', projectId: 'p2', on: false}}), true);
+  assert.equal(changeIsStricter(ask, {always: {source: 'pc', projectId: 'p3', on: true}}), false);
+  assert.equal(changeIsStricter(taskRules({rule: 'auto', projects: {p: 'ask'}, always: []}), {project: {id: 'p', rule: null}}), false);
+});

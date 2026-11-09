@@ -50,8 +50,22 @@ export async function changeTaskRules(ownerId: string, change: unknown): Promise
 
 /** What to do with a task from `source` for `projectId`: “always allow” first, then the project's exception, then the rule for all. */
 export function decideTask(rules: TaskRules, source: string, projectId: string): TaskRule {
-  const project = rules.projects[projectId];
-  if (project === 'refuse') return 'refuse';
+  // “Don't accept” wins: on the project, or for all projects when the project has no exception of its own.
+  const base = rules.projects[projectId] ?? rules.rule;
+  if (base === 'refuse') return 'refuse';
   if (rules.always.some(a => a.source === source && a.projectId === projectId)) return 'auto';
-  return project ?? rules.rule;
+  return base;
+}
+const STRICT: Record<TaskRule, number> = { auto: 0, ask: 1, refuse: 2 };
+/** True when no computer and project would be allowed more after the change (agents may only tighten). */
+export function changeIsStricter(rules: TaskRules, change: unknown): boolean {
+  if (!taskRulesChangeOk(change)) return false;
+  const after = taskRules(JSON.parse(JSON.stringify(rules)));
+  if (change.rule) after.rule = change.rule;
+  if (change.project) { if (change.project.rule) after.projects[change.project.id] = change.project.rule; else delete after.projects[change.project.id]; }
+  if (change.always) { after.always = after.always.filter(a => a.source !== change.always!.source || a.projectId !== change.always!.projectId); if (change.always.on) after.always.push({ source: change.always.source, projectId: change.always.projectId }); }
+  const projects = new Set([...Object.keys(rules.projects), ...Object.keys(after.projects), ...rules.always.map(a => a.projectId), ...after.always.map(a => a.projectId), '\u0000any']);
+  const sources = new Set([...rules.always.map(a => a.source), ...after.always.map(a => a.source), '\u0000any']);
+  for (const p of projects) for (const s of sources) if (STRICT[decideTask(after, s, p)] < STRICT[decideTask(rules, s, p)]) return false;
+  return true;
 }

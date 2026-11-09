@@ -8,6 +8,7 @@ import {ComputerEnrollment} from './ComputerEnrollment';
 import {ComputerLinkControls, ComputerDirectControls} from './ComputerLinkControls';
 import {ComputerSyncWorkspace} from './ComputerSyncWorkspace';
 import {ComputerTaskRules} from './ComputerTaskRules';
+import {ComputerShare} from './ComputerShare';
 import {UiIcon} from './ui-icons';
 import type {UiIconName} from './ui-icons';
 
@@ -36,8 +37,9 @@ export function ComputerSettings({client, pane, onApprovals}: {client: SessionCl
       <header className="phone-head"><div><h2 className="settings-page-title">{place.label}</h2><p className="settings-page-desc">{place.note}</p></div></header>
       {notice && <p role="status" className="fine-print">{notice}</p>}
       {pane === 'account' && <>
-        <DproAccountPanel client={client}/>
+        <AccountSafety client={client}/>
         <AccountTwoFactor client={client}/>
+        <DproAccountPanel client={client}/>
         <details><summary>Older way to add computers</summary><ComputerEnrollment client={client}/></details>
       </>}
       {pane !== 'account' && !usable && <div className="phone-empty"><UiIcon name="screen" size={24}/><b>Sign in to your Dpro account first</b><p>Then your computers show here. Open Account and safety.</p></div>}
@@ -51,10 +53,32 @@ export function ComputerSettings({client, pane, onApprovals}: {client: SessionCl
         <p className="fine-print">To forget a computer, select it in Computers and choose More › Forget this computer.</p>
       </>}
       {pane === 'tasks' && usable && view && <ComputerTaskRules client={client} deviceNames={Object.fromEntries(devices.map(d => [d.id, computerName(look, d.id, d.name)]))}/>}
-      {pane === 'share' && usable && view && <ComputerSyncWorkspace client={client} devices={view.devices} onApprovals={onApprovals}/>}
-      {pane === 'connection' && usable && view && (devices.length
-        ? devices.map(d => <section key={d.id} className="computer-connection" aria-label={d.name}><p className="section-label"><UiIcon name="screen" size={13}/> {d.name} · {computerPathLabel(d.path)}</p><ComputerDirectControls client={client} view={view} device={d} onNotice={setNotice}/></section>)
-        : <p className="fine-print">Add a computer first; then you can let it use the same Wi‑Fi.</p>)}
+      {pane === 'share' && usable && view && <>
+        <ComputerShare client={client}/>
+        <details><summary>Share one item with one computer…</summary><ComputerSyncWorkspace client={client} devices={view.devices} onApprovals={onApprovals}/></details>
+      </>}
+      {pane === 'connection' && usable && view && (devices.length ? <>
+        <div className="phone-list" role="list">{devices.map(d => <div key={d.id} className="phone-row" role="listitem"><span className="phone-tile"><UiIcon name={d.path === 'direct' ? 'wifi' : 'globe'} size={15}/></span><span className="phone-row-text"><b>{d.name}</b><small>{computerPathLabel(d.path)}</small></span></div>)}</div>
+        <p className="fine-print">Over the internet, your computers talk end-to-end encrypted; our server only passes the messages on. On the same Wi‑Fi they can talk directly once you allow it.</p>
+        <details><summary>Advanced… same Wi‑Fi, network and port</summary>{devices.map(d => <section key={d.id} className="computer-connection" aria-label={d.name}><p className="section-label"><UiIcon name="screen" size={13}/> {d.name}</p><ComputerDirectControls client={client} view={view} device={d} onNotice={setNotice}/></section>)}</details>
+      </> : <p className="fine-print">Add a computer first; then you can let it use the same Wi‑Fi.</p>)}
     </div>
+  </div>;
+}
+
+/** CP6d Account and safety: who is signed in and the everyday actions; recovery, history and deleting the account stay under Account and workspaces…. */
+function AccountSafety({client}: {client: SessionClient}) {
+  const status = useAccountStatus(client);
+  const [notice, setNotice] = useState('');
+  const [confirm, setConfirm] = useState(false);
+  if (!status?.connected) return <p className="fine-print">{status === null ? 'Your Dpro account can’t be reached right now.' : 'Not signed in to your Dpro account on this computer. Open Computers to add it.'}</p>;
+  const self = status.view?.devices?.find(d => d.id === status.view?.deviceId);
+  return <div className="phone-list" role="list">
+    <div className="phone-row" role="listitem"><span className="phone-tile"><UiIcon name="shield" size={15}/></span><span className="phone-row-text"><b>Signed in on {self?.label ?? 'this computer'}</b><small>{status.view?.deviceStatus === 'approved' ? 'Added to your account' : 'Waiting for a Yes on another computer'}</small></span>
+      {!confirm ? <button type="button" onClick={() => setConfirm(true)}>Sign out this computer</button>
+        : <span className="computer-task-actions"><button type="button" onClick={() => setConfirm(false)}>Cancel</button><button type="button" className="danger" onClick={() => void client.request({method: 'POST', path: '/api/computers/account/signout', body: {}}).then(r => setNotice(r.status === 200 ? 'Signed out. Your work stays on this computer.' : 'It could not sign out.')).finally(() => setConfirm(false))}>Sign out</button></span>}
+    </div>
+    <p className="fine-print">A lost or stolen computer: select it in Computers and choose Forget this computer. Recovery, history and deleting your Dpro account are under Account and workspaces….</p>
+    {notice && <p role="status" className="fine-print">{notice}</p>}
   </div>;
 }

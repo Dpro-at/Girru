@@ -76,3 +76,7 @@
 .computer-later button{display:inline-flex;align-items:center;gap:6px}
 .computer-later button.is-on{border-color:var(--accent,#3B7BF6)}
 .computer-send-later{margin-right:auto}
+.computer-switch{width:34px;height:20px;border-radius:10px;border:0;padding:2px;background:var(--border,#2A2F38);cursor:pointer;flex:none;display:flex}
+.computer-switch i{width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s}
+.computer-switch.is-on{background:var(--accent,#3B7BF6)}
+.computer-switch.is-on i{transform:translateX(14px)}
