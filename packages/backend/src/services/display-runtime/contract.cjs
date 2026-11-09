@@ -10,7 +10,12 @@ Object.defineProperty(exports, "COMPONENT_TYPES", { enumerable: true, get: funct
 exports.DISPLAY_SCHEMA_VERSION = 1;
 exports.DISPLAY_LIMITS = Object.freeze({ bytes: 128000, elements: 200, depth: 8, visits: 1000, children: 60, operations: 1000, array: 500, string: 8000 });
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
-const forbidden = (k) => ['__proto__', 'prototype', 'constructor'].includes(k);
+const forbidden = (k) => k === '__proto__' || k === 'prototype' || k === 'constructor';
+function defineData(target, key, value) {
+    if (key === '__proto__' || key === 'prototype' || key === 'constructor')
+        fail('display_key_invalid');
+    Object.defineProperty(target, key, { value, writable: true, enumerable: true, configurable: true });
+}
 const object = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && [Object.prototype, null].includes(Object.getPrototypeOf(v));
 const id = (v) => typeof v === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(v) && !forbidden(v);
 function fail(reason) { throw Error(reason); }
@@ -29,25 +34,55 @@ function safeValue(v, depth = 0) {
             fail('display_number_invalid');
         return;
     }
+    if (v && typeof v === 'object' && !own(v, 'toJSON') && 'toJSON' in v)
+        fail('display_json_required');
     if (Array.isArray(v)) {
         if (v.length > exports.DISPLAY_LIMITS.array)
             fail('display_array_limit');
-        for (const item of v)
-            safeValue(item, depth + 1);
+        for (const key of Reflect.ownKeys(v)) {
+            if (key === 'length')
+                continue;
+            if (typeof key !== 'string' || forbidden(key) || !/^(0|[1-9][0-9]*)$/.test(key))
+                fail('display_key_invalid');
+            const descriptor = Object.getOwnPropertyDescriptor(v, key);
+            if (!descriptor?.enumerable || !own(descriptor, 'value'))
+                fail('display_json_required');
+        }
+        for (let i = 0; i < v.length; i++) {
+            const descriptor = Object.getOwnPropertyDescriptor(v, String(i));
+            if (!descriptor?.enumerable || !own(descriptor, 'value'))
+                fail('display_json_required');
+            safeValue(descriptor.value, depth + 1);
+        }
         return;
     }
     if (!object(v))
         fail('display_json_required');
-    const keys = Object.keys(v);
+    const keys = Reflect.ownKeys(v);
     if (keys.length > 200)
         fail('display_object_limit');
     for (const key of keys) {
-        if (forbidden(key) || key.length > 100)
+        if (typeof key !== 'string' || forbidden(key) || key.length > 100)
             fail('display_key_invalid');
-        safeValue(v[key], depth + 1);
+        const descriptor = Object.getOwnPropertyDescriptor(v, key);
+        if (!descriptor?.enumerable || !own(descriptor, 'value'))
+            fail('display_json_required');
+        safeValue(descriptor.value, depth + 1);
     }
 }
-const clone = (v) => JSON.parse(JSON.stringify(v));
+function clone(v) {
+    safeValue(v);
+    if (Array.isArray(v))
+        return v.map(clone);
+    if (!object(v))
+        return v;
+    const result = Object.create(null);
+    for (const key of Object.keys(v)) {
+        const descriptor = Object.getOwnPropertyDescriptor(v, key);
+        defineData(result, key, clone(descriptor.value));
+    }
+    return result;
+}
 function pointer(path) {
     if (typeof path !== 'string' || path.length > 1000 || !path.startsWith('/'))
         fail('display_patch_path');
@@ -62,6 +97,8 @@ function readAt(root, parts) { let value = root; for (const key of parts) {
     value = value[key];
 } return value; }
 function writeAt(root, parts, value, mode) {
+    if (!parts.length || parts.some(forbidden))
+        fail('display_patch_path');
     const key = parts.at(-1);
     let parent = root;
     for (const part of parts.slice(0, -1)) {
@@ -84,7 +121,7 @@ function writeAt(root, parts, value, mode) {
         else if (mode === 'remove')
             parent.splice(i, 1);
         else
-            parent[i] = value;
+            parent.splice(i, 1, value);
         return;
     }
     if (!object(parent))
@@ -94,12 +131,13 @@ function writeAt(root, parts, value, mode) {
     if (mode === 'remove')
         delete parent[key];
     else
-        parent[key] = value;
+        defineData(parent, key, value);
 }
 function dataBudget(value) { safeValue(value); if (new TextEncoder().encode(JSON.stringify(value)).length > exports.DISPLAY_LIMITS.bytes)
     fail('display_byte_limit'); }
 function fromPatches(text) {
-    const root = { elements: {} };
+    const root = Object.create(null);
+    defineData(root, 'elements', Object.create(null));
     let count = 0;
     for (const line of text.split('\n')) {
         if (!line.trim())
@@ -180,7 +218,7 @@ function normalizeDisplay(input) {
             }
             else
                 warnings.push('Unsupported component: ' + value.type);
-            elements[key] = { type: value.type, props: clone(props), children: [...children] };
+            defineData(elements, key, { type: value.type, props: clone(props), children: [...children] });
         }
         if (!own(elements, raw.root))
             fail('display_root_missing');

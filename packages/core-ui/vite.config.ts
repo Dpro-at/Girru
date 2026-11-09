@@ -1,5 +1,7 @@
+import {reactResolve} from './scripts/react-runtime.cjs';
 export default {
   base: '/',
+  resolve: reactResolve(),
   envDir: false,
   publicDir: false,
   css: { postcss: { plugins: [] } },

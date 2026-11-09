@@ -4,6 +4,7 @@
 // which adding it again brings back. An app may only make tables named after itself.
 // No network: the Girru Store is a fake. Run: node --import tsx --test test/store-install.test.mjs
 import test from 'node:test';
+import {fileURLToPath} from 'node:url';
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -11,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 
-const backendDir = process.cwd();
+const backendDir = fileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-store-install-'));
 const data = join(dir, '.data');
 mkdirSync(join(data, 'multi-agent'), { recursive: true });
@@ -190,14 +191,24 @@ test('SQL execution uses the checked in-memory bytes even if the installed file 
 
 
 test('incoming package writes are exclusive and cannot replace a planted symlink', async t=>{
- const original=fs.writeFileSync,previous=served,outside=join(dir,'unrelated-marker.txt');let planted=false,unavailable=false;
- original(outside,'keep synthetic marker');
+ const original=fs.openSync,previous=served,outside=join(dir,'unrelated-marker.txt');let planted=false,unavailable=false;
+ fs.writeFileSync(outside,'keep synthetic marker');
  try{
   served=pkgFiles();index=indexFor(served);forget();
-  fs.writeFileSync=(target,bytes,options)=>{
+  fs.openSync=(target,flags,mode)=>{
    if(!planted&&String(target).includes('.incoming-notes-')&&String(target).endsWith(join('index.js'))){try{fs.symlinkSync(outside,target);planted=true;}catch(error){if(process.platform==='win32'&&['EPERM','EACCES','ENOTSUP'].includes(error.code))unavailable=true;throw error;}}
-   return original(target,bytes,options);
+   return original(target,flags,mode);
   };
   const result=await new Promise(done=>startAdd('notes',{restart:()=>false,onDone:done}));if(unavailable){t.skip('Windows symlink creation privilege unavailable; planted-symlink case not exercised');return;}assert.equal(planted,true);assert.equal(result.ok,false);assert.equal(readFileSync(outside,'utf8'),'keep synthetic marker');
- }finally{fs.writeFileSync=original;served=previous;index=indexFor(served);forget();}
+ }finally{fs.openSync=original;served=previous;index=indexFor(served);forget();}
+});
+
+
+test('owner-approved package snapshot is used without a second catalogue request',async()=>{
+ const previous=globalThis.fetch;served=pkgFiles();index=indexFor(served);
+ const shown=(await store()).items.find(item=>item.id==='store:notes');
+ const {readStoreRepo}=await import(join(backendDir,'src/services/store-repo.ts'));const reviewed=await readStoreRepo();forget();let indexRequests=0;
+ globalThis.fetch=async(url,...args)=>{if(String(url)==='https://store.test/index.json'){indexRequests++;throw Error('unexpected second catalogue request');}return previous(url,...args);};
+ try{const result=await installFromStore('owner-1','store:notes',shown.hash,{repo:async()=>reviewed,restart:()=>false});assert.equal(result.ok,true);for(let n=0;n<200&&!addJob(result.job).done;n++)await new Promise(resolve=>setTimeout(resolve,10));assert.equal(addJob(result.job).ok,true,addJob(result.job).message);assert.equal(indexRequests,0);}
+ finally{globalThis.fetch=previous;}
 });

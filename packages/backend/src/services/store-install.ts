@@ -16,6 +16,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { installedAppsRoot, installedAppDir } from '../config/backend-root.js';
 import { readStoreRepo, storeBase, type StorePackage, type RepoRead } from './store-repo.js';
 import type {RuntimeFetch} from './code-runtime.js';
+import {captureReviewedStorePackage, downloadReviewedStoreFile, verifiedStoreFileBytes, writeVerifiedStoreFile, type VerifiedStoreFile, type PackageFetch} from './store-package-files.js';
 import { workspaceBackupsDir } from './backups.js';
 
 export type AddStep = 'getting' | 'checking' | 'setting-up' | 'adding';
@@ -25,7 +26,7 @@ const ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/; // no "--", no trailing "-": table pref
 const KEY = (id: string) => `store.installed.${id}`;
 const prefixOf = (id: string) => `app_${id.replace(/-/g, '_')}__`;
 const sha = (b: Buffer | string) => createHash('sha256').update(b).digest('hex');
-export type Fetch = (url: string, init: { signal: AbortSignal; headers: Record<string, string> }) => Promise<{ ok: boolean; status: number; arrayBuffer(): Promise<ArrayBuffer> }>;
+export type Fetch = PackageFetch;
 
 async function sql() {
   const { getDatabase } = await import('../db/index.js');
@@ -115,21 +116,21 @@ async function add(job: AddJob, { fetch: get = globalThis.fetch as unknown as Fe
   const id = job.app;
   if (!ID.test(id)) throw new Error('unknown app');
   const repo = await read();
-  const pkg: StorePackage | undefined = repo.packages?.[`girru:${id}`];
-  const item = repo.index?.items.find((x) => x.id === `girru:${id}`);
-  if (!item || !pkg) throw new Error('it is not in the Girru Store any more');
+  const listedPackage: StorePackage | undefined = repo.packages?.[`girru:${id}`];
+  const listedItem = repo.index?.items.find((x) => x.id === `girru:${id}`);
+  const item = listedItem ? Object.freeze({...listedItem}) : undefined;
+  if (!item || !listedPackage) throw new Error('it is not in the Girru Store any more');
+  const pkg = captureReviewedStorePackage(listedPackage);
   if ((await installedApps())[id]?.source === 'private') throw new Error('you have a private app with the same name; remove it in My apps first');
   // 1. The reviewed file list must match its checksum and name only plain relative paths before anything is fetched.
   if (sha(JSON.stringify(pkg.files)) !== pkg.sha256) throw new Error('the package list does not match its checksum');
   if (!pkg.files.every((f) => SAFE_PATH.test(f.path) && !f.path.split('/').some((part) => part === '.' || part === '..'))) throw new Error('a file path leaves the app folder');
   // 2. Get every file, checked in memory against the reviewed size and sha256 before anything is written.
-  const files: Array<{ path: string; bytes: Buffer }> = [];
-  for (const f of pkg.files) {
-    const res = await get(`${storeBase()}/apps/${id}/package/${f.path}`, { signal: AbortSignal.timeout(20_000), headers: { 'User-Agent': 'Girru' } });
-    if (!res.ok) throw new Error(`the Girru Store answered ${res.status}`);
-    const bytes = Buffer.from(await res.arrayBuffer());
-    if (bytes.length !== f.size || sha(bytes) !== f.sha256) throw new Error('a file is not what the Girru Store reviewed; try again later');
-    files.push({ path: f.path, bytes });
+  const files: Array<{ path: string; bytes: Buffer; verified: VerifiedStoreFile }> = [];
+  const base = storeBase();
+  for (const file of pkg.files) {
+    const verified = await downloadReviewedStoreFile(file, `${base}/apps/${id}/package/${file.path}`, get);
+    files.push({path: verified.path, bytes: verifiedStoreFileBytes(verified), verified});
   }
   // 3. Check that it is this app.
   job.step = 'checking';
@@ -146,12 +147,7 @@ async function add(job: AddJob, { fetch: get = globalThis.fetch as unknown as Fe
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });
   const incoming = fs.mkdtempSync(path.join(root, `.incoming-${id}-`));
   try {
-    for (const f of files) {
-      const target = path.join(incoming, ...f.path.split('/'));
-      if (!target.startsWith(incoming + path.sep)) throw new Error('a file path leaves the app folder');
-      fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
-      fs.writeFileSync(target, f.bytes, { mode: 0o600, flag: 'wx' });
-    }
+    for (const file of files) writeVerifiedStoreFile(incoming, file.verified);
     if(['agent-connect','call-center','trading','browser'].includes(id)){
       const descriptor=files.find(f=>f.path===(id==='agent-connect'?'runtime-packages.npm':'app-host.npm'));
       if(!descriptor)throw Error('The app has no reviewed host descriptor.');
