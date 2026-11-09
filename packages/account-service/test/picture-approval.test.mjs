@@ -11,44 +11,56 @@ async function login(p,subject='123456789',extra={}){const publicKey=publicKeyTe
 function request(p,op,payload={}){const {challenge}=service.requestChallenge(p.session.accessToken,{publicKey:publicKeyText(p.key.publicKey),operation:op,bodyHash:C.digest(C.canonical(payload))});return service.execute(p.session.accessToken,op,{challenge,command:command(p,challenge,op,payload),payload});}
 function rotate(p,token=p.session.refreshToken){const payload={refreshToken:token,publicKey:publicKeyText(p.key.publicKey)},challenge=service.refreshChallenge(payload).challenge;return service.refresh({challenge,command:command(p,challenge,'session.refresh',payload),...payload});}
 const {deviceComparisonCode}=await import('../../backend/src/accounts/protocol.ts');
-// B2: a new computer is added after a Yes on an approved computer that compared the same pictures; no codes are carried.
-const own=(p,enrollment,accountId,deviceId)=>deviceComparisonCode(accountId,deviceId,publicKeyText(p.key.publicKey),enrollment.comparisonNonce);
-test('picture approval: the new computer and the approving one compute the same code from what each sees',async()=>{
- const owner=peer(),fresh=peer(),stranger=peer();
- const o=await login(owner,'555000111');const f=await login(fresh,'555000111');await login(stranger,'777000111');
- assert.equal(o.view.deviceStatus,'approved');assert.equal(f.view.deviceStatus,'pending');
- const mine=request(fresh,'device.enrollment');assert.equal(mine.status,'pending');assert.match(mine.comparisonNonce,/^[A-Za-z0-9_-]{43}$/);assert.equal(mine.approvedBy,null);
- assert.throws(()=>request(fresh,'device.requests'),/pending/,'a pending computer cannot list requests');
- const {requests}=request(owner,'device.requests');assert.equal(requests.length,1);const r=requests[0];
- assert.equal(r.deviceId,f.view.deviceId);assert.equal(r.publicKey,publicKeyText(fresh.key.publicKey));assert.equal(r.comparisonNonce,mine.comparisonNonce);
- assert.equal(request(stranger,'device.requests').requests.length,0,'another account never sees it');
- const newSide=own(fresh,mine,f.view.id,f.view.deviceId),oldSide=deviceComparisonCode(o.view.id,r.deviceId,r.publicKey,r.comparisonNonce);
- assert.equal(newSide,oldSide);assert.match(newSide,/^[a-f0-9]{12}$/);
- assert.throws(()=>request(owner,'device.approve.v2',{deviceId:r.deviceId,publicKey:r.publicKey,comparisonCode:'000000000000',confirmed:true}),/changed/,'different pictures are refused');
- assert.throws(()=>request(owner,'device.approve.v2',{deviceId:r.deviceId,publicKey:publicKeyText(stranger.key.publicKey),comparisonCode:oldSide,confirmed:true}),/changed/,'a swapped key is refused');
- assert.throws(()=>request(owner,'device.approve.v2',{deviceId:r.deviceId,publicKey:r.publicKey,comparisonCode:oldSide,confirmed:false}),/comparison_required/);
- assert.throws(()=>request(stranger,'device.approve.v2',{deviceId:r.deviceId,publicKey:r.publicKey,comparisonCode:oldSide,confirmed:true}),/changed/,'another account cannot approve it');
- assert.throws(()=>request(fresh,'device.approve.v2',{deviceId:r.deviceId,publicKey:r.publicKey,comparisonCode:oldSide,confirmed:true}),/pending/,'it cannot approve itself');
- const view=request(owner,'device.approve.v2',{deviceId:r.deviceId,publicKey:r.publicKey,comparisonCode:oldSide,confirmed:true});
- assert.equal(view.devices.find(d=>d.id===r.deviceId).status,'approved');
- const after=request(fresh,'device.enrollment');assert.equal(after.status,'approved');assert.equal(after.comparisonNonce,null);assert.deepEqual(after.approvedBy,{deviceId:o.view.deviceId,publicKey:publicKeyText(owner.key.publicKey),label:'Temporary computer'});
- assert.equal(request(owner,'device.requests').requests.length,0);
- assert.throws(()=>request(owner,'device.approve.v2',{deviceId:r.deviceId,publicKey:r.publicKey,comparisonCode:oldSide,confirmed:true}),/changed/,'approving twice is refused');
+const {randomBytes}=await import('node:crypto');
+// B2: commit-then-reveal. The new computer commits to a secret, the approving computer adds its own random value, then the secret is revealed; both screens show the same pictures only if nobody swapped a key.
+const secret=()=>randomBytes(32).toString('base64url');
+async function pair(subject){const owner=peer(),fresh=peer();const o=await login(owner,subject),f=await login(fresh,subject);return {owner,fresh,o,f};}
+const code=(accountId,deviceId,publicKey,approverId,approverKey,approverNonce,reveal)=>deviceComparisonCode({accountId,deviceId,publicKey,approverId,approverKey,approverNonce,reveal});
+test('commit, challenge, reveal: both computers compute the same code and Yes approves',async()=>{
+ const {owner,fresh,o,f}=await pair('556000111');const stranger=peer();await login(stranger,'556999111');
+ assert.equal(request(owner,'device.requests').requests.length,0,'nothing is listed before the new computer commits');
+ const nD=secret();assert.deepEqual(request(fresh,'device.commit',{commitment:C.digest(nD)}),{committed:true});
+ assert.throws(()=>request(fresh,'device.commit',{commitment:C.digest(secret())}),/committed/,'the commitment is fixed once');
+ assert.throws(()=>request(fresh,'device.requests'),/pending/);assert.equal(request(stranger,'device.requests').requests.length,0);
+ const r=request(owner,'device.requests').requests[0];assert.equal(r.deviceId,f.view.deviceId);assert.equal(r.approverId,null);
+ assert.throws(()=>request(fresh,'device.reveal',{reveal:nD}),/unavailable/,'reveal waits for the approving computer');
+ const nA=secret();request(owner,'device.challenge',{deviceId:r.deviceId,nonce:nA});
+ assert.throws(()=>request(owner,'device.challenge',{deviceId:r.deviceId,nonce:secret()}),/taken/,'the challenge is fixed once');
+ const seen=request(fresh,'device.enrollment');assert.equal(seen.approverNonce,nA);assert.equal(seen.approver.deviceId,o.view.deviceId);
+ assert.throws(()=>request(fresh,'device.reveal',{reveal:secret()}),/reveal_changed/,'a different secret than committed is refused');
+ request(fresh,'device.reveal',{reveal:nD});
+ const ok=request(owner,'device.requests').requests[0];assert.equal(ok.reveal,nD);
+ const newSide=code(f.view.id,f.view.deviceId,publicKeyText(fresh.key.publicKey),seen.approver.deviceId,seen.approver.publicKey,seen.approverNonce,nD);
+ const oldSide=code(o.view.id,ok.deviceId,ok.publicKey,o.view.deviceId,publicKeyText(owner.key.publicKey),nA,ok.reveal);
+ assert.equal(newSide,oldSide);
+ assert.throws(()=>request(owner,'device.approve.v2',{deviceId:ok.deviceId,publicKey:ok.publicKey,comparisonCode:'0'.repeat(12),confirmed:true}),/changed/);
+ assert.throws(()=>request(owner,'device.approve.v2',{deviceId:ok.deviceId,publicKey:publicKeyText(stranger.key.publicKey),comparisonCode:oldSide,confirmed:true}),/changed/,'a swapped key is refused');
+ const view=request(owner,'device.approve.v2',{deviceId:ok.deviceId,publicKey:ok.publicKey,comparisonCode:oldSide,confirmed:true});
+ assert.equal(view.devices.find(d=>d.id===ok.deviceId).status,'approved');
+ const after=request(fresh,'device.enrollment');assert.equal(after.status,'approved');assert.equal(after.approvedBy.publicKey,publicKeyText(owner.key.publicKey));
 });
-test('picture approval needs a recent Google sign-in on the approving computer, and expires',async()=>{
- const owner=peer(),late=peer();await login(owner,'555000222');const l=await login(late,'555000222');
- const r=request(owner,'device.requests').requests[0],code=deviceComparisonCode(l.view.id,r.deviceId,r.publicKey,r.comparisonNonce);
+test('only the approving computer that set the challenge can approve, and it needs a recent Google sign-in',async()=>{
+ const {owner,fresh,o,f}=await pair('556000222');const second=peer();await login(second,'556000222');
+ const r0=request(owner,'device.requests').requests.find(x=>x.deviceId===f.view.deviceId);
+ // the second login is itself pending; approve it with the owner first so it can try to approve
+ const nS=secret();request(second,'device.commit',{commitment:C.digest(nS)});
+ const sReq=request(owner,'device.requests').requests.find(x=>x.publicKey===publicKeyText(second.key.publicKey));const sA=secret();request(owner,'device.challenge',{deviceId:sReq.deviceId,nonce:sA});const sSeen=request(second,'device.enrollment');request(second,'device.reveal',{reveal:nS});
+ request(owner,'device.approve.v2',{deviceId:sReq.deviceId,publicKey:sReq.publicKey,comparisonCode:code(o.view.id,sReq.deviceId,sReq.publicKey,o.view.deviceId,publicKeyText(owner.key.publicKey),sA,nS),confirmed:true});
+ assert.equal(r0,undefined,'a request without a commitment is never listed');
+ const nD=secret();request(fresh,'device.commit',{commitment:C.digest(nD)});const nA=secret();
+ request(owner,'device.challenge',{deviceId:f.view.deviceId,nonce:nA});request(fresh,'device.reveal',{reveal:nD});
+ const c=code(o.view.id,f.view.deviceId,publicKeyText(fresh.key.publicKey),o.view.deviceId,publicKeyText(owner.key.publicKey),nA,nD);
+ assert.throws(()=>request(second,'device.approve.v2',{deviceId:f.view.deviceId,publicKey:publicKeyText(fresh.key.publicKey),comparisonCode:c,confirmed:true}),/changed/,'another computer cannot finish someone else’s challenge');
  now+=6*60000;
- assert.throws(()=>request(owner,'device.approve.v2',{deviceId:r.deviceId,publicKey:r.publicKey,comparisonCode:code,confirmed:true}),/fresh_google|expired|invalid/);
- now+=10*60000;await login(owner,'555000222');
- assert.equal(request(owner,'device.requests').requests.length,0,'an expired request is no longer listed');
- assert.throws(()=>request(owner,'device.approve.v2',{deviceId:r.deviceId,publicKey:r.publicKey,comparisonCode:code,confirmed:true}),/changed/);
+ assert.throws(()=>request(owner,'device.approve.v2',{deviceId:f.view.deviceId,publicKey:publicKeyText(fresh.key.publicKey),comparisonCode:c,confirmed:true}),/fresh_google/);
+ assert.ok(sSeen.approverNonce);
 });
-test('No on the approving computer forgets the new computer and ends its session',async()=>{
- const owner=peer(),unwanted=peer();await login(owner,'555000333');const u=await login(unwanted,'555000333');
- const r=request(owner,'device.requests').requests[0];assert.equal(r.deviceId,u.view.deviceId);
- assert.throws(()=>request(owner,'device.deny',{deviceId:r.deviceId,confirmed:false}),/input/);
- const view=request(owner,'device.deny',{deviceId:r.deviceId,confirmed:true});assert.equal(view.devices.find(d=>d.id===r.deviceId).status,'revoked');
- assert.throws(()=>request(unwanted,'device.enrollment'));
+test('No forgets the new computer and ends its session; an expired request disappears',async()=>{
+ const {owner,fresh,f}=await pair('556000333');request(fresh,'device.commit',{commitment:C.digest(secret())});
+ assert.throws(()=>request(owner,'device.deny',{deviceId:f.view.deviceId,confirmed:false}),/input/);
+ const view=request(owner,'device.deny',{deviceId:f.view.deviceId,confirmed:true});assert.equal(view.devices.find(d=>d.id===f.view.deviceId).status,'revoked');
+ assert.throws(()=>request(fresh,'device.enrollment'));
+ const late=peer();await login(late,'556000333');request(late,'device.commit',{commitment:C.digest(secret())});
+ now+=11*60000;await login(owner,'556000333');
  assert.equal(request(owner,'device.requests').requests.length,0);
 });
