@@ -35,6 +35,14 @@ it does not recover work-content keys.
    loader and the shared source imports included in the reviewed tree. Copying
    this package alone is insufficient. No dependency installation, application
    packaging or CI run is performed by these templates.
+3. Optional: account two-step sign-in. Create a private key file for the
+   `dpro-account` user (mode 0600, inside a 0700 directory) holding 32 random
+   bytes as base64url, keep an offline copy, and add
+   `--secret-key-file /var/lib/dpro-account-keys/totp.key` to `ExecStart`. It
+   seals each account's authenticator secret. Without it, two-step sign-in stays
+   off and computers are added only with a Yes on another computer. Losing the
+   file turns off two-step for every account; never commit or print it.
+   Existing stores gain the new columns in place on the next start.
 3. Review `service.env.example`. Match the canonical origin, port and epoch root
    to the approved inventory. Provision the metadata and independently retained
    epoch directories as private directories for `dpro-account`. This service
