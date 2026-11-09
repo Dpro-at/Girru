@@ -62,3 +62,12 @@ test('twenty wrong codes in a day lock the code path; the owner sees it; a Googl
  await assert.rejects(()=>service.googleExchange({challenge,command:command(fresh,challenge,'google.exchange',payload),...payload}),/locked|code_wrong|wait/,'Google alone cannot reset an account with two-step on');
  assert.equal(request(owner,'account.view').deviceStatus,'approved');assert.ok(o);
 });
+test('a computer approved by a computer that joined with the code also counts as joined with the code',async()=>{
+ const owner=peer(),byCode=peer(),later=peer();await login(owner,'557000555');const {secret}=request(owner,'twofactor.setup');request(owner,'twofactor.enable',{code:codeAt(secret)});
+ const b=await login(byCode,'557000555');now+=30000;request(byCode,'device.approve.totp',{code:codeAt(secret),confirmed:true});
+ const l=await login(later,'557000555');const nD=(await import('node:crypto')).randomBytes(32).toString('base64url');request(later,'device.commit',{commitment:C.digest(nD)});
+ const nA=(await import('node:crypto')).randomBytes(32).toString('base64url');request(byCode,'device.challenge',{deviceId:l.view.deviceId,nonce:nA});request(later,'device.reveal',{reveal:nD});
+ const {deviceComparisonCode}=await import('../../backend/src/accounts/protocol.ts');
+ request(byCode,'device.approve.v2',{deviceId:l.view.deviceId,publicKey:publicKeyText(later.key.publicKey),comparisonCode:deviceComparisonCode({accountId:b.view.id,deviceId:l.view.deviceId,publicKey:publicKeyText(later.key.publicKey),commitment:C.digest(nD),approverId:b.view.deviceId,approverKey:publicKeyText(byCode.key.publicKey),approverNonce:nA,reveal:nD}),confirmed:true});
+ const ids=request(owner,'device.requests').viaCodeIds;assert.ok(ids.includes(b.view.deviceId)&&ids.includes(l.view.deviceId),'the chain is marked, so it needs Keep too');
+});
