@@ -52,6 +52,8 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 /** Data for "this computer": <userData>/data (DPRO_DESKTOP_DATA_DIR overrides, e.g. for tests). */
+/** A separate profile for trials and development: GIRRU_PROFILE_DIR (or --user-data-dir=) must be an absolute path; the installed app's own settings are then never opened. */
+{const arg=process.argv.find(a=>a.startsWith('--user-data-dir='));const profile=process.env.GIRRU_PROFILE_DIR||(arg?arg.slice('--user-data-dir='.length):'');if(profile){if(!path.isAbsolute(profile))throw Error('GIRRU_PROFILE_DIR must be an absolute path');require('node:fs').mkdirSync(profile,{recursive:true,mode:0o700});app.setPath('userData',profile);}}
 const dataDir = () => selectedData || (process.env.DPRO_DESKTOP_DATA_DIR ? path.resolve(process.env.DPRO_DESKTOP_DATA_DIR) : path.join(app.getPath('userData'), 'data'));
 const settingsDir = () => app.getPath('userData');
 /**
