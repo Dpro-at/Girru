@@ -15,14 +15,14 @@ const {randomBytes}=await import('node:crypto');
 // B2: commit-then-reveal. The new computer commits to a secret, the approving computer adds its own random value, then the secret is revealed; both screens show the same pictures only if nobody swapped a key.
 const secret=()=>randomBytes(32).toString('base64url');
 async function pair(subject){const owner=peer(),fresh=peer();const o=await login(owner,subject),f=await login(fresh,subject);return {owner,fresh,o,f};}
-const code=(accountId,deviceId,publicKey,approverId,approverKey,approverNonce,reveal)=>deviceComparisonCode({accountId,deviceId,publicKey,approverId,approverKey,approverNonce,reveal});
+const code=(accountId,deviceId,publicKey,approverId,approverKey,approverNonce,reveal)=>deviceComparisonCode({accountId,deviceId,publicKey,commitment:C.digest(reveal),approverId,approverKey,approverNonce,reveal});
 test('commit, challenge, reveal: both computers compute the same code and Yes approves',async()=>{
  const {owner,fresh,o,f}=await pair('556000111');const stranger=peer();await login(stranger,'556999111');
  assert.equal(request(owner,'device.requests').requests.length,0,'nothing is listed before the new computer commits');
  const nD=secret();assert.deepEqual(request(fresh,'device.commit',{commitment:C.digest(nD)}),{committed:true});
  assert.throws(()=>request(fresh,'device.commit',{commitment:C.digest(secret())}),/committed/,'the commitment is fixed once');
  assert.throws(()=>request(fresh,'device.requests'),/pending/);assert.equal(request(stranger,'device.requests').requests.length,0);
- const r=request(owner,'device.requests').requests[0];assert.equal(r.deviceId,f.view.deviceId);assert.equal(r.approverId,null);
+ const r=request(owner,'device.requests').requests[0];assert.equal(r.deviceId,f.view.deviceId);assert.equal(r.approverId,null);assert.equal(r.commitment,C.digest(nD),'the approving computer sees the commitment before it adds its own value');assert.throws(()=>deviceComparisonCode({accountId:'a',deviceId:'b',publicKey:'c',commitment:r.commitment,approverId:'d',approverKey:'e',approverNonce:'f',reveal:secret()}),/reveal_changed/,'a reveal that does not match the commitment is refused locally');
  assert.throws(()=>request(fresh,'device.reveal',{reveal:nD}),/unavailable/,'reveal waits for the approving computer');
  const nA=secret();request(owner,'device.challenge',{deviceId:r.deviceId,nonce:nA});
  assert.throws(()=>request(owner,'device.challenge',{deviceId:r.deviceId,nonce:secret()}),/taken/,'the challenge is fixed once');
