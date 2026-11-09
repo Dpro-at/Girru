@@ -51,3 +51,14 @@ test('without a service key, two-step stays off',async()=>{
  const plain=new AccountService({store,origin:'https://accounts.example.test/identity/v1',clientId:C.DEFAULT_GOOGLE_CLIENT_ID,verifyGoogle:verify,temporaryTestOnly:true,now:()=>now});
  const keep=service;service=plain;try{const p=peer();await login(p,'557000333');assert.deepEqual(request(p,'twofactor.status'),{enabled:false,available:false});assert.throws(()=>request(p,'twofactor.setup'),/unavailable/);}finally{service=keep;}
 });
+test('twenty wrong codes in a day lock the code path; the owner sees it; a Google-only reset needs the code',async()=>{
+ const owner=peer(),thief=peer();const o=await login(owner,'557000444');const {secret}=request(owner,'twofactor.setup');request(owner,'twofactor.enable',{code:codeAt(secret)});
+ await login(thief,'557000444');
+ for(let round=0;round<4;round++){for(let i=0;i<5;i++)assert.throws(()=>request(thief,'device.approve.totp',{code:String(200000+round*10+i),confirmed:true}),/code_wrong/);now+=16*60000;await login(thief,'557000444');}
+ now+=30000;assert.throws(()=>request(thief,'device.approve.totp',{code:codeAt(secret),confirmed:true}),/locked/,'after 20 wrong codes in a day only an approved computer can help');
+ await login(owner,'557000444');assert.ok(request(owner,'device.requests').twoFactorFailuresToday>=20,'the owner is told about failed attempts');
+ const fresh=peer(),publicKey=publicKeyText(fresh.key.publicKey),{challenge}=service.googleChallenge({publicKey});
+ const payload={publicKey,idToken:JSON.stringify({nonce:challenge,subject:'557000444'}),label:'Thief',osFamily:'macos',appVersion:'1',confirmFirstDevice:false,resetAccount:true,resetConfirmation:'START A NEW DEVICE GROUP'};
+ await assert.rejects(()=>service.googleExchange({challenge,command:command(fresh,challenge,'google.exchange',payload),...payload}),/locked|code_wrong|wait/,'Google alone cannot reset an account with two-step on');
+ assert.equal(request(owner,'account.view').deviceStatus,'approved');assert.ok(o);
+});

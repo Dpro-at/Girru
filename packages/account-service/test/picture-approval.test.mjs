@@ -20,12 +20,13 @@ test('commit, challenge, reveal: both computers compute the same code and Yes ap
  const {owner,fresh,o,f}=await pair('556000111');const stranger=peer();await login(stranger,'556999111');
  assert.equal(request(owner,'device.requests').requests.length,0,'nothing is listed before the new computer commits');
  const nD=secret();assert.deepEqual(request(fresh,'device.commit',{commitment:C.digest(nD)}),{committed:true});
- assert.throws(()=>request(fresh,'device.commit',{commitment:C.digest(secret())}),/committed/,'the commitment is fixed once');
+ assert.deepEqual(request(fresh,'device.commit',{commitment:C.digest(nD)}),{committed:true},'it may commit again (after a restart) while nobody has answered');
  assert.throws(()=>request(fresh,'device.requests'),/pending/);assert.equal(request(stranger,'device.requests').requests.length,0);
  const r=request(owner,'device.requests').requests[0];assert.equal(r.deviceId,f.view.deviceId);assert.equal(r.approverId,null);assert.equal(r.commitment,C.digest(nD),'the approving computer sees the commitment before it adds its own value');assert.throws(()=>deviceComparisonCode({accountId:'a',deviceId:'b',publicKey:'c',commitment:r.commitment,approverId:'d',approverKey:'e',approverNonce:'f',reveal:secret()}),/reveal_changed/,'a reveal that does not match the commitment is refused locally');
  assert.throws(()=>request(fresh,'device.reveal',{reveal:nD}),/unavailable/,'reveal waits for the approving computer');
  const nA=secret();request(owner,'device.challenge',{deviceId:r.deviceId,nonce:nA});
  assert.throws(()=>request(owner,'device.challenge',{deviceId:r.deviceId,nonce:secret()}),/taken/,'the challenge is fixed once');
+ assert.throws(()=>request(fresh,'device.commit',{commitment:C.digest(secret())}),/committed/,'once answered, the commitment is fixed');
  const seen=request(fresh,'device.enrollment');assert.equal(seen.approverNonce,nA);assert.equal(seen.approver.deviceId,o.view.deviceId);
  assert.throws(()=>request(fresh,'device.reveal',{reveal:secret()}),/reveal_changed/,'a different secret than committed is refused');
  request(fresh,'device.reveal',{reveal:nD});

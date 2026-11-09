@@ -2,7 +2,7 @@ import {useState} from 'react';
 import type {SessionClient} from './session';
 import {useComputerOverview, computerStateLabel, computerPathLabel} from './ComputerDevices';
 import {DproAccountPanel} from './DproAccountPanel';
-import {AccountTwoFactor} from './ComputerJoin';
+import {AccountTwoFactor, ThisComputerCheck} from './ComputerJoin';
 import {ComputerEnrollment} from './ComputerEnrollment';
 import {ComputerLinkControls, ComputerDirectControls} from './ComputerLinkControls';
 import {ComputerSyncWorkspace} from './ComputerSyncWorkspace';
@@ -40,6 +40,7 @@ export function ComputerSettings({client, pane, onApprovals}: {client: SessionCl
           {view.self && <div className="phone-row" role="listitem"><span className="phone-tile"><UiIcon name="screen" size={16}/></span><span className="phone-row-text"><b>{view.self.name}</b><small>This computer</small></span></div>}
           {devices.map(d => <div key={d.id} className="phone-row" role="listitem"><span className="phone-tile"><UiIcon name="screen" size={16}/></span><span className="phone-row-text"><b>{d.name}</b><small>{computerStateLabel(d.state)} · {computerPathLabel(d.path)}</small></span></div>)}
         </div>
+        <ThisComputerCheck client={client}/>
         <ComputerLinkControls client={client} view={view} onNotice={setNotice}/>
         <p className="fine-print">To forget a computer, select it in Computers and choose More › Forget this computer.</p>
       </>}

@@ -7,7 +7,7 @@ import type {UiIconName} from './ui-icons';
 
 /** Adding a computer (DEVICES-PROJECT-01 B2, boards CP1, CP2, CP7, CP9c): plain words, pictures instead of codes. */
 const root = '/api/computers/account';
-type Status = {desktopAvailable?: boolean; connected?: boolean; googleLinked?: boolean; view?: {deviceStatus?: string; devices?: {id: string; label: string; status: string}[]} | null; pairing?: {self: {waiting: boolean; approver: string | null; code: string | null} | null; requests: {deviceId: string; label: string; osFamily: string; code: string | null; publicKey?: string; elsewhere: boolean}[]; addedWithCode: {deviceId: string; label: string; publicKey: string}[]} | null};
+type Status = {desktopAvailable?: boolean; connected?: boolean; googleLinked?: boolean; view?: {deviceStatus?: string; devices?: {id: string; label: string; status: string}[]} | null; pairing?: {self: {waiting: boolean; approver: string | null; code: string | null; changed?: boolean} | null; requests: {deviceId: string; label: string; osFamily: string; code: string | null; publicKey?: string; elsewhere: boolean; changed?: boolean}[]; addedWithCode: {deviceId: string; label: string; publicKey: string; checkCode: string}[]; twoFactorFailuresToday?: number; thisComputerCheck?: string} | null};
 
 /** Plain words for the account service's answers (one name per thing; never a code on screen). */
 export function computerAccountWords(code: string) {
@@ -25,6 +25,7 @@ export function computerAccountWords(code: string) {
     account_device_unavailable: 'That request has ended.',
     account_pairing_taken: 'Another of your computers is already answering this request.',
     account_device_pending: 'This computer is still waiting to be added.',
+    account_twofactor_locked: 'Too many wrong codes today. Add this computer with a Yes on one of your other computers instead.',
     account_desktop_required: 'Open the Girru app on this computer to add it. A browser window can’t keep the computer’s key safe.',
     account_local_desktop_required: 'Open the Girru app on this computer to add it.',
   };
@@ -81,7 +82,7 @@ export function AddThisComputer({client, status}: {client: SessionClient; status
       <p className="computer-steps"><span>1 Signed in</span><b>2 Say Yes on your other computer</b><span>3 Choose what comes</span></p>
       <h2>Now go to your other computer</h2>
       <ol className="computer-join-list"><li>Open Girru on a computer you already use.</li><li>It asks: “Add this computer to your account?”</li><li>If it shows the same pictures, press Yes, add it.</li></ol>
-      {self?.code ? <ComputerPictures code={self.code}/> : <p role="status" className="fine-print">Waiting for your other computer…</p>}
+      {self?.changed ? <p role="alert">Something changed while you were adding this computer, so it stopped for safety. Sign in again to start over.</p> : self?.code ? <ComputerPictures code={self.code}/> : <p role="status" className="fine-print">Waiting for your other computer…</p>}
       {notice && <p role="status">{notice}</p>}
       {!useCode ? <button type="button" className="link-button" onClick={() => setUseCode(true)}>My other computers are off — use my authenticator code</button>
         : <div className="computer-join-code"><label className="phone-field"><span>Code from your authenticator app</span><input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))}/></label><button type="button" className="primary" disabled={busy || code.length !== 6} onClick={() => void join()}>Add this computer</button></div>}
@@ -109,15 +110,17 @@ export function ComputerJoinRequests({client, status}: {client: SessionClient; s
   const reqs = status?.pairing?.requests ?? [], added = status?.pairing?.addedWithCode ?? [];
   if (!reqs.length && !added.length) return null;
   const answer = async (r: {deviceId: string; code: string | null; publicKey?: string}, yes: boolean) => { const deviceId = r.deviceId; setBusy(deviceId); setNotice(''); try { await call(client, root + (yes ? '/requests/approve' : '/requests/deny'), yes ? {deviceId, comparisonCode: r.code, publicKey: r.publicKey, confirmed: true} : {deviceId, confirmed: true}); setNotice(yes ? 'Added. It shows in your computers.' : 'It was not added.'); } catch (e) { setNotice(computerAccountWords((e as Error).message)); } finally { setBusy(''); } };
-  const keep = async (a: {deviceId: string; publicKey: string}) => { setNotice(''); try { await call(client, root + '/requests/keep', {deviceId: a.deviceId, publicKey: a.publicKey, confirmed: true}); setNotice('Kept. It shows in your computers.'); } catch (e) { setNotice(computerAccountWords((e as Error).message)); } };
+  const forget = async (a: {deviceId: string}) => { setNotice(''); try { await call(client, root + '/devices/revoke', {deviceId: a.deviceId, confirmed: true}); setNotice('It was forgotten.'); } catch (e) { setNotice(computerAccountWords((e as Error).message)); } };
+  const keep = async (a: {deviceId: string; publicKey: string; checkCode: string}) => { setNotice(''); try { await call(client, root + '/requests/keep', {deviceId: a.deviceId, publicKey: a.publicKey, checkCode: a.checkCode, confirmed: true}); setNotice('Kept. It shows in your computers.'); } catch (e) { setNotice(computerAccountWords((e as Error).message)); } };
   return <section aria-label="New computers" className="computer-join-requests">
     <p className="section-label">Needs you</p>
     {reqs.map(r => <div key={r.deviceId} className="computer-task" role="group" aria-label={`Add ${r.label}`}>
       <UiIcon name="user-plus" size={16}/>
-      <span className="computer-task-text"><b>Add “{r.label}” to your account?</b><small>{r.elsewhere ? 'Another of your computers is answering this.' : r.code ? 'Check the new computer shows these same pictures. Only add a computer you own.' : 'Getting the pictures ready…'}</small>{r.code && <ComputerPictures code={r.code}/>}</span>
-      {!r.elsewhere && <span className="computer-task-actions"><button type="button" disabled={busy === r.deviceId} onClick={() => void answer(r, false)}>No, it’s not me</button><button type="button" className="primary" disabled={busy === r.deviceId || !r.code} onClick={() => void answer(r, true)}>Yes, add it</button></span>}
+      <span className="computer-task-text"><b>Add “{r.label}” to your account?</b><small>{r.changed ? 'This request changed after you answered it, so it stopped for safety. Start again on the new computer.' : r.elsewhere ? 'Another of your computers is answering this.' : r.code ? 'Check the new computer shows these same pictures. Only add a computer you own.' : 'Getting the pictures ready…'}</small>{r.code && <ComputerPictures code={r.code}/>}</span>
+      {!r.elsewhere && !r.changed && <span className="computer-task-actions"><button type="button" disabled={busy === r.deviceId} onClick={() => void answer(r, false)}>No, it’s not me</button><button type="button" className="primary" disabled={busy === r.deviceId || !r.code} onClick={() => void answer(r, true)}>Yes, add it</button></span>}
     </div>)}
-    {added.slice(0, 3).map(a => <div key={a.deviceId} className="computer-task" role="group" aria-label={`${a.label} joined with your code`}><UiIcon name="alert" size={16}/><span className="computer-task-text"><b>“{a.label}” joined with your authenticator code</b><small>Was this you? Keep it to work with it, or forget it.</small></span><span className="computer-task-actions"><button type="button" onClick={() => void keep(a)}>Keep</button></span></div>)}
+    {(status?.pairing?.twoFactorFailuresToday ?? 0) >= 5 && <p role="alert" className="fine-print"><UiIcon name="alert" size={13}/> Someone tried {status?.pairing?.twoFactorFailuresToday} wrong authenticator codes on your Dpro account today. If it was not you, change your Google password.</p>}
+    {added.slice(0, 3).map(a => <div key={a.deviceId} className="computer-task" role="group" aria-label={`${a.label} joined with your code`}><UiIcon name="alert" size={16}/><span className="computer-task-text"><b>“{a.label}” joined with your authenticator code</b><small>Was this you? Keep it only if “{a.label}” shows this same code in Settings › Computers › My computers.</small><code className="computer-check-code">{a.checkCode.slice(0, 4)} {a.checkCode.slice(4, 8)} {a.checkCode.slice(8, 12)}</code></span><span className="computer-task-actions"><button type="button" className="primary" onClick={() => void forget(a)}>Forget it</button><button type="button" onClick={() => void keep(a)}>Same code — keep</button></span></div>)}
     {notice && <p role="status" className="fine-print">{notice}</p>}
   </section>;
 }
@@ -161,4 +164,12 @@ export function AccountTwoFactor({client}: {client: SessionClient}) {
       {notice && <p role="status">{notice}</p>}
     </Sheet>}
   </section>;
+}
+
+/** Settings › Computers › My computers: this computer's code, for checking it from another computer. */
+export function ThisComputerCheck({client}: {client: SessionClient}) {
+  const status = useAccountStatus(client);
+  const c = status?.pairing?.thisComputerCheck;
+  if (!c) return null;
+  return <p className="fine-print">This computer’s check code: <code className="computer-check-code">{c.slice(0, 4)} {c.slice(4, 8)} {c.slice(8, 12)}</code></p>;
 }
