@@ -43,6 +43,15 @@ it does not recover work-content keys.
    off and computers are added only with a Yes on another computer. Losing the
    file turns off two-step for every account; never commit or print it.
    Existing stores gain the new columns in place on the next start.
+   Optional: Google sign-in without a file on each computer. Put the Google
+   desktop client secret (the bare secret, or the client JSON downloaded from
+   Google Cloud for the same client ID) in a private file for `dpro-account`
+   (mode 0600, inside a 0700 directory) and add
+   `--google-client-secret-file /var/lib/dpro-account-keys/google-client.json`
+   to `ExecStart`. Apps then finish Google sign-in through `POST /google/token`:
+   they send only the one-time code, its PKCE verifier and their loopback
+   redirect, and get back only the ID token. Without the file, apps ask the owner
+   to pick the client JSON once. Never commit or print it.
 3. Review `service.env.example`. Match the canonical origin, port and epoch root
    to the approved inventory. Provision the metadata and independently retained
    epoch directories as private directories for `dpro-account`. This service
