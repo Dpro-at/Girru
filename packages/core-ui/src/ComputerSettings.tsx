@@ -58,7 +58,7 @@ export function ComputerSettings({client, pane, onApprovals}: {client: SessionCl
             <button type="button" className="tool" title="Rename and icon…" aria-label="Rename and icon" onClick={() => setRenaming({id: view.self!.id, name: computerName(look, view.self!.id, view.self!.name), icon: (look?.icons[view.self!.id] as ComputerIconKey) ?? null})}><UiIcon name="pencil" size={14}/></button></div>}
           {devices.filter(d => d.id !== forgetting).map(d => <div key={d.id} className="phone-row" role="listitem"><span className="phone-tile"><UiIcon name={computerIcon(look, d.id, os(d.publicKey))} size={16}/></span><span className="phone-row-text"><b>{computerName(look, d.id, d.name)}</b><small>{computerStateLabel(d.state)} · {computerPathLabel(d.path)}</small></span>
             <button type="button" className="tool" title="Rename and icon…" aria-label={`Rename ${d.name}`} onClick={() => setRenaming({id: d.id, name: computerName(look, d.id, d.name), icon: (look?.icons[d.id] as ComputerIconKey) ?? null})}><UiIcon name="pencil" size={14}/></button>
-            <button type="button" className="tool" title="Forget this computer" aria-label={`Forget ${d.name}`} onClick={() => forgetComputerLater(client, {id: d.id, name: computerName(look, d.id, d.name)})}><UiIcon name="trash" size={14}/></button></div>)}
+            <button type="button" className="tool" title="Forget this computer" aria-label={`Forget ${d.name}`} onClick={() => forgetComputerLater(client, {id: d.id, name: computerName(look, d.id, d.name), publicKey: d.publicKey})}><UiIcon name="trash" size={14}/></button></div>)}
         </div>
         <ForgetNotice/>
         <TasksAtOnce client={client}/>

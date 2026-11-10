@@ -153,7 +153,6 @@ export function ComputerJoinRequests({client, status}: {client: SessionClient; s
   const forget = async (a: {deviceId: string}) => { setNotice(''); try { await call(client, root + '/devices/revoke', {deviceId: a.deviceId, confirmed: true}); setNotice('It was forgotten.'); } catch (e) { setNotice(computerAccountWords((e as Error).message)); } };
   const keep = async (a: {deviceId: string; publicKey: string; checkCode: string}) => { setNotice(''); try { await call(client, root + '/requests/keep', {deviceId: a.deviceId, publicKey: a.publicKey, checkCode: a.checkCode, confirmed: true}); setNotice('Kept. It shows in your computers.'); } catch (e) { setNotice(computerAccountWords((e as Error).message)); } };
   return <section aria-label="New computers" className="computer-join-requests">
-    <p className="section-label">Needs you</p>
     {reqs.map(r => <div key={r.deviceId} className="computer-task" role="group" aria-label={`Add ${r.label}`}>
       <UiIcon name={computerIcon(null, r.deviceId, r.osFamily)} size={16}/>
       <span className="computer-task-text"><b>Add “{r.label}” to your account?</b><small>{r.changed ? 'This request changed after you answered it, so it stopped for safety. Start again on the new computer.' : r.elsewhere ? 'Another of your computers is answering this.' : r.code ? 'Check the new computer shows these same pictures. Only add a computer you own.' : 'Getting the pictures ready…'}</small>{r.code && <ComputerPictures code={r.code}/>}</span>

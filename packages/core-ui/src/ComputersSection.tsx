@@ -74,12 +74,12 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   };
 
   const renameItem = (id: string, name: string): MenuItem => ({label: 'Rename and icon…', icon: 'pencil', shortcut: '↩', run: () => setRenaming({id, name, icon: look?.icons[id] as ComputerIconKey ?? null})});
-  const menuFor = (d: {id: string; name: string}): MenuItem[] => [
+  const menuFor = (d: {id: string; name: string; publicKey?: string}): MenuItem[] => [
     {label: 'Send a task…', icon: 'send', shortcut: '⌘↩', run: () => setSending(d.id)},
     {label: 'Works on…', icon: 'board', run: () => { setSelected(d.id); setInspector(true); }},
     renameItem(d.id, nameOf(d.id, d.name)),
     'sep',
-    {label: 'Forget this computer', icon: 'trash', shortcut: '⌫', danger: true, run: () => { forgetComputerLater(client, {id: d.id, name: nameOf(d.id, d.name)}); setSelected(self?.id ?? ''); }},
+    {label: 'Forget this computer', icon: 'trash', shortcut: '⌫', danger: true, run: () => { forgetComputerLater(client, {id: d.id, name: nameOf(d.id, d.name), publicKey: d.publicKey}); setSelected(self?.id ?? ''); }},
   ];
   const menuForSelf = (): MenuItem[] => [renameItem(self?.id ?? '', nameOf(self?.id ?? '', self?.name ?? 'This computer')), {label: 'Settings › Computers', icon: 'gear', run: onSettings}];
   const nav = <nav className="dk-sidebar computers-places" aria-label="My computers">
@@ -125,11 +125,9 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
       <ProjectCopyAsks client={client}/>
       {isSelf && newerElsewhere && <div className="computer-task computer-version" role="status"><UiIcon name="download" size={16}/><span className="computer-task-text"><b>Update Girru on this computer</b><small>{newerElsewhere.label} has a newer Girru ({newerElsewhere.appVersion}). Until this computer is updated, they can’t send each other tasks.</small></span>{onUpdates && <span className="computer-task-actions"><button type="button" className="primary" onClick={onUpdates}>Update…</button></span>}</div>}
       {!isSelf && device && older(device.publicKey) && <div className="computer-task computer-version" role="status"><UiIcon name="download" size={16}/><span className="computer-task-text"><b>{nameOf(device.id, device.name)} has another Girru version</b><small>It can still be seen, but it can’t take new tasks until both run the same version. It updates by itself the next time it opens (backup first).</small></span></div>}
-      {isSelf && <ComputerJoinRequests client={client} status={account}/>}
-      {isSelf && <ContinuityRequests client={client} status={account}/>}
-      <section aria-label="Needs you"><p className="section-label">Needs you</p>{needs.length > 0 ? <div className="computer-list" role="list">
+      <section aria-label="Needs you"><p className="section-label">Needs you</p>{isSelf && <ComputerJoinRequests client={client} status={account}/>}{isSelf && <ContinuityRequests client={client} status={account}/>}{needs.length > 0 ? <div className="computer-list" role="list">
         {needs.map(a => row(a, <>{a.approvalId ? <AllowTask client={client} approvalId={a.approvalId} sourceName={nameOf(a.sourceDevice, a.sourceName)} onDone={setNotice} onApprovals={onApprovals}/> : <button type="button" onClick={onApprovals}>Open Approvals</button>}<ComputerTaskTiming client={client} taskId={a.taskId} onPrepared={onApprovals}/></>))}
-      </div> : <p className="fine-print">Nothing waits for you.</p>}</section>
+      </div> : !(isSelf && ((account?.pairing?.addedWithCode?.length ?? 0) > 0 || (account?.pairing?.requests?.length ?? 0) > 0)) && <p className="fine-print">Nothing waits for you.</p>}</section>
       <section aria-label="Working on"><p className="section-label">Working on</p>
         {working.length ? <div className="computer-list" role="list">
           {working.map(a => row(a, <>{a.sessionId && <button type="button" onClick={() => onOpenChat(a.sessionId!)}>Open its chat</button>}{WORKING.has(a.state) && a.state !== 'cancel_requested' && <button type="button" className="danger-text" onClick={() => void cancel(a)}>Stop</button>}</>))}
