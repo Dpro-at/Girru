@@ -2,7 +2,7 @@ import {JoinStart, JoinReady, NameThisComputer, quietDiscovery, readSetupEntry, 
 import {useAccountStatus} from './ComputerJoin';
 import { DiscoveryStream } from './DiscoveryStream';
 import { SetupOrb } from './SetupOrb';
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { SessionClient } from './session';
 import { UiIcon } from './ui-icons';
 import { ClaudeCodeIcon, CodexIcon, GeminiIcon } from './brand-icons';
@@ -110,13 +110,17 @@ export function FirstRunSetup({ client, initialStep, workspaceType: initialType,
   const [preparing, setPreparing] = useState(false);
   const [scan, setScan] = useState<QuietDiscoveryProgress | null>(null);
   const [scanFailed, setScanFailed] = useState(false);
+  const movedOn = useRef(false);
   const startSame = async () => {
     setPreparing(true); setScanFailed(false);
     const done = await quietDiscovery(client, setScan);
     setPreparing(false);
+    if (movedOn.current) return;
     if (!done) { setScanFailed(true); return; }
     await go('tools');
   };
+  /* The scan runs in the backend, so the owner can go on and let it finish in the background. */
+  const continueInBackground = async () => { movedOn.current = true; await go('tools'); };
   useEffect(() => { if (entry === 'same' && step === 'discovery' && !preparing) void startSame(); }, [entry, step]);
   const terminal = useSetupTerminal(client);
   useEffect(() => { void window.dproApp?.setSetupWindow?.(true).catch(() => {}); }, []);
@@ -164,7 +168,8 @@ export function FirstRunSetup({ client, initialStep, workspaceType: initialType,
             {scanFailed ? <><p>Looking through this computer did not finish.</p><div className="setup-actions"><button type="button" className="primary" onClick={() => void startSame()}>Try again</button></div></>
             : <><p><b>Getting this computer ready</b></p>
               <p>Girru is looking through this computer for your projects and notes. Nothing leaves this computer. On a big disk this can take a few minutes. You do not need to do anything on {joined?.from ?? 'your other computer'} now.</p>
-              {scan && scan.status === 'scanning' && <p>{scan.scanned.toLocaleString()} files looked at · {scan.projects} projects · {scan.notes} notes</p>}</>}
+              {scan && scan.status === 'scanning' && <p>{scan.scanned.toLocaleString()} files looked at · {scan.projects} projects · {scan.notes} notes</p>}
+              {scan && scan.status === 'scanning' && <div className="setup-actions"><button type="button" className="primary" onClick={() => void continueInBackground()}>Continue, keep looking in the background</button></div>}</>}
           </section>
         : <><p className="computer-steps computer-join-steps"><span>1 Added</span><span>2 What comes</span><b>3 AI tools</b><span>4 Open Girru</span></p><ToolsStep client={client} terminal={terminal} onSignedIn={setSignedIn} onNext={() => setJoinReady(true)}/></>}
     </>

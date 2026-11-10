@@ -56,7 +56,9 @@ export async function firstRunState(userId: string): Promise<FirstRunState> {
 
 /** Remembers the step reached, so a restart continues where the owner left. */
 export async function saveFirstRunStep(userId: string, step: FirstRunStep, workspaceType?: WorkspaceType, companyName?: string): Promise<FirstRunState> {
-  const discoveryDone = (await firstRunDiscovery(userId)).status === 'done';
+  const discoveryStatus = (await firstRunDiscovery(userId)).status;
+  /* A scan that is still running may carry on in the background (the owner pressed Continue); only a scan that never started or failed blocks the next step. */
+  const discoveryDone = discoveryStatus === 'done' || discoveryStatus === 'scanning';
   await sql().tx(function* () {
     yield* lockName(`onboarding_state:${userId}`);
     const row = yield* one<Row>('SELECT answers, completed FROM onboarding_state WHERE user_id = ?', userId);
