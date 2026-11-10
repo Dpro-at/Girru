@@ -28,6 +28,7 @@ export function ComputerWorksOn({client, onClose}: {client: SessionClient; onClo
   const [url, setUrl] = useState('');
   const [parent, setParent] = useState('');
   const [projectId, setProjectId] = useState('');
+  const [localFolder, setLocalFolder] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   useEffect(() => { void client.request({method: 'GET', path: '/api/computers/works-on/choices'}).then(r => { if (r.status === 200) { const c = r.body as Choices; setChoices(c); if (!c.projects.some(p => p.hasFolder)) setWay('github'); } }).catch(() => setNotice('It could not be read. Try again.')); }, [client]);
@@ -39,6 +40,11 @@ export function ComputerWorksOn({client, onClose}: {client: SessionClient; onClo
     setBusy(true); setNotice('');
     try {
       let id = projectId || here[0]?.id || '';
+      if (way === 'here' && localFolder.trim()) {
+        const r = await client.request({method: 'POST', path: '/api/computers/works-on/folder', body: {folder: localFolder.trim(), confirmed: true}});
+        if (r.status !== 200) throw Error((r.body as {code?: string})?.code ?? 'folder');
+        id = (r.body as {id: string}).id;
+      }
       if (way === 'copy') {
         if (copy?.state === 'ready' && copy.projectId) id = copy.projectId;
         else {
@@ -61,10 +67,10 @@ export function ComputerWorksOn({client, onClose}: {client: SessionClient; onClo
       setNotice(code.includes('exists') ? 'A folder with that name is already there. Choose another place, or use “It is already on this computer”.' : code.includes('url') ? 'Use the project’s GitHub address, like github.com/you/project.' : code.includes('folder') ? 'Write the full path of an existing folder, like /Users/you/Projects.' : 'It could not be added. Check that this computer can reach GitHub and try again.');
     } finally { setBusy(false); }
   };
-  return <Sheet title="The project this computer works on" onClose={onClose} actions={<><button type="button" onClick={onClose}>Cancel</button><button type="button" className="primary" disabled={busy || !ready || (way === 'github' ? !url.trim() || !parent.trim() : way === 'copy' ? (copy ? copy.state !== 'ready' : !parent.trim() || !others.length) : !(projectId || here[0]))} onClick={() => void go()}>{busy ? 'Working…' : way === 'github' ? 'Get the project' : way === 'copy' ? (copy?.state === 'ready' ? 'Use this project' : copy ? 'Copying…' : 'Ask for a copy') : 'Use this project'}</button></>}>
+  return <Sheet title="The project this computer works on" onClose={onClose} actions={<><button type="button" onClick={onClose}>Cancel</button><button type="button" className="primary" disabled={busy || !ready || (way === 'github' ? !url.trim() || !parent.trim() : way === 'copy' ? (copy ? copy.state !== 'ready' : !parent.trim() || !others.length) : !(localFolder.trim() || projectId || here[0]))} onClick={() => void go()}>{busy ? 'Working…' : way === 'github' ? 'Get the project' : way === 'copy' ? (copy?.state === 'ready' ? 'Use this project' : copy ? 'Copying…' : 'Ask for a copy') : 'Use this project'}</button></>}>
     <div className="cp-choices" role="radiogroup" aria-label="Where it comes from">
       <button type="button" role="radio" aria-checked={way === 'github'} className={`cp-choice${way === 'github' ? ' is-on' : ''}`} onClick={() => setWay('github')}><span className="cp-tile" style={{'--tint': '#9DBBFF'} as React.CSSProperties}><UiIcon name="globe" size={18}/></span><span className="cp-choice-text"><span>Get it from GitHub</span><small>Recommended. This computer uses its own GitHub sign-in.</small></span></button>
-      <button type="button" role="radio" aria-checked={way === 'here'} disabled={!here.length} className={`cp-choice${way === 'here' ? ' is-on' : ''}`} onClick={() => setWay('here')}><span className="cp-tile" style={{'--tint': '#F0C27A'} as React.CSSProperties}><UiIcon name="folder" size={18}/></span><span className="cp-choice-text"><span>It is already on this computer</span><small>{here.length ? 'Pick the project; its folder stays where it is.' : 'No project with a folder here yet.'}</small></span></button>
+      <button type="button" role="radio" aria-checked={way === 'here'} className={`cp-choice${way === 'here' ? ' is-on' : ''}`} onClick={() => setWay('here')}><span className="cp-tile" style={{'--tint': '#F0C27A'} as React.CSSProperties}><UiIcon name="folder" size={18}/></span><span className="cp-choice-text"><span>It is already on this computer</span><small>{here.length ? 'Pick the project; its folder stays where it is.' : 'Pick a folder that is already on this computer.'}</small></span></button>
       <button type="button" role="radio" aria-checked={way === 'copy'} disabled={!others.length} className={`cp-choice${way === 'copy' ? ' is-on' : ''}`} onClick={() => setWay('copy')}><span className="cp-tile" style={{'--tint': '#8FD6B0'} as React.CSSProperties}><UiIcon name="screen" size={18}/></span><span className="cp-choice-text"><span>Copy it from another computer</span><small>{others.length ? 'For projects without GitHub. Sent once, encrypted; that computer allows it first.' : 'No other computer in your account yet.'}</small></span></button>
     </div>
     {way === 'copy' ? (copy ? <div className="cp-card-panel" role="status">
@@ -82,7 +88,8 @@ export function ComputerWorksOn({client, onClose}: {client: SessionClient; onClo
       <label className="phone-field"><span>GitHub address</span><input value={url} placeholder="github.com/you/project" onChange={e => setUrl(e.target.value)}/></label>
       {(choices?.projects ?? []).some(p => p.github) && !url && <p className="cp-note">From your projects: {(choices!.projects.filter(p => p.github).slice(0, 3)).map(p => <button key={p.id} type="button" className="cp-link" onClick={() => setUrl(p.github!)}>{p.name}</button>)}</p>}
       <FolderField value={parent} onChange={setParent}/>
-    </> : <label className="phone-field"><span>Project</span><select value={projectId || here[0]?.id || ''} onChange={e => setProjectId(e.target.value)}>{here.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>}
+    </> : <>{here.length > 0 && !localFolder.trim() && <label className="phone-field"><span>Project</span><select value={projectId || here[0]?.id || ''} onChange={e => setProjectId(e.target.value)}>{here.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>}
+      <FolderField label={here.length ? 'Or a folder on this computer' : 'The folder on this computer'} value={localFolder} onChange={setLocalFolder}/></>}
     {!ready && choices && <p className="cp-note">{!workspaceId ? 'Add this computer to your account first.' : 'Create an agent and a Board first.'}</p>}
     {notice && <p role="status" className="cp-note">{notice}</p>}
   </Sheet>;
@@ -121,10 +128,10 @@ export function ProjectCopyAsks({client}: {client: SessionClient}) {
 }
 
 /** "Put it in this folder": typed, or picked with the system folder dialog (Finder / File Explorer) when the desktop app offers it. */
-function FolderField({value, onChange}: {value: string; onChange: (v: string) => void}) {
+function FolderField({value, onChange, label = 'Put it in this folder'}: {value: string; onChange: (v: string) => void; label?: string}) {
   const bridge = typeof window === 'undefined' ? undefined : (window as unknown as { dproApp?: { chooseProjectFolders?: () => Promise<string[]> } }).dproApp;
   const browse = async () => { try { const [first] = await bridge!.chooseProjectFolders!(); if (first) onChange(first); } catch { /* keep what is typed */ } };
-  return <label className="phone-field"><span>Put it in this folder</span>
+  return <label className="phone-field"><span>{label}</span>
     <span style={{display: 'flex', gap: 8}}><input style={{flex: 1}} value={value} placeholder="/Users/you/Documents/Projects" onChange={e => onChange(e.target.value)}/>
       {bridge?.chooseProjectFolders && <button type="button" onClick={() => void browse()}>Browse…</button>}</span></label>;
 }
