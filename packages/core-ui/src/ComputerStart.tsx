@@ -215,11 +215,18 @@ export function ContinuityRequests({client, status}: {client: SessionClient; sta
 }
 
 /** The “Your files” look happens quietly on a computer that starts “Same as …” (the first run needs it done). */
-export async function quietDiscovery(client: SessionClient) {
-  const read = async () => { try { const r = await client.request({method: 'GET', path: '/api/first-run/discovery'} as never); return (r.body as {status?: string} | null)?.status ?? null; } catch { return null; } };
+export type QuietDiscoveryProgress = {status: string | null; scanned: number; projects: number; notes: number};
+/**
+ * Looks through this computer while the join screen waits. A big disk can take several minutes, so it keeps
+ * waiting while the scan is running (up to 20 minutes) and reports progress, instead of giving up after 90 seconds.
+ * Returns true when the scan finished.
+ */
+export async function quietDiscovery(client: SessionClient, onProgress?: (p: QuietDiscoveryProgress) => void): Promise<boolean> {
+  const read = async () => { try { const r = await client.request({method: 'GET', path: '/api/first-run/discovery'} as never); const b = (r.body ?? null) as {status?: string; scanned?: number; counts?: {projects?: number; notes?: number}} | null; const p = {status: b?.status ?? null, scanned: b?.scanned ?? 0, projects: b?.counts?.projects ?? 0, notes: b?.counts?.notes ?? 0}; onProgress?.(p); return p.status; } catch { return null; } };
   let state = await read();
   if (state !== 'done' && state !== 'scanning') { try { await client.request({method: 'POST', path: '/api/first-run/discovery'} as never); } catch { /* read again below */ } }
-  for (let n = 0; n < 90 && (state = await read()) !== 'done'; n++) { if (state === 'error') return; await new Promise(r => setTimeout(r, 1000)); }
+  for (let n = 0; n < 1200 && (state = await read()) !== 'done'; n++) { if (state === 'error') return false; await new Promise(r => setTimeout(r, 1000)); }
+  return state === 'done';
 }
 
 /**
