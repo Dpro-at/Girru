@@ -57,6 +57,7 @@ test('backend env: loopback, random port, data dir, token; no unrelated variable
   assert.equal(env.PATH, '/bin');
   assert.equal(env.OPENAI_API_KEY, undefined);
   assert.equal(env.DATABASE_PATH, undefined);
+  assert.match(env.GIRRU_APP_VERSION, /^[A-Za-z0-9.+_-]{1,40}$/);
 });
 
 test('redactor removes secrets from log lines', () => {

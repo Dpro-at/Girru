@@ -29,7 +29,7 @@ export function ComputerSettings({client, pane, onApprovals}: {client: SessionCl
   const devices = (view?.devices ?? []).filter(d => d.state !== 'revoked');
   const usable = !!view && (view.testOnly || !!view.configured);
   const place = COMPUTER_SETTINGS_PANES.find(p => p.key === pane)!;
-  const account = useAccountStatus(client, pane === 'mine');
+  const account = useAccountStatus(client, pane !== 'tasks');
   const {look} = useComputerLook(client, pane === 'mine' || pane === 'tasks');
   const os = (publicKey?: string, self = false) => account?.view?.devices?.find(d => self ? d.id === account?.view?.deviceId : !!publicKey && d.publicKey === publicKey)?.osFamily;
   return <div className="phone-settings computer-settings">
@@ -40,9 +40,9 @@ export function ComputerSettings({client, pane, onApprovals}: {client: SessionCl
         <AccountSafety client={client}/>
         <AccountTwoFactor client={client}/>
         <DproAccountPanel client={client}/>
-        <details><summary>Older way to add computers</summary><ComputerEnrollment client={client}/></details>
+        <details><summary>Advanced: add a computer with a code</summary><ComputerEnrollment client={client}/></details>
       </>}
-      {pane !== 'account' && pane !== 'tasks' && !usable && <div className="phone-empty"><UiIcon name="screen" size={24}/><b>Sign in to your Dpro account first</b><p>Then your computers show here. Open Account and safety.</p></div>}
+      {pane !== 'account' && pane !== 'tasks' && !usable && <NotReadyYet account={account}/>}
       {pane === 'mine' && usable && view && <>
         <div className="phone-list" role="list" aria-label="My computers">
           {view.self && <div className="phone-row" role="listitem"><span className="phone-tile"><UiIcon name={computerIcon(look, view.self.id, os(undefined, true))} size={16}/></span><span className="phone-row-text"><b>{computerName(look, view.self.id, view.self.name)}</b><small>This computer</small></span></div>}
@@ -64,6 +64,17 @@ export function ComputerSettings({client, pane, onApprovals}: {client: SessionCl
       </> : <p className="fine-print">Add a computer first; then you can let it use the same Wi‑Fi.</p>)}
     </div>
   </div>;
+}
+
+/** Why a place is still empty, in one sentence: not signed in, this computer still waiting, or getting ready. */
+function NotReadyYet({account}: {account: ReturnType<typeof useAccountStatus>}) {
+  const self = account?.view?.devices?.find(d => d.id === account?.view?.deviceId);
+  const [title, text] = account === undefined ? ['Reading…', '']
+    : account === null ? ['Your Dpro account can’t be reached right now', 'Check the internet connection; your work on this computer is not affected.']
+    : !account.connected ? ['This computer is not in your Dpro account yet', 'Open Computers to add it. Then your computers show here.']
+    : account.view?.deviceStatus === 'pending' ? [`${self?.label ?? 'This computer'} is waiting to be added`, 'Open Computers to finish adding it. Then your computers show here.']
+    : ['Getting your computers ready…', 'This takes a few seconds after a computer is added.'];
+  return <div className="phone-empty" role="status"><UiIcon name="screen" size={24}/><b>{title}</b>{text && <p>{text}</p>}</div>;
 }
 
 /** CP6d Account and safety: who is signed in and the everyday actions; recovery, history and deleting the account stay under Account and workspaces…. */

@@ -9,7 +9,7 @@ import {computerIcon} from './ComputerLook';
 
 /** Adding a computer (DEVICES-PROJECT-01 B2, boards CP1, CP2, CP7, CP9c): plain words, pictures instead of codes. */
 const root = '/api/computers/account';
-export type Status = {desktopAvailable?: boolean; configured?: boolean; connected?: boolean; active?: boolean; googleLinked?: boolean; workspaces?: {id: string; label: string; mode: string; state: string; sourceDeviceId?: string | null}[]; coverage?: {category: string; label: string; available: boolean; continuity: boolean}[]; view?: {deviceId?: string; deviceStatus?: string; devices?: {id: string; label: string; status: string; presence?: string; osFamily?: string; publicKey?: string; appVersion?: string}[]} | null; pairing?: {self: {waiting: boolean; approver: string | null; code: string | null; changed?: boolean} | null; requests: {deviceId: string; label: string; osFamily: string; code: string | null; publicKey?: string; elsewhere: boolean; changed?: boolean}[]; addedWithCode: {deviceId: string; label: string; publicKey: string; checkCode: string}[]; twoFactorFailuresToday?: number; thisComputerCheck?: string} | null};
+export type Status = {desktopAvailable?: boolean; configured?: boolean; mapping?: unknown; connected?: boolean; active?: boolean; googleLinked?: boolean; workspaces?: {id: string; label: string; mode: string; state: string; sourceDeviceId?: string | null}[]; coverage?: {category: string; label: string; available: boolean; continuity: boolean}[]; view?: {deviceId?: string; deviceStatus?: string; devices?: {id: string; label: string; status: string; presence?: string; osFamily?: string; publicKey?: string; appVersion?: string}[]} | null; pairing?: {self: {waiting: boolean; approver: string | null; code: string | null; changed?: boolean} | null; requests: {deviceId: string; label: string; osFamily: string; code: string | null; publicKey?: string; elsewhere: boolean; changed?: boolean}[]; addedWithCode: {deviceId: string; label: string; publicKey: string; checkCode: string}[]; twoFactorFailuresToday?: number; thisComputerCheck?: string} | null};
 
 /** Plain words for the account service's answers (one name per thing; never a code on screen). */
 export function computerAccountWords(code: string) {
@@ -39,10 +39,12 @@ export async function call(client: SessionClient, path: string, body?: unknown) 
   return r.body as any;
 }
 /** The Dpro account status, read every few seconds while shown. */
+/** This computer was added before: after Girru restarts it reconnects by itself (once per start), no “Resume” button. */
+let resumeTried = false;
 export function useAccountStatus(client: SessionClient, enabled = true) {
   // undefined while reading; null when this window cannot reach the account (a browser, or no desktop app).
   const [status, setStatus] = useState<Status | null | undefined>(undefined);
-  useEffect(() => { if (!enabled) return; let live = true; const load = async () => { try { const s = await call(client, root); if (live) setStatus(s); } catch { if (live) setStatus(null); } }; void load(); const t = setInterval(() => void load(), 3000); return () => { live = false; clearInterval(t); }; }, [client, enabled]);
+  useEffect(() => { if (!enabled) return; let live = true; const load = async () => { try { let s = await call(client, root); if (s?.configured && !s.connected && s.mapping && !resumeTried) { resumeTried = true; try { await call(client, root + '/resume', {}); s = await call(client, root); } catch { /* stays signed out; Computers offers to add it */ } } if (live) setStatus(s); } catch { if (live) setStatus(null); } }; void load(); const t = setInterval(() => void load(), 3000); return () => { live = false; clearInterval(t); }; }, [client, enabled]);
   return status;
 }
 
@@ -73,7 +75,9 @@ export function AddThisComputer({client, status}: {client: SessionClient; status
   const current = useRef(flow); current.current = flow;
   useEffect(() => { if (!flow || flow.ready) return; let live = true; const t = setInterval(() => { void call(client, root + '/flow/status', {flowId: flow.flowId, clientNonce: flow.clientNonce}).then(r => { if (!live) return; if (r.state === 'ready') { clearInterval(t); setFlow({...flow, ready: true}); void finish({...flow, ready: true}); } else if (r.state === 'failed') { clearInterval(t); setFlow(null); setNotice('Sign-in did not finish. Nothing changed. Sign in again when you are ready.'); } }).catch(() => { clearInterval(t); setFlow(null); setNotice('The sign-in took too long. Start again.'); }); }, 1500); return () => { live = false; clearInterval(t); }; }, [flow?.flowId]);
   const run = async (fn: () => Promise<void>) => { setBusy(true); setNotice(''); try { await fn(); } catch (e) { setNotice(computerAccountWords((e as Error).message)); } finally { setBusy(false); } };
-  const start = () => run(async () => { const bytes = crypto.getRandomValues(new Uint8Array(32)); const clientNonce = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); const r = await call(client, root + '/flow/start', {kind: 'connect', clientNonce, label: name.trim() || 'Computer', confirmed: true}); setFlow({flowId: r.flowId, clientNonce}); });
+  // The name is optional: without one the computer registers with its own name (for example “Mohamed’s MacBook Pro”).
+  const start = (kind: 'connect' | 'recover' = 'connect') => run(async () => { const bytes = crypto.getRandomValues(new Uint8Array(32)); const clientNonce = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); const r = await call(client, root + '/flow/start', {kind, clientNonce, ...(name.trim() ? {label: name.trim()} : {}), confirmed: true}); setFlow({flowId: r.flowId, clientNonce}); });
+  const [firstAsk, setFirstAsk] = useState(false);
   async function finish(f = current.current, verification?: {challenge: string; nonce: string; code: string}) { if (!f) return; await run(async () => { const r = await call(client, root + '/flow/finish', {flowId: f.flowId, clientNonce: f.clientNonce, ...(verification ? {verification} : {})}); if (r.verificationRequired) { setVerify({challenge: r.challenge, nonce: r.nonce}); return; } setVerify(null); setFlow(null); }); }
   const join = () => run(async () => { await call(client, root + '/join-with-code', {code: code.trim(), confirmed: true}); setCode(''); });
 
@@ -93,15 +97,35 @@ export function AddThisComputer({client, status}: {client: SessionClient; status
   </div>;
   if (waiting) {
     const self = status?.pairing?.self;
+    // No other computer of this account is on: it can never say Yes. Offer to start over with this one as the first.
+    const othersOn = (status?.view?.devices ?? []).some(d => d.id !== status?.view?.deviceId && d.status === 'approved' && d.presence === 'online');
+    if (flow || verify) return <div className="computer-join">
+      <h2>Make this the first computer</h2>
+      {verify ? <div className="computer-join-code"><label className="phone-field"><span>Code from your authenticator app</span><input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))}/></label><button type="button" className="primary" disabled={busy || code.length !== 6} onClick={() => void finish(current.current, {...verify, code: code.trim()})}>Continue</button></div>
+        : <p role="status" className="fine-print">Continue with Google in your browser…</p>}
+      {flow && <button type="button" className="link-button" onClick={() => { void call(client, root + '/flow/cancel', {flowId: flow.flowId, clientNonce: flow.clientNonce}).catch(() => {}); setFlow(null); setVerify(null); }}>Cancel</button>}
+      {notice && <p role="status">{notice}</p>}
+    </div>;
     return <div className="computer-join">
       <p className="computer-steps"><span>1 Signed in</span><b>2 Say Yes on your other computer</b><span>3 Choose what comes</span></p>
       <h2>Now go to your other computer</h2>
-      <ol className="computer-join-list"><li>Open Girru on a computer you already use.</li><li>It asks: “Add this computer to your account?”</li><li>If it shows the same pictures, press Yes, add it.</li></ol>
-      {self?.changed ? <p role="alert">Something changed while you were adding this computer, so it stopped for safety. Sign in again to start over.</p> : self?.code ? <ComputerPictures code={self.code}/> : <p role="status" className="fine-print">Waiting for your other computer…</p>}
+      <p>Open Girru there. It asks “Add this computer to your account?” If it shows the same pictures, press <b>Yes, add it</b>.</p>
+      {self?.changed ? <p role="alert">Something changed while you were adding this computer, so it stopped for safety. Sign in again to start over.</p> : self?.code ? <ComputerPictures code={self.code}/> : <p role="status" className="computer-waiting"><UiIcon name="clock" size={15}/> Waiting for your other computer…</p>}
       {notice && <p role="status">{notice}</p>}
-      {!useCode ? <button type="button" className="link-button" onClick={() => setUseCode(true)}>My other computers are off — use my authenticator code</button>
-        : <div className="computer-join-code"><label className="phone-field"><span>Code from your authenticator app</span><input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))}/></label><button type="button" className="primary" disabled={busy || code.length !== 6} onClick={() => void join()}>Add this computer</button></div>}
-      <p className="fine-print">Signing in alone never adds a computer. Only a Yes from your other computer, or your authenticator code, does.</p>
+      <p className="section-label">Can’t use your other computer?</p>
+      <div className="computer-start-choices" role="group" aria-label="Other ways">
+        <button type="button" className={`computer-start-choice${useCode ? ' is-on' : ''}`} aria-expanded={useCode} onClick={() => { setUseCode(v => !v); setFirstAsk(false); }}>
+          <span className="computer-start-tile"><UiIcon name="key" size={16}/></span><span><b>Use my authenticator code</b><small>If two-step sign-in is on for your account.</small></span>
+        </button>
+        {!othersOn && <button type="button" className={`computer-start-choice${firstAsk ? ' is-on' : ''}`} aria-expanded={firstAsk} onClick={() => { setFirstAsk(v => !v); setUseCode(false); }}>
+          <span className="computer-start-tile"><UiIcon name="screen" size={16}/></span><span><b>Make this the first computer</b><small>None of your other computers is on. Use this if they are old or gone.</small></span>
+        </button>}
+      </div>
+      {useCode && <div className="computer-join-code"><label className="phone-field"><span>Code from your authenticator app</span><input autoFocus inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))}/></label><button type="button" className="primary" disabled={busy || code.length !== 6} onClick={() => void join()}>Add this computer</button></div>}
+      {firstAsk && <div className="computer-first-ask" role="alertdialog" aria-label="Make this the first computer">
+        <p>Your other computers leave your account. Their work stays on them, and you can add them again later. Google asks once more.</p>
+        <div className="setup-actions"><button type="button" onClick={() => setFirstAsk(false)}>Cancel</button><button type="button" className="primary" disabled={busy} onClick={() => { setFirstAsk(false); void start('recover'); }}>Make it the first</button></div>
+      </div>}
     </div>;
   }
   return <div className="computer-join">

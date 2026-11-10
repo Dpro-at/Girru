@@ -85,3 +85,10 @@
 .computer-start-choice .computer-start-tile{display:grid;place-items:center;align-items:center;justify-content:center}
 .setup-welcome .public-mark{width:64px;height:64px;display:grid;place-items:center}
 .setup-welcome .public-mark svg{width:56px;height:56px}
+
+/* Waiting with no other computer on: one quiet way to start over as the first computer. */
+.computer-first { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line, #1D2129); display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.computer-first p { margin: 0; color: var(--muted, #AEB7C4); font-size: 12.5px; line-height: 1.5; }
+.computer-first-ask { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-radius: 10px; background: var(--panel-2, #14171C); box-shadow: inset 0 0 0 1px var(--line-2, #2A2F38); max-width: 520px; }
+.computer-join .computer-waiting { display: flex; align-items: center; gap: 8px; color: var(--muted, #AEB7C4); }
+.computer-join .computer-first-ask { margin-top: 4px; }

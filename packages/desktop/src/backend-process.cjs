@@ -33,6 +33,7 @@ const PASS_THROUGH = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_AL
   'GIRRU_STORE_P2', 'GIRRU_STORE_P2B', 'GIRRU_STORE_P3', 'GIRRU_STORE_P4', 'GIRRU_STORE_P5', 'GIRRU_STORE_P6',
   'GIRRU_STORE_P7', 'GIRRU_STORE_P8', 'GIRRU_STORE_P9', 'GIRRU_STORE_P9B', 'GIRRU_MEMORY_HELPER', 'GIRRU_DOC_INDEX', 'GIRRU_REPO_TRUST'];
 
+const DESKTOP_VERSION = (() => { try { const v = require('../package.json').version; return typeof v === 'string' && /^[A-Za-z0-9.+_-]{1,40}$/.test(v) ? v : '1'; } catch { return '1'; } })();
 function backendEnv({ base = process.env, dataDir, token, allowedOrigin, extra = {} }) {
   const env = {};
   for (const key of PASS_THROUGH) if (typeof base[key] === 'string') env[key] = base[key];
@@ -45,6 +46,8 @@ function backendEnv({ base = process.env, dataDir, token, allowedOrigin, extra =
     AGENT_PLAYER_LAUNCH_TOKEN: token,
     ALLOWED_ORIGINS: allowedOrigin,
     FRONTEND_URL: allowedOrigin,
+    // The version this computer shows to your other computers (Dpro account device list).
+    GIRRU_APP_VERSION: DESKTOP_VERSION,
     ...extra,
   };
 }

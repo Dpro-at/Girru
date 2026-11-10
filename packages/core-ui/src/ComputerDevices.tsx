@@ -12,14 +12,15 @@ export function ComputerDevicesProvider({ client, enabled, children }: {
 }) { const [view, setView] = useState<ComputerOverview | null>(null); useEffect(() => { if (!enabled) {
     setView(null);
     return;
-} let current = true; let timer: ReturnType<typeof setInterval> | undefined; const load = async () => { try {
+} let current = true; let timer: ReturnType<typeof setInterval> | undefined; let slowNow = false; const load = async () => { try {
     const r = await client.request({ method: 'GET', path: '/api/computers' });
     if (current) {
-        // Not set up yet (no Dpro account on this installation): say so and stop asking every 2 seconds.
+        // Not set up yet (no Dpro account, or this computer still waiting to be added): say so and ask
+        // every 10 seconds instead of every 2, so the page notices when the computer is added.
         const next = r.status === 200 ? r.body as ComputerOverview : r.status === 400 || r.status === 404 || r.status === 409 ? NOT_SET_UP : null;
         setView(next);
-        if (next && !next.testOnly && !next.configured && timer)
-            clearInterval(timer);
+        const slow = !!next && !next.testOnly && !next.configured;
+        if (slow !== slowNow) { slowNow = slow; clearInterval(timer); timer = setInterval(() => void load(), slow ? 10_000 : 2000); }
     }
 }
 catch {

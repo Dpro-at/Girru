@@ -26,12 +26,42 @@ async function readInstalledClient(file, expectedClientId) {
   } catch { throw Error('device_google_installed_client_invalid'); }
   finally { await handle.close(); }
 }
-function protectedGoogleLogin({ custody, login, selectInstalledClient }) {
+/**
+ * The Dpro account service finishes Google sign-in with the secret it keeps (POST <origin>/google/token),
+ * so no computer needs a Google client file. Only the one-time code, the PKCE verifier and the loopback
+ * redirect are sent; only the ID token comes back, and it is still verified here.
+ */
+function serverGoogleExchange(origin, fetcher = fetch) {
+  let base;
+  try { base = new URL(origin); } catch { return null; }
+  if (!(base.protocol === 'https:' || base.protocol === 'http:' && base.hostname === '127.0.0.1') || base.search || base.hash) return null;
+  const url = base.href.replace(/\/$/, '') + '/google/token';
+  const post = async body => {
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15000);
+    try {
+      const r = await fetcher(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), redirect: 'error', signal: controller.signal });
+      const text = await r.text();
+      if (text.length > 32768) throw Error('device_google_server_exchange_refused');
+      return { status: r.status, body: JSON.parse(text) };
+    } finally { clearTimeout(timer); }
+  };
+  return {
+    /** An empty request tells a configured service (input refused) from one without the secret or an older one. */
+    async available() { try { const r = await post({}); return r.status === 403 && r.body?.code === 'account_input_invalid'; } catch { return false; } },
+    async exchange(input) {
+      const r = await post(input);
+      if (r.status !== 200 || Object.keys(r.body ?? {}).join() !== 'idToken' || typeof r.body.idToken !== 'string' || r.body.idToken.length > 20000) throw Error('device_google_server_exchange_refused');
+      return r.body.idToken;
+    },
+  };
+}
+function protectedGoogleLogin({ custody, login, selectInstalledClient, server = null }) {
   return async options => {
     const checkActive = () => { if (options.signal?.aborted) throw Error('device_google_login_cancelled'); };
     checkActive();
     let config = await custody.read(s => s.googleInstalledClient);
     if (!config || config.clientId !== options.clientId) {
+      if (server && await server.available()) { checkActive(); return login({ ...options, exchange: server.exchange }); }
       if (!selectInstalledClient) return login(options);
       const selected = await selectInstalledClient(options.clientId);
       if (!selected) throw Error('device_google_configuration_cancelled');
@@ -44,4 +74,4 @@ function protectedGoogleLogin({ custody, login, selectInstalledClient }) {
     return login({ ...options, clientSecret: config.clientSecret });
   };
 }
-module.exports = { validateInstalledClient, readInstalledClient, protectedGoogleLogin };
+module.exports = { validateInstalledClient, readInstalledClient, protectedGoogleLogin, serverGoogleExchange };

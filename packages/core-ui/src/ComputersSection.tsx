@@ -51,6 +51,8 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   const ownVersion = account?.view?.devices?.find(d => d.id === account?.view?.deviceId)?.appVersion;
   const older = (publicKey?: string) => { const v = accountDevice(publicKey)?.appVersion; return !!v && !!ownVersion && v !== ownVersion ? v : null; };
   const self = view?.self ?? null;
+  // While this computer waits to be added, the coordinator has no list yet; the account still knows it.
+  const accountSelf = account?.view?.devices?.find(d => d.id === account?.view?.deviceId) ?? null;
   const devices = useMemo(() => (view?.devices ?? []).filter(d => d.state !== 'revoked'), [view]);
   const attempts = view?.attempts ?? [];
   useEffect(() => { if (!selected && self) setSelected(self.id); }, [selected, self]);
@@ -86,6 +88,9 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
     {self && <button type="button" className="nav-item dk-place" aria-current={isSelf ? 'page' : undefined} onClick={() => setSelected(self.id)}>
       <UiIcon name={iconOf(self.id)} size={15}/><span className="dk-place-name">{nameOf(self.id, self.name)}</span><span className="dk-count">this one</span>
       {attempts.filter(a => a.targetDevice === self.id && WAITING.has(a.state)).length > 0 && <span className="dk-badge-pill" title="Needs you">{attempts.filter(a => a.targetDevice === self.id && WAITING.has(a.state)).length}</span>}
+    </button>}
+    {!self && accountSelf && <button type="button" className="nav-item dk-place" aria-current="page" title={accountSelf.status === 'pending' ? 'Waiting to be added to your account' : undefined}>
+      <UiIcon name={computerIcon(look, accountSelf.id, accountSelf.osFamily)} size={15}/><span className="dk-place-name">{nameOf(accountSelf.id, accountSelf.label)}</span><span className="dk-count">{accountSelf.status === 'pending' ? 'waiting' : 'this one'}</span>
     </button>}
     {devices.map(d => <button key={d.id} type="button" className="nav-item dk-place" aria-current={selected === d.id ? 'page' : undefined} onClick={() => setSelected(d.id)} onContextMenu={e => { setSelected(d.id); menu.at(e, menuFor(d)); }}>
       <UiIcon name={iconOf(d.id, d.publicKey)} size={15}/><span className="dk-place-name">{nameOf(d.id, d.name)}</span>
