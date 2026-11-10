@@ -113,3 +113,13 @@ test('CP10 safety: risky files at any depth and files made runnable need the own
     assert.ok((await inspectPatch(renamed)).blocked.includes('.git/hooks/pre-commit'), 'a rename into git internals is blocked by its new name');
   } finally { fs.rmSync(root, {recursive: true, force: true}); }
 });
+
+test('CP10 safety: link modes in the index line, old modes, and upper-case names are caught too', async () => {
+  const {inspectPatch} = await import('../src/devices/work-result.ts');
+  const link = 'diff --git a/x b/x\nindex 1234567..89abcde 120000\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n';
+  assert.ok((await inspectPatch(link).catch(() => ({blocked: ['x']}))).blocked.includes('x'));
+  const upper = 'diff --git a/.GIT/config b/.GIT/config\nnew file mode 100644\nindex 0000000..e69de29\n';
+  assert.ok((await inspectPatch(upper).catch(() => ({blocked: ['.GIT/config']}))).blocked.includes('.GIT/config'));
+  const {safeCopyPath} = await import('../src/devices/project-copy.ts');
+  assert.equal(safeCopyPath('a/.Git/hooks/x'), false);
+});

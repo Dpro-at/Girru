@@ -82,6 +82,7 @@ async function pushBranch(top: string, patch: string, branch: string, title: str
 /** Names that hold keys and secrets; the work is never sent when it touches one. */
 const SECRET_NAME = /^\.env(?:\.|$)|^\.envrc$|^\.dev\.vars$|\.(?:pem|key|p12|pfx|jks|keystore|tfstate|tfvars)$|^id_(?:rsa|ed25519|ecdsa|dsa)|^credentials|^(?:secrets\.env|\.credentials\.json|\.npmrc|\.netrc|\.git-credentials|\.pgpass|auth\.json|service-account.*\.json|.*-credentials\.json)$/i;
 export const secretPath = (p: string) => p.split('/').some(n => SECRET_NAME.test(n));
+/** For any line of a patch header that is not one git writes for a plain change, refuse rather than guess. */
 
 export const patchParts = (patch: string) => Array.from({ length: Math.max(1, Math.ceil(patch.length / PART_CHARS)) }, (_, i) => patch.slice(i * PART_CHARS, (i + 1) * PART_CHARS));
 
@@ -123,15 +124,18 @@ export async function inspectPatch(patch: string): Promise<{ files: string[]; bl
     let m: RegExpExecArray | null;
     if (line.startsWith('diff --git ')) { close(); m = /^diff --git (\S+|"[^"]*") (\S+|"[^"]*")$/.exec(line); if (!m) { blocked.add(line.slice(11, 200)); continue; } entry.push(strip(m[1]), strip(m[2])); }
     else if ((m = /^(?:rename|copy) (?:from|to) (.+)$/.exec(line))) entry.push(unquote(m[1]));
-    else if ((m = /^(?:new file mode|new mode|mode change \d+ =>) (\d{6})/.exec(line)) || (m = /^mode change \d+ => (\d{6})/.exec(line))) {
+    else if ((m = /^(?:old mode|new mode|new file mode|deleted file mode) (\d{6})$/.exec(line)) || (m = /^mode change \d{6} => (\d{6})/.exec(line)) || (m = /^index [0-9a-f]+\.\.[0-9a-f]+ (\d{6})$/.exec(line))) {
+      // Any link or submodule mode, old or new, blocks the entry; a runnable mode needs the second press.
       const mode = m[1], names = [...entry];
       if (mode === '120000' || mode === '160000') names.forEach(n => blocked.add(n));
       else if (mode === '100755') names.forEach(n => risky.add(n));
+      else if (mode !== '100644') names.forEach(n => blocked.add(n));
     }
   }
   close();
   for (const f of files) {
-    if (f.split('/').includes('.git') || f.startsWith('/') || f.split('/').includes('..') || secretPath(f)) blocked.add(f);
+    // Case-insensitive, as macOS and Windows file systems are.
+    if (f.toLowerCase().split('/').includes('.git') || f.startsWith('/') || f.includes('\\') || f.split('/').includes('..') || secretPath(f)) blocked.add(f);
     if (RISKY.test(f)) risky.add(f);
   }
   // git's own reading must agree with ours (no entry git sees that we did not).
@@ -144,7 +148,7 @@ export async function inspectPatch(patch: string): Promise<{ files: string[]; bl
   return { files: [...files], blocked: [...blocked], risky: [...risky].filter(f => !blocked.has(f)) };
 }
 /** Files that run programs or change how the project is built or checked, at any folder depth. */
-const RISKY = /(?:^|\/)(?:\.github|\.gitlab|\.circleci|\.husky|\.githooks|\.devcontainer|\.buildkite)\/|(?:^|\/)\.vscode\/(?:tasks|launch|settings)\.json$|(?:^|\/)(?:package\.json|Makefile|makefile|GNUmakefile|Dockerfile|docker-compose\.ya?ml|compose\.ya?ml|\.gitlab-ci\.yml|Jenkinsfile|\.pre-commit-config\.yaml|setup\.py|setup\.cfg|pyproject\.toml|build\.gradle(?:\.kts)?|settings\.gradle(?:\.kts)?|pom\.xml|Cargo\.toml|build\.rs|\.npmrc|\.yarnrc(?:\.yml)?|\.envrc|justfile|Taskfile\.ya?ml|(?:vite|webpack|rollup|babel|jest|vitest|eslint)\.config\.[cm]?[jt]s|\.gitattributes|\.gitmodules)$/;
+const RISKY = /(?:^|\/)(?:\.github|\.gitlab|\.circleci|\.husky|\.githooks|\.devcontainer|\.buildkite)\/|(?:^|\/)\.vscode\/(?:tasks|launch|settings)\.json$|(?:^|\/)(?:package\.json|Makefile|makefile|GNUmakefile|Dockerfile|docker-compose\.ya?ml|compose\.ya?ml|\.gitlab-ci\.yml|Jenkinsfile|\.pre-commit-config\.yaml|setup\.py|setup\.cfg|pyproject\.toml|build\.gradle(?:\.kts)?|settings\.gradle(?:\.kts)?|pom\.xml|Cargo\.toml|build\.rs|\.npmrc|\.yarnrc(?:\.yml)?|\.envrc|justfile|Taskfile\.ya?ml|(?:vite|webpack|rollup|babel|jest|vitest|eslint)\.config\.[cm]?[jt]s|\.gitattributes|\.gitmodules)$/i;
 
 /** Bring into: apply the work to the project folder (not committed: the owner reviews and saves it as usual). */
 export async function bringInto(folder: string, patch: string): Promise<{ ok: true } | { ok: false; conflicts: string[] }> {
