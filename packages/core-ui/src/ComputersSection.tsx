@@ -7,10 +7,11 @@ import {ComputerTaskRequest} from './ComputerTaskRequest';
 import {ComputerTaskTiming} from './ComputerTaskTiming';
 import {ComputerLinkControls} from './ComputerLinkControls';
 import {Sheet, ContextMenu, useMenu, type MenuItem} from './desktop-ui';
-import {COMPUTER_ICONS, computerIcon, computerName, useComputerLook, type ComputerIconKey} from './ComputerLook';
+import {computerIcon, computerName, useComputerLook, type ComputerIconKey} from './ComputerLook';
 import {AddThisComputer, ComputerJoinRequests, useAccountStatus} from './ComputerJoin';
 import {ContinuityRequests} from './ComputerStart';
 import {AllowTask} from './ComputerTaskRules';
+import {RenameComputerSheet, forgetComputerLater, ForgetNotice, useForgetPending} from './ComputerActions';
 import {UiIcon} from './ui-icons';
 
 /** Tasks that wait for this computer's owner to allow them. */
@@ -36,7 +37,6 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   const account = useAccountStatus(client, active);
   const [selected, setSelected] = useState('');
   const [adding, setAdding] = useState(false);
-  const [forget, setForget] = useState(false);
   const [notice, setNotice] = useState('');
   const [inspector, setInspector] = useState(true);
   const [renaming, setRenaming] = useState<{id: string; name: string; icon: ComputerIconKey | null} | null>(null);
@@ -54,6 +54,8 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   // While this computer waits to be added, the coordinator has no list yet; the account still knows it.
   const accountSelf = account?.view?.devices?.find(d => d.id === account?.view?.deviceId) ?? null;
   const devices = useMemo(() => (view?.devices ?? []).filter(d => d.state !== 'revoked'), [view]);
+  const forgetting = useForgetPending();
+  const listed = devices.filter(d => d.id !== forgetting);
   const attempts = view?.attempts ?? [];
   useEffect(() => { if (!selected && self) setSelected(self.id); }, [selected, self]);
   const device = devices.find(d => d.id === selected);
@@ -67,12 +69,6 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
     try { const r = await client.request({method: 'POST', path: `/api/computers/tasks/${encodeURIComponent(a.taskId)}/cancel`}); setNotice(r.status === 200 ? 'Stopping the task.' : 'The task could not be stopped.'); }
     catch { setNotice('The task could not be stopped.'); }
   };
-  const forgetNow = async () => {
-    if (!device) return;
-    try { const r = await client.request({method: 'POST', path: `/api/computers/peers/${encodeURIComponent(device.id)}/revoke`}); setNotice(r.status === 200 ? `${device.name} was forgotten.` : 'It could not be forgotten.'); if (r.status === 200) setSelected(self?.id ?? ''); }
-    catch { setNotice('It could not be forgotten.'); }
-    finally { setForget(false); }
-  };
 
   const renameItem = (id: string, name: string): MenuItem => ({label: 'Rename and icon…', icon: 'pencil', shortcut: '↩', run: () => setRenaming({id, name, icon: look?.icons[id] as ComputerIconKey ?? null})});
   const menuFor = (d: {id: string; name: string}): MenuItem[] => [
@@ -80,7 +76,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
     {label: 'Works on…', icon: 'board', run: () => { setSelected(d.id); setInspector(true); }},
     renameItem(d.id, nameOf(d.id, d.name)),
     'sep',
-    {label: 'Forget this computer', icon: 'trash', shortcut: '⌫', danger: true, run: () => { setSelected(d.id); setForget(true); }},
+    {label: 'Forget this computer', icon: 'trash', shortcut: '⌫', danger: true, run: () => { forgetComputerLater(client, {id: d.id, name: nameOf(d.id, d.name)}); setSelected(self?.id ?? ''); }},
   ];
   const menuForSelf = (): MenuItem[] => [renameItem(self?.id ?? '', nameOf(self?.id ?? '', self?.name ?? 'This computer')), {label: 'Settings › Computers', icon: 'gear', run: onSettings}];
   const nav = <nav className="dk-sidebar computers-places" aria-label="My computers">
@@ -92,7 +88,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
     {!self && accountSelf && <button type="button" className="nav-item dk-place" aria-current="page" title={accountSelf.status === 'pending' ? 'Waiting to be added to your account' : undefined}>
       <UiIcon name={computerIcon(look, accountSelf.id, accountSelf.osFamily)} size={15}/><span className="dk-place-name">{nameOf(accountSelf.id, accountSelf.label)}</span><span className="dk-count">{accountSelf.status === 'pending' ? 'waiting' : 'this one'}</span>
     </button>}
-    {devices.map(d => <button key={d.id} type="button" className="nav-item dk-place" aria-current={selected === d.id ? 'page' : undefined} onClick={() => setSelected(d.id)} onContextMenu={e => { setSelected(d.id); menu.at(e, menuFor(d)); }}>
+    {listed.map(d => <button key={d.id} type="button" className="nav-item dk-place" aria-current={selected === d.id ? 'page' : undefined} onClick={() => setSelected(d.id)} onContextMenu={e => { setSelected(d.id); menu.at(e, menuFor(d)); }}>
       <UiIcon name={iconOf(d.id, d.publicKey)} size={15}/><span className="dk-place-name">{nameOf(d.id, d.name)}</span>
       <span className={`computer-dot ${d.state === 'available' || d.state === 'busy' ? 'on' : 'off'}`} title={computerStateLabel(d.state)} aria-label={computerStateLabel(d.state)}/>
       {waitingFrom(d.id).length > 0 && <span className="dk-badge-pill" title="Needs you">{waitingFrom(d.id).length}</span>}
@@ -121,6 +117,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
         <button type="button" className="tool" title={inspector ? 'Hide details' : 'Show details'} aria-label={inspector ? 'Hide details' : 'Show details'} aria-pressed={inspector} onClick={() => setInspector(v => !v)}><UiIcon name="inspector" size={15}/></button>
       </header>
       {notice && <p role="status" className="fine-print">{notice}</p>}
+      <ForgetNotice/>
       {!isSelf && device && older(device.publicKey) && <div className="computer-task computer-version" role="status"><UiIcon name="download" size={16}/><span className="computer-task-text"><b>{nameOf(device.id, device.name)} has another Girru version</b><small>It can still be seen, but it can’t take new tasks until both run the same version. It updates by itself the next time it opens (backup first).</small></span></div>}
       {isSelf && <ComputerJoinRequests client={client} status={account}/>}
       {isSelf && <ContinuityRequests client={client} status={account}/>}
@@ -153,13 +150,6 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
       {view && <details><summary>Older way, with a code to copy</summary><ComputerLinkControls client={client} view={view} onNotice={setNotice}/></details>}
     </Sheet>}
     <ContextMenu menu={menu.menu} onClose={menu.close}/>
-    {renaming && <Sheet title="Rename and icon" onClose={() => setRenaming(null)} actions={<><button type="button" onClick={() => setRenaming(null)}>Cancel</button><button type="button" className="primary" disabled={!renaming.name.trim()} onClick={() => { const r = renaming; void save(r.id, {name: r.name.trim(), ...(r.icon ? {icon: r.icon} : {})}).then(() => setRenaming(null)).catch(() => setNotice('It could not be saved.')); }}>Save</button></>}>
-      <label className="phone-field"><span>Name on this computer</span><input autoFocus value={renaming.name} maxLength={64} onChange={e => setRenaming({...renaming, name: e.target.value})}/></label>
-      <div className="computer-icons" role="radiogroup" aria-label="Picture">{COMPUTER_ICONS.map(i => <button key={i.key} type="button" role="radio" aria-checked={renaming.icon === i.key} className={`computer-icon-choice${renaming.icon === i.key ? ' is-on' : ''}`} title={i.name} onClick={() => setRenaming({...renaming, icon: i.key})}><UiIcon name={i.icon} size={22}/><small>{i.name}</small></button>)}</div>
-      <p className="fine-print">Girru picks the picture from the system by itself; choose another if you like.</p>
-    </Sheet>}
-    {forget && device && <Sheet title={`Forget “${device.name}”?`} onClose={() => setForget(false)} actions={<><button type="button" onClick={() => setForget(false)}>Cancel</button><button type="button" className="danger" onClick={() => void forgetNow()}>Forget this computer</button></>}>
-      <p>It can no longer send or take tasks. To use it again, add it again.</p>
-    </Sheet>}
+    {renaming && <RenameComputerSheet target={renaming} onSave={save} onClose={() => setRenaming(null)}/>}
   </section>;
 }

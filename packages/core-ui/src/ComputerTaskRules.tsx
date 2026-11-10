@@ -9,7 +9,7 @@ import type {UiIconName} from './ui-icons';
  * once, or always from that computer in that project.
  */
 export type TaskRule = 'ask' | 'auto' | 'refuse';
-type Rules = {rule: TaskRule; projects: Record<string, TaskRule>; always: {source: string; projectId: string}[]};
+export type Rules = {rule: TaskRule; projects: Record<string, TaskRule>; always: {source: string; projectId: string}[]; atOnce?: number; column?: string | null};
 const CHOICES: ReadonlyArray<{key: TaskRule; title: string; note: string; icon: UiIconName}> = [
   {key: 'ask', title: 'Ask me every time', note: 'A notice with Allow / Not now. Recommended.', icon: 'inbox'},
   {key: 'auto', title: 'Allow automatically', note: 'It starts at once, with this computer’s rules for agents.', icon: 'play'},
@@ -18,7 +18,7 @@ const CHOICES: ReadonlyArray<{key: TaskRule; title: string; note: string; icon: 
 export const taskRuleWords = (r: TaskRule) => CHOICES.find(c => c.key === r)!.title.replace(' every time', '');
 const path = '/api/computers/task-rules';
 
-async function post(client: SessionClient, body: unknown): Promise<Rules> {
+export async function post(client: SessionClient, body: unknown): Promise<Rules> {
   const r = await client.request({method: 'POST', path, body});
   if (r.status !== 200) throw Error('rules_refused');
   return r.body as Rules;
@@ -66,11 +66,45 @@ export function ComputerTaskRules({client, deviceNames}: {client: SessionClient;
       <button type="button" className="tool" title="Stop allowing always" aria-label="Stop allowing always" onClick={() => change({always: {source: a.source, projectId: a.projectId, on: false}})}><UiIcon name="close" size={13}/></button>
     </div>)}</div></>}
     <p className="section-label">Where allowed tasks go</p>
-    <p className="fine-print"><UiIcon name="board" size={13}/> The project’s Board, in its first column. Each computer works in its own copy, on its own branch.</p>
-    <p className="section-label">Tasks at once on this computer</p>
-    <p className="fine-print"><UiIcon name="layers" size={13}/> Up to 3. More wait their turn on the computer that sent them.</p>
+    <LandingColumn rules={rules} onChange={change}/>
     {notice && <p role="status" className="fine-print">{notice}</p>}
   </div>;
+}
+
+/** CP6 “Where allowed tasks go”: the project's Board, in the first column or a column the owner names. */
+function LandingColumn({rules, onChange}: {rules: Rules; onChange: (body: unknown) => void}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(rules.column ?? '');
+  const where = rules.column ? `The project’s Board, column ${rules.column}` : 'The project’s Board, in its first column';
+  return <div className="phone-list" role="list">
+    <div className="phone-row" role="listitem"><span className="phone-tile"><UiIcon name="board" size={15}/></span>
+      <span className="phone-row-text"><b>{where}</b><small>Each computer works in its own copy, on its own branch.</small></span>
+      {!editing && <button type="button" onClick={() => { setName(rules.column ?? ''); setEditing(true); }}>Change…</button>}
+    </div>
+    {editing && <div className="computer-rule-add">
+      <label className="phone-field"><span>Column name</span><input autoFocus value={name} maxLength={60} placeholder="To do" onChange={e => setName(e.target.value)}/></label>
+      <p className="fine-print">Used on every project’s Board that has a column with this name; otherwise the first column.</p>
+      <div className="setup-actions">
+        {rules.column && <button type="button" onClick={() => { onChange({column: null}); setEditing(false); }}>Use the first column</button>}
+        <button type="button" onClick={() => setEditing(false)}>Cancel</button>
+        <button type="button" className="primary" disabled={!name.trim()} onClick={() => { onChange({column: name.trim()}); setEditing(false); }}>Save</button>
+      </div>
+    </div>}
+  </div>;
+}
+
+/** CP6d “Tasks at once on this computer” (1–5); more wait their turn on the computer that sent them. */
+export function TasksAtOnce({client}: {client: SessionClient}) {
+  const [rules, setRules] = useState<Rules | null>(null);
+  const [notice, setNotice] = useState('');
+  useEffect(() => { let live = true; void client.request({method: 'GET', path}).then(r => { if (live && r.status === 200) setRules(r.body as Rules); }).catch(() => {}); return () => { live = false; }; }, [client]);
+  if (!rules) return null;
+  return <div className="phone-list" role="list"><div className="phone-row" role="listitem">
+    <span className="phone-tile"><UiIcon name="layers" size={15}/></span>
+    <span className="phone-row-text"><b>Tasks at once on this computer</b><small>More wait their turn on the computer that sent them.</small></span>
+    <select aria-label="Tasks at once on this computer" value={rules.atOnce ?? 3} onChange={e => void post(client, {atOnce: Number(e.target.value)}).then(setRules).catch(() => setNotice('It could not be saved. Try again.'))}>{[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}</option>)}</select>
+    {notice && <small role="status">{notice}</small>}
+  </div></div>;
 }
 
 /** CP4b: Allow a task that arrived, once or always from that computer in that project; Not now keeps it waiting. */

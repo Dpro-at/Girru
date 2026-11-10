@@ -5,7 +5,7 @@ import {computerLook, computerLookChangeOk} from '../src/api/routes/computer-loo
 
 test('tasks from other computers: ask by default, project exceptions, always-allow per computer and project (CP6, CP4b)', () => {
   const none = taskRules(undefined);
-  assert.deepEqual(none, {rule: 'ask', projects: {}, always: []});
+  assert.deepEqual(none, {rule: 'ask', projects: {}, always: [], atOnce: 3, column: null});
   const rules = taskRules({rule: 'auto', projects: {p1: 'refuse', p2: 'ask', 'bad id!': 'auto', p3: 'maybe'}, always: [{source: 'mac', projectId: 'p2'}, {source: 'x'}]});
   assert.deepEqual(rules.projects, {p1: 'refuse', p2: 'ask'});
   assert.equal(rules.always.length, 1);
@@ -55,4 +55,17 @@ test('the checked value is the saved value: a change that would be cut off is re
   assert.equal(Object.keys(full.projects).length, 500);
   assert.throws(() => applyTaskRulesChange(full, {project: {id: 'new', rule: 'refuse'}}), /computer_task_rules_full/);
   assert.equal(applyTaskRulesChange(full, {project: {id: 'p1', rule: null}}).projects.p1, undefined);
+});
+
+test('tasks at once (1–5) and the landing column are owner choices; fewer at once counts as stricter', async () => {
+  const {taskRules, applyTaskRulesChange, changeIsStricter, taskRulesChangeOk} = await import('../src/devices/task-rules.ts');
+  const base = taskRules(undefined);
+  assert.equal(applyTaskRulesChange(base, {atOnce: 1}).atOnce, 1);
+  assert.equal(applyTaskRulesChange(base, {column: 'To do'}).column, 'To do');
+  assert.equal(applyTaskRulesChange({...base, column: 'To do'}, {column: null}).column, null);
+  for (const bad of [{atOnce: 0}, {atOnce: 6}, {atOnce: 2.5}, {column: ''}, {column: ' padded'}, {column: 'x'.repeat(61)}]) assert.equal(taskRulesChangeOk(bad), false);
+  assert.equal(changeIsStricter(base, {atOnce: 2}), true);
+  assert.equal(changeIsStricter(base, {atOnce: 5}), false);
+  assert.equal(changeIsStricter(base, {column: 'Review'}), false);
+  assert.deepEqual(taskRules({atOnce: 9, column: 7}), {...base});
 });
