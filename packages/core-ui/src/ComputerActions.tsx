@@ -26,7 +26,7 @@ type Pending = {id: string; name: string; publicKey?: string; at: number; timer:
 let pending: Pending | null = null;
 const listeners = new Set<() => void>();
 const changed = () => { for (const l of [...listeners]) l(); };
-let lastResult: {name: string; ok: boolean} | null = null;
+let lastResult: {name: string; ok: boolean; partial?: boolean} | null = null;
 
 export function forgetComputerLater(client: SessionClient, device: {id: string; name: string; publicKey?: string}) {
   if (pending) { clearTimeout(pending.timer); void runForget(client, pending); }
@@ -35,16 +35,19 @@ export function forgetComputerLater(client: SessionClient, device: {id: string; 
 }
 async function runForget(client: SessionClient, item: Pending) {
   if (pending === item) pending = null;
-  let ok = false;
-  // A computer in your Dpro account leaves the account (the account revokes it); a linked one is also forgotten here.
+  // A computer in your Dpro account must leave the account; the link here is forgotten too. The account decides the result.
+  let inAccount: boolean | null = null, accountOk = false, hereOk = false;
   try {
     const status = await client.request({method: 'GET', path: '/api/computers/account'});
+    if (status.status !== 200) throw Error();
     const view = (status.body as {view?: {devices?: {id: string; publicKey?: string; status?: string}[]}} | null)?.view;
     const match = view?.devices?.find(d => d.status !== 'revoked' && (d.id === item.id || !!item.publicKey && d.publicKey === item.publicKey));
-    if (match) { const r = await client.request({method: 'POST', path: '/api/computers/account/devices/revoke', body: {deviceId: match.id, confirmed: true}}); ok = r.status === 200; }
-  } catch { ok = false; }
-  try { const r = await client.request({method: 'POST', path: `/api/computers/peers/${encodeURIComponent(item.id)}/revoke`}); ok = ok || r.status === 200; } catch { /* not linked here */ }
-  lastResult = {name: item.name, ok}; changed();
+    inAccount = !!match;
+    if (match) { const r = await client.request({method: 'POST', path: '/api/computers/account/devices/revoke', body: {deviceId: match.id, confirmed: true}}); accountOk = r.status === 200; }
+  } catch { inAccount = inAccount ?? null; }
+  try { const r = await client.request({method: 'POST', path: `/api/computers/peers/${encodeURIComponent(item.id)}/revoke`}); hereOk = r.status === 200; } catch { /* not linked here */ }
+  const ok = inAccount === true ? accountOk : inAccount === false ? hereOk : false;
+  lastResult = {name: item.name, ok, partial: !ok && hereOk}; changed();
 }
 export function undoForget() { if (!pending) return; clearTimeout(pending.timer); pending = null; lastResult = null; changed(); }
 
@@ -53,7 +56,7 @@ export function ForgetNotice() {
   const [, tick] = useState(0);
   useEffect(() => { const l = () => tick(n => n + 1); listeners.add(l); return () => { listeners.delete(l); }; }, []);
   if (pending) return <p role="status" className="computer-undo"><UiIcon name="trash" size={14}/><span>{pending.name} will be forgotten.</span><button type="button" className="link-button" onClick={undoForget}>Undo</button></p>;
-  if (lastResult) return <p role="status" className="computer-undo"><span>{lastResult.ok ? `${lastResult.name} was forgotten. To use it again, add it again.` : `${lastResult.name} could not be forgotten. Try again.`}</span></p>;
+  if (lastResult) return <p role="status" className="computer-undo"><span>{lastResult.ok ? `${lastResult.name} was forgotten. To use it again, add it again.` : lastResult.partial ? `${lastResult.name} was removed here but is still in your Dpro account. Try again.` : `${lastResult.name} could not be forgotten. Try again.`}</span></p>;
   return null;
 }
 export const isForgetting = (id: string) => pending?.id === id;
