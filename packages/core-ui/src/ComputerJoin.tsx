@@ -42,10 +42,12 @@ export async function call(client: SessionClient, path: string, body?: unknown) 
 /** The Dpro account status, read every few seconds while shown. */
 /** This computer was added before: after Girru restarts it reconnects by itself (once per start), no “Resume” button. */
 let resumeTried = false;
+/** Set when that reconnect was refused (for example the account ended this computer's sign-in): the page then offers to sign in instead of waiting. */
+let resumeRefused = false;
 export function useAccountStatus(client: SessionClient, enabled = true) {
   // undefined while reading; null when this window cannot reach the account (a browser, or no desktop app).
   const [status, setStatus] = useState<Status | null | undefined>(undefined);
-  useEffect(() => { if (!enabled) return; let live = true; const load = async () => { try { let s = await call(client, root); if (s?.configured && !s.connected && s.mapping && !resumeTried) { resumeTried = true; try { await call(client, root + '/resume', {}); s = await call(client, root); } catch { /* stays signed out; Computers offers to add it */ } } if (live) setStatus(s); } catch { if (live) setStatus(null); } }; void load(); const t = setInterval(() => void load(), 3000); return () => { live = false; clearInterval(t); }; }, [client, enabled]);
+  useEffect(() => { if (!enabled) return; let live = true; const load = async () => { try { let s = await call(client, root); if (s?.configured && !s.connected && s.mapping && !resumeTried) { resumeTried = true; try { await call(client, root + '/resume', {}); s = await call(client, root); } catch { resumeRefused = true; /* stays signed out; Computers offers to sign in */ } } if (s?.connected) resumeRefused = false; if (live) setStatus(s && resumeRefused && !s.connected ? {...s, resumeRefused: true} : s); } catch { if (live) setStatus(null); } }; void load(); const t = setInterval(() => void load(), 3000); return () => { live = false; clearInterval(t); }; }, [client, enabled]);
   return status;
 }
 
