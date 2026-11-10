@@ -30,6 +30,7 @@ test('agents read task rules, may only make them stricter, and see the free comp
  await assert.rejects(()=>workspaceDevicesTool({operation:'set_task_rules',change:{rule:'auto'},confirmed:true},backend),/owner/);
  await assert.rejects(()=>workspaceDevicesTool({operation:'set_task_rules',change:{always:{source:'pc',projectId:'p',on:true}},confirmed:true},backend));
  await assert.rejects(()=>workspaceDevicesTool({operation:'set_task_rules',change:{back:{id:'p',via:'github'}},confirmed:true},backend),/owner/);
+ await assert.rejects(()=>workspaceDevicesTool({operation:'set_task_rules',change:{tool:'subscription:claude'},confirmed:true},backend),/owner/);
  await assert.rejects(()=>workspaceDevicesTool({operation:'set_task_rules',change:{rule:'ask'}},backend));
  await workspaceDevicesTool({operation:'rename_computer',deviceId:'pc',icon:'windows-pc',confirmed:true},backend);assert.deepEqual(calls.at(-1),{method:'POST',path:'/api/computers/look',body:{deviceId:'pc',icon:'windows-pc'}});
 });
