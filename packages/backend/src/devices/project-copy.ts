@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { gzipSync, gunzipSync } from 'node:zlib';
-import { secretPath } from './work-result.js';
+import { secretPath, confusingSegment } from './work-result.js';
 import { redactImportText } from '../memory/import/redact.js';
 import { minimalChildEnv } from '../tools/exec-policy.js';
 
@@ -65,7 +65,7 @@ export const copyParts = (text: string) => Array.from({ length: Math.max(1, Math
 export function safeCopyPath(p: unknown): p is string {
   if (typeof p !== 'string' || !p || p.length > 600 || p.startsWith('/') || p.includes('\\') || /[\x00-\x1f\x7f]/.test(p)) return false;
   const parts = p.split('/');
-  return !parts.some(n => !n || n === '.' || n === '..' || n.toLowerCase() === '.git') && !secretPath(p);
+  return !parts.some(n => !n || n === '.' || n === '..' || n.toLowerCase() === '.git' || confusingSegment(n)) && !secretPath(p);
 }
 
 /** Write the copy into `parent/name` (a new folder), after checking it arrived whole. */

@@ -38,3 +38,8 @@ test('a project copy carries its files, not ignored or secret files or links, an
     assert.equal(safeCopyPath('src/app.ts'), true);
   } finally { fs.rmSync(root, {recursive: true, force: true}); }
 });
+
+test('names macOS or Windows could read as .git, or with invisible characters, never land', () => {
+  for (const bad of ['a/.git./x', 'a/.git /x', 'GIT~1/config', 'a/name.', 'a/name ', 'a/.g​it/x', 'x/﻿file']) assert.equal(safeCopyPath(bad), false, JSON.stringify(bad));
+  assert.equal(safeCopyPath('docs/readme.md'), true);
+});

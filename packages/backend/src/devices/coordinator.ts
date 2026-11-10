@@ -293,7 +293,7 @@ export class ComputerCoordinator {
         // The list shown is the patch's own; links, git internals and secret files never come in; CI and automation files need a second press.
         const look = await inspectPatch(patch);
         if (look.blocked.length) return { ok: false as const, blocked: look.blocked, conflicts: [] };
-        if (r.mode === 'direct' && (new Set(look.files).size !== new Set(r.files.map(x => x.path)).size || look.files.some(f => !r.files.some(x => x.path === f)))) throw Error('computer_result_changed');
+        if ((r.mode === 'direct' || r.mode === 'github') && (new Set(look.files).size !== new Set(r.files.map(x => x.path)).size || look.files.some(f => !r.files.some(x => x.path === f)))) throw Error('computer_result_changed');
         if (look.risky.length && !confirmRisky) return { ok: false as const, risky: look.risky, conflicts: [] };
         const done = await bringInto(folder, patch);
         if (done.ok) markResult(dataRoot(), a.task_id, 'brought');

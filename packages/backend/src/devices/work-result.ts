@@ -17,7 +17,7 @@ export const DIRECT_MAX_BYTES = 3 * 1024 * 1024;
 export const PART_CHARS = 16_000;
 export type ResultFile = { path: string; added: number; removed: number };
 export type WorkMode = 'github' | 'direct' | 'too_large' | 'none';
-export interface WorkResult { taskId: string; mode: WorkMode; branch?: string; base?: string; files: ResultFile[]; size?: number; sha256?: string; parts?: number }
+export interface WorkResult { taskId: string; mode: WorkMode; branch?: string; base?: string; commit?: string; files: ResultFile[]; size?: number; sha256?: string; parts?: number }
 
 /** No hooks, no pager, no outside programs; the user's own config (identity, credentials) only where it is needed. */
 const SAFE = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-c', 'core.pager=cat', '-c', 'diff.external=', '--no-pager'];
@@ -50,7 +50,7 @@ export async function finishWork(input: { folder: string; start: string; compute
   const branch = branchFor(input.computer, input.taskId);
   if (!diff.rel) {
     const pushed = await pushBranch(diff.top, diff.patch, branch, input.title).catch(() => null);
-    if (pushed) return { result: { taskId: input.taskId, mode: 'github', branch, base: pushed.base, files: diff.files }, patch: '' };
+    if (pushed) return { result: { taskId: input.taskId, mode: 'github', branch, base: pushed.base, commit: pushed.commit, files: diff.files }, patch: '' };
   }
   const size = Buffer.byteLength(diff.patch);
   if (size > DIRECT_MAX_BYTES) return { result: { taskId: input.taskId, mode: 'too_large', files: diff.files }, patch: '' };
@@ -58,7 +58,7 @@ export async function finishWork(input: { folder: string; start: string; compute
 }
 
 /** Commits the patch on top of HEAD without touching the working folder, then pushes it as a new branch to origin on GitHub. */
-async function pushBranch(top: string, patch: string, branch: string, title: string): Promise<{ base: string } | null> {
+async function pushBranch(top: string, patch: string, branch: string, title: string): Promise<{ base: string; commit: string } | null> {
   if (!BRANCH.test(branch)) return null;
   const remote = (await git(top, ['remote', 'get-url', 'origin']).catch(() => '')).trim();
   // Tests stand a local bare repository in for GitHub; real use needs a GitHub origin.
@@ -75,13 +75,15 @@ async function pushBranch(top: string, patch: string, branch: string, title: str
     const tree = (await git(top, ['write-tree'], { index })).trim();
     const commit = (await git(top, ['commit-tree', tree, '-p', base, '-m', title.replace(/[\x00-\x1f\x7f]+/g, ' ').slice(0, 120) || 'Work from another computer'], { user: true })).trim();
     await git(top, ['push', 'origin', `${commit}:refs/heads/${branch}`], { user: true, timeout: 90_000 });
-    return { base };
+    return { base, commit };
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
 /** Names that hold keys and secrets; the work is never sent when it touches one. */
 const SECRET_NAME = /^\.env(?:\.|$)|^\.envrc$|^\.dev\.vars$|\.(?:pem|key|p12|pfx|jks|keystore|tfstate|tfvars)$|^id_(?:rsa|ed25519|ecdsa|dsa)|^credentials|^(?:secrets\.env|\.credentials\.json|\.npmrc|\.netrc|\.git-credentials|\.pgpass|auth\.json|service-account.*\.json|.*-credentials\.json)$/i;
 export const secretPath = (p: string) => p.split('/').some(n => SECRET_NAME.test(n));
+/** A path segment that macOS or Windows could read as something else: .git with trailing dots/spaces, an 8.3 short name, a trailing dot or space, invisible characters. */
+export const confusingSegment = (n: string) => /^\.git[\s.]*$/i.test(n) || /^git~\d+$/i.test(n) || /[. ]$/.test(n) || /[\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/.test(n);
 /** For any line of a patch header that is not one git writes for a plain change, refuse rather than guess. */
 
 export const patchParts = (patch: string) => Array.from({ length: Math.max(1, Math.ceil(patch.length / PART_CHARS)) }, (_, i) => patch.slice(i * PART_CHARS, (i + 1) * PART_CHARS));
@@ -104,10 +106,12 @@ export function directPatch(dataDir: string, r: WorkResult): string {
 }
 /** The GitHub branch's work against the base it started from (fetched, not merged). */
 export async function githubPatch(folder: string, r: WorkResult): Promise<string> {
-  if (!r.branch || !BRANCH.test(r.branch) || !/^[a-f0-9]{40}$/.test(r.base ?? '')) throw Error('computer_result_invalid');
+  if (!r.branch || !BRANCH.test(r.branch) || !/^[a-f0-9]{40}$/.test(r.base ?? '') || !/^[a-f0-9]{40}$/.test(r.commit ?? '')) throw Error('computer_result_invalid');
   const top = (await git(folder, ['rev-parse', '--show-toplevel'])).trim();
   await git(top, ['fetch', '--no-tags', 'origin', `refs/heads/${r.branch}`], { user: true, timeout: 90_000 });
-  return git(top, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--binary', '--full-index', r.base!, 'FETCH_HEAD']);
+  // Exactly the commit the other computer pushed: a branch moved since then is refused.
+  if ((await git(top, ['rev-parse', 'FETCH_HEAD'])).trim() !== r.commit) throw Error('computer_result_changed');
+  return git(top, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--binary', '--full-index', r.base!, r.commit!]);
 }
 /**
  * What a patch really changes, read from the patch itself (not from what the other computer said),
@@ -138,7 +142,7 @@ export async function inspectPatch(patch: string): Promise<{ files: string[]; bl
   close();
   for (const f of files) {
     // Case-insensitive, as macOS and Windows file systems are.
-    if (f.toLowerCase().split('/').includes('.git') || f.startsWith('/') || f.includes('\\') || f.split('/').includes('..') || secretPath(f)) blocked.add(f);
+    if (f.toLowerCase().split('/').includes('.git') || f.split('/').some(confusingSegment) || f.startsWith('/') || f.includes('\\') || f.split('/').includes('..') || secretPath(f)) blocked.add(f);
     if (RISKY.test(f)) risky.add(f);
   }
   // git's own reading must agree with ours (no entry git sees that we did not).
