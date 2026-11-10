@@ -184,8 +184,11 @@ export async function cloneFromGithub(url: string, parent: string): Promise<{ fo
   if (!path.isAbsolute(parent) || !existsSync(parent)) throw Error('computer_project_folder_invalid');
   const name = url.replace(/\.git$/, '').split('/').pop()!.replace(/[^A-Za-z0-9_.-]/g, '-');
   if (!name || name === '.' || name === '..') throw Error('computer_project_url_invalid');
-  const folder = path.join(parent, name);
+  // The new folder is exactly one level inside the folder the owner chose, never beside or above it.
+  const base = path.resolve(parent), folder = path.resolve(base, name);
+  if (!folder.startsWith(base + path.sep) || path.dirname(folder) !== base) throw Error('computer_project_url_invalid');
   if (existsSync(folder)) throw Error('computer_project_folder_exists');
-  await git(parent, ['clone', '--no-recurse-submodules', url, folder], { user: true, timeout: 600_000 });
+  // Git runs from a neutral folder: the target is absolute, and the chosen folder's own settings are never read.
+  await git(tmpdir(), ['clone', '--no-recurse-submodules', url, folder], { user: true, timeout: 600_000 });
   return { folder, name };
 }
