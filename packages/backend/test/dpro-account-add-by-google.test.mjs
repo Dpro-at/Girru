@@ -17,3 +17,8 @@ test('the computer added by signing in trusts the first one, so it can ask it wh
  const result=await until(async()=>{await b.request('status');try{return await b.request('source',{deviceId:first});}catch(e){if(/account_peer_pin_required/.test(e.message))return false;throw e;}});
  assert.ok(result);
 });
+test('the computer added by signing in is never asked to keep itself',async()=>{
+ const [,b]=peers,self=(await b.request('status')).view.deviceId;
+ for(let i=0;i<3;i++){const s=await b.request('status');assert.ok(!(s.pairing?.addedWithCode??[]).some(a=>a.deviceId===self));await new Promise(r=>setTimeout(r,2100));}
+});
+
