@@ -159,7 +159,7 @@ export function FirstRunSetup({ client, initialStep, workspaceType: initialType,
     : entry === 'same' ? <>
       {stepNotice && <p className="setup-note" role="alert">{stepNotice}</p>}
       {joinReady ? <JoinReady name={joined?.name ?? 'This computer'} from={joined?.from ?? 'your other computer'} comes={joined?.comes ?? ''} onOpen={() => void finish()}/>
-        : step === 'discovery' ? <section className="setup-note" role="status" aria-live="polite">
+        : step === 'discovery' ? <section className="setup-note join-scan" role="status" aria-live="polite">
             <p className="computer-steps computer-join-steps"><span>1 Added</span><b>2 What comes</b><span>3 AI tools</span><span>4 Open Girru</span></p>
             {scanFailed ? <><p>Looking through this computer did not finish.</p><div className="setup-actions"><button type="button" className="primary" onClick={() => void startSame()}>Try again</button></div></>
             : <><p><b>Getting this computer ready</b></p>

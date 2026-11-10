@@ -201,3 +201,8 @@
 .shell .computers-inspector .cp-link.cp-link, .shell .computers-inspector .link-button { align-self: flex-start; text-align: left; padding: 0; justify-content: flex-start; }
 .shell .computers-inspector .computers-check { display: flex; flex-direction: row; justify-content: flex-start; align-items: center; gap: 10px; width: auto; }
 .shell .computers-inspector .computers-check input { width: 16px; height: 16px; min-width: 16px; margin: 0; flex: none; }
+/* Join screen while this computer is scanned: a readable block, not one squeezed row (setup-note is a flex row). */
+.setup-note.join-scan { display:block; max-width:560px; margin:24px auto; padding:14px 16px; font-size:13px; }
+.setup-note.join-scan p { margin:0 0 8px; }
+.setup-note.join-scan p:last-child { margin-bottom:0; }
+.setup-note.join-scan .computer-steps { display:flex; gap:12px; margin-bottom:12px; }
