@@ -92,3 +92,24 @@ test('CP10 safety: secret files stop the send, the patch is read for itself, res
     assert.throws(() => part(data, 't5', 0, 'x'), /computer_result_exists/);
   } finally { fs.rmSync(root, {recursive: true, force: true}); }
 });
+
+test('CP10 safety: risky files at any depth and files made runnable need the owner\'s second press', async () => {
+  const {inspectPatch} = await import('../src/devices/work-result.ts');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'girru-risky-')));
+  try {
+    const office = repo(root, 'office');
+    fs.mkdirSync(path.join(office, 'web'));
+    fs.writeFileSync(path.join(office, 'web', 'package.json'), '{"scripts":{}}\n');
+    fs.writeFileSync(path.join(office, 'run.sh'), 'echo hi\n');
+    git(office, 'add', '-A'); git(office, 'commit', '-qm', 'more');
+    const start = await startSnapshot(office);
+    fs.writeFileSync(path.join(office, 'web', 'package.json'), '{"scripts":{"postinstall":"x"}}\n');
+    fs.chmodSync(path.join(office, 'run.sh'), 0o755);
+    const {patch} = await finishWork({folder: office, start, computer: 'PC', taskId: 't6', title: 'x'});
+    const look = await inspectPatch(patch);
+    assert.ok(look.risky.includes('web/package.json'), 'a package.json in a sub-folder counts');
+    assert.ok(look.risky.includes('run.sh'), 'a file made runnable counts');
+    const renamed = 'diff --git a/a.txt b/.git/hooks/pre-commit\nsimilarity index 100%\nrename from a.txt\nrename to .git/hooks/pre-commit\n';
+    assert.ok((await inspectPatch(renamed)).blocked.includes('.git/hooks/pre-commit'), 'a rename into git internals is blocked by its new name');
+  } finally { fs.rmSync(root, {recursive: true, force: true}); }
+});

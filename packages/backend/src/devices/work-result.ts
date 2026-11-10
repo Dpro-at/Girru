@@ -113,19 +113,38 @@ export async function githubPatch(folder: string, r: WorkResult): Promise<string
  * and the paths that need the owner's extra look: links, git internals, CI and automation files.
  */
 export async function inspectPatch(patch: string): Promise<{ files: string[]; blocked: string[]; risky: string[] }> {
+  // Read from the patch's own headers: every entry's old and new names, and every final file mode.
+  const files = new Set<string>(), blocked = new Set<string>(), risky = new Set<string>();
+  const unquote = (p: string) => { const t = p.trim(); if (!t.startsWith('"')) return t; blocked.add(t); return t.slice(1, -1); };
+  const strip = (p: string) => unquote(p).replace(/^[ab]\//, '');
+  let entry: string[] = [];
+  const close = () => { for (const n of entry) files.add(n); entry = []; };
+  for (const line of patch.split('\n')) {
+    let m: RegExpExecArray | null;
+    if (line.startsWith('diff --git ')) { close(); m = /^diff --git (\S+|"[^"]*") (\S+|"[^"]*")$/.exec(line); if (!m) { blocked.add(line.slice(11, 200)); continue; } entry.push(strip(m[1]), strip(m[2])); }
+    else if ((m = /^(?:rename|copy) (?:from|to) (.+)$/.exec(line))) entry.push(unquote(m[1]));
+    else if ((m = /^(?:new file mode|new mode|mode change \d+ =>) (\d{6})/.exec(line)) || (m = /^mode change \d+ => (\d{6})/.exec(line))) {
+      const mode = m[1], names = [...entry];
+      if (mode === '120000' || mode === '160000') names.forEach(n => blocked.add(n));
+      else if (mode === '100755') names.forEach(n => risky.add(n));
+    }
+  }
+  close();
+  for (const f of files) {
+    if (f.split('/').includes('.git') || f.startsWith('/') || f.split('/').includes('..') || secretPath(f)) blocked.add(f);
+    if (RISKY.test(f)) risky.add(f);
+  }
+  // git's own reading must agree with ours (no entry git sees that we did not).
   const dir = mkdtempSync(path.join(tmpdir(), 'girru-look-')), file = path.join(dir, 'work.patch');
   try {
     writeFileSync(file, patch, { mode: 0o600 });
     const numstat = await git(dir, ['apply', '--numstat', '-z', file]);
-    const summary = await git(dir, ['apply', '--summary', file]);
-    const files = [...new Set(numstat.split('\u0000').map(r => /^(?:\d+|-)\t(?:\d+|-)\t(.+)$/.exec(r)?.[1]).filter((x): x is string => !!x))];
-    const blocked = files.filter(f => f.split('/').includes('.git') || f.startsWith('/') || f.split('/').includes('..') || secretPath(f));
-    for (const m of summary.matchAll(/mode 120000 (.+)$/gm)) blocked.push(m[1].trim());
-    const risky = files.filter(f => /^(?:\.github\/|\.gitlab-ci|\.husky\/|\.githooks\/|\.vscode\/(?:tasks|launch|settings)\.json$|\.devcontainer\/|Makefile$|package\.json$)/.test(f));
-    for (const m of summary.matchAll(/mode 100755 (.+)$/gm)) risky.push(m[1].trim());
-    return { files, blocked: [...new Set(blocked)], risky: [...new Set(risky)] };
+    for (const r of numstat.split('\u0000')) { const p = /^(?:\d+|-)\t(?:\d+|-)\t(.+)$/.exec(r)?.[1]; if (p && !files.has(p)) blocked.add(p); }
   } finally { rmSync(dir, { recursive: true, force: true }); }
+  return { files: [...files], blocked: [...blocked], risky: [...risky].filter(f => !blocked.has(f)) };
 }
+/** Files that run programs or change how the project is built or checked, at any folder depth. */
+const RISKY = /(?:^|\/)(?:\.github|\.gitlab|\.circleci|\.husky|\.githooks|\.devcontainer|\.buildkite)\/|(?:^|\/)\.vscode\/(?:tasks|launch|settings)\.json$|(?:^|\/)(?:package\.json|Makefile|makefile|GNUmakefile|Dockerfile|docker-compose\.ya?ml|compose\.ya?ml|\.gitlab-ci\.yml|Jenkinsfile|\.pre-commit-config\.yaml|setup\.py|setup\.cfg|pyproject\.toml|build\.gradle(?:\.kts)?|settings\.gradle(?:\.kts)?|pom\.xml|Cargo\.toml|build\.rs|\.npmrc|\.yarnrc(?:\.yml)?|\.envrc|justfile|Taskfile\.ya?ml|(?:vite|webpack|rollup|babel|jest|vitest|eslint)\.config\.[cm]?[jt]s|\.gitattributes|\.gitmodules)$/;
 
 /** Bring into: apply the work to the project folder (not committed: the owner reviews and saves it as usual). */
 export async function bringInto(folder: string, patch: string): Promise<{ ok: true } | { ok: false; conflicts: string[] }> {
