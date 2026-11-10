@@ -109,7 +109,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
 
   const row = (a: ComputerAttempt, actions: ReactNode) => <div key={a.attemptId} className="computer-task" role="listitem">
     <UiIcon name={a.state === 'completed' ? 'check' : WAITING.has(a.state) ? 'inbox' : 'play'} size={15}/>
-    <span className="computer-task-text"><b>{a.detail?.split('\n')[0]?.slice(0, 120) || 'Task'}</b><small>{a.state === 'completed' ? 'Done' : a.statusLabel} · from {a.sourceName}</small></span>
+    <span className="computer-task-text"><b>{(a as {title?: string}).title || a.detail?.split('\n')[0]?.slice(0, 120) || 'Task'}</b><small>{a.state === 'completed' ? 'Done' : a.statusLabel} · from {a.sourceName}</small>{a.state === 'blocked' && a.detail && <small className="cp-warn">{a.detail.split('\n')[0].slice(0, 200)}</small>}</span>
     <span className="computer-task-actions">{actions}</span>
   </div>;
 
@@ -138,7 +138,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
       {isSelf && newerElsewhere && <div className="computer-task computer-version" role="status"><UiIcon name="download" size={16}/><span className="computer-task-text"><b>Update Girru on this computer</b><small>{newerElsewhere.label} has a newer Girru ({newerElsewhere.appVersion}). Until this computer is updated, they can’t send each other tasks.</small></span>{onUpdates && <span className="computer-task-actions"><button type="button" className="primary" onClick={onUpdates}>Update…</button></span>}</div>}
       {!isSelf && device && older(device.publicKey) && <div className="computer-task computer-version" role="status"><UiIcon name="download" size={16}/><span className="computer-task-text"><b>{nameOf(device.id, device.name)} has another Girru version</b><small>It can still be seen, but it can’t take new tasks until both run the same version. It updates by itself the next time it opens (backup first).</small></span></div>}
       <section aria-label="Needs you"><p className="section-label">Needs you</p>{isSelf && <ComputerJoinRequests client={client} status={account}/>}{isSelf && <ContinuityRequests client={client} status={account}/>}{isSelf && <SameSetupArrived client={client} status={account}/>}{needs.length > 0 ? <div className="computer-list" role="list">
-        {needs.map(a => row(a, <>{a.approvalId ? <AllowTask client={client} approvalId={a.approvalId} sourceName={nameOf(a.sourceDevice, a.sourceName)} onDone={setNotice} onApprovals={onApprovals}/> : <button type="button" onClick={onApprovals}>Open Approvals</button>}<ComputerTaskTiming client={client} taskId={a.taskId} onPrepared={onApprovals}/></>))}
+        {needs.map(a => row(a, <>{a.approvalId ? <AllowTask client={client} approvalId={a.approvalId} sourceName={nameOf(a.sourceDevice, a.sourceName)} onDone={setNotice} onApprovals={onApprovals}/> : <button type="button" onClick={onApprovals}>Open Approvals</button>}{a.state === 'blocked' ? <TryAgain client={client} taskId={a.taskId} onDone={setNotice}/> : <ComputerTaskTiming client={client} taskId={a.taskId} onPrepared={onApprovals}/>}</>))}
       </div> : !(isSelf && ((account?.pairing?.addedWithCode?.length ?? 0) > 0 || (account?.pairing?.requests?.length ?? 0) > 0)) && <p className="fine-print">Nothing waits for you.</p>}</section>
       <section aria-label="Working on"><p className="section-label">Working on</p>
         {working.length ? <div className="computer-list" role="list">
@@ -165,4 +165,10 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
     {worksOn && <ComputerWorksOn client={client} currentName={view?.dispatchOptions?.[0]?.label} onClose={() => setWorksOn(false)}/>}
     {renaming && <RenameComputerSheet target={renaming} onSave={save} onClose={() => setRenaming(null)}/>}
   </section>;
+}
+
+/** CP13: a task that could not start tries again after the owner fixed the reason shown above it. */
+function TryAgain({client, taskId, onDone}: {client: SessionClient; taskId: string; onDone: (text: string) => void}) {
+  const [busy, setBusy] = useState(false);
+  return <button type="button" disabled={busy} onClick={() => { setBusy(true); void client.request({method: 'POST', path: `/api/computers/tasks/${taskId}/timing`, body: {timing: {mode: 'immediate'}}}).then(r => onDone(r.status === 200 ? 'Trying again.' : 'It still cannot start. Fix the reason shown, then try again.')).catch(() => onDone('It still cannot start. Fix the reason shown, then try again.')).finally(() => setBusy(false)); }}>Try again</button>;
 }
