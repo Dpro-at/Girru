@@ -223,7 +223,7 @@ export function SameSetupArrived({client, status}: {client: SessionClient; statu
   const nameOf = (id: string) => (status?.view?.devices ?? []).find((d: any) => d.id === id)?.label || 'Your other computer';
   const skippedStates = new Set(['rejected', 'failed', 'unknown']);
   return <section className="computer-join-requests" aria-label="Setup arriving from your other computer">
-    <p className="cp-note">{nameOf(String(copying[0].sourceDeviceId ?? ''))} allowed it. Everything comes over now; chats and memory stay there.</p>
+    <p className="cp-note">{records.length ? `Coming over from ${nameOf(String(copying[0].sourceDeviceId ?? ''))} now; chats and memory stay there.` : `Getting the setup from ${nameOf(String(copying[0].sourceDeviceId ?? ''))}… keep Girru open there.`}</p>
     {SAME_ORDER.map(([kind, label]) => {
       const of = records.filter(r => r.category === kind), arrived = of.filter(r => r.state === 'applied').length, skipped = of.filter(r => skippedStates.has(r.state)).length, coming = of.length - arrived - skipped;
       const pill = !of.length ? 'waiting' : coming ? `${arrived} of ${of.length} · arriving…` : `${arrived} arrived`;
