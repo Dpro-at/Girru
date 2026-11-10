@@ -43,7 +43,8 @@ function walk(folder: string, rel = '', out: string[] = []): string[] {
  */
 function readListedFile(full: string): { bytes: Buffer; st: { size: number; mode: number } } | 'skip' | 'missing' {
   let fd: number;
-  try { fd = openSync(full, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0)); }
+  // O_NONBLOCK: a pipe or device put in a file's place is opened without waiting, then refused by fstat.
+  try { fd = openSync(full, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0)); }
   catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 'skip'; }
   try {
     const st = fstatSync(fd);
