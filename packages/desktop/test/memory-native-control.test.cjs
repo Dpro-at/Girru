@@ -38,6 +38,16 @@ for(const [name,platform,available] of [['Windows','win32',true],['a computer wi
   assert.deepEqual(await next.resolve(),{kind:'unmanaged-control',root:f.allocated.root});
  });
 }
+test('with new-workspace encryption off, a new workspace starts plain even where the key store works',posix,async t=>{
+ const temporary=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'girru-plain-off-'))),settings=path.join(temporary,'settings');fs.mkdirSync(settings,{mode:0o700});t.after(()=>fs.rmSync(temporary,{recursive:true,force:true}));
+ const protector={isEncryptionAvailable:()=>true,getSelectedStorageBackend:()=>'gnome_libsecret',encryptString(){throw Error('plain mode must not encrypt');},decryptString(){throw Error('plain mode must not decrypt');}};
+ const allocated=allocateNativeControlWorkspace(settings),open=enrollment=>createNativeControlAuthority({root:allocated.root,settingsDirectory:settings,protector,enrollment,platform:process.platform,encryptNewWorkspaces:false});
+ const first=open(allocated.proof);t.after(()=>first.close());
+ assert.deepEqual(await first.resolve(),{kind:'unmanaged-control',root:allocated.root});
+ assert.equal(fs.existsSync(path.join(settings,'memory-control-authorities')),false);
+ const next=open(null);t.after(()=>next.close());
+ assert.deepEqual(await next.resolve(),{kind:'unmanaged-control',root:allocated.root});
+});
 test('a managed workspace never falls back to plain mode when this computer can hold the key',posix,async t=>{const f=fixture(t);assert.equal((await f.authority.resolve()).kind,'new-app-owned-control');const again=createNativeControlAuthority({root:f.allocated.root,settingsDirectory:f.settings,protector:{...f.protector,isEncryptionAvailable:()=>false},platform:process.platform});t.after(()=>again.close());await assert.rejects(()=>again.resolve());});
 test('an empty managed workspace without control files is still refused where the key store works',posix,async t=>{const temporary=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'girru-plain-refuse-'))),settings=path.join(temporary,'settings');fs.mkdirSync(settings,{mode:0o700});t.after(()=>fs.rmSync(temporary,{recursive:true,force:true}));const allocated=allocateNativeControlWorkspace(settings),authority=createNativeControlAuthority({root:allocated.root,settingsDirectory:settings,protector:{isEncryptionAvailable:()=>true,getSelectedStorageBackend:()=>'gnome_libsecret'},platform:process.platform});t.after(()=>authority.close());await assert.rejects(()=>authority.resolve());});
 test('a workspace made by an older Girru (database, no control files) opens as before',posix,async t=>{const temporary=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'girru-legacy-'))),settings=path.join(temporary,'settings');fs.mkdirSync(settings,{mode:0o700});t.after(()=>fs.rmSync(temporary,{recursive:true,force:true}));const allocated=allocateNativeControlWorkspace(settings);fs.writeFileSync(path.join(allocated.root,'agent-player.db'),'',{mode:0o600});const authority=createNativeControlAuthority({root:allocated.root,settingsDirectory:settings,protector:{isEncryptionAvailable:()=>true,getSelectedStorageBackend:()=>'gnome_libsecret'},platform:process.platform});t.after(()=>authority.close());assert.deepEqual(await authority.resolve(),{kind:'unmanaged-control',root:allocated.root});});

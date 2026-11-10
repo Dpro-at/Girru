@@ -65,6 +65,9 @@ const { allowedFirstRun, firstRunRoute, firstRunResponse } = require('../src/fir
 const { allowedPhone, phoneRoute, phoneResponse } = require('../src/phone-contract.js');
 // DEVICES-PROJECT-01: Computers and the Dpro account (owner only; the backend checks owner, loopback and desktop custody).
 const { allowedComputer, computerRoute, computerResponse } = require('../src/computer-contract.js');
+// Google sign-in (Welcome › Create account / Sign in): the desktop broker verifies Google; only the reviewed
+// local flow fields pass here, never a Google token.
+const { googleAuthRoute, allowedGoogleAuth, googleAuthResponse } = require('../src/google-auth-contract.js');
 const { allowedAgentRules, agentRulesRoute, agentRulesResponse } = require('../src/agent-rules-contract.js');
 const { allowedOrg, orgRoute, orgResponse, orgFields } = require('../src/org-contract.js');
 const { allowedLibrary: allowedAgentLibrary, libraryRoute: agentLibraryRoute, libraryResponse: agentLibraryResponse } = require('../src/agent-library-contract.js');
@@ -171,6 +174,7 @@ function allowed(method, target, body) {
   if (firstRunRoute(target)) return allowedFirstRun(method, target, body);
   if (phoneRoute(target)) return allowedPhone(method, target, body);
   if (computerRoute(target)) return allowedComputer(method, target, body);
+  if (googleAuthRoute(target)) return allowedGoogleAuth(method, target, body);
   if (agentRulesRoute(target)) return allowedAgentRules(method, target, body);
   if (orgRoute(target)) return allowedOrg(method, target, body);
   if (agentLibraryRoute(target)) return allowedAgentLibrary(method, target, body);
@@ -275,6 +279,7 @@ function project(target, status, body) {
   if (firstRunRoute(target)) return firstRunResponse(target, status, body);
   if (phoneRoute(target)) return phoneResponse(target, status, body);
   if (computerRoute(target)) return computerResponse(target, status, body);
+  if (googleAuthRoute(target)) return googleAuthResponse(target, status, body);
   if (agentRulesRoute(target)) return agentRulesResponse(target, status, body);
   if (orgRoute(target)) return orgResponse(target, status, body);
   if (agentLibraryRoute(target)) return agentLibraryResponse(target, status, body);
@@ -442,7 +447,9 @@ function createApplicationServer({ browserController = null, packageRoot = root,
     if (Object.keys(req.headers).some(k => !passiveHeaders.has(k) && !(chat && k === 'idempotency-key')) || (req.headers.connection && !/^(close|keep-alive)$/i.test(req.headers.connection)) || (req.headers['sec-fetch-mode'] && req.headers['sec-fetch-mode'] !== 'same-origin') || (req.headers['sec-fetch-dest'] && req.headers['sec-fetch-dest'] !== 'empty')) return send(400);
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && req.headers.origin !== origin) return send(403);
     if (chat && !validKey(req.headers['idempotency-key'])) return send(400);
-    const login = raw === '/api/auth/login' || (raw === OWNER_SETUP_PATH && req.method === 'POST');
+    // Google sign-in runs before there is a session (the link flow belongs to a signed-in owner).
+    const googleLogin = googleAuthRoute(raw) && !raw.startsWith('/api/auth/google/link');
+    const login = raw === '/api/auth/login' || (raw === OWNER_SETUP_PATH && req.method === 'POST') || googleLogin;
     const discovery = raw === '/api/setup/status' && req.method === 'GET';
     let auth = req.headers.authorization;
     if (auth === 'Bearer dpro-remembered-session') {
@@ -589,7 +596,7 @@ function createApplicationServer({ browserController = null, packageRoot = root,
             const delayHeaders = response.rawHeaders.filter((value, i) => i % 2 === 0 && value.toLowerCase() === 'retry-after').length;
             const delay = status === 429 && delayHeaders === 1 ? retryAfterSeconds(response.headers['retry-after']) : undefined;
             if (delay !== undefined && !res.headersSent) res.setHeader('Retry-After', String(delay));
-            if (raw === '/api/auth/login' && status === 200 && typeof projected?.token === 'string') {
+            if ((raw === '/api/auth/login' || raw === '/api/auth/google/finish') && status === 200 && typeof projected?.token === 'string') {
               res.setHeader('Set-Cookie', `dpro_session=${projected.token}; HttpOnly; SameSite=Strict; Path=/api; Max-Age=604800`);
             } else if ((verificationRoute(raw)&&status===200&&projected?.requiresSignIn===true) || (raw === '/api/auth/login' && status === 200 && projected?.recovered === true) || (raw === '/api/auth/logout' && status === 200) || (raw === '/api/auth/me' && status === 401 && req.headers.authorization === 'Bearer dpro-remembered-session')) {
               res.setHeader('Set-Cookie', 'dpro_session=; HttpOnly; SameSite=Strict; Path=/api; Max-Age=0');

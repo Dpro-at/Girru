@@ -14,7 +14,7 @@
 .computers-title h2{margin:0;font-size:17px}
 .computers-title small{color:var(--muted)}
 .computer-list{display:flex;flex-direction:column;gap:6px}
-.computer-task{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:10px;background:var(--surface);border:1px solid var(--border)}
+.shell .computer-task.computer-task{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:10px;background:var(--surface);border:1px solid var(--border)}
 .computer-task-text{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
 .computer-task-text b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .computer-task-text small{color:var(--muted)}
@@ -46,10 +46,10 @@
 .setup-welcome-actions{display:flex;flex-direction:column;gap:8px;width:260px}
 .setup-welcome-actions button{height:36px}
 .computer-start-choices{display:flex;flex-direction:column;gap:8px}
-.computer-start-choice{display:flex;align-items:flex-start;justify-content:flex-start;gap:12px;width:100%;padding:12px;border-radius:10px;text-align:left;background:var(--surface);border:1px solid var(--border);color:inherit;font:inherit;cursor:pointer}
-.computer-start-choice.is-on{border-color:var(--accent,#3B7BF6);background:var(--subtle)}
-.computer-start-choice span{display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left}
-.computer-start-choice small{color:var(--muted)}
+.shell .computer-start-choice.computer-start-choice{display:flex;align-items:flex-start;justify-content:flex-start;gap:12px;width:100%;padding:12px;border-radius:10px;text-align:left;background:var(--surface);border:1px solid var(--border);color:inherit;font:inherit;cursor:pointer}
+.shell .computer-start-choice.computer-start-choice.is-on{border-color:var(--accent,#3B7BF6);background:var(--subtle)}
+.shell .computer-start-choice.computer-start-choice span{display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left}
+.shell .computer-start-choice.computer-start-choice small{color:var(--muted)}
 .computer-start-tile{width:32px;height:32px;border-radius:8px;display:grid!important;place-items:center;flex:none;background:var(--subtle);color:var(--accent,#3B7BF6)}
 .computer-start-list{display:flex;flex-direction:column;gap:6px}
 .computer-start-item{display:flex;align-items:center;gap:8px}
@@ -58,9 +58,9 @@
 .computer-join-steps{justify-content:center}
 .computer-start-done.is-warn{color:var(--ap-warn,#C26A00)}
 .computer-icons{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-.computer-icon-choice{display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 4px;border-radius:10px;background:var(--surface);border:1px solid var(--border);color:var(--accent,#3B7BF6);font:inherit;cursor:pointer}
-.computer-icon-choice small{color:var(--muted);font-size:11px}
-.computer-icon-choice.is-on{border-color:var(--accent,#3B7BF6);background:var(--subtle)}
+.shell .computer-icon-choice.computer-icon-choice{display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 4px;border-radius:10px;background:var(--surface);border:1px solid var(--border);color:var(--accent,#3B7BF6);font:inherit;cursor:pointer}
+.shell .computer-icon-choice.computer-icon-choice small{color:var(--muted);font-size:11px}
+.shell .computer-icon-choice.computer-icon-choice.is-on{border-color:var(--accent,#3B7BF6);background:var(--subtle)}
 .computer-allow{display:flex;align-items:center;gap:8px}
 .computer-allow-always{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
 .computer-task-rules{display:flex;flex-direction:column;gap:10px}
@@ -68,20 +68,123 @@
 .computer-rule-pick{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .computer-version{border-color:var(--ap-warn,#C26A00)}
 .computer-to{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}
-.computer-to-item{display:flex;align-items:center;gap:7px;height:34px;padding:0 10px;border-radius:7px;background:var(--surface);border:1px solid var(--border);color:inherit;font:inherit;cursor:pointer;min-width:0}
-.computer-to-item span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
-.computer-to-item small{color:var(--muted);font-size:11px}
-.computer-to-item.is-on{border-color:var(--accent,#3B7BF6);background:var(--subtle)}
+.shell .computer-to-item.computer-to-item{display:flex;align-items:center;gap:7px;height:34px;padding:0 10px;border-radius:7px;background:var(--surface);border:1px solid var(--border);color:inherit;font:inherit;cursor:pointer;min-width:0}
+.shell .computer-to-item.computer-to-item span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+.shell .computer-to-item.computer-to-item small{color:var(--muted);font-size:11px}
+.shell .computer-to-item.computer-to-item.is-on{border-color:var(--accent,#3B7BF6);background:var(--subtle)}
 .computer-later{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .computer-later button{display:inline-flex;align-items:center;gap:6px}
 .computer-later button.is-on{border-color:var(--accent,#3B7BF6)}
-.computer-send-later{margin-right:auto}
-.computer-switch{width:34px;height:20px;border-radius:10px;border:0;padding:2px;background:var(--border,#2A2F38);cursor:pointer;flex:none;display:flex}
-.computer-switch i{width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s}
-.computer-switch.is-on{background:var(--accent,#3B7BF6)}
-.computer-switch.is-on i{transform:translateX(14px)}
+.shell .computer-send-later.computer-send-later{margin-right:auto}
+/* Doubled class: the app's general button rules (height 28px, panel background) must not reshape the switch. */
+.shell button.computer-switch.computer-switch{width:34px;min-width:34px;height:20px;min-height:20px;border-radius:10px;border:0;padding:2px;background:#2A2F38;cursor:pointer;flex:none;display:flex;align-items:center;justify-content:flex-start;box-shadow:none}
+.shell button.computer-switch.computer-switch i{width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s;display:block}
+.shell button.computer-switch.computer-switch.is-on{background:#3B7BF6}
+.shell button.computer-switch.computer-switch.is-on i{transform:translateX(14px)}
+.shell button.computer-switch.computer-switch:disabled{opacity:.7;cursor:default;background:#3A404B}
+.shell button.computer-switch.computer-switch:disabled i{background:#8A95AA}
+/* CP6c: each kind has its own tile color, like the board. */
+.phone-tile.tint{background:color-mix(in srgb,var(--tint) 14%,transparent);color:var(--tint)}
 .computer-task-rules .computers-label{max-width:560px}
 .computer-task-rules .computer-start-choices{max-width:560px}
-.computer-start-choice .computer-start-tile{display:grid;place-items:center;align-items:center;justify-content:center}
+.shell .computer-start-choice.computer-start-choice .computer-start-tile{display:grid;place-items:center;align-items:center;justify-content:center}
 .setup-welcome .public-mark{width:64px;height:64px;display:grid;place-items:center}
 .setup-welcome .public-mark svg{width:56px;height:56px}
+
+/* Waiting with no other computer on: one quiet way to start over as the first computer. */
+.computer-first { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line, #1D2129); display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.computer-first p { margin: 0; color: var(--muted, #AEB7C4); font-size: 12.5px; line-height: 1.5; }
+.computer-first-ask { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-radius: 10px; background: var(--panel-2, #14171C); box-shadow: inset 0 0 0 1px var(--line-2, #2A2F38); max-width: 520px; }
+.computer-join .computer-waiting { display: flex; align-items: center; gap: 8px; color: var(--muted, #AEB7C4); }
+.computer-join .computer-first-ask { margin-top: 4px; }
+.computer-undo { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 8px; background: var(--subtle); font-size: 12.5px; }
+.computer-undo .link-button { margin-left: auto; font-weight: 600; }
+
+/* Board CP6: Settings › Computers pages, measured from the board (padding, radius, colors).
+   Light uses the theme's colors; dark uses the board's exact colors. */
+.computer-task-rules { display: flex; flex-direction: column; gap: 20px; max-width: 760px; }
+.cp-block { display: flex; flex-direction: column; gap: 8px; }
+.cp-h { font-size: 13px; font-weight: 600; }
+.cp-h-row { display: flex; align-items: center; justify-content: space-between; }
+.cp-note { font-size: 12px; color: var(--muted); }
+.cp-choices { display: flex; flex-direction: column; gap: 8px; }
+.shell button.cp-choice.cp-choice, .shell .cp-card { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 0; padding: 10px 12px; border: 0; border-radius: 10px; text-align: left; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); color: inherit; font: inherit; }
+.shell button.cp-choice.cp-choice { cursor: pointer; }
+.shell button.cp-choice.cp-choice.is-on { background: var(--subtle); box-shadow: inset 0 0 0 1px #3B7BF6; }
+.shell .cp-card { padding: 12px 14px; }
+.cp-tile { width: 32px; height: 32px; border-radius: 8px; flex: none; display: grid; place-items: center; background: color-mix(in srgb, var(--tint) 14%, transparent); color: var(--tint); }
+.cp-choice-text { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cp-choice-text > span { font-size: 13px; }
+.cp-choice-text > small { font-size: 12px; color: var(--muted); }
+.shell button.cp-soft.cp-soft { height: 28px; min-height: 28px; padding: 0 12px; border: 0; border-radius: 6px; background: var(--subtle); color: var(--text); font-size: 12px; }
+.shell button.cp-link.cp-link { background: transparent; border: 0; padding: 0; min-height: 0; color: #3B7BF6; font-size: 12.5px; cursor: pointer; }
+.shell button.cp-link.cp-link:hover { background: transparent; text-decoration: underline; }
+.cp-list { border-radius: 10px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); display: flex; flex-direction: column; }
+.cp-list-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.cp-list-row:last-child { border-bottom: 0; }
+.cp-grow { flex: 1; min-width: 0; }
+.cp-pill { height: 24px; padding: 0 10px; border-radius: 6px; font-size: 12px; background: var(--subtle); color: var(--muted); border: 0; }
+.cp-pill.is-auto { background: #12251A; color: #8FD6B0; }
+.shell button.cp-x.cp-x { width: 26px; height: 26px; min-height: 26px; padding: 0; border: 0; background: transparent; color: var(--muted); }
+.shell[data-theme="dark"] .cp-note { color: #6E7787; }
+.shell[data-theme="dark"] button.cp-choice.cp-choice, .shell[data-theme="dark"] .cp-card, .shell[data-theme="dark"] .cp-list { background: #14171C; box-shadow: inset 0 0 0 1px #2A2F38; }
+.shell[data-theme="dark"] button.cp-choice.cp-choice:hover { background: #171B22; }
+.shell[data-theme="dark"] button.cp-choice.cp-choice.is-on { background: #172034; box-shadow: inset 0 0 0 1px #3B7BF6; }
+.shell[data-theme="dark"] .cp-choice-text > small { color: #8A95AA; }
+.shell[data-theme="dark"] button.cp-soft.cp-soft { background: #1C2029; color: #D9E0E6; }
+.shell[data-theme="dark"] button.cp-link.cp-link { color: #7AA5FF; }
+.shell[data-theme="dark"] .cp-list-row { border-bottom-color: #1D2129; }
+.shell[data-theme="dark"] .cp-pill { background: #1C2029; color: #AEB7C4; }
+/* Account and safety: the account window's entry sits in the Safety list like the other rows. */
+.cp-account .cp-list-row > section { flex: 1; }
+.cp-account .cp-list-row .preference-row { display: flex; align-items: center; gap: 12px; padding: 0; border: 0; background: transparent; }
+.cp-account .cp-list-row .preference-label { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.cp-account .cp-list-row .preference-label strong { font-size: 13px; font-weight: 400; }
+.cp-account .cp-list-row .preference-label small { font-size: 12px; color: var(--muted); }
+.shell .cp-list-row.computer-twofactor { display: flex; flex-direction: row; align-items: center; gap: 12px; padding: 10px 14px; margin: 0; border-bottom: 1px solid var(--border); }
+.shell[data-theme="dark"] .cp-list-row.computer-twofactor { border-bottom-color: #1D2129; }
+.cp-account .cp-list-row { gap: 12px; }
+/* CP5 card tile: the computer and its step, then a thin bar while it runs. */
+.computer-card-status { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: #9DBBFF; }
+.computer-card-status.is-completed { color: #8FD6B0; }
+.computer-card-status.is-cancelled, .computer-card-status.is-unknown, .computer-card-status.is-blocked { color: var(--muted); }
+.computer-card-line { display: flex; align-items: center; gap: 6px; }
+.computer-card-bar { height: 4px; border-radius: 2px; background: #22262E; overflow: hidden; }
+.computer-card-bar i { display: block; height: 100%; background: #3B7BF6; }
+/* CP5 card details: where it runs, live steps, Open its chat · Stop. */
+.cp-card-panel { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; margin-bottom: 12px; border-radius: 10px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
+.shell[data-theme="dark"] .cp-card-panel { background: #14171C; box-shadow: inset 0 0 0 1px #2A2F38; }
+.cp-card-where { display: flex; align-items: center; gap: 8px; color: #9DBBFF; font-size: 12.5px; }
+.cp-card-label { font-size: 12px; color: var(--muted); }
+.cp-card-wait, .cp-card-done { margin: 0; font-size: 12.5px; color: var(--muted); }
+.cp-card-done { display: flex; align-items: center; gap: 6px; color: #8FD6B0; }
+.cp-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.cp-steps li { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.cp-steps li i { width: 14px; height: 14px; border-radius: 50%; box-sizing: border-box; flex: none; border: 1.5px solid #4A5160; }
+.cp-steps li.is-done i { background: #3BB273; border: 0; }
+.cp-steps li.is-now { font-weight: 600; }
+.cp-steps li.is-now i { border: 2px solid #3B7BF6; }
+.cp-steps li.is-next { color: var(--muted); }
+.cp-steps li.is-failed i { background: #F29BC0; border: 0; }
+.cp-card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.shell button.cp-stop.cp-stop { height: 30px; min-height: 30px; padding: 0 12px; border: 0; background: transparent; color: #F29BC0; font-size: 12.5px; }
+/* CP11a: the agent's offer under its reply. */
+.cp-offer { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 0 38px; padding: 12px; border-radius: 10px; font-size: 12.5px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); max-width: 560px; }
+.shell[data-theme="dark"] .cp-offer { background: #14171C; box-shadow: inset 0 0 0 1px #2A2F38; }
+.cp-offer-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.cp-offer-steps li { display: flex; align-items: center; gap: 10px; }
+.cp-offer-to { display: inline-flex; align-items: center; gap: 6px; color: #9DBBFF; }
+.cp-offer-to.is-missing { color: #F0C27A; }
+.cp-offer-actions { display: flex; gap: 8px; }
+.cp-offer-steps li { flex-direction: column; align-items: stretch; gap: 4px; }
+.cp-offer-head { display: flex; align-items: center; gap: 10px; }
+.cp-offer-text summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+.cp-offer-text p { margin: 4px 0 0; white-space: pre-wrap; font-size: 12px; max-height: 160px; overflow: auto; }
+/* CP10c Bring the work back. */
+.cp-bring { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 12.5px; }
+.cp-bring-files { list-style: none; margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--subtle); display: flex; flex-direction: column; gap: 6px; }
+.shell[data-theme="dark"] .cp-bring-files { background: #1C2029; }
+.cp-bring-files li { display: flex; gap: 8px; align-items: center; }
+.cp-plus { color: #8FD6B0; font-weight: 600; }
+.cp-minus { color: #F29BC0; font-weight: 600; }
+.cp-warn { margin: 0; padding: 10px 12px; border-radius: 10px; background: #2A2310; color: #F0C27A; line-height: 1.5; }

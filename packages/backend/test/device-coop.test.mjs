@@ -61,6 +61,24 @@ test('two disposable profiles pair, use the existing relay, obtain real approval
  await sender.dispatch(actor,b.id,task('task_one'));await new Promise(r=>setTimeout(r,250));assert.equal((await listConversations(owner)).length,1);await assert.rejects(()=>sender.dispatch(actor,b.id,{...task('task_one'),text:'Changed task'}),/changed/);await assert.rejects(()=>approve('task_one'));
  assert.throws(()=>readEnvelope({extra:true}));
 });
+test('CP10a copy: one computer asks for a project, the other owner allows, the files arrive in a new folder only',async()=>{
+ process.env.AGENT_PLAYER_DATA_DIR=join(temporary,'data');mkdirSync(process.env.AGENT_PLAYER_DATA_DIR,{recursive:true});
+ const folder=join(temporary,'site');mkdirSync(join(folder,'src'),{recursive:true});writeFileSync(join(folder,'src','index.html'),'<h1>Copied</h1>\n');writeFileSync(join(folder,'.env'),'API_KEY=never\n');writeFileSync(join(folder,'notes.md'),'token: sk-live-0123456789abcdefghijklmnopqrstuv\n');
+ const site=await createProject(owner,{name:'Site',folder});
+ const parent=join(temporary,'office-projects');mkdirSync(parent);
+ const {requestId}=await receiver.requestProjectCopy(actor,a.id,'Site copy',parent);
+ await until(async()=>(await sender.view(actor)).copyAsks.some(x=>x.requestId===requestId));
+ const ask=(await sender.view(actor)).copyAsks.find(x=>x.requestId===requestId);assert.equal(ask.fromName,'Second computer');
+ const sent=await sender.allowProjectCopy(actor,requestId,site.id);assert.equal(sent.files,1);assert.equal(sent.secrets,1,'a file holding a key stays behind');
+ const done=await until(async()=>{const c=(await receiver.view(actor)).copies.find(x=>x.requestId===requestId);return c&&c.state==='ready'?c:false;});
+ assert.equal(readFileSync(join(parent,'Site copy','src','index.html'),'utf8'),'<h1>Copied</h1>\n');
+ assert.ok(done.projectId);
+ const {existsSync}=await import('node:fs');assert.equal(existsSync(join(parent,'Site copy','.env')),false);assert.equal(existsSync(join(parent,'Site copy','notes.md')),false);
+ const second=await receiver.requestProjectCopy(actor,a.id,'Other',parent);await until(async()=>(await sender.view(actor)).copyAsks.some(x=>x.requestId===second.requestId));
+ await sender.denyProjectCopy(actor,second.requestId);
+ await until(async()=>(await receiver.view(actor)).copies.find(x=>x.requestId===second.requestId)?.state==='refused');
+ await assert.rejects(()=>sender.allowProjectCopy(actor,second.requestId,site.id),/copy_missing/);
+});
 test('local missing bindings block, cancellation waits for target acknowledgment, revocation and restore fail closed',async()=>{
  await sender.dispatch(actor,b.id,task('disconnect_task'));await until(async()=> (await receiverRepo.attempt('disconnect_task'))?.approval_id);await approve('disconnect_task');sender.transport.stop();await until(async()=> (await receiverRepo.attempt('disconnect_task'))?.state==='completed');assert.notEqual((await senderRepo.attempt('disconnect_task')).state,'completed');await sender.transport.start();await until(async()=> (await senderRepo.attempt('disconnect_task'))?.state==='completed');assert.equal((await listConversations(owner)).length,2);
  await sender.dispatch(actor,b.id,{...task('blocked_task'),projectBinding:'missing'});await until(async()=> (await senderRepo.attempt('blocked_task'))?.state==='blocked');

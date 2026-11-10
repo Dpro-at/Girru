@@ -71,3 +71,17 @@ test('a computer approved by a computer that joined with the code also counts as
  request(byCode,'device.approve.v2',{deviceId:l.view.deviceId,publicKey:publicKeyText(later.key.publicKey),comparisonCode:deviceComparisonCode({accountId:b.view.id,deviceId:l.view.deviceId,publicKey:publicKeyText(later.key.publicKey),commitment:C.digest(nD),approverId:b.view.deviceId,approverKey:publicKeyText(byCode.key.publicKey),approverNonce:nA,reveal:nD}),confirmed:true});
  const ids=request(owner,'device.requests').viaCodeIds;assert.ok(ids.includes(b.view.deviceId)&&ids.includes(l.view.deviceId),'the chain is marked, so it needs Keep too');
 });
+
+// D11 (Mohamed, 2026-11-10): Google sign-in on the app adds the computer; with two-step on, the code (or a Yes) still does.
+test('signing in with Google adds the computer, unless two-step sign-in is on',async()=>{
+ const first=peer(),second=peer(),old=peer(),third=peer(),fourth=peer();
+ await login(first,'661000222');
+ const added=await login(second,'661000222',{addByGoogle:true});assert.equal(added.view.deviceStatus,'approved');
+ const told=request(first,'device.requests').addedWithCode;assert.ok(told.some(d=>d.deviceId===added.view.deviceId),'the other computers are told, with Keep or Forget');
+ const waiting=await login(old,'661000222');assert.equal(waiting.view.deviceStatus,'pending','an app that does not ask still waits for a Yes');
+ const later=await login(old,'661000222',{addByGoogle:true});assert.equal(later.view.deviceStatus,'approved','signing in again on the app adds it');
+ const {secret}=request(first,'twofactor.setup');request(first,'twofactor.enable',{code:codeAt(secret)});
+ const guarded=await login(third,'661000222',{addByGoogle:true});assert.equal(guarded.view.deviceStatus,'pending','two-step on: Google alone never adds it');
+ now+=30000;assert.equal(request(third,'device.approve.totp',{code:codeAt(secret),confirmed:true}).deviceStatus,'approved');
+ await assert.rejects(()=>login(fourth,'661000222',{addByGoogle:'yes'}),/input/);
+});

@@ -5,12 +5,13 @@ import type {ComputerAttempt} from './computer-contract.js';
 import {useComputerOverview, computerStateLabel, computerPathLabel} from './ComputerDevices';
 import {ComputerTaskRequest} from './ComputerTaskRequest';
 import {ComputerTaskTiming} from './ComputerTaskTiming';
-import {ComputerLinkControls} from './ComputerLinkControls';
-import {Sheet, ContextMenu, useMenu, type MenuItem} from './desktop-ui';
-import {COMPUTER_ICONS, computerIcon, computerName, useComputerLook, type ComputerIconKey} from './ComputerLook';
+import {ContextMenu, useMenu, type MenuItem} from './desktop-ui';
+import {computerIcon, computerName, useComputerLook, type ComputerIconKey} from './ComputerLook';
 import {AddThisComputer, ComputerJoinRequests, useAccountStatus} from './ComputerJoin';
 import {ContinuityRequests} from './ComputerStart';
 import {AllowTask} from './ComputerTaskRules';
+import {ComputerWorksOn, ProjectCopyAsks} from './ComputerWorksOn';
+import {RenameComputerSheet, forgetComputerLater, ForgetNotice, useForgetPending} from './ComputerActions';
 import {UiIcon} from './ui-icons';
 
 /** Tasks that wait for this computer's owner to allow them. */
@@ -24,10 +25,11 @@ const WORKING = new Set(['queued', 'scheduled', 'accepted', 'running', 'cancel_r
  * works on; its details sit in the inspector. One main action: Send a task.
  * Rare and technical controls live in Settings › Computers.
  */
-export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApprovals, onSettings}: {
+export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApprovals, onSettings, onUpdates}: {
   client: SessionClient;
   active: boolean;
   sidebarSlot?: HTMLElement | null;
+  onUpdates?: () => void;
   onOpenChat: (id: string) => void;
   onApprovals: () => void;
   onSettings: () => void;
@@ -35,10 +37,9 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   const view = useComputerOverview();
   const account = useAccountStatus(client, active);
   const [selected, setSelected] = useState('');
-  const [adding, setAdding] = useState(false);
-  const [forget, setForget] = useState(false);
   const [notice, setNotice] = useState('');
   const [inspector, setInspector] = useState(true);
+  const [worksOn, setWorksOn] = useState(false);
   const [renaming, setRenaming] = useState<{id: string; name: string; icon: ComputerIconKey | null} | null>(null);
   const [sending, setSending] = useState('');
   const {look, save} = useComputerLook(client, active);
@@ -49,9 +50,15 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   const nameOf = (id: string, name: string) => computerName(look, id, name);
   // CP11e (D10): computers take tasks from each other only on the same Girru version.
   const ownVersion = account?.view?.devices?.find(d => d.id === account?.view?.deviceId)?.appVersion;
+  // CP11e (D10): this computer sees by itself that another of your computers runs a newer Girru.
+  const newerElsewhere = (account?.view?.devices ?? []).filter(d => d.id !== account?.view?.deviceId && d.status === 'approved' && !!ownVersion && (d.appVersion ?? '').localeCompare(ownVersion, undefined, {numeric: true}) > 0).sort((a, b) => (b.appVersion ?? '').localeCompare(a.appVersion ?? '', undefined, {numeric: true}))[0];
   const older = (publicKey?: string) => { const v = accountDevice(publicKey)?.appVersion; return !!v && !!ownVersion && v !== ownVersion ? v : null; };
   const self = view?.self ?? null;
+  // While this computer waits to be added, the coordinator has no list yet; the account still knows it.
+  const accountSelf = account?.view?.devices?.find(d => d.id === account?.view?.deviceId) ?? null;
   const devices = useMemo(() => (view?.devices ?? []).filter(d => d.state !== 'revoked'), [view]);
+  const forgetting = useForgetPending();
+  const listed = devices.filter(d => d.id !== forgetting);
   const attempts = view?.attempts ?? [];
   useEffect(() => { if (!selected && self) setSelected(self.id); }, [selected, self]);
   const device = devices.find(d => d.id === selected);
@@ -65,12 +72,6 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
     try { const r = await client.request({method: 'POST', path: `/api/computers/tasks/${encodeURIComponent(a.taskId)}/cancel`}); setNotice(r.status === 200 ? 'Stopping the task.' : 'The task could not be stopped.'); }
     catch { setNotice('The task could not be stopped.'); }
   };
-  const forgetNow = async () => {
-    if (!device) return;
-    try { const r = await client.request({method: 'POST', path: `/api/computers/peers/${encodeURIComponent(device.id)}/revoke`}); setNotice(r.status === 200 ? `${device.name} was forgotten.` : 'It could not be forgotten.'); if (r.status === 200) setSelected(self?.id ?? ''); }
-    catch { setNotice('It could not be forgotten.'); }
-    finally { setForget(false); }
-  };
 
   const renameItem = (id: string, name: string): MenuItem => ({label: 'Rename and icon…', icon: 'pencil', shortcut: '↩', run: () => setRenaming({id, name, icon: look?.icons[id] as ComputerIconKey ?? null})});
   const menuFor = (d: {id: string; name: string}): MenuItem[] => [
@@ -78,16 +79,19 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
     {label: 'Works on…', icon: 'board', run: () => { setSelected(d.id); setInspector(true); }},
     renameItem(d.id, nameOf(d.id, d.name)),
     'sep',
-    {label: 'Forget this computer', icon: 'trash', shortcut: '⌫', danger: true, run: () => { setSelected(d.id); setForget(true); }},
+    {label: 'Forget this computer', icon: 'trash', shortcut: '⌫', danger: true, run: () => { forgetComputerLater(client, {id: d.id, name: nameOf(d.id, d.name)}); setSelected(self?.id ?? ''); }},
   ];
   const menuForSelf = (): MenuItem[] => [renameItem(self?.id ?? '', nameOf(self?.id ?? '', self?.name ?? 'This computer')), {label: 'Settings › Computers', icon: 'gear', run: onSettings}];
   const nav = <nav className="dk-sidebar computers-places" aria-label="My computers">
-    <p className="section-label dk-label computers-label"><span>My computers</span>{usable && <button type="button" className="tool" title="Add a computer (⌘N)" aria-label="Add a computer" onClick={() => setAdding(true)}><UiIcon name="plus" size={14}/></button>}</p>
+    <p className="section-label dk-label computers-label"><span>My computers</span></p>
     {self && <button type="button" className="nav-item dk-place" aria-current={isSelf ? 'page' : undefined} onClick={() => setSelected(self.id)}>
       <UiIcon name={iconOf(self.id)} size={15}/><span className="dk-place-name">{nameOf(self.id, self.name)}</span><span className="dk-count">this one</span>
       {attempts.filter(a => a.targetDevice === self.id && WAITING.has(a.state)).length > 0 && <span className="dk-badge-pill" title="Needs you">{attempts.filter(a => a.targetDevice === self.id && WAITING.has(a.state)).length}</span>}
     </button>}
-    {devices.map(d => <button key={d.id} type="button" className="nav-item dk-place" aria-current={selected === d.id ? 'page' : undefined} onClick={() => setSelected(d.id)} onContextMenu={e => { setSelected(d.id); menu.at(e, menuFor(d)); }}>
+    {!self && accountSelf && <button type="button" className="nav-item dk-place" aria-current="page" title={accountSelf.status === 'pending' ? 'Waiting to be added to your account' : undefined}>
+      <UiIcon name={computerIcon(look, accountSelf.id, accountSelf.osFamily)} size={15}/><span className="dk-place-name">{nameOf(accountSelf.id, accountSelf.label)}</span><span className="dk-count">{accountSelf.status === 'pending' ? 'waiting' : 'this one'}</span>
+    </button>}
+    {listed.map(d => <button key={d.id} type="button" className="nav-item dk-place" aria-current={selected === d.id ? 'page' : undefined} onClick={() => setSelected(d.id)} onContextMenu={e => { setSelected(d.id); menu.at(e, menuFor(d)); }}>
       <UiIcon name={iconOf(d.id, d.publicKey)} size={15}/><span className="dk-place-name">{nameOf(d.id, d.name)}</span>
       <span className={`computer-dot ${d.state === 'available' || d.state === 'busy' ? 'on' : 'off'}`} title={computerStateLabel(d.state)} aria-label={computerStateLabel(d.state)}/>
       {waitingFrom(d.id).length > 0 && <span className="dk-badge-pill" title="Needs you">{waitingFrom(d.id).length}</span>}
@@ -103,7 +107,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   let main: ReactNode;
   if (!view) main = <div className="dk-empty"><p role="status">Reading your computers…</p></div>;
   else if (!usable || account?.view?.deviceStatus === 'pending') main = <div className="computers-main"><AddThisComputer client={client} status={account}/></div>;
-  else if (!devices.length && isSelf && !needs.length) main = <div className="dk-empty computers-empty"><UiIcon name="screen" size={28}/><b>Your agents can also work on your other computers</b><p>Install Girru there and sign in with the same account.</p><button type="button" className="primary" onClick={() => setAdding(true)}>Add a computer</button></div>;
+  else if (!devices.length && isSelf && !needs.length) main = <div className="dk-empty computers-empty"><UiIcon name="screen" size={28}/><b>Your agents can also work on your other computers</b><p>Install Girru on your other computer and sign in with the same Google account. It joins your account by itself and shows up here.</p></div>;
   else {
     const name = isSelf ? nameOf(self?.id ?? '', self?.name ?? 'This computer') : device ? nameOf(device.id, device.name) : 'Computer';
     const status = isSelf ? 'This computer' : device ? `${computerStateLabel(device.state)} · ${computerPathLabel(device.path)}` : '';
@@ -116,6 +120,9 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
         <button type="button" className="tool" title={inspector ? 'Hide details' : 'Show details'} aria-label={inspector ? 'Hide details' : 'Show details'} aria-pressed={inspector} onClick={() => setInspector(v => !v)}><UiIcon name="inspector" size={15}/></button>
       </header>
       {notice && <p role="status" className="fine-print">{notice}</p>}
+      <ForgetNotice/>
+      <ProjectCopyAsks client={client}/>
+      {isSelf && newerElsewhere && <div className="computer-task computer-version" role="status"><UiIcon name="download" size={16}/><span className="computer-task-text"><b>Update Girru on this computer</b><small>{newerElsewhere.label} has a newer Girru ({newerElsewhere.appVersion}). Until this computer is updated, they can’t send each other tasks.</small></span>{onUpdates && <span className="computer-task-actions"><button type="button" className="primary" onClick={onUpdates}>Update…</button></span>}</div>}
       {!isSelf && device && older(device.publicKey) && <div className="computer-task computer-version" role="status"><UiIcon name="download" size={16}/><span className="computer-task-text"><b>{nameOf(device.id, device.name)} has another Girru version</b><small>It can still be seen, but it can’t take new tasks until both run the same version. It updates by itself the next time it opens (backup first).</small></span></div>}
       {isSelf && <ComputerJoinRequests client={client} status={account}/>}
       {isSelf && <ContinuityRequests client={client} status={account}/>}
@@ -135,7 +142,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
     {device && <><span className="computers-field"><small>Connection</small><span><UiIcon name="wifi" size={14}/>{computerPathLabel(device.path)}</span></span>
       <span className="computers-field"><small>Last seen</small><span>{device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleString() : 'Not yet'}</span></span>
       <span className="computers-field"><small>Works on</small>{(device.dispatchOptions ?? []).length ? (device.dispatchOptions ?? []).map(o => <span key={o.id}><UiIcon name="board" size={14}/>{o.label}</span>) : <span>No projects shared yet</span>}</span></>}
-    {isSelf && <span className="computers-field"><small>Works on</small>{(view?.dispatchOptions ?? []).length ? view!.dispatchOptions.map(o => <span key={o.id}><UiIcon name="board" size={14}/>{o.label}</span>) : <span>No projects shared yet</span>}</span>}
+    {isSelf && <span className="computers-field"><small>Works on</small>{(view?.dispatchOptions ?? []).length ? view!.dispatchOptions.map(o => <span key={o.id}><UiIcon name="board" size={14}/>{o.label}</span>) : <span>No project yet</span>}<button type="button" className="cp-link" onClick={() => setWorksOn(true)}>{(view?.dispatchOptions ?? []).length ? 'Change…' : 'Add a project…'}</button></span>}
     <button type="button" className="link-button" onClick={onSettings}>Settings › Computers</button>
   </aside> : null;
 
@@ -143,18 +150,8 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
     {sidebarSlot ? (active ? createPortal(nav, sidebarSlot) : null) : nav}
     {main}
     {inspectorPane}
-    {adding && <Sheet title="Add a computer" onClose={() => setAdding(false)}>
-      <ol className="computer-join-list"><li>Install Girru on the other computer.</li><li>Choose Computers › Continue with Google there, with the same Google account.</li><li>This computer then asks “Add it to your account?” with pictures to compare.</li></ol>
-      {view && <details><summary>Older way, with a code to copy</summary><ComputerLinkControls client={client} view={view} onNotice={setNotice}/></details>}
-    </Sheet>}
     <ContextMenu menu={menu.menu} onClose={menu.close}/>
-    {renaming && <Sheet title="Rename and icon" onClose={() => setRenaming(null)} actions={<><button type="button" onClick={() => setRenaming(null)}>Cancel</button><button type="button" className="primary" disabled={!renaming.name.trim()} onClick={() => { const r = renaming; void save(r.id, {name: r.name.trim(), ...(r.icon ? {icon: r.icon} : {})}).then(() => setRenaming(null)).catch(() => setNotice('It could not be saved.')); }}>Save</button></>}>
-      <label className="phone-field"><span>Name on this computer</span><input autoFocus value={renaming.name} maxLength={64} onChange={e => setRenaming({...renaming, name: e.target.value})}/></label>
-      <div className="computer-icons" role="radiogroup" aria-label="Picture">{COMPUTER_ICONS.map(i => <button key={i.key} type="button" role="radio" aria-checked={renaming.icon === i.key} className={`computer-icon-choice${renaming.icon === i.key ? ' is-on' : ''}`} title={i.name} onClick={() => setRenaming({...renaming, icon: i.key})}><UiIcon name={i.icon} size={22}/><small>{i.name}</small></button>)}</div>
-      <p className="fine-print">Girru picks the picture from the system by itself; choose another if you like.</p>
-    </Sheet>}
-    {forget && device && <Sheet title={`Forget “${device.name}”?`} onClose={() => setForget(false)} actions={<><button type="button" onClick={() => setForget(false)}>Cancel</button><button type="button" className="danger" onClick={() => void forgetNow()}>Forget this computer</button></>}>
-      <p>It can no longer send or take tasks. To use it again, add it again.</p>
-    </Sheet>}
+    {worksOn && <ComputerWorksOn client={client} onClose={() => setWorksOn(false)}/>}
+    {renaming && <RenameComputerSheet target={renaming} onSave={save} onClose={() => setRenaming(null)}/>}
   </section>;
 }

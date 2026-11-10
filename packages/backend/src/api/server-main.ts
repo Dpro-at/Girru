@@ -80,7 +80,11 @@ async function start() {
     // RUN-ISO ISO-1: re-check the data tree after every store was opened.
     if (process.env[ISOLATED_ENV] === '1') assertSafeIsolatedTree(path.resolve(dataRoot()));
 
-    if(nativeStartup)await nativeStartup.runOperation(()=>fastify.listen({port:PORT,host:HOST}));else await fastify.listen({port:PORT,host:HOST});
+    // Startup hooks (fastify.ready) run inside a selected operation; listen() must not: the server's
+    // connection handle would carry that finished operation into every request, and the request
+    // admission refuses nested operations (every request failed with MemoryCipherError on a new Mac).
+    if(nativeStartup)await nativeStartup.runOperation(async()=>{await fastify.ready();});
+    await fastify.listen({port:PORT,host:HOST});
 
     // RUN-ISO / INSTALLER-05: tell the isolated launcher or the desktop app
     // (IPC only, no secrets) that we listen, with the real port (PORT=0 = random).

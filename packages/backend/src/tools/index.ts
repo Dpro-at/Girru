@@ -111,6 +111,7 @@ import { askChoiceTool } from './plan/ask-choice.js';
 import { sessionTools } from './tasks/sessions.js';
 import { askCodingAppTool } from './cli/ask-coding-app.js';
 import { boardSuggestCardTool } from './board/board-suggest.js';
+import { computerOfferTool } from './computer-offer.js';
 import { ruleSuggestTool } from './rules/rule-suggest.js';
 import { handoffReadTool, handoffSaveTool, handoffSaveToolP8 } from './handoff/handoff.js';
 import { runNoteTool } from './handoff/run-note.js';
@@ -162,6 +163,7 @@ const CORE_TOOLS: Tool[] = [
   ...sessionTools, // CHAT-ORCH-01: sub-sessions (start asks the owner; only coordinators in the owner's chat)
   ruleSuggestTool, // RULES-01: suggests a rule; only the owner turns it into one (self-only, no grant)
   boardSuggestCardTool, // CHAT-PRO-02 I step 2: suggests a board card; only the owner creates it (self-only, no grant)
+  computerOfferTool, // CP11a: offers steps for other computers; only the owner sends them (self-only, no grant)
   handoffSaveTool, handoffReadTool, // CORE-MEM-HANDOFF: the agent's own done/left/next note for its next session (self-only, no grant)
   askCodingAppTool, // CORE-ROUTE-01: ask the owner's Claude Code / Codex (granted per agent, approved per call, desktop app only)
 ];

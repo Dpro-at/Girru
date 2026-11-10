@@ -38,3 +38,23 @@ test('native file import rejects oversized, malformed and symlink credentials',a
  await fs.writeFile(file,'x'.repeat(16385));await assert.rejects(readInstalledClient(file,clientId));
  await fs.writeFile(file,'{}');await assert.rejects(readInstalledClient(file,clientId));
 });
+
+const {serverGoogleExchange}=require('../src/google-client-config.cjs');
+test('with a configured account service, Google sign-in needs no client file: the service finishes it',async()=>{
+ const sent=[];const fetcher=async(url,init)=>{const body=JSON.parse(init.body);sent.push({url,body});if(!Object.keys(body).length)return {status:403,text:async()=>JSON.stringify({code:'account_input_invalid'})};return {status:200,text:async()=>JSON.stringify({idToken:'a.b.c'})};};
+ const server=serverGoogleExchange('https://relay.example.test/identity/v1',fetcher);
+ let picked=0;const login=protectedGoogleLogin({custody:{read:async()=>null,transact:async()=>assert.fail('nothing is stored')},selectInstalledClient:async()=>{picked++;return null;},server,login:async options=>{assert.equal(options.clientSecret,undefined);assert.equal(await options.exchange({code:'c'.repeat(12),codeVerifier:'v'.repeat(43),redirectUri:'http://127.0.0.1:5/oauth/device'}),'a.b.c');return 'signed-in';}});
+ assert.equal(await login({clientId:'123-abc.apps.googleusercontent.com'}),'signed-in');
+ assert.equal(picked,0);
+ assert.equal(sent[1].url,'https://relay.example.test/identity/v1/google/token');
+ assert.deepEqual(Object.keys(sent[1].body).sort(),['code','codeVerifier','redirectUri']);
+});
+test('a service without the secret (or an older one) falls back to the file, and odd origins are never used',async()=>{
+ const off=serverGoogleExchange('https://relay.example.test/identity/v1',async()=>({status:403,text:async()=>JSON.stringify({code:'account_google_exchange_unavailable'})}));
+ assert.equal(await off.available(),false);
+ const old=serverGoogleExchange('https://relay.example.test/identity/v1',async()=>({status:404,text:async()=>JSON.stringify({code:'account_route_unavailable'})}));
+ assert.equal(await old.available(),false);
+ for(const bad of ['http://relay.example.test/identity/v1','file:///etc','not a url','https://relay.example.test/identity/v1?x=1'])assert.equal(serverGoogleExchange(bad),null);
+ const refused=serverGoogleExchange('https://relay.example.test/identity/v1',async()=>({status:200,text:async()=>JSON.stringify({idToken:'a.b.c',access_token:'x'})}));
+ await assert.rejects(()=>refused.exchange({}),/device_google_server_exchange_refused/);
+});

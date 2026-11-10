@@ -9,6 +9,7 @@
 // STORE-MAP-01 P8 (switch on): T-n is the link hub — "Linked to T-n" in the side (Chats and
 // Task file move there from Work), "Latest handoff" in place of "From the task file".
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import {ComputerCardPanel} from './ComputerCardPanel';
 import type { DragEvent, ReactNode } from 'react';
 import { UiIcon } from './ui-icons';
 import type { UiIconName } from './ui-icons';
@@ -315,6 +316,7 @@ function TaskSide({ card, controller, busy, page, onOpenChat, linked, linksMissi
   const sched = s.schedule ?? null;
   const tokensAll = (page?.spent ?? []).reduce((n, x) => n + x.tokens, 0);
   return <aside className="tp-side" aria-label="About this task">
+    <ComputerCardPanel client={controller.client} cardId={card.id} boardId={s.boardId ?? ''} cardVersion={card.version} title={card.title} sessionId={card.conversationId} onOpenChat={onOpenChat}/>
     {!card.taskFile?.finished && !toSort && <div className="tp-continue">
       <span className="tp-split"><button type="button" className="primary" disabled={busy || !!card.taskFile?.problem} title={card.taskFile?.problem ? 'Fix the task’s line in the file first' : 'A new chat that goes on with this task and writes back what it did'}
         onClick={() => void controller.continueTask(agent || undefined, model || undefined).then(id => { if (id) onOpenChat?.(id); })}><UiIcon name="play" size={13}/>Continue</button>
