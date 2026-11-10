@@ -350,7 +350,9 @@ export class ComputerCoordinator {
         }
         if (c.state !== 'receiving' || !c.parts || e.payload.index >= c.parts) throw Error('computer_copy_state');
         const file = pathCopy.join(this.copyDir(e.payload.requestId), 'part-' + e.payload.index);
-        if (!hasCopy(file)) { writeCopy(file, e.payload.text, { mode: 0o600 }); c.received++; }
+        // Create-only ('wx'): a part that already arrived is never written twice nor counted twice.
+        try { writeCopy(file, e.payload.text, { mode: 0o600, flag: 'wx' }); c.received++; }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
         if (c.received < c.parts) return;
         const dir = this.copyDir(e.payload.requestId);
         try {

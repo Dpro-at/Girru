@@ -6,7 +6,7 @@
  */
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
+import { closeSync, constants as fsConstants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { secretPath, confusingSegment } from './work-result.js';
@@ -36,6 +36,24 @@ function walk(folder: string, rel = '', out: string[] = []): string[] {
   return out;
 }
 
+/**
+ * One listed file, read through a single descriptor: the name is opened without following a link
+ * (O_NOFOLLOW where the system has it), and the type and size come from that open descriptor, so a
+ * file swapped for a link after it was listed can never carry another file off this computer.
+ */
+function readListedFile(full: string): { bytes: Buffer; st: { size: number; mode: number } } | 'skip' | 'missing' {
+  let fd: number;
+  // O_NONBLOCK: a pipe or device put in a file's place is opened without waiting, then refused by fstat.
+  try { fd = openSync(full, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0)); }
+  catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 'skip'; }
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile()) return 'skip';
+    if (st.size > COPY_MAX_RAW) throw Error('computer_project_too_large');
+    return { bytes: readFileSync(fd), st: { size: st.size, mode: st.mode } };
+  } finally { closeSync(fd); }
+}
+
 /** The project packed for the trip: its files (not ignored, not secret, no links), gzip, then base64. */
 export async function packProject(folder: string): Promise<{ text: string; files: number; size: number; sha256: string; skipped: number; secrets: number }> {
   if (!path.isAbsolute(folder) || !existsSync(folder)) throw Error('computer_project_folder_missing');
@@ -45,11 +63,11 @@ export async function packProject(folder: string): Promise<{ text: string; files
   for (const rel of listed) {
     if (files.length >= COPY_MAX_FILES) throw Error('computer_project_too_large');
     if (rel.split('/').some(n => SKIP_DIRS.has(n)) || secretPath(rel)) { skipped++; continue; }
-    const full = path.join(folder, rel);
-    let st; try { st = lstatSync(full); } catch { continue; }
-    if (!st.isFile()) { skipped++; continue; }
+    const read = readListedFile(path.join(folder, rel));
+    if (read === 'missing') continue;
+    if (read === 'skip') { skipped++; continue; }
+    const { bytes, st } = read;
     raw += st.size; if (raw > COPY_MAX_RAW) throw Error('computer_project_too_large');
-    const bytes = readFileSync(full);
     // A file whose text holds something that looks like a key or password stays behind (the parts are not readable on the way).
     if (bytes.length <= 2 * 1024 * 1024 && !bytes.subarray(0, 8000).includes(0) && redactImportText(bytes.toString('utf8')).total) { skipped++; secrets++; continue; }
     files.push({ p: rel, m: st.mode & 0o111 ? 0o755 : 0o644, d: bytes.toString('base64') });
