@@ -48,6 +48,8 @@ export class DeviceCoopRepository {
     async revoke(id: string) { const local = this.localId; await this.writeTx(function* () { yield* lockName('computer-peer:' + id); yield* run('UPDATE computer_peers SET revoked=1,epoch=epoch+1 WHERE local_device_id=? AND peer_id=?', local, id); });
         // What was still waiting to go to it, and what followed it, is dropped: it can never leave now (best effort; the store may hold no sync tables).
         try { await this.writeTx(function* () { yield* run("DELETE FROM computer_sync_records WHERE local_device_id=? AND peer_id=? AND direction='out' AND state IN ('queued','pending')", local, id); yield* run('DELETE FROM computer_sync_selections WHERE local_device_id=? AND peer_id=?', local, id); yield* run('DELETE FROM computer_delivery WHERE local_device_id=? AND peer_id=?', local, id); }); } catch { /* the revoke above already stands */ } }
+    /** CP13: messages of computers that were forgotten are kept nowhere (best effort). */
+    async pruneForgotten(){const local=this.localId;try{await this.writeTx(function*(){yield* run('DELETE FROM computer_delivery WHERE local_device_id=? AND peer_id IN (SELECT peer_id FROM computer_peers WHERE local_device_id=? AND revoked=1)',local,local);});}catch{/* kept for the next start */}}
     async sequence(){return Number((await this.runner.read(one<{next_sequence:number}>('SELECT next_sequence FROM computer_counters WHERE local_device_id=?',this.localId)))?.next_sequence??0);}
     async nextSequence() { const local = this.localId; return this.writeTx(function* () { yield* lockName('computer-sequence:' + local); const old = yield* one<{
         next_sequence: number;
