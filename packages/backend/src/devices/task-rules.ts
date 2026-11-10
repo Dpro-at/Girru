@@ -14,7 +14,7 @@ export interface TaskRules { rule: TaskRule; projects: Record<string, TaskRule>;
 export const DEFAULT_AT_ONCE = 3;
 const atOnceOk = (x: unknown): x is number => Number.isInteger(x) && (x as number) >= 1 && (x as number) <= 5;
 const columnOk = (x: unknown): x is string => typeof x === 'string' && x.trim() === x && x.length >= 1 && x.length <= 60 && !/[\x00-\x1f\x7f]/.test(x);
-const ID = /^[A-Za-z0-9_-]{1,128}$/;
+const ID = { test: (x: string) => /^[A-Za-z0-9_-]{1,128}$/.test(x) && !['__proto__', 'constructor', 'prototype'].includes(x) };
 const record = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
 const isRule = (x: unknown): x is TaskRule => (TASK_RULES as readonly unknown[]).includes(x);
 
@@ -41,11 +41,12 @@ export async function readTaskRules(ownerId: string) { return taskRules(await ge
 /** The rules after one change, made whole; refused when making it whole would drop an entry (full lists). */
 export function applyTaskRulesChange(rules: TaskRules, change: unknown): TaskRules {
   if (!taskRulesChangeOk(change)) throw Error('computer_task_rules_invalid');
-  const next: TaskRules = { rule: rules.rule, projects: { ...rules.projects }, always: rules.always.map(a => ({ ...a })), atOnce: rules.atOnce, column: rules.column };
+  // A prototype-free copy: a project id can never reach an object's own machinery.
+  const next: TaskRules = { rule: rules.rule, projects: Object.assign(Object.create(null) as Record<string, TaskRule>, rules.projects), always: rules.always.map(a => ({ ...a })), atOnce: rules.atOnce, column: rules.column };
   if (change.rule) next.rule = change.rule;
   if (change.atOnce !== undefined) next.atOnce = change.atOnce;
   if (change.column !== undefined) next.column = change.column;
-  if (change.project) { if (change.project.rule) next.projects[change.project.id] = change.project.rule; else delete next.projects[change.project.id]; }
+  if (change.project) { const pid = change.project.id; if (!ID.test(pid)) throw Error('computer_task_rules_invalid'); if (change.project.rule) Object.defineProperty(next.projects, pid, { value: change.project.rule, enumerable: true, writable: true, configurable: true }); else delete next.projects[pid]; }
   if (change.always) {
     const { source, projectId, on } = change.always;
     next.always = next.always.filter(a => a.source !== source || a.projectId !== projectId);

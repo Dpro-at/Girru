@@ -10,7 +10,7 @@ import { getPref, setPref } from '../../repositories/user-prefs.js';
 export const COMPUTER_ICON_KEYS = ['macbook', 'imac', 'mac-mini', 'mac-studio', 'windows-laptop', 'windows-pc', 'linux', 'other'] as const;
 /** notices: CP11c “From my other computers” system notices (on unless turned off). */
 export interface ComputerLook { icons: Record<string, string>; names: Record<string, string>; notices: boolean }
-const ID = /^[A-Za-z0-9_-]{1,128}$/;
+const ID = { test: (x: string) => /^[A-Za-z0-9_-]{1,128}$/.test(x) && !['__proto__', 'constructor', 'prototype'].includes(x) };
 const record = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
 /** A saved value made whole: bad entries dropped, at most 64 computers. */
 export function computerLook(x: unknown): ComputerLook {
@@ -43,8 +43,11 @@ export async function computerLookRoutes(fastify: FastifyInstance) {
     const b = request.body, look = computerLook(await getPref(actor.userId, 'computer-look'));
     if (b.notices !== undefined) { look.notices = b.notices; await setPref(actor.userId, 'computer-look', look); return look; }
     const id = b.deviceId!;
-    if (b.icon !== undefined) look.icons[id] = b.icon;
-    if (b.name !== undefined) { if (b.name) look.names[id] = b.name.trim(); else delete look.names[id]; }
+    const icons = Object.assign(Object.create(null) as Record<string, string>, look.icons), names = Object.assign(Object.create(null) as Record<string, string>, look.names);
+    const set = (o: Record<string, string>, v: string) => Object.defineProperty(o, id, { value: v, enumerable: true, writable: true, configurable: true });
+    if (b.icon !== undefined) set(icons, b.icon);
+    if (b.name !== undefined) { if (b.name) set(names, b.name.trim()); else delete names[id]; }
+    look.icons = { ...icons }; look.names = { ...names };
     const saved = computerLook(look);
     if (!(id in saved.icons) && b.icon !== undefined || b.name && !(id in saved.names)) return reply.code(409).send({ error: 'Too many computers', code: 'invalid' });
     await setPref(actor.userId, 'computer-look', saved);

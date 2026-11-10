@@ -69,3 +69,15 @@ test('tasks at once (1–5) and the landing column are owner choices; fewer at o
   assert.equal(changeIsStricter(base, {column: 'Review'}), false);
   assert.deepEqual(taskRules({atOnce: 9, column: 7}), {...base});
 });
+
+test('reserved names never become keys (prototype safety)', async () => {
+  const {taskRules, applyTaskRulesChange, taskRulesChangeOk} = await import('../src/devices/task-rules.ts');
+  const {computerLookChangeOk, computerLook} = await import('../src/api/routes/computer-look.ts');
+  for (const id of ['__proto__', 'constructor', 'prototype']) {
+    assert.equal(taskRulesChangeOk({project: {id, rule: 'refuse'}}), false, id);
+    assert.equal(computerLookChangeOk({deviceId: id, name: 'x'}), false, id);
+  }
+  assert.deepEqual(Object.keys(taskRules({projects: {__proto__: 'auto', ok: 'ask'}}).projects), ['ok']);
+  assert.equal(Object.hasOwn(computerLook(JSON.parse('{"names":{"__proto__":"x"}}')).names, '__proto__'), false);
+  assert.equal(applyTaskRulesChange(taskRules(undefined), {project: {id: 'p1', rule: 'refuse'}}).projects.p1, 'refuse');
+});
