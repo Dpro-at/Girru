@@ -43,3 +43,8 @@ test('names macOS or Windows could read as .git, or with invisible characters, n
   for (const bad of ['a/.git./x', 'a/.git /x', 'GIT~1/config', 'a/name.', 'a/name ', 'a/.g​it/x', 'x/﻿file']) assert.equal(safeCopyPath(bad), false, JSON.stringify(bad));
   assert.equal(safeCopyPath('docs/readme.md'), true);
 });
+
+test('NTFS streams, Windows-reserved characters and every invisible format character are refused', () => {
+  for (const bad of ['.git::$INDEX_ALLOCATION/x', '.GIT:$DATA', 'a/b:stream', 'a/.g‌it/x', 'a/.g⁪it/x', 'a/x?y', 'a/x|y', 'a/x<y', 'a/x*y']) assert.equal(safeCopyPath(bad), false, JSON.stringify(bad));
+  assert.equal(safeCopyPath('src/notes-2026.md'), true);
+});
