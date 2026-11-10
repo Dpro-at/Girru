@@ -168,3 +168,11 @@
 .cp-steps li.is-failed i { background: #F29BC0; border: 0; }
 .cp-card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .shell button.cp-stop.cp-stop { height: 30px; min-height: 30px; padding: 0 12px; border: 0; background: transparent; color: #F29BC0; font-size: 12.5px; }
+/* CP11a: the agent's offer under its reply. */
+.cp-offer { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 0 38px; padding: 12px; border-radius: 10px; font-size: 12.5px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); max-width: 560px; }
+.shell[data-theme="dark"] .cp-offer { background: #14171C; box-shadow: inset 0 0 0 1px #2A2F38; }
+.cp-offer-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.cp-offer-steps li { display: flex; align-items: center; gap: 10px; }
+.cp-offer-to { display: inline-flex; align-items: center; gap: 6px; color: #9DBBFF; }
+.cp-offer-to.is-missing { color: #F0C27A; }
+.cp-offer-actions { display: flex; gap: 8px; }

@@ -291,12 +291,27 @@ export function turnSuggestions(parts: readonly Part[]): CardSuggestion[] {
   return out;
 }
 
+/** CP11a: an agent's offer to run steps on the owner's other computers (the newest successful one). */
+export const OFFER_TOOL = 'computer_offer';
+export type ComputerOffer = Readonly<{ why: string; steps: readonly Readonly<{ title: string; computer: string; text: string }>[] }>;
+export function turnOffer(parts: readonly Part[]): ComputerOffer | null {
+  let offer: ComputerOffer | null = null;
+  for (const p of parts) if (p.kind === 'tools') for (const c of p.calls) {
+    if (c.name !== OFFER_TOOL || c.isError || c.output === undefined) continue;
+    const a = args(c.input), raw = Array.isArray(a.steps) ? a.steps : [];
+    const steps = raw.slice(0, 6).filter((x): x is {title: string; computer: string; text: string} => !!x && typeof x === 'object' && ['title', 'computer', 'text'].every(k => typeof (x as Record<string, unknown>)[k] === 'string' && ((x as Record<string, string>)[k]).trim().length > 0))
+      .map(x => ({ title: x.title.trim().slice(0, 120), computer: x.computer.trim().slice(0, 64), text: x.text.trim().slice(0, 8000) }));
+    if (steps.length) offer = { why: typeof a.why === 'string' ? a.why.trim().slice(0, 300) : '', steps };
+  }
+  return offer;
+}
+
 /** The parts without plan updates and card suggestions: both are shown on their own, not as tool work. */
 export function withoutPlan(parts: readonly Part[]): Part[] {
   const out: Part[] = [];
   for (const p of parts) {
     if (p.kind !== 'tools') { out.push(p); continue; }
-    const calls = p.calls.filter(c => c.name !== PLAN_TOOL && c.name !== SUGGEST_TOOL && c.name !== CHOICE_TOOL && c.name !== SESSION_START);
+    const calls = p.calls.filter(c => c.name !== PLAN_TOOL && c.name !== SUGGEST_TOOL && c.name !== CHOICE_TOOL && c.name !== SESSION_START && c.name !== OFFER_TOOL);
     if (calls.length) out.push(calls.length === p.calls.length ? p : { ...p, calls });
   }
   return out;

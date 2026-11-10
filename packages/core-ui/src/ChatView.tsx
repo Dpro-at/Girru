@@ -39,8 +39,9 @@ import { joinPath } from './code-open';
 import { UiIcon } from './ui-icons';
 import { ClaudeCodeIcon, CodexIcon, GeminiIcon } from './brand-icons';
 import type { UiIconName } from './ui-icons';
-import { approxTokens, duration, groupLabel, liveCalls, livePhase, planOf, splitWork, toolCount, toolView, turnChoice, turnOutputs, turnSessions, turnSuggestions, withoutPlan, workGroups, workSegments, type WorkItem } from './turns';
-import type { CardSuggestion } from './turns';
+import { approxTokens, duration, groupLabel, liveCalls, livePhase, planOf, splitWork, toolCount, toolView, turnChoice, turnOutputs, turnOffer, turnSessions, turnSuggestions, withoutPlan, workGroups, workSegments, type WorkItem } from './turns';
+import type { CardSuggestion, ComputerOffer } from './turns';
+import { ComputerOfferCard } from './ComputerOfferCard';
 import { ChatCardsController, activityLine, cardDraftFrom } from './chat-board';
 import type { ChatCard, ChatProgress } from './chat-board';
 import type { Priority } from './board';
@@ -528,6 +529,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
         {s.turns.map((t, i) => t.role === 'user'
           ? <UserMessage key={t.key} turn={t} highlight={flash === t.key} onKey={client ? setKeysOpen : undefined} onEdit={running ? undefined : text => { controller.edit(text); input.current?.focus(); }} onRemember={canRemember && messageRef(t) ? () => openRemember(t, t.content) : undefined}/>
           : <AssistantTurn recovery={t.code === 'run_interrupted' && client && s.activeId ? <RecoveryApprovals key={`${s.activeId}:${client.getSnapshot().epoch}`} client={client} conversationId={s.activeId}/> : undefined} key={t.key} turn={t} highlight={flash === t.key} writer={nameOf(t.agentId ?? convAgentId)} writerDepartment={departmentOf(t.agentId ?? convAgentId)} writerRole={s.agents.find(a => a.id === (t.agentId ?? convAgentId))?.primary || (!(t.agentId ?? convAgentId) && s.agents.some(a => a.primary)) ? 'main agent' : undefined} last={i === s.turns.length - 1} onRetry={lastUser ? () => void controller.send(t.code === 'run_interrupted' ? 'Continue the interrupted work from the saved checkpoints. Review what is already done and inspect unknown outcomes before repeating any action. Ask me to approve each tool call.' : lastUser.content) : undefined}
+            offerCard={owner && client && i === s.turns.length - 1 ? (o => <ComputerOfferCard client={client} offer={o} conversationId={s.activeId} onKeepHere={() => void controller.send('Keep it here: do this work on this computer.')}/>) : undefined}
             onSuggest={owner && cardsCtl && s.activeId ? openCardForm : undefined} onRemember={canRemember && messageRef(t) ? text => openRemember(t, text) : undefined}
             proposals={t.runId && memCtl ? <MemoryProposals controller={memCtl} items={byRun.get(t.runId) ?? []}/> : null} recall={recallCtl} onWrongPlace={moveCtl ? m => void moveCtl.open(m) : undefined}/>)}
         {moveCtl && <MoveDialog c={moveCtl} from="From a reply’s “wrong place”"/>}
@@ -822,13 +824,14 @@ function SecretChip({ type, id, onOpen }: { type: string; id: string; onOpen?: (
 }
 
 /** One assistant turn: live parts in order while running; work folded once finished. */
-function AssistantTurn({ turn, last, onRetry, writer, writerDepartment, writerRole, recovery, onSuggest, onRemember, proposals, highlight, recall, onWrongPlace }: { turn: Turn; last: boolean; onRetry?: () => void; writer?: string; writerDepartment?: string | null; writerRole?: string; recovery?: ReactNode; onSuggest?: (s: CardSuggestion) => void; onRemember?: (text: string) => void; proposals?: ReactNode; highlight?: boolean; recall?: ChatRecallController | null; onWrongPlace?: (m: { id: string; text: string; drawerId: string }) => void }) {
+function AssistantTurn({ turn, last, onRetry, writer, writerDepartment, writerRole, recovery, onSuggest, onRemember, proposals, highlight, recall, onWrongPlace, offerCard }: { offerCard?: (offer: ComputerOffer) => ReactNode; turn: Turn; last: boolean; onRetry?: () => void; writer?: string; writerDepartment?: string | null; writerRole?: string; recovery?: ReactNode; onSuggest?: (s: CardSuggestion) => void; onRemember?: (text: string) => void; proposals?: ReactNode; highlight?: boolean; recall?: ChatRecallController | null; onWrongPlace?: (m: { id: string; text: string; drawerId: string }) => void }) {
   const live = turn.status === 'running';
   const plan = planOf(turn);
   const suggestions = turnSuggestions(turn.parts);
   const choice = turnChoice(turn.parts);
   const sessions = turnSessions(turn.parts);
-  const parts = plan || suggestions.length || choice || sessions.length ? withoutPlan(turn.parts) : turn.parts;
+  const offer = turnOffer(turn.parts);
+  const parts = plan || suggestions.length || choice || sessions.length || offer ? withoutPlan(turn.parts) : turn.parts;
   // CHAT-LIVE-01 (LW1): while it runs, the steps so far come from the live preview (the checked parts replace them at the end).
   const liveSteps = live && parts.length === 0 ? liveCalls(turn.previewSteps) : [];
   const phase = livePhase(turn);
@@ -873,6 +876,7 @@ function AssistantTurn({ turn, last, onRetry, writer, writerDepartment, writerRo
         {sessions.length > 0 && <SessionsCard sessions={sessions}/>}
         {choice && <ChoiceCard choice={choice} open={last}/>}
         {suggestions.map((g, i) => <CardSuggestionView key={i} suggestion={g} onCreate={onSuggest}/>)}
+        {offer && offerCard?.(offer)}
         {proposals}
         {recovery}
         <TurnFooter text={answerText || turn.content} ms={turn.durationMs} stopped={turn.status === 'stopped'} onRemember={onRemember} recall={recall ? <RecallChip c={recall} turn={turn}/> : null}
