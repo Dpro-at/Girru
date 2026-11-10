@@ -80,7 +80,7 @@ export class ComputerCoordinator {
         }
         catch { /* Revoked/offline work stays local and cannot execute. */ }
     } }
-    async advertise(actor: Actor, state: 'available' | 'busy' | 'paused' = 'available') { if(this.stopped)return;await this.membership.assertOwner(actor);const active=(await this.repo.attempts()).filter(a=>a.target_id===this.repo.localId&&['accepted','running','cancel_requested'].includes(a.state)).length;if(active>3)throw Error('computer_capacity_unknown');if(active&&state==='available')state='busy';const slots=await this.dispatchOptions(); for (const p of await this.repo.peers()) {
+    async advertise(actor: Actor, state: 'available' | 'busy' | 'paused' = 'available') { if(this.stopped)return;await this.membership.assertOwner(actor);const active=(await this.repo.attempts()).filter(a=>a.target_id===this.repo.localId&&['accepted','running','cancel_requested'].includes(a.state)).length;const own=await readTaskRules(this.membership.ownerId);if(active>own.atOnce)throw Error('computer_capacity_unknown');if(!own.takes)state='paused';else if(active&&state==='available')state='busy';const slots=await this.dispatchOptions(); for (const p of await this.repo.peers()) {
         if(this.stopped)return;try {
             const e = await this.envelope(p.peer_id, 'presence', { bootId: this.bootId, name: this.name, state, expiresAt: this.now() + 15000, capabilities: this.membership.authority.testOnly?['synthetic-task-v1']:['task-v1','selected-sync-v1'],slots,capacity:{limit:(await readTaskRules(this.membership.ownerId)).atOnce,active} });
             await this.transport.send(e);
@@ -150,7 +150,9 @@ export class ComputerCoordinator {
             return;
         }
         // CP6: “Don't accept” ends it here; “Allow automatically” approves the same record below.
-        const rule=decideTask(await readTaskRules(this.membership.ownerId),e.sender,b.projectId);
+        const rules=await readTaskRules(this.membership.ownerId);
+        if(!rules.takes){await this.change(p.taskId,'cancelled','This computer is not taking new tasks right now.');return;}
+        const rule=decideTask(rules,e.sender,b.projectId);
         if(rule==='refuse'){await this.change(p.taskId,'cancelled','This computer does not accept tasks from your other computers for this project.');return;}
         let timing:ExecutionTiming;try{timing=readExecutionTiming(a.timing_json?JSON.parse(a.timing_json):p.timing,this.now());}catch{await this.change(a.task_id,'blocked','The requested time is no longer valid. Choose a new exact execution review.');return;}
         const preview = { timing,targetCardId:a.target_card_id??null,targetCardVersion:a.target_card_version??null,sourceDevice: e.sender, targetDevice: this.repo.localId, project: b.projectId, agent: b.agentId, model: b.model, task: p, epoch: e.epoch };

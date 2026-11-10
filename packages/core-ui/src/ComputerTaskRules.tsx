@@ -10,7 +10,7 @@ import type {UiIconName} from './ui-icons';
  * once, or always from that computer in that project.
  */
 export type TaskRule = 'ask' | 'auto' | 'refuse';
-export type Rules = {rule: TaskRule; projects: Record<string, TaskRule>; always: {source: string; projectId: string}[]; atOnce?: number; column?: string | null};
+export type Rules = {rule: TaskRule; projects: Record<string, TaskRule>; always: {source: string; projectId: string}[]; atOnce?: number; column?: string | null; takes?: boolean};
 const CHOICES: ReadonlyArray<{key: TaskRule; title: string; note: string; icon: UiIconName; tint: string}> = [
   {key: 'ask', title: 'Ask me every time', note: 'A notice with Allow / Not now. Recommended.', icon: 'inbox', tint: '#9DBBFF'},
   {key: 'auto', title: 'Allow automatically', note: 'It starts at once, with this computer’s rules for agents.', icon: 'play', tint: '#8FD6B0'},
@@ -129,4 +129,13 @@ export function AllowTask({client, approvalId, sourceName, onDone, onApprovals}:
     <label className="computer-allow-always"><input type="checkbox" checked={always} onChange={e => setAlways(e.target.checked)}/>Always from {sourceName} here</label>
     <button type="button" className="primary" disabled={busy} onClick={() => void allow()}>Allow</button>
   </span>;
+}
+
+/** CP3 inspector: “Takes new tasks” for this computer (off: it shows as not taking tasks and refuses new ones). */
+export function TakesNewTasks({client}: {client: SessionClient}) {
+  const [rules, setRules] = useState<Rules | null>(null);
+  const [notice, setNotice] = useState('');
+  useEffect(() => { let live = true; void client.request({method: 'GET', path}).then(r => { if (live && r.status === 200) setRules(r.body as Rules); }).catch(() => {}); return () => { live = false; }; }, [client]);
+  if (!rules) return null;
+  return <label className="computers-check"><input type="checkbox" checked={rules.takes !== false} onChange={e => void post(client, {takes: e.target.checked}).then(setRules).catch(() => setNotice('It could not be saved.'))}/>Takes new tasks{notice && <small role="status">{notice}</small>}</label>;
 }

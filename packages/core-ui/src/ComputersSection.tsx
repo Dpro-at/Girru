@@ -9,7 +9,7 @@ import {ContextMenu, useMenu, type MenuItem} from './desktop-ui';
 import {computerIcon, computerName, useComputerLook, type ComputerIconKey} from './ComputerLook';
 import {AddThisComputer, ComputerJoinRequests, useAccountStatus} from './ComputerJoin';
 import {ContinuityRequests} from './ComputerStart';
-import {AllowTask} from './ComputerTaskRules';
+import {AllowTask, TakesNewTasks} from './ComputerTaskRules';
 import {ComputerWorksOn, ProjectCopyAsks} from './ComputerWorksOn';
 import {RenameComputerSheet, forgetComputerLater, ForgetNotice, useForgetPending} from './ComputerActions';
 import {UiIcon} from './ui-icons';
@@ -109,10 +109,9 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   // Right after Girru starts it reconnects to the account by itself: say so, never offer to add a computer that is already added.
   else if (account === undefined || account?.configured && !!account.mapping && !account.connected || account?.connected && account.view?.deviceStatus === 'approved' && !usable) main = <div className="dk-empty computers-empty" role="status"><UiIcon name="screen" size={28}/><b>{account?.connected ? 'Getting your computers ready…' : 'Connecting to your account…'}</b><p>This takes a few seconds after Girru starts.</p></div>;
   else if (!usable || account?.view?.deviceStatus === 'pending') main = <div className="computers-main"><AddThisComputer client={client} status={account}/></div>;
-  else if (!devices.length && isSelf && !needs.length) main = <div className="dk-empty computers-empty"><UiIcon name="screen" size={28}/><b>Your agents can also work on your other computers</b><p>Install Girru on your other computer and sign in with the same Google account. It joins your account by itself and shows up here.</p></div>;
   else {
     const name = isSelf ? nameOf(self?.id ?? '', self?.name ?? 'This computer') : device ? nameOf(device.id, device.name) : 'Computer';
-    const status = isSelf ? 'This computer' : device ? `${computerStateLabel(device.state)} · ${computerPathLabel(device.path)}` : '';
+    const status = isSelf ? 'This computer · online' : device ? `${computerStateLabel(device.state)} · ${computerPathLabel(device.path)}` : '';
     main = <div className="computers-main">
       <header className="computers-head">
         <span className="computers-tile"><UiIcon name={isSelf ? iconOf(self?.id ?? '') : iconOf(device?.id ?? '', device?.publicKey)} size={22}/></span>
@@ -128,14 +127,16 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
       {!isSelf && device && older(device.publicKey) && <div className="computer-task computer-version" role="status"><UiIcon name="download" size={16}/><span className="computer-task-text"><b>{nameOf(device.id, device.name)} has another Girru version</b><small>It can still be seen, but it can’t take new tasks until both run the same version. It updates by itself the next time it opens (backup first).</small></span></div>}
       {isSelf && <ComputerJoinRequests client={client} status={account}/>}
       {isSelf && <ContinuityRequests client={client} status={account}/>}
-      {needs.length > 0 && <section aria-label="Needs you"><p className="section-label">Needs you</p><div className="computer-list" role="list">
+      <section aria-label="Needs you"><p className="section-label">Needs you</p>{needs.length > 0 ? <div className="computer-list" role="list">
         {needs.map(a => row(a, <>{a.approvalId ? <AllowTask client={client} approvalId={a.approvalId} sourceName={nameOf(a.sourceDevice, a.sourceName)} onDone={setNotice} onApprovals={onApprovals}/> : <button type="button" onClick={onApprovals}>Open Approvals</button>}<ComputerTaskTiming client={client} taskId={a.taskId} onPrepared={onApprovals}/></>))}
-      </div></section>}
+      </div> : <p className="fine-print">Nothing waits for you.</p>}</section>
       <section aria-label="Working on"><p className="section-label">Working on</p>
         {working.length ? <div className="computer-list" role="list">
           {working.map(a => row(a, <>{a.sessionId && <button type="button" onClick={() => onOpenChat(a.sessionId!)}>Open its chat</button>}{WORKING.has(a.state) && a.state !== 'cancel_requested' && <button type="button" className="danger-text" onClick={() => void cancel(a)}>Stop</button>}</>))}
         </div> : <p className="fine-print">Nothing right now.{!isSelf && device && device.state !== 'available' && device.state !== 'busy' ? ' Tasks you send wait on this computer and go when it is open again.' : ''}</p>}
       </section>
+      {/* CP3b: only this computer in the account. */}
+      {isSelf && !devices.length && <div className="computers-alone"><UiIcon name="screen" size={22}/><span><b>Your agents can also work on your other computers</b><small>Install Girru on your other computer and sign in with the same Google account. It joins your account by itself and shows up here.</small></span></div>}
     </div>;
   }
 
@@ -144,7 +145,11 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
     {device && <><span className="computers-field"><small>Connection</small><span><UiIcon name="wifi" size={14}/>{computerPathLabel(device.path)}</span></span>
       <span className="computers-field"><small>Last seen</small><span>{device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleString() : 'Not yet'}</span></span>
       <span className="computers-field"><small>Works on</small>{(device.dispatchOptions ?? []).length ? (device.dispatchOptions ?? []).map(o => <span key={o.id}><UiIcon name="board" size={14}/>{o.label}</span>) : <span>No projects shared yet</span>}</span></>}
+    {isSelf && <span className="computers-field"><small>Connection</small><span><UiIcon name="wifi" size={14}/>{account?.connected ? 'Online · your account' : 'Not connected to your account'}</span></span>}
     {isSelf && <span className="computers-field"><small>Works on</small>{(view?.dispatchOptions ?? []).length ? view!.dispatchOptions.map(o => <span key={o.id}><UiIcon name="board" size={14}/>{o.label}</span>) : <span>No project yet</span>}<button type="button" className="cp-link" onClick={() => setWorksOn(true)}>{(view?.dispatchOptions ?? []).length ? 'Change…' : 'Add a project…'}</button></span>}
+    {isSelf && <TakesNewTasks client={client}/>}
+    {device && <span className="computers-field"><small>Takes new tasks</small><span>{device.state === 'paused' ? 'No' : 'Yes'}</span></span>}
+    <span className="computers-hint">⋯ and right-click: Rename and icon · Works on… · Forget this computer</span>
     <button type="button" className="link-button" onClick={onSettings}>Settings › Computers</button>
   </aside> : null;
 
