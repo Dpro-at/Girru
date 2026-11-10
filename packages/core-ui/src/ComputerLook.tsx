@@ -14,7 +14,7 @@ export const COMPUTER_ICONS: ReadonlyArray<{key: ComputerIconKey; name: string; 
   {key: 'other', name: 'Other', icon: 'pc-other'},
 ];
 export type ComputerIconKey = 'macbook' | 'imac' | 'mac-mini' | 'mac-studio' | 'windows-laptop' | 'windows-pc' | 'linux' | 'other';
-export type ComputerLookPrefs = {icons: Record<string, ComputerIconKey>; names: Record<string, string>};
+export type ComputerLookPrefs = {icons: Record<string, ComputerIconKey>; names: Record<string, string>; notices?: boolean};
 /** The picture Girru picks by itself from the system the computer runs. */
 export function systemIcon(osFamily?: string | null): ComputerIconKey {
   return osFamily === 'macos' ? 'macbook' : osFamily === 'windows' ? 'windows-pc' : osFamily === 'linux' ? 'linux' : 'other';

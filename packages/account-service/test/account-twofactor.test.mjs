@@ -77,6 +77,7 @@ test('signing in with Google adds the computer, unless two-step sign-in is on',a
  const first=peer(),second=peer(),old=peer(),third=peer(),fourth=peer();
  await login(first,'661000222');
  const added=await login(second,'661000222',{addByGoogle:true});assert.equal(added.view.deviceStatus,'approved');
+ const told=request(first,'device.requests').addedWithCode;assert.ok(told.some(d=>d.deviceId===added.view.deviceId),'the other computers are told, with Keep or Forget');
  const waiting=await login(old,'661000222');assert.equal(waiting.view.deviceStatus,'pending','an app that does not ask still waits for a Yes');
  const later=await login(old,'661000222',{addByGoogle:true});assert.equal(later.view.deviceStatus,'approved','signing in again on the app adds it');
  const {secret}=request(first,'twofactor.setup');request(first,'twofactor.enable',{code:codeAt(secret)});

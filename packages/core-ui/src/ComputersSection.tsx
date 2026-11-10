@@ -24,10 +24,11 @@ const WORKING = new Set(['queued', 'scheduled', 'accepted', 'running', 'cancel_r
  * works on; its details sit in the inspector. One main action: Send a task.
  * Rare and technical controls live in Settings › Computers.
  */
-export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApprovals, onSettings}: {
+export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApprovals, onSettings, onUpdates}: {
   client: SessionClient;
   active: boolean;
   sidebarSlot?: HTMLElement | null;
+  onUpdates?: () => void;
   onOpenChat: (id: string) => void;
   onApprovals: () => void;
   onSettings: () => void;
@@ -47,6 +48,8 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   const nameOf = (id: string, name: string) => computerName(look, id, name);
   // CP11e (D10): computers take tasks from each other only on the same Girru version.
   const ownVersion = account?.view?.devices?.find(d => d.id === account?.view?.deviceId)?.appVersion;
+  // CP11e (D10): this computer sees by itself that another of your computers runs a newer Girru.
+  const newerElsewhere = (account?.view?.devices ?? []).filter(d => d.id !== account?.view?.deviceId && d.status === 'approved' && !!ownVersion && (d.appVersion ?? '').localeCompare(ownVersion, undefined, {numeric: true}) > 0).sort((a, b) => (b.appVersion ?? '').localeCompare(a.appVersion ?? '', undefined, {numeric: true}))[0];
   const older = (publicKey?: string) => { const v = accountDevice(publicKey)?.appVersion; return !!v && !!ownVersion && v !== ownVersion ? v : null; };
   const self = view?.self ?? null;
   // While this computer waits to be added, the coordinator has no list yet; the account still knows it.
@@ -116,6 +119,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
       </header>
       {notice && <p role="status" className="fine-print">{notice}</p>}
       <ForgetNotice/>
+      {isSelf && newerElsewhere && <div className="computer-task computer-version" role="status"><UiIcon name="download" size={16}/><span className="computer-task-text"><b>Update Girru on this computer</b><small>{newerElsewhere.label} has a newer Girru ({newerElsewhere.appVersion}). Until this computer is updated, they can’t send each other tasks.</small></span>{onUpdates && <span className="computer-task-actions"><button type="button" className="primary" onClick={onUpdates}>Update…</button></span>}</div>}
       {!isSelf && device && older(device.publicKey) && <div className="computer-task computer-version" role="status"><UiIcon name="download" size={16}/><span className="computer-task-text"><b>{nameOf(device.id, device.name)} has another Girru version</b><small>It can still be seen, but it can’t take new tasks until both run the same version. It updates by itself the next time it opens (backup first).</small></span></div>}
       {isSelf && <ComputerJoinRequests client={client} status={account}/>}
       {isSelf && <ContinuityRequests client={client} status={account}/>}

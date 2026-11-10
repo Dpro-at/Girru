@@ -27,7 +27,7 @@ test('task rule changes accept only known shapes', () => {
 });
 
 test('computer pictures and names: known pictures, short plain names (CP9c)', () => {
-  assert.deepEqual(computerLook({icons: {a: 'imac', b: 'toaster'}, names: {a: 'Office PC', c: '', d: 'x'.repeat(65)}}), {icons: {a: 'imac'}, names: {a: 'Office PC'}});
+  assert.deepEqual(computerLook({icons: {a: 'imac', b: 'toaster'}, names: {a: 'Office PC', c: '', d: 'x'.repeat(65)}}), {icons: {a: 'imac'}, names: {a: 'Office PC'}, notices: true});
   assert.equal(computerLookChangeOk({deviceId: 'a', icon: 'linux'}), true);
   assert.equal(computerLookChangeOk({deviceId: 'a', name: ''}), true, 'an empty name goes back to the account name');
   assert.equal(computerLookChangeOk({deviceId: 'a', icon: 'toaster'}), false);
