@@ -5,8 +5,7 @@ import type {ComputerAttempt} from './computer-contract.js';
 import {useComputerOverview, computerStateLabel, computerPathLabel} from './ComputerDevices';
 import {ComputerTaskRequest} from './ComputerTaskRequest';
 import {ComputerTaskTiming} from './ComputerTaskTiming';
-import {ComputerLinkControls} from './ComputerLinkControls';
-import {Sheet, ContextMenu, useMenu, type MenuItem} from './desktop-ui';
+import {ContextMenu, useMenu, type MenuItem} from './desktop-ui';
 import {computerIcon, computerName, useComputerLook, type ComputerIconKey} from './ComputerLook';
 import {AddThisComputer, ComputerJoinRequests, useAccountStatus} from './ComputerJoin';
 import {ContinuityRequests} from './ComputerStart';
@@ -36,7 +35,6 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   const view = useComputerOverview();
   const account = useAccountStatus(client, active);
   const [selected, setSelected] = useState('');
-  const [adding, setAdding] = useState(false);
   const [notice, setNotice] = useState('');
   const [inspector, setInspector] = useState(true);
   const [renaming, setRenaming] = useState<{id: string; name: string; icon: ComputerIconKey | null} | null>(null);
@@ -80,7 +78,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   ];
   const menuForSelf = (): MenuItem[] => [renameItem(self?.id ?? '', nameOf(self?.id ?? '', self?.name ?? 'This computer')), {label: 'Settings › Computers', icon: 'gear', run: onSettings}];
   const nav = <nav className="dk-sidebar computers-places" aria-label="My computers">
-    <p className="section-label dk-label computers-label"><span>My computers</span>{usable && <button type="button" className="tool" title="Add a computer (⌘N)" aria-label="Add a computer" onClick={() => setAdding(true)}><UiIcon name="plus" size={14}/></button>}</p>
+    <p className="section-label dk-label computers-label"><span>My computers</span></p>
     {self && <button type="button" className="nav-item dk-place" aria-current={isSelf ? 'page' : undefined} onClick={() => setSelected(self.id)}>
       <UiIcon name={iconOf(self.id)} size={15}/><span className="dk-place-name">{nameOf(self.id, self.name)}</span><span className="dk-count">this one</span>
       {attempts.filter(a => a.targetDevice === self.id && WAITING.has(a.state)).length > 0 && <span className="dk-badge-pill" title="Needs you">{attempts.filter(a => a.targetDevice === self.id && WAITING.has(a.state)).length}</span>}
@@ -104,7 +102,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   let main: ReactNode;
   if (!view) main = <div className="dk-empty"><p role="status">Reading your computers…</p></div>;
   else if (!usable || account?.view?.deviceStatus === 'pending') main = <div className="computers-main"><AddThisComputer client={client} status={account}/></div>;
-  else if (!devices.length && isSelf && !needs.length) main = <div className="dk-empty computers-empty"><UiIcon name="screen" size={28}/><b>Your agents can also work on your other computers</b><p>Install Girru there and sign in with the same account.</p><button type="button" className="primary" onClick={() => setAdding(true)}>Add a computer</button></div>;
+  else if (!devices.length && isSelf && !needs.length) main = <div className="dk-empty computers-empty"><UiIcon name="screen" size={28}/><b>Your agents can also work on your other computers</b><p>Install Girru on your other computer and sign in with the same Google account. It joins your account by itself and shows up here.</p></div>;
   else {
     const name = isSelf ? nameOf(self?.id ?? '', self?.name ?? 'This computer') : device ? nameOf(device.id, device.name) : 'Computer';
     const status = isSelf ? 'This computer' : device ? `${computerStateLabel(device.state)} · ${computerPathLabel(device.path)}` : '';
@@ -145,10 +143,6 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
     {sidebarSlot ? (active ? createPortal(nav, sidebarSlot) : null) : nav}
     {main}
     {inspectorPane}
-    {adding && <Sheet title="Add a computer" onClose={() => setAdding(false)}>
-      <ol className="computer-join-list"><li>Install Girru on the other computer.</li><li>Choose Computers › Continue with Google there, with the same Google account.</li><li>This computer then asks “Add it to your account?” with pictures to compare.</li></ol>
-      {view && <details><summary>Older way, with a code to copy</summary><ComputerLinkControls client={client} view={view} onNotice={setNotice}/></details>}
-    </Sheet>}
     <ContextMenu menu={menu.menu} onClose={menu.close}/>
     {renaming && <RenameComputerSheet target={renaming} onSave={save} onClose={() => setRenaming(null)}/>}
   </section>;

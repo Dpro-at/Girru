@@ -1,5 +1,4 @@
-import {DproAccountPanel} from './DproAccountPanel';
-import {JoinStart, JoinReady, quietDiscovery, readSetupEntry, writeSetupEntry, setupRoad} from './ComputerStart';
+import {JoinStart, JoinReady, NameThisComputer, quietDiscovery, readSetupEntry, writeSetupEntry, setupRoad} from './ComputerStart';
 import {useAccountStatus} from './ComputerJoin';
 import { DiscoveryStream } from './DiscoveryStream';
 import { SetupOrb } from './SetupOrb';
@@ -107,6 +106,7 @@ export function FirstRunSetup({ client, initialStep, workspaceType: initialType,
   const entry = alone ? null : chosen ?? setupRoad(account);
   const [joined, setJoined] = useState<{ from: string; comes: string; name: string } | null>(null);
   const [joinReady, setJoinReady] = useState(false);
+  const [named, setNamed] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const startSame = async () => {
     setPreparing(true);
@@ -151,7 +151,8 @@ export function FirstRunSetup({ client, initialStep, workspaceType: initialType,
       <div className="setup-actions"><button type="button" className="primary" onClick={() => { setPlainNote('seen'); void finishAfterNote(); }}>OK</button></div></section>
   </main></div>;
   return <div className="shell app-shell first-run-shell" data-theme={appearance.theme} lang="en" dir="ltr"><main className="first-run-setup" aria-label="Set up Girru">
-    {entry === 'signin' ? <JoinStart client={client} onFresh={() => { writeSetupEntry(null); setEntry(null); setAlone(true); }} onSame={(from, comes, name) => { writeSetupEntry('same'); setJoined({ from, comes, name }); setEntry('same'); }}/>
+    {!named ? <NameThisComputer client={client} onDone={() => setNamed(true)}/>
+    : entry === 'signin' ? <JoinStart client={client} onFresh={() => { writeSetupEntry(null); setEntry(null); setAlone(true); }} onSame={(from, comes, name) => { writeSetupEntry('same'); setJoined({ from, comes, name }); setEntry('same'); }}/>
     : entry === 'same' ? <>
       {stepNotice && <p className="setup-note" role="alert">{stepNotice}</p>}
       {joinReady ? <JoinReady name={joined?.name ?? 'This computer'} from={joined?.from ?? 'your other computer'} comes={joined?.comes ?? ''} onOpen={() => void finish()}/>
@@ -162,7 +163,7 @@ export function FirstRunSetup({ client, initialStep, workspaceType: initialType,
     {step !== 'discovery' && <SetupOrb/>}
     <SetupSteps current={step === 'discovery' ? 'Your files' : step === 'tools' ? 'AI tools' : step === 'model' ? 'Local model' : step === 'phone' ? 'Phone' : 'Team'}/>
     {stepNotice && <p className="setup-note" role="alert">{stepNotice}</p>}
-    {step === 'discovery' && <><DproAccountPanel client={client} firstRun/><DiscoveryStep client={client} onNext={() => go('tools')}/></>}
+    {step === 'discovery' && <DiscoveryStep client={client} onNext={() => go('tools')}/>}
     {step === 'tools' && <ToolsStep client={client} terminal={terminal} onSignedIn={setSignedIn} onNext={() => go('model')}/>}
     {step === 'model' && <ModelStep client={client} terminal={terminal} canSkip={signedIn} onBack={() => go('tools')} onNext={() => go('team')}/>}
     {step === 'team' && <TeamStep client={client} workspaceType={workspaceType} companyKind={workspaceType === 'company' ? companyKind : undefined} ready={teamReady} onReady={() => setTeamReady(true)} onBack={() => go('model')} onDone={() => setStep('phone')}/>}

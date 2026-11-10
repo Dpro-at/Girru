@@ -3,6 +3,7 @@ import type {SessionClient} from './session';
 import {AddThisComputer, call, computerAccountWords, useAccountStatus, type Status} from './ComputerJoin';
 import {UiIcon} from './ui-icons';
 import type {UiIconName} from './ui-icons';
+import {computerIcon, useComputerLook} from './ComputerLook';
 
 /**
  * A new computer joins an account that already has computers (DEVICES-PROJECT-01, boards CP1b–CP2d).
@@ -219,4 +220,36 @@ export async function quietDiscovery(client: SessionClient) {
   let state = await read();
   if (state !== 'done' && state !== 'scanning') { try { await client.request({method: 'POST', path: '/api/first-run/discovery'} as never); } catch { /* read again below */ } }
   for (let n = 0; n < 90 && (state = await read()) !== 'done'; n++) { if (state === 'error') return; await new Promise(r => setTimeout(r, 1000)); }
+}
+
+/**
+ * Right after signing in (D11, Mohamed 2026-11-10): the only question about this computer is its name,
+ * filled in with the system's own name. Signing in already added it to the account.
+ */
+export function NameThisComputer({client, onDone}: {client: SessionClient; onDone: () => void}) {
+  const status = useAccountStatus(client);
+  const {look, save} = useComputerLook(client);
+  const selfId = status?.view?.deviceId ?? '';
+  const label = status?.view?.devices?.find(d => d.id === selfId)?.label ?? '';
+  const [name, setName] = useState<string | null>(null);
+  const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState(false);
+  const named = !!selfId && !!look?.names?.[selfId];
+  useEffect(() => { if (named) onDone(); }, [named]);
+  // Not in a Dpro account on this computer (for example Google was not ready): nothing to name.
+  useEffect(() => { if (status === null || status && !status.connected) onDone(); }, [status]);
+  if (!status?.connected || !look || named) return <p role="status" className="setup-note">One moment…</p>;
+  const value = name ?? label;
+  const go = async () => {
+    setBusy(true); setNotice('');
+    try { await save(selfId, {name: value.trim()}); onDone(); } catch { setNotice('It could not be saved. Try again.'); } finally { setBusy(false); }
+  };
+  return <section className="computer-join" aria-label="Name this computer">
+    <span className="computer-start-done"><UiIcon name={computerIcon(look, selfId, status.view?.devices?.find(d => d.id === selfId)?.osFamily)} size={26}/></span>
+    <h2>Name this computer</h2>
+    <p>Your other computers see it with this name.</p>
+    <label className="phone-field"><span>Computer name</span><input autoFocus value={value} maxLength={64} onChange={e => setName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && value.trim()) void go(); }}/></label>
+    {notice && <p role="status">{notice}</p>}
+    <div className="setup-actions"><button type="button" className="primary" disabled={busy || !value.trim()} onClick={() => void go()}>Continue</button></div>
+  </section>;
 }

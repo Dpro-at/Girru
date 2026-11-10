@@ -3,11 +3,12 @@ import type {SessionClient} from './session';
 import {useComputerOverview, computerStateLabel, computerPathLabel} from './ComputerDevices';
 import {DproAccountPanel} from './DproAccountPanel';
 import {AccountTwoFactor, ThisComputerCheck, useAccountStatus} from './ComputerJoin';
-import {computerIcon, computerName, useComputerLook} from './ComputerLook';
+import {computerIcon, computerName, useComputerLook, type ComputerIconKey} from './ComputerLook';
+import {RenameComputerSheet, forgetComputerLater, ForgetNotice, useForgetPending} from './ComputerActions';
 import {ComputerEnrollment} from './ComputerEnrollment';
 import {ComputerLinkControls, ComputerDirectControls} from './ComputerLinkControls';
 import {ComputerSyncWorkspace} from './ComputerSyncWorkspace';
-import {ComputerTaskRules} from './ComputerTaskRules';
+import {ComputerTaskRules, TasksAtOnce} from './ComputerTaskRules';
 import {ComputerShare} from './ComputerShare';
 import {UiIcon} from './ui-icons';
 import type {UiIconName} from './ui-icons';
@@ -30,7 +31,9 @@ export function ComputerSettings({client, pane, onApprovals}: {client: SessionCl
   const usable = !!view && (view.testOnly || !!view.configured);
   const place = COMPUTER_SETTINGS_PANES.find(p => p.key === pane)!;
   const account = useAccountStatus(client, pane !== 'tasks');
-  const {look} = useComputerLook(client, pane === 'mine' || pane === 'tasks');
+  const {look, save} = useComputerLook(client, pane === 'mine' || pane === 'tasks');
+  const [renaming, setRenaming] = useState<{id: string; name: string; icon: ComputerIconKey | null} | null>(null);
+  const forgetting = useForgetPending();
   const os = (publicKey?: string, self = false) => account?.view?.devices?.find(d => self ? d.id === account?.view?.deviceId : !!publicKey && d.publicKey === publicKey)?.osFamily;
   return <div className="phone-settings computer-settings">
     <div className="phone-main">
@@ -40,17 +43,21 @@ export function ComputerSettings({client, pane, onApprovals}: {client: SessionCl
         <AccountSafety client={client}/>
         <AccountTwoFactor client={client}/>
         <DproAccountPanel client={client}/>
-        <details><summary>Advanced: add a computer with a code</summary><ComputerEnrollment client={client}/></details>
+        <details><summary>Advanced: add a computer with a code</summary><ThisComputerCheck client={client}/>{view && <ComputerLinkControls client={client} view={view} onNotice={setNotice}/>}<ComputerEnrollment client={client}/></details>
       </>}
       {pane !== 'account' && pane !== 'tasks' && !usable && <NotReadyYet account={account}/>}
       {pane === 'mine' && usable && view && <>
         <div className="phone-list" role="list" aria-label="My computers">
-          {view.self && <div className="phone-row" role="listitem"><span className="phone-tile"><UiIcon name={computerIcon(look, view.self.id, os(undefined, true))} size={16}/></span><span className="phone-row-text"><b>{computerName(look, view.self.id, view.self.name)}</b><small>This computer</small></span></div>}
-          {devices.map(d => <div key={d.id} className="phone-row" role="listitem"><span className="phone-tile"><UiIcon name={computerIcon(look, d.id, os(d.publicKey))} size={16}/></span><span className="phone-row-text"><b>{computerName(look, d.id, d.name)}</b><small>{computerStateLabel(d.state)} · {computerPathLabel(d.path)}</small></span></div>)}
+          {view.self && <div className="phone-row" role="listitem"><span className="phone-tile"><UiIcon name={computerIcon(look, view.self.id, os(undefined, true))} size={16}/></span><span className="phone-row-text"><b>{computerName(look, view.self.id, view.self.name)}</b><small>This computer</small></span>
+            <button type="button" className="tool" title="Rename and icon…" aria-label="Rename and icon" onClick={() => setRenaming({id: view.self!.id, name: computerName(look, view.self!.id, view.self!.name), icon: (look?.icons[view.self!.id] as ComputerIconKey) ?? null})}><UiIcon name="pencil" size={14}/></button></div>}
+          {devices.filter(d => d.id !== forgetting).map(d => <div key={d.id} className="phone-row" role="listitem"><span className="phone-tile"><UiIcon name={computerIcon(look, d.id, os(d.publicKey))} size={16}/></span><span className="phone-row-text"><b>{computerName(look, d.id, d.name)}</b><small>{computerStateLabel(d.state)} · {computerPathLabel(d.path)}</small></span>
+            <button type="button" className="tool" title="Rename and icon…" aria-label={`Rename ${d.name}`} onClick={() => setRenaming({id: d.id, name: computerName(look, d.id, d.name), icon: (look?.icons[d.id] as ComputerIconKey) ?? null})}><UiIcon name="pencil" size={14}/></button>
+            <button type="button" className="tool" title="Forget this computer" aria-label={`Forget ${d.name}`} onClick={() => forgetComputerLater(client, {id: d.id, name: computerName(look, d.id, d.name)})}><UiIcon name="trash" size={14}/></button></div>)}
         </div>
-        <ThisComputerCheck client={client}/>
-        <ComputerLinkControls client={client} view={view} onNotice={setNotice}/>
-        <p className="fine-print">To forget a computer, select it in Computers and choose More › Forget this computer.</p>
+        <ForgetNotice/>
+        <TasksAtOnce client={client}/>
+        <p className="fine-print">A new computer joins by itself: install Girru there and sign in with the same Google account.</p>
+        {renaming && <RenameComputerSheet target={renaming} onSave={save} onClose={() => setRenaming(null)}/>}
       </>}
       {pane === 'tasks' && <ComputerTaskRules client={client} deviceNames={Object.fromEntries((devices ?? []).map(d => [d.id, computerName(look, d.id, d.name)]))}/>}
       {pane === 'share' && usable && view && <>
