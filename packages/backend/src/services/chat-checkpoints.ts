@@ -160,3 +160,19 @@ export async function checkpointFileDiff(before:string,after:string,rel:string){
  const diff=await git(a.top,['diff','--no-renames','--no-color','--no-ext-diff','--no-textconv','-U3',a.tree,b.tree,'--',literal(file)]);
  return{path:rel,diff:diff.slice(0,400000),hidden:false,binary:/^Binary files /m.test(diff),truncated:diff.length>400000};
 }
+
+/** CP10: the work between two snapshots as one binary-safe patch (paths relative to the repository) with each file's line counts. */
+export async function checkpointPatch(before: string, after: string, maxBytes = 3 * 1024 * 1024): Promise<{ top: string; rel: string; patch: string; files: { path: string; added: number; removed: number }[] }> {
+  const a = split(before), b = split(after);
+  if (a.top !== b.top || a.rel !== b.rel) throw new CheckpointError('Different folders');
+  const scope = ['--', ...(a.rel ? [literal(a.rel)] : [])];
+  const stat = await git(a.top, ['diff', '--no-renames', '--numstat', '-z', a.tree, b.tree, ...scope]);
+  const files: { path: string; added: number; removed: number }[] = [];
+  for (const row of stat.split('\u0000')) { const m = /^(\d+|-)\t(\d+|-)\t(.+)$/.exec(row); if (m) files.push({ path: m[3], added: m[1] === '-' ? 0 : Number(m[1]), removed: m[2] === '-' ? 0 : Number(m[2]) }); }
+  if (!files.length) return { top: a.top, rel: a.rel, patch: '', files };
+  const patch = await new Promise<string>((resolve, reject) => execFile('git', [...SAFE, 'diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--binary', '--full-index', a.tree, b.tree, ...scope], {
+    cwd: a.top, timeout: 30_000, maxBuffer: maxBytes + 1, windowsHide: true,
+    env: minimalChildEnv({ GIT_OPTIONAL_LOCKS: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_ATTR_SOURCE: EMPTY_TREE, GIT_ATTR_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' }),
+  }, (err, stdout) => (err ? reject(new CheckpointError('too_large_or_failed')) : resolve(String(stdout)))));
+  return { top: a.top, rel: a.rel, patch, files: files.slice(0, 500) };
+}

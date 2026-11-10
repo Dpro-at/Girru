@@ -180,3 +180,11 @@
 .cp-offer-head { display: flex; align-items: center; gap: 10px; }
 .cp-offer-text summary { cursor: pointer; font-size: 12px; color: var(--muted); }
 .cp-offer-text p { margin: 4px 0 0; white-space: pre-wrap; font-size: 12px; max-height: 160px; overflow: auto; }
+/* CP10c Bring the work back. */
+.cp-bring { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 12.5px; }
+.cp-bring-files { list-style: none; margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--subtle); display: flex; flex-direction: column; gap: 6px; }
+.shell[data-theme="dark"] .cp-bring-files { background: #1C2029; }
+.cp-bring-files li { display: flex; gap: 8px; align-items: center; }
+.cp-plus { color: #8FD6B0; font-weight: 600; }
+.cp-minus { color: #F29BC0; font-weight: 600; }
+.cp-warn { margin: 0; padding: 10px 12px; border-radius: 10px; background: #2A2310; color: #F0C27A; line-height: 1.5; }

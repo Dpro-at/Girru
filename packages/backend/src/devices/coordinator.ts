@@ -6,13 +6,15 @@ import type {SyncPayload} from './replication-contract.js';
 import { randomUUID } from 'node:crypto';
 import {userActor} from '../repositories/actor.js';
 import type { Actor } from '../repositories/actor.js';
-import { one, run, lockName, dialect, type Step } from '../repositories/sql-steps.js';
+import { one, all, run, lockName, dialect, type Step } from '../repositories/sql-steps.js';
 import { createConversationStep,findConversation,findProject } from '../repositories/chat-conversations.js';
 import { acceptChatRunStep, finishChatRunStep } from '../repositories/chat-recovery.js';
 import { createCardSteps,getBoard,updateCard } from '../services/task-board.js';
 import { chatRuns, liveWork } from '../services/chat-runs.js';
 import { requestApproval,denyApproval,approveAndRun } from '../tools/approvals.js';
 import { readTaskRules, decideTask } from './task-rules.js';
+import { startSnapshot, finishWork, patchParts, saveResult, savePart, readResult, markResult, directPatch, githubPatch, bringInto } from './work-result.js';
+import { dataRoot } from '../config/data-root.js';
 import { addComment } from '../services/task-board.js';
 import { computerTaskAcceptTool, registerComputerReceiver } from './tool.js';
 import { ComputerMembership } from './membership.js';
@@ -111,6 +113,7 @@ export class ComputerCoordinator {
         {
             if(e.kind==='sync_status'){if(!this.syncStatusReceiver)throw Error('computer_sync_unconfigured');await this.syncStatusReceiver(e.sender,e.payload);}
             else if(e.kind==='sync'){if(!this.syncReceiver)throw Error('computer_sync_unconfigured');await this.syncReceiver(e.sender,e.payload,e.epoch);}
+            else if (e.kind === 'result' || e.kind === 'result_part') { const a = await this.repo.attempt(e.payload.taskId); if (!a || a.source_id !== e.target || a.target_id !== e.sender || a.attempt_id !== e.payload.attemptId) throw Error('computer_result_binding'); if (e.kind === 'result_part') savePart(dataRoot(), a.task_id, e.payload.index, e.payload.text); else { const { attemptId: _attempt, ...result } = e.payload; saveResult(dataRoot(), result, e.sender); } }
             else if (e.kind === 'task')
                 await this.receiveTask(e);
             else if (e.kind === 'status')
@@ -193,7 +196,7 @@ export class ComputerCoordinator {
             throw Error('computer_authority_revoked'); yield* lockName('computer-capacity:'+a.local_device_id);const occupancy=yield* one<{n:number}>("SELECT COUNT(*) AS n FROM computer_attempts WHERE local_device_id=? AND target_id=? AND state IN ('accepted','running','cancel_requested')",a.local_device_id,a.local_device_id);if(Number(occupancy?.n)>=atOnce)throw Error('computer_capacity_unavailable');yield* createConversationStep(a.owner_id, { title: 'Task from another computer', projectId: b.projectId, agentId: b.agentId, model: b.model, mode: 'ask' }, sessionId); if(synthetic)yield* acceptChatRunStep({ run_id: runId, session_id: sessionId, user_id: a.owner_id, agent_id: b.agentId, started_at: now }, p.text); if(current.target_card_id){const card=yield* one<any>('SELECT version FROM board_cards WHERE id=? AND board_id=?'+lock,current.target_card_id,b.boardId);if(!card||Number(card.version)!==Number(current.target_card_version))throw Error('computer_target_card_changed');yield* run('UPDATE board_cards SET conversation_id=? WHERE id=? AND board_id=?',sessionId,current.target_card_id,b.boardId);}else throw Error('computer_target_card_missing'); yield* run("UPDATE computer_attempts SET state='accepted',session_id=?,run_id=?,detail='Accepted by the target owner.' WHERE local_device_id=? AND task_id=?", sessionId, runId, a.local_device_id, a.task_id); });
         if(this.runAdmission){
             await this.repo.runner.read(run('INSERT INTO computer_execution_leases(local_device_id,task_id,fence,epoch,expires_at) VALUES(?,?,?,?,?)',this.repo.localId,a.task_id,fence,a.epoch,String(this.now()+15000)));
-            try{await this.runAdmission.start({ownerId:a.owner_id,sessionId,runId,agentId:b.agentId,projectId:b.projectId,model:b.model,text:p.text,canExecute:async()=>{try{await this.fenced(a.task_id,fence);return true;}catch{return false;}},finished:status=>this.complete(a.task_id,fence,runId,status)});const fresh=await this.repo.attempt(a.task_id);if(fresh?.state==='accepted')await this.change(a.task_id,'running','Running on the target computer.');this.watchSteps(a.task_id,runId);}catch{await this.change(a.task_id,'unknown','Normal runtime admission did not return a durable outcome. Inspect the linked run; do not retry.');}return this.viewAttempt((await this.repo.attempt(a.task_id))!);
+            try{await this.noteWorkStart(a.task_id,a.owner_id,b.projectId);await this.runAdmission.start({ownerId:a.owner_id,sessionId,runId,agentId:b.agentId,projectId:b.projectId,model:b.model,text:p.text,canExecute:async()=>{try{await this.fenced(a.task_id,fence);return true;}catch{return false;}},finished:status=>this.complete(a.task_id,fence,runId,status)});const fresh=await this.repo.attempt(a.task_id);if(fresh?.state==='accepted')await this.change(a.task_id,'running','Running on the target computer.');this.watchSteps(a.task_id,runId);}catch{await this.change(a.task_id,'unknown','Normal runtime admission did not return a durable outcome. Inspect the linked run; do not retry.');}return this.viewAttempt((await this.repo.attempt(a.task_id))!);
         }
         await this.change(a.task_id, 'running', 'Synthetic executor is running on the target computer.');
         chatRuns.start({ userId: a.owner_id, sessionId, runId, agentId: b.agentId, execute: async (reply) => { await new Promise(resolve => setTimeout(resolve, 150)); await this.fenced(a.task_id, fence); if (chatRuns.get(runId)?.stopping)
@@ -202,7 +205,7 @@ export class ComputerCoordinator {
     }
     private async complete(task: string, fence: string, runId: string, status: string) { if (this.stopped)
         throw Error('computer_execution_fenced'); const membership = this.membership; await this.repo.mutate(task, function* (a) { if (a.fence !== fence || !['accepted', 'running', 'cancel_requested'].includes(a.state) || !membership.authority.fresh(a.local_device_id, a.source_id, a.epoch))
-        throw Error('computer_execution_fenced'); yield* finishChatRunStep(runId, status); yield* run('UPDATE computer_attempts SET state=?,detail=? WHERE local_device_id=? AND task_id=?', status === 'complete' ? 'completed' : status === 'stopped' ? 'cancelled' : 'unknown', status === 'complete' ? (redactImportText(chatRuns.get(runId)?.answer??'').text.replace(/\[SECRET:[^\]]+\]/gi,'[redacted local reference]').slice(0,8000)||'The target confirmed completion.') : status === 'stopped' ? 'The target confirmed cancellation.' : 'The execution failed; inspect the linked run.', a.local_device_id, a.task_id); }); await this.publish((await this.repo.attempt(task))!); }
+        throw Error('computer_execution_fenced'); yield* finishChatRunStep(runId, status); yield* run('UPDATE computer_attempts SET state=?,detail=? WHERE local_device_id=? AND task_id=?', status === 'complete' ? 'completed' : status === 'stopped' ? 'cancelled' : 'unknown', status === 'complete' ? (redactImportText(chatRuns.get(runId)?.answer??'').text.replace(/\[SECRET:[^\]]+\]/gi,'[redacted local reference]').slice(0,8000)||'The target confirmed completion.') : status === 'stopped' ? 'The target confirmed cancellation.' : 'The execution failed; inspect the linked run.', a.local_device_id, a.task_id); }); await this.publish((await this.repo.attempt(task))!); if(status==='complete')void this.sendWork(task); else this.workStart.delete(task); }
     private async fenced(task: string, fence: string) { const a = await this.repo.attempt(task); if (this.stopped || !a || a.fence !== fence || !['accepted', 'running', 'cancel_requested'].includes(a.state))
         throw Error('computer_execution_fenced');await this.membership.authority.assertExecutionFresh?.(a.source_id,Number(a.epoch)); const member=await this.membership.current(a.source_id);if(Number(member.epoch)!==a.epoch)throw Error('computer_membership_epoch_changed');await this.resources(taskPayload.parse(JSON.parse(a.payload_json)));await this.membership.authority.assertReady?.();if(!this.membership.authority.testOnly){const lease=await this.repo.runner.read(one<any>('SELECT fence,epoch,expires_at,revoked FROM computer_execution_leases WHERE local_device_id=? AND task_id=?',this.repo.localId,task));const owner=await this.repo.runner.read(one<any>('SELECT role,status FROM users WHERE id=?',a.owner_id));if(!lease||lease.revoked||lease.fence!==fence||Number(lease.epoch)!==a.epoch||Number(lease.expires_at)<=this.now()||owner?.role!=='owner'||owner.status!=='active')throw Error('computer_execution_lease_expired');} }
     private async receiveStatus(e: Extract<Envelope, {
@@ -249,6 +252,41 @@ export class ComputerCoordinator {
             } catch { /* steps are a convenience; the status still arrives */ }
         };
         const timer = setInterval(() => void tick(), 4000); (timer as any).unref?.(); this.stepWatch.set(task, timer);
+    }
+    /** CP10: the project folder when a task starts here, so its work can go back when it ends. */
+    private workStart = new Map<string, { folder: string; start: string }>();
+    private async noteWorkStart(task: string, owner: string, projectId: string) { try { const folder = (await findProject(owner, projectId))?.folder; if (!folder) return; const start = await startSnapshot(folder); if (start) this.workStart.set(task, { folder, start }); } catch { /* the result then comes back as text only */ } }
+    private async sendWork(task: string) {
+        const w = this.workStart.get(task); this.workStart.delete(task);
+        try {
+            const a = await this.repo.attempt(task); if (!w || !a || a.source_id === this.repo.localId || this.stopped) return;
+            const title = taskPayload.parse(JSON.parse(a.payload_json)).text.split('\n')[0];
+            const { result, patch } = await finishWork({ folder: w.folder, start: w.start, computer: this.name, taskId: a.task_id, title });
+            if (result.mode === 'none') return;
+            if (result.mode === 'direct') { const parts = patchParts(patch); for (let i = 0; i < parts.length; i++) await this.queue(a.source_id, 'result_part', { taskId: a.task_id, attemptId: a.attempt_id, index: i, text: parts[i] }, a.attempt_id + '-p' + i); }
+            await this.queue(a.source_id, 'result', { attemptId: a.attempt_id, ...result }, a.attempt_id + '-r');
+        } catch { /* the text result already went back with the status */ }
+    }
+    /** CP10c: what came back for a task this computer sent (files and how), and the projects it can go into. */
+    async workResult(actor: Actor, taskId: string) {
+        await this.membership.assertOwner(actor); const a = await this.repo.attempt(taskId);
+        if (!a || a.source_id !== this.repo.localId) throw Error('computer_task_missing');
+        const r = readResult(dataRoot(), a.task_id);
+        const projects = (await this.repo.runner.read(all<{ id: string; name: string }>("SELECT id, name FROM chat_projects WHERE user_id=? AND folder IS NOT NULL AND folder<>'' ORDER BY name", a.owner_id))).slice(0, 200);
+        const conv = a.source_session_id ? await findConversation(a.owner_id, a.source_session_id).catch(() => null) : null;
+        return { result: r ? { mode: r.mode, branch: r.branch ?? null, files: r.files, state: r.state, from: (await this.repo.peer(r.from).catch(() => null))?.name ?? 'Another computer', receivedAt: r.receivedAt } : null, projects, suggested: (conv as any)?.projectId ?? null };
+    }
+    /** CP10c Bring into: the work goes into the chosen project's folder, not committed, after the owner pressed it. */
+    async bringWork(actor: Actor, taskId: string, projectId: string) {
+        await this.membership.assertOwner(actor); const a = await this.repo.attempt(taskId);
+        if (!a || a.source_id !== this.repo.localId) throw Error('computer_task_missing');
+        const r = readResult(dataRoot(), a.task_id); if (!r || r.state !== 'ready') throw Error('computer_result_unavailable');
+        const folder = (await findProject(a.owner_id, projectId))?.folder; if (!folder) throw Error('computer_project_folder_missing');
+        const patch = r.mode === 'direct' ? directPatch(dataRoot(), r) : r.mode === 'github' ? await githubPatch(folder, r) : null;
+        if (!patch) throw Error('computer_result_unavailable');
+        const done = await bringInto(folder, patch);
+        if (done.ok) markResult(dataRoot(), a.task_id, 'brought');
+        return done;
     }
     /** On the source: the newest steps each task reported (kept while Girru runs). */
     private stepsSeen = new Map<string, RunStep[]>();

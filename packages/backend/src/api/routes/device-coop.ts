@@ -28,6 +28,8 @@ export async function deviceCoopRoutes(app:FastifyInstance,options:{pilot?:Compu
  route('GET','/api/computers/chats/:id/selection',async r=>{const a=actorOf(r)!,c=await findConversation(a.userId!,r.params.id);if(!c)throw Error('computer_chat_unavailable');return {messages:(await listConversationMessages(c.id)).filter(m=>m.role==='user'||m.role==='assistant').slice(-20).map(m=>({id:m.id,role:m.role,preview:redactImportText(m.content).text.slice(0,120)}))};});
  route('POST','/api/computers/tasks',async r=>{const b=exact(r.body,['target','task']);return required().dispatch(actorOf(r)!,b.target,b.task);});
  route('POST','/api/computers/tasks/:id/timing',async r=>{const b=exact(r.body,['timing']);return required().reviewTiming(actorOf(r)!,r.params.id,b.timing);});
+ route('GET','/api/computers/tasks/:id/result',async r=>required().workResult(actorOf(r)!,r.params.id));
+ route('POST','/api/computers/tasks/:id/bring',async r=>{const b=exact(r.body,['projectId','confirmed']);if(b.confirmed!==true||typeof b.projectId!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(b.projectId))throw Error('computer_invalid_request');return required().bringWork(actorOf(r)!,r.params.id,b.projectId);});
  route('POST','/api/computers/tasks/:id/cancel',async r=>{exact(r.body??{},[]);return required().cancel(actorOf(r)!,r.params.id);});
  route('POST','/api/computers/pairing',async r=>{exact(r.body??{},[]);const c=required();return c.membership.invite(actorOf(r)!,c.transport.connector.url,c.name);});
  route('POST','/api/computers/join',async r=>{const b=exact(r.body,['qr','name']);return required().membership.join(actorOf(r)!,{qr:b.qr,name:b.name,workspace:required().membership.workspace});});
