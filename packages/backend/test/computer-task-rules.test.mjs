@@ -111,3 +111,8 @@ test('CP13: the AI tool here is the owner’s choice only, and an agent cannot c
   assert.throws(() => applyTaskRulesChange(base, {tool: 'bad\u0000id'}));
   assert.equal(changeIsStricter(base, {tool: 'subscription:claude'}), false);
 });
+test('CP13: Same as carries how tasks are taken, never this computer’s AI tool, projects or Takes new tasks', async () => {
+  const {portableTaskRules} = await import('../src/devices/domain-sync.ts');
+  const out = portableTaskRules({rule: 'auto', atOnce: 2, column: 'Inbox', tool: 'subscription:claude', takes: false, projects: {p1: 'refuse'}, back: {p1: 'direct'}, always: [{source: 's', projectId: 'p1'}]});
+  assert.deepEqual(out, {rule: 'auto', atOnce: 2, column: 'Inbox'});
+});

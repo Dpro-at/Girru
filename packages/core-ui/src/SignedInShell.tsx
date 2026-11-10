@@ -118,7 +118,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
   const codeOwner=state.user?.role==='owner';
   useEffect(()=>{if(!codeOwner){setCodeHost(null,false);return;}setCodeHost(async(t,o)=>{const {top,bottom,right}=editorBounds();const result=await window.dproApp?.nabu?.open(t.folder,t.file,top,bottom,right,{...(t.line?{line:t.line}:{}),...(t.generated?{note:true}:{}),...(o.readOnly?{readOnly:true}:{})});if(result?.mode==='code'){setPage('code');return true;}return false;},nativeEditor);return()=>setCodeHost(null,false);},[codeOwner,nativeEditor]);
   useEffect(()=>{setCodeInstall(codeOwner&&codeMissing?()=>openCodeInStore():null);return()=>setCodeInstall(null);},[codeOwner,codeMissing]);
-  const appearance = useAppTheme();
+  const appearance = useAppTheme(client);
   const theme = appearance.theme;
   // The title-bar switch goes back to "system" when it lands on the system's own theme.
   const toggleTheme = () => { const next = theme === 'dark' ? 'light' : 'dark'; const system = window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; appearance.setPreference(next === system ? 'system' : next); };

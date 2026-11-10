@@ -41,6 +41,27 @@ export function footerPrefs(x: unknown): FooterPrefs {
   return { order, hidden, iconsOnly: typeof v.iconsOnly === 'boolean' ? v.iconsOnly : false, approvalsWhenWaiting: typeof v.approvalsWhenWaiting === 'boolean' ? v.approvalsWhenWaiting : true };
 }
 
+const THEMES = ['system', 'light', 'dark'] as const;
+/** CP13: the theme is saved in the program (not only the window), so “Same as” can bring it to a new computer. */
+export async function uiThemeRoutes(fastify: FastifyInstance) {
+  fastify.get('/api/me/theme', async (request, reply) => {
+    const actor = actorOrReply(reply, actorOf(request), requireAccount);
+    if (!actor) return reply;
+    if (!actor.userId) return reply.code(403).send({ error: 'A signed-in account is required', code: 'forbidden' });
+    const saved = await getPref(actor.userId, 'theme');
+    return { theme: (THEMES as readonly unknown[]).includes(saved) ? saved : null };
+  });
+  fastify.put<{ Body: unknown }>('/api/me/theme', async (request, reply) => {
+    const actor = actorOrReply(reply, actorOf(request), requireAccount);
+    if (!actor) return reply;
+    if (!actor.userId) return reply.code(403).send({ error: 'A signed-in account is required', code: 'forbidden' });
+    const body = request.body as { theme?: unknown } | null;
+    if (!body || Object.keys(body).join() !== 'theme' || !(THEMES as readonly unknown[]).includes(body.theme)) return reply.code(400).send({ error: 'Unknown theme', code: 'invalid' });
+    await setPref(actor.userId, 'theme', body.theme);
+    return { theme: body.theme };
+  });
+}
+
 export async function uiFooterRoutes(fastify: FastifyInstance) {
   fastify.get('/api/me/footer', async (request, reply) => {
     const actor = actorOrReply(reply, actorOf(request), requireAccount);
