@@ -40,6 +40,15 @@ export function ComputerWorksOn({client, currentName, onClose}: {client: Session
       if (b.status !== 200) throw Error('back');
       const d = await client.request({method: 'POST', path: '/api/computers/account/workspaces/destination', body: {workspaceId, projectId: id, agentId: choices.agentId, boardId: choices.boardId, columnId: choices.columnId, confirmed: true}});
       if (d.status !== 200) throw Error('destination');
+      // Choosing the project here is the owner's yes to receiving tasks on this computer: its main agent may accept them.
+      // Each task still waits for the owner unless the rules allow it automatically.
+      const g = await client.request({method: 'GET', path: `/api/agents/${choices.agentId}/tool-grants`});
+      if (g.status !== 200) throw Error('grants');
+      const view = g.body as {grants: {tool: string; scopes: unknown}[]; version: number};
+      if (!view.grants.some(x => x.tool === 'computer_task_accept')) {
+        const c = await client.request({method: 'PUT', path: `/api/agents/${choices.agentId}/tool-grants`, body: {grants: [...view.grants, {tool: 'computer_task_accept', scopes: null}], expectedVersion: view.version}});
+        if (c.status !== 200) throw Error('grants');
+      }
       onClose();
     } catch (e) {
       const code = (e as Error).message;
