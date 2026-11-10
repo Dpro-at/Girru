@@ -43,13 +43,15 @@ export async function readTaskRules(ownerId: string) { return taskRules(await ge
 /** The rules after one change, made whole; refused when making it whole would drop an entry (full lists). */
 export function applyTaskRulesChange(rules: TaskRules, change: unknown): TaskRules {
   if (!taskRulesChangeOk(change)) throw Error('computer_task_rules_invalid');
-  // A prototype-free copy: a project id can never reach an object's own machinery.
-  const next: TaskRules = { rule: rules.rule, projects: Object.assign(Object.create(null) as Record<string, TaskRule>, rules.projects), always: rules.always.map(a => ({ ...a })), atOnce: rules.atOnce, column: rules.column, takes: rules.takes };
+  // Project exceptions are edited as a Map: a request-chosen project id is a map key, never a property name on a live object.
+  const projects = new Map(Object.entries(rules.projects));
+  const next: TaskRules = { rule: rules.rule, projects: {}, always: rules.always.map(a => ({ ...a })), atOnce: rules.atOnce, column: rules.column, takes: rules.takes };
   if (change.rule) next.rule = change.rule;
   if (change.takes !== undefined) next.takes = change.takes;
   if (change.atOnce !== undefined) next.atOnce = change.atOnce;
   if (change.column !== undefined) next.column = change.column;
-  if (change.project) { const pid = change.project.id; if (!ID.test(pid)) throw Error('computer_task_rules_invalid'); if (change.project.rule) Object.defineProperty(next.projects, pid, { value: change.project.rule, enumerable: true, writable: true, configurable: true }); else delete next.projects[pid]; }
+  if (change.project) { const pid = change.project.id; if (!ID.test(pid)) throw Error('computer_task_rules_invalid'); if (change.project.rule) projects.set(pid, change.project.rule); else projects.delete(pid); }
+  next.projects = Object.fromEntries(projects);
   if (change.always) {
     const { source, projectId, on } = change.always;
     next.always = next.always.filter(a => a.source !== source || a.projectId !== projectId);
