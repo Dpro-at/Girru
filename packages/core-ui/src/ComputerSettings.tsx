@@ -1,3 +1,4 @@
+import type React from 'react';
 import {useState} from 'react';
 import type {SessionClient} from './session';
 import {useComputerOverview, computerStateLabel, computerPathLabel} from './ComputerDevices';
@@ -39,12 +40,17 @@ export function ComputerSettings({client, pane, onApprovals}: {client: SessionCl
     <div className="phone-main">
       <header className="phone-head"><div><h2 className="settings-page-title">{place.label}</h2><p className="settings-page-desc">{place.note}</p></div></header>
       {notice && <p role="status" className="fine-print">{notice}</p>}
-      {pane === 'account' && <>
+      {pane === 'account' && <div className="computer-task-rules cp-account">
         <AccountSafety client={client}/>
-        <AccountTwoFactor client={client}/>
-        <DproAccountPanel client={client}/>
+        <section className="cp-block"><b className="cp-h">Safety</b>
+          <div className="cp-list" role="list">
+            <AccountTwoFactor client={client}/>
+            <div className="cp-list-row" role="listitem"><span className="cp-tile" style={{'--tint': '#F29BC0'} as React.CSSProperties}><UiIcon name="alert" size={16}/></span><span className="cp-choice-text"><span>A lost or stolen computer</span><small>Select it in Computers and choose Forget this computer. Its work stays on it; it can no longer send or take tasks.</small></span></div>
+            <div className="cp-list-row" role="listitem"><span className="cp-tile" style={{'--tint': '#C4A5FF'} as React.CSSProperties}><UiIcon name="history" size={16}/></span><DproAccountPanel client={client}/></div>
+          </div>
+        </section>
         <details><summary>Advanced: add a computer with a code</summary><ThisComputerCheck client={client}/>{view && <ComputerLinkControls client={client} view={view} onNotice={setNotice}/>}<ComputerEnrollment client={client}/></details>
-      </>}
+      </div>}
       {pane !== 'account' && pane !== 'tasks' && !usable && <NotReadyYet account={account}/>}
       {pane === 'mine' && usable && view && <>
         <div className="phone-list" role="list" aria-label="My computers">
@@ -91,12 +97,13 @@ function AccountSafety({client}: {client: SessionClient}) {
   const [confirm, setConfirm] = useState(false);
   if (!status?.connected) return <p className="fine-print">{status === null ? 'Your Dpro account can’t be reached right now.' : 'Not signed in to your Dpro account on this computer. Open Computers to add it.'}</p>;
   const self = status.view?.devices?.find(d => d.id === status.view?.deviceId);
-  return <div className="phone-list" role="list">
-    <div className="phone-row" role="listitem"><span className="phone-tile"><UiIcon name="shield" size={15}/></span><span className="phone-row-text"><b>Signed in on {self?.label ?? 'this computer'}</b><small>{status.view?.deviceStatus === 'approved' ? 'Added to your account' : 'Waiting for a Yes on another computer'}</small></span>
-      {!confirm ? <button type="button" onClick={() => setConfirm(true)}>Sign out this computer</button>
-        : <span className="computer-task-actions"><button type="button" onClick={() => setConfirm(false)}>Cancel</button><button type="button" className="danger" onClick={() => void client.request({method: 'POST', path: '/api/computers/account/signout', body: {}}).then(r => setNotice(r.status === 200 ? 'Signed out. Your work stays on this computer.' : 'It could not sign out.')).finally(() => setConfirm(false))}>Sign out</button></span>}
+  const email = client.getSnapshot().user?.email;
+  return <section className="cp-block">
+    <div className="cp-card"><span className="cp-tile" style={{'--tint': '#9DBBFF'} as React.CSSProperties}><UiIcon name="shield" size={18}/></span>
+      <span className="cp-choice-text"><span>{email ?? 'Your Dpro account'}</span><small>Signed in on {self?.label ?? 'this computer'} · {status.view?.deviceStatus === 'approved' ? 'added to your account' : 'waiting to be added'}</small></span>
+      {!confirm ? <button type="button" className="cp-soft" onClick={() => setConfirm(true)}>Sign out this computer</button>
+        : <span className="computer-task-actions"><button type="button" className="cp-soft" onClick={() => setConfirm(false)}>Cancel</button><button type="button" className="danger" onClick={() => void client.request({method: 'POST', path: '/api/computers/account/signout', body: {}}).then(r => setNotice(r.status === 200 ? 'Signed out. Your work stays on this computer.' : 'It could not sign out.')).finally(() => setConfirm(false))}>Sign out</button></span>}
     </div>
-    <p className="fine-print">A lost or stolen computer: select it in Computers and choose Forget this computer. Recovery, history and deleting your Dpro account are under Account and workspaces….</p>
-    {notice && <p role="status" className="fine-print">{notice}</p>}
-  </div>;
+    {notice && <p role="status" className="cp-note">{notice}</p>}
+  </section>;
 }

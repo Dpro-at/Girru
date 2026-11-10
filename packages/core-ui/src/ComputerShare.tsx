@@ -1,3 +1,4 @@
+import type React from 'react';
 import {useEffect, useState} from 'react';
 import type {SessionClient} from './session';
 import {UiIcon} from './ui-icons';
@@ -8,10 +9,10 @@ import type {UiIconName} from './ui-icons';
  * to what a computer that starts “Same as this one” may copy; nothing goes until that computer asks
  * and the owner presses Allow. Memory stays on each computer for now (D3).
  */
-const GROUPS: ReadonlyArray<{key: string; name: string; note: string; icon: UiIconName; categories: string[]}> = [
-  {key: 'agents', name: 'Agents and their personalities', note: 'The same on every computer', icon: 'person', categories: ['agent', 'personality', 'specialty']},
-  {key: 'skills', name: 'Skills and rules', note: 'The same on every computer', icon: 'sparkle', categories: ['skill', 'rule']},
-  {key: 'prefs', name: 'Panels and footer', note: 'The same on every computer', icon: 'sliders', categories: ['preferences']},
+const GROUPS: ReadonlyArray<{key: string; name: string; note: string; icon: UiIconName; categories: string[]; tint: string}> = [
+  {key: 'agents', name: 'Agents and their personalities', note: 'The same on every computer', icon: 'person', categories: ['agent', 'personality', 'specialty'], tint: '#9DBBFF'},
+  {key: 'skills', name: 'Skills and rules', note: 'The same on every computer', icon: 'sparkle', categories: ['skill', 'rule'], tint: '#F0C27A'},
+  {key: 'prefs', name: 'Panels and footer', note: 'The same on every computer', icon: 'sliders', categories: ['preferences'], tint: '#8FD6B0'},
 ];
 type Item = {category: string; localId: string; label?: string};
 const root = '/api/computers/account';
@@ -37,12 +38,12 @@ export function ComputerShare({client}: {client: SessionClient}) {
   };
   return <div className="phone-list" role="list" aria-label="What my computers share">
     {GROUPS.map(g => { const count = state.resources.filter(r => g.categories.includes(r.category)).length; return <div key={g.key} className="phone-row" role="listitem">
-      <span className="phone-tile"><UiIcon name={g.icon} size={15}/></span>
+      <span className="phone-tile tint" style={{'--tint': g.tint} as React.CSSProperties}><UiIcon name={g.icon} size={15}/></span>
       <span className="phone-row-text"><b>{g.name}</b><small>{count ? `${g.note} · ${count}` : 'Nothing of this kind yet'}</small></span>
       <button type="button" role="switch" aria-checked={on(g)} aria-label={g.name} className={`computer-switch${on(g) ? ' is-on' : ''}`} disabled={busy || !count} onClick={() => void toggle(g)}><i/></button>
     </div>; })}
-    <div className="phone-row" role="listitem"><span className="phone-tile"><UiIcon name="board" size={15}/></span><span className="phone-row-text"><b>Projects and their Boards</b><small>Each task brings its card; the project itself is on each computer (GitHub, a folder, or a copy).</small></span></div>
-    <div className="phone-row" role="listitem"><span className="phone-tile"><UiIcon name="database" size={15}/></span><span className="phone-row-text"><b>Memory</b><small>Stays on each computer for now</small></span></div>
+    <div className="phone-row" role="listitem"><span className="phone-tile tint" style={{'--tint': '#C4A5FF'} as React.CSSProperties}><UiIcon name="board" size={15}/></span><span className="phone-row-text"><b>Projects and their Boards</b><small>Each task brings its card; the project itself is on each computer (GitHub, a folder, or a copy).</small></span></div>
+    <div className="phone-row" role="listitem"><span className="phone-tile tint" style={{'--tint': '#F29BC0'} as React.CSSProperties}><UiIcon name="database" size={15}/></span><span className="phone-row-text"><b>Memory</b><small>Stays on each computer for now</small></span></div>
     {notice && <p role="status" className="fine-print">{notice}</p>}
   </div>;
 }

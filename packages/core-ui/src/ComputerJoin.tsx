@@ -1,3 +1,4 @@
+import type React from 'react';
 import {useEffect, useRef, useState} from 'react';
 import type {SessionClient} from './session';
 import {Sheet} from './desktop-ui';
@@ -188,10 +189,10 @@ export function AccountTwoFactor({client}: {client: SessionClient}) {
   useEffect(() => { void load(); }, [client]);
   if (!state) return null;
   const act = async (body: unknown, done: string) => { setNotice(''); try { await call(client, root + '/twofactor', body); setNotice(done); setSetup(null); setOff(false); setCode(''); await load(); } catch (e) { setNotice(computerAccountWords((e as Error).message)); } };
-  return <section className="phone-row computer-twofactor" aria-label="Two-step sign-in for my Dpro account">
-    <span className="phone-tile"><UiIcon name="lock" size={16}/></span>
-    <span className="phone-row-text"><b>Two-step sign-in for my Dpro account</b><small>{!state.available ? 'Not available on this Dpro service yet.' : state.enabled ? 'On. A new computer can also join with your authenticator code.' : 'Off. Turn it on to add a computer when your other computers are off.'}</small>{notice && <small role="status">{notice}</small>}</span>
-    {state.available && (state.enabled ? <button type="button" onClick={() => setOff(true)}>Turn off…</button> : <button type="button" onClick={() => void call(client, root + '/twofactor', {action: 'setup'}).then(setSetup).catch(e => setNotice(computerAccountWords((e as Error).message)))}>Turn on…</button>)}
+  return <section className="cp-list-row computer-twofactor" aria-label="Two-step sign-in for my Dpro account">
+    <span className="cp-tile" style={{'--tint': '#8FD6B0'} as React.CSSProperties}><UiIcon name="lock" size={16}/></span>
+    <span className="cp-choice-text"><span>Two-step sign-in</span><small>{!state.available ? 'Not available on this Dpro service yet.' : state.enabled ? 'On. A new computer can also join with your authenticator code.' : 'Off. Turn it on to add a computer when your other computers are off.'}</small>{notice && <small role="status">{notice}</small>}</span>
+    {state.available && (state.enabled ? <button type="button" className="cp-soft" onClick={() => setOff(true)}>Turn off…</button> : <button type="button" className="cp-soft" onClick={() => void call(client, root + '/twofactor', {action: 'setup'}).then(setSetup).catch(e => setNotice(computerAccountWords((e as Error).message)))}>Turn on…</button>)}
     {setup && <Sheet title="Turn on two-step sign-in" onClose={() => setSetup(null)}>
       <p>Scan this with your authenticator app, then type the 6-digit code it shows.</p>
       <QrImage text={setup.uri}/>
