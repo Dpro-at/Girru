@@ -76,12 +76,12 @@ export function ComputerWorksOn({client, onClose}: {client: SessionClient; onClo
     </div> : <>
       <label className="phone-field"><span>From</span><select value={from || others[0]?.id || ''} onChange={e => setFrom(e.target.value)}>{others.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
       <label className="phone-field"><span>Project name there (optional)</span><input value={copyName} maxLength={80} placeholder="Website" onChange={e => setCopyName(e.target.value)}/></label>
-      <label className="phone-field"><span>Put it in this folder</span><input value={parent} placeholder="/Users/you/Documents/Projects" onChange={e => setParent(e.target.value)}/></label>
+      <FolderField value={parent} onChange={setParent}/>
     </>)
     : way === 'github' ? <>
       <label className="phone-field"><span>GitHub address</span><input value={url} placeholder="github.com/you/project" onChange={e => setUrl(e.target.value)}/></label>
       {(choices?.projects ?? []).some(p => p.github) && !url && <p className="cp-note">From your projects: {(choices!.projects.filter(p => p.github).slice(0, 3)).map(p => <button key={p.id} type="button" className="cp-link" onClick={() => setUrl(p.github!)}>{p.name}</button>)}</p>}
-      <label className="phone-field"><span>Put it in this folder</span><input value={parent} placeholder="/Users/you/Documents/Projects" onChange={e => setParent(e.target.value)}/></label>
+      <FolderField value={parent} onChange={setParent}/>
     </> : <label className="phone-field"><span>Project</span><select value={projectId || here[0]?.id || ''} onChange={e => setProjectId(e.target.value)}>{here.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>}
     {!ready && choices && <p className="cp-note">{!workspaceId ? 'Add this computer to your account first.' : 'Create an agent and a Board first.'}</p>}
     {notice && <p role="status" className="cp-note">{notice}</p>}
@@ -118,4 +118,13 @@ export function ProjectCopyAsks({client}: {client: SessionClient}) {
     </div>)}
     {notice && <p role="status" className="cp-note">{notice}</p>}
   </section>;
+}
+
+/** "Put it in this folder": typed, or picked with the system folder dialog (Finder / File Explorer) when the desktop app offers it. */
+function FolderField({value, onChange}: {value: string; onChange: (v: string) => void}) {
+  const bridge = typeof window === 'undefined' ? undefined : (window as unknown as { dproApp?: { chooseProjectFolders?: () => Promise<string[]> } }).dproApp;
+  const browse = async () => { try { const [first] = await bridge!.chooseProjectFolders!(); if (first) onChange(first); } catch { /* keep what is typed */ } };
+  return <label className="phone-field"><span>Put it in this folder</span>
+    <span style={{display: 'flex', gap: 8}}><input style={{flex: 1}} value={value} placeholder="/Users/you/Documents/Projects" onChange={e => onChange(e.target.value)}/>
+      {bridge?.chooseProjectFolders && <button type="button" onClick={() => void browse()}>Browse…</button>}</span></label>;
 }
