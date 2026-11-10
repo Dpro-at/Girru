@@ -81,7 +81,8 @@
 .shell button.computer-switch.computer-switch i{width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s;display:block}
 .shell button.computer-switch.computer-switch.is-on{background:#3B7BF6}
 .shell button.computer-switch.computer-switch.is-on i{transform:translateX(14px)}
-.shell button.computer-switch.computer-switch:disabled{opacity:.45;cursor:default}
+.shell button.computer-switch.computer-switch:disabled{opacity:.7;cursor:default;background:#3A404B}
+.shell button.computer-switch.computer-switch:disabled i{background:#8A95AA}
 /* CP6c: each kind has its own tile color, like the board. */
 .phone-tile.tint{background:color-mix(in srgb,var(--tint) 14%,transparent);color:var(--tint)}
 .computer-task-rules .computers-label{max-width:560px}
