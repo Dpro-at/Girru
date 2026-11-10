@@ -46,6 +46,9 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   const menu = useMenu();
   // CP9c: the account knows each computer's system; its key ties it to the computer in this list.
   const accountDevice = (publicKey?: string) => account?.view?.devices?.find(d => d.publicKey && d.publicKey === publicKey);
+  /** The account sees it online but the direct link is not up yet: “Connecting…”, not “Off”. */
+  const shownState = (d: {state: string; publicKey?: string}) => (d.state === 'offline' || d.state === 'unknown') && accountDevice(d.publicKey)?.presence === 'online' ? 'connecting' : d.state;
+  const stateWords = (d: {state: string; publicKey?: string}) => shownState(d) === 'connecting' ? 'Connecting…' : computerStateLabel(d.state);
   const iconOf = (id: string, publicKey?: string) => computerIcon(look, id, id === self?.id ? account?.view?.devices?.find(d => d.id === account?.view?.deviceId)?.osFamily : accountDevice(publicKey)?.osFamily);
   const nameOf = (id: string, name: string) => computerName(look, id, name);
   // CP11e (D10): computers take tasks from each other only on the same Girru version.
@@ -58,7 +61,10 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   const accountSelf = account?.view?.devices?.find(d => d.id === account?.view?.deviceId) ?? null;
   const devices = useMemo(() => (view?.devices ?? []).filter(d => d.state !== 'revoked'), [view]);
   const forgetting = useForgetPending();
-  const listed = devices.filter(d => d.id !== forgetting);
+  // The same computer signed in again shows once (the newest); the older copies wait on one line to be forgotten.
+  const newestFirst = [...devices].filter(d => d.id !== forgetting).sort((a, b) => (accountDevice(b.publicKey)?.registeredAt ?? 0) - (accountDevice(a.publicKey)?.registeredAt ?? 0));
+  const seenNames = new Set<string>(), listed: typeof devices = [], olderCopies: typeof devices = [];
+  for (const d of newestFirst) { const key = nameOf(d.id, d.name).trim().toLowerCase(); if (seenNames.has(key)) olderCopies.push(d); else { seenNames.add(key); listed.push(d); } }
   const attempts = view?.attempts ?? [];
   useEffect(() => { if (!selected && self) setSelected(self.id); }, [selected, self]);
   const device = devices.find(d => d.id === selected);
@@ -93,9 +99,12 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
     </button>}
     {listed.map(d => <button key={d.id} type="button" className="nav-item dk-place" aria-current={selected === d.id ? 'page' : undefined} onClick={() => setSelected(d.id)} onContextMenu={e => { setSelected(d.id); menu.at(e, menuFor(d)); }}>
       <UiIcon name={iconOf(d.id, d.publicKey)} size={15}/><span className="dk-place-name">{nameOf(d.id, d.name)}</span>
-      <span className={`computer-dot ${d.state === 'available' || d.state === 'busy' ? 'on' : 'off'}`} title={computerStateLabel(d.state)} aria-label={computerStateLabel(d.state)}/>
+      <span className={`computer-dot ${d.state === 'available' || d.state === 'busy' ? 'on' : shownState(d) === 'connecting' ? 'connecting' : 'off'}`} title={stateWords(d)} aria-label={stateWords(d)}/>
       {waitingFrom(d.id).length > 0 && <span className="dk-badge-pill" title="Needs you">{waitingFrom(d.id).length}</span>}
     </button>)}
+    {olderCopies.length > 0 && <button type="button" className="nav-item dk-place computers-older" title="The same computers signed in before. They no longer work." onClick={() => { for (const d of olderCopies) forgetComputerLater(client, {id: d.id, name: nameOf(d.id, d.name), publicKey: d.publicKey}); }}>
+      <UiIcon name="trash" size={14}/><span className="dk-place-name">Older copies ({olderCopies.length})</span><span className="dk-count">Forget</span>
+    </button>}
   </nav>;
 
   const row = (a: ComputerAttempt, actions: ReactNode) => <div key={a.attemptId} className="computer-task" role="listitem">
@@ -111,7 +120,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   else if (!usable || account?.view?.deviceStatus === 'pending') main = <div className="computers-main"><AddThisComputer client={client} status={account}/></div>;
   else {
     const name = isSelf ? nameOf(self?.id ?? '', self?.name ?? 'This computer') : device ? nameOf(device.id, device.name) : 'Computer';
-    const status = isSelf ? 'This computer · online' : device ? `${computerStateLabel(device.state)} · ${computerPathLabel(device.path)}` : '';
+    const status = isSelf ? 'This computer · online' : device ? (shownState(device) === 'connecting' ? 'Connecting…' : `${computerStateLabel(device.state)} · ${computerPathLabel(device.path)}`) : '';
     main = <div className="computers-main">
       <header className="computers-head">
         <span className="computers-tile"><UiIcon name={isSelf ? iconOf(self?.id ?? '') : iconOf(device?.id ?? '', device?.publicKey)} size={22}/></span>

@@ -37,8 +37,11 @@ export function ComputerTaskRequest({client, conversationId, card, title, preset
   const {look} = useComputerLook(client, open);
   const devices = useMemo(() => {
     const free = (d: {state: string; dispatchOptions?: unknown[]; capacity?: {active: number; limit: number} | null}) => (d.state === 'available' ? 2 : d.state === 'busy' ? 1 : 0) + ((d.dispatchOptions?.length ?? 0) > 0 ? 2 : 0) - (d.capacity && d.capacity.active >= d.capacity.limit ? 1 : 0);
-    return (view?.devices ?? []).filter(d => d.state !== 'revoked').sort((a, b) => free(b) - free(a));
-  }, [view]);
+    // One entry per computer: when the same computer signed in again, only its newest copy.
+    const reg = (k?: string) => account?.view?.devices?.find(x => !!k && x.publicKey === k)?.registeredAt ?? 0;
+    const seen = new Set<string>();
+    return (view?.devices ?? []).filter(d => d.state !== 'revoked').sort((a, b) => reg(b.publicKey) - reg(a.publicKey)).filter(d => { const k = d.name.trim().toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).sort((a, b) => free(b) - free(a));
+  }, [view, account]);
   if (!view?.devices.length || !view.configured && !view.testOnly) return null;
   const chosen = target || devices[0]?.id || '';
   const device = devices.find(d => d.id === chosen);
@@ -70,15 +73,16 @@ export function ComputerTaskRequest({client, conversationId, card, title, preset
     </>}>
       <div className="phone-field"><span>To</span>
         <div className="computer-to" role="radiogroup" aria-label="To">{devices.map(d => {
-          const on = d.state === 'available' || d.state === 'busy';
+          const on = d.state === 'available' || d.state === 'busy', connecting = !on && account?.view?.devices?.find(x => !!d.publicKey && x.publicKey === d.publicKey)?.presence === 'online';
           const full = !!d.capacity && d.capacity.active >= d.capacity.limit;
           return <button key={d.id} type="button" role="radio" aria-checked={chosen === d.id} className={`computer-to-item${chosen === d.id ? ' is-on' : ''}`} onClick={() => { setTarget(d.id); setBinding(''); }}>
-            <UiIcon name={computerIcon(look, d.id, os(d.publicKey))} size={16}/><i className={`computer-dot ${on ? 'on' : 'off'}`}/>
-            <span>{computerName(look, d.id, d.name)}</span><small>{!on ? 'off' : full ? 'busy' : 'free'}</small>
+            <UiIcon name={computerIcon(look, d.id, os(d.publicKey))} size={16}/><i className={`computer-dot ${on ? 'on' : connecting ? 'connecting' : 'off'}`}/>
+            <span>{computerName(look, d.id, d.name)}</span><small>{connecting ? 'connecting' : !on ? 'off' : full ? 'busy' : 'free'}</small>
           </button>;
         })}</div>
       </div>
-      <label className="phone-field"><span>Project and agent</span><select value={pick} onChange={e => setBinding(e.target.value)}>{options.length ? options.map(o => <option value={o.id} key={o.id}>{o.label}</option>) : <option value="">No project shared with this computer yet</option>}</select></label>
+      {options.length ? <label className="phone-field"><span>Project and agent</span><select value={pick} onChange={e => setBinding(e.target.value)}>{options.map(o => <option value={o.id} key={o.id}>{o.label}</option>)}</select></label>
+        : <p className="cp-warn">{device ? computerName(look, device.id, device.name) : 'That computer'} has no project yet. On it, open Computers › its own page › Works on › Add a project…, then send again.</p>}
       <label className="phone-field"><span>What to do</span><textarea maxLength={8000} rows={4} value={text} onChange={e => setText(e.target.value)}/></label>
       {showLater && <div className="computer-later" role="group" aria-label="Send later">
         {(['tonight', 'morning', 'pick'] as const).map(k => <button key={k} type="button" aria-pressed={later === k} className={later === k ? 'is-on' : ''} onClick={() => setLater(later === k ? null : k)}><UiIcon name={k === 'tonight' ? 'moon' : k === 'morning' ? 'sun' : 'calendar'} size={14}/>{k === 'tonight' ? 'Tonight' : k === 'morning' ? 'Tomorrow morning' : 'Pick a time'}</button>)}

@@ -206,3 +206,4 @@
 .setup-note.join-scan p { margin:0 0 8px; }
 .setup-note.join-scan p:last-child { margin-bottom:0; }
 .setup-note.join-scan .computer-steps { display:flex; gap:12px; margin-bottom:12px; }
+.computer-dot.connecting { background: transparent; border: 1.5px dashed #9DBBFF; }
