@@ -83,7 +83,7 @@ async function pushBranch(top: string, patch: string, branch: string, title: str
 const SECRET_NAME = /^\.env(?:\.|$)|^\.envrc$|^\.dev\.vars$|\.(?:pem|key|p12|pfx|jks|keystore|tfstate|tfvars)$|^id_(?:rsa|ed25519|ecdsa|dsa)|^credentials|^(?:secrets\.env|\.credentials\.json|\.npmrc|\.netrc|\.git-credentials|\.pgpass|auth\.json|service-account.*\.json|.*-credentials\.json)$/i;
 export const secretPath = (p: string) => p.split('/').some(n => SECRET_NAME.test(n));
 /** A path segment that macOS or Windows could read as something else: .git with trailing dots/spaces, an 8.3 short name, a trailing dot or space, invisible characters. */
-export const confusingSegment = (n: string) => /^\.git[\s.]*$/i.test(n) || /^git~\d+$/i.test(n) || /[. ]$/.test(n) || /[\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/.test(n);
+export const confusingSegment = (n: string) => /^\.git[\s.]*$/i.test(n) || /^\.git[\s.]*:/i.test(n) || /^git~\d+$/i.test(n) || /[. ]$/.test(n) || /[:<>"|?*\\]/.test(n) || /\p{Cf}|[\u0000-\u001F\u007F]/u.test(n);
 /** For any line of a patch header that is not one git writes for a plain change, refuse rather than guess. */
 
 export const patchParts = (patch: string) => Array.from({ length: Math.max(1, Math.ceil(patch.length / PART_CHARS)) }, (_, i) => patch.slice(i * PART_CHARS, (i + 1) * PART_CHARS));
