@@ -5,7 +5,7 @@ import {computerLook, computerLookChangeOk} from '../src/api/routes/computer-loo
 
 test('tasks from other computers: ask by default, project exceptions, always-allow per computer and project (CP6, CP4b)', () => {
   const none = taskRules(undefined);
-  assert.deepEqual(none, {rule: 'ask', projects: {}, always: [], atOnce: 3, column: null, takes: true, back: {}});
+  assert.deepEqual(none, {rule: 'ask', projects: {}, always: [], atOnce: 3, column: null, takes: true, back: {}, tool: null});
   const rules = taskRules({rule: 'auto', projects: {p1: 'refuse', p2: 'ask', 'bad id!': 'auto', p3: 'maybe'}, always: [{source: 'mac', projectId: 'p2'}, {source: 'x'}]});
   assert.deepEqual(rules.projects, {p1: 'refuse', p2: 'ask'});
   assert.equal(rules.always.length, 1);
@@ -102,4 +102,12 @@ test('CP12: how work comes back is kept per project, checked, and stays the owne
   assert.equal(taskRulesChangeOk({back: {id: 'p1', via: 'email'}}), false);
   assert.equal(taskRulesChangeOk({back: {id: '__proto__', via: 'direct'}}), false);
   assert.equal(changeIsStricter(base, {back: {id: 'p1', via: 'direct'}}), false, 'agents can never change it');
+});
+test('CP13: the AI tool here is the owner’s choice only, and an agent cannot change it', async () => {
+  const {taskRules, applyTaskRulesChange, changeIsStricter} = await import('../src/devices/task-rules.ts');
+  const base = taskRules(null);
+  assert.equal(applyTaskRulesChange(base, {tool: 'subscription:claude'}).tool, 'subscription:claude');
+  assert.equal(applyTaskRulesChange({...base, tool: 'x'}, {tool: null}).tool, null);
+  assert.throws(() => applyTaskRulesChange(base, {tool: 'bad\u0000id'}));
+  assert.equal(changeIsStricter(base, {tool: 'subscription:claude'}), false);
 });

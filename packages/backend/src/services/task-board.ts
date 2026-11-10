@@ -400,6 +400,21 @@ export function addColumn(ownerId: string, boardId: string, body: Record<string,
   }, { immediate: true });
 }
 
+/** CP13: the column with this name, made as the first column when the board has none yet (where tasks from the owner's other computers land). */
+export function ensureFirstColumn(ownerId: string, boardId: string, name: string): Promise<string> {
+  const title = line(name, 'name', 60);
+  return sql().tx(function* () {
+    yield* boardRow(ownerId, boardId);
+    const found = yield* one<{ id: string }>('SELECT id FROM board_columns WHERE board_id = ? AND lower(name) = lower(?)', boardId, title);
+    if (found) return found.id;
+    const r = yield* one<{ n: number; p: number | null }>('SELECT COUNT(*) AS n, MIN(position) AS p FROM board_columns WHERE board_id = ?', boardId);
+    if (Number(r?.n ?? 0) >= MAX_COLUMNS) throw bad(`A board can have at most ${MAX_COLUMNS} columns`);
+    const id = randomUUID();
+    yield* run('INSERT INTO board_columns (id, board_id, name, position) VALUES (?, ?, ?, ?)', id, boardId, title, (r?.p === null || r?.p === undefined ? 0 : Number(r.p)) - 1000);
+    return id;
+  }, { immediate: true });
+}
+
 export function renameColumn(ownerId: string, boardId: string, columnId: string, body: Record<string, unknown>): Promise<Board> {
   onlyKeys(body, ['name']);
   const name = line(body.name, 'name', 60);
