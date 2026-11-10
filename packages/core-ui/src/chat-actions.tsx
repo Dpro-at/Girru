@@ -1,9 +1,10 @@
 // CHAT-BUILD-01 follow-up (CH5, CH8): chat actions shared by the sidebar's right-click and the chat's ⋯ menu —
 // open a chat in a new window, and continue a chat in another folder (a new chat there, its summary in the box).
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ConversationsController } from './conversations';
 import type { Turn } from './turns';
 import { ProjectFolderPicker } from './ProjectFolderPicker';
+import { chooseProjectDirectories } from './ChatComposerControls';
 import { Sheet } from './desktop-ui';
 
 const CHAT_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$/;
@@ -61,6 +62,11 @@ export function ContinueElsewhere({ controller, chatId, onDone }: { controller: 
     controller.edit(summary);
     onDone();
   };
+  // The system window first (Finder / File Explorer); the in-app browser only where there is none (a browser tab).
+  const [fallback, setFallback] = useState(false);
+  useEffect(() => { let live = true; const bridge = (window as unknown as { dproApp?: { chooseProjectFolders?: (o?: { multiple: boolean }) => Promise<string[]> } }).dproApp;
+    void chooseProjectDirectories(false, bridge).then(paths => { if (!live) return; if (paths === null) setFallback(true); else if (paths[0]) void go(paths[0]); else onDone(); }).catch(() => { if (live) setFallback(true); });
+    return () => { live = false; }; }, []);
   if (error) return <Sheet title="Continue in another folder" onClose={onDone} actions={<button type="button" onClick={onDone}>Close</button>}><p role="alert">{error}</p></Sheet>;
-  return <ProjectFolderPicker controller={controller} onClose={onDone} onSelect={p => void go(p)}/>;
+  return fallback ? <ProjectFolderPicker controller={controller} onClose={onDone} onSelect={p => void go(p)}/> : null;
 }
