@@ -89,8 +89,15 @@ export function JoinStart({client, onFresh, onSame}: {client: SessionClient; onF
         let next: Preview = await call(client, root + '/workspaces/source', {sourceDeviceId: from.id});
         const first = next.workspaces?.[0];
         if (!next.waitingForSource && first) next = await call(client, root + '/workspaces/source', {sourceDeviceId: from.id, workspaceId: first.workspaceId});
-        if (live) setPreview(next);
-      } catch (e) { if (live) setNotice(computerAccountWords((e as Error).message)); }
+        if (live) { setPreview(next); setNotice(''); }
+      } catch (e) {
+        // CP13: when the other computer has not let this one in yet, say what to do there; this page keeps asking by itself.
+        const code = (e as Error).message, name = from.label ?? 'your other computer';
+        const words = ['computer_request_refused', 'computer_owner_request_refused', 'account_peer_unavailable'].includes(code) ? `Go to ${name} and press “Yes, it’s me”. This page asks again by itself.`
+          : code === 'account_peer_pin_required' ? `Go to ${name} and press Keep for this computer. This page asks again by itself.`
+          : computerAccountWords(code);
+        if (live) setNotice(words);
+      }
     };
     void load();
     const t = setInterval(() => { if (!preview?.resources) void load(); }, 4000);
