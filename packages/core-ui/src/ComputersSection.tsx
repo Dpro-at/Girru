@@ -106,6 +106,8 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
 
   let main: ReactNode;
   if (!view) main = <div className="dk-empty"><p role="status">Reading your computers…</p></div>;
+  // Right after Girru starts it reconnects to the account by itself: say so, never offer to add a computer that is already added.
+  else if (account === undefined || account?.configured && !!account.mapping && !account.connected || account?.connected && account.view?.deviceStatus === 'approved' && !usable) main = <div className="dk-empty computers-empty" role="status"><UiIcon name="screen" size={28}/><b>{account?.connected ? 'Getting your computers ready…' : 'Connecting to your account…'}</b><p>This takes a few seconds after Girru starts.</p></div>;
   else if (!usable || account?.view?.deviceStatus === 'pending') main = <div className="computers-main"><AddThisComputer client={client} status={account}/></div>;
   else if (!devices.length && isSelf && !needs.length) main = <div className="dk-empty computers-empty"><UiIcon name="screen" size={28}/><b>Your agents can also work on your other computers</b><p>Install Girru on your other computer and sign in with the same Google account. It joins your account by itself and shows up here.</p></div>;
   else {
