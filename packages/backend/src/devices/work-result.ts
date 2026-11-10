@@ -124,9 +124,12 @@ export async function inspectPatch(patch: string): Promise<{ files: string[]; bl
     let m: RegExpExecArray | null;
     if (line.startsWith('diff --git ')) { close(); m = /^diff --git (\S+|"[^"]*") (\S+|"[^"]*")$/.exec(line); if (!m) { blocked.add(line.slice(11, 200)); continue; } entry.push(strip(m[1]), strip(m[2])); }
     else if ((m = /^(?:rename|copy) (?:from|to) (.+)$/.exec(line))) entry.push(unquote(m[1]));
-    else if ((m = /^(?:old mode|new mode|new file mode|deleted file mode) (\d{6})$/.exec(line)) || (m = /^mode change \d{6} => (\d{6})/.exec(line)) || (m = /^index [0-9a-f]+\.\.[0-9a-f]+ (\d{6})$/.exec(line))) {
+    else if (/^\s*(?:old mode|new mode|new file mode|deleted file mode|mode change|index )/.test(line) && !/^index [0-9a-f]+\.\.[0-9a-f]+$/.test(line)) {
+      // Read the way git reads it (spaces, any length); a line git might read differently blocks the entry.
+      m = /^(?:old mode|new mode|new file mode|deleted file mode)\s+([0-7]+)\s*$/.exec(line) ?? /^mode change\s+[0-7]+\s*=>\s*([0-7]+)\s*$/.exec(line) ?? /^index [0-9a-f]+\.\.[0-9a-f]+\s+([0-7]+)\s*$/.exec(line);
+      if (!m) { entry.forEach(n => blocked.add(n)); continue; }
       // Any link or submodule mode, old or new, blocks the entry; a runnable mode needs the second press.
-      const mode = m[1], names = [...entry];
+      const mode = m[1].replace(/^0+(?=\d{6})/, ''), names = [...entry];
       if (mode === '120000' || mode === '160000') names.forEach(n => blocked.add(n));
       else if (mode === '100755') names.forEach(n => risky.add(n));
       else if (mode !== '100644') names.forEach(n => blocked.add(n));
@@ -144,6 +147,10 @@ export async function inspectPatch(patch: string): Promise<{ files: string[]; bl
     writeFileSync(file, patch, { mode: 0o600 });
     const numstat = await git(dir, ['apply', '--numstat', '-z', file]);
     for (const r of numstat.split('\u0000')) { const p = /^(?:\d+|-)\t(?:\d+|-)\t(.+)$/.exec(r)?.[1]; if (p && !files.has(p)) blocked.add(p); }
+    // And git's own summary of modes: a link, a submodule or any unusual mode it reports is blocked.
+    const summary = await git(dir, ['apply', '--summary', file]);
+    for (const m of summary.matchAll(/mode (\d+) (.+)$/gm)) { const f = m[2].trim().replace(/ \(\d+%\)$/, ''); if (m[1] === '100755') risky.add(f); else if (m[1] !== '100644') blocked.add(f); }
+    for (const m of summary.matchAll(/mode change (\d+) => (\d+) (.+)$/gm)) { const f = m[3].trim(); if (m[2] === '100755') risky.add(f); else if (m[2] !== '100644') blocked.add(f); }
   } finally { rmSync(dir, { recursive: true, force: true }); }
   return { files: [...files], blocked: [...blocked], risky: [...risky].filter(f => !blocked.has(f)) };
 }

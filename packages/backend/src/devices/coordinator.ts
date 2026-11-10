@@ -15,6 +15,10 @@ import { requestApproval,denyApproval,approveAndRun } from '../tools/approvals.j
 import { readTaskRules, decideTask } from './task-rules.js';
 import { startSnapshot, finishWork, patchParts, saveResult, savePart, readResult, markResult, directPatch, githubPatch, bringInto, inspectPatch } from './work-result.js';
 import { dataRoot } from '../config/data-root.js';
+import { packProject, copyParts, unpackProject } from './project-copy.js';
+import { createProject } from '../repositories/chat-conversations.js';
+import { mkdirSync as mkdirCopy, writeFileSync as writeCopy, readFileSync as readCopy, existsSync as hasCopy, rmSync as rmCopy } from 'node:fs';
+import pathCopy from 'node:path';
 import { addComment } from '../services/task-board.js';
 import { computerTaskAcceptTool, registerComputerReceiver } from './tool.js';
 import { ComputerMembership } from './membership.js';
@@ -108,11 +112,13 @@ export class ComputerCoordinator {
             await this.repo.acknowledge(e.sender, e.payload.eventId);this.transport.acknowledge(e.sender,e.payload.eventId);
             return;
         }
-        if(redactImportText(canonical(e.payload)).total)throw Error('computer_credentials_refused');
+        // Project copy parts are compressed bytes, checked file by file before they were packed (packProject).
+        if(e.kind!=='project_part'&&redactImportText(canonical(e.payload)).total)throw Error('computer_credentials_refused');
         await this.repo.store('in', e);
         {
             if(e.kind==='sync_status'){if(!this.syncStatusReceiver)throw Error('computer_sync_unconfigured');await this.syncStatusReceiver(e.sender,e.payload);}
             else if(e.kind==='sync'){if(!this.syncReceiver)throw Error('computer_sync_unconfigured');await this.syncReceiver(e.sender,e.payload,e.epoch);}
+            else if (e.kind === 'project_request' || e.kind === 'project_offer' || e.kind === 'project_part') await this.receiveCopy(e);
             else if (e.kind === 'result' || e.kind === 'result_part') { const a = await this.repo.attempt(e.payload.taskId); if (!a || a.source_id !== e.target || a.target_id !== e.sender || a.attempt_id !== e.payload.attemptId) throw Error('computer_result_binding'); if (a.state !== 'completed' && a.state !== 'running') throw Error('computer_result_state'); if (e.kind === 'result' && a.state !== 'completed') throw Error('computer_result_state'); if (e.kind === 'result_part') savePart(dataRoot(), a.task_id, e.payload.index, e.payload.text); else { const { attemptId: _attempt, ...result } = e.payload; saveResult(dataRoot(), result, e.sender); } }
             else if (e.kind === 'task')
                 await this.receiveTask(e);
@@ -293,6 +299,74 @@ export class ComputerCoordinator {
         if (done.ok) markResult(dataRoot(), a.task_id, 'brought');
         return done;
     }
+    /** CP10a copy: asks that arrived here (another computer wants a project), and copies on their way here. */
+    private copyAsks = new Map<string, { from: string; name: string; at: number }>();
+    private copies = new Map<string, { to: string; name: string; parent: string; state: 'waiting' | 'receiving' | 'ready' | 'refused' | 'failed'; size?: number; sha256?: string; parts?: number; received: number; projectId?: string; at: number }>();
+    private copyDir(id: string) { if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw Error('computer_copy_invalid'); return pathCopy.join(dataRoot(), 'project-copies', id); }
+    async requestProjectCopy(actor: Actor, target: string, name: string, parent: string) {
+        await this.membership.assertOwner(actor);
+        if (typeof parent !== 'string' || !pathCopy.isAbsolute(parent) || !hasCopy(parent)) throw Error('computer_project_folder_invalid');
+        const clean = (typeof name === 'string' ? name : '').replace(/[\x00-\x1f\x7f]+/g, ' ').trim().slice(0, 80);
+        if ([...this.copies.values()].filter(c => ['waiting', 'receiving'].includes(c.state)).length >= 3) throw Error('computer_copy_busy');
+        const requestId = randomUUID();
+        this.copies.set(requestId, { to: target, name: clean, parent, state: 'waiting', received: 0, at: this.now() });
+        await this.queue(target, 'project_request', { requestId, name: clean }, requestId);
+        return { requestId };
+    }
+    /** On the computer that has the project: the owner allowed it, so pack it and send it. */
+    async allowProjectCopy(actor: Actor, requestId: string, projectId: string) {
+        await this.membership.assertOwner(actor);
+        const ask = this.copyAsks.get(requestId); if (!ask) throw Error('computer_copy_missing');
+        const project = await findProject(this.membership.ownerId, projectId); if (!project?.folder) throw Error('computer_project_folder_missing');
+        this.copyAsks.delete(requestId);
+        let packed;
+        try { packed = await packProject(project.folder); }
+        catch (e) { await this.queue(ask.from, 'project_offer', { requestId, state: 'failed' }, requestId + '-o'); throw e; }
+        const parts = copyParts(packed.text);
+        await this.queue(ask.from, 'project_offer', { requestId, state: 'allowed', name: project.name.slice(0, 80), files: packed.files, size: packed.size, sha256: packed.sha256, parts: parts.length }, requestId + '-o');
+        for (let i = 0; i < parts.length; i++) await this.queue(ask.from, 'project_part', { requestId, index: i, text: parts[i] }, requestId + '-' + i);
+        return { sent: true, files: packed.files, leftBehind: packed.skipped, secrets: packed.secrets };
+    }
+    async denyProjectCopy(actor: Actor, requestId: string) {
+        await this.membership.assertOwner(actor);
+        const ask = this.copyAsks.get(requestId); if (!ask) throw Error('computer_copy_missing');
+        this.copyAsks.delete(requestId);
+        await this.queue(ask.from, 'project_offer', { requestId, state: 'refused' }, requestId + '-o');
+        return { refused: true };
+    }
+    private async receiveCopy(e: Envelope) {
+        if (e.kind === 'project_request') { if (this.copyAsks.size >= 8) throw Error('computer_copy_busy'); this.copyAsks.set(e.payload.requestId, { from: e.sender, name: e.payload.name, at: this.now() }); return; }
+        if (e.kind !== 'project_offer' && e.kind !== 'project_part') return;
+        const c = this.copies.get(e.payload.requestId);
+        if (!c || c.to !== e.sender) throw Error('computer_copy_binding');
+        if (e.kind === 'project_offer') {
+            if (c.state !== 'waiting') throw Error('computer_copy_state');
+            if (e.payload.state !== 'allowed') { c.state = e.payload.state === 'refused' ? 'refused' : 'failed'; return; }
+            Object.assign(c, { state: 'receiving', size: e.payload.size, sha256: e.payload.sha256, parts: e.payload.parts, name: c.name || e.payload.name || 'Project' });
+            mkdirCopy(this.copyDir(e.payload.requestId), { recursive: true, mode: 0o700 });
+            return;
+        }
+        if (c.state !== 'receiving' || !c.parts || e.payload.index >= c.parts) throw Error('computer_copy_state');
+        const file = pathCopy.join(this.copyDir(e.payload.requestId), 'part-' + e.payload.index);
+        if (!hasCopy(file)) { writeCopy(file, e.payload.text, { mode: 0o600 }); c.received++; }
+        if (c.received < c.parts) return;
+        const dir = this.copyDir(e.payload.requestId);
+        try {
+            const text = Array.from({ length: c.parts }, (_, i) => readCopy(pathCopy.join(dir, 'part-' + i), 'utf8')).join('');
+            const got = unpackProject(text, { size: c.size!, sha256: c.sha256! }, c.parent, c.name);
+            const project = await createProject(this.membership.ownerId, { name: c.name, folder: got.folder });
+            c.state = 'ready'; c.projectId = project.id;
+        } catch { c.state = 'failed'; }
+        finally { rmCopy(dir, { recursive: true, force: true }); }
+    }
+    /** For the overview: asks that wait for this owner's Allow, and copies on their way here. */
+    private async copyView() {
+        const name = async (id: string) => (await this.repo.peer(id).catch(() => null))?.name ?? 'Another computer';
+        return {
+            copyAsks: await Promise.all([...this.copyAsks].map(async ([requestId, a]) => ({ requestId, fromName: await name(a.from), name: a.name }))),
+            copies: await Promise.all([...this.copies].filter(([, c]) => this.now() - c.at < 86_400_000).map(async ([requestId, c]) => ({ requestId, toName: await name(c.to), name: c.name, state: c.state, received: c.received, parts: c.parts ?? 0, projectId: c.projectId ?? null }))),
+        };
+    }
     /** On the source: the newest steps each task reported (kept while Girru runs). */
     private stepsSeen = new Map<string, RunStep[]>();
     private viewAttempt(a: ComputerAttempt) { const labels: Record<string, string> = { queued: 'Queued on this computer', waiting_approval: 'Waiting for target approval', scheduled:'Scheduled on target', blocked: 'Target unavailable', accepted: 'Accepted by target', running: 'Running on target', completed: 'Completed on target', cancel_requested: 'Waiting for target to cancel', cancelled: 'Cancelled by target', unknown: 'Outcome needs review' }; return { statusLabel: labels[a.state] ?? 'Outcome needs review', sourceSessionId:a.source_session_id??null,sourceCardId:a.source_card_id??null,targetCardId:a.target_card_id??null,timing:a.timing_json?JSON.parse(a.timing_json):JSON.parse(a.payload_json).timing??{mode:'immediate'},taskId: a.task_id, attemptId: a.attempt_id, sourceDevice: a.source_id, targetDevice: a.target_id, state:a.state,sessionId: a.session_id, runId: a.run_id, approvalId: a.target_id === this.repo.localId ? a.approval_id : null, detail: a.detail, steps: this.stepsSeen.get(a.task_id) ?? [] }; }
@@ -302,7 +376,7 @@ export class ComputerCoordinator {
         for(const p of await this.repo.peers()){const current=this.presence.get(p.peer_id),fresh=!p.revoked&&this.membership.authority.fresh(p.local_device_id,p.peer_id,Number(p.epoch));devices.push({id:p.peer_id,name:p.name,publicKey:p.public_key,epoch:Number(p.epoch),state:!fresh?'revoked':current?(current.payload.expiresAt>this.now()?current.payload.state:'offline'):'unknown',lastSeenAt:current?.receivedAt??null,dispatchOptions:current?.payload.slots??[],capacity:fresh&&current&&current.payload.expiresAt>this.now()?current.payload.capacity:null,path:fresh?this.transport.path(p.peer_id):'waiting'});}
         const names=new Map(devices.map(d=>[d.id,d.name]));names.set(this.repo.localId,this.name);
         const dispatchOptions=await this.dispatchOptions();
-        return {workspace:this.membership.workspace,dispatchOptions,testOnly:this.membership.authority.testOnly,configured:true,productionEnrollment:PRODUCTION_ENROLLMENT,self:{id:this.repo.localId,name:this.name},connection:this.transport.connector.status,devices,attempts:(await this.repo.attempts()).map(a=>({...this.viewAttempt(a),sourceName:names.get(a.source_id)??'Unknown computer',targetName:names.get(a.target_id)??'Unknown computer'}))};
+        return {workspace:this.membership.workspace,dispatchOptions,testOnly:this.membership.authority.testOnly,configured:true,productionEnrollment:PRODUCTION_ENROLLMENT,self:{id:this.repo.localId,name:this.name},connection:this.transport.connector.status,devices,attempts:(await this.repo.attempts()).map(a=>({...this.viewAttempt(a),sourceName:names.get(a.source_id)??'Unknown computer',targetName:names.get(a.target_id)??'Unknown computer'})),...await this.copyView()};
     }
 }
 

@@ -123,3 +123,11 @@ test('CP10 safety: link modes in the index line, old modes, and upper-case names
   const {safeCopyPath} = await import('../src/devices/project-copy.ts');
   assert.equal(safeCopyPath('a/.Git/hooks/x'), false);
 });
+
+test('CP10 safety: a mode line written with extra spaces or another length still blocks a link', async () => {
+  const {inspectPatch} = await import('../src/devices/work-result.ts');
+  const spaced = 'diff --git a/y b/y\nnew file mode  120000\nindex 0000000..e69de29\n';
+  assert.ok((await inspectPatch(spaced).catch(() => ({blocked: ['y']}))).blocked.includes('y'));
+  const odd = 'diff --git a/z b/z\nnew file mode 0120000\nindex 0000000..e69de29\n';
+  assert.ok((await inspectPatch(odd).catch(() => ({blocked: ['z']}))).blocked.includes('z'));
+});
