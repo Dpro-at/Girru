@@ -33,7 +33,7 @@ test('CP10: the work comes back directly in parts and Bring into puts it in the 
     assert.equal(fs.readFileSync(path.join(mac, 'app.txt'), 'utf8'), fs.readFileSync(path.join(office, 'app.txt'), 'utf8'));
     assert.equal(fs.existsSync(path.join(mac, '.env')), false);
     assert.match(git(mac, 'status', '--porcelain'), /app\.txt/, 'left for the owner to review and save');
-    savePart(data, 'task1', 0, parts[0] + 'tampered');
+    fs.writeFileSync(path.join(data, 'computer-results', 'task1', 'part-0'), parts[0] + 'tampered');
     assert.throws(() => directPatch(data, back), /computer_result_changed/);
   } finally { fs.rmSync(root, {recursive: true, force: true}); }
 });
@@ -62,4 +62,33 @@ test('CP10: with a GitHub origin the work goes up as this computer\'s branch and
     assert.equal(fs.readFileSync(path.join(mac, 'app.txt'), 'utf8'), 'one\ntwo from office\n');
     assert.match(git(hub, 'log', '-1', '--format=%an', 'girru/office-pc/task2'), /Owner/, 'committed as the owner, never as an agent');
   } finally { delete process.env.GIRRU_TEST_GITHUB_REMOTE; fs.rmSync(root, {recursive: true, force: true}); }
+});
+
+test('CP10 safety: secret files stop the send, the patch is read for itself, results are kept once', async () => {
+  const {inspectPatch, secretPath, saveResult: save, savePart: part} = await import('../src/devices/work-result.ts');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'girru-safe-')));
+  try {
+    const office = repo(root, 'office');
+    const start = await startSnapshot(office);
+    fs.writeFileSync(path.join(office, 'service-account.json'), '{}');
+    const sent = await finishWork({folder: office, start, computer: 'PC', taskId: 't3', title: 'x'});
+    assert.equal(sent.result.mode, 'none', 'nothing leaves when a secret-looking file changed');
+    for (const p of ['.envrc', 'a/.dev.vars', 'infra/x.tfstate', 'keys/id_ecdsa', 'k.keystore']) assert.equal(secretPath(p), true, p);
+    assert.equal(secretPath('src/app.ts'), false);
+    fs.rmSync(path.join(office, 'service-account.json'));
+    fs.mkdirSync(path.join(office, '.github', 'workflows'), {recursive: true});
+    fs.writeFileSync(path.join(office, '.github', 'workflows', 'ci.yml'), 'on: push\n');
+    fs.symlinkSync('/etc/hosts', path.join(office, 'link'));
+    const s2 = await startSnapshot(office);
+    const {patch} = await (await import('../src/devices/work-result.ts')).finishWork({folder: office, start, computer: 'PC', taskId: 't4', title: 'x'});
+    const look = await inspectPatch(patch);
+    assert.ok(look.files.includes('.github/workflows/ci.yml'));
+    assert.ok(look.risky.includes('.github/workflows/ci.yml'), 'CI files need a second press');
+    assert.ok(look.blocked.includes('link'), 'links never come in');
+    assert.ok(s2);
+    const data = path.join(root, 'data');
+    save(data, {taskId: 't5', mode: 'none', files: []}, 'peer');
+    assert.throws(() => save(data, {taskId: 't5', mode: 'none', files: []}, 'peer'), /computer_result_exists/);
+    assert.throws(() => part(data, 't5', 0, 'x'), /computer_result_exists/);
+  } finally { fs.rmSync(root, {recursive: true, force: true}); }
 });

@@ -13,7 +13,7 @@ import { createCardSteps,getBoard,updateCard } from '../services/task-board.js';
 import { chatRuns, liveWork } from '../services/chat-runs.js';
 import { requestApproval,denyApproval,approveAndRun } from '../tools/approvals.js';
 import { readTaskRules, decideTask } from './task-rules.js';
-import { startSnapshot, finishWork, patchParts, saveResult, savePart, readResult, markResult, directPatch, githubPatch, bringInto } from './work-result.js';
+import { startSnapshot, finishWork, patchParts, saveResult, savePart, readResult, markResult, directPatch, githubPatch, bringInto, inspectPatch } from './work-result.js';
 import { dataRoot } from '../config/data-root.js';
 import { addComment } from '../services/task-board.js';
 import { computerTaskAcceptTool, registerComputerReceiver } from './tool.js';
@@ -113,7 +113,7 @@ export class ComputerCoordinator {
         {
             if(e.kind==='sync_status'){if(!this.syncStatusReceiver)throw Error('computer_sync_unconfigured');await this.syncStatusReceiver(e.sender,e.payload);}
             else if(e.kind==='sync'){if(!this.syncReceiver)throw Error('computer_sync_unconfigured');await this.syncReceiver(e.sender,e.payload,e.epoch);}
-            else if (e.kind === 'result' || e.kind === 'result_part') { const a = await this.repo.attempt(e.payload.taskId); if (!a || a.source_id !== e.target || a.target_id !== e.sender || a.attempt_id !== e.payload.attemptId) throw Error('computer_result_binding'); if (e.kind === 'result_part') savePart(dataRoot(), a.task_id, e.payload.index, e.payload.text); else { const { attemptId: _attempt, ...result } = e.payload; saveResult(dataRoot(), result, e.sender); } }
+            else if (e.kind === 'result' || e.kind === 'result_part') { const a = await this.repo.attempt(e.payload.taskId); if (!a || a.source_id !== e.target || a.target_id !== e.sender || a.attempt_id !== e.payload.attemptId) throw Error('computer_result_binding'); if (a.state !== 'completed' && a.state !== 'running') throw Error('computer_result_state'); if (e.kind === 'result' && a.state !== 'completed') throw Error('computer_result_state'); if (e.kind === 'result_part') savePart(dataRoot(), a.task_id, e.payload.index, e.payload.text); else { const { attemptId: _attempt, ...result } = e.payload; saveResult(dataRoot(), result, e.sender); } }
             else if (e.kind === 'task')
                 await this.receiveTask(e);
             else if (e.kind === 'status')
@@ -277,13 +277,18 @@ export class ComputerCoordinator {
         return { result: r ? { mode: r.mode, branch: r.branch ?? null, files: r.files, state: r.state, from: (await this.repo.peer(r.from).catch(() => null))?.name ?? 'Another computer', receivedAt: r.receivedAt } : null, projects, suggested: (conv as any)?.projectId ?? null };
     }
     /** CP10c Bring into: the work goes into the chosen project's folder, not committed, after the owner pressed it. */
-    async bringWork(actor: Actor, taskId: string, projectId: string) {
+    async bringWork(actor: Actor, taskId: string, projectId: string, confirmRisky = false) {
         await this.membership.assertOwner(actor); const a = await this.repo.attempt(taskId);
         if (!a || a.source_id !== this.repo.localId) throw Error('computer_task_missing');
         const r = readResult(dataRoot(), a.task_id); if (!r || r.state !== 'ready') throw Error('computer_result_unavailable');
         const folder = (await findProject(a.owner_id, projectId))?.folder; if (!folder) throw Error('computer_project_folder_missing');
         const patch = r.mode === 'direct' ? directPatch(dataRoot(), r) : r.mode === 'github' ? await githubPatch(folder, r) : null;
         if (!patch) throw Error('computer_result_unavailable');
+        // The list shown is the patch's own; links, git internals and secret files never come in; CI and automation files need a second press.
+        const look = await inspectPatch(patch);
+        if (look.blocked.length) return { ok: false as const, blocked: look.blocked, conflicts: [] };
+        if (r.mode === 'direct' && (look.files.length !== r.files.length || look.files.some(f => !r.files.some(x => x.path === f)))) throw Error('computer_result_changed');
+        if (look.risky.length && !confirmRisky) return { ok: false as const, risky: look.risky, conflicts: [] };
         const done = await bringInto(folder, patch);
         if (done.ok) markResult(dataRoot(), a.task_id, 'brought');
         return done;

@@ -10,6 +10,7 @@ import {computerIcon, computerName, useComputerLook, type ComputerIconKey} from 
 import {AddThisComputer, ComputerJoinRequests, useAccountStatus} from './ComputerJoin';
 import {ContinuityRequests} from './ComputerStart';
 import {AllowTask} from './ComputerTaskRules';
+import {ComputerWorksOn} from './ComputerWorksOn';
 import {RenameComputerSheet, forgetComputerLater, ForgetNotice, useForgetPending} from './ComputerActions';
 import {UiIcon} from './ui-icons';
 
@@ -38,6 +39,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   const [selected, setSelected] = useState('');
   const [notice, setNotice] = useState('');
   const [inspector, setInspector] = useState(true);
+  const [worksOn, setWorksOn] = useState(false);
   const [renaming, setRenaming] = useState<{id: string; name: string; icon: ComputerIconKey | null} | null>(null);
   const [sending, setSending] = useState('');
   const {look, save} = useComputerLook(client, active);
@@ -139,7 +141,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
     {device && <><span className="computers-field"><small>Connection</small><span><UiIcon name="wifi" size={14}/>{computerPathLabel(device.path)}</span></span>
       <span className="computers-field"><small>Last seen</small><span>{device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleString() : 'Not yet'}</span></span>
       <span className="computers-field"><small>Works on</small>{(device.dispatchOptions ?? []).length ? (device.dispatchOptions ?? []).map(o => <span key={o.id}><UiIcon name="board" size={14}/>{o.label}</span>) : <span>No projects shared yet</span>}</span></>}
-    {isSelf && <span className="computers-field"><small>Works on</small>{(view?.dispatchOptions ?? []).length ? view!.dispatchOptions.map(o => <span key={o.id}><UiIcon name="board" size={14}/>{o.label}</span>) : <span>No projects shared yet</span>}</span>}
+    {isSelf && <span className="computers-field"><small>Works on</small>{(view?.dispatchOptions ?? []).length ? view!.dispatchOptions.map(o => <span key={o.id}><UiIcon name="board" size={14}/>{o.label}</span>) : <span>No project yet</span>}<button type="button" className="cp-link" onClick={() => setWorksOn(true)}>{(view?.dispatchOptions ?? []).length ? 'Change…' : 'Add a project…'}</button></span>}
     <button type="button" className="link-button" onClick={onSettings}>Settings › Computers</button>
   </aside> : null;
 
@@ -148,6 +150,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
     {main}
     {inspectorPane}
     <ContextMenu menu={menu.menu} onClose={menu.close}/>
+    {worksOn && <ComputerWorksOn client={client} onClose={() => setWorksOn(false)}/>}
     {renaming && <RenameComputerSheet target={renaming} onSave={save} onClose={() => setRenaming(null)}/>}
   </section>;
 }

@@ -45,6 +45,8 @@ export async function finishWork(input: { folder: string; start: string; compute
   try { diff = await checkpointPatch(input.start, end, DIRECT_MAX_BYTES); }
   catch { return { result: { taskId: input.taskId, mode: 'too_large', files: [] }, patch: '' }; }
   if (!diff.files.length) return { result: { taskId: input.taskId, mode: 'none', files: [] }, patch: '' };
+  // Nothing leaves this computer when the work touches a file that looks like a secret.
+  if (diff.files.some(f => secretPath(f.path))) return { result: { taskId: input.taskId, mode: 'none', files: [] }, patch: '' };
   const branch = branchFor(input.computer, input.taskId);
   if (!diff.rel) {
     const pushed = await pushBranch(diff.top, diff.patch, branch, input.title).catch(() => null);
@@ -77,14 +79,18 @@ async function pushBranch(top: string, patch: string, branch: string, title: str
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
+/** Names that hold keys and secrets; the work is never sent when it touches one. */
+const SECRET_NAME = /^\.env(?:\.|$)|^\.envrc$|^\.dev\.vars$|\.(?:pem|key|p12|pfx|jks|keystore|tfstate|tfvars)$|^id_(?:rsa|ed25519|ecdsa|dsa)|^credentials|^(?:secrets\.env|\.credentials\.json|\.npmrc|\.netrc|\.git-credentials|\.pgpass|auth\.json|service-account.*\.json|.*-credentials\.json)$/i;
+export const secretPath = (p: string) => p.split('/').some(n => SECRET_NAME.test(n));
+
 export const patchParts = (patch: string) => Array.from({ length: Math.max(1, Math.ceil(patch.length / PART_CHARS)) }, (_, i) => patch.slice(i * PART_CHARS, (i + 1) * PART_CHARS));
 
 // ---- on the computer that sent the task ----
 
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const dirOf = (dataDir: string, taskId: string) => { if (!ID.test(taskId)) throw Error('computer_result_invalid'); return path.join(dataDir, 'computer-results', taskId); };
-export function saveResult(dataDir: string, result: WorkResult, from: string) { const d = dirOf(dataDir, result.taskId); mkdirSync(d, { recursive: true, mode: 0o700 }); writeFileSync(path.join(d, 'result.json'), JSON.stringify({ ...result, from, receivedAt: Date.now(), state: 'ready' }), { mode: 0o600 }); }
-export function savePart(dataDir: string, taskId: string, index: number, text: string) { const d = dirOf(dataDir, taskId); mkdirSync(d, { recursive: true, mode: 0o700 }); writeFileSync(path.join(d, `part-${index}`), text, { mode: 0o600 }); }
+export function saveResult(dataDir: string, result: WorkResult, from: string) { const d = dirOf(dataDir, result.taskId); if (existsSync(path.join(d, 'result.json'))) throw Error('computer_result_exists'); mkdirSync(d, { recursive: true, mode: 0o700 }); writeFileSync(path.join(d, 'result.json'), JSON.stringify({ ...result, from, receivedAt: Date.now(), state: 'ready' }), { mode: 0o600 }); }
+export function savePart(dataDir: string, taskId: string, index: number, text: string) { const d = dirOf(dataDir, taskId); if (existsSync(path.join(d, 'result.json'))) throw Error('computer_result_exists'); mkdirSync(d, { recursive: true, mode: 0o700 }); writeFileSync(path.join(d, `part-${index}`), text, { mode: 0o600 }); }
 export function readResult(dataDir: string, taskId: string): (WorkResult & { from: string; state: string; receivedAt: number }) | null { try { return JSON.parse(readFileSync(path.join(dirOf(dataDir, taskId), 'result.json'), 'utf8')); } catch { return null; } }
 export function markResult(dataDir: string, taskId: string, state: 'brought' | 'ready') { const r = readResult(dataDir, taskId); if (r) writeFileSync(path.join(dirOf(dataDir, taskId), 'result.json'), JSON.stringify({ ...r, state }), { mode: 0o600 }); }
 /** The direct patch, whole and unchanged (every part present, the size and hash as the other computer said). */
@@ -102,6 +108,25 @@ export async function githubPatch(folder: string, r: WorkResult): Promise<string
   await git(top, ['fetch', '--no-tags', 'origin', `refs/heads/${r.branch}`], { user: true, timeout: 90_000 });
   return git(top, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--binary', '--full-index', r.base!, 'FETCH_HEAD']);
 }
+/**
+ * What a patch really changes, read from the patch itself (not from what the other computer said),
+ * and the paths that need the owner's extra look: links, git internals, CI and automation files.
+ */
+export async function inspectPatch(patch: string): Promise<{ files: string[]; blocked: string[]; risky: string[] }> {
+  const dir = mkdtempSync(path.join(tmpdir(), 'girru-look-')), file = path.join(dir, 'work.patch');
+  try {
+    writeFileSync(file, patch, { mode: 0o600 });
+    const numstat = await git(dir, ['apply', '--numstat', '-z', file]);
+    const summary = await git(dir, ['apply', '--summary', file]);
+    const files = [...new Set(numstat.split('\u0000').map(r => /^(?:\d+|-)\t(?:\d+|-)\t(.+)$/.exec(r)?.[1]).filter((x): x is string => !!x))];
+    const blocked = files.filter(f => f.split('/').includes('.git') || f.startsWith('/') || f.split('/').includes('..') || secretPath(f));
+    for (const m of summary.matchAll(/mode 120000 (.+)$/gm)) blocked.push(m[1].trim());
+    const risky = files.filter(f => /^(?:\.github\/|\.gitlab-ci|\.husky\/|\.githooks\/|\.vscode\/(?:tasks|launch|settings)\.json$|\.devcontainer\/|Makefile$|package\.json$)/.test(f));
+    for (const m of summary.matchAll(/mode 100755 (.+)$/gm)) risky.push(m[1].trim());
+    return { files, blocked: [...new Set(blocked)], risky: [...new Set(risky)] };
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
 /** Bring into: apply the work to the project folder (not committed: the owner reviews and saves it as usual). */
 export async function bringInto(folder: string, patch: string): Promise<{ ok: true } | { ok: false; conflicts: string[] }> {
   const top = (await git(folder, ['rev-parse', '--show-toplevel'])).trim();
@@ -114,4 +139,19 @@ export async function bringInto(folder: string, patch: string): Promise<{ ok: tr
       catch (e) { const text = String((e as { stderr?: string }).stderr ?? ''); return { ok: false, conflicts: [...new Set([...text.matchAll(/(?:patch failed|conflict[s]? in|U)\s*:?\s*([^\s:]+)/gi)].map(m => m[1]))].slice(0, 20) }; }
     }
   } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+// ---- CP10a: the project on this computer ----
+
+const GITHUB_URL = /^https:\/\/github\.com\/[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}?(?:\.git)?$/;
+/** Clone a GitHub project into a new folder inside `parent` (the owner chose both); the folder must not exist yet. */
+export async function cloneFromGithub(url: string, parent: string): Promise<{ folder: string; name: string }> {
+  if (!GITHUB_URL.test(url)) throw Error('computer_project_url_invalid');
+  if (!path.isAbsolute(parent) || !existsSync(parent)) throw Error('computer_project_folder_invalid');
+  const name = url.replace(/\.git$/, '').split('/').pop()!.replace(/[^A-Za-z0-9_.-]/g, '-');
+  if (!name || name === '.' || name === '..') throw Error('computer_project_url_invalid');
+  const folder = path.join(parent, name);
+  if (existsSync(folder)) throw Error('computer_project_folder_exists');
+  await git(parent, ['clone', '--no-recurse-submodules', url, folder], { user: true, timeout: 600_000 });
+  return { folder, name };
 }

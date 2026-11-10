@@ -52,16 +52,16 @@ export function BringWorkBack({client, taskId, targetName}: {client: SessionClie
   const [data, setData] = useState<WorkBack | null>(null);
   const [project, setProject] = useState('');
   const [busy, setBusy] = useState(false);
-  const [outcome, setOutcome] = useState<{ok: true} | {ok: false; conflicts: string[]} | null>(null);
+  const [outcome, setOutcome] = useState<{ok: true} | {ok: false; conflicts: string[]; blocked?: string[]; risky?: string[]} | null>(null);
   const [notice, setNotice] = useState('');
   useEffect(() => { let live = true; const load = () => void client.request({method: 'GET', path: `/api/computers/tasks/${encodeURIComponent(taskId)}/result`}).then(r => { if (live && r.status === 200) setData(r.body as WorkBack); }).catch(() => {}); load(); const t = setInterval(load, 10_000); return () => { live = false; clearInterval(t); }; }, [client, taskId]);
   const r = data?.result;
   if (!r || r.mode === 'none') return null;
   const chosen = project || data?.suggested || data?.projects[0]?.id || '';
   const name = data?.projects.find(p => p.id === chosen)?.name ?? 'the project';
-  const bring = async () => {
+  const bring = async (confirmRisky = false) => {
     setBusy(true); setNotice('');
-    try { const x = await client.request({method: 'POST', path: `/api/computers/tasks/${encodeURIComponent(taskId)}/bring`, body: {projectId: chosen, confirmed: true}}); if (x.status === 200) setOutcome(x.body as typeof outcome); else setNotice('It could not be brought in. Check that the project has a folder here.'); }
+    try { const x = await client.request({method: 'POST', path: `/api/computers/tasks/${encodeURIComponent(taskId)}/bring`, body: {projectId: chosen, confirmed: true, ...(confirmRisky ? {confirmRisky: true} : {})}}); if (x.status === 200) setOutcome(x.body as typeof outcome); else setNotice('It could not be brought in. Check that the project has a folder here.'); }
     catch { setNotice('It could not be brought in.'); } finally { setBusy(false); }
   };
   const added = r.files.reduce((n, f) => n + f.added, 0), removed = r.files.reduce((n, f) => n + f.removed, 0);
@@ -71,6 +71,8 @@ export function BringWorkBack({client, taskId, targetName}: {client: SessionClie
     <ul className="cp-bring-files">{r.files.slice(0, 8).map(f => <li key={f.path}><span className="cp-grow">{f.path}</span>{f.added > 0 && <span className="cp-plus">+{f.added}</span>}{f.removed > 0 && <span className="cp-minus">−{f.removed}</span>}</li>)}{r.files.length > 8 && <li className="cp-note">and {r.files.length - 8} more</li>}</ul>
     {r.state === 'brought' || outcome?.ok ? <p className="cp-card-done"><UiIcon name="check" size={14}/>Brought into {name}. Look at the changes there and save them as usual.</p>
       : r.mode === 'too_large' ? null
+      : outcome && !outcome.ok && outcome.blocked?.length ? <p className="cp-warn">It was not brought in: it changes {outcome.blocked.join(', ')}, which never come in from another computer (links, git files or secret files).</p>
+      : outcome && !outcome.ok && outcome.risky?.length ? <div className="cp-warn"><p>It also changes {outcome.risky.join(', ')}. These files run programs (checks, automation). Look at them first.</p><button type="button" className="cp-soft" disabled={busy} onClick={() => void bring(true)}>Bring in anyway</button></div>
       : outcome && !outcome.ok ? <p className="cp-warn">{targetName} and this computer both changed {outcome.conflicts.length ? outcome.conflicts.join(', ') : 'the same lines'}. The parts that fit are in {name}; the rest is marked in the files for you to choose.</p>
       : <span className="cp-card-actions">
         {(data?.projects.length ?? 0) > 1 && <select aria-label="Project" value={chosen} onChange={e => setProject(e.target.value)}>{data!.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}
