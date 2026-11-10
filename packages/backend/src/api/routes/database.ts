@@ -348,7 +348,7 @@ export async function databaseRoutes(fastify: FastifyInstance) {
       }
 
       unlinkSync(backupPath);
-      console.log(`[Database API] ✅ Backup deleted: ${filename}`);
+      console.log(`[Database API] ✅ Backup deleted: ${filename.replace(/[\r\n]/g, '')}`);
 
       return {
         success: true,
