@@ -1,3 +1,4 @@
+process.env.GIRRU_TEST_PAIRING_ONLY='1';
 // B2: a second computer joins after a Yes on the first one (both show the same pictures), a third joins with the account's authenticator code.
 import test from 'node:test';import assert from 'node:assert/strict';import {createDproHarness} from './fixtures/dpro-harness.mjs';
 const T=await import('../src/auth/verification/totp.ts');

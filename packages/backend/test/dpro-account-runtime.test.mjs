@@ -1,3 +1,4 @@
+process.env.GIRRU_TEST_PAIRING_ONLY='1';
 // Three temporary profiles; actual Google and OS acceptance remain separate.
 import test from 'node:test';import assert from 'node:assert/strict';import {createDproHarness} from './fixtures/dpro-harness.mjs';
 const h=await createDproHarness(),{root,account,peers,until}=h;test.after(()=>h.close());
