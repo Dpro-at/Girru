@@ -203,30 +203,29 @@ export function useContinuity(client: SessionClient, status: Status | null | und
 
 /** On the computer a new one copies from: one Allow for “start the same as this computer”. */
 /**
- * "Same as …" on the new computer: the other computer sent the setup; one confirm here applies all of it
- * (agents, specialties, skills, rules), using this computer's Main agent model for the agents.
+ * CP13 “Same as …” on the new computer: the other computer allowed it, so what arrives is applied by itself
+ * (by the program, in order). This list only shows how far it got, kind by kind; agents use this computer's AI tool.
  */
+const SAME_ORDER: [string, string][] = [['personality', 'Personalities'], ['specialty', 'Specialties'], ['skill', 'Skills'], ['rule', 'Rules'], ['preferences', 'Settings'], ['agent', 'Agents']];
 export function SameSetupArrived({client, status}: {client: SessionClient; status: Status | null | undefined}) {
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState('');
-  const waiting = (status?.workspaces ?? []).filter((w: any) => w.mode === 'continuity' && w.state === 'waiting_local_review');
-  if (!waiting.length) return notice ? <p role="status" className="fine-print">{notice}</p> : null;
-  const nameOf = (id: string) => (status?.view?.devices ?? []).find((d: any) => d.id === id)?.label ?? 'your other computer';
-  const apply = async (w: any) => {
-    setBusy(true); setNotice('Applying… this can take a minute.');
-    try {
-      const r = await call(client, root + '/workspaces/apply-same', {workspaceId: w.id, confirmed: true});
-      setNotice(r.failed?.length || r.waiting ? `Applied ${r.applied} of ${r.total}. ${r.waiting ? r.waiting + ' wait in Approvals. ' : ''}${r.failed?.length ? r.failed.length + ' could not be applied (' + [...new Set(r.failed.map((f: any) => f.code))].join(', ') + ').' : ''}` : `Done: ${r.applied} items from ${nameOf(w.sourceDeviceId)} are on this computer.`);
-    } catch (e) { setNotice(`That did not work (${e instanceof Error ? e.message : 'error'}). Try again in a moment.`); }
-    finally { setBusy(false); }
-  };
-  return <section className="computer-join-requests" aria-label="Setup that arrived from your other computer">
-    {waiting.map((w: any) => <div key={w.id} className="computer-task" role="listitem">
-      <UiIcon name="copy" size={16}/>
-      <span className="computer-task-text"><b>The setup from {nameOf(w.sourceDeviceId)} arrived</b><small>Agents, specialties, skills and rules · they use this computer's Main agent model · chats and memory stay on {nameOf(w.sourceDeviceId)}</small></span>
-      <span className="computer-task-actions"><button type="button" className="primary" disabled={busy} onClick={() => void apply(w)}>{busy ? 'Applying…' : 'Apply all'}</button></span>
-    </div>)}
-    {notice && <p role="status" className="fine-print">{notice}</p>}
+  const [records, setRecords] = useState<{direction: string; category: string; state: string}[]>([]);
+  const copying = (status?.workspaces ?? []).filter((w: any) => w.mode === 'continuity' && w.state !== 'ready');
+  const on = copying.length > 0;
+  useEffect(() => { if (!on) return; let live = true; const load = () => void client.request({method: 'GET', path: '/api/computers/sync'}).then(r => { if (live && r.status === 200) setRecords(((r.body as any)?.records ?? []).filter((x: any) => x.direction === 'in')); }).catch(() => {}); load(); const t = setInterval(load, 4000); return () => { live = false; clearInterval(t); }; }, [on, client]);
+  if (!on) return null;
+  const nameOf = (id: string) => (status?.view?.devices ?? []).find((d: any) => d.id === id)?.label || 'Your other computer';
+  const skippedStates = new Set(['rejected', 'failed', 'unknown']);
+  return <section className="computer-join-requests" aria-label="Setup arriving from your other computer">
+    <p className="cp-note">{nameOf(String(copying[0].sourceDeviceId ?? ''))} allowed it. Everything comes over now; chats and memory stay there.</p>
+    {SAME_ORDER.map(([kind, label]) => {
+      const of = records.filter(r => r.category === kind), arrived = of.filter(r => r.state === 'applied').length, skipped = of.filter(r => skippedStates.has(r.state)).length, coming = of.length - arrived - skipped;
+      const pill = !of.length ? 'waiting' : coming ? `${arrived} of ${of.length} · arriving…` : `${arrived} arrived`;
+      return <div key={kind} className="computer-task" role="listitem">
+        <UiIcon name={coming || !of.length ? 'clock' : 'check'} size={15}/>
+        <span className="computer-task-text"><b>{label}</b>{kind === 'agent' && <small>They use this computer’s AI tool.</small>}{skipped > 0 && <small className="cp-warn">{skipped} could not come over. Add {skipped === 1 ? 'it' : 'them'} here by hand.</small>}</span>
+        <span className="computer-task-actions"><small>{pill}</small></span>
+      </div>;
+    })}
   </section>;
 }
 

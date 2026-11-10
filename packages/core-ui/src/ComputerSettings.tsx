@@ -8,7 +8,7 @@ import {computerName, useComputerLook} from './ComputerLook';
 import {ComputerEnrollment} from './ComputerEnrollment';
 import {ComputerLinkControls, ComputerDirectControls} from './ComputerLinkControls';
 import {ComputerSyncWorkspace} from './ComputerSyncWorkspace';
-import {ComputerTaskRules, TasksAtOnce} from './ComputerTaskRules';
+import {ComputerTaskRules, TasksAtOnce, ComputerAiTool} from './ComputerTaskRules';
 import {ComputerShare} from './ComputerShare';
 import {UiIcon} from './ui-icons';
 
@@ -27,6 +27,7 @@ export function ComputerSettings({client, onApprovals}: {client: SessionClient; 
     <div className="phone-main">
       <header className="phone-head"><div><h2 className="settings-page-title">Computers</h2><p className="settings-page-desc">What this computer does with tasks from your other computers.</p></div></header>
       {notice && <p role="status" className="fine-print">{notice}</p>}
+      <ComputerAiTool client={client}/>
       <ComputerTaskRules client={client} deviceNames={names} part="main"/>
       <TasksAtOnce client={client}/>
       <div className="phone-list" role="list"><div className="phone-row" role="listitem">

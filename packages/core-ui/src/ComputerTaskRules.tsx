@@ -140,3 +140,19 @@ export function TakesNewTasks({client}: {client: SessionClient}) {
   if (!rules) return null;
   return <label className="computers-check"><input type="checkbox" checked={rules.takes !== false} onChange={e => void post(client, {takes: e.target.checked}).then(setRules).catch(() => setNotice('It could not be saved.'))}/>Takes new tasks{notice && <small role="status">{notice}</small>}</label>;
 }
+
+/** CP13 “AI tool here”: the tool this computer runs tasks from your other computers and copied agents with (your own signed-in account). */
+export function ComputerAiTool({client}: {client: SessionClient}) {
+  const [data, setData] = useState<{tools: {id: string; label: string}[]; current: string | null} | null>(null);
+  const [notice, setNotice] = useState('');
+  useEffect(() => { let live = true; void client.request({method: 'GET', path: '/api/computers/tools'}).then(r => { if (live && r.status === 200) setData(r.body as never); }).catch(() => {}); return () => { live = false; }; }, [client]);
+  if (!data) return null;
+  return <div className="phone-list" role="list"><div className="phone-row" role="listitem">
+    <span className="phone-tile"><UiIcon name="sparkle" size={15}/></span>
+    <span className="phone-row-text"><b>AI tool here</b><small>{data.tools.length ? 'Used for tasks from your other computers and for copied agents.' : 'No AI tool is signed in on this computer yet. Sign in to one in Settings › AI tools.'}</small></span>
+    {data.tools.length > 0 && <select aria-label="AI tool here" value={data.current ?? ''} onChange={e => { const tool = e.target.value; void post(client, {tool}).then(() => { setData({...data, current: tool}); setNotice(''); }).catch(() => setNotice('It could not be saved. Try again.')); }}>
+      {data.tools.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+    </select>}
+    {notice && <small role="status">{notice}</small>}
+  </div></div>;
+}
