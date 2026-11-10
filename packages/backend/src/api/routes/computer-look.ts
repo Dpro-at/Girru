@@ -28,6 +28,19 @@ export function computerLookChangeOk(x: unknown): x is { deviceId?: string; icon
   return !('name' in x) || typeof x.name === 'string' && (x.name === '' || validName(x.name));
 }
 
+/** One computer's picture and/or name applied and made whole; null when the list is full and the change would be dropped. */
+export function applyComputerLookChange(look: ComputerLook, change: { deviceId?: string; icon?: string; name?: string }): ComputerLook | null {
+  const id = change.deviceId;
+  if (typeof id !== 'string' || !ID.test(id)) return null;
+  // Edited as Maps: a request-chosen id is a map key, never a property name on a live object.
+  const icons = new Map(Object.entries(look.icons)), names = new Map(Object.entries(look.names));
+  if (change.icon !== undefined) icons.set(id, change.icon);
+  if (change.name !== undefined) { if (change.name) names.set(id, change.name.trim()); else names.delete(id); }
+  const saved = computerLook({ icons: Object.fromEntries(icons), names: Object.fromEntries(names), notices: look.notices });
+  if (change.icon !== undefined && !Object.hasOwn(saved.icons, id) || change.name && !Object.hasOwn(saved.names, id)) return null;
+  return saved;
+}
+
 export async function computerLookRoutes(fastify: FastifyInstance) {
   fastify.get('/api/computers/look', async (request, reply) => {
     const actor = actorOrReply(reply, actorOf(request), requireAccount);
@@ -42,14 +55,8 @@ export async function computerLookRoutes(fastify: FastifyInstance) {
     if (!computerLookChangeOk(request.body)) return reply.code(400).send({ error: 'Unknown computer look', code: 'invalid' });
     const b = request.body, look = computerLook(await getPref(actor.userId, 'computer-look'));
     if (b.notices !== undefined) { look.notices = b.notices; await setPref(actor.userId, 'computer-look', look); return look; }
-    const id = b.deviceId!;
-    const icons = Object.assign(Object.create(null) as Record<string, string>, look.icons), names = Object.assign(Object.create(null) as Record<string, string>, look.names);
-    const set = (o: Record<string, string>, v: string) => Object.defineProperty(o, id, { value: v, enumerable: true, writable: true, configurable: true });
-    if (b.icon !== undefined) set(icons, b.icon);
-    if (b.name !== undefined) { if (b.name) set(names, b.name.trim()); else delete names[id]; }
-    look.icons = { ...icons }; look.names = { ...names };
-    const saved = computerLook(look);
-    if (!(id in saved.icons) && b.icon !== undefined || b.name && !(id in saved.names)) return reply.code(409).send({ error: 'Too many computers', code: 'invalid' });
+    const saved = applyComputerLookChange(look, b);
+    if (!saved) return reply.code(409).send({ error: 'Too many computers', code: 'invalid' });
     await setPref(actor.userId, 'computer-look', saved);
     return saved;
   });

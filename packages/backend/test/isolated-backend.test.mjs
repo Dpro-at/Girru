@@ -16,7 +16,7 @@ import assert from 'node:assert/strict';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative, sep } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 
 const backendDir = process.cwd();
 const repoRoot = join(backendDir, '..', '..');
@@ -218,6 +218,14 @@ test('BUG-01: backup names are single safe segments', async () => {
   for (const bad of ['../agent-player.db', '..db', 'a/b.db', 'a\\b.db', '.hidden.db', 'x.db.txt', '', null, 'x..y.db']) {
     assert.equal(isSafeBackupName(bad), false, String(bad));
   }
+});
+
+test('code scanning: a backup path is resolved and checked to stay directly inside the backup folder', async () => {
+  const { backupFilePath } = await import(join(backendDir, 'src/api/routes/database.ts'));
+  const dir = join(dataDir, 'backups');
+  assert.equal(backupFilePath(dir, 'database_2026-10-14_10-00-00.db'), join(resolve(dir), 'database_2026-10-14_10-00-00.db'));
+  assert.equal(backupFilePath(dir + sep, 'a.db'), join(resolve(dir), 'a.db'), 'a trailing separator on the folder is fine');
+  for (const bad of ['../agent-player.db', 'a/b.db', 'a\\b.db', '..db', '', null, undefined, 42]) assert.equal(backupFilePath(dir, bad), null, String(bad));
 });
 
 test('every store resolves under AGENT_PLAYER_DATA_DIR', async () => {

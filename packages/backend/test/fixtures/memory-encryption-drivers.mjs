@@ -9,9 +9,16 @@ function temporaryRoot() {
   if(process.env.NODE_ENV!=='test'||!raw||!path.isAbsolute(raw))throw Error('enc_fixture_explicit_temporary_root_required');
   const root=path.resolve(raw),stat=fs.lstatSync(root);
   if(!stat.isDirectory()||stat.isSymbolicLink()||fs.realpathSync(root)!==root||!path.basename(root).startsWith('girru-enc-final-'))throw Error('enc_fixture_temporary_root_refused');
-  const markerFile=path.join(root,'.girru-enc-test-root.json'),markerStat=fs.lstatSync(markerFile);
-  if(!markerStat.isFile()||markerStat.isSymbolicLink()||markerStat.nlink!==1||markerStat.size>1024)throw Error('enc_fixture_marker_refused');
-  const marker=JSON.parse(fs.readFileSync(markerFile,'utf8'));
+  // One descriptor for check and read: O_NOFOLLOW refuses a link, fstat checks the file actually opened.
+  const markerFile=path.join(root,'.girru-enc-test-root.json');
+  let markerFd;
+  try{markerFd=fs.openSync(markerFile,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW??0));}catch{throw Error('enc_fixture_marker_refused');}
+  let markerStat,marker;
+  try{
+    markerStat=fs.fstatSync(markerFd);
+    if(!markerStat.isFile()||markerStat.nlink!==1||markerStat.size>1024)throw Error('enc_fixture_marker_refused');
+    marker=JSON.parse(fs.readFileSync(markerFd,'utf8'));
+  }finally{fs.closeSync(markerFd);}
   if(marker.version!==1||marker.synthetic!==true||typeof marker.nonce!=='string'||! /^[a-f0-9]{32}$/.test(marker.nonce))throw Error('enc_fixture_marker_refused');
   if(process.platform!=='win32'&&(stat.uid!==process.getuid()||(stat.mode&0o077)!==0||markerStat.uid!==process.getuid()||(markerStat.mode&0o077)!==0))throw Error('enc_fixture_private_root_required');
   // Fail before importing application modules unless all process defaults are explicitly synthetic too.
