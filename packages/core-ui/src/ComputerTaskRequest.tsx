@@ -27,7 +27,9 @@ export function ComputerTaskRequest({client, conversationId, card, title, preset
   const setOpen = (v: boolean) => { setOpenState(v); if (!v) onClosed?.(); };
   const [target, setTarget] = useState(presetTarget ?? '');
   const [binding, setBinding] = useState('');
-  const [text, setText] = useState(title ?? '');
+  const [taskTitle, setTaskTitle] = useState(title ?? '');
+  const [text, setText] = useState('');
+  const [priority, setPriority] = useState<'low' | 'normal' | 'high' | 'urgent'>('normal');
   const [later, setLater] = useState<null | 'tonight' | 'morning' | 'pick'>(null);
   const [picked, setPicked] = useState('');
   const [showLater, setShowLater] = useState(false);
@@ -56,7 +58,7 @@ export function ComputerTaskRequest({client, conversationId, card, title, preset
     if (later && !timing) { setNotice('Choose a time between now and 30 days from now.'); return; }
     setBusy(true);
     try {
-      const r = await client.request({method: 'POST', path: '/api/computers/tasks', body: {target: chosen, task: {taskId: crypto.randomUUID(), attemptId: crypto.randomUUID(), projectBinding: b.id, agentBinding: b.agentBinding, modelBinding: b.modelBinding, text, ...(timing ? {timing} : {}), ...(conversationId || card ? {source: {...(conversationId ? {conversationId} : {}), ...card}} : {})}}});
+      const r = await client.request({method: 'POST', path: '/api/computers/tasks', body: {target: chosen, task: {taskId: crypto.randomUUID(), attemptId: crypto.randomUUID(), projectBinding: b.id, agentBinding: b.agentBinding, modelBinding: b.modelBinding, text: text.trim() || taskTitle.trim(), title: taskTitle.trim().slice(0, 200), priority, ...(timing ? {timing} : {}), ...(conversationId || card ? {source: {...(conversationId ? {conversationId} : {}), ...card}} : {})}}});
       if (r.status === 200) { setNotice(''); setOpen(false); return; }
       setNotice('The task could not be sent.');
     } catch { setNotice('The task could not be sent.'); } finally { setBusy(false); }
@@ -67,12 +69,12 @@ export function ComputerTaskRequest({client, conversationId, card, title, preset
     {openNow === undefined && (label
       ? <button type="button" className="primary" onClick={() => { setTarget(presetTarget ?? ''); setOpen(true); }}>{label}</button>
       : <button type="button" className="tool" title="Send a task to another computer" aria-label="Send a task" onClick={() => setOpen(true)}><UiIcon name="screen" size={15}/></button>)}
-    {open && <Sheet title="Send a task" onClose={() => setOpen(false)} actions={<>
+    {open && <Sheet title="New task" onClose={() => setOpen(false)} actions={<>
       <button type="button" className="link-button computer-send-later" onClick={() => setShowLater(v => !v)}>{when ? `Later: ${when}` : 'Later…'}</button>
       <button type="button" onClick={() => setOpen(false)}>Cancel</button>
-      <button type="button" className="primary" disabled={busy || !chosen || !pick || !text.trim()} onClick={() => void send()}>{later ? 'Send for later' : 'Send'}</button>
+      <button type="button" className="primary" disabled={busy || !chosen || !pick || !taskTitle.trim()} onClick={() => void send()}>{later ? 'Send for later' : 'Send'}</button>
     </>}>
-      <div className="phone-field"><span>To</span>
+      <div className="phone-field"><span>Runs on</span>
         <div className="computer-to" role="radiogroup" aria-label="To">{devices.map(d => {
           const on = d.state === 'available' || d.state === 'busy', connecting = !on && account?.view?.devices?.find(x => !!d.publicKey && x.publicKey === d.publicKey)?.presence === 'online';
           const full = !!d.capacity && d.capacity.active >= d.capacity.limit;
@@ -82,7 +84,9 @@ export function ComputerTaskRequest({client, conversationId, card, title, preset
           </button>;
         })}</div>
       </div>
-      <label className="phone-field"><span>What to do</span><textarea maxLength={8000} rows={4} value={text} placeholder="Translate the store page into German…" onChange={e => setText(e.target.value)}/></label>
+      <label className="phone-field"><span>Task title</span><input autoFocus maxLength={200} value={taskTitle} placeholder="What needs to be done?" onChange={e => setTaskTitle(e.target.value)}/></label>
+      <label className="phone-field"><span>Details</span><textarea maxLength={8000} rows={4} value={text} placeholder="Steps, files, what done looks like…" onChange={e => setText(e.target.value)}/></label>
+      <label className="phone-field"><span>Priority</span><select value={priority} onChange={e => setPriority(e.target.value as typeof priority)}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></label>
       {options.length > 1 ? <label className="phone-field"><span>Project</span><select value={pick} onChange={e => setBinding(e.target.value)}>{options.map(o => <option value={o.id} key={o.id}>{o.label}</option>)}</select></label> : null}
       {options.length ? <p className="cp-note">Runs in {device ? computerName(look, device.id, device.name) : 'That computer'}’s project ({options.find(o => o.id === pick)?.label}). {device && !deviceOn ? 'It is off: the task waits here and goes when it is on.' : 'It asks there first, unless you allowed it always.'}</p>
         : <p className="cp-warn">Choose its folder on {device ? computerName(look, device.id, device.name) : 'That computer'} first: there, open Computers › this computer › Project › Change….</p>}

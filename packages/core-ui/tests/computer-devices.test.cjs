@@ -11,3 +11,11 @@ test('the project sheet may save a chosen folder and how work comes back, nothin
  assert.equal(C.allowedComputer('POST','/api/computers/works-on/folder',{folder:'/x',confirmed:true,url:'https://x'}),false);
  assert.equal(C.allowedComputer('POST','/api/computers/task-rules',{back:{id:'p1',via:'direct'}}),true);
 });
+test('CP14: a task to another computer may carry the Board fields (title, priority), nothing else', async () => {
+ const C = await import('../src/computer-contract.js');
+ const base = {taskId: 't1', attemptId: 'a1', projectBinding: 'p1', agentBinding: 'g1', modelBinding: 'm1', text: 'git pull origin main'};
+ assert.equal(C.allowedComputer('POST', '/api/computers/tasks', {target: 'd1', task: {...base, title: 'Pull main', priority: 'normal'}}), true);
+ assert.equal(C.allowedComputer('POST', '/api/computers/tasks', {target: 'd1', task: {...base, priority: 'huge'}}), false);
+ assert.equal(C.allowedComputer('POST', '/api/computers/tasks', {target: 'd1', task: {...base, title: 'x\u0000'}}), false);
+ assert.equal(C.allowedComputer('POST', '/api/computers/tasks', {target: 'd1', task: {...base, folder: '/etc'}}), false);
+});
