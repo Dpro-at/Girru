@@ -10,7 +10,7 @@ import { one, run, lockName, dialect, type Step } from '../repositories/sql-step
 import { createConversationStep,findConversation,findProject } from '../repositories/chat-conversations.js';
 import { acceptChatRunStep, finishChatRunStep } from '../repositories/chat-recovery.js';
 import { createCardSteps,getBoard,updateCard } from '../services/task-board.js';
-import { chatRuns } from '../services/chat-runs.js';
+import { chatRuns, liveWork } from '../services/chat-runs.js';
 import { requestApproval,denyApproval,approveAndRun } from '../tools/approvals.js';
 import { readTaskRules, decideTask } from './task-rules.js';
 import { addComment } from '../services/task-board.js';
@@ -53,7 +53,7 @@ export class ComputerCoordinator {
     async start() {const generation=this.lifecycle;await this.membership.authority.assertReady?.(); await this.membership.assertFresh();if(generation!==this.lifecycle)throw Error('computer_application_stopped'); this.stopped = false; await this.repo.recover();if(generation!==this.lifecycle)throw Error('computer_application_stopped'); await this.transport.start();if(generation!==this.lifecycle)throw Error('computer_application_stopped'); for (const a of await this.repo.attempts())
         if (a.state === 'unknown' && a.target_id === this.repo.localId)
             await this.publish(a); this.timer = setInterval(() => { void this.flush().catch(() => undefined); }, 150); this.timer.unref();if(!this.membership.authority.testOnly){this.authorityTimer=setInterval(()=>{void this.renewAuthority().catch(()=>this.closeEffects());},5000);this.authorityTimer.unref();} }
-    stop() { this.stopped = true;this.lifecycle++;if(this.authorityTimer)clearInterval(this.authorityTimer);this.authorityTimer=null; if (this.timer)
+    stop() { this.stopped = true;this.lifecycle++;for(const t of this.stepWatch.values())clearInterval(t);this.stepWatch.clear();if(this.authorityTimer)clearInterval(this.authorityTimer);this.authorityTimer=null; if (this.timer)
         clearInterval(this.timer); this.timer = null; this.transport.stop(); this.unregister(); }
     private async envelope(peer: string, kind: Envelope['kind'], payload: unknown, requestId: string = randomUUID()) { const p = await this.membership.current(peer); return readEnvelope({ protocol: 'girru-computer', version: 1, workspace: this.membership.workspace, epoch: Number(p.epoch), sender: this.membership.identity.id, target: peer, eventId: randomUUID(), requestId, sequence: await this.membership.nextSequence(), sentAt: this.now(), fingerprint: fingerprint(payload), kind, payload }); }
     private async queue(peer: string, kind: Envelope['kind'], payload: unknown, requestId?: string) { if(this.stopped)throw Error('computer_application_stopped');const e = await this.envelope(peer, kind, payload, requestId); await this.repo.store('out', e); return e; }
@@ -193,7 +193,7 @@ export class ComputerCoordinator {
             throw Error('computer_authority_revoked'); yield* lockName('computer-capacity:'+a.local_device_id);const occupancy=yield* one<{n:number}>("SELECT COUNT(*) AS n FROM computer_attempts WHERE local_device_id=? AND target_id=? AND state IN ('accepted','running','cancel_requested')",a.local_device_id,a.local_device_id);if(Number(occupancy?.n)>=atOnce)throw Error('computer_capacity_unavailable');yield* createConversationStep(a.owner_id, { title: 'Task from another computer', projectId: b.projectId, agentId: b.agentId, model: b.model, mode: 'ask' }, sessionId); if(synthetic)yield* acceptChatRunStep({ run_id: runId, session_id: sessionId, user_id: a.owner_id, agent_id: b.agentId, started_at: now }, p.text); if(current.target_card_id){const card=yield* one<any>('SELECT version FROM board_cards WHERE id=? AND board_id=?'+lock,current.target_card_id,b.boardId);if(!card||Number(card.version)!==Number(current.target_card_version))throw Error('computer_target_card_changed');yield* run('UPDATE board_cards SET conversation_id=? WHERE id=? AND board_id=?',sessionId,current.target_card_id,b.boardId);}else throw Error('computer_target_card_missing'); yield* run("UPDATE computer_attempts SET state='accepted',session_id=?,run_id=?,detail='Accepted by the target owner.' WHERE local_device_id=? AND task_id=?", sessionId, runId, a.local_device_id, a.task_id); });
         if(this.runAdmission){
             await this.repo.runner.read(run('INSERT INTO computer_execution_leases(local_device_id,task_id,fence,epoch,expires_at) VALUES(?,?,?,?,?)',this.repo.localId,a.task_id,fence,a.epoch,String(this.now()+15000)));
-            try{await this.runAdmission.start({ownerId:a.owner_id,sessionId,runId,agentId:b.agentId,projectId:b.projectId,model:b.model,text:p.text,canExecute:async()=>{try{await this.fenced(a.task_id,fence);return true;}catch{return false;}},finished:status=>this.complete(a.task_id,fence,runId,status)});const fresh=await this.repo.attempt(a.task_id);if(fresh?.state==='accepted')await this.change(a.task_id,'running','Running on the target computer.');}catch{await this.change(a.task_id,'unknown','Normal runtime admission did not return a durable outcome. Inspect the linked run; do not retry.');}return this.viewAttempt((await this.repo.attempt(a.task_id))!);
+            try{await this.runAdmission.start({ownerId:a.owner_id,sessionId,runId,agentId:b.agentId,projectId:b.projectId,model:b.model,text:p.text,canExecute:async()=>{try{await this.fenced(a.task_id,fence);return true;}catch{return false;}},finished:status=>this.complete(a.task_id,fence,runId,status)});const fresh=await this.repo.attempt(a.task_id);if(fresh?.state==='accepted')await this.change(a.task_id,'running','Running on the target computer.');this.watchSteps(a.task_id,runId);}catch{await this.change(a.task_id,'unknown','Normal runtime admission did not return a durable outcome. Inspect the linked run; do not retry.');}return this.viewAttempt((await this.repo.attempt(a.task_id))!);
         }
         await this.change(a.task_id, 'running', 'Synthetic executor is running on the target computer.');
         chatRuns.start({ userId: a.owner_id, sessionId, runId, agentId: b.agentId, execute: async (reply) => { await new Promise(resolve => setTimeout(resolve, 150)); await this.fenced(a.task_id, fence); if (chatRuns.get(runId)?.stopping)
@@ -209,7 +209,7 @@ export class ComputerCoordinator {
         kind: 'status';
     }>) { const p = e.payload; const before=await this.repo.attempt(p.taskId).catch(()=>null); await this.repo.mutate(p.taskId, function* (a) { if (a.source_id !== e.target || a.target_id !== e.sender || a.attempt_id !== p.attemptId || e.sequence <= Number(a.status_sequence))
         return; if (['completed', 'cancelled', 'unknown'].includes(a.state) || a.state === 'cancel_requested' && ['running', 'accepted', 'scheduled', 'waiting_approval'].includes(p.state))
-        return; yield* run('UPDATE computer_attempts SET state=?,session_id=?,run_id=?,detail=?,status_sequence=? WHERE local_device_id=? AND task_id=?', p.state, p.sessionId, p.runId, p.detail, e.sequence, a.local_device_id, a.task_id);if(p.targetCardId)yield* run('UPDATE computer_attempts SET target_card_id=?,timing_json=? WHERE local_device_id=? AND task_id=?',p.targetCardId,canonical(p.timing??{mode:'immediate'}),a.local_device_id,a.task_id); });const after=await this.repo.attempt(p.taskId);if(after?.source_card_id&&after.state===p.state&&before?.state!==p.state&&!this.stopped)void this.followCard(after,p.state,p.detail); }
+        return; yield* run('UPDATE computer_attempts SET state=?,session_id=?,run_id=?,detail=?,status_sequence=? WHERE local_device_id=? AND task_id=?', p.state, p.sessionId, p.runId, p.detail, e.sequence, a.local_device_id, a.task_id);if(p.targetCardId)yield* run('UPDATE computer_attempts SET target_card_id=?,timing_json=? WHERE local_device_id=? AND task_id=?',p.targetCardId,canonical(p.timing??{mode:'immediate'}),a.local_device_id,a.task_id); });if(p.steps)this.stepsSeen.set(p.taskId,p.steps);const after=await this.repo.attempt(p.taskId);if(after?.source_card_id&&after.state===p.state&&before?.state!==p.state&&!this.stopped)void this.followCard(after,p.state,p.detail); }
     private async receiveCancel(e: Extract<Envelope, {
         kind: 'cancel';
     }>) { const a = await this.repo.attempt(e.payload.taskId); if (!a || a.source_id !== e.sender || a.target_id !== e.target || a.attempt_id !== e.payload.attemptId)
@@ -231,9 +231,28 @@ export class ComputerCoordinator {
     private async renewAuthority(){if(this.stopped||this.renewing)return;this.renewing=true;try{await this.renewAuthorityOne();}finally{this.renewing=false;}}
     private async renewAuthorityOne(){if(this.stopped)return;await this.membership.authority.refresh?.();await this.membership.authority.assertReady?.();for(const a of await this.repo.attempts())if(a.target_id===this.repo.localId&&['accepted','running','cancel_requested'].includes(a.state)){const member=await this.membership.current(a.source_id);if(Number(member.epoch)!==a.epoch)throw Error('computer_membership_epoch_changed');const changed=await this.repo.runner.read(run('UPDATE computer_execution_leases SET expires_at=? WHERE local_device_id=? AND task_id=? AND fence=? AND revoked=0 AND expires_at>?',String(this.now()+15000),this.repo.localId,a.task_id,a.fence,String(this.now())));if(changed.changes!==1)throw Error('computer_execution_lease_lost');}}
     private async change(task: string, state: string, detail: string) { if(this.stopped)throw Error('computer_application_stopped');await this.repo.mutate(task, function* (a) { yield* run('UPDATE computer_attempts SET state=?,detail=? WHERE local_device_id=? AND task_id=?', state, detail, a.local_device_id, task); }); await this.publish((await this.repo.attempt(task))!); }
-    private async publish(a: ComputerAttempt) { if(this.stopped)throw Error('computer_application_stopped');if (a.source_id === this.repo.localId)
-        return; await this.queue(a.source_id, 'status', { taskId: a.task_id, attemptId: a.attempt_id, state: a.state,targetCardId:a.target_card_id??null,timing:a.timing_json?JSON.parse(a.timing_json):JSON.parse(a.payload_json).timing??{mode:'immediate'}, sessionId: a.session_id, runId: a.run_id, detail: a.detail }, a.attempt_id); }
-    private viewAttempt(a: ComputerAttempt) { const labels: Record<string, string> = { queued: 'Queued on this computer', waiting_approval: 'Waiting for target approval', scheduled:'Scheduled on target', blocked: 'Target unavailable', accepted: 'Accepted by target', running: 'Running on target', completed: 'Completed on target', cancel_requested: 'Waiting for target to cancel', cancelled: 'Cancelled by target', unknown: 'Outcome needs review' }; return { statusLabel: labels[a.state] ?? 'Outcome needs review', sourceSessionId:a.source_session_id??null,sourceCardId:a.source_card_id??null,targetCardId:a.target_card_id??null,timing:a.timing_json?JSON.parse(a.timing_json):JSON.parse(a.payload_json).timing??{mode:'immediate'},taskId: a.task_id, attemptId: a.attempt_id, sourceDevice: a.source_id, targetDevice: a.target_id, state:a.state,sessionId: a.session_id, runId: a.run_id, approvalId: a.target_id === this.repo.localId ? a.approval_id : null, detail: a.detail }; }
+    private async publish(a: ComputerAttempt, steps?: RunStep[]) { if(this.stopped)throw Error('computer_application_stopped');if (a.source_id === this.repo.localId)
+        return; await this.queue(a.source_id, 'status', { taskId: a.task_id, attemptId: a.attempt_id, state: a.state,targetCardId:a.target_card_id??null,timing:a.timing_json?JSON.parse(a.timing_json):JSON.parse(a.payload_json).timing??{mode:'immediate'}, sessionId: a.session_id, runId: a.run_id, detail: a.detail, ...(steps ? { steps } : {}) }, a.attempt_id); }
+    /** CP5 steps: on the target, the running task's plan (or its newest tool steps) every few seconds, only when it changes. */
+    private stepWatch = new Map<string, ReturnType<typeof setInterval>>();
+    private sentSteps = new Map<string, string>();
+    private watchSteps(task: string, runId: string) {
+        if (this.stepWatch.has(task)) return;
+        const tick = async () => {
+            try {
+                const a = await this.repo.attempt(task);
+                if (this.stopped || !a || a.state !== 'running') { clearInterval(this.stepWatch.get(task)); this.stepWatch.delete(task); this.sentSteps.delete(task); return; }
+                const run = chatRuns.get(runId); if (!run) return;
+                const steps = runSteps(liveWork(run.parts)); if (!steps.length) return;
+                const key = JSON.stringify(steps); if (this.sentSteps.get(task) === key) return;
+                this.sentSteps.set(task, key); await this.publish(a, steps);
+            } catch { /* steps are a convenience; the status still arrives */ }
+        };
+        const timer = setInterval(() => void tick(), 4000); (timer as any).unref?.(); this.stepWatch.set(task, timer);
+    }
+    /** On the source: the newest steps each task reported (kept while Girru runs). */
+    private stepsSeen = new Map<string, RunStep[]>();
+    private viewAttempt(a: ComputerAttempt) { const labels: Record<string, string> = { queued: 'Queued on this computer', waiting_approval: 'Waiting for target approval', scheduled:'Scheduled on target', blocked: 'Target unavailable', accepted: 'Accepted by target', running: 'Running on target', completed: 'Completed on target', cancel_requested: 'Waiting for target to cancel', cancelled: 'Cancelled by target', unknown: 'Outcome needs review' }; return { statusLabel: labels[a.state] ?? 'Outcome needs review', sourceSessionId:a.source_session_id??null,sourceCardId:a.source_card_id??null,targetCardId:a.target_card_id??null,timing:a.timing_json?JSON.parse(a.timing_json):JSON.parse(a.payload_json).timing??{mode:'immediate'},taskId: a.task_id, attemptId: a.attempt_id, sourceDevice: a.source_id, targetDevice: a.target_id, state:a.state,sessionId: a.session_id, runId: a.run_id, approvalId: a.target_id === this.repo.localId ? a.approval_id : null, detail: a.detail, steps: this.stepsSeen.get(a.task_id) ?? [] }; }
     private async dispatchOptions(){return await Promise.all([...this.binding.entries()].map(async([id,b])=>({id,label:((await findProject(this.membership.ownerId,b.projectId))?.name??'Project unavailable').slice(0,120),agentBinding:b.agentBinding??b.agentId,modelBinding:b.modelBinding??(/^[A-Za-z0-9_-]{1,128}$/.test(b.model)?b.model:'model-'+fingerprint(b.model).slice(0,16))})));}
     async view(actor:Actor){
         await this.membership.assertOwner(actor);const devices=[];
@@ -242,4 +261,13 @@ export class ComputerCoordinator {
         const dispatchOptions=await this.dispatchOptions();
         return {workspace:this.membership.workspace,dispatchOptions,testOnly:this.membership.authority.testOnly,configured:true,productionEnrollment:PRODUCTION_ENROLLMENT,self:{id:this.repo.localId,name:this.name},connection:this.transport.connector.status,devices,attempts:(await this.repo.attempts()).map(a=>({...this.viewAttempt(a),sourceName:names.get(a.source_id)??'Unknown computer',targetName:names.get(a.target_id)??'Unknown computer'}))};
     }
+}
+
+type RunStep = { title: string; state: 'done' | 'now' | 'next' | 'failed' };
+/** The plan when the agent made one (its titles), otherwise its newest tool steps as plain names. */
+export function runSteps(work: ReturnType<typeof liveWork>): RunStep[] {
+    const clean = (t: string) => t.replace(/[\x00-\x1f\x7f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+    if (work.plan?.length) return work.plan.filter(p => !p.parent).slice(0, 12).map(p => ({ title: clean(p.title) || 'Step', state: p.status === 'done' || p.status === 'skipped' ? 'done' : p.status === 'active' ? 'now' : 'next' }));
+    const steps = (work.steps ?? []).slice(-6);
+    return steps.map((x, i) => ({ title: clean(x.name.replace(/[_-]+/g, ' ')) || 'Step', state: x.failed ? 'failed' : x.done ? 'done' : i === steps.length - 1 ? 'now' : 'done' }));
 }

@@ -144,3 +144,27 @@
 .shell .cp-list-row.computer-twofactor { display: flex; flex-direction: row; align-items: center; gap: 12px; padding: 10px 14px; margin: 0; border-bottom: 1px solid var(--border); }
 .shell[data-theme="dark"] .cp-list-row.computer-twofactor { border-bottom-color: #1D2129; }
 .cp-account .cp-list-row { gap: 12px; }
+/* CP5 card tile: the computer and its step, then a thin bar while it runs. */
+.computer-card-status { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: #9DBBFF; }
+.computer-card-status.is-completed { color: #8FD6B0; }
+.computer-card-status.is-cancelled, .computer-card-status.is-unknown, .computer-card-status.is-blocked { color: var(--muted); }
+.computer-card-line { display: flex; align-items: center; gap: 6px; }
+.computer-card-bar { height: 4px; border-radius: 2px; background: #22262E; overflow: hidden; }
+.computer-card-bar i { display: block; height: 100%; background: #3B7BF6; }
+/* CP5 card details: where it runs, live steps, Open its chat · Stop. */
+.cp-card-panel { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; margin-bottom: 12px; border-radius: 10px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
+.shell[data-theme="dark"] .cp-card-panel { background: #14171C; box-shadow: inset 0 0 0 1px #2A2F38; }
+.cp-card-where { display: flex; align-items: center; gap: 8px; color: #9DBBFF; font-size: 12.5px; }
+.cp-card-label { font-size: 12px; color: var(--muted); }
+.cp-card-wait, .cp-card-done { margin: 0; font-size: 12.5px; color: var(--muted); }
+.cp-card-done { display: flex; align-items: center; gap: 6px; color: #8FD6B0; }
+.cp-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.cp-steps li { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.cp-steps li i { width: 14px; height: 14px; border-radius: 50%; box-sizing: border-box; flex: none; border: 1.5px solid #4A5160; }
+.cp-steps li.is-done i { background: #3BB273; border: 0; }
+.cp-steps li.is-now { font-weight: 600; }
+.cp-steps li.is-now i { border: 2px solid #3B7BF6; }
+.cp-steps li.is-next { color: var(--muted); }
+.cp-steps li.is-failed i { background: #F29BC0; border: 0; }
+.cp-card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.shell button.cp-stop.cp-stop { height: 30px; min-height: 30px; padding: 0 12px; border: 0; background: transparent; color: #F29BC0; font-size: 12.5px; }

@@ -1,4 +1,4 @@
-import {ComputerExecutionBadge, useComputerOverview} from './ComputerDevices';
+import {ComputerCardStatus, useComputerOverview} from './ComputerDevices';
 import {ComputerTaskRequest} from './ComputerTaskRequest';
 import {ContextMenu, useMenu} from './desktop-ui';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -201,7 +201,7 @@ function CardTile({ card, controller }: { card: Card; controller: BoardControlle
       {card.labels.length > 0 && <span className="board-labels">{card.labels.map(id => { const l = controller.getSnapshot().labels.find(x => x.id === id); return l ? <span key={id} className="board-label" data-color={l.color}>{l.name}</span> : null; })}</span>}
       {card.departments.length > 0 && <span className="board-chips">{card.departments.map(d => <span key={d} className="board-chip">{d}</span>)}</span>}
       <span className="board-card-title">{card.type !== 'task' && <span className={`board-type t-${card.type}`} title={cardTypeLabel[card.type]}><UiIcon name={typeMark[card.type]} size={13}/> {cardTypeLabel[card.type]}</span>}{card.title}</span>
-      <ComputerExecutionBadge sessionId={card.conversationId} cardId={card.id}/><span className="board-card-meta">
+      <ComputerCardStatus sessionId={card.conversationId} cardId={card.id}/><span className="board-card-meta">
         {card.priority !== 'normal' && <span className={`board-priority p-${card.priority}`}>{priorityLabel[card.priority]}</span>}
         {card.startDate && <span className="board-due">From {card.startDate}</span>}
         {card.dueDate && <span className={overdue ? 'board-due overdue' : 'board-due'}>Due {card.dueDate}</span>}

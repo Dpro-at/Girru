@@ -36,3 +36,23 @@ export function useComputerOverview(){return useContext(Computers);}
 export function computerStateLabel(state:string){return ({available:'Free',busy:'Working',paused:'Not taking tasks',offline:'Off',unknown:'Can’t reach it',revoked:'Forgotten',pending:'Waiting to be added'} as Record<string,string>)[state]??state;}
 /** How two computers reach each other, in plain words. */
 export function computerPathLabel(path:string){return path==='direct'?'Same Wi‑Fi':path==='relay'?'Over the internet':'Not connected';}
+
+/** The attempt that belongs to a Board card (sent from here, or arrived here). */
+export function useCardAttempt(cardId?: string | null, sessionId?: string | null) {
+  const view = useContext(Computers);
+  return view?.attempts.find(a => !!cardId && (a.sourceCardId === cardId || a.targetCardId === cardId) || !!sessionId && (a.sessionId === sessionId || a.sourceSessionId === sessionId)) ?? null;
+}
+/** CP5 on the card tile: which computer and which step, with a thin progress bar; “Done on …” when it is back. */
+export function ComputerCardStatus({cardId, sessionId}: {cardId?: string | null; sessionId?: string | null}) {
+  const a = useCardAttempt(cardId, sessionId);
+  if (!a) return null;
+  const steps = a.steps ?? [];
+  const now = steps.find(s => s.state === 'now')?.title;
+  const done = steps.filter(s => s.state === 'done').length;
+  const words = a.state === 'completed' ? `Done on ${a.targetName}` : a.state === 'waiting_approval' ? `${a.targetName} · waiting for Allow` : a.state === 'scheduled' ? `${a.targetName} · later` : ['running', 'accepted'].includes(a.state) ? `${a.targetName}${now ? ` · ${now.toLowerCase()}` : ' · running'}` : ['cancelled', 'unknown', 'blocked'].includes(a.state) ? `${a.targetName} · stopped` : `${a.targetName} · ${a.statusLabel.toLowerCase()}`;
+  const running = ['running', 'accepted'].includes(a.state);
+  return <span className={`computer-card-status is-${a.state}`} title={`Runs on ${a.targetName} · sent by ${a.sourceName}`}>
+    <span className="computer-card-line"><UiIcon name={a.state === 'completed' ? 'check' : 'screen'} size={13}/>{words}</span>
+    {running && <span className="computer-card-bar"><i style={{width: `${steps.length ? Math.max(8, Math.round(done / steps.length * 100)) : 30}%`}}/></span>}
+  </span>;
+}
