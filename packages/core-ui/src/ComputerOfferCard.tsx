@@ -41,7 +41,11 @@ export function ComputerOfferCard({client, offer, conversationId, onKeepHere}: {
   return <div className="cp-offer" role="group" aria-label="Send steps to other computers">
     <b>Send {plan.length === 1 ? 'this step' : `${plan.length} steps`} to other computers?</b>
     {offer.why && <span className="cp-note">{offer.why}</span>}
-    <ul className="cp-offer-steps">{plan.map((p, i) => <li key={i}><span className="cp-grow">{p.title}</span><span className={`cp-offer-to${p.device ? '' : ' is-missing'}`}><UiIcon name="screen" size={12}/>{p.device ? computerName(look, p.device.id, p.device.name) : `${p.computer}?`}</span><button type="button" className="cp-link" onClick={() => setChanging(i)}>Change…</button></li>)}</ul>
+    {/* What is sent is shown in full before Send: the title, the whole text, and the project and agent it runs with. */}
+    <ul className="cp-offer-steps">{plan.map((p, i) => <li key={i}>
+      <span className="cp-offer-head"><span className="cp-grow">{p.title}</span><span className={`cp-offer-to${p.device ? '' : ' is-missing'}`}><UiIcon name="screen" size={12}/>{p.device ? computerName(look, p.device.id, p.device.name) : `${p.computer}?`}</span><button type="button" className="cp-link" onClick={() => setChanging(i)}>Change…</button></span>
+      <details className="cp-offer-text" open={plan.length === 1}><summary>What it will do{p.device && option(p.device) ? ` · ${option(p.device)!.label}` : ''}</summary><p dir="auto">{p.text}</p></details>
+    </li>)}</ul>
     {missing.length > 0 && <span className="cp-note">Not one of your computers: {missing.join(', ')}. Use Change… to pick one.</span>}
     <span className="cp-offer-actions">
       <button type="button" className="primary" disabled={state === 'sending' || missing.length === plan.length} onClick={() => void send()}>{state === 'sending' ? 'Sending…' : 'Send'}</button>

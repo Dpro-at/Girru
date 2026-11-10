@@ -176,3 +176,7 @@
 .cp-offer-to { display: inline-flex; align-items: center; gap: 6px; color: #9DBBFF; }
 .cp-offer-to.is-missing { color: #F0C27A; }
 .cp-offer-actions { display: flex; gap: 8px; }
+.cp-offer-steps li { flex-direction: column; align-items: stretch; gap: 4px; }
+.cp-offer-head { display: flex; align-items: center; gap: 10px; }
+.cp-offer-text summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+.cp-offer-text p { margin: 4px 0 0; white-space: pre-wrap; font-size: 12px; max-height: 160px; overflow: auto; }
