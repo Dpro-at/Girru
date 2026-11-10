@@ -75,8 +75,11 @@ export function AddThisComputer({client, status}: {client: SessionClient; status
   const [useCode, setUseCode] = useState(false);
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const [locked, setLocked] = useState(false);
+  // A Girru that was not closed properly kept this computer's keys locked; the owner unlocks them (the Mac asks to confirm).
+  const unlock = locked ? <button type="button" className="link-button" disabled={busy} onClick={() => { setBusy(true); void call(client, '/api/computers/enrollment/recover-custody-lease', {confirmed: true}).then(() => { setLocked(false); setNotice('Unlocked. Sign in again.'); }).catch(() => setNotice('Not unlocked. Close every other Girru window and try again.')).finally(() => setBusy(false)); }}>Unlock</button> : null;
   const current = useRef(flow); current.current = flow;
-  useEffect(() => { if (!flow || flow.ready) return; let live = true; const t = setInterval(() => { void call(client, root + '/flow/status', {flowId: flow.flowId, clientNonce: flow.clientNonce}).then(r => { if (!live) return; if (r.state === 'ready') { clearInterval(t); setFlow({...flow, ready: true}); void finish({...flow, ready: true}); } else if (r.state === 'failed') { clearInterval(t); setFlow(null); setNotice('Sign-in did not finish. Nothing changed. Sign in again when you are ready.'); } }).catch(() => { clearInterval(t); setFlow(null); setNotice('The sign-in took too long. Start again.'); }); }, 1500); return () => { live = false; clearInterval(t); }; }, [flow?.flowId]);
+  useEffect(() => { if (!flow || flow.ready) return; let live = true; const t = setInterval(() => { void call(client, root + '/flow/status', {flowId: flow.flowId, clientNonce: flow.clientNonce}).then(r => { if (!live) return; if (r.state === 'ready') { clearInterval(t); setFlow({...flow, ready: true}); void finish({...flow, ready: true}); } else if (r.state === 'failed') { clearInterval(t); setFlow(null); setLocked(r.reason === 'locked'); setNotice(r.reason === 'locked' ? 'Girru was not closed properly last time, so this computer’s keys are still locked. Unlock them, then sign in again.' : 'Sign-in did not finish. Nothing changed. Sign in again when you are ready.'); } }).catch(() => { clearInterval(t); setFlow(null); setNotice('The sign-in took too long. Start again.'); }); }, 1500); return () => { live = false; clearInterval(t); }; }, [flow?.flowId]);
   const run = async (fn: () => Promise<void>) => { setBusy(true); setNotice(''); try { await fn(); } catch (e) { setNotice(computerAccountWords((e as Error).message)); } finally { setBusy(false); } };
   // The name is optional: without one the computer registers with its own name (for example “Mohamed’s MacBook Pro”).
   const start = (kind: 'connect' | 'recover' = 'connect') => run(async () => { const bytes = crypto.getRandomValues(new Uint8Array(32)); const clientNonce = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); const r = await call(client, root + '/flow/start', {kind, clientNonce, ...(name.trim() ? {label: name.trim()} : {}), confirmed: true}); setFlow({flowId: r.flowId, clientNonce}); });
@@ -107,14 +110,14 @@ export function AddThisComputer({client, status}: {client: SessionClient; status
       {verify ? <div className="computer-join-code"><label className="phone-field"><span>Code from your authenticator app</span><input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))}/></label><button type="button" className="primary" disabled={busy || code.length !== 6} onClick={() => void finish(current.current, {...verify, code: code.trim()})}>Continue</button></div>
         : <p role="status" className="fine-print">Continue with Google in your browser…</p>}
       {flow && <button type="button" className="link-button" onClick={() => { void call(client, root + '/flow/cancel', {flowId: flow.flowId, clientNonce: flow.clientNonce}).catch(() => {}); setFlow(null); setVerify(null); }}>Cancel</button>}
-      {notice && <p role="status">{notice}</p>}
+      {notice && <p role="status">{notice}</p>}{unlock}
     </div>;
     return <div className="computer-join">
       <SetupRoad at={1}/>
       <h2>Now go to your other computer</h2>
       <p>Open Girru there. It asks “Add this computer to your account?” If it shows the same pictures, press <b>Yes, add it</b>.</p>
       {self?.changed ? <p role="alert">Something changed while you were adding this computer, so it stopped for safety. Sign in again to start over.</p> : self?.code ? <ComputerPictures code={self.code}/> : <p role="status" className="computer-waiting"><UiIcon name="clock" size={15}/> Waiting for your other computer…</p>}
-      {notice && <p role="status">{notice}</p>}
+      {notice && <p role="status">{notice}</p>}{unlock}
       <p className="section-label">Can’t use your other computer?</p>
       <div className="computer-start-choices" role="group" aria-label="Other ways">
         <button type="button" className={`computer-start-choice${useCode ? ' is-on' : ''}`} aria-expanded={useCode} onClick={() => { setUseCode(v => !v); setFirstAsk(false); }}>
@@ -140,7 +143,7 @@ export function AddThisComputer({client, status}: {client: SessionClient; status
       : <button type="button" className="primary" disabled={busy || !!flow || status === null || status?.desktopAvailable === false} onClick={() => void start()}>{flow ? 'Waiting for Google…' : 'Continue with Google'}</button>}
     {(status === null || status?.desktopAvailable === false) && <p role="status">Open the Girru app on this computer to add it. A browser window can’t keep the computer’s key safe.</p>}
     {flow && <button type="button" className="link-button" onClick={() => { void call(client, root + '/flow/cancel', {flowId: flow.flowId, clientNonce: flow.clientNonce}).catch(() => {}); setFlow(null); }}>Cancel</button>}
-    {notice && <p role="status">{notice}</p>}
+    {notice && <p role="status">{notice}</p>}{unlock}
     <p className="fine-print">Your browser opens for Google. Your chats, files and agents are never sent to Dpro.</p>
   </div>;
 }
