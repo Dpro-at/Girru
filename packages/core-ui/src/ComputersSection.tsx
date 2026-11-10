@@ -8,7 +8,7 @@ import {ComputerTaskTiming} from './ComputerTaskTiming';
 import {ContextMenu, useMenu, type MenuItem} from './desktop-ui';
 import {computerIcon, computerName, useComputerLook, type ComputerIconKey} from './ComputerLook';
 import {AddThisComputer, ComputerJoinRequests, useAccountStatus} from './ComputerJoin';
-import {ContinuityRequests} from './ComputerStart';
+import {ContinuityRequests, SameSetupArrived} from './ComputerStart';
 import {AllowTask, TakesNewTasks} from './ComputerTaskRules';
 import {ComputerWorksOn, ProjectCopyAsks} from './ComputerWorksOn';
 import {RenameComputerSheet, forgetComputerLater, ForgetNotice, useForgetPending} from './ComputerActions';
@@ -125,7 +125,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
       <ProjectCopyAsks client={client}/>
       {isSelf && newerElsewhere && <div className="computer-task computer-version" role="status"><UiIcon name="download" size={16}/><span className="computer-task-text"><b>Update Girru on this computer</b><small>{newerElsewhere.label} has a newer Girru ({newerElsewhere.appVersion}). Until this computer is updated, they can’t send each other tasks.</small></span>{onUpdates && <span className="computer-task-actions"><button type="button" className="primary" onClick={onUpdates}>Update…</button></span>}</div>}
       {!isSelf && device && older(device.publicKey) && <div className="computer-task computer-version" role="status"><UiIcon name="download" size={16}/><span className="computer-task-text"><b>{nameOf(device.id, device.name)} has another Girru version</b><small>It can still be seen, but it can’t take new tasks until both run the same version. It updates by itself the next time it opens (backup first).</small></span></div>}
-      <section aria-label="Needs you"><p className="section-label">Needs you</p>{isSelf && <ComputerJoinRequests client={client} status={account}/>}{isSelf && <ContinuityRequests client={client} status={account}/>}{needs.length > 0 ? <div className="computer-list" role="list">
+      <section aria-label="Needs you"><p className="section-label">Needs you</p>{isSelf && <ComputerJoinRequests client={client} status={account}/>}{isSelf && <ContinuityRequests client={client} status={account}/>}{isSelf && <SameSetupArrived client={client} status={account}/>}{needs.length > 0 ? <div className="computer-list" role="list">
         {needs.map(a => row(a, <>{a.approvalId ? <AllowTask client={client} approvalId={a.approvalId} sourceName={nameOf(a.sourceDevice, a.sourceName)} onDone={setNotice} onApprovals={onApprovals}/> : <button type="button" onClick={onApprovals}>Open Approvals</button>}<ComputerTaskTiming client={client} taskId={a.taskId} onPrepared={onApprovals}/></>))}
       </div> : !(isSelf && ((account?.pairing?.addedWithCode?.length ?? 0) > 0 || (account?.pairing?.requests?.length ?? 0) > 0)) && <p className="fine-print">Nothing waits for you.</p>}</section>
       <section aria-label="Working on"><p className="section-label">Working on</p>

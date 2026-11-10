@@ -58,7 +58,9 @@ export function JoinStart({client, onFresh, onSame}: {client: SessionClient; onF
   const view = status?.view;
   const selfId = view?.deviceId ?? '';
   const self = view?.devices?.find(d => d.id === selfId);
-  const others = (view?.devices ?? []).filter(d => d.id !== selfId && d.status === 'approved');
+  /* Online computers first; an older copy of this same computer (same name, off) is never offered as the source. */
+  const others = (view?.devices ?? []).filter(d => d.id !== selfId && d.status === 'approved' && !(d.presence !== 'online' && !!self?.label && d.label === self.label))
+    .sort((x, y) => Number(y.presence === 'online') - Number(x.presence === 'online'));
   const approved = !!status?.connected && view?.deviceStatus === 'approved';
   const from = others.find(d => d.id === source) ?? others.find(d => d.presence === 'online') ?? others[0];
   const leave = (fn: () => void) => { if (done.current) return; done.current = true; fn(); };
@@ -134,7 +136,7 @@ export function JoinStart({client, onFresh, onSame}: {client: SessionClient; onF
     </div>
     {choice === 'same' && others.length > 1 && <label className="phone-field"><span>From</span><select value={from?.id ?? ''} onChange={e => { setSource(e.target.value); setPreview(null); }}>{others.map(d => <option key={d.id} value={d.id}>{d.label}{d.presence === 'online' ? '' : ' (off)'}</option>)}</select></label>}
     {choice === 'same' && (preview?.waitingForSource || from?.presence !== 'online' && !preview?.resources
-      ? <p role="status" className="fine-print"><UiIcon name="clock" size={13}/> Open Girru on {from?.label ?? 'your other computer'}. It sends the list as soon as it is open.</p>
+      ? <p role="status" className="fine-print"><UiIcon name="clock" size={13}/> {from?.label ?? 'Your other computer'} is off. Go to {from?.label ?? 'your other computer'}, open Girru and keep it open: it sends the list by itself.{others.some(d => d.presence === 'online' && d.id !== from?.id) ? ' Or choose a computer that is on above.' : ''}</p>
       : !preview ? <p role="status" className="fine-print">Asking {from?.label ?? 'your other computer'} what it shares…</p>
       : !preview.workspaceId || !resources.length ? <p role="status" className="fine-print">{from?.label ?? 'Your other computer'} is getting ready to share. Keep Girru open there for a moment.</p>
       : <div className="computer-start-list" aria-label={`Same as ${from?.label} brings`}>
@@ -154,7 +156,7 @@ export function JoinReady({name, from, comes, onOpen}: {name: string; from: stri
     <p className="computer-steps"><span>1 Added</span><span>2 What comes</span><span>3 AI tools</span><b>4 Open Girru</b></p>
     <span className="computer-start-done"><UiIcon name="check" size={28}/></span>
     <h2>{name} is ready</h2>
-    <p>{comes ? `${comes[0].toUpperCase()}${comes.slice(1)} come from ${from}.` : `Your agents and projects come from ${from}.`} Press Allow on {from} when it asks, and they arrive here by themselves.</p>
+    <p>{comes ? `${comes[0].toUpperCase()}${comes.slice(1)} come from ${from}.` : `Your agents and projects come from ${from}.`} Now go to {from}: under Computers › Needs you press Allow. Then come back here: in Computers › this computer › Needs you press Apply all.</p>
     <div className="setup-actions"><button type="button" className="primary" onClick={onOpen}>Open Girru</button></div>
   </section>;
 }
@@ -194,6 +196,34 @@ export function useContinuity(client: SessionClient, status: Status | null | und
 }
 
 /** On the computer a new one copies from: one Allow for “start the same as this computer”. */
+/**
+ * "Same as …" on the new computer: the other computer sent the setup; one confirm here applies all of it
+ * (agents, specialties, skills, rules), using this computer's Main agent model for the agents.
+ */
+export function SameSetupArrived({client, status}: {client: SessionClient; status: Status | null | undefined}) {
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState('');
+  const waiting = (status?.workspaces ?? []).filter((w: any) => w.mode === 'continuity' && w.state === 'waiting_local_review');
+  if (!waiting.length) return notice ? <p role="status" className="fine-print">{notice}</p> : null;
+  const nameOf = (id: string) => (status?.view?.devices ?? []).find((d: any) => d.id === id)?.label ?? 'your other computer';
+  const apply = async (w: any) => {
+    setBusy(true); setNotice('Applying… this can take a minute.');
+    try {
+      const r = await call(client, root + '/workspaces/apply-same', {workspaceId: w.id, confirmed: true});
+      setNotice(r.failed?.length || r.waiting ? `Applied ${r.applied} of ${r.total}. ${r.waiting ? r.waiting + ' wait in Approvals. ' : ''}${r.failed?.length ? r.failed.length + ' could not be applied (' + [...new Set(r.failed.map((f: any) => f.code))].join(', ') + ').' : ''}` : `Done: ${r.applied} items from ${nameOf(w.sourceDeviceId)} are on this computer.`);
+    } catch (e) { setNotice(`That did not work (${e instanceof Error ? e.message : 'error'}). Try again in a moment.`); }
+    finally { setBusy(false); }
+  };
+  return <section className="computer-join-requests" aria-label="Setup that arrived from your other computer">
+    {waiting.map((w: any) => <div key={w.id} className="computer-task" role="listitem">
+      <UiIcon name="copy" size={16}/>
+      <span className="computer-task-text"><b>The setup from {nameOf(w.sourceDeviceId)} arrived</b><small>Agents, specialties, skills and rules · they use this computer's Main agent model · chats and memory stay on {nameOf(w.sourceDeviceId)}</small></span>
+      <span className="computer-task-actions"><button type="button" className="primary" disabled={busy} onClick={() => void apply(w)}>{busy ? 'Applying…' : 'Apply all'}</button></span>
+    </div>)}
+    {notice && <p role="status" className="fine-print">{notice}</p>}
+  </section>;
+}
+
 export function ContinuityRequests({client, status}: {client: SessionClient; status: Status | null | undefined}) {
   const [requests, setRequests] = useContinuity(client, status);
   const [notice, setNotice] = useState('');
