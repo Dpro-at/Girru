@@ -188,3 +188,16 @@
 .cp-plus { color: #8FD6B0; font-weight: 600; }
 .cp-minus { color: #F29BC0; font-weight: 600; }
 .cp-warn { margin: 0; padding: 10px 12px; border-radius: 10px; background: #2A2310; color: #F0C27A; line-height: 1.5; }
+/* CP3b: only this computer — a quiet card under its own work. */
+.computers-alone { display: flex; gap: 12px; align-items: flex-start; margin-top: 18px; padding: 14px 16px; border-radius: 10px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); color: var(--muted); }
+.shell[data-theme="dark"] .computers-alone { background: #14171C; box-shadow: inset 0 0 0 1px #2A2F38; }
+.computers-alone span { display: flex; flex-direction: column; gap: 4px; }
+.computers-alone b { color: var(--text); font-size: 13px; }
+.computers-alone small { font-size: 12.5px; line-height: 1.5; }
+.computers-check { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.computers-hint { margin-top: auto; font-size: 12px; color: var(--muted); line-height: 1.5; }
+/* CP3 board values: quiet grey section labels; inspector items start at the left; a normal-size checkbox beside its words. */
+.shell .computers-main .section-label { color: #8A95AA; font-size: 11px; font-weight: 600; letter-spacing: .05em; padding: 0; margin: 14px 0 6px; }
+.shell .computers-inspector .cp-link.cp-link, .shell .computers-inspector .link-button { align-self: flex-start; text-align: left; padding: 0; justify-content: flex-start; }
+.shell .computers-inspector .computers-check { display: flex; flex-direction: row; justify-content: flex-start; align-items: center; gap: 10px; width: auto; }
+.shell .computers-inspector .computers-check input { width: 16px; height: 16px; min-width: 16px; margin: 0; flex: none; }

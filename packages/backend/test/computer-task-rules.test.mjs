@@ -5,7 +5,7 @@ import {computerLook, computerLookChangeOk} from '../src/api/routes/computer-loo
 
 test('tasks from other computers: ask by default, project exceptions, always-allow per computer and project (CP6, CP4b)', () => {
   const none = taskRules(undefined);
-  assert.deepEqual(none, {rule: 'ask', projects: {}, always: [], atOnce: 3, column: null});
+  assert.deepEqual(none, {rule: 'ask', projects: {}, always: [], atOnce: 3, column: null, takes: true});
   const rules = taskRules({rule: 'auto', projects: {p1: 'refuse', p2: 'ask', 'bad id!': 'auto', p3: 'maybe'}, always: [{source: 'mac', projectId: 'p2'}, {source: 'x'}]});
   assert.deepEqual(rules.projects, {p1: 'refuse', p2: 'ask'});
   assert.equal(rules.always.length, 1);
@@ -80,4 +80,14 @@ test('reserved names never become keys (prototype safety)', async () => {
   assert.deepEqual(Object.keys(taskRules({projects: {__proto__: 'auto', ok: 'ask'}}).projects), ['ok']);
   assert.equal(Object.hasOwn(computerLook(JSON.parse('{"names":{"__proto__":"x"}}')).names, '__proto__'), false);
   assert.equal(applyTaskRulesChange(taskRules(undefined), {project: {id: 'p1', rule: 'refuse'}}).projects.p1, 'refuse');
+});
+
+test('Takes new tasks: off is a stricter choice an agent may make; only the owner turns it back on', async () => {
+  const {taskRules, applyTaskRulesChange, changeIsStricter, taskRulesChangeOk} = await import('../src/devices/task-rules.ts');
+  const base = taskRules(undefined);
+  assert.equal(base.takes, true);
+  assert.equal(applyTaskRulesChange(base, {takes: false}).takes, false);
+  assert.equal(changeIsStricter(base, {takes: false}), true);
+  assert.equal(changeIsStricter({...base, takes: false}, {takes: true}), false);
+  assert.equal(taskRulesChangeOk({takes: 'no'}), false);
 });

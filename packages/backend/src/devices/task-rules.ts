@@ -10,7 +10,8 @@ import { getPref, setPrefReviewed } from '../repositories/user-prefs.js';
 export type TaskRule = 'ask' | 'auto' | 'refuse';
 export const TASK_RULES: readonly TaskRule[] = ['ask', 'auto', 'refuse'];
 /** atOnce: tasks from other computers running here at the same time (1–5). column: the Board column allowed tasks land in (null = the first). */
-export interface TaskRules { rule: TaskRule; projects: Record<string, TaskRule>; always: { source: string; projectId: string }[]; atOnce: number; column: string | null }
+/** takes: CP3 “Takes new tasks” — off means this computer shows as not taking tasks and refuses new ones. */
+export interface TaskRules { rule: TaskRule; projects: Record<string, TaskRule>; always: { source: string; projectId: string }[]; atOnce: number; column: string | null; takes: boolean }
 export const DEFAULT_AT_ONCE = 3;
 const atOnceOk = (x: unknown): x is number => Number.isInteger(x) && (x as number) >= 1 && (x as number) <= 5;
 const columnOk = (x: unknown): x is string => typeof x === 'string' && x.trim() === x && x.length >= 1 && x.length <= 60 && !/[\x00-\x1f\x7f]/.test(x);
@@ -23,12 +24,13 @@ export function taskRules(x: unknown): TaskRules {
   const v = record(x) ? x : {};
   const projects = Object.fromEntries(Object.entries(record(v.projects) ? v.projects : {}).filter(([k, r]) => ID.test(k) && isRule(r)).slice(0, 500)) as Record<string, TaskRule>;
   const always = (Array.isArray(v.always) ? v.always : []).filter((a): a is { source: string; projectId: string } => record(a) && typeof a.source === 'string' && ID.test(a.source) && typeof a.projectId === 'string' && ID.test(a.projectId)).slice(0, 200).map(a => ({ source: a.source, projectId: a.projectId }));
-  return { rule: isRule(v.rule) ? v.rule : 'ask', projects, always, atOnce: atOnceOk(v.atOnce) ? v.atOnce : DEFAULT_AT_ONCE, column: columnOk(v.column) ? v.column : null };
+  return { rule: isRule(v.rule) ? v.rule : 'ask', projects, always, atOnce: atOnceOk(v.atOnce) ? v.atOnce : DEFAULT_AT_ONCE, column: columnOk(v.column) ? v.column : null, takes: v.takes !== false };
 }
 
 /** One change: the rule for all, one project's exception (null removes it), or one “always allow”. */
-export function taskRulesChangeOk(x: unknown): x is { rule?: TaskRule; project?: { id: string; rule: TaskRule | null }; always?: { source: string; projectId: string; on: boolean }; atOnce?: number; column?: string | null } {
-  if (!record(x) || !Object.keys(x).length || !Object.keys(x).every(k => ['rule', 'project', 'always', 'atOnce', 'column'].includes(k))) return false;
+export function taskRulesChangeOk(x: unknown): x is { rule?: TaskRule; project?: { id: string; rule: TaskRule | null }; always?: { source: string; projectId: string; on: boolean }; atOnce?: number; column?: string | null; takes?: boolean } {
+  if (!record(x) || !Object.keys(x).length || !Object.keys(x).every(k => ['rule', 'project', 'always', 'atOnce', 'column', 'takes'].includes(k))) return false;
+  if ('takes' in x && typeof x.takes !== 'boolean') return false;
   if ('atOnce' in x && !atOnceOk(x.atOnce)) return false;
   if ('column' in x && x.column !== null && !columnOk(x.column)) return false;
   if ('rule' in x && !isRule(x.rule)) return false;
@@ -42,8 +44,9 @@ export async function readTaskRules(ownerId: string) { return taskRules(await ge
 export function applyTaskRulesChange(rules: TaskRules, change: unknown): TaskRules {
   if (!taskRulesChangeOk(change)) throw Error('computer_task_rules_invalid');
   // A prototype-free copy: a project id can never reach an object's own machinery.
-  const next: TaskRules = { rule: rules.rule, projects: Object.assign(Object.create(null) as Record<string, TaskRule>, rules.projects), always: rules.always.map(a => ({ ...a })), atOnce: rules.atOnce, column: rules.column };
+  const next: TaskRules = { rule: rules.rule, projects: Object.assign(Object.create(null) as Record<string, TaskRule>, rules.projects), always: rules.always.map(a => ({ ...a })), atOnce: rules.atOnce, column: rules.column, takes: rules.takes };
   if (change.rule) next.rule = change.rule;
+  if (change.takes !== undefined) next.takes = change.takes;
   if (change.atOnce !== undefined) next.atOnce = change.atOnce;
   if (change.column !== undefined) next.column = change.column;
   if (change.project) { const pid = change.project.id; if (!ID.test(pid)) throw Error('computer_task_rules_invalid'); if (change.project.rule) Object.defineProperty(next.projects, pid, { value: change.project.rule, enumerable: true, writable: true, configurable: true }); else delete next.projects[pid]; }
@@ -82,7 +85,7 @@ export function changeIsStricter(rules: TaskRules, change: unknown): boolean {
 }
 function isStricter(rules: TaskRules, after: TaskRules): boolean {
   // Fewer tasks at once is stricter; moving where tasks land is the owner's choice only.
-  if (after.atOnce > rules.atOnce || after.column !== rules.column) return false;
+  if (after.atOnce > rules.atOnce || after.column !== rules.column || after.takes && !rules.takes) return false;
   const projects = new Set([...Object.keys(rules.projects), ...Object.keys(after.projects), ...rules.always.map(a => a.projectId), ...after.always.map(a => a.projectId), '\u0000any']);
   const sources = new Set([...rules.always.map(a => a.source), ...after.always.map(a => a.source), '\u0000any']);
   for (const p of projects) for (const s of sources) if (STRICT[decideTask(after, s, p)] < STRICT[decideTask(rules, s, p)]) return false;
