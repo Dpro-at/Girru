@@ -40,6 +40,8 @@ export class ComputerSynchronization {
   const order=['personality','specialty','skill','rule','preferences','agent'],rank=(c:string)=>{const i=order.indexOf(c);return i<0?order.length:i;};
   const latest=new Map<string,SyncRecord>();for(const r of await this.repo.list()){if(r.direction!=='in'||r.peer_id!==input.peerId||!input.items.some(i=>i.category===r.category&&i.logicalId===r.logical_id))continue;const key=r.category+'/'+r.logical_id,seen=latest.get(key);if(!seen||Number(r.revision)>Number(seen.revision))latest.set(key,r);}
   let applied=0,waiting=0;const failed:{category:string;code:string}[]=[];
+  /* CP13: settings arrive through the copy tool. The owner chose Same as here and the other computer allowed it, so the agent that applies the set may use that tool (each item still goes through its own approval record). */
+  if([...latest.values()].some(r=>!isConfiguration(r.category)))await this.repo.runner.read(run("INSERT INTO agent_tool_grants (agent_id, tool_name, scopes, granted_by) SELECT ?, 'computer_sync_apply', NULL, ? WHERE NOT EXISTS (SELECT 1 FROM agent_tool_grants WHERE agent_id=? AND tool_name='computer_sync_apply')",input.agentId,a.userId!,input.agentId));
   for(const r of [...latest.values()].sort((x,y)=>rank(x.category)-rank(y.category))){
    if(r.state==='applied'){applied++;continue;}
    try{
