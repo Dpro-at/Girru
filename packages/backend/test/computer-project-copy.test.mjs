@@ -6,7 +6,7 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {gzipSync} from 'node:zlib';
 import {createHash} from 'node:crypto';
-import {packProject, unpackProject, copyParts, safeCopyPath} from '../src/devices/project-copy.ts';
+import {packProject, unpackProject, copyParts, safeCopyPath, readListedFile} from '../src/devices/project-copy.ts';
 
 test('a project copy carries its files, not ignored or secret files or links, and lands only in a new folder', async () => {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'girru-copy-')));
@@ -75,5 +75,22 @@ test('clone from GitHub: the new folder sits exactly inside the chosen folder an
     await assert.rejects(() => cloneFromGithub('https://example.com/owner/site', root), /url_invalid/);
     fs.mkdirSync(path.join(root, 'site'));
     await assert.rejects(() => cloneFromGithub('https://github.com/owner/site.git', root), /folder_exists/, 'checked before git runs');
+  } finally { fs.rmSync(root, {recursive: true, force: true}); }
+});
+
+test('a listed file is read only when it is a plain file inside the project: no final link, no link in a parent folder', () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'girru-copy-read-')));
+  try {
+    const project = path.join(root, 'project'), outside = path.join(root, 'outside');
+    fs.mkdirSync(project); fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(outside, 'private.txt'), 'outside\n');
+    fs.writeFileSync(path.join(project, 'real.txt'), 'inside\n');
+    fs.symlinkSync(path.join(outside, 'private.txt'), path.join(project, 'link.txt'));
+    fs.symlinkSync(outside, path.join(project, 'linked-dir'));
+    const real = readListedFile(path.join(project, 'real.txt'), project);
+    assert.equal(typeof real === 'object' && real.bytes.toString('utf8'), 'inside\n');
+    assert.equal(readListedFile(path.join(project, 'link.txt'), project), 'skip', 'final link');
+    assert.equal(readListedFile(path.join(project, 'linked-dir', 'private.txt'), project), 'skip', 'link in a parent folder');
+    assert.equal(readListedFile(path.join(project, 'gone.txt'), project), 'missing');
   } finally { fs.rmSync(root, {recursive: true, force: true}); }
 });
