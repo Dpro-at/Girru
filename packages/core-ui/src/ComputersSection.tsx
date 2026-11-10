@@ -10,7 +10,7 @@ import {computerIcon, computerName, useComputerLook, type ComputerIconKey} from 
 import {AddThisComputer, ComputerJoinRequests, useAccountStatus} from './ComputerJoin';
 import {ContinuityRequests} from './ComputerStart';
 import {AllowTask} from './ComputerTaskRules';
-import {ComputerWorksOn} from './ComputerWorksOn';
+import {ComputerWorksOn, ProjectCopyAsks} from './ComputerWorksOn';
 import {RenameComputerSheet, forgetComputerLater, ForgetNotice, useForgetPending} from './ComputerActions';
 import {UiIcon} from './ui-icons';
 
@@ -121,6 +121,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
       </header>
       {notice && <p role="status" className="fine-print">{notice}</p>}
       <ForgetNotice/>
+      <ProjectCopyAsks client={client}/>
       {isSelf && newerElsewhere && <div className="computer-task computer-version" role="status"><UiIcon name="download" size={16}/><span className="computer-task-text"><b>Update Girru on this computer</b><small>{newerElsewhere.label} has a newer Girru ({newerElsewhere.appVersion}). Until this computer is updated, they can’t send each other tasks.</small></span>{onUpdates && <span className="computer-task-actions"><button type="button" className="primary" onClick={onUpdates}>Update…</button></span>}</div>}
       {!isSelf && device && older(device.publicKey) && <div className="computer-task computer-version" role="status"><UiIcon name="download" size={16}/><span className="computer-task-text"><b>{nameOf(device.id, device.name)} has another Girru version</b><small>It can still be seen, but it can’t take new tasks until both run the same version. It updates by itself the next time it opens (backup first).</small></span></div>}
       {isSelf && <ComputerJoinRequests client={client} status={account}/>}

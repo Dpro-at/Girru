@@ -61,7 +61,7 @@ export function useComputerNotices(enabled: boolean, onOpen: () => void, client?
   useEffect(() => {
     if (!enabled || !view) return;
     const before = seen.current;
-    const now = new Map(view.attempts.map(a => [a.attemptId, a.state]));
+    const now = new Map([...view.attempts.map(a => [a.attemptId, a.state] as [string, string]), ...(view.copyAsks ?? []).map(c => [c.requestId, 'copy-ask'] as [string, string])]);
     seen.current = now;
     if (!before || !allowed.current || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     const selfId = view.self?.id;
@@ -74,5 +74,6 @@ export function useComputerNotices(enabled: boolean, onOpen: () => void, client?
       else if (a.sourceDevice === selfId && ['cancelled', 'blocked', 'unknown'].includes(a.state)) say(`${a.targetName} stopped “${title}”`, a.statusLabel);
       else if (a.targetDevice === selfId && a.state === 'waiting_approval' && !old) say(`${a.sourceName} sent a task`, `Allow “${title}”?`);
     }
+    for (const c of view.copyAsks ?? []) if (!before.has(c.requestId)) say(`${c.fromName} asks for a copy of a project`, 'Open Computers to choose the project and allow it.');
   }, [enabled, view]);
 }
