@@ -2,7 +2,7 @@ import {useEffect, useMemo, useState, type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
 import type {SessionClient} from './session';
 import type {ComputerAttempt} from './computer-contract.js';
-import {useComputerOverview, computerStateLabel, computerPathLabel} from './ComputerDevices';
+import {useComputerOverview, computerStateLabel} from './ComputerDevices';
 import {ComputerTaskRequest} from './ComputerTaskRequest';
 import {ComputerTaskTiming} from './ComputerTaskTiming';
 import {ContextMenu, useMenu, type MenuItem} from './desktop-ui';
@@ -82,7 +82,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   const renameItem = (id: string, name: string): MenuItem => ({label: 'Rename and icon…', icon: 'pencil', shortcut: '↩', run: () => setRenaming({id, name, icon: look?.icons[id] as ComputerIconKey ?? null})});
   const menuFor = (d: {id: string; name: string; publicKey?: string}): MenuItem[] => [
     {label: 'Send a task…', icon: 'send', shortcut: '⌘↩', run: () => setSending(d.id)},
-    {label: 'Works on…', icon: 'board', run: () => { setSelected(d.id); setInspector(true); }},
+    {label: 'Project…', icon: 'board', run: () => { setSelected(d.id); setInspector(true); }},
     renameItem(d.id, nameOf(d.id, d.name)),
     'sep',
     {label: 'Forget this computer', icon: 'trash', shortcut: '⌫', danger: true, run: () => { forgetComputerLater(client, {id: d.id, name: nameOf(d.id, d.name), publicKey: d.publicKey}); setSelected(self?.id ?? ''); }},
@@ -120,7 +120,10 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   else if (!usable || account?.view?.deviceStatus === 'pending') main = <div className="computers-main"><AddThisComputer client={client} status={account}/></div>;
   else {
     const name = isSelf ? nameOf(self?.id ?? '', self?.name ?? 'This computer') : device ? nameOf(device.id, device.name) : 'Computer';
-    const status = isSelf ? 'This computer · online' : device ? (shownState(device) === 'connecting' ? 'Connecting…' : `${computerStateLabel(device.state)} · ${computerPathLabel(device.path)}`) : '';
+    // CP12 A: one short line: on or off, and the project it works on.
+    const project = (isSelf ? view.dispatchOptions : device?.dispatchOptions ?? [])[0]?.label;
+    const onWord = isSelf ? 'On' : device ? (shownState(device) === 'connecting' ? 'Connecting…' : device.state === 'available' || device.state === 'busy' ? 'On' : device.state === 'paused' ? 'On · not taking new tasks' : 'Off') : '';
+    const status = onWord + (project ? ` · works on ${project}` : ' · no project yet');
     main = <div className="computers-main">
       <header className="computers-head">
         <span className="computers-tile"><UiIcon name={isSelf ? iconOf(self?.id ?? '') : iconOf(device?.id ?? '', device?.publicKey)} size={22}/></span>
@@ -148,16 +151,10 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   }
 
   const inspectorPane = usable && inspector && (isSelf || device) ? <aside className="computers-inspector" aria-label="About this computer">
-    <b>{isSelf ? self?.name : device?.name}</b>
-    {device && <><span className="computers-field"><small>Connection</small><span><UiIcon name="wifi" size={14}/>{computerPathLabel(device.path)}</span></span>
-      <span className="computers-field"><small>Last seen</small><span>{device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleString() : 'Not yet'}</span></span>
-      <span className="computers-field"><small>Works on</small>{(device.dispatchOptions ?? []).length ? (device.dispatchOptions ?? []).map(o => <span key={o.id}><UiIcon name="board" size={14}/>{o.label}</span>) : <span>No projects shared yet</span>}</span></>}
-    {isSelf && <span className="computers-field"><small>Connection</small><span><UiIcon name="wifi" size={14}/>{account?.connected ? 'Online · your account' : 'Not connected to your account'}</span></span>}
-    {isSelf && <span className="computers-field"><small>Works on</small>{(view?.dispatchOptions ?? []).length ? view!.dispatchOptions.map(o => <span key={o.id}><UiIcon name="board" size={14}/>{o.label}</span>) : <span>No project yet</span>}<button type="button" className="cp-link" onClick={() => setWorksOn(true)}>{(view?.dispatchOptions ?? []).length ? 'Change…' : 'Add a project…'}</button></span>}
+    <b>{isSelf ? nameOf(self?.id ?? '', self?.name ?? 'This computer') : device ? nameOf(device.id, device.name) : ''}</b>
+    <span className="computers-field"><small>Project</small>{((isSelf ? view?.dispatchOptions : device?.dispatchOptions) ?? []).map(o => <span key={o.id}><UiIcon name="folder" size={14}/>{o.label}</span>)}{!((isSelf ? view?.dispatchOptions : device?.dispatchOptions) ?? []).length && <span>{isSelf ? 'None yet' : 'None yet: choose its folder on that computer'}</span>}
+      {isSelf && <button type="button" className="cp-link" onClick={() => setWorksOn(true)}>{(view?.dispatchOptions ?? []).length ? 'Change…' : 'Choose a folder…'}</button>}</span>
     {isSelf && <TakesNewTasks client={client}/>}
-    {device && <span className="computers-field"><small>Takes new tasks</small><span>{device.state === 'paused' ? 'No' : 'Yes'}</span></span>}
-    <span className="computers-hint">⋯ and right-click: Rename and icon · Works on… · Forget this computer</span>
-    <button type="button" className="link-button" onClick={onSettings}>Settings › Computers</button>
   </aside> : null;
 
   return <section className="computers" data-inspector={inspectorPane ? 'open' : 'closed'} data-inline-sidebar={!sidebarSlot || undefined} aria-label="Computers">
@@ -165,7 +162,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
     {main}
     {inspectorPane}
     <ContextMenu menu={menu.menu} onClose={menu.close}/>
-    {worksOn && <ComputerWorksOn client={client} onClose={() => setWorksOn(false)}/>}
+    {worksOn && <ComputerWorksOn client={client} currentName={view?.dispatchOptions?.[0]?.label} onClose={() => setWorksOn(false)}/>}
     {renaming && <RenameComputerSheet target={renaming} onSave={save} onClose={() => setRenaming(null)}/>}
   </section>;
 }

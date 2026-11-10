@@ -61,6 +61,12 @@ test('CP10: with a GitHub origin the work goes up as this computer\'s branch and
     assert.deepEqual(done, {ok: true});
     assert.equal(fs.readFileSync(path.join(mac, 'app.txt'), 'utf8'), 'one\ntwo from office\n');
     assert.match(git(hub, 'log', '-1', '--format=%an', 'girru/office-pc/task2'), /Owner/, 'committed as the owner, never as an agent');
+    // CP12 C: “Directly, I look first” keeps the work off GitHub even when the folder has a GitHub address.
+    const start2 = await startSnapshot(office);
+    fs.writeFileSync(path.join(office, 'app.txt'), 'one\ntwo from office\nthree\n');
+    const direct = await finishWork({folder: office, start: start2, computer: 'Office PC', taskId: 'task5', title: 'Direct', back: 'direct'});
+    assert.equal(direct.result.mode, 'direct'); assert.ok(direct.patch.includes('three'));
+    assert.throws(() => git(hub, 'rev-parse', '--verify', 'girru/office-pc/task5'), 'nothing was pushed');
   } finally { delete process.env.GIRRU_TEST_GITHUB_REMOTE; fs.rmSync(root, {recursive: true, force: true}); }
 });
 

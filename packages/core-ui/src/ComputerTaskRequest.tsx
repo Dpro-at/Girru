@@ -1,6 +1,6 @@
 import {useMemo, useState} from 'react';
 import type {SessionClient} from './session';
-import {useComputerOverview, computerStateLabel} from './ComputerDevices';
+import {useComputerOverview} from './ComputerDevices';
 import {Sheet} from './desktop-ui';
 import {UiIcon} from './ui-icons';
 import {useAccountStatus} from './ComputerJoin';
@@ -45,7 +45,8 @@ export function ComputerTaskRequest({client, conversationId, card, title, preset
   if (!view?.devices.length || !view.configured && !view.testOnly) return null;
   const chosen = target || devices[0]?.id || '';
   const device = devices.find(d => d.id === chosen);
-  const options = device?.dispatchOptions?.length ? device.dispatchOptions : view.dispatchOptions;
+  // CP12 B: the project is the target's own; nothing to pick (a list only if it ever offers several).
+  const options = device?.dispatchOptions ?? [];
   const pick = binding && options.some(o => o.id === binding) ? binding : options[0]?.id ?? '';
   const timing = later ? laterTiming(later, picked) : null;
   const os = (publicKey?: string) => account?.view?.devices?.find(d => !!publicKey && d.publicKey === publicKey)?.osFamily;
@@ -67,7 +68,7 @@ export function ComputerTaskRequest({client, conversationId, card, title, preset
       ? <button type="button" className="primary" onClick={() => { setTarget(presetTarget ?? ''); setOpen(true); }}>{label}</button>
       : <button type="button" className="tool" title="Send a task to another computer" aria-label="Send a task" onClick={() => setOpen(true)}><UiIcon name="screen" size={15}/></button>)}
     {open && <Sheet title="Send a task" onClose={() => setOpen(false)} actions={<>
-      <button type="button" className="link-button computer-send-later" onClick={() => setShowLater(v => !v)}>{when ? `Later: ${when}` : 'Send later…'}</button>
+      <button type="button" className="link-button computer-send-later" onClick={() => setShowLater(v => !v)}>{when ? `Later: ${when}` : 'Later…'}</button>
       <button type="button" onClick={() => setOpen(false)}>Cancel</button>
       <button type="button" className="primary" disabled={busy || !chosen || !pick || !text.trim()} onClick={() => void send()}>{later ? 'Send for later' : 'Send'}</button>
     </>}>
@@ -81,14 +82,14 @@ export function ComputerTaskRequest({client, conversationId, card, title, preset
           </button>;
         })}</div>
       </div>
-      {options.length ? <label className="phone-field"><span>Project and agent</span><select value={pick} onChange={e => setBinding(e.target.value)}>{options.map(o => <option value={o.id} key={o.id}>{o.label}</option>)}</select></label>
-        : <p className="cp-warn">{device ? computerName(look, device.id, device.name) : 'That computer'} has no project yet. On it, open Computers › its own page › Works on › Add a project…, then send again.</p>}
-      <label className="phone-field"><span>What to do</span><textarea maxLength={8000} rows={4} value={text} onChange={e => setText(e.target.value)}/></label>
+      <label className="phone-field"><span>What to do</span><textarea maxLength={8000} rows={4} value={text} placeholder="Translate the store page into German…" onChange={e => setText(e.target.value)}/></label>
+      {options.length > 1 ? <label className="phone-field"><span>Project</span><select value={pick} onChange={e => setBinding(e.target.value)}>{options.map(o => <option value={o.id} key={o.id}>{o.label}</option>)}</select></label> : null}
+      {options.length ? <p className="cp-note">Runs in {device ? computerName(look, device.id, device.name) : 'That computer'}’s project ({options.find(o => o.id === pick)?.label}). {device && !deviceOn ? 'It is off: the task waits here and goes when it is on.' : 'It asks there first, unless you allowed it always.'}</p>
+        : <p className="cp-warn">Choose its folder on {device ? computerName(look, device.id, device.name) : 'That computer'} first: there, open Computers › this computer › Project › Change….</p>}
       {showLater && <div className="computer-later" role="group" aria-label="Send later">
         {(['tonight', 'morning', 'pick'] as const).map(k => <button key={k} type="button" aria-pressed={later === k} className={later === k ? 'is-on' : ''} onClick={() => setLater(later === k ? null : k)}><UiIcon name={k === 'tonight' ? 'moon' : k === 'morning' ? 'sun' : 'calendar'} size={14}/>{k === 'tonight' ? 'Tonight' : k === 'morning' ? 'Tomorrow morning' : 'Pick a time'}</button>)}
         {later === 'pick' && <input type="datetime-local" aria-label="Time" value={picked} onChange={e => setPicked(e.target.value)}/>}
       </div>}
-      <p className="fine-print">{device && !deviceOn ? `${computerStateLabel(device.state)}: the task waits here and goes when it is on.` : 'The other computer allows it first and runs it with its own rules.'}</p>
       {notice && <p role="status">{notice}</p>}
     </Sheet>}
   </>;

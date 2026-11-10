@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {taskRules, taskRulesChangeOk, decideTask} from '../src/devices/task-rules.ts';
+import {taskRules, taskRulesChangeOk, decideTask, applyTaskRulesChange, changeIsStricter} from '../src/devices/task-rules.ts';
 import {computerLook, computerLookChangeOk} from '../src/api/routes/computer-look.ts';
 
 test('tasks from other computers: ask by default, project exceptions, always-allow per computer and project (CP6, CP4b)', () => {
   const none = taskRules(undefined);
-  assert.deepEqual(none, {rule: 'ask', projects: {}, always: [], atOnce: 3, column: null, takes: true});
+  assert.deepEqual(none, {rule: 'ask', projects: {}, always: [], atOnce: 3, column: null, takes: true, back: {}});
   const rules = taskRules({rule: 'auto', projects: {p1: 'refuse', p2: 'ask', 'bad id!': 'auto', p3: 'maybe'}, always: [{source: 'mac', projectId: 'p2'}, {source: 'x'}]});
   assert.deepEqual(rules.projects, {p1: 'refuse', p2: 'ask'});
   assert.equal(rules.always.length, 1);
@@ -90,4 +90,16 @@ test('Takes new tasks: off is a stricter choice an agent may make; only the owne
   assert.equal(changeIsStricter(base, {takes: false}), true);
   assert.equal(changeIsStricter({...base, takes: false}, {takes: true}), false);
   assert.equal(taskRulesChangeOk({takes: 'no'}), false);
+});
+
+test('CP12: how work comes back is kept per project, checked, and stays the owner\u2019s choice', () => {
+  const base = taskRules(null);
+  assert.deepEqual({...base.back}, {});
+  const after = applyTaskRulesChange(base, {back: {id: 'p1', via: 'direct'}});
+  assert.equal(after.back.p1, 'direct');
+  assert.equal(taskRules({back: {p1: 'github', bad: 'ftp', __proto__x: 'direct'}}).back.p1, 'github');
+  assert.equal(taskRules({back: {bad: 'ftp'}}).back.bad, undefined);
+  assert.equal(taskRulesChangeOk({back: {id: 'p1', via: 'email'}}), false);
+  assert.equal(taskRulesChangeOk({back: {id: '__proto__', via: 'direct'}}), false);
+  assert.equal(changeIsStricter(base, {back: {id: 'p1', via: 'direct'}}), false, 'agents can never change it');
 });

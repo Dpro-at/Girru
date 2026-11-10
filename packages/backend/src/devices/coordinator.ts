@@ -262,14 +262,14 @@ export class ComputerCoordinator {
         const timer = setInterval(() => void tick(), 4000); (timer as any).unref?.(); this.stepWatch.set(task, timer);
     }
     /** CP10: the project folder when a task starts here, so its work can go back when it ends. */
-    private workStart = new Map<string, { folder: string; start: string }>();
-    private async noteWorkStart(task: string, owner: string, projectId: string) { try { const folder = (await findProject(owner, projectId))?.folder; if (!folder) return; const start = await startSnapshot(folder); if (start) this.workStart.set(task, { folder, start }); } catch { /* the result then comes back as text only */ } }
+    private workStart = new Map<string, { folder: string; start: string; back?: 'github' | 'direct' }>();
+    private async noteWorkStart(task: string, owner: string, projectId: string) { try { const folder = (await findProject(owner, projectId))?.folder; if (!folder) return; const start = await startSnapshot(folder); const back = (await readTaskRules(owner).catch(() => null))?.back[projectId]; if (start) this.workStart.set(task, { folder, start, back }); } catch { /* the result then comes back as text only */ } }
     private async sendWork(task: string) {
         const w = this.workStart.get(task); this.workStart.delete(task);
         try {
             const a = await this.repo.attempt(task); if (!w || !a || a.source_id === this.repo.localId || this.stopped) return;
             const title = taskPayload.parse(JSON.parse(a.payload_json)).text.split('\n')[0];
-            const { result, patch } = await finishWork({ folder: w.folder, start: w.start, computer: this.name, taskId: a.task_id, title });
+            const { result, patch } = await finishWork({ folder: w.folder, start: w.start, computer: this.name, taskId: a.task_id, title, back: w.back });
             if (result.mode === 'none') return;
             if (result.mode === 'direct') { const parts = patchParts(patch); for (let i = 0; i < parts.length; i++) await this.queue(a.source_id, 'result_part', { taskId: a.task_id, attemptId: a.attempt_id, index: i, text: parts[i] }, a.attempt_id + '-p' + i); }
             await this.queue(a.source_id, 'result', { attemptId: a.attempt_id, ...result }, a.attempt_id + '-r');

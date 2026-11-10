@@ -1,4 +1,4 @@
-import {JoinStart, JoinReady, NameThisComputer, quietDiscovery, readSetupEntry, writeSetupEntry, setupRoad, type QuietDiscoveryProgress} from './ComputerStart';
+import {JoinStart, JoinReady, NameThisComputer, SetupRoad, quietDiscovery, readSetupEntry, writeSetupEntry, setupRoad, type QuietDiscoveryProgress} from './ComputerStart';
 import {useAccountStatus} from './ComputerJoin';
 import { DiscoveryStream } from './DiscoveryStream';
 import { SetupOrb } from './SetupOrb';
@@ -111,12 +111,11 @@ export function FirstRunSetup({ client, initialStep, workspaceType: initialType,
   const [scan, setScan] = useState<QuietDiscoveryProgress | null>(null);
   const [scanFailed, setScanFailed] = useState(false);
   const movedOn = useRef(false);
+  // CP12 E: the files scan runs quietly in the background; the road goes straight on to AI tools.
   const startSame = async () => {
     setPreparing(true); setScanFailed(false);
-    const done = await quietDiscovery(client, setScan);
-    setPreparing(false);
-    if (movedOn.current) return;
-    if (!done) { setScanFailed(true); return; }
+    movedOn.current = true;
+    void quietDiscovery(client, setScan).finally(() => setPreparing(false));
     await go('tools');
   };
   /* The scan runs in the backend, so the owner can go on and let it finish in the background. */
@@ -164,14 +163,14 @@ export function FirstRunSetup({ client, initialStep, workspaceType: initialType,
       {stepNotice && <p className="setup-note" role="alert">{stepNotice}</p>}
       {joinReady ? <JoinReady name={joined?.name ?? 'This computer'} from={joined?.from ?? 'your other computer'} comes={joined?.comes ?? ''} onOpen={() => void finish()}/>
         : step === 'discovery' ? <section className="setup-note join-scan" role="status" aria-live="polite">
-            <p className="computer-steps computer-join-steps"><span>1 Added</span><b>2 What comes</b><span>3 AI tools</span><span>4 Open Girru</span></p>
+            <SetupRoad at={4}/>
             {scanFailed ? <><p>Looking through this computer did not finish.</p><div className="setup-actions"><button type="button" className="primary" onClick={() => void startSame()}>Try again</button></div></>
             : <><p><b>Getting this computer ready</b></p>
               <p>Girru is looking through this computer for your projects and notes. Nothing leaves this computer. On a big disk this can take a few minutes. You do not need to do anything on {joined?.from ?? 'your other computer'} now.</p>
               {scan && scan.status === 'scanning' && <p>{scan.scanned.toLocaleString()} files looked at · {scan.projects} projects · {scan.notes} notes</p>}
               {scan && scan.status === 'scanning' && <div className="setup-actions"><button type="button" className="primary" onClick={() => void continueInBackground()}>Continue, keep looking in the background</button></div>}</>}
           </section>
-        : <><p className="computer-steps computer-join-steps"><span>1 Added</span><span>2 What comes</span><b>3 AI tools</b><span>4 Open Girru</span></p><ToolsStep client={client} terminal={terminal} onSignedIn={setSignedIn} onNext={() => setJoinReady(true)}/></>}
+        : <><SetupRoad at={4}/><ToolsStep client={client} terminal={terminal} onSignedIn={setSignedIn} onNext={() => setJoinReady(true)}/></>}
     </>
     : !workspaceType || (workspaceType === 'company' && !companyName) ? <WorkspaceTypeStep value={workspaceType} companyName={companyName} busy={savingType} notice={typeNotice} onNext={(type, name) => void chooseType(type, name)}/> : <>
     {step !== 'discovery' && <SetupOrb/>}

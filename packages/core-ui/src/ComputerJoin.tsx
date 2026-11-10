@@ -5,7 +5,7 @@ import {Sheet} from './desktop-ui';
 import {QrImage} from './PhonePairing';
 import {UiIcon} from './ui-icons';
 import type {UiIconName} from './ui-icons';
-import {useContinuity, useShareByDefault} from './ComputerStart';
+import {useContinuity, useShareByDefault, SetupRoad} from './ComputerStart';
 import {computerIcon} from './ComputerLook';
 
 /** Adding a computer (DEVICES-PROJECT-01 B2, boards CP1, CP2, CP7, CP9c): plain words, pictures instead of codes. */
@@ -108,7 +108,7 @@ export function AddThisComputer({client, status}: {client: SessionClient; status
       {notice && <p role="status">{notice}</p>}
     </div>;
     return <div className="computer-join">
-      <p className="computer-steps"><span>1 Signed in</span><b>2 Say Yes on your other computer</b><span>3 Choose what comes</span></p>
+      <SetupRoad at={1}/>
       <h2>Now go to your other computer</h2>
       <p>Open Girru there. It asks “Add this computer to your account?” If it shows the same pictures, press <b>Yes, add it</b>.</p>
       {self?.changed ? <p role="alert">Something changed while you were adding this computer, so it stopped for safety. Sign in again to start over.</p> : self?.code ? <ComputerPictures code={self.code}/> : <p role="status" className="computer-waiting"><UiIcon name="clock" size={15}/> Waiting for your other computer…</p>}
@@ -130,7 +130,7 @@ export function AddThisComputer({client, status}: {client: SessionClient; status
     </div>;
   }
   return <div className="computer-join">
-    <p className="computer-steps"><b>1 Sign in</b><span>2 Say Yes on your other computer</span><span>3 Choose what comes</span></p>
+    <SetupRoad at={1}/>
     <h2>Add this computer to your account</h2>
     <p>Sign in with the same Google account you use for Girru on your other computer.</p>
     <label className="phone-field"><span>Give this computer a name</span><input value={name} maxLength={64} placeholder="Office PC" onChange={e => setName(e.target.value)}/></label>

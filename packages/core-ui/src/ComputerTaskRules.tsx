@@ -25,7 +25,7 @@ export async function post(client: SessionClient, body: unknown): Promise<Rules>
   return r.body as Rules;
 }
 
-export function ComputerTaskRules({client, deviceNames}: {client: SessionClient; deviceNames: Record<string, string>}) {
+export function ComputerTaskRules({client, deviceNames, part = 'all'}: {client: SessionClient; deviceNames: Record<string, string>; part?: 'all' | 'main' | 'advanced'}) {
   const [rules, setRules] = useState<Rules | null>(null);
   const [projects, setProjects] = useState<{id: string; name: string}[]>([]);
   const [adding, setAdding] = useState(false);
@@ -43,31 +43,32 @@ export function ComputerTaskRules({client, deviceNames}: {client: SessionClient;
   const found = useMemo(() => { const q = query.trim().toLowerCase(); return q ? projects.filter(p => p.name.toLowerCase().includes(q) && !(rules?.projects[p.id])).slice(0, 8) : []; }, [query, projects, rules]);
   if (!rules) return <p role="status" className="fine-print">Reading…</p>;
   const exceptions = Object.entries(rules.projects);
+  const main = part !== 'advanced', advanced = part !== 'main';
   return <div className="computer-task-rules">
-    <section className="cp-block"><b className="cp-h">For all projects</b>
-    <div role="radiogroup" aria-label="For all projects" className="cp-choices">
+    {main && <section className="cp-block"><b className="cp-h">Tasks from my other computers</b>
+    <div role="radiogroup" aria-label="Tasks from my other computers" className="cp-choices">
       {CHOICES.map(c => <button key={c.key} type="button" role="radio" aria-checked={rules.rule === c.key} className={`cp-choice${rules.rule === c.key ? ' is-on' : ''}`} onClick={() => change({rule: c.key})}>
         <span className="cp-tile" style={{'--tint': c.tint} as React.CSSProperties}><UiIcon name={c.icon} size={18}/></span><span className="cp-choice-text"><span>{c.title}</span><small>{c.note}</small></span>
       </button>)}
-    </div></section>
-    <section className="cp-block"><span className="cp-h-row"><b className="cp-h">Except these projects</b><button type="button" className="cp-soft" onClick={() => { setAdding(true); setPick(null); setQuery(''); }}>Add a project…</button></span>
+    </div></section>}
+    {advanced && <section className="cp-block"><span className="cp-h-row"><b className="cp-h">Except these projects</b><button type="button" className="cp-soft" onClick={() => { setAdding(true); setPick(null); setQuery(''); }}>Add a project…</button></span>
     {exceptions.length > 0 && <div className="cp-list" role="list">{exceptions.map(([id, r]) => <div key={id} className="cp-list-row" role="listitem">
       <UiIcon name="folder" size={14}/><span className="cp-grow">{nameOf(id)}</span>
       <select className={`cp-pill${r === 'auto' ? ' is-auto' : ''}`} aria-label={`Rule for ${nameOf(id)}`} value={r} onChange={e => change({project: {id, rule: e.target.value}})}>{CHOICES.map(c => <option key={c.key} value={c.key}>{taskRuleWords(c.key)}</option>)}</select>
       <button type="button" className="cp-x" title="Remove exception" aria-label={`Remove ${nameOf(id)}`} onClick={() => change({project: {id, rule: null}})}><UiIcon name="close" size={14}/></button>
     </div>)}</div>}
-    <span className="cp-note">Only projects that differ are listed, even with 200 projects.</span></section>
-    {adding && <div className="computer-rule-add">
+    <span className="cp-note">Only projects that differ are listed, even with 200 projects.</span></section>}
+    {advanced && adding && <div className="computer-rule-add">
       <label className="phone-field"><span>Find a project</span><input autoFocus value={query} placeholder="Type a name" onChange={e => { setQuery(e.target.value); setPick(null); }}/></label>
       {!pick && query.trim() && <div className="phone-list" role="listbox" aria-label="Projects">{found.length ? found.map(p => <button key={p.id} type="button" role="option" aria-selected={false} className="phone-row" onClick={() => setPick(p)}><UiIcon name="folder" size={14}/><span className="phone-row-text"><b>{p.name}</b></span></button>) : <p className="fine-print">No project with that name.</p>}</div>}
       {pick && <p className="computer-rule-pick"><b>{pick.name}</b>: {CHOICES.map(c => <button key={c.key} type="button" onClick={() => { change({project: {id: pick.id, rule: c.key}}); setAdding(false); }}>{taskRuleWords(c.key)}</button>)}</p>}
       <button type="button" className="link-button" onClick={() => setAdding(false)}>Cancel</button>
     </div>}
-    {rules.always.length > 0 && <><b className="cp-h">Always allowed</b><div className="phone-list" role="list">{rules.always.map(a => <div key={a.source + a.projectId} className="phone-row" role="listitem">
+    {advanced && rules.always.length > 0 && <><b className="cp-h">Always allowed</b><div className="phone-list" role="list">{rules.always.map(a => <div key={a.source + a.projectId} className="phone-row" role="listitem">
       <span className="phone-tile"><UiIcon name="check" size={15}/></span><span className="phone-row-text"><b>From {deviceNames[a.source] ?? 'another computer'}</b><small>{nameOf(a.projectId)}</small></span>
       <button type="button" className="tool" title="Stop allowing always" aria-label="Stop allowing always" onClick={() => change({always: {source: a.source, projectId: a.projectId, on: false}})}><UiIcon name="close" size={13}/></button>
     </div>)}</div></>}
-    <LandingColumn rules={rules} onChange={change}/>
+    {advanced && <LandingColumn rules={rules} onChange={change}/>}
     {notice && <p role="status" className="fine-print">{notice}</p>}
   </div>;
 }

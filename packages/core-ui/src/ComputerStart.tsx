@@ -47,6 +47,12 @@ export function whatComes(resources: Resource[]) {
 }
 const portable = (status: Status | null | undefined, resources: Resource[]) => resources.filter(r => (status?.coverage ?? []).some((c: {category: string; available: boolean; continuity: boolean}) => c.category === r.category && c.available && c.continuity));
 
+/** CP12 E: the five steps of a new computer, the same on every screen of that road. */
+const ROAD = ['Sign in', 'Name', 'New or Same as', 'AI tools', 'Ready'] as const;
+export function SetupRoad({at}: {at: 1 | 2 | 3 | 4 | 5}) {
+  return <p className="computer-steps computer-join-steps" aria-label={`Step ${at} of ${ROAD.length}`}>{ROAD.map((s, i) => i + 1 === at ? <b key={s}>{i + 1} {s}</b> : <span key={s}>{i + 1} {s}</span>)}</p>;
+}
+
 export function JoinStart({client, onFresh, onSame}: {client: SessionClient; onFresh: () => void; onSame: (from: string, comes: string, name: string) => void}) {
   const status = useAccountStatus(client);
   const [choice, setChoice] = useState<'same' | 'fresh'>('same');
@@ -122,7 +128,7 @@ export function JoinStart({client, onFresh, onSame}: {client: SessionClient; onF
   };
   const box = (on: boolean) => `computer-start-choice${on ? ' is-on' : ''}`;
   return <section className="computer-join computer-start" aria-label="How should this computer start">
-    <p className="computer-steps"><span>1 Added</span><b>2 What comes</b><span>3 AI tools</span><span>4 Open Girru</span></p>
+    <SetupRoad at={3}/>
     <h2>How should {name} start?</h2>
     <div role="radiogroup" aria-label="How to start" className="computer-start-choices">
       <button type="button" role="radio" aria-checked={choice === 'same'} className={box(choice === 'same')} onClick={() => setChoice('same')}>
@@ -153,7 +159,7 @@ export function JoinStart({client, onFresh, onSame}: {client: SessionClient; onF
 /** CP2d: the last screen on a computer that started “Same as …”. */
 export function JoinReady({name, from, comes, onOpen}: {name: string; from: string; comes: string; onOpen: () => void}) {
   return <section className="computer-join computer-start" aria-label={`${name} is ready`}>
-    <p className="computer-steps"><span>1 Added</span><span>2 What comes</span><span>3 AI tools</span><b>4 Open Girru</b></p>
+    <SetupRoad at={5}/>
     <span className="computer-start-done"><UiIcon name="check" size={28}/></span>
     <h2>{name} is ready</h2>
     <p>{comes ? `${comes[0].toUpperCase()}${comes.slice(1)} come from ${from}.` : `Your agents and projects come from ${from}.`} Now go to {from}: under Computers › Needs you press Allow. Then come back here: in Computers › this computer › Needs you press Apply all.</p>
@@ -282,6 +288,7 @@ export function NameThisComputer({client, onDone}: {client: SessionClient; onDon
     try { await save(selfId, {name: value.trim()}); onDone(); } catch { setNotice('It could not be saved. Try again.'); } finally { setBusy(false); }
   };
   return <section className="computer-join" aria-label="Name this computer">
+    <SetupRoad at={2}/>
     <span className="computer-start-done"><UiIcon name={computerIcon(look, selfId, status.view?.devices?.find(d => d.id === selfId)?.osFamily)} size={26}/></span>
     <h2>Name this computer</h2>
     <p>Your other computers see it with this name.</p>
