@@ -116,3 +116,10 @@ test('CP13: Same as carries how tasks are taken, never this computer’s AI tool
   const out = portableTaskRules({rule: 'auto', atOnce: 2, column: 'Inbox', tool: 'subscription:claude', takes: false, projects: {p1: 'refuse'}, back: {p1: 'direct'}, always: [{source: 's', projectId: 'p1'}]});
   assert.deepEqual(out, {rule: 'auto', atOnce: 2, column: 'Inbox'});
 });
+test('CP13: Same as never makes this computer accept more tasks than before', async () => {
+  const {stricterTaskRules} = await import('../src/devices/domain-sync.ts');
+  const looser = stricterTaskRules({rule: 'ask', atOnce: 2}, {rule: 'auto', atOnce: 5, column: 'Inbox'});
+  assert.equal(looser.rule, 'ask'); assert.equal(looser.atOnce, 2); assert.equal(looser.column, 'Inbox');
+  const stricter = stricterTaskRules({rule: 'auto', atOnce: 4, tool: 'subscription:claude'}, {rule: 'refuse', atOnce: 1});
+  assert.equal(stricter.rule, 'refuse'); assert.equal(stricter.atOnce, 1); assert.equal(stricter.tool, 'subscription:claude');
+});
