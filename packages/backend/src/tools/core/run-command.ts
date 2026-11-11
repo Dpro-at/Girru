@@ -85,16 +85,21 @@ function checkFlags(args: string[], allowed: string[]): string[] | null {
 /** Security review: the project's own git settings (local and worktree scope) may hold only these known-safe keys;
  *  any other key could start a program, so git commands then wait for the owner's Run. The owner's global settings stay as they are. */
 const SAFE_GIT_KEY = /^(core\.(bare|repositoryformatversion|filemode|logallrefupdates|ignorecase|precomposeunicode|symlinks|autocrlf|eol|safecrlf|quotepath)|remote\.[^=]+\.(url|fetch|pushurl|tagopt|prune)|branch\.[^=]+\.(remote|merge|description|vscode-merge-base|github-pr-owner-number)|user\.(name|email)|lfs\.repositoryformatversion|submodule\.active|extensions\.worktreeconfig|pull\.ff|fetch\.prune|init\.defaultbranch|color\.[a-z.]+)$/i;
-export function gitConfigIsPlain(lines: string[]): boolean {
-  return lines.every(l => SAFE_GIT_KEY.test(l.split('=')[0].trim()));
+/** Takes exact key names (from `git config --name-only -z`), never `key=value` lines: a value can never pass as a key. */
+export function gitConfigIsPlain(names: string[]): boolean {
+  return names.every(n => !/[=\s]/.test(n) && SAFE_GIT_KEY.test(n));
 }
-/** The keys git really uses from the project (local and worktree scope, includes followed); null when it cannot be read. */
+/** The key names git really uses from the project (local and worktree scope, includes followed), NUL-separated so
+ *  no value can be read as a key; null when it cannot be read. */
 function localGitConfig(cwd: string): string[] | null {
   try {
-    const r = spawnSync('git', ['config', '--list', '--show-scope', '--includes'], {cwd, encoding: 'utf8', timeout: 5000, env: {...minimalChildEnv(), GIT_CONFIG_NOSYSTEM: '1'}, windowsHide: true});
+    const r = spawnSync('git', ['config', '--list', '--show-scope', '--includes', '--name-only', '-z'], {cwd, encoding: 'utf8', timeout: 5000, env: {...minimalChildEnv(), GIT_CONFIG_NOSYSTEM: '1'}, windowsHide: true});
     if (r.status !== 0) return null;
-    const lines = r.stdout.split(/\r?\n/).filter(Boolean).map(l => { const t = l.indexOf('\t'); return t < 0 ? ['', l] : [l.slice(0, t), l.slice(t + 1)]; });
-    return lines.filter(([scope]) => scope !== 'global' && scope !== 'system').map(([, kv]) => kv);
+    const parts = r.stdout.split('\0'); if (parts.at(-1) === '') parts.pop();
+    if (parts.length % 2) return null;
+    const names: string[] = [];
+    for (let i = 0; i < parts.length; i += 2) if (parts[i] !== 'global' && parts[i] !== 'system') names.push(parts[i + 1]);
+    return names;
   } catch { return null; }
 }
 
@@ -129,7 +134,7 @@ export function allowedCommand(command: string, cwd: string, remotes: (cwd: stri
   if (!config || !gitConfigIsPlain(config)) return null;
   // Hooks, file monitors, pagers and external diff programs never run from an agent's git command.
   const noDiffTools = ['diff', 'show', 'log'].includes(sub) ? ['--no-ext-diff', '--no-textconv'] : sub === 'blame' || sub === 'grep' ? ['--no-textconv'] : [];
-  return ['git', '-c', `core.hooksPath=${os.devNull}`, '-c', 'core.fsmonitor=false', '-c', 'protocol.ext.allow=never', '-c', 'core.pager=cat', '-c', 'diff.external=', '-c', 'core.gitProxy=', '-c', 'pull.rebase=false', sub, ...noDiffTools, ...(sub === 'pull' ? ['--no-rebase'] : []), ...gitArgs];
+  return ['git', '-c', `core.hooksPath=${os.devNull}`, '-c', 'core.fsmonitor=false', '-c', 'protocol.ext.allow=never', '-c', 'core.pager=cat', '-c', 'diff.external=', '-c', 'core.gitProxy=', '-c', 'pull.rebase=false', '-c', 'submodule.recurse=false', '-c', 'fetch.recurseSubmodules=false', '-c', 'diff.ignoreSubmodules=all', '-c', 'status.submoduleSummary=false', sub, ...noDiffTools, ...(sub === 'pull' ? ['--no-rebase', '--no-recurse-submodules'] : sub === 'fetch' ? ['--no-recurse-submodules'] : sub === 'status' || sub === 'diff' ? ['--ignore-submodules=all'] : []), ...gitArgs];
 }
 
 /** True when the command needs the owner's Run (not on the allowlist). */

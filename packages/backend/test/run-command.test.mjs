@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 test('CP15: only known read and sync commands run at once; everything else waits for the owner', async () => {
   const m = await import('../src/tools/core/run-command.ts');
-  const allowedCommand = (c, d) => m.allowedCommand(c, d, () => ['origin'], () => ['core.bare=false']);
+  const allowedCommand = (c, d) => m.allowedCommand(c, d, () => ['origin'], () => ['core.bare']);
   const riskyCommand = (c, d) => allowedCommand(c, d) === null;
   const cwd = process.platform === 'win32' ? 'C:\\work\\project' : '/work/project';
   for (const ok of ['git pull origin main', 'git status --short', 'git rev-parse --short HEAD', 'git log -1 --oneline', 'git fetch origin', 'git branch -a', 'ls -la src', 'grep -rn TODO src', 'cat "src/a b.txt"', 'node --version', 'git log -5 --oneline', 'head -n 20 README.md', 'git fetch --prune origin', 'git diff --stat HEAD~1', 'grep -rn TODO .']) assert.equal(riskyCommand(ok, cwd), false, ok);
@@ -35,9 +35,10 @@ test('allowed words start without a shell, and a timeout stops the children too'
 
 test('review fixes 4: a project git config that starts other programs makes git commands wait for the owner', async () => {
   const m = await import('../src/tools/core/run-command.ts');
-  assert.equal(m.gitConfigIsPlain(['core.bare=false', 'remote.origin.url=https://github.com/a/b', 'branch.main.remote=origin']), true);
-  for (const bad of ['hook.pre.command=x', 'core.editor=vi', 'extensions.objectformat=sha1', 'alias.st=!sh', 'filter.lfs.smudge=x', 'core.sshCommand=x', 'diff.x.textconv=y', 'remote.origin.uploadpack=z', 'credential.helper=h', 'include.path=../x', 'core.fsmonitor=x'])
+  assert.equal(m.gitConfigIsPlain(['core.bare', 'remote.origin.url', 'branch.main.remote', 'submodule.active']), true);
+  assert.equal(m.gitConfigIsPlain(['remote.x.url=y.uploadpack']), false, 'a key holding = is never plain');
+  for (const bad of ['hook.pre.command', 'core.editor', 'extensions.objectformat', 'alias.st', 'filter.lfs.smudge', 'core.sshCommand', 'diff.x.textconv', 'remote.origin.uploadpack', 'credential.helper', 'include.path', 'core.fsmonitor'])
     assert.equal(m.gitConfigIsPlain([bad]), false, bad);
-  assert.equal(m.allowedCommand('git status', process.cwd(), () => ['origin'], () => ['filter.x.clean=evil']), null);
+  assert.equal(m.allowedCommand('git status', process.cwd(), () => ['origin'], () => ['filter.x.clean']), null);
   assert.equal(m.allowedCommand('git status', process.cwd(), () => ['origin'], () => null), null);
 });

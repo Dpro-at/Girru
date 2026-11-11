@@ -54,6 +54,7 @@ const { allowedChatExport, chatExportRoute, chatExportResponse } = require('../s
 const { allowedChatSecrets, chatSecretsRoute, chatSecretsResponse } = require('../src/chat-secrets-contract.js');
 const { allowedTerminal, terminalPath, terminalRoute, terminalResponse, TerminalEventParser, TERMINAL_STREAM_MS } = require('../src/terminal-contract.js');
 const { allowedFooter, footerRoute, footerResponse } = require('../src/footer-contract.js');
+const { allowedMePrefs, mePrefsRoute, mePrefsResponse } = require('../src/me-prefs-contract.js');
 const { allowedMemoryHelper, memoryHelperRoute, memoryHelperResponse } = require('../src/memory-helper-contract.js');
 const { allowedDocIndex, docIndexResponse, docIndexRoute, READ_PDF_BASE64 } = require('../src/doc-index-contract.js');
 const { allowedProjectTrust, projectTrustResponse, projectTrustRoute } = require('../src/project-trust-contract.js');
@@ -162,6 +163,7 @@ function allowed(method, target, body) {
   if (templatePath(target)) return allowedTemplates(method,target,body);
   if (skillLibraryPath(target)) return allowedSkillLibrary(method,target,body);
   if (footerRoute(target)) return allowedFooter(method, target, body);
+  if (mePrefsRoute(target)) return allowedMePrefs(method, target, body);
   if (memoryHelperRoute(target)) return allowedMemoryHelper(method, target, body);
   if (docIndexRoute(target)) return allowedDocIndex(method, target, body);
   if (projectTrustRoute(target)) return allowedProjectTrust(method, target, body);
@@ -267,6 +269,7 @@ function project(target, status, body) {
   if (cardRoute(target)) return agentCardResponse(target, status, body);
   if (terminalRoute(target)) return terminalResponse(target, status, body);
   if (footerRoute(target)) return footerResponse(status, body);
+  if (mePrefsRoute(target)) return mePrefsResponse(target, status, body);
   if (memoryHelperRoute(target)) return memoryHelperResponse(target, status, body);
   if (docIndexRoute(target)) return docIndexResponse(target, status, body);
   if (projectTrustRoute(target)) return projectTrustResponse(target, status, body);
