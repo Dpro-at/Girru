@@ -110,7 +110,7 @@ export class People {
   run(context:{account:AccountRow;device:DeviceRow},operation:PeopleOperation,payload:unknown){
     const me=context.account.id;this.purge();
     switch(operation){
-      case 'people.me':{exact(payload,[]);return this.person(this.ensureProfile(me));}
+      case 'people.me':{exact(payload,[]);const anchor=anchorDevice(this.store,me);/* confirmed: this computer may exchange tasks with people; twoFactor: the account can confirm it with a code. */return {...this.person(this.ensureProfile(me)),confirmed:context.device.approved_via!=='google'||context.device.id===anchor,twoFactor:!!context.account.totp_secret};}
       case 'people.nickname':{
         exact(payload,['nickname']);const mine=this.ensureProfile(me);
         const name=payload.nickname===null?null:normalNickname(payload.nickname);

@@ -10,11 +10,13 @@ import {UiIcon} from './ui-icons';
  * A person you add only exchanges tasks with you; nothing else is shared.
  */
 export interface Person {publicId: string; nickname: string | null}
+/** Your own: whether this computer may exchange tasks with people, and whether the account has two-step sign-in. */
+export interface Me extends Person {confirmed?: boolean; twoFactor?: boolean}
 export interface PersonComputer {deviceId: string; publicKey: string; label: string; osFamily: string; viaGoogle?: boolean; presence: 'online' | 'unknown'}
 export interface LinkedPerson {linkId: string; person: Person; linkedAt: number; computers: PersonComputer[]}
 export interface PeopleRequest {linkId: string; person: Person; expiresAt: number; code: string; codeExpiresAt: number}
 export interface PersonTask {id: string; direction: 'out' | 'in'; linkId: string; person: {publicId: string; name: string}; text: string; state: 'waiting' | 'running' | 'review' | 'done' | 'declined' | 'failed'; answer: string; sessionId: string | null; createdAt: number}
-export interface PeopleState {me: Person | null; people: LinkedPerson[]; blocked: {linkId: string; person: Person}[]; incoming: PeopleRequest[]; outgoing: PeopleRequest[]; tasks: PersonTask[]}
+export interface PeopleState {me: Me | null; people: LinkedPerson[]; blocked: {linkId: string; person: Person}[]; incoming: PeopleRequest[]; outgoing: PeopleRequest[]; tasks: PersonTask[]}
 
 const PATH = '/api/computers/account/people';
 export const people = (client: SessionClient, body: Record<string, unknown>) => call(client, PATH, body);
@@ -58,7 +60,7 @@ export function usePeople(client: SessionClient, active: boolean, ready: boolean
 }
 
 /** Board A: on your own computer's page only. */
-export function YouOnGirru({client, me, onAdd, onChanged}: {client: SessionClient; me: Person; onAdd: () => void; onChanged: () => void}) {
+export function YouOnGirru({client, me, onAdd, onChanged, onSettings}: {client: SessionClient; me: Me; onAdd: () => void; onChanged: () => void; onSettings?: () => void}) {
   const [editing, setEditing] = useState<string | null>(null), [notice, setNotice] = useState(''), [copied, setCopied] = useState(false);
   const save = async () => {
     try { await people(client, {action: 'nickname', nickname: editing?.trim() ? editing.trim() : null}); setEditing(null); setNotice(''); onChanged(); }
@@ -73,6 +75,7 @@ export function YouOnGirru({client, me, onAdd, onChanged}: {client: SessionClien
     </span>
     <span className="people-you-row"><small>Your ID</small><span className="people-id">{me.publicId}</span><button type="button" onClick={copy} title="Copy your ID"><UiIcon name="copy" size={13}/>{copied ? 'Copied' : 'Copy'}</button></span>
     <small className="fine-print">Give either one to a person you work with. Nobody is added without your OK.</small>
+    {me.confirmed === false && <ConfirmThisComputer client={client} twoFactor={!!me.twoFactor} onDone={onChanged} onSettings={onSettings}/>}
     {notice && <p role="status" className="fine-print">{notice}</p>}
   </section>;
 }
@@ -213,5 +216,25 @@ function AnswerReview({client, task, onChanged, onOpenChat, onNotice}: {client: 
       <textarea aria-label="Answer" className="people-answer" rows={5} maxLength={8000} value={text} onChange={e => setText(e.target.value)} placeholder="Write what they should get back"/>
       <small>Only this text goes to {task.person.name}. Check it holds nothing private.</small></span>
     <span className="computer-task-actions"><button type="button" className="primary" disabled={busy || !text.trim()} onClick={() => void act(true)}>Send answer</button>{task.sessionId && <button type="button" onClick={() => onOpenChat(task.sessionId!)}>Open its chat</button>}<button type="button" disabled={busy} onClick={() => void act(false)}>Don't send</button></span>
+  </div>;
+}
+
+/** CP17: a computer added by Google sign-in alone exchanges tasks with people only after the owner confirms it with the
+ *  account's two-step code (your other computers you trusted are then confirmed by themselves). */
+function ConfirmThisComputer({client, twoFactor, onDone, onSettings}: {client: SessionClient; twoFactor: boolean; onDone: () => void; onSettings?: () => void}) {
+  const [code, setCode] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false);
+  const confirm = async () => {
+    setBusy(true); setNotice('');
+    try { await call(client, '/api/computers/account/twofactor', {action: 'confirm', code: code.trim(), confirmed: true}); setCode(''); setNotice('Confirmed. Your other computers you trusted are confirmed too.'); onDone(); }
+    catch (e) { const c = (e as Error).message; setNotice(c === 'account_twofactor_code_wrong' ? 'That code was not right. Try again.' : c === 'account_twofactor_wait' ? 'Too many wrong codes. Wait 15 minutes, then try again.' : 'That did not work. Try again.'); }
+    finally { setBusy(false); }
+  };
+  return <div className="people-confirm" role="group" aria-label="Confirm this computer">
+    <span><UiIcon name="shield" size={14}/><b>Confirm this computer to work with people</b></span>
+    {twoFactor
+      ? <span className="people-you-row"><input aria-label="Two-step code" inputMode="numeric" maxLength={6} placeholder="6-digit code" value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))} onKeyDown={e => { if (e.key === 'Enter' && code.length === 6) void confirm(); }}/><button type="button" className="primary" disabled={busy || code.length !== 6} onClick={() => void confirm()}>Confirm</button></span>
+      : <span className="people-you-row"><small>Turn on two-step sign-in for your account; the code you type then confirms this computer.</small>{onSettings && <button type="button" onClick={onSettings}>Two-step sign-in…</button>}</span>}
+    <small className="fine-print">It was added by Google sign-in alone. Until you confirm it, people can't send it tasks or get tasks from it.</small>
+    {notice && <p role="status" className="fine-print">{notice}</p>}
   </div>;
 }

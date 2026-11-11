@@ -15,3 +15,10 @@ test('CP17 D: a task from a person waits in Needs you with Allow and Decline',()
  assert.match(html,/sara\.dev asks: Report the branch/);assert.match(html,/>Allow</);assert.match(html,/>Decline</);assert.match(html,/Only its answer goes back/);});
 test('CP17 D: the send sheet says where it runs and that it waits for their OK',()=>{const html=renderToStaticMarkup(React.createElement(P.SendToPersonSheet,{client,onClose(){},onSent(){},person:{linkId:'l1',linkedAt:1,person:{publicId:'GR-4M8P-2XW1',nickname:'sara.dev'},computers:[]}}));
  assert.match(html,/Send a task to sara\.dev/);assert.match(html,/none is on right now/);assert.match(html,/waits for their OK/);});
+test('CP17: an unconfirmed computer says so on your card, with a code box when two-step is on',()=>{
+ const on=renderToStaticMarkup(React.createElement(P.YouOnGirru,{client,onAdd(){},onChanged(){},me:{publicId:'GR-7K2D-9QF4',nickname:null,confirmed:false,twoFactor:true}}));
+ assert.match(on,/Confirm this computer to work with people/);assert.match(on,/6-digit code/);
+ const off=renderToStaticMarkup(React.createElement(P.YouOnGirru,{client,onAdd(){},onChanged(){},onSettings(){},me:{publicId:'GR-7K2D-9QF4',nickname:null,confirmed:false,twoFactor:false}}));
+ assert.match(off,/Turn on two-step sign-in/);assert.match(off,/Two-step sign-in…/);
+ const ok=renderToStaticMarkup(React.createElement(P.YouOnGirru,{client,onAdd(){},onChanged(){},me:{publicId:'GR-7K2D-9QF4',nickname:null,confirmed:true}}));
+ assert.doesNotMatch(ok,/Confirm this computer/);});
