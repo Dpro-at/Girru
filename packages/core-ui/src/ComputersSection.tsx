@@ -113,9 +113,10 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
     <UiIcon name={a.state === 'completed' ? 'check' : WAITING.has(a.state) ? 'inbox' : 'play'} size={15}/>
     <span className="computer-task-text"><b>{(a as {title?: string}).title || (sentHere(a) ? '' : a.detail?.split('\n')[0]?.slice(0, 120)) || 'Task'}</b>
       {/* CP16 B: the computer that sent a task says where it went; the one that ran it says who sent it. */}
-      <small>{a.state === 'completed' ? 'Done' : a.state === 'running' && /^Waits for your OK/.test(a.detail ?? '') ? 'Waits for your OK there' : a.statusLabel} · {sentHere(a) ? `sent from here to ${a.targetName}` : `from ${a.sourceName}`}</small>
+      <small>{a.state === 'completed' ? 'Done' : a.state === 'running' && /^Waits for your OK/.test(a.detail ?? '') ? 'Waits for your OK there' : a.state === 'unknown' && sentHere(a) ? `Did not finish on ${a.targetName}` : a.statusLabel} · {sentHere(a) ? `sent from here to ${a.targetName}` : `from ${a.sourceName}`}</small>
       {a.state === 'blocked' && a.detail && <small className="cp-warn">{a.detail.split('\n')[0].slice(0, 200)}</small>}
-      {sentHere(a) && a.state === 'completed' && a.detail && <TaskAnswer text={a.detail} where={a.targetName}/>}</span>
+      {sentHere(a) && a.state === 'completed' && a.detail && <TaskAnswer text={a.detail} where={a.targetName}/>}
+      {sentHere(a) && a.state === 'unknown' && a.detail && !a.detail.startsWith('girru-device-sealed:') && <small className="cp-warn">{a.detail.split('\n')[0].slice(0, 200)}</small>}</span>
     <span className="computer-task-actions">{actions}</span>
   </div>;
 
