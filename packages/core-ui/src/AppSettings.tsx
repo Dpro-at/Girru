@@ -121,6 +121,7 @@ export function AppSettings({ onOpenDeviceChat,onOpenChannelsStore,onOpenStore, 
       {active_==='move'&&owner&&<WorkspacePackSettings client={client!}/>}
       {active_==='voice'&&owner&&<VoiceSettings client={client!}/>}
       {active_==='permissions'&&owner&&<>
+        <AgentCommandsSwitch client={client!}/>
         <AgentPermissionsGrid client={client!} active={active} onAgent={id=>setPermAgent(id)}/>
         <h3 className="settings-sub-title">One agent's tools and memory</h3>
         <PermissionsSettings client={client!} parts={['tools','memory']} agentId={permAgent} onApprovals={onApprovals??(()=>{})} onAccount={()=>setTab('account')} onAgent={onAgent}/>
@@ -151,4 +152,13 @@ export function AppSettings({ onOpenDeviceChat,onOpenChannelsStore,onOpenStore, 
     {!aboutOnly&&!sidebarSlot&&sidebar}
     {page}
   </div>;
+}
+
+/** CP15: the owner's switch for agents running commands on this computer (in the chat's project folder; risky ones wait for Run). */
+function AgentCommandsSwitch({client}:{client:SessionClient}){
+ const [on,setOn]=useState<boolean|null>(null),[notice,setNotice]=useState('');
+ useEffect(()=>{let live=true;void client.request({method:'GET',path:'/api/me/agent-commands'} as never).then(r=>{if(live&&r.status===200)setOn((r.body as {on?:boolean}).on===true);}).catch(()=>{});return()=>{live=false;};},[client]);
+ if(on===null)return null;
+ const change=(next:boolean)=>{setNotice('');void client.request({method:'PUT',path:'/api/me/agent-commands',body:{on:next}} as never).then(r=>{if(r.status===200)setOn(next);else setNotice('It could not be saved. Try again.');}).catch(()=>setNotice('It could not be saved. Try again.'));};
+ return <div className="phone-list" role="list"><div className="phone-row" role="listitem"><span className="phone-row-text"><b>Agents can run commands on this computer</b><small>In the chat’s project folder, with any AI tool. Deleting, pushing and anything outside the folder wait for your Run.</small></span><label className="switch"><input type="checkbox" checked={on} onChange={e=>change(e.target.checked)} aria-label="Agents can run commands on this computer"/></label>{notice&&<small role="status">{notice}</small>}</div></div>;
 }

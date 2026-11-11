@@ -1,3 +1,4 @@
+import { runCommandTool, runCommandOwnerTool } from './core/run-command.js';
 import {computerNativeTools} from '../devices/native.js';
 import {computerSyncApplyTool} from '../devices/sync-tool.js';
 import {syntheticComputerTools} from '../devices/tool.js';
@@ -138,7 +139,7 @@ const CORE_TOOLS: Tool[] = [
   teamListTool, teamDelegateTool, teamResultsTool, quickHelperTool, quickHelperResultTool,
   ...teamAdminTools,workspaceControlApplyTool,teamControlApplyTool,reportPublishTool,displayCatalogueTool,
   specialtyLibraryTool, specialtyApplyTool,
-  execTool, readTool, writeTool, editTool, webFetchTool, executeCodeTool,
+  execTool, runCommandTool, runCommandOwnerTool, readTool, writeTool, editTool, webFetchTool, executeCodeTool, // CP15: commands in the chat's project folder
   browserNavigateTool, browserScreenshotTool, browserExtractTool, browserInteractTool,
   memorySaveTool, memorySearchTool, memoryReflectTool, memoryStatsTool, memoryEditTool, memoryDeleteTool, memoryForgetTool, memoryGraphTool,
   memoryDoctorTool, memoryDoctorFixTool, memoryMoveTool,

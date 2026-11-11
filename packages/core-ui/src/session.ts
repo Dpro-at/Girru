@@ -157,6 +157,7 @@ export function allowedRequest(method: string, path: string, body?: unknown): bo
   if (templatePath(path)) return allowedTemplates(method,path,body);
   if (skillLibraryPath(path)) return allowedSkillLibrary(method,path,body);
   if (footerRoute(path)) return allowedFooter(method, path, body);
+  if (path === '/api/me/agent-commands') return method === 'GET' ? body === undefined : method === 'PUT' && record(body) && Object.keys(body).join() === 'on' && typeof body.on === 'boolean';
   if (path === THEME_PATH) return method === 'GET' ? body === undefined : method === 'PUT' && record(body) && Object.keys(body).join() === 'theme' && ['system', 'light', 'dark'].includes(body.theme as string);
   if (memoryHelperRoute(path)) return allowedMemoryHelper(method, path, body);
   if (docIndexRoute(path)) return allowedDocIndex(method, path, body);
@@ -272,6 +273,7 @@ function projectResponse(path: string, response: WireResponse): WireResponse {
   if (cardRoute(path)) return { status: response.status, body: agentCardResponse(path, response.status, response.body) };
   if (terminalRoute(path)) return { status: response.status, body: terminalResponse(path, response.status, response.body) };
   if (footerRoute(path)) return { status: response.status, body: footerResponse(response.status, response.body) };
+  if (path === '/api/me/agent-commands') return { status: response.status, body: record(response.body) && typeof response.body.on === 'boolean' ? { on: response.body.on } : {} };
   if (path === THEME_PATH) return { status: response.status, body: record(response.body) && ['system', 'light', 'dark', null].includes(response.body.theme as string) ? { theme: response.body.theme } : {} };
   if (memoryHelperRoute(path)) return { status: response.status, body: memoryHelperResponse(path, response.status, response.body) };
   if (docIndexRoute(path)) return { status: response.status, body: docIndexResponse(path, response.status, response.body) };

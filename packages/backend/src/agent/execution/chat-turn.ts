@@ -417,7 +417,9 @@ export async function executeChatTurn(reply: AgentReply, input: ChatTurnInput): 
         const toolIndex=onDemand?.index()??'';
         // CHAT-LIVE-01 (LW6): outside "Accept edits" the coding app's own file access is read-only; file changes go through Girru's edit/write (the owner approves each).
         const fileNote=currentChatRun()?.chatMode!=='accept_edits'&&input.fileReadRoot?'Your own file access in this chat is read-only. To change a file in this folder, call the Girru tool edit (part of an existing file; read it first) or write (a whole file), loading it with tool_load first when it is not listed; the owner approves the change, then it is made in the real file. Do not say the change is impossible.':'';
-        const replyPrompt=subscriptionReplyPrompt(context+(toolIndex?`\n\n${toolIndex}`:'')+(systemPromptAppend?`\n\n${systemPromptAppend}`:'')+(fileNote?`\n\n${fileNote}`:''),history);
+        // CP15: when the owner lets agents run commands, say so, so the agent runs them instead of listing them for the owner.
+        const commandNote=input.fileReadRoot&&allTools.some(t=>t.name==='run_command')?'You can run shell commands in this chat\u2019s project folder with the Girru tool run_command (git, tests, builds, search), loading it with tool_load first when it is not listed. Run them yourself and answer with the result; do not give the owner commands to copy. Deleting, pushing, force options, sudo and paths outside the folder go through run_command_owner, which shows the owner a Run button.':'';
+        const replyPrompt=subscriptionReplyPrompt(context+(toolIndex?`\n\n${toolIndex}`:'')+(systemPromptAppend?`\n\n${systemPromptAppend}`:'')+(fileNote?`\n\n${fileNote}`:'')+(commandNote?`\n\n${commandNote}`:''),history);
         {const run=currentChatRun();if(run)run.usage={model:subscriptionSource!,tokensIn:estimateTokens(replyPrompt)};}
         const answer=await subscriptionToolLoop({prompt:replyPrompt,signal:abort.signal,
           tools:onDemand?onDemand.definitions():allTools,

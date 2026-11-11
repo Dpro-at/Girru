@@ -43,6 +43,7 @@ export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'executed' | 'f
 
 /** Built-in and known tools that always need approval. */
 export const APPROVAL_REQUIRED_TOOLS: Readonly<Record<string, ApprovalCategory>> = {
+  run_command_owner:'other', // CP15: a risky command waits for the owner's Run
   workspace_control_apply:'settings', // Internal executor: only a real owner approval ticket admits it.
   team_control_apply:'settings',
   team_agent_create:'settings',team_agent_update:'settings',team_personality_apply:'settings',team_specialty_apply:'settings',

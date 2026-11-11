@@ -62,6 +62,20 @@ export async function uiThemeRoutes(fastify: FastifyInstance) {
   });
 }
 
+/** CP15: the owner's switch “Agents can run commands on this computer”. Turning it on lets the agents use run_command (owner Run for risky ones). */
+export async function agentCommandsRoutes(fastify: FastifyInstance) {
+  const ownerOnly = (request: any, reply: any) => { const actor = actorOrReply(reply, actorOf(request), requireAccount); if (!actor) return null; if (!actor.userId || actor.role !== 'owner') { reply.code(403).send({ error: 'Only the owner can change this', code: 'forbidden' }); return null; } return actor; };
+  fastify.get('/api/me/agent-commands', async (request, reply) => { const actor = ownerOnly(request, reply); if (!actor) return reply; return { on: (await getPref(actor.userId!, 'agent-commands')) === true }; });
+  fastify.put<{ Body: unknown }>('/api/me/agent-commands', async (request, reply) => {
+    const actor = ownerOnly(request, reply); if (!actor) return reply;
+    const body = request.body as { on?: unknown } | null;
+    if (!body || Object.keys(body).join() !== 'on' || typeof body.on !== 'boolean') return reply.code(400).send({ error: 'Send on: true or false', code: 'invalid' });
+    await setPref(actor.userId!, 'agent-commands', body.on);
+    if (body.on) { const { q } = await import('../../repositories/sql-steps.js'); for (const tool of ['run_command', 'run_command_owner']) await q.run("INSERT INTO agent_tool_grants (agent_id, tool_name, scopes, granted_by) SELECT a.id, ?, NULL, ? FROM agents_config a WHERE NOT EXISTS (SELECT 1 FROM agent_tool_grants g WHERE g.agent_id = a.id AND g.tool_name = ?)", tool, actor.userId!, tool); }
+    return { on: body.on };
+  });
+}
+
 export async function uiFooterRoutes(fastify: FastifyInstance) {
   fastify.get('/api/me/footer', async (request, reply) => {
     const actor = actorOrReply(reply, actorOf(request), requireAccount);
