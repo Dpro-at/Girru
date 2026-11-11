@@ -127,3 +127,14 @@ test('the code is the same for both sides in one window and differs across windo
   assert.notEqual(P.peopleCode(seed,10),P.peopleCode(seed,11));
   assert.notEqual(P.peopleCode(seed,10),P.peopleCode(C.opaque(),10));
 });
+
+test('a computer added by Google sign-in alone is shared with people only after its owner confirms it',async()=>{
+  const added=peer(),r=await login(added,'1001',{addByGoogle:true}),first=request(mohamed,'account.view').deviceId;
+  assert.equal(store.one('SELECT approved_via v FROM devices WHERE id=?',r.view.deviceId).v,'google');
+  assert.throws(()=>request(added,'device.confirm',{deviceId:first,confirmed:true}),/unconfirmed/,'an unconfirmed computer cannot vouch for others');
+  assert.throws(()=>request(mohamed,'device.confirm',{deviceId:r.view.deviceId,confirmed:false}),/input/);
+  assert.deepEqual(request(mohamed,'device.confirm',{deviceId:r.view.deviceId,confirmed:true}),{confirmed:true});
+  assert.equal(store.one('SELECT approved_via v FROM devices WHERE id=?',r.view.deviceId).v,'kept');
+  assert.deepEqual(request(mohamed,'device.confirm',{deviceId:r.view.deviceId,confirmed:true}),{confirmed:false},'already confirmed');
+  assert.throws(()=>request(sara,'device.confirm',{deviceId:r.view.deviceId,confirmed:true}),/unavailable/,'never across accounts');
+});
