@@ -419,3 +419,40 @@ real Girru. iPhone 18 Pro simulator, iOS 27.2, 402 pt wide. Screenshots
 
 **Not tested:** dark mode of the new layout, sending a message (not to start
 the owner's agents).
+
+## Test: phone chat fit (72cdccc5)
+
+PR Dpro-at/Girru#197, branch `phone/chat-fit` at `72cdccc5`. The main Mac
+merged it into the MacBook's test Girru (local merge `49ea6c0a`, same profile
+and data), rebuilt core-ui and restarted it; the app was reopened so the page
+loaded the new build. Same simulator build, still paired with the owner's real
+Girru; iPhone 18 Pro simulator, iOS 27.2, 402 pt. Screenshots
+`result/fit3-*.png`; sizes measured in the page.
+
+**Fixed (all four claims checked):**
+
+1. **Right drawer:** `.chat-details` is now z-index 70 over the scrim (65); it
+   is no longer greyed, taps land inside it (`elementFromPoint` hits the
+   drawer's own links), and a swipe scrolls it (scrollTop 0 → 277, the
+   Results and memory parts come into view) (`fit3-02`, `fit3-03`). A tap on
+   the dimmed strip left of it closes it.
+2. **Text sizes:** user and assistant message text 16 px, code 14 px, the
+   task card's lines and details 14 px, meta lines 14 px, composer 16 px
+   (`fit3-01`). The 10.4 px text is gone.
+3. **Width:** the column is 378 px with 12 px on each side (was 306 with 48);
+   user text is 350 px wide, assistant paragraphs 338 px; the composer is 386
+   of 402 px.
+4. **Cancelled Face ID for the terminal:** "Face Not Recognized" then Cancel
+   leaves the app in the chat, with no terminal page and no error
+   (`fit3-04`).
+
+**Still good:** page 402 px wide with no sideways scroll; with the keyboard up
+the composer ends at 400 of the 416 px visible area, Send visible, no slide
+(`fit3-05`); the meetings and specialties errors stay gone. **Dark mode:** the
+chat, the right drawer and the left drawer are all dark and readable
+(`fit3-06` to `fit3-08`).
+
+**Not tested:** sending a message and the reply streaming in. This chat runs
+the owner's real Main Agent (Claude Code) on his computer, so it waits for his
+OK. The terminal key row (^C) was not part of this change and still does not
+stop a command (see the `e1d207fb` section).
