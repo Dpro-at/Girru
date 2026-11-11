@@ -1,4 +1,5 @@
 import {admitReportRun,finishReportRun,reportCanStart,reconcileReportAttempts,recordReportApprovalDecision,decidedReportApprovals,resumeReportAfterApproval,isBoardReport,captureBoardReport} from '../../services/reports.js';
+import { sessionRunFinished } from '../../services/session-run-hooks.js';
 import { runEventWire } from '../../agent/contracts/events.js';
 import { preferredMention } from '../../agent/context/target.js';
 import { meetingAttendanceChat } from '../../services/meeting-attendance.js';
@@ -487,7 +488,7 @@ export async function continueAfterApproval(approvalId: string): Promise<TurnSta
   const user = await q.one<{ role: string; status: string }>('SELECT role, status FROM users WHERE id = ?', a.user_id);
   if (!user || user.status !== 'active' || user.role === 'guest') return null;
   await ensureChatRecovery();const reportRunId=`approval-${approvalId}`.slice(0,128);let report;try{report=await resumeReportAfterApproval(a.user_id,c.id,reportRunId);}catch{return null;}if(report===false)return null;
-  const out = await startTurn({ userId: a.user_id, role: user.role, c, runId: reportRunId, message: CONTINUE_MESSAGE + openPlanReminder(await listConversationMessages(c.id)), ...(c.model ? { model: c.model } : {}),...(report?{agentId:report.row.agent_id,canStart:()=>reportCanStart(a.user_id!,report.row.id,Number(report.row.revision)),onFinished:(status:string)=>finishReportRun(a.user_id!,c.id,reportRunId,status)}:{}) });
+  const out = await startTurn({ userId: a.user_id, role: user.role, c, runId: reportRunId, message: CONTINUE_MESSAGE + openPlanReminder(await listConversationMessages(c.id)), ...(c.model ? { model: c.model } : {}),...(report?{agentId:report.row.agent_id,canStart:()=>reportCanStart(a.user_id!,report.row.id,Number(report.row.revision)),onFinished:async(status:string)=>{await finishReportRun(a.user_id!,c.id,reportRunId,status);await sessionRunFinished(c.id,reportRunId,status);}}:{onFinished:(status:string)=>sessionRunFinished(c.id,reportRunId,status)}) });
   if(report&&out.code!==202)await finishReportRun(a.user_id,c.id,reportRunId,'refused');
   console.log('[ChatRuns] Continue after approval', { approvalId, status: out.code });
   return out;

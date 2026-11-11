@@ -238,7 +238,9 @@ export class ToolsRegistry {
     const chatMode = currentChatRun()?.chatMode;
     // "Accept edits": Girru's own file edits run as the agent's rules say; anything else that changes something asks.
     // (For coding-app replies the owner's Accept edits also lets the app edit files in the chat's folders.)
-    if ((chatMode === 'ask' || chatMode === 'plan' || (chatMode === 'accept_edits' && !isFileEdit(tool))) && changesSomething(tool)) category = category ?? modeCategory ?? 'other';
+    // CP15: run_command keeps to its own allowlist (read and sync commands); anything else is run_command_owner's Run card. So only "Plan first" holds it.
+    const ownRules = toolName === 'run_command' && chatMode !== 'plan';
+    if (!ownRules && (chatMode === 'ask' || chatMode === 'plan' || (chatMode === 'accept_edits' && !isFileEdit(tool))) && changesSomething(tool)) category = category ?? modeCategory ?? 'other';
     // CHAT-LIVE-01 (LW6): "Auto" changes the chat folder's real files only after the owner allows it (the mode text promises it).
     if (chatMode !== 'accept_edits' && chatFolderFile(tool, this.context)) category = category ?? modeCategory ?? 'other';
     if(isTeamAdminTool(tool)&&TEAM_ADMIN_WRITES.has(toolName))category='settings';

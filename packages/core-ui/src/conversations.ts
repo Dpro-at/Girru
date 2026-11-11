@@ -454,6 +454,8 @@ export class ConversationsController {
     this.rememberLast(id);
     const seq = ++this.#openSeq;
     const known = this.#state.conversations.find(c => c.id === id);
+    // A chat opened from elsewhere (a task from another computer) joins the list, so its project and folder show.
+    if (!known) void this.refreshList();
     this.publish({ ...this.codeDraftFor(id), activeId: id, turns: [], threadPhase: 'loading', runId: null, starting: false, stopping: false, reconnecting: false, queue: [], queuePaused: false, elsewhere: false, notice: undefined, agentId: known?.agentId ?? '', model: known?.model ?? '', replyAgent: '', focus: null, hasEarlier: false, loadingEarlier: false });
     try {
       await this.#modelWrites;if(!this.live()||seq!==this.#openSeq)return;
