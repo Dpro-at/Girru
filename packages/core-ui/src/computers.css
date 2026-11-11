@@ -215,3 +215,11 @@
 .computer-trust{display:flex;flex-direction:column;gap:8px;min-width:0;flex:1}
 .computer-trust-code{font:600 20px/1.2 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.12em;background:var(--subtle);border-radius:8px;padding:10px 14px;text-align:center}
 .computer-trust-actions{display:flex;gap:8px;flex-wrap:wrap}
+/* CP17 E: sidebar search and the All / Online / Offline filter. */
+.computers-search{padding:4px 8px 6px}
+.computers-search input{width:100%;box-sizing:border-box;height:28px;border-radius:7px;border:1px solid var(--border);background:var(--surface);color:var(--text);padding:0 9px;font:inherit;font-size:12px}
+.computers-filter{display:flex;gap:4px;padding:0 8px 6px;flex-wrap:wrap}
+.computers-filter button{border:0;border-radius:999px;padding:2px 9px;font:inherit;font-size:11px;background:var(--subtle);color:var(--muted);cursor:pointer}
+.computers-filter button[aria-checked=true]{background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--text)}
+.computers-filter button span{opacity:.75}
+.computers-none{padding:6px 12px}

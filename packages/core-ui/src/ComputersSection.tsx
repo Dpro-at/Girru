@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useState, type ReactNode} from 'react';
+import {useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
 import type {SessionClient} from './session';
 import type {ComputerAttempt} from './computer-contract.js';
@@ -37,6 +37,12 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   const view = useComputerOverview();
   const account = useAccountStatus(client, active);
   const [selected, setSelected] = useState('');
+  // CP17 E: the sidebar's search and filter; the filter is remembered on this computer.
+  const [query, setQuery] = useState('');
+  const [place, setPlaceState] = useState<'all' | 'online' | 'offline'>(() => { try { const v = localStorage.getItem('girru.computers.filter'); return v === 'online' || v === 'offline' ? v : 'all'; } catch { return 'all'; } });
+  const setPlace = (v: 'all' | 'online' | 'offline') => { setPlaceState(v); try { localStorage.setItem('girru.computers.filter', v); } catch { /* kept for this window */ } };
+  const searchRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { const onKey = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f' && searchRef.current?.offsetParent) { e.preventDefault(); searchRef.current.focus(); } }; window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey); }, []);
   const [notice, setNotice] = useState('');
   const [inspector, setInspector] = useState(true);
   const [worksOn, setWorksOn] = useState(false);
@@ -88,20 +94,32 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
     {label: 'Forget this computer', icon: 'trash', shortcut: '⌫', danger: true, run: () => { forgetComputerLater(client, {id: d.id, name: nameOf(d.id, d.name), publicKey: d.publicKey}); setSelected(self?.id ?? ''); }},
   ];
   const menuForSelf = (): MenuItem[] => [renameItem(self?.id ?? '', nameOf(self?.id ?? '', self?.name ?? 'This computer')), {label: 'Settings › Computers', icon: 'gear', run: onSettings}];
+  // CP17 E: search (name or id, as you type) and an All / Online / Offline filter with counts.
+  const isOn = (d: {state?: string}) => d.state === 'available' || d.state === 'busy';
+  const q = query.trim().toLowerCase();
+  const matches = (id: string, name: string) => !q || name.toLowerCase().includes(q) || id.toLowerCase().includes(q);
+  const shown = listed.filter(d => matches(d.id, nameOf(d.id, d.name)) && (place === 'all' || (place === 'online') === isOn(d)));
+  const onCount = listed.filter(isOn).length + (self ? 1 : 0), offCount = listed.filter(d => !isOn(d)).length;
+  const selfShown = !!self && matches(self.id, nameOf(self.id, self.name)) && place !== 'offline';
   const nav = <nav className="dk-sidebar computers-places" aria-label="My computers">
+    <div className="computers-search"><input ref={searchRef} type="search" aria-label="Search computers" placeholder="Search computers" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') setQuery(''); }}/></div>
+    <div className="computers-filter" role="radiogroup" aria-label="Show">
+      {([['all', 'All', listed.length + (self ? 1 : 0)], ['online', 'Online', onCount], ['offline', 'Offline', offCount]] as const).map(([k, label, n]) => <button key={k} type="button" role="radio" aria-checked={place === k} onClick={() => setPlace(k)}>{label} <span>{n}</span></button>)}
+    </div>
     <p className="section-label dk-label computers-label"><span>My computers</span></p>
-    {self && <button type="button" className="nav-item dk-place" aria-current={isSelf ? 'page' : undefined} onClick={() => setSelected(self.id)}>
+    {self && selfShown && <button type="button" className="nav-item dk-place" aria-current={isSelf ? 'page' : undefined} onClick={() => setSelected(self.id)}>
       <UiIcon name={iconOf(self.id)} size={15}/><span className="dk-place-name">{nameOf(self.id, self.name)}</span><span className="dk-count">this one</span>
       {attempts.filter(a => a.targetDevice === self.id && WAITING.has(a.state)).length > 0 && <span className="dk-badge-pill" title="Needs you">{attempts.filter(a => a.targetDevice === self.id && WAITING.has(a.state)).length}</span>}
     </button>}
     {!self && accountSelf && <button type="button" className="nav-item dk-place" aria-current="page" title={accountSelf.status === 'pending' ? 'Waiting to be added to your account' : undefined}>
       <UiIcon name={computerIcon(look, accountSelf.id, accountSelf.osFamily)} size={15}/><span className="dk-place-name">{nameOf(accountSelf.id, accountSelf.label)}</span><span className="dk-count">{accountSelf.status === 'pending' ? 'waiting' : 'this one'}</span>
     </button>}
-    {listed.map(d => <button key={d.id} type="button" className="nav-item dk-place" aria-current={selected === d.id ? 'page' : undefined} onClick={() => setSelected(d.id)} onContextMenu={e => { setSelected(d.id); menu.at(e, menuFor(d)); }}>
+    {shown.map(d => <button key={d.id} type="button" className="nav-item dk-place" aria-current={selected === d.id ? 'page' : undefined} onClick={() => setSelected(d.id)} onContextMenu={e => { setSelected(d.id); menu.at(e, menuFor(d)); }}>
       <UiIcon name={iconOf(d.id, d.publicKey)} size={15}/><span className="dk-place-name">{nameOf(d.id, d.name)}</span>
       <span className={`computer-dot ${d.state === 'available' || d.state === 'busy' ? 'on' : shownState(d) === 'connecting' ? 'connecting' : 'off'}`} title={stateWords(d)} aria-label={stateWords(d)}/>
       {waitingFrom(d.id).length > 0 && <span className="dk-badge-pill" title="Needs you">{waitingFrom(d.id).length}</span>}
     </button>)}
+    {q && !shown.length && !selfShown && <p className="fine-print computers-none">No computer matches “{query.trim()}”.</p>}
     {olderCopies.length > 0 && <button type="button" className="nav-item dk-place computers-older" title="The same computers signed in before. They no longer work." onClick={() => { for (const d of olderCopies) forgetComputerLater(client, {id: d.id, name: nameOf(d.id, d.name), publicKey: d.publicKey}); }}>
       <UiIcon name="trash" size={14}/><span className="dk-place-name">Older copies ({olderCopies.length})</span><span className="dk-count">Forget</span>
     </button>}
