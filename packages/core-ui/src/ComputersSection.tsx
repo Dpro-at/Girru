@@ -132,6 +132,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
     {newGroup !== null ? <input className="computers-group-input" autoFocus aria-label="New group name" placeholder="Group name" maxLength={40} value={newGroup} onChange={e => setNewGroup(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && newGroup.trim()) { void group({action: 'create', name: newGroup.trim()}).catch(() => setNotice('The group could not be made.')); setNewGroup(null); } else if (e.key === 'Escape') setNewGroup(null); }} onBlur={() => setNewGroup(null)}/>
       : <button type="button" className="nav-item dk-place computers-new-group" onClick={() => setNewGroup('')}><UiIcon name="plus" size={14}/><span className="dk-place-name">New group…</span></button>}
     {q && !shown.length && !selfShown && <p className="fine-print computers-none">No computer matches “{query.trim()}”.</p>}
+    {!q && place !== 'all' && !shown.length && !selfShown && <p className="fine-print computers-none">{place === 'offline' ? 'No computer is offline.' : 'No computer is online.'}</p>}
     {olderCopies.length > 0 && <button type="button" className="nav-item dk-place computers-older" title="The same computers signed in before. They no longer work." onClick={() => { for (const d of olderCopies) forgetComputerLater(client, {id: d.id, name: nameOf(d.id, d.name), publicKey: d.publicKey}); }}>
       <UiIcon name="trash" size={14}/><span className="dk-place-name">Older copies ({olderCopies.length})</span><span className="dk-count">Forget</span>
     </button>}
