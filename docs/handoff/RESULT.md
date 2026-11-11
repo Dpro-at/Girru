@@ -331,3 +331,34 @@ used a small Python client for the simulator's `webinspectord_sim.socket`
 (no TCP port, unlike `ios_webkit_debug_proxy`, which listens on every
 interface). A request log in the harness (method, path, status of every
 `api.call`) would make the next round's "missing request" check exact.
+
+### Test 3, part 2: paired with the owner's real Girru (owner's go, 11 November)
+
+The owner said yes to pairing the simulator with the Girru desktop app running
+on this Mac (main checkout, `computers/simplify` at `e4378818`, which contains
+`phone/app` up to `804678dd`). The QR came from the phone button next to the
+owner's name ("Reaches this computer anywhere"); both screens showed 031 265
+(`r2-20`) and **the owner pressed Allow himself**. Nothing was sent in his
+chats.
+
+- **The chat page shows the owner's data but the messages are invisible**
+  (`r2-21`). They are in the page (for example the user's "Run git status
+  --short …" and the agent's "The model did not answer"), but on the 402 pt
+  screen `main.page-area` is 180 px wide, `.chat-thread` 96 px wide and
+  **0 px high**, and `.chat-column` 0 px wide; the side panel (Details:
+  "22.5k tokens", Main Agent · Claude Code, memory) takes the rest. Same root as
+  finding 2, but with real chats the conversation cannot be read at all.
+- A second refused request on the chat page: **"Could not finish this. Try
+  again. Reload specialties"** (`core-ui/src/SpecialtyLibrary.tsx:224`; it reads
+  `/api/specialty-templates`, which is not on the phone's list). The meeting
+  error (finding 3) shows here too.
+- The app's own screens show the real data correctly (`r2-22` to `r2-24`):
+  Tasks (next scheduled "Agent review, every day at 03:00"), Approvals (empty
+  state), Team (Main Agent, Ash, Cameron, Noel, Remy, Wren, with Support /
+  Marketing / Sales chips).
+
+**Owner's wish for the pairing screen (for the main computer):** a code to type
+under the QR, for a phone without a camera. Today the QR holds a 368-character
+`girru://pair` link, so this needs the typed-code proposal in
+`PHONE_FEATURES.md` §5 (protocol change, owner's OK first). It is not the
+6-digit check code, which only confirms the phone.
