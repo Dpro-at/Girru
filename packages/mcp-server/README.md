@@ -36,6 +36,7 @@ The public definitions in `src/tools.ts` (and domain modules) and `publicToolCat
 | `workspace_tasks` | Project task files | `list`, `get`, `activity`, `continue`, `sort`, `people`, `checklist`, `schedule` |
 | `workspace_runs` | Runs | `list`, `get`, `schedules`, `schedule_runs`, `schedule_task`, `stop`, `retry` |
 | `workspace_footer` | Footer sections | `read`, `set` |
+| `run_command` | Run a command in a project | See the tool input schema |
 | `account_settings` | Account security and updates | `two_step`, `devices`, `sign_out_device`, `updates`, `check_updates` |
 | `workspace_backups` | Backups | `status`, `back_up_now` |
 | `skill_library` | Skill library | `versions`, `list`, `read`, `agent`, `catalogue`, `found`, `look`, `look_status`, `preview`, `add` |

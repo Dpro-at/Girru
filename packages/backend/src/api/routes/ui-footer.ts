@@ -76,6 +76,34 @@ export async function agentCommandsRoutes(fastify: FastifyInstance) {
   });
 }
 
+/** CP15 (MCP): a coding app connected to Girru runs a command in one of the owner's projects, with the same rules as
+ *  in a chat: off unless the owner's switch is on; known read and sync commands run at once; any other command becomes
+ *  a Run request in Approvals and runs only after the owner presses Run there. */
+export async function agentCommandRunRoutes(fastify: FastifyInstance) {
+  fastify.post<{ Body: unknown }>('/api/commands/run', async (request, reply) => {
+    const actor = actorOrReply(reply, actorOf(request), requireAccount); if (!actor) return reply;
+    if (!actor.userId || actor.role !== 'owner') return reply.code(403).send({ error: 'Only the owner can run commands', code: 'forbidden' });
+    const body = request.body as Record<string, unknown> | null;
+    const keys = body && typeof body === 'object' && !Array.isArray(body) ? Object.keys(body) : null;
+    if (!keys || keys.some(k => !['projectId', 'command', 'timeout'].includes(k)) || typeof body!.projectId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(body!.projectId) || typeof body!.command !== 'string')
+      return reply.code(400).send({ error: 'Send projectId and command (and an optional timeout in milliseconds).', code: 'invalid' });
+    const { findProject } = await import('../../repositories/chat-conversations.js');
+    const folder = (await findProject(actor.userId, body!.projectId))?.folder;
+    if (!folder) return reply.code(404).send({ error: 'That project has no folder on this computer.', code: 'no_project_folder' });
+    const { runCommandTool, runCommandOwnerTool } = await import('../../tools/core/run-command.js');
+    const params = { command: body!.command, ...(body!.timeout !== undefined ? { timeout: body!.timeout } : {}) };
+    // The command is asked on behalf of the main agent (the switch gave it the command tools), so its Run in Approvals has an agent with the grant.
+    const { q } = await import('../../repositories/sql-steps.js');
+    const main = await q.one<{ id: string }>('SELECT id FROM agents_config ORDER BY is_primary DESC, created_at ASC LIMIT 1');
+    const context = { userId: actor.userId, accessOwnerId: actor.userId, workspaceDir: folder, fileReadRoot: folder, ...(main ? { agentId: main.id } : {}) } as any;
+    const ran = await runCommandTool.execute(params, context);
+    if (ran.error !== 'owner_run_required') return { ran: ran.error === undefined || ran.error === 'nonzero_exit', code: ran.error ?? null, output: (ran.content ?? []).map(c => c.text ?? '').join('\n').slice(0, 64 * 1024) };
+    const { requestApproval } = await import('../../tools/approvals.js');
+    const waiting = await requestApproval(runCommandOwnerTool, params, context, 'other');
+    return { ran: false, code: 'waiting_for_run', approvalId: (waiting.details as { approvalId?: string } | undefined)?.approvalId ?? null, output: 'This command waits for the owner: it shows in Approvals with a Run button.' };
+  });
+}
+
 export async function uiFooterRoutes(fastify: FastifyInstance) {
   fastify.get('/api/me/footer', async (request, reply) => {
     const actor = actorOrReply(reply, actorOf(request), requireAccount);

@@ -129,7 +129,7 @@ import { agentGrantsRoutes } from './routes/agent-grants.js';
 import { agentPermissionsRoutes } from './routes/agent-permissions.js'; // CORE-PERMS-01
 import { taskBoardRoutes } from './routes/task-board.js'; // BOARD-01
 import { terminalRoutes } from './routes/terminal.js';
-import { uiFooterRoutes, uiThemeRoutes, agentCommandsRoutes } from './routes/ui-footer.js';
+import { uiFooterRoutes, uiThemeRoutes, agentCommandsRoutes, agentCommandRunRoutes } from './routes/ui-footer.js';
 import { computerLookRoutes } from './routes/computer-look.js';
 import { uiAgentsChartRoutes } from './routes/ui-agents-chart.js';
 import { agentPersonalityRoutes } from './routes/agent-personality.js';
@@ -502,6 +502,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await fastify.register(taskBoardRoutes); // BOARD-01: company task board
   await fastify.register(uiFooterRoutes); // SH3: footer choices per person
   await fastify.register(agentCommandsRoutes); // CP15: owner switch for agents running commands
+  await fastify.register(agentCommandRunRoutes); // CP15: the same command tool for agents connected by MCP
   await fastify.register(uiThemeRoutes); // CP13: theme saved in the program so Same as can copy it
   await fastify.register(computerLookRoutes); // CP9c: computer pictures and names
   await fastify.register(uiAgentsChartRoutes); // Agents chart choices per person (AGENTS-ORG-01)
