@@ -363,16 +363,19 @@ under the QR, for a phone without a camera. Today the QR holds a 368-character
 `PHONE_FEATURES.md` §5 (protocol change, owner's OK first). It is not the
 6-digit check code, which only confirms the phone.
 
-## Test: phone chat fit (74c321ed)
+## Test: phone chat fit (e1d207fb)
 
-PR Dpro-at/Girru#197 "Fit the chat page to the phone", branch `phone/chat-fit`
-at `74c321ed`. The chat page comes from the computer, so the main Mac ran the
-MacBook's Girru from a local merge of `computers/simplify` and `phone/chat-fit`
-(same profile and data). The iPhone app is unchanged: same simulator build,
-still paired with the owner's real Girru. iPhone 18 Pro simulator, iOS 27.2,
-402 pt wide. Screenshots `result/fit-*.png`; sizes measured in the page.
+PR Dpro-at/Girru#197 "Fit the chat page to the phone", branch `phone/chat-fit`.
+First tested at `74c321ed`, then again at the new head `e1d207fb`
+(styles.css and a test). The chat page comes from the computer, so the main
+Mac ran the MacBook's Girru from a local merge of `computers/simplify` and
+`phone/chat-fit` (`515a767e`, same profile and data), rebuilt core-ui and
+restarted it; the app was reopened so the page loaded the new build. The
+iPhone app is unchanged: same simulator build, still paired with the owner's
+real Girru. iPhone 18 Pro simulator, iOS 27.2, 402 pt wide. Screenshots
+`result/fit-*.png` are all from `e1d207fb`; sizes were measured in the page.
 
-**Fixed (checked on the owner's real chats):**
+**Works (checked on the owner's real chats):**
 
 - The page is exactly 402 px wide; the conversation is full width
   (`.chat-thread` 402×574) and the messages are readable (`fit-01`).
@@ -381,16 +384,18 @@ still paired with the owner's real Girru. iPhone 18 Pro simulator, iOS 27.2,
 - The left drawer (chat list) is closed at start, opens over a dimmed chat
   with the owner's projects and chats, and closes on a tap outside (`fit-02`).
   The owner: "the left side bar is good".
+- New in `e1d207fb`: the composer is full width (386 of 402 px, textarea
+  362 px; it was 220 px at `74c321ed`).
 - With the keyboard up nothing slides sideways (scroll width 402, scroll 0);
   the composer sits above the keyboard with Send visible (`fit-07`).
-- Back from the terminal page returns to the same chat (10 messages, full
-  width, `fit-06`).
 - The meetings and specialties errors are gone (the only alerts left are the
   chat's own "The model did not answer" messages).
-- The terminal opens as its own page after Face ID ("Open the terminal" in
-  the system log).
+- The terminal is its own page after Face ID ("Open the terminal" in the
+  system log) and now starts on the restarted Girru: `echo hi; date` gives the
+  real output (`fit-05`). Back returns to the same chat (10 messages, full
+  width, `fit-06`).
 
-**Findings:**
+**Findings (still open at `e1d207fb`):**
 
 1. **The right drawer cannot be used or scrolled** (`fit-04`; the owner saw it
    too). `.chat-details` is `position: fixed; z-index: 12`, while
@@ -400,19 +405,17 @@ still paired with the owner's real Girru. iPhone 18 Pro simulator, iOS 27.2,
    `overflow-y: auto`) never scrolls. The drawer must sit above the scrim.
 2. **Text sizes are mixed and mostly desktop-small** (the owner: "some things
    small, some big"): message text 13.5 px, code 12.15 px, the task card in the
-   chat 12–12.5 px with details at 10.4 px, while the composer writes at 16 px.
-   Phone body text should be about 16–17 px.
-3. **The composer is narrow:** 220 px of 402 (textarea 196 px). The column
-   also keeps 48 px margins on both sides (306 px), and assistant text starts
-   at x 88, so a reply line is only 266 px wide. The owner: "the chat box is
-   very small".
-4. **The terminal does not start on this Girru:** after Face ID the page shows
-   "The terminal could not start", and "Start again" leaves an empty screen
-   (no prompt). Probably the terminal is not switched on in the Girru the main
-   Mac restarted (`AGENT_TERMINAL=true`); please check before judging the page.
-5. When Face ID for the terminal is cancelled, the page still switches to the
-   terminal page with "The terminal could not start" (`fit-03`). No shell
-   opens, but after a cancel it should stay in the chat.
+   chat 12–12.5 px with details at 10.4 px, meta lines 12.5 px, while the
+   composer writes at 16 px. Phone body text should be about 16–17 px.
+3. **The conversation keeps desktop margins:** the column is 306 px with 48 px
+   on both sides, and assistant text starts at x 88, so a reply line is only
+   266 px wide.
+4. **^C on the key row still does not stop `sleep 30`** (round 2 finding 1;
+   not part of this PR).
+5. Seen at `74c321ed`, not retested: when Face ID for the terminal is
+   cancelled, the page still switches to the terminal page with "The terminal
+   could not start". No shell opens, but after a cancel it should stay in the
+   chat.
 
 **Not tested:** dark mode of the new layout, sending a message (not to start
-the owner's agents), the terminal key row (needs a working terminal).
+the owner's agents).
