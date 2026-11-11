@@ -490,3 +490,72 @@ Two small things on the way:
 
 **Still open:** the terminal key row (^C) was not part of this change and
 still does not stop a command (see the `e1d207fb` section).
+
+## Test: phone settings (696287fd)
+
+Boards P33–P39 (approved by the owner). Code: `origin/phone/settings` at
+`696287fd` (on `main` `76aa89e8`; `638f5a23` computer side `settings.read` /
+`settings.change`, `696287fd` iPhone `App/Screens/SettingsScreens.swift` and
+the drawer gear). The MacBook's test Girru runs a local merge of it
+(`5e7e562d`, same profile and data). iPhone 18 Pro simulator, iOS 27.2,
+paired with the owner's real Girru. Screenshots `result/set-*.png`. Nothing
+was changed in the owner's settings: every change was cancelled.
+
+**Checks:**
+
+| Check | Result |
+|---|---|
+| backend `test/phone-*.test.mjs` (test worktree) | **48 pass**, 0 fail (expected 48) |
+| iPhone build of `phone/settings` | **failed**, one error; after the fix **BUILD SUCCEEDED** |
+| `swift run CoreChecks` | **375 passed, 0 failed** |
+
+**Build fix (one commit, on a local branch `phone/settings-build-fix` on top
+of `696287fd`, not pushed):** `4a2cc525` "Label the Team screen title so the
+iPhone app compiles". `TeamScreen.swift:16` called `ScreenTitle("Team") { … }`;
+with a trailing view `ScreenTitle` takes `text:` (as `TasksScreen` does), so it
+is now `ScreenTitle(text: "Team") { … }`.
+
+**Works:**
+
+- The chat drawer has "Settings" at the bottom; it opens the native Settings
+  sheet (`set-01`): This phone (the computer, "Ask Face ID again · After 1
+  min") and Your computer (Account and general, Models and replies,
+  Permissions 🔒, Approval rules, Computers, Phones 🔒).
+- This phone (`set-02`, `set-03`): Anywhere ✓, "Only on this Wi-Fi" marked
+  "Coming in a later version"; Face ID after leaving the app (Right away /
+  15 s / 30 s / 1 min, 1 min chosen); two notification switches; "Forget this
+  computer…" in red with a lock (not pressed).
+- Account (`set-04`): two-step sign-in Off, one signed-in session with Sign
+  out (not pressed), appearance and language.
+- Models and replies (`set-05`): Main Agent answers with "Claude Code ·
+  existing account" ✓ (left as is), local models listed.
+- Permissions (`set-06`): per agent, Off / Ask / Allow for browser, internet,
+  messages, delete, install, money. A change asks Face ID ("Change what Main
+  Agent may do"); cancelled, the value stays (`set-07`). Allow on a risky one
+  (Delete things) first asks "Allow without asking you?" before Face ID;
+  Cancel leaves it on Ask with no Face ID asked (`set-08`).
+- Phones (`set-11`): "iPhone 18 Pro · This phone".
+- Dark mode of the sheet (`set-12`).
+
+**Findings:**
+
+1. **Approval rules shows "Something went wrong on your computer. Try
+   again."** every time (`set-09`). `settings.ts` reads
+   `GET /api/reviewer-policies`, which calls
+   `reviewerRequestIdentity(request, true)`; the phone's owner request
+   probably does not pass it, so `get()` throws `unavailable`.
+2. **Computers shows "Nothing here yet"** (`set-10`), while the owner's Girru
+   lists three computers (MacBook Pro, Mac Mini, Alarade). `settings.ts`
+   takes `configuration.membership.devices`; the `/api/computers` answer
+   carries the list at its top level (`devices`, from the coordinator's
+   `view()`), so the phone gets an empty list.
+3. **Account lists the signed-in session as "Unknown device"**: the owner
+   cannot tell which device a Sign out would end.
+4. After the new app was installed, the chat page stayed blank
+   (`about:blank`) and did not retry, also after switching tabs; the relay
+   connection had dropped once at that moment. Tasks worked. A restart of the
+   app loaded it. The page should retry when the session comes back.
+5. Small: the big title of the computer page is cut ("Mohameds-MacBook-…").
+
+**Not tested on purpose:** actually changing a setting, Forget this computer
+and Sign out (they change the owner's real setup; each needs his OK).
