@@ -1,13 +1,14 @@
 /**
- * CP15 (Mohamed, 2026-11-10): agents run commands like a person at a terminal, in the chat's
- * project folder, for every engine (Claude Code, Codex, Gemini, API and local models).
+ * CP15 (Mohamed, 2026-11-10): agents run commands in the chat's project folder, for every engine
+ * (Claude Code, Codex, Gemini, API and local models).
  *
  *  - Off until the owner turns on Settings › Permissions › "Agents can run commands on this computer".
- *  - run_command runs ordinary commands at once; the chat shows only the agent's final answer.
- *  - A risky command (deleting, pushing, force, sudo, anything outside the project folder) is refused
- *    by run_command and must go through run_command_owner, which waits for the owner's Run (approval card).
- *  - The child gets a minimal environment (no server secrets) and never the server's data folder.
- *  - Sign-ins and keys are never typed by the agent: the environment carries no secrets.
+ *  - run_command runs only a short list of known read-and-sync commands (git status/log/diff/pull…, ls, cat,
+ *    grep…), started directly without a shell, with paths inside the project folder and git hooks turned off.
+ *    Security review: a list of blocked words can always be got around, so the boundary is this allowlist.
+ *  - Everything else (builds, tests, pipes, deleting, pushing, anything outside the folder) goes through
+ *    run_command_owner, which shows the exact command and runs it only after the owner presses Run.
+ *  - The child gets a minimal environment (no server secrets) and never the server's own folder.
  */
 import {spawn} from 'node:child_process';
 import path from 'node:path';
@@ -26,38 +27,58 @@ export async function agentCommandsOn(userId: string | undefined | null): Promis
   try { return (await getPref(userId, AGENT_COMMANDS_PREF)) === true; } catch { return false; }
 }
 
-const RISKY_WORDS: RegExp[] = [
-  /(^|[\s;&|(])(rm|rmdir|del|erase|rd|unlink|shred|truncate|mkfs|format|diskpart|dd)(\s|$)/i,
-  /Remove-Item|Clear-Content|Format-Volume/i,
-  /(^|[\s;&|(])(sudo|su|doas|runas|chmod|chown|chgrp|icacls|takeown|reg|setx|launchctl|systemctl|crontab|schtasks)(\s|$)/i,
-  /\bgit\s+(push|clean|reset\s+--hard|rebase|filter-branch|filter-repo|update-ref|gc\s+--prune|reflog\s+expire|branch\s+-D|tag\s+-d|stash\s+(drop|clear))\b/i,
-  /\bgit\s+checkout\s+--\s/i, /\s--force(\s|$|=)|\s-f(\s|$)/,
-  /\b(curl|wget|iwr|Invoke-WebRequest|Invoke-RestMethod)\b[^|]*\|\s*(sh|bash|zsh|pwsh|powershell|iex|python|node)\b/i,
-  /\b(npm|pnpm|yarn)\s+publish\b|\bgh\s+(pr\s+merge|release|repo\s+delete)\b/i,
-  /\b(shutdown|reboot|halt|poweroff|kill|killall|pkill|taskkill)\b/i,
-  // Review fix: deleting through other tools, and code given inline to an interpreter or a nested shell.
-  /\s-delete\b|-exec\s|\bxargs\b|\bmv\s|\bMove-Item\b/i,
-  /\b(sh|bash|zsh|dash|fish|pwsh|powershell|cmd)(\.exe)?\s+(-[a-z]*c|\/c|-command|-encodedcommand)\b/i,
-  /\b(python3?|node|deno|bun|perl|ruby|php|osascript)\s+(-[a-z]*[ce]\b|--eval|--exec)/i,
-  /\beval\b|\bsource\s|(^|[\s;&|])\.\s+\S|`|\$\(/,
-  // Review fix: code fed to a shell or interpreter through a pipe, a heredoc or a script file, and opening other apps.
-  /\|\s*(sudo\s+)?(sh|bash|zsh|dash|fish|python3?|node|deno|bun|perl|ruby|php|pwsh|powershell|cmd|osascript)\b/i, /<</,
-  /(^|[\s;&|(])(sh|bash|zsh|dash|fish)\s+(?!-)\S/i, /\b(python3?|node|perl|ruby|php)\s+-(\s|$)/i, /\b(sh|bash|zsh)\s+-s\b/i,
-  /(^|[\s;&|(])(open|osascript|automator|start|explorer)(\.exe)?(\s|$)/i,
-];
-
-/** True when a command needs the owner's Run: it may delete, push, act as another user, or reach outside the project folder. */
-export function riskyCommand(command: string, cwd: string): boolean {
-  if (RISKY_WORDS.some(r => r.test(command))) return true;
-  // Paths outside the project folder (absolute, home or parent paths).
-  for (const raw of command.match(/(?:^|\s|=|["'])((?:[A-Za-z]:[\\/]|\\\\|\/|~[\\/]?|\.\.[\\/]?)[^\s"'|;&<>]*)/g) ?? []) {
-    const p = raw.replace(/^[\s="']+/, '');
-    if (p.startsWith('~') || p === '..' || /^\.\.[\\/]/.test(p)) return true;
-    const abs = path.resolve(p);
-    const rel = path.relative(cwd, abs);
-    if (rel.startsWith('..') || path.isAbsolute(rel)) return true;
+/** Splits a command into words with plain quotes; null when it uses any shell feature (pipes, redirects, $, `, ;, &…). */
+export function splitCommand(command: string): string[] | null {
+  const out: string[] = []; let cur = '', quote: string | null = null, has = false;
+  for (const ch of command) {
+    if (quote) { if (ch === quote) quote = null; else cur += ch; continue; }
+    if (ch === '"' || ch === "'") { quote = ch; has = true; continue; }
+    if (/\s/.test(ch)) { if (has || cur) out.push(cur); cur = ''; has = false; continue; }
+    if (/[|;&<>$`(){}\n\r]/.test(ch)) return null;
+    cur += ch; has = true;
   }
-  return /(^|[^<])>\s*\/dev\/(sd|disk|nvme)/.test(command);
+  if (quote) return null;
+  if (has || cur) out.push(cur);
+  return out.length ? out : null;
+}
+
+const SIMPLE = new Set(['ls', 'pwd', 'cat', 'head', 'tail', 'wc', 'grep', 'rg', 'echo', 'date', 'whoami']);
+const VERSION_ONLY = new Set(['node', 'npm', 'pnpm', 'yarn', 'python', 'python3', 'go', 'cargo', 'java', 'dotnet', 'git']);
+const GIT_READ = new Set(['status', 'log', 'diff', 'show', 'rev-parse', 'ls-files', 'blame', 'describe', 'shortlog', 'grep', 'fetch', 'pull', 'ls-remote', 'remote', 'branch', 'tag', 'stash']);
+const GIT_BAD_FLAG = /^(--(upload-pack|receive-pack|exec|config-env|git-dir|work-tree|output|ext-diff|textconv|open-files-in-pager|rebase|recurse-submodules|pre|pre-glob|namespace)\b|-O|-c$|-u$|-C$)/;
+
+function insideFolder(arg: string, cwd: string): boolean {
+  const value = arg.startsWith('-') ? (arg.includes('=') ? arg.slice(arg.indexOf('=') + 1) : '') : arg;
+  if (!value) return true;
+  if (value.startsWith('~') || /^[A-Za-z]:/.test(value) && !path.isAbsolute(value)) return false;
+  if (!/[\\/]/.test(value) && value !== '..' && !path.isAbsolute(value)) return true;
+  const rel = path.relative(cwd, path.resolve(cwd, value));
+  return !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+/** The allowlist: the words to start without a shell, or null when the command needs the owner's Run. */
+export function allowedCommand(command: string, cwd: string): string[] | null {
+  const words = splitCommand(command);
+  if (!words) return null;
+  const [cmd, ...args] = words;
+  if (!args.every(a => insideFolder(a, cwd)) || args.some(a => a.includes('::') || /^ext:/i.test(a))) return null;
+  if (VERSION_ONLY.has(cmd) && args.length === 1 && ['--version', '-v', 'version'].includes(args[0])) return words;
+  if (SIMPLE.has(cmd)) return cmd === 'rg' && args.some(a => /^--pre/.test(a)) ? null : words;
+  if (cmd !== 'git' || !args.length || !GIT_READ.has(args[0])) return null;
+  const [sub, ...rest] = args;
+  if (rest.some(a => GIT_BAD_FLAG.test(a))) return null;
+  if (sub === 'remote' && !(rest.length === 0 || (rest.length === 1 && rest[0] === '-v'))) return null;
+  if (sub === 'branch' && !rest.every(a => ['-a', '-r', '-v', '-vv', '--show-current', '--list'].includes(a))) return null;
+  if (sub === 'tag' && !rest.every(a => a === '-l' || a === '--list')) return null;
+  if (sub === 'stash' && !(rest.length === 1 && rest[0] === 'list')) return null;
+  // Hooks, file monitors and external diff programs never run from an agent's git command.
+  const noDiffTools = ['diff', 'show', 'log'].includes(sub) ? ['--no-ext-diff', '--no-textconv'] : [];
+  return ['git', '-c', `core.hooksPath=${os.devNull}`, '-c', 'core.fsmonitor=false', sub, ...noDiffTools, ...rest];
+}
+
+/** True when the command needs the owner's Run (not on the allowlist). */
+export function riskyCommand(command: string, cwd: string): boolean {
+  return allowedCommand(command, cwd) === null;
 }
 
 /** Review fix: only the chat's own project folder; never the server's folder, its parents, the home folder or the disk root. */
@@ -73,21 +94,6 @@ function projectCwd(context: ToolExecutionContext | undefined): string | null {
   } catch { return null; }
 }
 
-/** Review fix (macOS): commands run without the owner's Run may write only inside the project folder and temp folders. */
-function sandboxed(command: string, cwd: string): {file: string; args: string[]} | null {
-  if (process.platform !== 'darwin') return null;
-  const q = (p: string) => JSON.stringify(p);
-  const home = os.homedir();
-  // Tool caches (npm, pip, builds) may be written too; nothing else outside the project.
-  const dirs = [cwd, realpathSync(os.tmpdir()), '/private/tmp', '/private/var/folders', '/dev', path.join(home, '.npm'), path.join(home, '.cache'), path.join(home, 'Library/Caches')];
-  // Review fixes: git hooks and config are never written (they would run later as the owner), and no other app is
-  // opened or scripted (Launch Services, Apple Events), so the confined command cannot hand work to an unconfined one.
-  const profile = `(version 1)(allow default)(deny file-write*)(allow file-write* ${dirs.map(d => `(subpath ${q(d)})`).join(' ')})`
-    + `(deny file-write* (subpath ${q(path.join(cwd, '.git', 'hooks'))}) (literal ${q(path.join(cwd, '.git', 'config'))}))`
-    + `(deny appleevent-send)(deny mach-lookup (global-name "com.apple.coreservices.launchservicesd") (global-name-regex #"^com\\.apple\\.lsd\\."))`;
-  return {file: '/usr/bin/sandbox-exec', args: ['-p', profile, '/bin/sh', '-c', command]};
-}
-
 function readParams(params: unknown): {command: string; timeout: number} | null {
   if (!params || typeof params !== 'object' || Array.isArray(params)) return null;
   const p = params as Record<string, unknown>;
@@ -100,19 +106,23 @@ function readParams(params: unknown): {command: string; timeout: number} | null 
 
 const text = (s: string, error?: string): ToolResult => ({content: [{type: 'text', text: s}], ...(error ? {error} : {})});
 
-export function runShell(command: string, cwd: string, timeout: number, confined: boolean): Promise<{code: number | null; out: string; timedOut: boolean; ms: number}> {
+/** Runs words directly (no shell) or, for a command the owner approved, a whole line through the system shell. */
+export function runShell(command: string | string[], cwd: string, timeout: number): Promise<{code: number | null; out: string; timedOut: boolean; ms: number}> {
   const started = Date.now();
   return new Promise(resolve => {
     const win = process.platform === 'win32';
-    const box = confined ? sandboxed(command, cwd) : null;
-    const file = box?.file ?? (win ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh');
-    const args = box?.args ?? (win ? ['/d', '/s', '/c', command] : ['-c', command]);
-    const child = spawn(file, args, {cwd, env: minimalChildEnv(), windowsHide: true, windowsVerbatimArguments: win, detached: !win});
+    const direct = Array.isArray(command);
+    const file = direct ? command[0] : (win ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh');
+    const args = direct ? command.slice(1) : (win ? ['/d', '/s', '/c', command] : ['-c', command]);
+    const env = {...minimalChildEnv(), GIT_TERMINAL_PROMPT: '0'};
+    let child;
+    try { child = spawn(file, args, {cwd, env, windowsHide: true, windowsVerbatimArguments: win && !direct, detached: !win, shell: false}); }
+    catch (e) { resolve({code: null, out: String((e as Error).message), timedOut: false, ms: 0}); return; }
     let out = '', timedOut = false, done = false;
     const finish = (code: number | null, extra = '') => { if (done) return; done = true; clearTimeout(timer); resolve({code, out: out + extra, timedOut, ms: Date.now() - started}); };
     const add = (b: Buffer) => { if (out.length < MAX_OUTPUT) out += b.toString('utf8').slice(0, MAX_OUTPUT - out.length); };
-    child.stdout.on('data', add); child.stderr.on('data', add);
-    // Review fix: the timeout stops the whole process group (children too), and a child left holding the output cannot keep the call open.
+    child.stdout?.on('data', add); child.stderr?.on('data', add);
+    // The timeout stops the whole process group (children too), and a child left holding the output cannot keep the call open.
     const killAll = () => {
       try { if (win && child.pid) spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {windowsHide: true}); else if (child.pid) process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* gone */ } }
     };
@@ -129,17 +139,18 @@ async function execute(params: unknown, context: ToolExecutionContext | undefine
   if (!plan) return text('Give one command as text (and an optional timeout in milliseconds).', 'invalid_command');
   const cwd = projectCwd(context);
   if (!cwd) return text('This chat has no project folder, so commands cannot run here. Choose a folder for the chat first.', 'no_project_folder');
-  if (!ownerApproved && riskyCommand(plan.command, cwd)) return text(`This command needs the owner: call run_command_owner with the same command, and Girru shows it with a Run button.\n${plan.command}`, 'owner_run_required');
-  const r = await runShell(plan.command, cwd, plan.timeout, !ownerApproved);
+  const words = ownerApproved ? null : allowedCommand(plan.command, cwd);
+  if (!ownerApproved && !words) return text(`This command needs the owner: call run_command_owner with the same command, and Girru shows it with a Run button.\n${plan.command}`, 'owner_run_required');
+  const r = await runShell(words ?? plan.command, cwd, plan.timeout);
   const head = r.timedOut ? `Stopped after ${Math.round(plan.timeout / 1000)} s.` : `Exit code ${r.code ?? 'unknown'} · ${r.ms} ms.`;
   return text(`${head}\n${r.out || '(no output)'}`, r.timedOut ? 'timeout' : r.code === 0 ? undefined : 'nonzero_exit');
 }
 
-const schema = {type: 'object', properties: {command: {type: 'string', description: 'One shell command, run in the chat’s project folder.'}, timeout: {type: 'number', description: 'Milliseconds, at most 120000. Default 60000.'}}, required: ['command'], additionalProperties: false} as const;
+const schema = {type: 'object', properties: {command: {type: 'string', description: 'One command, run in the chat’s project folder.'}, timeout: {type: 'number', description: 'Milliseconds, at most 120000. Default 60000.'}}, required: ['command'], additionalProperties: false} as const;
 
 export const runCommandTool: Tool = {
   name: 'run_command',
-  description: 'Run a shell command in this chat’s project folder (git, tests, builds, search, listing files…) and get its output. Deleting, pushing, force options, sudo and paths outside the project are refused here: use run_command_owner for those.',
+  description: 'Run a read or sync command in this chat’s project folder and get its output, at once: git status/log/diff/show/branch/fetch/pull/rev-parse/ls-files/grep, ls, cat, head, tail, wc, grep, rg, and --version checks. No pipes or shell features. Anything else (builds, tests, installs, deleting, pushing, pipes, paths outside the folder) goes through run_command_owner.',
   input_schema: schema as any,
   async execute(params, context) { return execute(params, context, false); },
 };
@@ -147,7 +158,7 @@ export const runCommandTool: Tool = {
 export const runCommandOwnerTool: Tool = {
   name: 'run_command_owner',
   requiresApproval: true,
-  description: 'Ask the owner to run a risky command (delete, push, force, sudo, outside the project folder) in this chat’s project folder. Girru shows the exact command with a Run button; it runs only after the owner presses it.',
+  description: 'Ask the owner to run any other command (builds, tests, installs, pipes, delete, push, outside the folder) in this chat’s project folder. Girru shows the exact command with a Run button; it runs only after the owner presses it.',
   input_schema: schema as any,
   async execute(params, context) { return execute(params, context, true); },
 };
