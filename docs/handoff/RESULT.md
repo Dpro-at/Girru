@@ -202,3 +202,132 @@ Test 3 on the real desktop app.
   `-GirruPairLink`. A code lasts 2 minutes, so launch straight away.
 - Inspect the phone's web view with `ios_webkit_debug_proxy` on the
   simulator's `webinspectord_sim.socket` (the view is inspectable in debug).
+
+## Test round 2 (11 November 2026)
+
+Tested this branch at `ca24980e` (it contains `phone/app` up to `804678dd`
+"Hand test round 2 to the build Mac") on the build Mac: macOS 26.6.2,
+Xcode 27.2, iPhone 18 Pro simulator with iOS 27.2, Node 24.22.2. Testing
+only: **no code changed, no build fix needed.** Screenshots are
+`result/r2-*.png`.
+
+Installs: `npm ci` in `packages/backend` and `packages/core-ui`. The root and
+`packages/relay` have no `package-lock.json`, so `npm ci` refuses there
+(`EUSAGE`); the relay tests ran with the old workaround
+(`npm install --no-save tsx@^4.21.0` in `packages/relay`).
+
+### Test 1: shared checks
+
+| Check | Result | Expected (NEXT.md) |
+|---|---|---|
+| relay | **29 pass** | 29 |
+| backend `test/phone-*.test.mjs` | **43 pass** | 42 |
+| core-ui `tests/phone-shell.test.cjs` | **3 pass** | 3 |
+| `swift run CoreChecks` | **368 passed, 0 failed** | 359 |
+
+### Test 2: iPhone build
+
+`xcodegen generate` and `xcodebuild -scheme Girru -sdk iphonesimulator`:
+**BUILD SUCCEEDED**, no fixes. Two warnings only (`AppModel.swift:240`
+`try` without a throwing call; `DeviceIdentity.swift:67` "will never be
+executed", the simulator-only branch). Android was not part of this round.
+
+### Test 3: the simulator through `wss://relay.girru.net/v1`
+
+Ran against `pair-harness.mjs --manual` with `AGENT_TERMINAL=true` (throwaway
+database, stubbed model that answers "Hello from the computer"), with a core-ui
+build from `node scripts/build.cjs --candidate --live-entry`. **Not** against
+the owner's real desktop app: that app runs on this Mac against the main
+checkout and was not to be touched. So the chat list, agents and messages are
+test data, not the owner's.
+
+Pairing: the same check code on both screens (148 152, `r2-01`), Allow, then the
+bottom bar with Chat / Tasks / Approvals / Team.
+
+**Findings (most important first):**
+
+1. **The key row does not send its keys.** ^C, Ctrl and Tab do nothing: ^C
+   does not stop `sleep 30` (the owner pressed it too, same result), Ctrl then
+   `l` types a plain `l`, Tab does not complete `ech`. On the computer each tap
+   on the key row arrives as a `POST …/resize` (31 resize rows in the audit
+   log) and never as `…/input`. Typing from the keyboard does arrive.
+2. **The chat page is the desktop layout squeezed into 402 pt** (`r2-02`,
+   `r2-04`, `r2-09`):
+   - the top bar's icons sit on top of each other and over "Commands";
+   - the Details / Changes / Files panel opens in the narrow screen and
+     covers the chat;
+   - with the keyboard up the whole page slides sideways (the terminal's text
+     is cut on the left, ⋯ off the right edge) and the send button is hidden
+     under the terminal pane;
+   - the desktop voice row ("Choose an engine in Voice settings") shows;
+   - the terminal opens docked under the chat and takes a third of the
+     screen (`r2-03`), not full size as boards P24–P26 show.
+   - After Back from the full-size terminal the chat page is empty: only
+     "You … Message" (`r2-09`, `r2-17`).
+
+   **The owner's direction (11 November, for a design board before code):**
+   the same chat page, with the chat list as a drawer from the left and the
+   details as a drawer from the right, both closed by default; the meeting bar
+   small at the top; the conversation alone in the middle; the terminal on its
+   own full page (opened from its button after Face ID, Back returns to chat),
+   never docked inside the chat.
+3. **"The meeting could not be updated. Try again."** shows above every chat
+   (`r2-05`). The page's Meetings part asks for `/api/meetings`
+   (`core-ui/src/Meetings.tsx:10`), which is not on the phone's list in
+   `ui-bridge.ts` (`phoneMayCall`). Either the page must not ask on the phone
+   or the list needs it (owner's call).
+4. **The terminal loses its connection after about two minutes**
+   ("Lost the connection to the terminal. Start again", `r2-18`). The audit log
+   shows the stream re-attached at 09:18:07 and 09:18:57, then never again;
+   at 09:20 the page showed the error. The first command (`echo hi; date`)
+   now works (round 1 finding 5 is fixed for the first minutes).
+5. **The chat page sometimes paints nothing** until the app re-renders: after
+   one tap in the page the screen stayed empty while the page's own DOM had
+   the composer and terminal laid out; after a lock and unlock it painted.
+6. The keyboard closed by itself once while typing in the terminal
+   (`sleep ` arrived, `30` and Return were lost).
+7. Approvals, Deny and Approve: with a pending request added by hand to the
+   test database, **both buttons did nothing and showed no message** (no Face
+   ID, the row stayed pending). My row had no `params_hash`, so this may be my
+   test data, not the app; it needs a real request from an agent tool call.
+   If a real one also fails, the missing error notice is a finding.
+8. The simulator's screen froze twice right after the terminal's Face ID
+   sheet closed (clock stopped, taps ignored, the app still running
+   underneath); pressing the side button twice brought it back. Probably the
+   simulator, but watch for it on a real iPhone.
+
+**Fixed since round 1 (checked):**
+
+- Round 1 finding 1: the chat page loads, signed in, not blank; a message sent
+  from the page reached the computer and the reply came back into the page
+  (`r2-06`; `chat_messages` has both). Word-by-word streaming cannot be
+  judged here: the harness's stubbed model answers in one piece.
+- Finding 4: the terminal started after `npm ci` with no `chmod` by hand
+  ("zsh on your computer").
+- Finding 6: after more than 60 seconds away the app asks Face ID and shows
+  nothing behind it, and the keyboard bar is not over the lock (`r2-19`).
+
+**Worked as designed:**
+
+- The terminal asks Face ID ("Open the terminal", in the system log) before
+  it opens, from Tasks and from the chat page; the key row (Paste, ^C, ^D,
+  Esc, Tab, Ctrl, arrows) shows above a lowercase keyboard (`r2-07`).
+- Tasks: Now / Scheduled / Done, empty state, terminal and plus buttons (`r2-08`).
+- Approvals: empty state with "See what the team is doing" (`r2-10`); a
+  pending request opens with Deny and Approve, the tab shows the badge 1 (`r2-12`).
+- Team: main agent first marked "Needs you", search and chips (`r2-11`).
+- Dark mode on Approvals, Team, Tasks and the chat page (`r2-14` to `r2-17`).
+- The app asks Face ID again only after 60 seconds in the background (the
+  default `LockPolicy` delay); a shorter trip opens without asking, by design.
+
+**Not tested this round:** the paste check, ⋯ menu of the terminal,
+autocorrect on `ls`, "Waiting for you" opening Approvals, a real approval
+decision, a cut-short approval, and the real desktop app with the owner's own
+data (needs the owner's go to pair with the Girru running on this Mac).
+
+**Tool note:** GET requests from the page are not logged anywhere, and the
+page keeps its own `fetch`, so a wrapper cannot see them. To read the page I
+used a small Python client for the simulator's `webinspectord_sim.socket`
+(no TCP port, unlike `ios_webkit_debug_proxy`, which listens on every
+interface). A request log in the harness (method, path, status of every
+`api.call`) would make the next round's "missing request" check exact.
