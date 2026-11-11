@@ -137,6 +137,15 @@ export function allowedCommand(command: string, cwd: string, remotes: (cwd: stri
   return ['git', '-c', `core.hooksPath=${os.devNull}`, '-c', 'core.fsmonitor=false', '-c', 'protocol.ext.allow=never', '-c', 'core.pager=cat', '-c', 'diff.external=', '-c', 'core.gitProxy=', '-c', 'pull.rebase=false', '-c', 'submodule.recurse=false', '-c', 'fetch.recurseSubmodules=false', '-c', 'diff.ignoreSubmodules=all', '-c', 'status.submoduleSummary=false', sub, ...noDiffTools, ...(sub === 'pull' ? ['--no-rebase', '--no-recurse-submodules'] : sub === 'fetch' ? ['--no-recurse-submodules'] : sub === 'status' || sub === 'diff' ? ['--ignore-submodules=all'] : []), ...gitArgs];
 }
 
+/** Security review: allowed commands that only read (no fetch, pull or ls-remote): these run even in "Ask me". */
+export function readOnlyCommand(command: string, cwd: string): boolean {
+  const words = allowedCommand(command, cwd);
+  if (!words) return false;
+  if (words[0] !== 'git') return true;
+  const sub = words.find((w, i) => i > 0 && words[i - 1] !== '-c' && w !== '-c');
+  return !['fetch', 'pull', 'ls-remote'].includes(sub ?? '');
+}
+
 /** True when the command needs the owner's Run (not on the allowlist). */
 export function riskyCommand(command: string, cwd: string): boolean {
   return allowedCommand(command, cwd) === null;

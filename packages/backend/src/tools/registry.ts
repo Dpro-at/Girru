@@ -1,4 +1,5 @@
 import {storedRunAllowsTool} from '../memory/encryption/stored-run-tool-policy.js';
+import { readOnlyCommand } from './core/run-command.js';
 import {computerSyncApplyTool} from '../devices/sync-tool.js';
 import {computerTaskAcceptTool} from '../devices/tool.js';
 import {consumeComputerTicket,bindComputerApproval} from '../devices/approval.js';
@@ -239,7 +240,8 @@ export class ToolsRegistry {
     // "Accept edits": Girru's own file edits run as the agent's rules say; anything else that changes something asks.
     // (For coding-app replies the owner's Accept edits also lets the app edit files in the chat's folders.)
     // CP15: run_command keeps to its own allowlist (read and sync commands); anything else is run_command_owner's Run card. So only "Plan first" holds it.
-    const ownRules = toolName === 'run_command' && chatMode !== 'plan';
+    // Security review: only commands that read run without the mode's OK; pull and fetch still ask in "Ask me".
+    const ownRules = toolName === 'run_command' && chatMode !== 'plan' && typeof params.command === 'string' && !!(this.context.fileReadRoot || this.context.workspaceDir) && readOnlyCommand(params.command, this.context.fileReadRoot || this.context.workspaceDir);
     if (!ownRules && (chatMode === 'ask' || chatMode === 'plan' || (chatMode === 'accept_edits' && !isFileEdit(tool))) && changesSomething(tool)) category = category ?? modeCategory ?? 'other';
     // CHAT-LIVE-01 (LW6): "Auto" changes the chat folder's real files only after the owner allows it (the mode text promises it).
     if (chatMode !== 'accept_edits' && chatFolderFile(tool, this.context)) category = category ?? modeCategory ?? 'other';

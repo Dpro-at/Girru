@@ -63,3 +63,10 @@ test('review fix: control characters from a command or its output never reach th
   const {plainText} = await import('../src/tools/core/run-command.ts');
   assert.equal(plainText('ok\x1b[2J\x9b31m\x07\rdone\r\nnext\tx'), 'ok[2J31mdone\nnext\tx');
 });
+
+test('review fix: only reading commands skip the chat mode\u2019s OK; pull and fetch still ask in Ask me', async () => {
+  const m = await import('../src/tools/core/run-command.ts');
+  const cwd = process.cwd();
+  for (const ok of ['git status --short', 'git log -1 --oneline', 'ls -la', 'cat README.md']) assert.equal(m.readOnlyCommand(ok, cwd), true, ok);
+  for (const no of ['git pull origin main', 'git fetch origin', 'git push', 'rm x']) assert.equal(m.readOnlyCommand(no, cwd), false, no);
+});
