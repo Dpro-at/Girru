@@ -119,7 +119,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
   const codeOwner=state.user?.role==='owner';
   useEffect(()=>{if(!codeOwner){setCodeHost(null,false);return;}setCodeHost(async(t,o)=>{const {top,bottom,right}=editorBounds();const result=await window.dproApp?.nabu?.open(t.folder,t.file,top,bottom,right,{...(t.line?{line:t.line}:{}),...(t.generated?{note:true}:{}),...(o.readOnly?{readOnly:true}:{})});if(result?.mode==='code'){setPage('code');return true;}return false;},nativeEditor);return()=>setCodeHost(null,false);},[codeOwner,nativeEditor]);
   useEffect(()=>{setCodeInstall(codeOwner&&codeMissing?()=>openCodeInStore():null);return()=>setCodeInstall(null);},[codeOwner,codeMissing]);
-  const appearance = useAppTheme();
+  const appearance = useAppTheme(client);
   const theme = appearance.theme;
   // The title-bar switch goes back to "system" when it lands on the system's own theme.
   const toggleTheme = () => { const next = theme === 'dark' ? 'light' : 'dark'; const system = window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; appearance.setPreference(next === system ? 'system' : next); };
@@ -285,7 +285,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
     <main id="content" className="page-area">
       {notice}
       <section className="page page-chat" aria-label="Chat" hidden={page !== 'chat' && page !== 'code'}>
-        {chat ? <ChatView embeddedCode={page==='code'} onOpenCode={nativeEditor&&owner?openProjectCode:undefined} active={page === 'chat'||page==='code'} titleSlot={titleSlot} onChooseContext={newChat} terminalRequest={terminalRequest} boardRequest={boardRequest} placeRequest={placeRequest} controller={chat} mode={mode} client={client} onAddConnector={() => setPage('mcp')} onSetUpModel={() => openSettings('replies')} onOpenApprovals={() => setPage('approvals')} onOpenAgent={id => { setAgentFocus(f => ({ id, n: (f?.n ?? 0) + 1 })); setPage('agents'); }} onOpenRules={user.role === 'owner' ? (agent, category) => { setApprovalsPlace(r => ({ place: 'perms', agent, category, n: (r?.n ?? 0) + 1 })); setPage('approvals'); } : undefined}
+        {chat ? <ChatView embeddedCode={page==='code'} onOpenCode={nativeEditor&&owner?openProjectCode:undefined} active={page === 'chat'||page==='code'} titleSlot={titleSlot} onChooseContext={newChat} terminalRequest={terminalRequest} boardRequest={boardRequest} placeRequest={placeRequest} controller={chat} mode={mode} client={client} onAddConnector={() => setPage('mcp')} onSetUpModel={() => openSettings('replies')} onOpenVoiceSettings={() => openSettings('voice')} onOpenApprovals={() => setPage('approvals')} onOpenAgent={id => { setAgentFocus(f => ({ id, n: (f?.n ?? 0) + 1 })); setPage('agents'); }} onOpenRules={user.role === 'owner' ? (agent, category) => { setApprovalsPlace(r => ({ place: 'perms', agent, category, n: (r?.n ?? 0) + 1 })); setPage('approvals'); } : undefined}
           onOpenCard={(boardId, cardId) => { setPage('board'); void board?.reveal(boardId, cardId); }}
           onOpenMemoryPage={() => setPage('memory')} onOpenMemory={(drawerId, memoryId) => { setMemoryFocus(f => ({ drawerId, memoryId, n: (f?.n ?? 0) + 1 })); setPage('memory'); }}/> : null}
       </section>

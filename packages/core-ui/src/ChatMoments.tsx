@@ -23,6 +23,8 @@ import { TASK_MAX, taskText } from './approvals-contract.js';
 
 export type Moments = {
   nativeCode?:boolean;
+  /** CP15: the chat's project folder, shown on a Run card for a command. */
+  folder?: string | null;
   client?: SessionClient; conversationId?: string | null; agentName?: (id?: string) => string;
   /** CH6: an agent's short description, whose sub-agent it is, and the step each delegated agent runs now (while a reply works). */
   agentAbout?: (id?: string) => string | undefined; subAgentOf?: (id?: string) => string | undefined; steps?: readonly { agentId: string; tool: string; at: string }[];
@@ -39,6 +41,18 @@ export type Moments = {
   onOpenChat?: (id: string) => void; onStopChat?: (id: string) => void; chatState?: (id: string) => { running: boolean; waiting: number; title?: string } | undefined;
 };
 export const MomentsContext = createContext<Moments>({});
+
+/** CP15: one plain line on what a command may do, shown on its Run card. */
+export function commandHint(command: string): string {
+  const c = command.toLowerCase();
+  if (/\b(rm|rmdir|del|erase|rd|remove-item|unlink)\b|-delete\b|git\s+clean\b/.test(c)) return 'Deletes files';
+  if (/git\s+push\b|\bpublish\b|gh\s+(pr|release)\b/.test(c)) return 'Sends to GitHub or a registry';
+  if (/git\s+(reset|rebase|checkout|restore)\b|--force\b/.test(c)) return 'Changes history or files';
+  if (/\b(npm|pnpm|yarn|pip3?|brew|cargo|apt|winget)\s+(i|install|add|update|upgrade)\b/.test(c)) return 'Installs software';
+  if (/\b(curl|wget|git\s+(pull|fe[t]ch|clone)|invoke-webrequest)\b/.test(c)) return 'Reaches the internet';
+  if (/\bsudo\b|\brunas\b/.test(c)) return 'Runs as administrator';
+  return '';
+}
 
 /** CH10 Steer now: what the owner said while the agent worked, and the step it was seen at. */
 export function SteerLine({ part }: { part: Extract<Part, { kind: 'steer' }> }) {
@@ -58,6 +72,7 @@ export function NoticeCard({ part }: { part: Extract<Part, { kind: 'notice' }> }
   if (part.code === 'choices') { const options = (part.text ?? '').split('\n').map(t => t.trim()).filter(Boolean).slice(0, 8);
     return options.length ? <div className="moment-choices" role="group" aria-label="Quick answers">{options.map(o => <button key={o} type="button" className="moment-choice" disabled={!m.onDraft} onClick={() => m.onDraft?.(o)}>{o}</button>)}</div> : null; }
   if (part.code === 'images_not_seen') return <p className="moment-line"><UiIcon name="image" size={12}/>{part.text ?? 'This model does not see images in this chat.'}</p>;
+  if (part.code === 'not_signed_in') return <p className="moment-line"><UiIcon name="alert" size={12}/>{part.text ?? 'The coding app is not signed in on this computer.'}</p>;
   if (part.code === 'plan_limit' && shown) return <p className="moment-line"><UiIcon name="pulse" size={12}/>Kept the model. It answers again when its plan allows.</p>;
   if (part.code === 'plan_limit') return <div className="moment-card" data-tone="needs" role="note">
     <p><UiIcon name="pulse" size={14}/>{part.text ?? 'The coding app hit its plan limit.'}</p>
@@ -88,7 +103,7 @@ export const DENY_UNDO_MS = 6000;
  * CH6 Change the task… (a waiting hand-off only): the owner rewrites the task in the long-text editor; the server makes a
  * new paramsHash over the edited text, so Allow once covers exactly it. `onTask` hears the task the card will allow. */
 export function ApprovalCard({ call, who, what, onTask }: { call: ToolCall; who?: string; what?: string; onTask?: (text: string, changed: boolean) => void }) {
-  const { nativeCode, client, conversationId, onOpenApprovals, onOpenRules, onDecided } = useContext(MomentsContext);
+  const { nativeCode, client, conversationId, onOpenApprovals, onOpenRules, onDecided, folder } = useContext(MomentsContext);
   const [state, setState] = useState<'waiting' | 'busy' | 'review' | 'saidNo' | 'allowed' | 'denied' | 'gone'>('waiting');
   const denyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const more = useMenu();
@@ -150,7 +165,8 @@ export function ApprovalCard({ call, who, what, onTask }: { call: ToolCall; who?
   const allowNow = () => { if (denyTimer.current) clearTimeout(denyTimer.current); denyTimer.current = null; setState('review'); if (detail?.verificationRequired) setVerify(true); else void allow(); };
   useEffect(() => () => { if (denyTimer.current) { clearTimeout(denyTimer.current); void client?.request({ method: 'POST', path: `/api/approvals/${id}/deny` } as never).catch(() => null); } }, []);
   if (!client || !id) return null;
-  const title = requestTitle(call.name, null);
+  const commandText = call.name === 'run_command_owner' ? (() => { try { const p = JSON.parse(call.input) as { command?: unknown }; return typeof p.command === 'string' ? p.command : null; } catch { return null; } })() : null;
+  const title = commandText ? `run ${commandText.split('\n')[0].slice(0, 80)}` : requestTitle(call.name, null);
   const said = what ?? title;
   if (state === 'allowed') return <p className="moment-line"><UiIcon name="check" size={12}/>Allowed: {title}. The chat carries on with the result.</p>;
   if (state === 'denied') return <p className="moment-line"><UiIcon name="close" size={12}/>You said no: {said}. It did not run.</p>;
@@ -163,6 +179,24 @@ export function ApprovalCard({ call, who, what, onTask }: { call: ToolCall; who?
   const fileReview=detail?editReview(detail.toolName,detail.params,detail.maskedFields??[]):null;
   const reviewComplete=!!fileReview||!!view?.complete;
   if(nativeCode&&fileReview&&detail)return <><NativeFileReview value={{id,path:fileReview.path,before:(detail.params as Record<string,string>).before,after:(detail.params as Record<string,string>).after}} onDecision={decision=>{if(state==='review'){if(decision==='approve'){if(detail.verificationRequired)setVerify(true);else void allow();}else void sendDeny();}}}/>{verify&&<ApprovalVerificationSheet client={client} id={detail.id} paramsHash={detail.paramsHash} toolName={title} onClose={()=>setVerify(false)} onApprove={receipt=>{setVerify(false);void allow(receipt);}}/>}</>;
+  // CP15 Run card: the exact command, where it runs and what it may do; Run / Not now.
+  const command = call.name === 'run_command_owner' ? (() => { const p = (detail?.params ?? (() => { try { return JSON.parse(call.input); } catch { return {}; } })()) as { command?: unknown }; return typeof p.command === 'string' ? p.command : null; })() : null;
+  if (command !== null) {
+    const name = folder ? folder.split(/[\\/]/).filter(Boolean).at(-1) : null;
+    const hint = commandHint(command);
+    return <div className="moment-card command-card" data-tone="needs">
+      <small className="moment-hint" dir="ltr">{name ? <>Run in {name} · {folder}</> : 'Run in this chat’s project folder'}</small>
+      <pre className="tool-cmd" dir="ltr"><code>{command}</code></pre>
+      <div className="moment-actions">
+        {state === 'review' ? <button type="button" className="moment-main" onClick={() => (detail?.verificationRequired ? setVerify(true) : void allow())}>Run</button>
+          : <button type="button" className="moment-main" disabled={state === 'busy'} onClick={() => void review()}>Review…</button>}
+        <button type="button" className="link-button" disabled={state === 'busy'} onClick={() => void deny()}>Not now</button>
+        <span style={{ flex: 1 }}/>{hint && <small className="moment-hint">{hint}</small>}
+      </div>
+      {notice && <p className="moment-hint" role="status">{notice}</p>}
+      {verify && detail && <ApprovalVerificationSheet client={client} id={detail.id} paramsHash={detail.paramsHash} toolName={title} onClose={() => setVerify(false)} onApprove={receipt => { setVerify(false); void allow(receipt); }}/>}
+    </div>;
+  }
   return <div className="moment-card" data-tone="needs">
     <p><UiIcon name="alert" size={14}/><span><b>{who ?? 'The agent'}</b> wants to: {title}</span></p>
     {fileReview?<FileEditReview review={fileReview}/>:view && (view.complete ? <dl className="approval-plain">{view.rows.map(([k, v]) => <div key={k}><dt>{k}</dt><dd dir="auto">{v}</dd></div>)}</dl>

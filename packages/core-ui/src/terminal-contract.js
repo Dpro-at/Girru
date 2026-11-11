@@ -81,7 +81,7 @@ export function terminalResponse(path, status, body) {
   if (status !== 200 && status !== 201) { const code = record(body) ? body.code : undefined; return (ERRORS[status] ?? []).includes(code) ? { code } : null; }
   if (!record(body)) throw Error('protocol');
   if (p.kind === 'prefs') return { prefs: terminalPrefs(body.prefs) };
-  if (p.kind === 'info') return { enabled: body.enabled === true, sessions: Array.isArray(body.sessions) ? body.sessions.filter(s => record(s) && typeof s.id === 'string' && ID.test(s.id)).slice(0, 20).map(s => ({ id: s.id, exited: s.exited === true })) : [] };
+  if (p.kind === 'info') return { enabled: body.enabled === true, sessions: Array.isArray(body.sessions) ? body.sessions.filter(s => record(s) && typeof s.id === 'string' && ID.test(s.id)).slice(0, 20).map(s => ({ id: s.id, exited: s.exited === true, ...(s.log === true ? { log: true } : {}) })) : [] };
   if (p.kind === 'create') {
     if (typeof body.id !== 'string' || !ID.test(body.id)) throw Error('protocol');
     return { id: body.id, cols: size(body.cols, 10, 500) ? body.cols : 80, rows: size(body.rows, 2, 200) ? body.rows : 24,

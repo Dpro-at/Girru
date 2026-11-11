@@ -82,3 +82,9 @@ test('explicit trial data preserves saved workspaces inside its profile, never e
   assert.deepEqual(candidates({...options,savedDir:path.join(workspaces,'escape')}),[options.explicitDir]);
  } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
+
+test('a separate profile looks only at its own folders, never a checkout .data or an old install', () => {
+  const d = require('../src/data-discovery.cjs');
+  const dirs = d.candidates({ defaultDir: '/p/data', home: '/h', cwd: '/r/packages/desktop', backendDir: '/r/packages/backend', savedDir: null, isolated: true });
+  assert.deepEqual(dirs, [require('node:path').resolve('/p/data')]);
+});

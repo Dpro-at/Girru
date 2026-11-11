@@ -41,6 +41,69 @@ export function footerPrefs(x: unknown): FooterPrefs {
   return { order, hidden, iconsOnly: typeof v.iconsOnly === 'boolean' ? v.iconsOnly : false, approvalsWhenWaiting: typeof v.approvalsWhenWaiting === 'boolean' ? v.approvalsWhenWaiting : true };
 }
 
+const THEMES = ['system', 'light', 'dark'] as const;
+/** CP13: the theme is saved in the program (not only the window), so “Same as” can bring it to a new computer. */
+export async function uiThemeRoutes(fastify: FastifyInstance) {
+  fastify.get('/api/me/theme', async (request, reply) => {
+    const actor = actorOrReply(reply, actorOf(request), requireAccount);
+    if (!actor) return reply;
+    if (!actor.userId) return reply.code(403).send({ error: 'A signed-in account is required', code: 'forbidden' });
+    const saved = await getPref(actor.userId, 'theme');
+    return { theme: (THEMES as readonly unknown[]).includes(saved) ? saved : null };
+  });
+  fastify.put<{ Body: unknown }>('/api/me/theme', async (request, reply) => {
+    const actor = actorOrReply(reply, actorOf(request), requireAccount);
+    if (!actor) return reply;
+    if (!actor.userId) return reply.code(403).send({ error: 'A signed-in account is required', code: 'forbidden' });
+    const body = request.body as { theme?: unknown } | null;
+    if (!body || Object.keys(body).join() !== 'theme' || !(THEMES as readonly unknown[]).includes(body.theme)) return reply.code(400).send({ error: 'Unknown theme', code: 'invalid' });
+    await setPref(actor.userId, 'theme', body.theme);
+    return { theme: body.theme };
+  });
+}
+
+/** CP15: the owner's switch “Agents can run commands on this computer”. Turning it on lets the agents use run_command (owner Run for risky ones). */
+export async function agentCommandsRoutes(fastify: FastifyInstance) {
+  const ownerOnly = (request: any, reply: any) => { const actor = actorOrReply(reply, actorOf(request), requireAccount); if (!actor) return null; if (!actor.userId || actor.role !== 'owner') { reply.code(403).send({ error: 'Only the owner can change this', code: 'forbidden' }); return null; } return actor; };
+  fastify.get('/api/me/agent-commands', async (request, reply) => { const actor = ownerOnly(request, reply); if (!actor) return reply; return { on: (await getPref(actor.userId!, 'agent-commands')) === true }; });
+  fastify.put<{ Body: unknown }>('/api/me/agent-commands', async (request, reply) => {
+    const actor = ownerOnly(request, reply); if (!actor) return reply;
+    const body = request.body as { on?: unknown } | null;
+    if (!body || Object.keys(body).join() !== 'on' || typeof body.on !== 'boolean') return reply.code(400).send({ error: 'Send on: true or false', code: 'invalid' });
+    await setPref(actor.userId!, 'agent-commands', body.on);
+    if (body.on) { const { q } = await import('../../repositories/sql-steps.js'); for (const tool of ['run_command', 'run_command_owner']) await q.run("INSERT INTO agent_tool_grants (agent_id, tool_name, scopes, granted_by) SELECT a.id, ?, NULL, ? FROM agents_config a WHERE NOT EXISTS (SELECT 1 FROM agent_tool_grants g WHERE g.agent_id = a.id AND g.tool_name = ?)", tool, actor.userId!, tool); }
+    return { on: body.on };
+  });
+}
+
+/** CP15 (MCP): a coding app connected to Girru runs a command in one of the owner's projects, with the same rules as
+ *  in a chat: off unless the owner's switch is on; known read and sync commands run at once; any other command becomes
+ *  a Run request in Approvals and runs only after the owner presses Run there. */
+export async function agentCommandRunRoutes(fastify: FastifyInstance) {
+  fastify.post<{ Body: unknown }>('/api/commands/run', async (request, reply) => {
+    const actor = actorOrReply(reply, actorOf(request), requireAccount); if (!actor) return reply;
+    if (!actor.userId || actor.role !== 'owner') return reply.code(403).send({ error: 'Only the owner can run commands', code: 'forbidden' });
+    const body = request.body as Record<string, unknown> | null;
+    const keys = body && typeof body === 'object' && !Array.isArray(body) ? Object.keys(body) : null;
+    if (!keys || keys.some(k => !['projectId', 'command', 'timeout'].includes(k)) || typeof body!.projectId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(body!.projectId) || typeof body!.command !== 'string')
+      return reply.code(400).send({ error: 'Send projectId and command (and an optional timeout in milliseconds).', code: 'invalid' });
+    const { findProject } = await import('../../repositories/chat-conversations.js');
+    const folder = (await findProject(actor.userId, body!.projectId))?.folder;
+    if (!folder) return reply.code(404).send({ error: 'That project has no folder on this computer.', code: 'no_project_folder' });
+    const { runCommandTool, runCommandOwnerTool } = await import('../../tools/core/run-command.js');
+    const params = { command: body!.command, ...(body!.timeout !== undefined ? { timeout: body!.timeout } : {}) };
+    // The command is asked on behalf of the main agent (the switch gave it the command tools), so its Run in Approvals has an agent with the grant.
+    const { q } = await import('../../repositories/sql-steps.js');
+    const main = await q.one<{ id: string }>('SELECT id FROM agents_config ORDER BY is_primary DESC, created_at ASC LIMIT 1');
+    const context = { userId: actor.userId, accessOwnerId: actor.userId, workspaceDir: folder, fileReadRoot: folder, ...(main ? { agentId: main.id } : {}) } as any;
+    const ran = await runCommandTool.execute(params, context);
+    if (ran.error !== 'owner_run_required') return { ran: ran.error === undefined || ran.error === 'nonzero_exit', code: ran.error ?? null, output: (ran.content ?? []).map(c => c.text ?? '').join('\n').slice(0, 64 * 1024) };
+    const { requestApproval } = await import('../../tools/approvals.js');
+    const waiting = await requestApproval(runCommandOwnerTool, params, context, 'other');
+    return { ran: false, code: 'waiting_for_run', approvalId: (waiting.details as { approvalId?: string } | undefined)?.approvalId ?? null, output: 'This command waits for the owner: it shows in Approvals with a Run button.' };
+  });
+}
+
 export async function uiFooterRoutes(fastify: FastifyInstance) {
   fastify.get('/api/me/footer', async (request, reply) => {
     const actor = actorOrReply(reply, actorOf(request), requireAccount);

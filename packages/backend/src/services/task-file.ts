@@ -423,8 +423,11 @@ export async function sortTask(ownerId: string, boardId: string, cardId: string,
 /** A card made from a project chat gets a number and a block in the project's task file. */
 export async function addCardTask(cardId: string, conversationId: string): Promise<void> {
   const s = await q.one<{ project_id: string | null }>('SELECT project_id FROM chat_sessions WHERE id = ?', conversationId).catch(() => undefined);
-  const projectId = s?.project_id;
-  if (!projectId || !(await taskFileOn(projectId))) return;
+  if (s?.project_id) await addProjectCardTask(cardId, s.project_id);
+}
+/** CP14 E: a task that came from another of the owner's computers gets its block in this project's task file, like a card made here. */
+export async function addProjectCardTask(cardId: string, projectId: string): Promise<void> {
+  if (!(await taskFileOn(projectId))) return;
   await serial(projectId, async () => {
     const owner = await owners(projectId);
     if (!owner || await q.one('SELECT card_id FROM task_file_cards WHERE card_id = ?', cardId)) return;

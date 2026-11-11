@@ -1,4 +1,5 @@
 import {admitReportRun,finishReportRun,reportCanStart,reconcileReportAttempts,recordReportApprovalDecision,decidedReportApprovals,resumeReportAfterApproval,isBoardReport,captureBoardReport} from '../../services/reports.js';
+import { sessionRunFinished } from '../../services/session-run-hooks.js';
 import { runEventWire } from '../../agent/contracts/events.js';
 import { preferredMention } from '../../agent/context/target.js';
 import { meetingAttendanceChat } from '../../services/meeting-attendance.js';
@@ -292,7 +293,7 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
   if (t.canStart && !await t.canStart()) { await recoverStaleRun(b.runId).catch(() => false); return send(409, { code: 'group_paused' }); }
   chatRuns.start({
     runId: b.runId, userId, sessionId: c.id, agentId: b.agentId ?? null,
-    onFinished: async status=>{await t.onFinished?.(status);await continueDecidedReportApprovals(t.userId,c.id);},
+    onFinished: async status=>{await t.onFinished?.(status);await continueDecidedReportApprovals(t.userId,c.id);await sessionRunFinished(c.id,t.runId,status);},
     // A failed checkpoint leaves the outcome unknown: close the row as interrupted (later turns ask before every tool).
     onUnstored: async () => { await recoverStaleRun(b.runId); },
     onPersisted: async status => {

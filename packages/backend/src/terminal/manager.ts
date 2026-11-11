@@ -113,6 +113,8 @@ interface Session {
   command: boolean;
   createdAt: string;
   shell: string;
+  /** CP15: the read-only "Agent commands" tab: what agents ran, with its output. No shell behind it. */
+  log?: boolean;
 }
 
 export interface TerminalManagerOptions {
@@ -145,7 +147,8 @@ export function ensureSpawnHelper(os: NodeJS.Platform = platform(), arch: string
 }
 
 async function loadNodePty(): Promise<PtySpawn> {
-  ensureSpawnHelper();
+  const fixed = ensureSpawnHelper();
+  if (fixed.length) console.warn('terminal_spawn_helper_fixed', fixed.length);
   const mod: any = await import('node-pty');
   const spawn = mod.spawn ?? mod.default?.spawn;
   if (typeof spawn !== 'function') throw new TerminalError('disabled', 'The terminal backend is not available on this server');
@@ -154,6 +157,7 @@ async function loadNodePty(): Promise<PtySpawn> {
 
 export class TerminalManager {
   private readonly sessions = new Map<string, Session>();
+  private readonly logs = new Map<string, string>();
   private spawnFn: PtySpawn | null;
   private readonly idleTimeoutMs: number;
   private readonly stopGraceMs: number;
@@ -174,7 +178,7 @@ export class TerminalManager {
   list(ownerId: string) {
     return [...this.sessions.values()]
       .filter(s => s.ownerId === ownerId)
-      .map(s => ({ id: s.id, shell: s.shell, createdAt: s.createdAt, exited: s.exitCode !== null }));
+      .map(s => ({ id: s.id, shell: s.shell, createdAt: s.createdAt, exited: s.exitCode !== null, ...(s.log ? { log: true } : {}) }));
   }
 
   /** `size.cwd`: a folder already checked by the caller (a project folder); otherwise home. */
@@ -182,7 +186,7 @@ export class TerminalManager {
     if (!terminalEnabled(this.env)) throw new TerminalError('disabled', 'The terminal is turned off on this server');
     // A finished session keeps its transcript for replay but no longer takes a place.
     // Sessions still starting count too, so two quick opens cannot pass the cap.
-    if (this.list(ownerId).filter(t => !t.exited).length + (this.opening.get(ownerId) ?? 0) >= MAX_SESSIONS_PER_OWNER) {
+    if ([...this.sessions.values()].filter(t => t.ownerId === ownerId && !t.log && t.exitCode === null).length + (this.opening.get(ownerId) ?? 0) >= MAX_SESSIONS_PER_OWNER) {
       throw new TerminalError('limit', `At most ${MAX_SESSIONS_PER_OWNER} terminals per account`);
     }
     if (size.command !== undefined && !commandAllowed(size.command)) throw new TerminalError('invalid', 'Invalid command');
@@ -217,6 +221,19 @@ export class TerminalManager {
     } finally { const n = (this.opening.get(ownerId) ?? 1) - 1; if (n) this.opening.set(ownerId, n); else this.opening.delete(ownerId); }
   }
 
+  /** CP15: add what an agent ran (and its output) to the owner's read-only "Agent commands" tab, made on first use. */
+  appendLog(ownerId: string, text: string) {
+    const known = this.logs.get(ownerId);
+    let s = known ? this.sessions.get(known) : undefined;
+    if (!s) {
+      const quiet: PtyProcess = { onData() {}, onExit() {}, write() {}, resize() {}, kill() {} };
+      s = { id: randomUUID(), ownerId, pty: quiet, chunks: [], bufferedBytes: 0, nextSeq: 1, exitCode: null, listeners: new Set(), idleTimer: null, stopTimer: null,
+        command: true, createdAt: new Date().toISOString(), shell: 'Agent commands', log: true };
+      this.sessions.set(s.id, s); this.logs.set(ownerId, s.id);
+    }
+    this.push(s, text.replace(/\r?\n/g, '\r\n'));
+  }
+
   /** Owner-scoped lookup: another account's session id reads as not found. */
   private get(ownerId: string, id: string): Session {
     const s = this.sessions.get(id);
@@ -226,6 +243,7 @@ export class TerminalManager {
 
   write(ownerId: string, id: string, data: unknown) {
     const s = this.get(ownerId, id);
+    if (s.log) throw new TerminalError('invalid', 'This tab only shows what agents ran');
     if (typeof data !== 'string' || !data) throw new TerminalError('invalid', 'Input must be a non-empty string');
     if (Buffer.byteLength(data, 'utf8') > MAX_INPUT_BYTES) throw new TerminalError('invalid', `Input is larger than ${MAX_INPUT_BYTES} bytes`);
     if (s.exitCode !== null) throw new TerminalError('closed', 'The shell has exited');
@@ -261,6 +279,7 @@ export class TerminalManager {
   /** Stop this session without discarding its exit event or transcript. */
   stop(ownerId: string, id: string) {
     const s = this.get(ownerId, id);
+    if (s.log) { this.destroy(s); return; }
     if (s.exitCode !== null || s.stopTimer) return;
     this.kill(s, 'SIGTERM');
     // Still running after the grace time: end it for good.
@@ -290,6 +309,7 @@ export class TerminalManager {
   private destroy(s: Session) {
     this.clearIdle(s);
     this.sessions.delete(s.id);
+    if (s.log && this.logs.get(s.ownerId) === s.id) this.logs.delete(s.ownerId);
     if (s.stopTimer) clearTimeout(s.stopTimer);
     s.stopTimer = null;
     if (s.exitCode === null) this.kill(s, 'SIGKILL');

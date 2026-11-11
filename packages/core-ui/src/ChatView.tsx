@@ -82,7 +82,10 @@ export const LIVE_ROWS = 4;
  * finished turn folds its work into "Worked for …". Behaviour lives in
  * ConversationsController; this file is layout and local view state only.
  */
-export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, productName = 'Girru', client, onAddConnector, onOpenCard, onOpenMemory, onOpenMemoryPage, onChooseContext, onSetUpModel, onOpenApprovals, onOpenAgent, onOpenRules, terminalRequest = 0, boardRequest = 0, placeRequest = 0, active = true, titleSlot = null }: { embeddedCode?:boolean; onOpenCode?:(folder:string,file?:string)=>void; titleSlot?: HTMLElement | null; placeRequest?: number; controller: ConversationsController; mode: 'live' | 'mock'; productName?: string; terminalRequest?: number; boardRequest?: number; client?: SessionClient; onChooseContext?:()=>void; onAddConnector?: () => void; onSetUpModel?: () => void; onOpenApprovals?: () => void; onOpenAgent?: (agentId: string) => void; onOpenRules?: (agentId: string, category: string) => void; onOpenCard?: (boardId: string, cardId: string) => void; onOpenMemory?: (drawerId: string, memoryId: string) => void; onOpenMemoryPage?: () => void; active?: boolean }) {
+/** The server's automatic message after an approval is decided (CONTINUE_MESSAGE): shown as a quiet line, not as the owner's words. */
+const APPROVAL_CONTINUE = 'I decided the waiting approval. Continue the task with its result.';
+
+export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, productName = 'Girru', client, onAddConnector, onOpenCard, onOpenMemory, onOpenMemoryPage, onChooseContext, onSetUpModel, onOpenVoiceSettings, onOpenApprovals, onOpenAgent, onOpenRules, terminalRequest = 0, boardRequest = 0, placeRequest = 0, active = true, titleSlot = null }: { embeddedCode?:boolean; onOpenCode?:(folder:string,file?:string)=>void; titleSlot?: HTMLElement | null; placeRequest?: number; controller: ConversationsController; mode: 'live' | 'mock'; productName?: string; terminalRequest?: number; boardRequest?: number; client?: SessionClient; onChooseContext?:()=>void; onAddConnector?: () => void; onSetUpModel?: () => void; onOpenVoiceSettings?: () => void; onOpenApprovals?: () => void; onOpenAgent?: (agentId: string) => void; onOpenRules?: (agentId: string, category: string) => void; onOpenCard?: (boardId: string, cardId: string) => void; onOpenMemory?: (drawerId: string, memoryId: string) => void; onOpenMemoryPage?: () => void; active?: boolean }) {
   const s = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const [meetingMeta, setMeetingMeta] = useState<MeetingRecord | null>(null);
   const [meetingCall, setMeetingCall] = useState(false), [meetingStage, setMeetingStage] = useState<HTMLDivElement | null>(null);
@@ -480,14 +483,14 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
   const mdActions = { ...(folder ? { openFile: (rel: string) => openBeside(rel) } : {}), ...(folder && client ? { openInCode: (rel: string) => void openInCodeFile(client, joinPath(folder, rel), null, say) } : {}),
     ...(owner && terminal ? { runCommand: runInTerminal, commandRun } : {}), ...(folder ? { folderName: folder.split(/[\\/]/).filter(Boolean).at(-1) } : {}) };
   useEffect(()=>{panes?.clearReply();},[panes,s.activeId]);
-  const moments = { client, conversationId: s.activeId, onOpenApprovals, steps, changeCards, nativeCode:embeddedCode,
+  const moments = { client, conversationId: s.activeId, onOpenApprovals, steps, changeCards, nativeCode:embeddedCode, folder,
     ...(folder ? { onOpenFile: openBeside } : {}), ...(folder && client ? { onFileMenu: (e: React.MouseEvent, rel: string) => fileCtl.at(e, fileMenu(client, joinPath(folder, rel), null, say)) } : {}),
     // CH6/CH10 team moments: Hand it again adds to the box (never sends), Set a model opens the agent, Always allow opens What agents may do.
     onOpenAgent, onOpenRules, onAnswer: (text: string) => { void controller.send(text); },
     onOpenChat: (id: string) => { void controller.open(id); }, onStopChat: (id: string) => { void controller.stopChat(id); },
     chatState: (id: string) => { const x = s.conversations.find(c => c.id === id) as (typeof s.conversations[number] & { running?: boolean; waiting?: number }) | undefined; return x ? { running: x.running === true, waiting: x.waiting ?? 0, title: x.title ?? undefined } : undefined; }, onDraft: (text: string) => { const d = controller.getSnapshot().draft.trim(); controller.edit(d ? `${d}\n\n${text}` : text); },
     agentAbout: (id?: string) => s.agents.find(a => a.id === id)?.about, subAgentOf: (id?: string) => s.agents.find(a => a.id === id)?.subAgentOf, onStop: () => void controller.stopAll(), agentName: (id?: string) => (id ? s.agents.find(a => a.id === id)?.name ?? id : nameOf(convAgentId)),
-    onSwitchAuto: () => controller.selectModel('auto'), onReviewChanges: () => {panes?.clearReply();setPane('changes');}, onReviewFile:(messageId:string,path:string,changes:import('./conversation-contract.js').WireChanges)=>{if(panes&&s.activeId){setPane('changes');void panes.openReplyDiff(s.activeId,messageId,path,changes);}}, onChanged: () => void controller.refreshGit(), onDecided: () => void controller.pickUpContinuation(),
+    onSwitchAuto: () => controller.selectModel('auto'), onReviewChanges: () => {panes?.clearReply();setPane('changes');}, onReviewFile:(messageId:string,path:string,changes:import('./conversation-contract.js').WireChanges)=>{if(panes&&s.activeId){setPane('changes');void panes.openReplyDiff(s.activeId,messageId,path,changes);}}, onChanged: () => void controller.refreshGit(), onDecided: () => { void controller.pickUpContinuation(); void controller.refreshList(); },
     onStartFresh: (summary: string) => { const title = activeConv?.title ?? 'the last chat'; controller.newChat(); controller.edit(`Continue from “${title}”. ${summary}`.slice(0, 4000)); } };
   return <MarkdownActionsContext.Provider value={mdActions}><MomentsContext.Provider value={moments}><div className="chat-layout" data-code-expanded={embeddedCode&&codeExpanded||undefined} data-panel={pane ?? 'rail'} data-empty={empty || undefined} data-max={(maximized && termOpen) || undefined}>
   {embeddedCode&&<CodeChatResize onResize={()=>setCodeExpanded(false)}/>}
@@ -535,7 +538,9 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
       </div> : <div className="chat-column" role="log" aria-live="polite" aria-relevant="additions">
         {activeConv?.parentId && <StartedByLine parentId={activeConv.parentId} parentTitle={s.conversations.find(c => c.id === activeConv.parentId)?.title ?? undefined}/>}
         {s.hasEarlier && <button type="button" className="ghost-action chat-earlier" disabled={s.loadingEarlier} onClick={() => void controller.loadEarlier()}>{s.loadingEarlier ? 'Loading earlier messages…' : 'Show earlier messages'}</button>}
-        {s.turns.map((t, i) => t.role === 'user'
+        {s.turns.map((t, i) => t.role === 'user' && t.content.startsWith(APPROVAL_CONTINUE)
+          ? <p key={t.key} className="moment-line"><UiIcon name="check" size={12}/>Decided. The agent carries on with the result.</p>
+          : t.role === 'user'
           ? <UserMessage key={t.key} turn={t} highlight={flash === t.key} onKey={client ? setKeysOpen : undefined} onEdit={running ? undefined : text => { controller.edit(text); input.current?.focus(); }} onRemember={canRemember && messageRef(t) ? () => openRemember(t, t.content) : undefined}/>
           : <AssistantTurn recovery={t.code === 'run_interrupted' && client && s.activeId ? <RecoveryApprovals key={`${s.activeId}:${client.getSnapshot().epoch}`} client={client} conversationId={s.activeId}/> : undefined} key={t.key} turn={t} highlight={flash === t.key} writer={nameOf(t.agentId ?? convAgentId)} writerDepartment={departmentOf(t.agentId ?? convAgentId)} writerRole={s.agents.find(a => a.id === (t.agentId ?? convAgentId))?.primary || (!(t.agentId ?? convAgentId) && s.agents.some(a => a.primary)) ? 'main agent' : undefined} last={i === s.turns.length - 1} onRetry={lastUser ? () => void controller.send(t.code === 'run_interrupted' ? 'Continue the interrupted work from the saved checkpoints. Review what is already done and inspect unknown outcomes before repeating any action. Ask me to approve each tool call.' : lastUser.content) : undefined}
             offerCard={owner && client && i === s.turns.length - 1 ? (o => <ComputerOfferCard client={client} offer={o} conversationId={s.activeId} onKeepHere={() => void controller.send('Keep it here: do this work on this computer.')}/>) : undefined}
@@ -609,12 +614,12 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
             onChange={id => (s.activeId ? controller.setReplyAgent(id) : controller.selectAgent(id))} open={popover === 'who'} setOpen={v => setPopover(v ? 'who' : null)}/>}
           {owner && <ModelButton controller={controller} open={popover === 'model'} setOpen={v => setPopover(v ? 'model' : null)}/>}
           {mic && <MicButton mic={mic}/>}
+          {client && owner && mode === 'live' && !meetingMeta && !phone && <ChatVoice client={client} controller={controller} active={active} onOpenVoiceSettings={onOpenVoiceSettings}/>}
           {running && !s.draft.trim()
             ? <button type="button" className="round-button stop" onClick={() => void controller.stop()} disabled={s.stopping} aria-label={s.stopping ? 'Stopping' : 'Stop the reply'}><UiIcon name="stop" size={10}/></button>
             : <button type="submit" className="round-button" disabled={(!s.draft.trim() && !s.attachments.length) || s.access === 'denied'} aria-label={busy ? 'Queue the message' : 'Send'}><UiIcon name="arrow-up" size={15}/></button>}
         </div>
       </form>
-      {client && owner && mode === 'live' && !meetingMeta && !phone && <ChatVoice client={client} controller={controller} active={active}/>}
     </div>
     </MeetingPanels>
     {terminal && termOpen && <section className="chat-terminal" aria-label="Terminal"><TerminalPane tabs={terminal.tabs} prefs={terminal.prefs} projectId={folderProject} maximized={maximized} onToggleMax={() => setMaximized(v => !v)} onClose={() => { setMaximized(false); setTermOpen(false); }}/></section>}

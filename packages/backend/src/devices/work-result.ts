@@ -37,8 +37,8 @@ export async function startSnapshot(folder: string): Promise<string | null> {
   try { const s = await snapshotState(folder); return s && s !== 'blocked' ? s : null; } catch { return null; }
 }
 
-/** After the task: the work as a patch, pushed as this computer's branch when the project has a GitHub remote. */
-export async function finishWork(input: { folder: string; start: string; computer: string; taskId: string; title: string }): Promise<{ result: WorkResult; patch: string }> {
+/** After the task: the work as a patch, pushed as this computer's branch when the project has a GitHub remote (unless the owner chose “Directly”). */
+export async function finishWork(input: { folder: string; start: string; computer: string; taskId: string; title: string; back?: 'github' | 'direct' }): Promise<{ result: WorkResult; patch: string }> {
   const end = await startSnapshot(input.folder);
   if (!end) return { result: { taskId: input.taskId, mode: 'none', files: [] }, patch: '' };
   let diff;
@@ -48,7 +48,7 @@ export async function finishWork(input: { folder: string; start: string; compute
   // Nothing leaves this computer when the work touches a file that looks like a secret.
   if (diff.files.some(f => secretPath(f.path))) return { result: { taskId: input.taskId, mode: 'none', files: [] }, patch: '' };
   const branch = branchFor(input.computer, input.taskId);
-  if (!diff.rel) {
+  if (!diff.rel && input.back !== 'direct') {
     const pushed = await pushBranch(diff.top, diff.patch, branch, input.title).catch(() => null);
     if (pushed) return { result: { taskId: input.taskId, mode: 'github', branch, base: pushed.base, commit: pushed.commit, files: diff.files }, patch: '' };
   }

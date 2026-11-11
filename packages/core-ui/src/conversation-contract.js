@@ -179,7 +179,7 @@ function call(x) {
     ...(typeof x.isError === 'boolean' ? { isError: x.isError } : {}), ...(num(x.ms) !== undefined ? { ms: num(x.ms) } : {}), ...(typeof x.approvalId === 'string' && /^[A-Za-z0-9-]{8,64}$/.test(x.approvalId) ? { approvalId: x.approvalId } : {}) };
 }
 /** CHAT-BUILD-01 stage 5: notices kept with a reply, and their codes. */
-const KEPT_NOTICES = ['injection', 'summarized', 'plan_limit', 'images_not_seen', 'choices'];
+const KEPT_NOTICES = ['injection', 'summarized', 'plan_limit', 'images_not_seen', 'choices', 'not_signed_in'];
 
 function part(x) {
   if (!record(x)) throw Error('protocol');
@@ -344,7 +344,7 @@ export function projectRunEvent(x) {
 /** Typed reasons a run may end with (CHAT-PRO-02 G: LM Studio not running). */
 const END_CODES = ['model_unavailable', 'local_model_missing', 'lmstudio_not_running', 'subscription_org_blocked'];
 /** Notices a running turn may show (CHAT-BUILD-01); never part of the answer. */
-const NOTICE_CODES = ['rate_limited', 'claude_key_missing', 'local_model_slow', 'injection', 'summarized', 'plan_limit', 'images_not_seen'];
+const NOTICE_CODES = ['rate_limited', 'claude_key_missing', 'local_model_slow', 'injection', 'summarized', 'plan_limit', 'images_not_seen', 'not_signed_in'];
 function projectEvent(x) {
   if (!record(x) || !Number.isSafeInteger(x.seq) || x.seq < 1) throw Error('protocol');
   const seq = x.seq;

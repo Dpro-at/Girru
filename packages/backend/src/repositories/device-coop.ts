@@ -45,7 +45,11 @@ export class DeviceCoopRepository {
     peers() { return this.runner.read(all<ComputerPeer>('SELECT * FROM computer_peers WHERE local_device_id=?', this.localId)); }
     peer(id: string) { return this.runner.read(one<ComputerPeer>('SELECT * FROM computer_peers WHERE local_device_id=? AND peer_id=?', this.localId, id)); }
     async enroll(p: ComputerPeer) { await this.writeTx(function* () { yield* lockName('computer-peer:' + p.local_device_id + ':' + p.peer_id); const old = yield* one<ComputerPeer>('SELECT * FROM computer_peers WHERE local_device_id=? AND peer_id=?', p.local_device_id, p.peer_id); if(old){if(old.owner_id!==p.owner_id||old.workspace_id!==p.workspace_id||p.epoch<Number(old.epoch)||!old.revoked&&p.epoch===Number(old.epoch))throw Error('computer_peer_exists');yield* run('UPDATE computer_peers SET public_key=?,name=?,epoch=?,revoked=0 WHERE local_device_id=? AND peer_id=?',p.public_key,p.name,p.epoch,p.local_device_id,p.peer_id);return;} yield* run('INSERT INTO computer_peers(local_device_id,peer_id,workspace_id,owner_id,public_key,name,epoch,revoked) VALUES(?,?,?,?,?,?,?,0)', p.local_device_id, p.peer_id, p.workspace_id, p.owner_id, p.public_key, p.name, p.epoch); }); }
-    async revoke(id: string) { const local = this.localId; await this.writeTx(function* () { yield* lockName('computer-peer:' + id); yield* run('UPDATE computer_peers SET revoked=1,epoch=epoch+1 WHERE local_device_id=? AND peer_id=?', local, id); }); }
+    async revoke(id: string) { const local = this.localId; await this.writeTx(function* () { yield* lockName('computer-peer:' + id); yield* run('UPDATE computer_peers SET revoked=1,epoch=epoch+1 WHERE local_device_id=? AND peer_id=?', local, id); });
+        // What was still waiting to go to it, and what followed it, is dropped: it can never leave now (best effort; the store may hold no sync tables).
+        try { await this.writeTx(function* () { yield* run("DELETE FROM computer_sync_records WHERE local_device_id=? AND peer_id=? AND direction='out' AND state IN ('queued','pending')", local, id); yield* run('DELETE FROM computer_sync_selections WHERE local_device_id=? AND peer_id=?', local, id); yield* run('DELETE FROM computer_delivery WHERE local_device_id=? AND peer_id=?', local, id); }); } catch { /* the revoke above already stands */ } }
+    /** CP13: messages of computers that were forgotten are kept nowhere (best effort). */
+    async pruneForgotten(){const local=this.localId;try{await this.writeTx(function*(){yield* run('DELETE FROM computer_delivery WHERE local_device_id=? AND peer_id IN (SELECT peer_id FROM computer_peers WHERE local_device_id=? AND revoked=1)',local,local);});}catch{/* kept for the next start */}}
     async sequence(){return Number((await this.runner.read(one<{next_sequence:number}>('SELECT next_sequence FROM computer_counters WHERE local_device_id=?',this.localId)))?.next_sequence??0);}
     async nextSequence() { const local = this.localId; return this.writeTx(function* () { yield* lockName('computer-sequence:' + local); const old = yield* one<{
         next_sequence: number;
@@ -62,7 +66,7 @@ export class DeviceCoopRepository {
         return false;
     } const count = yield* one<{
         n: number;
-    }>('SELECT COUNT(*) AS n FROM computer_delivery WHERE local_device_id=?', local); if (Number(count?.n) >= 2000)
+    }>("SELECT COUNT(*) AS n FROM computer_delivery d WHERE d.local_device_id=? AND NOT (d.direction='out' AND d.acknowledged=1) AND NOT EXISTS(SELECT 1 FROM computer_peers p WHERE p.local_device_id=d.local_device_id AND p.peer_id=d.peer_id AND p.revoked=1)", local); /* CP13: messages of forgotten computers and confirmed sends never fill the inbox. */ if (Number(count?.n) >= 20000)
         throw Error('computer_delivery_capacity'); yield* run('INSERT INTO computer_delivery(local_device_id,peer_id,direction,event_id,request_id,payload_hash,envelope_json) VALUES(?,?,?,?,?,?,?)', local, direction === 'in' ? e.sender : e.target, direction, e.eventId, e.requestId, e.fingerprint, encoded); return true; }); }
     pending() { return this.runner.read(all<{
         event_id: string;
