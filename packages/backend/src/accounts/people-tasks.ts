@@ -55,13 +55,13 @@ export class PeopleTasks {
   start(){if(!this.stopHook)this.stopHook=onSessionRunFinished((sessionId,runId,status)=>this.sessionFinished(sessionId,runId,status));}
   stop(){this.stopHook?.();this.stopHook=null;}
 
-  /** Pins linked people's computers (not those added by Google alone) so the relay lets them reach this one. */
+  /** Pins linked people's computers so the relay lets them reach this one. Every task from them still waits for the owner's Allow, and every answer for the owner's Send. */
   async pinLinked(force=false){
     const control=this.deps.control();if(!control)return [];
     const links=await this.deps.linked(force);
     /* Rebuilt from the current links each time: a removed person's computers lose their slot at once. */
     const wanted=new Map<string,string>();
-    for(const link of links)for(const c of link.computers)if(!c.viaGoogle&&wanted.size<MAX_PEOPLE_PINS)wanted.set(peerOf(c),c.publicKey);
+    for(const link of links)for(const c of link.computers)if(wanted.size<MAX_PEOPLE_PINS)wanted.set(peerOf(c),c.publicKey);
     for(const id of [...this.peoplePins])if(!wanted.has(id)){control.unpin(id);this.peoplePins.delete(id);}
     for(const [id,key] of wanted){if(this.peoplePins.has(id)||control.pinnedPublicKey(id))continue;try{control.pin(key);this.peoplePins.add(id);}catch{/* the channel is full: this one waits */}}
     await this.retryUndelivered().catch(()=>{});
@@ -85,7 +85,7 @@ export class PeopleTasks {
     if(typeof linkId!=='string'||!ID.test(linkId))throw Error('account_input_invalid');
     const body=typeof text==='string'?text.trim():'';if(!body||body.length>PERSON_TASK_CHARS)throw Error('account_people_task_text');
     const link=(await this.pinLinked(true)).find(l=>l.linkId===linkId);if(!link)throw Error('account_people_unavailable');
-    const targets=link.computers.filter(c=>!c.viaGoogle).sort((x,y)=>(y.presence==='online'?1:0)-(x.presence==='online'?1:0));
+    const targets=[...link.computers].sort((x,y)=>(y.presence==='online'?1:0)-(x.presence==='online'?1:0));
     if(!targets.length)throw Error('account_people_offline');
     const id=randomUUID(),[u,a]=this.where(),now=Date.now();
     for(const target of targets){
@@ -102,8 +102,8 @@ export class PeopleTasks {
 
   /** A request from another computer on the shared channel; only linked people's computers get here. */
   async receive(peer:string,request:{operation:string;input:unknown}){
-    const links=await this.deps.linked(false).then(l=>l.some(x=>x.computers.some(c=>!c.viaGoogle&&peerOf(c)===peer))?l:this.deps.linked(true));
-    const link=links.find(l=>l.computers.some(c=>!c.viaGoogle&&peerOf(c)===peer));
+    const links=await this.deps.linked(false).then(l=>l.some(x=>x.computers.some(c=>peerOf(c)===peer))?l:this.deps.linked(true));
+    const link=links.find(l=>l.computers.some(c=>peerOf(c)===peer));
     if(!link)throw Error('account_people_unavailable');
     const input=request.input as Record<string,unknown>;
     if(!input||typeof input!=='object'||Array.isArray(input))throw Error('account_input_invalid');

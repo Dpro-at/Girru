@@ -140,7 +140,7 @@ export function PersonPage({person, tasks, onOpenChat}: {person: LinkedPerson; t
     <section aria-label="Their computers"><p className="section-label">Their computers</p>
       <div className="computer-list" role="list">{person.computers.map(c => <div key={c.deviceId} className="computer-task" role="listitem">
         <UiIcon name={c.osFamily === 'windows' ? 'pc-tower' : 'pc-imac'} size={15}/>
-        <span className="computer-task-text"><b>{c.label}</b><small>{c.presence === 'online' ? 'On' : 'Off or not seen'}{c.viaGoogle ? ' · added without a code check' : ''}</small></span>
+        <span className="computer-task-text"><b>{c.label}</b><small>{c.presence === 'online' ? 'On' : 'Off or not seen'}</small></span>
       </div>)}{!person.computers.length && <p className="fine-print">No computer yet.</p>}</div>
     </section>
     <p className="fine-print">Only tasks are shared with {personName(person.person)}: never agents, settings, memory, chats or backups. A task from them always waits for your OK.</p>
@@ -163,7 +163,7 @@ function PersonTaskRow({task, name, onOpenChat}: {task: PersonTask; name: string
 /** CP17 D: send a task to a person; it goes to one of their computers that is on and waits for their OK. */
 export function SendToPersonSheet({client, person, onClose, onSent}: {client: SessionClient; person: LinkedPerson; onClose: () => void; onSent: (text: string) => void}) {
   const [text, setText] = useState(''), [busy, setBusy] = useState(false), [notice, setNotice] = useState('');
-  const name = personName(person.person), on = person.computers.some(c => c.presence === 'online' && !c.viaGoogle);
+  const name = personName(person.person), on = person.computers.some(c => c.presence === 'online');
   const send = async () => {
     setBusy(true); setNotice('');
     try { const r = await people(client, {action: 'send', linkId: person.linkId, text: text.trim()}); onSent(`Sent to ${name} (${r.to?.computer ?? 'their computer'}). It waits for their OK.`); onClose(); }
