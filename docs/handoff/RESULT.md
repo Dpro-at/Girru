@@ -452,7 +452,24 @@ the composer ends at 400 of the 416 px visible area, Send visible, no slide
 chat, the right drawer and the left drawer are all dark and readable
 (`fit3-06` to `fit3-08`).
 
-**Not tested:** sending a message and the reply streaming in. This chat runs
-the owner's real Main Agent (Claude Code) on his computer, so it waits for his
-OK. The terminal key row (^C) was not part of this change and still does not
-stop a command (see the `e1d207fb` section).
+**Sending a message (owner's OK, 11 November):** in a new chat on the phone,
+"Reply with one short sentence: phone chat test." was typed on the simulator
+keyboard and sent with Return (`fit3-09`). The phone side worked: the message
+reached the computer at once, the reply's "Thinking 25s … 1m 26s" counter
+updated live, second by second, through the session's stream, and the final
+state appeared without a reload. **But no reply text came:** after about
+1 min 26 s the run ended with "The model did not answer — the model or coding
+app stopped before the reply was done" (`fit3-10`). The same error is already
+in the owner's older chats on this computer (made before this test, from the
+desktop and the Mac Mini), so it is the coding app (Main Agent · Claude Code)
+on the MacBook, not the phone. Word-by-word streaming of reply text could not
+be seen because no text arrived.
+
+A second copy of the same message was sent about 1 min 53 s after the first,
+right when the error showed, and failed the same way (about 1 min 10 s). The
+build Mac sent only one (one Return). core-ui has no automatic resend
+(`conversations.ts:681`: "never resend the user message"), so someone most
+likely pressed send again in the watched panel. Worth confirming.
+
+**Still open:** the terminal key row (^C) was not part of this change and
+still does not stop a command (see the `e1d207fb` section).
