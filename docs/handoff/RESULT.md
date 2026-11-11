@@ -662,3 +662,33 @@ Findings for the author:
 
 The meeting "Phone meeting test" is left **paused** on the owner's Girru. It
 was not ended, and no decisions were approved.
+
+### Retest: phone meetings (ec4e2da3)
+
+`origin/phone/meetings` at `ec4e2da3` "Meetings: the coordinator writes the
+summary; clearer phone meeting screens", merged into the MacBook's test Girru
+(`95da19cc`; backend meetings 16/16 and core-ui phone-shell 5/5, run by the
+MacBook session). Only the computer's code changed, so I didn't rebuild the
+phone app. I restarted it so it would load the new page (`index-B1JwfwMS.js`;
+before that the phone still showed `index-Dx1KX_Ox.js` with
+"unavailable · Reload"). I reused the paused "Phone meeting test" (Mohamed's
+earlier OK). Screenshots are `result/meet2-*.png`. **No decision was approved
+and nothing was saved:** the decisions sheet is left open, with Approve and
+Save draft not pressed.
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Finish while Remy is on the slow local model | **Pass.** After Resume, Finish meeting asked Face ID and then the **Main Agent** (coordinator) wrote the summary in about 20 s. Remy was not asked. "Review meeting decisions" opened with the summary and 1 suggested task on the Company board (`meet2-05`) |
+| 2 | The header names the agent who is answering | **Not seen.** The inspector lost the page for the ~20 s of the summary turn, and the header was already "Reviewing decisions" when it came back. Checking it needs another turn |
+| 3 | Paused meeting: Try again says why | **Fail.** Still "The message was not sent. It is back in the box." (`meet2-03`). The computer answers 409 `meeting_conflict` "Resume the meeting before sending another message" (`assertMeetingWriter`, `services/meetings.ts:224`). But the phone's `api.call` returns only the desktop's projection, which by design drops error text (`phone/ui-bridge.ts:286`). So `r.body.error` never reaches the phone, and the new message only works on the desktop. The phone may need the code mapped to a fixed message in core-ui |
+| 4 | Your own call tile no longer covers the caption | **Partly.** The caption line is clear now ("Remy · Loading the avatar…  Choose a voice in Settin…"). But the tile moved to the top right, under the call's "Chat" button, which covers its avatar (`meet2-04`) |
+| 5 | Keyboard bar goes away after the form closes | **Pass.** Bar shown with the topic focused (`meet2-01`); gone after Cancel (`meet2-02`) |
+| 6 | Form says the main agent coordinates | **Pass.** With Sales (1 agent): "1 agent selected · plus you and your main agent, who coordinates. Invitations do not start model calls." |
+
+New finding: **the summary shows as raw JSON in the chat.** The Main Agent's
+message reads `{"summary":"Phone meeting test. The objective was …` in the
+chat (`.chat-prose.turn-text`). The decisions sheet parses it correctly.
+
+The meeting is left in "Reviewing decisions", with the sheet open on the
+phone. Approving it, which would create 1 task on the Company board, needs
+Mohamed's OK.
