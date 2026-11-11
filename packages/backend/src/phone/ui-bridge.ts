@@ -130,6 +130,8 @@ const MEETINGS = /^\/api\/meetings(?:$|[/?])/;
  * and archived lists stay on the computer.
  */
 const BOARD_KINDS: Record<string, Method[]> = {
+  // Every board load starts with this (board.ts › load): it makes the department boards that are missing.
+  sync: ['POST'],
   board: ['GET'],
   overview: ['GET'],
   cards: ['POST'],

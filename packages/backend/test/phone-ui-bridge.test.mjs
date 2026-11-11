@@ -74,7 +74,7 @@ test('the phone list is exactly the chat page (pinned)', async () => {
     ['POST', '/api/boards/board-1/cards'], ['PUT', '/api/boards/board-1/cards/card-1'], ['GET', '/api/boards/board-1/cards/card-1/page'],
     ['GET', '/api/boards/board-1/cards/card-1/activity'], ['POST', '/api/boards/board-1/cards/card-1/checklist'], ['PUT', '/api/boards/board-1/cards/card-1/checklist/item-1'],
     ['POST', '/api/boards/board-1/cards/card-1/comments'], ['POST', '/api/boards/board-1/cards/card-1/subtasks'], ['GET', '/api/boards/board-1/cards/card-1/chat'],
-    ['POST', '/api/chat/task-continue'],
+    ['POST', '/api/chat/task-continue'], ['POST', '/api/boards/sync-departments'], ['GET', '/api/boards/board-1/overview'],
     ['GET', '/api/chat/conversations/abcdefgh1/memories'], ['POST', '/api/chat/conversations/abcdefgh1/memories'],
     ['GET', '/api/memory/proposals/prop-1'], ['POST', '/api/memory/proposals/prop-1/approve'], ['POST', '/api/memory/proposals/prop-1/reject'],
     ['GET', '/api/chat/projects'], ['GET', `/api/chat/projects/${PID}/changes`], ['GET', `/api/chat/projects/${PID}/tree`],
@@ -95,7 +95,7 @@ test('the phone list is exactly the chat page (pinned)', async () => {
     ['DELETE', '/api/meetings/m-1'], ['PATCH', '/api/meetings/m-1'], ['GET', '/api/specialty-templates'],
     ['POST', `/api/chat/projects/${PID}/tree`], ['DELETE', `/api/chat/projects/${PID}`], ['POST', '/api/memory/proposals/prop-1/edit'], ['POST', '/api/boards'],
     ['PUT', '/api/boards/board-1'], ['POST', '/api/boards/board-1/columns'], ['PUT', '/api/boards/board-1/columns/col-1'], ['POST', '/api/boards/board-1/labels'],
-    ['PUT', '/api/boards/board-1/cards/card-1/schedule'], ['POST', '/api/boards/board-1/cards/card-1/task-sort'], ['POST', '/api/boards/sync-departments'], ['DELETE', '/api/boards/board-1/cards/card-1'],
+    ['PUT', '/api/boards/board-1/cards/card-1/schedule'], ['POST', '/api/boards/board-1/cards/card-1/task-sort'], ['DELETE', '/api/boards/board-1/cards/card-1'],
     ['GET', '/api/runs'], ['GET', '/api/approvals'], ['POST', '/api/approvals/0b8a1c4e-0000-4000-8000-000000000001/approve'], ['GET', '/api/approvals?status=all&limit=100'], ['GET', '/api/health'], ['GET', '/api/memory/proposals'], ['GET', '/health'], ['GET', '/api/../api/phone/devices'],
   ];
   for (const [m, p] of no) assert.equal(await B.phoneMayCall(m, p), false, `${m} ${p}`);
@@ -302,4 +302,28 @@ test('the terminal from a phone: open, stream its output, type, exit; keystrokes
     if (prev === undefined) delete process.env.AGENT_TERMINAL; else process.env.AGENT_TERMINAL = prev;
     terminalManager.closeAll();
   }
+});
+
+// Phone board P46: every request the computer's board page makes to show a board and open a task
+// must be on the phone's list, or the page stops with "Access denied" (simulator test, 11 November).
+test('the board page on the phone: loading a board and opening a task are all allowed', async () => {
+  const { BoardController } = await import('../../core-ui/src/board.ts');
+  const asked = [];
+  const card = { id: 'card-1', columnId: 'col-1', title: 'Write the report', description: '', priority: 'normal', position: 1, dueDate: null, archived: false, version: 1, agents: ['agent-1'], departments: [], comments: 0, updatedAt: '2026-11-11T10:00:00Z', type: 'task', startDate: null, cover: null, labels: [], checklist: { done: 0, total: 0 }, conversationId: 'chat-12345678' };
+  const board = { id: 'board-1', name: 'Q4', description: '', template: 'simple', color: 'teal', departments: [], kind: 'company', archived: false, version: 1, columns: [{ id: 'col-1', name: 'To do', position: 1 }], cards: [card], labels: [] };
+  const answers = [
+    [/sync-departments$/, {}], [/^\/api\/boards$/, { boards: [{ ...board, cards: 1, open: 1 }], templates: [], colors: [] }],
+    [/^\/api\/boards\/board-1$/, board], [/^\/api\/agents$/, { agents: [{ id: 'agent-1', name: 'Sara' }] }],
+    [/checklist$/, { items: [] }], [/comments$/, { comments: [] }], [/./, {}],
+  ];
+  const snapshot = { mode: 'live', epoch: 1, phase: 'authenticated', user: { id: 'owner', role: 'owner' } };
+  const client = { subscribe: () => () => {}, getSnapshot: () => snapshot, request: async ({ method, path }) => { asked.push([method, path]); return { status: 200, body: answers.find(([re]) => re.test(path))[1] }; } };
+  const c = new BoardController(client);
+  await c.load();
+  assert.equal(c.getSnapshot().boardId, 'board-1', c.getSnapshot().notice);
+  await c.openCard('card-1');
+  await new Promise(r => setTimeout(r, 20));
+  assert.ok(asked.length >= 6, JSON.stringify(asked));
+  for (const [m, p] of asked) assert.equal(await B.phoneMayCall(m, p), true, `${m} ${p} is asked by the board page`);
+  c.dispose();
 });
