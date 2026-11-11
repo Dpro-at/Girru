@@ -598,3 +598,24 @@ SUCCEEDED** with no change; CoreChecks **375 passed, 0 failed**. Screenshots
 
 Small: the same computer is "Mohameds-MacBook-Pro" (its host name) under This
 phone and "Mohamed's MacBook Pro" under Computers.
+
+### Retest: phone settings (d82a2bad)
+
+`origin/phone/settings` at `d82a2bad` "Phone Settings: name the computer's own
+sign-in, one name for the paired computer" (one commit on `98ccdf02`). The
+MacBook's Girru runs it (backend phone tests 51/51, run by the MacBook
+session). iPhone build from `d82a2bad`: **BUILD SUCCEEDED** with no change;
+CoreChecks **375 passed, 0 failed**. Screenshots `result/set4-*.png`. No real
+setting was changed.
+
+| Check | Result |
+|---|---|
+| Account | **Fixed:** the session is "Girru on Mohamed's MacBook Pro · Last used 1 min, 16 sec ago"; no "Unknown device", no "This phone" tag (`set4-03`) |
+| One name for the paired computer | **Fixed:** "Mohamed's MacBook Pro" in the Settings row, the This phone title and its card (`set4-01`, `set4-02`), the same as under Computers |
+| Computers | "Mohamed's MacBook Pro · This phone's computer" first, then Mac Mini and Alarade (`set4-04`) |
+| Approval rules | the two-step sign-in message (`set4-05`) |
+| Permissions | a change asks Face ID ("Change what Main Agent may do"); cancelled, "Send messages" stays Ask (`set4-06`) |
+| Chat page | loaded by itself on first launch |
+
+Phone Settings has no open finding left from these tests. Still untested: the
+chat page's automatic retry after a failed load (needs the relay cut briefly).
