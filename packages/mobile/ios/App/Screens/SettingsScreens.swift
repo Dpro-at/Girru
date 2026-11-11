@@ -17,6 +17,12 @@ final class SettingsData: ObservableObject {
 
     func view(_ section: String) -> [String: Any] { views[section] ?? [:] }
 
+    /// The paired computer's name as Girru shows it (Computers), else the name from pairing.
+    func pairedName(_ computer: PairedComputer) -> String {
+        let mine = ((views["computers"]?["computers"] as? [Any]) ?? []).compactMap { $0 as? [String: Any] }.first { $0["thisPhonesComputer"] as? Bool == true }
+        return (mine?["name"] as? String) ?? computer.computerName ?? "Your computer"
+    }
+
     func read(_ section: String) async {
         do {
             let r = try await model.send(try CommandBody.settingsRead(section: section))
@@ -80,7 +86,7 @@ private struct SettingsHome: View {
             Section("This phone") {
                 NavigationLink { ThisPhoneScreen(computer: computer, data: data, lock: lock) } label: {
                     Label { VStack(alignment: .leading, spacing: 2) {
-                        Text(computer.computerName ?? "Your computer")
+                        Text(data.pairedName(computer))
                         Text("Anywhere").font(.footnote).foregroundStyle(Theme.secondaryText)
                     } } icon: { Image(systemName: "desktopcomputer") }
                 }
@@ -98,6 +104,7 @@ private struct SettingsHome: View {
             }
         }
         .navigationTitle("Settings")
+        .task { await data.read("computers") }
     }
 }
 
@@ -138,7 +145,7 @@ private struct ThisPhoneScreen: View {
                     Image(systemName: "desktopcomputer").font(.system(size: 22)).foregroundStyle(Theme.accent).frame(width: 44, height: 44)
                         .background(Theme.quote, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(computer.computerName ?? "Your computer").font(.system(size: 17, weight: .semibold))
+                        Text(data.pairedName(computer)).font(.system(size: 17, weight: .semibold))
                         Text("Paired with this phone").font(.footnote).foregroundStyle(Theme.secondaryText)
                     }
                 }
@@ -172,7 +179,7 @@ private struct ThisPhoneScreen: View {
                 Button(role: .destructive) { confirmForget = true } label: { Label("Forget this computer…", systemImage: "lock.fill") }
             } footer: { Text("This phone stops reaching it. Pair again with a new code.") }
         }
-        .navigationTitle(computer.computerName ?? "This phone")
+        .navigationTitle(data.pairedName(computer))
         .navigationBarTitleDisplayMode(.inline)
         .task { await data.read("general") }
         .confirmationDialog("Forget this computer?", isPresented: $confirmForget, titleVisibility: .visible) {
@@ -307,7 +314,7 @@ private struct AccountScreen: View {
                             }
                         }
                         Spacer()
-                        if s["current"] as? Bool == true { Text("This phone").font(.footnote).foregroundStyle(Theme.secondaryText) }
+                        if s["current"] as? Bool == true { Text("This one").font(.footnote).foregroundStyle(Theme.secondaryText) }
                         else if let id = text(s["id"]) {
                             Button("Sign out", role: .destructive) { Task { await data.change("account", ["signOut": id], faceID: "Sign a device out") } }
                                 .buttonStyle(.borderless)

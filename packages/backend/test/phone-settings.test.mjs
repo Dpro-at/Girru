@@ -102,3 +102,9 @@ test('computers reads the top-level devices list', async () => {
   if (view.code) assert.ok(['unavailable', 'not_found'].includes(view.code), view.code);
   else for (const c of view.computers) assert.deepEqual(Object.keys(c).sort(), ['id', 'name', 'thisPhonesComputer']);
 });
+
+test('account sessions without a device name are named after this computer when it has one', async () => {
+  const view = await run({ type: 'settings.read', section: 'account' });
+  assert.ok(Array.isArray(view.sessions));
+  for (const x of view.sessions) assert.notEqual(x.label, '');
+});

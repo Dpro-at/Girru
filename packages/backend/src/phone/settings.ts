@@ -69,14 +69,14 @@ export async function settingsRead(ctx: CommandContext, body: Body) {
   if (s === 'account') {
     const sessions = await get(ctx, '/api/auth/sessions');
     const v = await ownerInject(ctx.ownerId, 'GET', '/api/auth/verification');
-    // The session marked current is the one this phone's request runs in: name it after this phone.
-    const phones = await ownerInject(ctx.ownerId, 'GET', '/api/phone').catch(() => null);
-    const mine = phones && phones.status === 200 && record(phones.body) ? list(phones.body.devices).find(d => d.id === ctx.deviceId) : undefined;
-    const phoneName = str(mine?.name, 120);
+    // Every session here signs in to this computer; one without a device name is Girru on this computer itself.
+    const comp = await ownerInject(ctx.ownerId, 'GET', '/api/computers').catch(() => null);
+    const computerName = comp && comp.status === 200 && record(comp.body) && record(comp.body.self) ? str(comp.body.self.name, 100) : null;
+    const nameOf = (label: string | null) => (!label || /^unknown device$/i.test(label.trim())) && computerName ? `Girru on ${computerName}` : label;
     return {
       section: s,
       twoStep: v.status === 200 && record(v.body) ? v.body.enabled === true : null,
-      sessions: list(record(sessions) ? sessions.sessions : []).slice(0, 50).map(d => ({ id: str(d.id, 128), label: d.current === true && phoneName ? phoneName : str(d.label, 120), current: d.current === true, lastSeenAt: typeof d.lastSeenAt === 'number' ? d.lastSeenAt : null })),
+      sessions: list(record(sessions) ? sessions.sessions : []).slice(0, 50).map(d => ({ id: str(d.id, 128), label: nameOf(str(d.label, 120)), current: d.current === true, lastSeenAt: typeof d.lastSeenAt === 'number' ? d.lastSeenAt : null })),
     };
   }
   if (s === 'replies') {
