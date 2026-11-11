@@ -4177,3 +4177,6 @@ html:has(.app-shell[data-phone]), body:has(.app-shell[data-phone]) { overflow:hi
 
 /* iPhone zooms into any field under 16 px (the meeting form, sheets): every field on the phone is 16 px. */
 .app-shell[data-phone] :is(input:not([type=checkbox]):not([type=radio]), select, textarea) { font-size:16px !important; }
+
+/* Phone call: your own tile sits at the top corner so it never covers the speaker's caption at the bottom. */
+.app-shell[data-phone] .meeting-self { inset-block-end:auto; inset-block-start:8px; }
