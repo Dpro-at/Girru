@@ -10,7 +10,7 @@ import {computerIcon} from './ComputerLook';
 
 /** Adding a computer (DEVICES-PROJECT-01 B2, boards CP1, CP2, CP7, CP9c): plain words, pictures instead of codes. */
 const root = '/api/computers/account';
-export type Status = {desktopAvailable?: boolean; configured?: boolean; mapping?: unknown; connected?: boolean; active?: boolean; googleLinked?: boolean; workspaces?: {id: string; label: string; mode: string; state: string; sourceDeviceId?: string | null}[]; coverage?: {category: string; label: string; available: boolean; continuity: boolean}[]; view?: {deviceId?: string; deviceStatus?: string; devices?: {id: string; label: string; status: string; presence?: string; osFamily?: string; publicKey?: string; appVersion?: string; registeredAt?: number}[]} | null; pairing?: {self: {waiting: boolean; approver: string | null; code: string | null; changed?: boolean} | null; requests: {deviceId: string; label: string; osFamily: string; code: string | null; publicKey?: string; elsewhere: boolean; changed?: boolean}[]; addedWithCode: {deviceId: string; label: string; publicKey: string; checkCode: string}[]; twoFactorFailuresToday?: number; thisComputerCheck?: string} | null};
+export type Status = {/** CP16 A: computers of this account this one does not trust yet, with the code to compare. */ trust?: {deviceId: string; label: string; code: string}[]; desktopAvailable?: boolean; configured?: boolean; mapping?: unknown; connected?: boolean; active?: boolean; googleLinked?: boolean; workspaces?: {id: string; label: string; mode: string; state: string; sourceDeviceId?: string | null}[]; coverage?: {category: string; label: string; available: boolean; continuity: boolean}[]; view?: {deviceId?: string; deviceStatus?: string; devices?: {id: string; label: string; status: string; presence?: string; osFamily?: string; publicKey?: string; appVersion?: string; registeredAt?: number}[]} | null; pairing?: {self: {waiting: boolean; approver: string | null; code: string | null; changed?: boolean} | null; requests: {deviceId: string; label: string; osFamily: string; code: string | null; publicKey?: string; elsewhere: boolean; changed?: boolean}[]; addedWithCode: {deviceId: string; label: string; publicKey: string; checkCode: string}[]; twoFactorFailuresToday?: number; thisComputerCheck?: string} | null};
 
 /** Plain words for the account service's answers (one name per thing; never a code on screen). */
 export function computerAccountWords(code: string) {
@@ -220,4 +220,18 @@ export function ThisComputerCheck({client}: {client: SessionClient}) {
   const c = status?.pairing?.thisComputerCheck;
   if (!c) return null;
   return <p className="fine-print">This computer’s check code: <code className="computer-check-code">{c.slice(0, 4)} {c.slice(4, 8)} {c.slice(8, 12)}</code></p>;
+}
+
+const spaced = (code: string) => code.replace(/(.{4})(?=.)/g, '$1 ');
+/** CP16 A: compare one code on both computers; "Same code" here trusts the other computer (it does the same there). */
+export function TrustCompare({client, item, intro, onTrusted, extra}: {client: SessionClient; item: {deviceId: string; label: string; code: string}; intro: React.ReactNode; onTrusted?: () => void; extra?: React.ReactNode}) {
+  const [busy, setBusy] = useState(false), [notice, setNotice] = useState(''), [differs, setDiffers] = useState(false);
+  const same = async () => { setBusy(true); setNotice(''); try { await call(client, root + '/devices/trust', {deviceId: item.deviceId, comparisonCode: item.code, confirmed: true}); setNotice('Trusted.'); onTrusted?.(); } catch (e) { setNotice(computerAccountWords((e as Error).message)); } finally { setBusy(false); } };
+  return <div className="computer-trust" role="group" aria-label={`Compare the code with ${item.label}`}>
+    <span>{intro}</span>
+    <span className="computer-trust-code" aria-label={`Code ${item.code.split('').join(' ')}`}>{spaced(item.code)}</span>
+    {differs ? <p role="alert" className="cp-warn">The codes differ: do not trust it. Nothing was changed.{extra ? ' ' : ''}</p> : null}
+    <span className="computer-trust-actions"><button type="button" className="primary" disabled={busy || differs} onClick={() => void same()}>Same code</button><button type="button" disabled={busy || differs} onClick={() => setDiffers(true)}>Different code</button>{extra}</span>
+    {notice && <p role="status" className="fine-print">{notice}</p>}
+  </div>;
 }

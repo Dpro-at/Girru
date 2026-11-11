@@ -1,6 +1,6 @@
 import {useEffect, useRef, useState} from 'react';
 import type {SessionClient} from './session';
-import {AddThisComputer, call, computerAccountWords, useAccountStatus, type Status} from './ComputerJoin';
+import {AddThisComputer, call, computerAccountWords, useAccountStatus, TrustCompare, type Status} from './ComputerJoin';
 import {UiIcon} from './ui-icons';
 import type {UiIconName} from './ui-icons';
 import {computerIcon, useComputerLook} from './ComputerLook';
@@ -81,6 +81,8 @@ export function JoinStart({client, onFresh, onSame}: {client: SessionClient; onF
   }, [approved, status?.workspaces?.length, others.length]);
 
   // “Same as …”: ask the other computer what it shares, and ask again while it is off.
+  // CP16 A: this computer does not trust the source yet: one code compare on both screens.
+  const [pinNeeded, setPinNeeded] = useState(false);
   useEffect(() => {
     if (!approved || choice !== 'same' || !from || status?.workspaces?.length) return;
     let live = true;
@@ -89,15 +91,15 @@ export function JoinStart({client, onFresh, onSame}: {client: SessionClient; onF
         let next: Preview = await call(client, root + '/workspaces/source', {sourceDeviceId: from.id});
         const first = next.workspaces?.[0];
         if (!next.waitingForSource && first) next = await call(client, root + '/workspaces/source', {sourceDeviceId: from.id, workspaceId: first.workspaceId});
-        if (live) { setPreview(next); setNotice(''); }
+        if (live) { setPreview(next); setNotice(''); setPinNeeded(false); }
       } catch (e) {
         // CP13: when the other computer has not let this one in yet, say what to do there; this page keeps asking by itself.
         const code = (e as Error).message, name = from.label ?? 'your other computer';
         const words = ['computer_request_refused', 'computer_owner_request_refused', 'account_peer_unavailable'].includes(code) ? `Go to ${name} and press “Yes, it’s me”. This page asks again by itself.`
           // P15 test 2026-11-11: there is no Keep to press on the other computer here; say what really works today.
-          : code === 'account_peer_pin_required' ? `This computer does not trust ${name} yet, so it cannot copy from it. Choose Start fresh, or link the two in Settings › Computers › Account and workspaces… (compare the code on both).`
+          : code === 'account_peer_pin_required' ? ''
           : computerAccountWords(code);
-        if (live) setNotice(words);
+        if (live) { setNotice(words); setPinNeeded(code === 'account_peer_pin_required'); }
       }
     };
     void load();
@@ -149,7 +151,10 @@ export function JoinStart({client, onFresh, onSame}: {client: SessionClient; onF
       </button>
     </div>
     {choice === 'same' && others.length > 1 && <label className="phone-field"><span>From</span><select value={from?.id ?? ''} onChange={e => { setSource(e.target.value); setPreview(null); }}>{others.map(d => <option key={d.id} value={d.id}>{d.label}{d.presence === 'online' ? '' : ' (off)'}</option>)}</select></label>}
-    {choice === 'same' && (preview?.waitingForSource || from?.presence !== 'online' && !preview?.resources
+    {choice === 'same' && pinNeeded && from && status?.trust?.some(t => t.deviceId === from.id) ? <TrustCompare client={client} item={status.trust!.find(t => t.deviceId === from.id)!}
+      intro={<>Before copying, make sure this is your {from.label}. The same code shows on {from.label}, under Computers › Needs you.</>}
+      extra={<button type="button" onClick={() => setChoice('fresh')}>Start fresh instead</button>}/>
+    : choice === 'same' && (preview?.waitingForSource || from?.presence !== 'online' && !preview?.resources
       ? <p role="status" className="fine-print"><UiIcon name="clock" size={13}/> {from?.label ?? 'Your other computer'} is off. Go to {from?.label ?? 'your other computer'}, open Girru and keep it open: it sends the list by itself.{others.some(d => d.presence === 'online' && d.id !== from?.id) ? ' Or choose a computer that is on above.' : ''}</p>
       : !preview ? <p role="status" className="fine-print">Asking {from?.label ?? 'your other computer'} what it shares…</p>
       : !preview.workspaceId || !resources.length ? <p role="status" className="fine-print">{from?.label ?? 'Your other computer'} is getting ready to share. Keep Girru open there for a moment.</p>

@@ -7,7 +7,7 @@ import {ComputerTaskRequest} from './ComputerTaskRequest';
 import {ComputerTaskTiming} from './ComputerTaskTiming';
 import {ContextMenu, useMenu, type MenuItem} from './desktop-ui';
 import {computerIcon, computerName, useComputerLook, type ComputerIconKey} from './ComputerLook';
-import {AddThisComputer, ComputerJoinRequests, useAccountStatus} from './ComputerJoin';
+import {AddThisComputer, ComputerJoinRequests, useAccountStatus, TrustCompare, call, computerAccountWords, type Status} from './ComputerJoin';
 import {ContinuityRequests, SameSetupArrived} from './ComputerStart';
 import {AllowTask, TakesNewTasks} from './ComputerTaskRules';
 import {ComputerWorksOn, ProjectCopyAsks} from './ComputerWorksOn';
@@ -107,9 +107,15 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
     </button>}
   </nav>;
 
+  /** CP16: this computer sent the task (its chat lives on the other computer). */
+  const sentHere = (a: ComputerAttempt) => !!self && a.sourceDevice === self.id && a.targetDevice !== self.id;
   const row = (a: ComputerAttempt, actions: ReactNode) => <div key={a.attemptId} className="computer-task" role="listitem">
     <UiIcon name={a.state === 'completed' ? 'check' : WAITING.has(a.state) ? 'inbox' : 'play'} size={15}/>
-    <span className="computer-task-text"><b>{(a as {title?: string}).title || a.detail?.split('\n')[0]?.slice(0, 120) || 'Task'}</b><small>{a.state === 'completed' ? 'Done' : a.statusLabel} · from {a.sourceName}</small>{a.state === 'blocked' && a.detail && <small className="cp-warn">{a.detail.split('\n')[0].slice(0, 200)}</small>}</span>
+    <span className="computer-task-text"><b>{(a as {title?: string}).title || (sentHere(a) ? '' : a.detail?.split('\n')[0]?.slice(0, 120)) || 'Task'}</b>
+      {/* CP16 B: the computer that sent a task says where it went; the one that ran it says who sent it. */}
+      <small>{a.state === 'completed' ? 'Done' : a.state === 'running' && /^Waits for your OK/.test(a.detail ?? '') ? 'Waits for your OK there' : a.statusLabel} · {sentHere(a) ? `sent from here to ${a.targetName}` : `from ${a.sourceName}`}</small>
+      {a.state === 'blocked' && a.detail && <small className="cp-warn">{a.detail.split('\n')[0].slice(0, 200)}</small>}
+      {sentHere(a) && a.state === 'completed' && a.detail && <TaskAnswer text={a.detail} where={a.targetName}/>}</span>
     <span className="computer-task-actions">{actions}</span>
   </div>;
 
@@ -137,12 +143,12 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
       <ProjectCopyAsks client={client}/>
       {isSelf && newerElsewhere && <div className="computer-task computer-version" role="status"><UiIcon name="download" size={16}/><span className="computer-task-text"><b>Update Girru on this computer</b><small>{newerElsewhere.label} has a newer Girru ({newerElsewhere.appVersion}). Until this computer is updated, they can’t send each other tasks.</small></span>{onUpdates && <span className="computer-task-actions"><button type="button" className="primary" onClick={onUpdates}>Update…</button></span>}</div>}
       {!isSelf && device && older(device.publicKey) && <div className="computer-task computer-version" role="status"><UiIcon name="download" size={16}/><span className="computer-task-text"><b>{nameOf(device.id, device.name)} has another Girru version</b><small>It can still be seen, but it can’t take new tasks until both run the same version. It updates by itself the next time it opens (backup first).</small></span></div>}
-      <section aria-label="Needs you"><p className="section-label">Needs you</p>{isSelf && <ComputerJoinRequests client={client} status={account}/>}{isSelf && <ContinuityRequests client={client} status={account}/>}{isSelf && <SameSetupArrived client={client} status={account}/>}{needs.length > 0 ? <div className="computer-list" role="list">
+      <section aria-label="Needs you"><p className="section-label">Needs you</p>{isSelf && <ComputerJoinRequests client={client} status={account}/>}{isSelf && <ContinuityRequests client={client} status={account}/>}{isSelf && <SameSetupArrived client={client} status={account}/>}{isSelf && <TrustRequests client={client} status={account}/>}{needs.length > 0 ? <div className="computer-list" role="list">
         {needs.map(a => (a.runWaiting ?? 0) > 0 && !WAITING.has(a.state) ? row(a, <><span className="fine-print">A command waits for your Run</span>{a.sessionId && <button type="button" onClick={() => onOpenChat(a.sessionId!)}>Open its chat</button>}</>) : row(a, <>{a.state === 'blocked' ? null : a.approvalId ? <AllowTask client={client} approvalId={a.approvalId} sourceName={nameOf(a.sourceDevice, a.sourceName)} onDone={setNotice} onApprovals={onApprovals}/> : <button type="button" onClick={onApprovals}>Open Approvals</button>}{a.state === 'blocked' ? <TryAgain client={client} taskId={a.taskId} onDone={setNotice}/> : <ComputerTaskTiming client={client} taskId={a.taskId} onPrepared={onApprovals}/>}</>))}
       </div> : !(isSelf && ((account?.pairing?.addedWithCode?.length ?? 0) > 0 || (account?.pairing?.requests?.length ?? 0) > 0)) && <p className="fine-print">Nothing waits for you.</p>}</section>
       <section aria-label="Working on"><p className="section-label">Working on</p>
         {working.length ? <div className="computer-list" role="list">
-          {working.map(a => row(a, <>{a.sessionId && <button type="button" onClick={() => onOpenChat(a.sessionId!)}>Open its chat</button>}{WORKING.has(a.state) && a.state !== 'cancel_requested' && <button type="button" className="danger-text" onClick={() => void cancel(a)}>Stop</button>}</>))}
+          {working.map(a => row(a, <>{a.sessionId && !sentHere(a) && <button type="button" onClick={() => onOpenChat(a.sessionId!)}>Open its chat</button>}{WORKING.has(a.state) && a.state !== 'cancel_requested' && <button type="button" className="danger-text" onClick={() => void cancel(a)}>Stop</button>}</>))}
         </div> : <p className="fine-print">Nothing right now.{!isSelf && device && device.state !== 'available' && device.state !== 'busy' ? ' Tasks you send wait on this computer and go when it is open again.' : ''}</p>}
       </section>
       {/* CP3b: only this computer in the account. */}
@@ -171,4 +177,28 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
 function TryAgain({client, taskId, onDone}: {client: SessionClient; taskId: string; onDone: (text: string) => void}) {
   const [busy, setBusy] = useState(false);
   return <button type="button" disabled={busy} onClick={() => { setBusy(true); void client.request({method: 'POST', path: `/api/computers/tasks/${taskId}/timing`, body: {timing: {mode: 'immediate'}}}).then(r => onDone(r.status === 200 ? 'Trying again.' : 'It still cannot start. Fix the reason shown, then try again.')).catch(() => onDone('It still cannot start. Fix the reason shown, then try again.')).finally(() => setBusy(false)); }}>Try again</button>;
+}
+
+/** CP16 B: the answer of a task this computer sent, on its row (the chat stays on the computer that ran it). */
+function TaskAnswer({text, where}: {text: string; where: string}) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => { void navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }).catch(() => {}); };
+  return <span className="computer-task-answer">
+    <pre dir="auto">{text}</pre>
+    <span className="computer-task-answer-foot"><button type="button" onClick={copy}>{copied ? 'Copied' : 'Copy answer'}</button><small>The chat stays on {where}</small></span>
+  </span>;
+}
+
+/** CP16 A: on each of your computers, the others it does not trust yet: compare the code shown on both, then Same code (or remove a computer that is not yours). */
+function TrustRequests({client, status}: {client: SessionClient; status: Status | null | undefined}) {
+  const [removing, setRemoving] = useState(''), [notice, setNotice] = useState('');
+  const items = status?.trust ?? [];
+  if (!items.length) return notice ? <p role="status" className="fine-print">{notice}</p> : null;
+  const remove = async (deviceId: string) => { try { await call(client, '/api/computers/account/devices/revoke', {deviceId, confirmed: true}); setNotice('Removed from your account.'); } catch (e) { setNotice(computerAccountWords((e as Error).message)); } finally { setRemoving(''); } };
+  return <div className="computer-list" role="list" aria-label="Computers to trust">
+    {items.map(t => <div key={t.deviceId} className="computer-task" role="listitem"><TrustCompare client={client} item={t}
+      intro={<><b>{t.label}</b> is in your account. Is it yours? The same code shows on {t.label}.</>}
+      extra={removing === t.deviceId ? <button type="button" className="danger-text" onClick={() => void remove(t.deviceId)}>Remove it from your account</button> : <button type="button" onClick={() => setRemoving(t.deviceId)}>Not mine</button>}/></div>)}
+    {notice && <p role="status" className="fine-print">{notice}</p>}
+  </div>;
 }
