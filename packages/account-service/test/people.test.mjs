@@ -140,7 +140,7 @@ test('a computer added by Google sign-in alone is shared with people only after 
   assert.throws(()=>request(sara,'device.confirm',{deviceId:r.view.deviceId,publicKey:key,confirmed:true}),/unavailable/,'never across accounts');
 });
 
-test('the account\'s oldest approved computer counts as confirmed even when it came in by Google sign-in',async()=>{
+test('the account\'s first computer counts as confirmed; removing it promotes nobody',async()=>{
   const a=peer(),b=peer();
   const first=await login(a,'7007');now+=1000;const second=await login(b,'7007',{addByGoogle:true});now+=1000;
   store.transaction(()=>store.run("UPDATE devices SET approved_via='google' WHERE id=?",first.view.deviceId));
@@ -148,4 +148,6 @@ test('the account\'s oldest approved computer counts as confirmed even when it c
   assert.equal(store.one('SELECT approved_via v FROM devices WHERE id=?',second.view.deviceId).v,'kept');
   const c=peer(),third=await login(c,'7007',{addByGoogle:true});
   assert.throws(()=>request(c,'device.confirm',{deviceId:second.view.deviceId,publicKey:publicKeyText(b.key.publicKey),confirmed:true}),/unconfirmed/,'a later Google-only computer is not the starting point');
+  request(b,'device.revoke',{deviceId:first.view.deviceId,confirmed:true});
+  assert.throws(()=>request(c,'device.confirm',{deviceId:second.view.deviceId,publicKey:publicKeyText(b.key.publicKey),confirmed:true}),/unconfirmed/,'no new starting point after the first computer is removed');
 });

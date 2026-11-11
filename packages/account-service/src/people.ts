@@ -24,9 +24,9 @@ interface ProfileRow {account_id:string;public_id:string;nickname:string|null;ni
 interface LinkRow {id:string;from_account:string;to_account:string;status:'pending'|'linked'|'blocked';code_seed:string;created_at:number;expires_at:number;linked_at:number|null}
 interface Presence {at:number}
 
-/** The account's oldest computer still approved counts as confirmed: it came in first, so a computer added later
- *  by someone with the Google password can never be it. It is where the owner's confirmations start. */
-export function anchorDevice(store:AccountStore,accountId:string){return store.one<{id:string}>("SELECT id FROM devices WHERE account_id=? AND status='approved' ORDER BY registered_at,id LIMIT 1",accountId)?.id??null;}
+/** The account's first computer (fixed when the account was made or reset) counts as confirmed while it is
+ *  still approved. It never moves to another computer, so removing older computers promotes nobody. */
+export function anchorDevice(store:AccountStore,accountId:string){return store.one<{id:string}>("SELECT d.id FROM accounts a JOIN devices d ON d.id=a.bootstrap_device_id AND d.account_id=a.id WHERE a.id=? AND d.status='approved'",accountId)?.id??null;}
 
 export const isPeopleOperation=(op:string):op is PeopleOperation=>(PEOPLE_OPERATIONS as readonly string[]).includes(op);
 
