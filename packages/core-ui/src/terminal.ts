@@ -3,7 +3,7 @@ import type { TerminalFrame, TerminalPrefs } from './terminal-contract.js';
 import { DEFAULT_TERMINAL_PREFS, terminalPrefOk, terminalPrefs } from './terminal-contract.js';
 
 export type TerminalPhase = 'idle' | 'starting' | 'open' | 'stopping' | 'exited' | 'off' | 'error';
-export type TerminalState = Readonly<{ phase: TerminalPhase; id: string | null; cwd: string; shell: string; message?: string; projectId: string | null; command?: string; exitCode?: number; signal?: number; droppedOutput?: boolean }>;
+export type TerminalState = Readonly<{ phase: TerminalPhase; id: string | null; cwd: string; shell: string; message?: string; projectId: string | null; command?: string; exitCode?: number; signal?: number; droppedOutput?: boolean; /** CP15: the read-only Agent commands tab. */ readOnly?: boolean }>;
 
 const record = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
 /** Output kept for redrawing the screen when the pane opens again. */
@@ -40,6 +40,13 @@ export class TerminalController {
     if (this.#replay.length + data.length > REPLAY_CHARS && !this.#state.droppedOutput) this.publish({ droppedOutput: true });
     this.#replay = (this.#replay + data).slice(-REPLAY_CHARS);
     this.#output.forEach(fn => fn(data));
+  }
+
+  /** CP15: shows the read-only "Agent commands" session (what agents ran) without starting a shell. */
+  attach(id: string) {
+    if (this.#state.phase !== 'idle') return;
+    this.publish({ phase: 'open', id, cwd: '', shell: 'Agent commands', readOnly: true, command: undefined, projectId: null });
+    void this.follow(id);
   }
 
   /** Opens a shell in the project folder (or home without a project). */
@@ -96,7 +103,7 @@ export class TerminalController {
 
   /** Keystrokes from the screen, sent in order. */
   write(data: string) {
-    if (this.#state.phase !== 'open' || !data) return;
+    if (this.#state.phase !== 'open' || !data || this.#state.readOnly) return;
     this.#pending += data;
     if (!this.#sending) void this.flush();
   }
@@ -165,6 +172,7 @@ export class TerminalPrefsController {
 }
 
 export const MAX_TERMINAL_TABS = 4;
+const AGENT_LOG = 'agent-commands';
 export type TerminalTab = Readonly<{ key: string; n: number; terminal: TerminalController; commandKey?: string }>;
 export type TerminalTabsState = Readonly<{ tabs: readonly TerminalTab[]; active: string | null }>;
 
@@ -178,7 +186,7 @@ export class TerminalTabs {
   subscribe = (fn: () => void) => { this.#listeners.add(fn); return () => { this.#listeners.delete(fn); }; };
   private publish(p: Partial<TerminalTabsState>) { this.#state = Object.freeze({ ...this.#state, ...p }); this.#listeners.forEach(fn => fn()); }
   /** Tabs whose session still runs: a finished command keeps its tab but no longer takes a place. */
-  #live() { return this.#state.tabs.filter(t => t.terminal.getSnapshot().phase !== 'exited').length; }
+  #live() { return this.#state.tabs.filter(t => t.commandKey !== AGENT_LOG && t.terminal.getSnapshot().phase !== 'exited').length; }
   /** Whether another live terminal may open. */
   canAdd() { return this.#live() < MAX_TERMINAL_TABS; }
   /** Opens a new tab (its shell starts when its screen mounts). */
@@ -198,6 +206,19 @@ export class TerminalTabs {
     return tab;
   }
   select(key: string) { if (this.#state.tabs.some(t => t.key === key)) this.publish({ active: key }); }
+  /** CP15: when agents have run commands, their read-only "Agent commands" tab appears beside the shells (never taking a place). */
+  async syncAgentLog() {
+    if (this.#state.tabs.some(t => t.commandKey === AGENT_LOG)) return;
+    try {
+      const r = await this.client.request({ method: 'GET', path: '/api/terminal' } as never);
+      const sessions = record(r.body) && Array.isArray(r.body.sessions) ? r.body.sessions as { id: string; exited: boolean; log?: boolean }[] : [];
+      const log = r.status === 200 ? sessions.find(s => s.log && !s.exited) : undefined;
+      if (!log || this.#state.tabs.some(t => t.commandKey === AGENT_LOG)) return;
+      const tab: TerminalTab = { key: `t${++this.#n}`, n: this.#n, terminal: new TerminalController(this.client), commandKey: AGENT_LOG };
+      tab.terminal.attach(log.id);
+      this.publish({ tabs: [...this.#state.tabs, tab], active: this.#state.active ?? tab.key });
+    } catch { /* the tab comes on the next check */ }
+  }
   /** Closes a tab and its shell. */
   close(key: string) {
     const i = this.#state.tabs.findIndex(t => t.key === key); if (i < 0) return;

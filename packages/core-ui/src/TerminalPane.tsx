@@ -35,6 +35,8 @@ export function TerminalPane({ tabs, prefs, projectId, maximized, onToggleMax, o
     project.current = projectId;
     if (!tabs.getSnapshot().tabs.length) tabs.add();
   }, [tabs, projectId]);
+  // CP15: the Agent commands tab appears once an agent has run a command.
+  useEffect(() => { void tabs.syncAgentLog(); const timer = setInterval(() => void tabs.syncAgentLog(), 4000); return () => clearInterval(timer); }, [tabs]);
   const closeTab = (key: string) => { const last = tabs.getSnapshot().tabs.length === 1; tabs.close(key); if (last) onClose?.(); };
   const active = t.tabs.find(x => x.key === t.active) ?? null;
   const pal = PALETTES[p.theme];
@@ -132,7 +134,7 @@ function TabButton({ n, terminal, active, onSelect, onClose }: { n: number; term
   const folder = s.cwd ? s.cwd.split('/').filter(Boolean).at(-1) : '';
   return <span className="term-tab" role="tab" aria-selected={active} data-phase={s.phase}>
     <button type="button" className="term-tab-open" onClick={onSelect} title={s.cwd ? shortPath(s.cwd) : undefined}>
-      <i className="term-dot" aria-hidden="true"/>{s.command ? <span className="term-tab-command" dir="ltr">{commandLabel(s.command)}</span> : <>{s.shell || 'shell'}{n > 1 ? ` ${n}` : ''} · you</>}{folder ? <span className="term-tab-dir"> · {folder}</span> : null}
+      <i className="term-dot" aria-hidden="true"/>{s.readOnly ? <span title="What agents ran, with its output (read only)">Agent commands</span> : s.command ? <span className="term-tab-command" dir="ltr">{commandLabel(s.command)}</span> : <>{s.shell || 'shell'}{n > 1 ? ` ${n}` : ''} · you</>}{folder ? <span className="term-tab-dir"> · {folder}</span> : null}
     </button>
     <button type="button" className="term-tab-close" aria-label={`Close terminal ${n}`} onClick={onClose}><UiIcon name="close" size={9}/></button>
   </span>;

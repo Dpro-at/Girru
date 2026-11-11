@@ -177,7 +177,7 @@ export class TerminalManager {
   list(ownerId: string) {
     return [...this.sessions.values()]
       .filter(s => s.ownerId === ownerId)
-      .map(s => ({ id: s.id, shell: s.shell, createdAt: s.createdAt, exited: s.exitCode !== null }));
+      .map(s => ({ id: s.id, shell: s.shell, createdAt: s.createdAt, exited: s.exitCode !== null, ...(s.log ? { log: true } : {}) }));
   }
 
   /** `size.cwd`: a folder already checked by the caller (a project folder); otherwise home. */
