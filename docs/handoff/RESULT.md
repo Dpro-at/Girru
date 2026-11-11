@@ -362,3 +362,57 @@ under the QR, for a phone without a camera. Today the QR holds a 368-character
 `girru://pair` link, so this needs the typed-code proposal in
 `PHONE_FEATURES.md` §5 (protocol change, owner's OK first). It is not the
 6-digit check code, which only confirms the phone.
+
+## Test: phone chat fit (74c321ed)
+
+PR Dpro-at/Girru#197 "Fit the chat page to the phone", branch `phone/chat-fit`
+at `74c321ed`. The chat page comes from the computer, so the main Mac ran the
+MacBook's Girru from a local merge of `computers/simplify` and `phone/chat-fit`
+(same profile and data). The iPhone app is unchanged: same simulator build,
+still paired with the owner's real Girru. iPhone 18 Pro simulator, iOS 27.2,
+402 pt wide. Screenshots `result/fit-*.png`; sizes measured in the page.
+
+**Fixed (checked on the owner's real chats):**
+
+- The page is exactly 402 px wide; the conversation is full width
+  (`.chat-thread` 402×574) and the messages are readable (`fit-01`).
+- The top bar fits: Chats, the chat's name, Terminal, ⋯, side panel, no
+  overlap.
+- The left drawer (chat list) is closed at start, opens over a dimmed chat
+  with the owner's projects and chats, and closes on a tap outside (`fit-02`).
+  The owner: "the left side bar is good".
+- With the keyboard up nothing slides sideways (scroll width 402, scroll 0);
+  the composer sits above the keyboard with Send visible (`fit-07`).
+- Back from the terminal page returns to the same chat (10 messages, full
+  width, `fit-06`).
+- The meetings and specialties errors are gone (the only alerts left are the
+  chat's own "The model did not answer" messages).
+- The terminal opens as its own page after Face ID ("Open the terminal" in
+  the system log).
+
+**Findings:**
+
+1. **The right drawer cannot be used or scrolled** (`fit-04`; the owner saw it
+   too). `.chat-details` is `position: fixed; z-index: 12`, while
+   `button.phone-scrim` is `position: fixed; z-index: 65`, so the dim layer
+   lies over the drawer: the drawer looks greyed, every touch on it hits the
+   scrim (which closes it), and its content (1006 px in a 729 px box,
+   `overflow-y: auto`) never scrolls. The drawer must sit above the scrim.
+2. **Text sizes are mixed and mostly desktop-small** (the owner: "some things
+   small, some big"): message text 13.5 px, code 12.15 px, the task card in the
+   chat 12–12.5 px with details at 10.4 px, while the composer writes at 16 px.
+   Phone body text should be about 16–17 px.
+3. **The composer is narrow:** 220 px of 402 (textarea 196 px). The column
+   also keeps 48 px margins on both sides (306 px), and assistant text starts
+   at x 88, so a reply line is only 266 px wide. The owner: "the chat box is
+   very small".
+4. **The terminal does not start on this Girru:** after Face ID the page shows
+   "The terminal could not start", and "Start again" leaves an empty screen
+   (no prompt). Probably the terminal is not switched on in the Girru the main
+   Mac restarted (`AGENT_TERMINAL=true`); please check before judging the page.
+5. When Face ID for the terminal is cancelled, the page still switches to the
+   terminal page with "The terminal could not start" (`fit-03`). No shell
+   opens, but after a cancel it should stay in the chat.
+
+**Not tested:** dark mode of the new layout, sending a message (not to start
+the owner's agents), the terminal key row (needs a working terminal).
