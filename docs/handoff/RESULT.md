@@ -619,3 +619,46 @@ setting was changed.
 
 Phone Settings has no open finding left from these tests. Still untested: the
 chat page's automatic retry after a failed load (needs the relay cut briefly).
+
+### Test: phone meetings (413f423a)
+
+`origin/phone/meetings` at `413f423a` (zoom fix `f424c30e`, wording fix
+`413f423a`), merged with `phone/settings` `d82a2bad` in the MacBook's test
+Girru (`482d97ac`). The phone is paired with the owner's real Girru. Mohamed
+OK'd one small live meeting in this session: "Phone meeting test", Sales only
+(Remy plus the Main Agent), with the decision field "Nothing real to decide.
+This only tests the phone." No decision was approved and no setting was
+changed. Screenshots are `result/meet-*.png`.
+
+| # | Check | Result |
+|---|---|---|
+| 6 | "New meeting" in the chat ⋯ menu | **Pass** (`meet-01`) |
+| 7 | No zoom on the fields | **Pass:** topic, find-department and decide fields are 16 px; `visualViewport.scale` stays 1 while typing (`meet-05`, `meet-07`) |
+| – | Wording | **Pass:** "1 agent · 1 head", "1 agent selected · plus you" (`meet-06`) |
+| 1 | Start with Face ID | **Pass:** Start meeting asks Face ID (`meet-08`); "no match" then Cancel keeps the filled form and starts nothing (`meet-09`); a match opens the meeting: "2 present · Main Agent coordinates · 0 of 2 initial turns" (`meet-10`) |
+| 2 | Turns stream in | **Partly.** Remy's turn (Sales) shows "Thinking" counting up live, then after 1m 37s "The model did not answer". Remy runs on the local model qwen3.5:9b ("No Claude key is set"), which did not answer, and the meeting pauses itself (`meet-11`). The Main Agent's turn (Claude Code) arrived after about 30 s (`meet-13`). I could not see it come in word by word: right after Next speaker the page showed "Loading the chat…" and the inspector lost the page for about 20 s |
+| 3 | Mic turn stops at 40 s | **Not testable here.** The call opens (`meet-14`), but the mic button is disabled with "Set up local speech-to-text to speak; typed chat still works." Setting up speech-to-text is a computer setting, so it was left alone. Leave call works |
+| 5 | End the meeting with Face ID | **Pass for the Face ID step:** Finish meeting asks Face ID, then sends "Finish the meeting and prepare its decisions for review." (`meet-15`). **But** that went to Remy's local model, which failed again after 1m 21s, and the meeting paused with no summary (`meet-16`) |
+| 4 | Approve decisions with Face ID | **Not reached:** no decisions sheet appeared, because the finish turn failed (see 5). Nothing was approved |
+
+Findings for the author:
+
+1. **Remy's local model blocks the meeting.** Both Remy turns failed on
+   qwen3.5:9b, and Finish was sent to Remy rather than the coordinating Main
+   Agent, so the meeting cannot be finished. The model choice is the owner's
+   setting, but it may help if Finish goes to the coordinator, or if the
+   meeting skips a participant whose model failed.
+2. **Try again does nothing while the meeting is paused.** It puts the message
+   back in the box with "The message was not sent. It is back in the box."
+   (`meet-12`). Either resume by itself, or say "Resume the meeting first".
+3. **Wrong status line:** during the finish turn the header said "Remy is
+   answering" while the Main Agent's bubble showed "Thinking" (`meet-15`).
+4. **Count after start:** with only Sales chosen (1 agent), the meeting header
+   showed "Invite remaining speakers (2)" (`meet-10`).
+5. **Call view:** the small "You · Camera" tile covers the end of the caption
+   line ("Choose a voice in …") (`meet-14`).
+6. **The keyboard bar stays** over the tab bar after the form closes
+   (`meet-10`), the same as in chat.
+
+The meeting "Phone meeting test" is left **paused** on the owner's Girru. It
+was not ended, and no decisions were approved.
