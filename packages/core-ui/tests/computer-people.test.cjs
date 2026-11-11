@@ -1,0 +1,13 @@
+require('./load.cjs');const test=require('node:test'),assert=require('node:assert/strict'),React=require('react'),{renderToStaticMarkup}=require('react-dom/server');
+const P=require('../src/ComputerPeople.tsx'),client={request:async()=>({status:200,body:{}})};
+test('CP17: the bridge allows only the people fields',async()=>{const C=await import('../src/computer-contract.js'),path='/api/computers/account/people';
+ assert.equal(C.allowedComputer('POST',path,{action:'find',query:'sara.dev'}),true);
+ assert.equal(C.allowedComputer('POST',path,{action:'accept',linkId:'x',code:'12345678',confirmed:true}),true);
+ assert.equal(C.allowedComputer('POST',path,{action:'me',token:'x'}),false);});
+test('CP17 A: your nickname and fixed ID with Copy and one Add button',()=>{const html=renderToStaticMarkup(React.createElement(P.YouOnGirru,{client,me:{publicId:'GR-7K2D-9QF4',nickname:'mohamed.alarade'},onAdd(){},onChanged(){}}));
+ assert.match(html,/You on Girru/);assert.match(html,/GR-7K2D-9QF4/);assert.match(html,/mohamed\.alarade/);assert.match(html,/Copy/);assert.match(html,/>Add</);assert.match(html,/Nobody is added without your OK/);});
+test('CP17 C: a request shows the code and Same code, add / Not now / Block',()=>{const html=renderToStaticMarkup(React.createElement(P.PeopleRequests,{client,onChanged(){},incoming:[{linkId:'l1',person:{publicId:'GR-4M8P-2XW1',nickname:'sara.dev'},expiresAt:0,code:'58210937',codeExpiresAt:0}]}));
+ assert.match(html,/sara\.dev wants to work with you/);assert.match(html,/5821 0937/);assert.match(html,/Same code, add/);assert.match(html,/Not now/);assert.match(html,/Block/);});
+test('CP17 D: a person page lists their computers and says only tasks are shared',()=>{const html=renderToStaticMarkup(React.createElement(P.PersonPage,{person:{linkId:'l1',linkedAt:1,person:{publicId:'GR-4M8P-2XW1',nickname:null},computers:[{deviceId:'d',publicKey:'k',label:'Sara Mac',osFamily:'macos',presence:'online'},{deviceId:'e',publicKey:'k2',label:'Sara PC',osFamily:'windows',presence:'unknown',viaGoogle:true}]}}));
+ assert.match(html,/Sara Mac/);assert.match(html,/Off or not seen · added without a code check/);assert.match(html,/Only tasks are shared with GR-4M8P-2XW1/);});
+test('CP17: plain words for refusals',()=>{assert.match(P.peopleWords('account_people_code_changed'),/code changed/);assert.match(P.peopleWords('something_else'),/did not work/);});
