@@ -10,7 +10,7 @@
  *    run_command_owner, which shows the exact command and runs it only after the owner presses Run.
  *  - The child gets a minimal environment (no server secrets) and never the server's own folder.
  */
-import {spawn} from 'node:child_process';
+import {spawn, spawnSync} from 'node:child_process';
 import path from 'node:path';
 import {realpathSync, statSync} from 'node:fs';
 import os from 'node:os';
@@ -42,38 +42,76 @@ export function splitCommand(command: string): string[] | null {
   return out.length ? out : null;
 }
 
-const SIMPLE = new Set(['ls', 'pwd', 'cat', 'head', 'tail', 'wc', 'grep', 'rg', 'echo', 'date', 'whoami']);
+// Security review: every command accepts only flags listed here (exact words); anything else needs the owner.
+const NUM = /^-\d{1,6}$|^-n\d{1,6}$|^--max-count=\d{1,6}$/;
+const FLAGS: Record<string, string[]> = {
+  ls: ['-l', '-a', '-la', '-al', '-lh', '-lah', '-R', '-1', '-A'], cat: [], wc: ['-l', '-w', '-c'], pwd: [], date: [], whoami: [],
+  head: ['#n'], tail: ['#n'], grep: ['-n', '-i', '-r', '-R', '-l', '-c', '-w', '-v', '-E', '-F', '-I', '-rn', '-rin', '-ri'], rg: ['-n', '-i', '-l', '-c', '-w', '-F', '--hidden'],
+};
+const GIT_FLAGS: Record<string, string[]> = {
+  status: ['-s', '--short', '-b', '--branch', '-sb', '--porcelain'],
+  log: ['#n', '--oneline', '--stat', '--graph', '--decorate', '--all', '-p', '--name-only', '--name-status', '--pretty=oneline', '--pretty=short', '--pretty=medium', '--pretty=full'],
+  diff: ['--stat', '--name-only', '--name-status', '--cached', '--staged', '--shortstat', '-p'], show: ['--stat', '--name-only', '--name-status', '--oneline', '-p', '--shortstat'],
+  'rev-parse': ['--short', '--abbrev-ref', '--show-toplevel', '--is-inside-work-tree', '--verify'], 'ls-files': ['-m', '-o', '-c', '--others', '--modified', '--cached', '--exclude-standard'],
+  blame: ['-s'], describe: ['--tags', '--always'], shortlog: ['-s', '-n', '-e', '-sn', '-sne'], grep: ['-n', '-i', '-l', '-c', '-w', '-I', '--count'],
+  fetch: ['--all', '--prune', '-p', '--tags', '--dry-run'], pull: ['--ff-only', '--no-rebase'], 'ls-remote': ['--heads', '--tags'],
+  remote: ['-v'], branch: ['-a', '-r', '-v', '-vv', '--show-current', '--list'], tag: ['-l', '--list'], stash: [],
+};
 const VERSION_ONLY = new Set(['node', 'npm', 'pnpm', 'yarn', 'python', 'python3', 'go', 'cargo', 'java', 'dotnet', 'git']);
-const GIT_READ = new Set(['status', 'log', 'diff', 'show', 'rev-parse', 'ls-files', 'blame', 'describe', 'shortlog', 'grep', 'fetch', 'pull', 'ls-remote', 'remote', 'branch', 'tag', 'stash']);
-const GIT_BAD_FLAG = /^(--(upload-pack|receive-pack|exec|config-env|git-dir|work-tree|output|ext-diff|textconv|open-files-in-pager|rebase|recurse-submodules|pre|pre-glob|namespace)\b|-O|-c$|-u$|-C$)/;
+const GIT_WORD = /^[A-Za-z0-9._\/~^@+-]{1,200}$/;
 
-function insideFolder(arg: string, cwd: string): boolean {
-  const value = arg.startsWith('-') ? (arg.includes('=') ? arg.slice(arg.indexOf('=') + 1) : '') : arg;
-  if (!value) return true;
-  if (value.startsWith('~') || /^[A-Za-z]:/.test(value) && !path.isAbsolute(value)) return false;
-  if (!/[\\/]/.test(value) && value !== '..' && !path.isAbsolute(value)) return true;
-  const rel = path.relative(cwd, path.resolve(cwd, value));
-  return !rel.startsWith('..') && !path.isAbsolute(rel);
+/** A path the command may read: inside the project folder after links are followed. */
+function insideFolder(value: string, cwd: string): boolean {
+  if (value.startsWith('~') || /^[A-Za-z]:/.test(value) || value.startsWith('\\\\')) return false;
+  let abs = path.resolve(cwd, value);
+  try { abs = realpathSync(abs); } catch { /* not there yet: checked as written */ }
+  const rel = path.relative(cwd, abs);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+/** Splits flags from other words; null when a flag is not listed. '#n' allows -N, -nN, --max-count=N and "-n N". */
+function checkFlags(args: string[], allowed: string[]): string[] | null {
+  const rest: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (!a.startsWith('-')) { rest.push(a); continue; }
+    if (allowed.includes('#n') && (NUM.test(a) || (a === '-n' && /^\d{1,6}$/.test(args[i + 1] ?? '') && ++i))) continue;
+    if (a === '--') return null;
+    if (!allowed.includes(a)) return null;
+  }
+  return rest;
+}
+
+function gitRemotes(cwd: string): string[] {
+  try { const r = spawnSync('git', ['remote'], {cwd, encoding: 'utf8', timeout: 5000, env: minimalChildEnv(), windowsHide: true}); return r.status === 0 ? r.stdout.split(/\r?\n/).map(x => x.trim()).filter(Boolean) : []; } catch { return []; }
 }
 
 /** The allowlist: the words to start without a shell, or null when the command needs the owner's Run. */
-export function allowedCommand(command: string, cwd: string): string[] | null {
+export function allowedCommand(command: string, cwd: string, remotes: (cwd: string) => string[] = gitRemotes): string[] | null {
   const words = splitCommand(command);
   if (!words) return null;
   const [cmd, ...args] = words;
-  if (!args.every(a => insideFolder(a, cwd)) || args.some(a => a.includes('::') || /^ext:/i.test(a))) return null;
   if (VERSION_ONLY.has(cmd) && args.length === 1 && ['--version', '-v', 'version'].includes(args[0])) return words;
-  if (SIMPLE.has(cmd)) return cmd === 'rg' && args.some(a => /^--pre/.test(a)) ? null : words;
-  if (cmd !== 'git' || !args.length || !GIT_READ.has(args[0])) return null;
-  const [sub, ...rest] = args;
-  if (rest.some(a => GIT_BAD_FLAG.test(a))) return null;
-  if (sub === 'remote' && !(rest.length === 0 || (rest.length === 1 && rest[0] === '-v'))) return null;
-  if (sub === 'branch' && !rest.every(a => ['-a', '-r', '-v', '-vv', '--show-current', '--list'].includes(a))) return null;
-  if (sub === 'tag' && !rest.every(a => a === '-l' || a === '--list')) return null;
-  if (sub === 'stash' && !(rest.length === 1 && rest[0] === 'list')) return null;
-  // Hooks, file monitors and external diff programs never run from an agent's git command.
+  if (cmd === 'echo') return args.some(a => a.startsWith('-')) ? null : words;
+  if (cmd !== 'git') {
+    const rest = Object.hasOwn(FLAGS, cmd) ? checkFlags(args, FLAGS[cmd]) : null;
+    if (!rest) return null;
+    // grep/rg take the pattern first; every other word is a path in the folder.
+    const paths = cmd === 'grep' || cmd === 'rg' ? rest.slice(1) : rest;
+    return paths.every(p => insideFolder(p, cwd)) ? words : null;
+  }
+  const [sub, ...gitArgs] = args;
+  if (!sub || !Object.hasOwn(GIT_FLAGS, sub)) return null;
+  const rest = checkFlags(gitArgs, GIT_FLAGS[sub]);
+  if (!rest) return null;
+  if (sub === 'stash' ? !(rest.length === 1 && rest[0] === 'list') : sub === 'remote' || sub === 'branch' || sub === 'tag' ? rest.length > 0 : false) return null;
+  if (sub === 'grep') { if (!rest.length || !rest.slice(1).every(p => insideFolder(p, cwd))) return null; }
+  else if (!rest.every(w => GIT_WORD.test(w) && !w.includes('..') && !w.includes('//') && insideFolder(w, cwd))) return null;
+  // Network commands: only the project's own remotes by name, never an address.
+  if ((sub === 'fetch' || sub === 'pull' || sub === 'ls-remote') && rest.length && !remotes(cwd).includes(rest[0])) return null;
+  // Hooks, file monitors, pagers and external diff programs never run from an agent's git command.
   const noDiffTools = ['diff', 'show', 'log'].includes(sub) ? ['--no-ext-diff', '--no-textconv'] : [];
-  return ['git', '-c', `core.hooksPath=${os.devNull}`, '-c', 'core.fsmonitor=false', sub, ...noDiffTools, ...rest];
+  return ['git', '-c', `core.hooksPath=${os.devNull}`, '-c', 'core.fsmonitor=false', '-c', 'protocol.ext.allow=never', '-c', 'core.pager=cat', sub, ...noDiffTools, ...gitArgs];
 }
 
 /** True when the command needs the owner's Run (not on the allowlist). */
@@ -114,7 +152,7 @@ export function runShell(command: string | string[], cwd: string, timeout: numbe
     const direct = Array.isArray(command);
     const file = direct ? command[0] : (win ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh');
     const args = direct ? command.slice(1) : (win ? ['/d', '/s', '/c', command] : ['-c', command]);
-    const env = {...minimalChildEnv(), GIT_TERMINAL_PROMPT: '0'};
+    const env = {...minimalChildEnv(), GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1'};
     let child;
     try { child = spawn(file, args, {cwd, env, windowsHide: true, windowsVerbatimArguments: win && !direct, detached: !win, shell: false}); }
     catch (e) { resolve({code: null, out: String((e as Error).message), timedOut: false, ms: 0}); return; }
