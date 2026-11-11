@@ -9,7 +9,7 @@
  *  - The child gets a minimal environment (no server secrets) and never the server's data folder.
  *  - Sign-ins and keys are never typed by the agent: the environment carries no secrets.
  */
-import {spawn, spawnSync} from 'node:child_process';
+import {spawn} from 'node:child_process';
 import path from 'node:path';
 import {realpathSync, statSync} from 'node:fs';
 import os from 'node:os';
@@ -40,6 +40,10 @@ const RISKY_WORDS: RegExp[] = [
   /\b(sh|bash|zsh|dash|fish|pwsh|powershell|cmd)(\.exe)?\s+(-[a-z]*c|\/c|-command|-encodedcommand)\b/i,
   /\b(python3?|node|deno|bun|perl|ruby|php|osascript)\s+(-[a-z]*[ce]\b|--eval|--exec)/i,
   /\beval\b|\bsource\s|(^|[\s;&|])\.\s+\S|`|\$\(/,
+  // Review fix: code fed to a shell or interpreter through a pipe, a heredoc or a script file, and opening other apps.
+  /\|\s*(sudo\s+)?(sh|bash|zsh|dash|fish|python3?|node|deno|bun|perl|ruby|php|pwsh|powershell|cmd|osascript)\b/i, /<</,
+  /(^|[\s;&|(])(sh|bash|zsh|dash|fish)\s+(?!-)\S/i, /\b(python3?|node|perl|ruby|php)\s+-(\s|$)/i, /\b(sh|bash|zsh)\s+-s\b/i,
+  /(^|[\s;&|(])(open|osascript|automator|start|explorer)(\.exe)?(\s|$)/i,
 ];
 
 /** True when a command needs the owner's Run: it may delete, push, act as another user, or reach outside the project folder. */
@@ -76,9 +80,11 @@ function sandboxed(command: string, cwd: string): {file: string; args: string[]}
   const home = os.homedir();
   // Tool caches (npm, pip, builds) may be written too; nothing else outside the project.
   const dirs = [cwd, realpathSync(os.tmpdir()), '/private/tmp', '/private/var/folders', '/dev', path.join(home, '.npm'), path.join(home, '.cache'), path.join(home, 'Library/Caches')];
-  // A git worktree keeps its repository data in the main checkout's .git folder.
-  try { const g = spawnSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {cwd, encoding: 'utf8', timeout: 3000, env: minimalChildEnv()}); const dir = g.status === 0 ? g.stdout.trim() : ''; if (dir && path.basename(dir) === '.git') dirs.push(realpathSync(dir)); } catch { /* not a repository */ }
-  const profile = `(version 1)(allow default)(deny file-write*)(allow file-write* ${dirs.map(d => `(subpath ${q(d)})`).join(' ')})`;
+  // Review fixes: git hooks and config are never written (they would run later as the owner), and no other app is
+  // opened or scripted (Launch Services, Apple Events), so the confined command cannot hand work to an unconfined one.
+  const profile = `(version 1)(allow default)(deny file-write*)(allow file-write* ${dirs.map(d => `(subpath ${q(d)})`).join(' ')})`
+    + `(deny file-write* (subpath ${q(path.join(cwd, '.git', 'hooks'))}) (literal ${q(path.join(cwd, '.git', 'config'))}))`
+    + `(deny appleevent-send)(deny mach-lookup (global-name "com.apple.coreservices.launchservicesd") (global-name-regex #"^com\\.apple\\.lsd\\."))`;
   return {file: '/usr/bin/sandbox-exec', args: ['-p', profile, '/bin/sh', '-c', command]};
 }
 

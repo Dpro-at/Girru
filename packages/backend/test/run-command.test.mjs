@@ -33,3 +33,10 @@ test('review fixes (macOS): a command run without the owner cannot write outside
     assert.equal(slow.timedOut, true); assert.ok(Date.now() - t0 < 5000);
   } finally { fs.rmSync(base, {recursive: true, force: true}); }
 });
+
+test('review fixes 2: piped or heredoc code, script files and opening apps need the owner', async () => {
+  const {riskyCommand} = await import('../src/tools/core/run-command.ts');
+  const cwd = process.cwd();
+  for (const bad of ['echo x | sh', 'cat a | python3', 'bash <<EOF', 'sh build.sh', 'bash -s', 'python3 - ', 'open -a Terminal', 'osascript x.scpt', 'start notepad']) assert.equal(riskyCommand(bad, cwd), true, bad);
+  for (const ok of ['git log --oneline | head -5', 'npm run build', 'ls | wc -l']) assert.equal(riskyCommand(ok, cwd), false, ok);
+});
