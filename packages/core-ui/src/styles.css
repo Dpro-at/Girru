@@ -4159,3 +4159,18 @@ html:has(.app-shell[data-phone]), body:has(.app-shell[data-phone]) { overflow:hi
 .app-shell[data-phone] .chat-composer-row .composer-pill { min-inline-size:36px; block-size:36px; padding-inline:8px; justify-content:center; }
 .app-shell[data-phone] .chat-composer-row .composer-spacer { flex:1 1 auto; min-inline-size:0; }
 .app-shell[data-phone] .chat-composer-row .round-button { inline-size:36px; block-size:36px; flex:none; margin-inline-start:4px; }
+
+/* Phone test round 3 (simulator): the details drawer sits above its scrim and scrolls; one text size; full width. */
+.app-shell[data-phone] .chat-layout > .chat-panel, .app-shell[data-phone] .chat-layout[data-panel] > .chat-details, .app-shell[data-phone] .chat-layout[data-panel] > .chat-panel[aria-label="Conversation details"] {
+  position:fixed !important; z-index:70 !important; inset-block:0 !important; inset-inline-end:0 !important; inset-inline-start:auto !important;
+  overflow-y:auto !important; overflow-x:hidden !important; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; max-block-size:none !important; }
+.app-shell[data-phone] .chat-layout > .chat-panel > * { flex-shrink:0; }
+.app-shell[data-phone] .phone-scrim { z-index:65 !important; }
+.app-shell[data-phone] .chat-thread { padding-inline:12px !important; font-size:16px; }
+.app-shell[data-phone] .chat-column { max-inline-size:none !important; inline-size:100% !important; }
+.app-shell[data-phone] .chat-thread :is(.turn-text, .user-bubble) { font-size:16px !important; line-height:1.5; }
+.app-shell[data-phone] .chat-thread :is(.turn-text, .user-bubble) :is(p, li, td, th, blockquote, a, strong, em, span:not([class])) { font-size:inherit !important; }
+.app-shell[data-phone] .chat-thread :is(pre, pre *, code, kbd) { font-size:14px !important; }
+.app-shell[data-phone] .chat-thread :is(.reply-meta, .turn-time, .turn-chip, small, [class*="chat-card"], [class*="card-"]) { font-size:14px !important; }
+.app-shell[data-phone] .chat-thread [class*="chat-card"] :is(small, span, p, div, li) { font-size:14px !important; }
+.app-shell[data-phone] .chat-screen textarea { font-size:16px !important; }
