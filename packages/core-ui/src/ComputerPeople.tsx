@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useState} from 'react';
 import type {SessionClient} from './session';
-import {call} from './ComputerJoin';
+import {call, computerAccountWords} from './ComputerJoin';
+import {QrImage} from './PhonePairing';
 import {Avatar, Sheet} from './desktop-ui';
 import {UiIcon} from './ui-icons';
 
@@ -222,19 +223,30 @@ function AnswerReview({client, task, onChanged, onOpenChat, onNotice}: {client: 
 /** CP17: a computer added by Google sign-in alone exchanges tasks with people only after the owner confirms it with the
  *  account's two-step code (your other computers you trusted are then confirmed by themselves). */
 function ConfirmThisComputer({client, twoFactor, onDone, onSettings}: {client: SessionClient; twoFactor: boolean; onDone: () => void; onSettings?: () => void}) {
-  const [code, setCode] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false), [code, setCode] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false);
+  const [setup, setSetup] = useState<{secret: string; uri: string} | null>(null);
+  /* Two-step sign-in is turned on right here; the code that turns it on also confirms this computer. */
+  const startSetup = async () => { setNotice(''); try { setSetup(await call(client, '/api/computers/account/twofactor', {action: 'setup'})); } catch (e) { setNotice(computerAccountWords((e as Error).message)); } };
+  const enable = async () => { setBusy(true); setNotice(''); try { await call(client, '/api/computers/account/twofactor', {action: 'enable', code}); setSetup(null); setCode(''); onDone(); } catch (e) { setNotice(computerAccountWords((e as Error).message)); } finally { setBusy(false); } };
   const confirm = async () => {
     setBusy(true); setNotice('');
-    try { await call(client, '/api/computers/account/twofactor', {action: 'confirm', code: code.trim(), confirmed: true}); setCode(''); setNotice('Confirmed. Your other computers you trusted are confirmed too.'); onDone(); }
-    catch (e) { const c = (e as Error).message; setNotice(c === 'account_twofactor_code_wrong' ? 'That code was not right. Try again.' : c === 'account_twofactor_wait' ? 'Too many wrong codes. Wait 15 minutes, then try again.' : 'That did not work. Try again.'); }
+    try { await call(client, '/api/computers/account/twofactor', {action: 'confirm', code: code.trim(), confirmed: true}); setCode(''); setOpen(false); onDone(); }
+    catch (e) { const c = (e as Error).message; setNotice(c === 'account_twofactor_code_wrong' ? 'That code was not right.' : c === 'account_twofactor_wait' ? 'Too many wrong codes. Wait 15 minutes.' : 'That did not work. Try again.'); }
     finally { setBusy(false); }
   };
   return <div className="people-confirm" role="group" aria-label="Confirm this computer">
-    <span><UiIcon name="shield" size={14}/><b>Confirm this computer to work with people</b></span>
-    {twoFactor
-      ? <span className="people-you-row"><input aria-label="Two-step code" inputMode="numeric" maxLength={6} placeholder="6-digit code" value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))} onKeyDown={e => { if (e.key === 'Enter' && code.length === 6) void confirm(); }}/><button type="button" className="primary" disabled={busy || code.length !== 6} onClick={() => void confirm()}>Confirm</button></span>
-      : <span className="people-you-row"><small>Turn on two-step sign-in for your account; the code you type then confirms this computer.</small>{onSettings && <button type="button" onClick={onSettings}>Two-step sign-in…</button>}</span>}
-    <small className="fine-print">It was added by Google sign-in alone. Until you confirm it, people can't send it tasks or get tasks from it.</small>
-    {notice && <p role="status" className="fine-print">{notice}</p>}
+    <UiIcon name="shield" size={13}/>
+    <span className="people-confirm-text" title="It was added by Google sign-in alone. Until you confirm it with your two-step code, people can't send it tasks or get tasks from it.">Not confirmed for people yet</span>
+    {open && twoFactor
+      ? <><input aria-label="Two-step code" inputMode="numeric" maxLength={6} placeholder="Code" autoFocus value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))} onKeyDown={e => { if (e.key === 'Enter' && code.length === 6) void confirm(); else if (e.key === 'Escape') setOpen(false); }}/><button type="button" className="primary" disabled={busy || code.length !== 6} onClick={() => void confirm()}>Confirm</button></>
+      : <button type="button" className="cp-link" title={twoFactor ? 'Type your two-step code' : 'Turn on two-step sign-in first'} onClick={() => twoFactor ? setOpen(true) : void startSetup()}>{twoFactor ? 'Confirm…' : 'Turn on two-step sign-in…'}</button>}
+    {notice && !setup && <small role="status">{notice}</small>}
+    {setup && <Sheet title="Turn on two-step sign-in" onClose={() => { setSetup(null); setCode(''); }} actions={<><button type="button" onClick={() => { setSetup(null); setCode(''); }}>Cancel</button><button type="button" className="primary" disabled={busy || code.length !== 6} onClick={() => void enable()}>Turn on</button></>}>
+      <p>Scan this with your authenticator app, then type the 6-digit code it shows. It also confirms this computer.</p>
+      <QrImage text={setup.uri}/>
+      <p className="fine-print">Can’t scan? Type this key: {setup.secret}</p>
+      <label className="phone-field"><span>Code</span><input autoFocus inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))} onKeyDown={e => { if (e.key === 'Enter' && code.length === 6) void enable(); }}/></label>
+      {notice && <p role="status">{notice}</p>}
+    </Sheet>}
   </div>;
 }
