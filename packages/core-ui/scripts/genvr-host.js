@@ -11,9 +11,11 @@ window.addEventListener('message',async event=>{
    if(typeof data.storageNamespace!=='string'||!data.storageNamespace)throw Error();
    await isolateBrowserCache(data.storageNamespace);
    const sdk=await import('/genvr/dist/studio.js');mountStudio=sdk.mountStudio;
+   // GV1 B: Girru's create page made the choices; the package makes the space, Girru saves it, the Studio opens on it.
+   let projectId=data.projectId;if(data.create)projectId=await createFromSpec(data.create);
    const host=await studioHost(typeof data.privateLibrary==='string'&&/^[a-f0-9]{64}$/.test(data.privateLibrary)?data.privateLibrary:null);
-   studio=mountStudio(document.getElementById('studio'),{filmExample:'/film-examples/island-languages.genvrfilm',forceWebGL:true,initialProjectId:data.projectId,...host,...(data.chat===true?hostChat():{}),agents:id=>request('agents',id),catalog:{list:()=>request('catalog-list'),asset:id=>request('catalog-asset',id)},storage:{list:()=>request('list'),read:id=>request('read',id),write:project=>request('write',project)}});
-   send({operation:'mounted'});if(sdk.STUDIO_HOST_VERSION!==1&&typeof data.projectId==='string')openExisting(data.projectId);
+   studio=mountStudio(document.getElementById('studio'),{filmExample:'/film-examples/island-languages.genvrfilm',forceWebGL:true,initialProjectId:projectId,...host,...(data.chat===true?hostChat():{}),agents:id=>request('agents',id),catalog:{list:()=>request('catalog-list'),asset:id=>request('catalog-asset',id)},storage:{list:()=>request('list'),read:id=>request('read',id),write:project=>request('write',project)}});
+   send({operation:'mounted'});if(sdk.STUDIO_HOST_VERSION!==1&&typeof projectId==='string')openExisting(projectId);
   }catch{send({operation:'unavailable'});}
  }
  if(data.operation==='notify'&&studio&&data.notification&&typeof data.notification==='object'){
@@ -119,4 +121,16 @@ async function studioHost(ticket){
  }};
  try{const {motions}=await call('motions');if(motions.length)options.motionLibrary={entries:motions.map(m=>({id:m.id,name:m.name,category:m.category,loop:m.loop,load:()=>call('motion',{id:m.id},true)}))};}catch{/* no private motion library on this computer */}
  return options;
+}
+
+const CREATE_STYLES=['realistic','blocky','anime','voxel'],CREATE_SIZES=['small','medium','large','huge','max'],CREATE_DEVICES=['phone','tablet','computer','tv','vr'];
+/** GV1 B: a new private space from the create page: empty land of the chosen size, look and play settings. */
+async function createFromSpec(spec){
+ if(!spec||typeof spec!=='object'||typeof spec.title!=='string'||!spec.title.trim()||spec.title.length>120||!CREATE_STYLES.includes(spec.style)||!CREATE_SIZES.includes(spec.sizeTier)||!['free','side'].includes(spec.view)||!['landscape','portrait','any'].includes(spec.orientation)||!Array.isArray(spec.devices)||!spec.devices.length||!spec.devices.every(d=>CREATE_DEVICES.includes(d)))throw Error('create');
+ const {createStudioProject,readStudioProject}=await import('/genvr/dist/studio-project.js');
+ const play={orientation:spec.orientation,view:spec.view,moves:[],devices:CREATE_DEVICES.filter(d=>spec.devices.includes(d))};
+ const made=createStudioProject(spec.style,'empty',play);
+ const project=readStudioProject({...made,title:spec.title.trim(),world:{...made.world,sizeTier:spec.sizeTier}});
+ await request('write',project);
+ return project.id;
 }

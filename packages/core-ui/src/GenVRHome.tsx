@@ -18,10 +18,11 @@ export interface SpaceRow {id: string; title: string; agentCount?: number; style
 export type GenVRPlace = 'spaces' | 'published' | 'market' | 'lab';
 export interface CreateSpec {title: string; style: string; view: 'free' | 'side'; devices: string[]; orientation: 'landscape' | 'portrait' | 'any'; sizeTier: string}
 
-export const STYLES: {id: string; name: string; sub: string; picture: string}[] = [
+/** later: the package cannot make this look yet (its own create page shows it as coming). */
+export const STYLES: {id: string; name: string; sub: string; picture: string; later?: boolean}[] = [
   {id: 'blocky', name: 'Simple', sub: 'Fast on every phone', picture: blocky},
   {id: 'realistic', name: 'Realistic', sub: 'Real light and water', picture: realistic},
-  {id: 'anime', name: 'Cartoon', sub: 'Painted colors', picture: anime},
+  {id: 'anime', name: 'Cartoon', sub: 'Painted colors', picture: anime, later: true},
   {id: 'voxel', name: 'Voxel', sub: 'Cube worlds', picture: voxel},
 ];
 /** The package's size tiers (contracts SIZE_TIERS): side length and players. */
@@ -129,7 +130,7 @@ export function CreateSpace({first, onCreate}: {first: boolean; onCreate: (spec:
   return <div className="genvr-create">
     <h2>{first ? 'Make your first space' : 'New space'}</h2>
     <label className="genvr-field"><small>Name</small><input value={spec.title} maxLength={120} onChange={e => set({title: e.target.value})}/></label>
-    <div className="genvr-group"><small>Look</small><div className="genvr-tiles four">{STYLES.map(s => <button key={s.id} type="button" className="genvr-tile" aria-pressed={spec.style === s.id} onClick={() => set({style: s.id})}><img src={s.picture} alt=""/><b>{s.name}</b><small>{s.sub}</small></button>)}</div></div>
+    <div className="genvr-group"><small>Look</small><div className="genvr-tiles four">{STYLES.map(s => <button key={s.id} type="button" className="genvr-tile" aria-pressed={spec.style === s.id} disabled={s.later} onClick={() => set({style: s.id})}><img src={s.picture} alt=""/><b>{s.name}{s.later && <span className="genvr-later"> later</span>}</b><small>{s.sub}</small></button>)}</div></div>
     <div className="genvr-group"><small>How it is played</small><div className="genvr-tiles three">
       <button type="button" className="genvr-tile" aria-pressed={spec.view === 'free'} onClick={() => set({view: 'free'})}><img src={worldFree} alt=""/><b>3D</b><small>Walk anywhere</small></button>
       <button type="button" className="genvr-tile" aria-pressed={spec.view === 'side'} onClick={() => set({view: 'side'})}><img src={worldSide} alt=""/><b>2D side view</b><small>Like a platform game</small></button>
