@@ -147,7 +147,8 @@ export function ensureSpawnHelper(os: NodeJS.Platform = platform(), arch: string
 }
 
 async function loadNodePty(): Promise<PtySpawn> {
-  ensureSpawnHelper();
+  const fixed = ensureSpawnHelper();
+  if (fixed.length) console.warn('terminal_spawn_helper_fixed', fixed.length);
   const mod: any = await import('node-pty');
   const spawn = mod.spawn ?? mod.default?.spawn;
   if (typeof spawn !== 'function') throw new TerminalError('disabled', 'The terminal backend is not available on this server');
