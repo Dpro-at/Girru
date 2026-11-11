@@ -4174,3 +4174,6 @@ html:has(.app-shell[data-phone]), body:has(.app-shell[data-phone]) { overflow:hi
 .app-shell[data-phone] .chat-thread :is(.reply-meta, .turn-time, .turn-chip, small, [class*="chat-card"], [class*="card-"]) { font-size:14px !important; }
 .app-shell[data-phone] .chat-thread [class*="chat-card"] :is(small, span, p, div, li) { font-size:14px !important; }
 .app-shell[data-phone] .chat-screen textarea { font-size:16px !important; }
+
+/* iPhone zooms into any field under 16 px (the meeting form, sheets): every field on the phone is 16 px. */
+.app-shell[data-phone] :is(input:not([type=checkbox]):not([type=radio]), select, textarea) { font-size:16px !important; }
