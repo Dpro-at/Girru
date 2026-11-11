@@ -238,7 +238,10 @@ export class ComputerCoordinator {
     private async recoverAfterRetry(sessionId: string, runId: string) {
         const a = (await this.repo.attempts()).find(x => x.session_id === sessionId && x.target_id === this.repo.localId && x.state === 'unknown');
         if (!a) return;
-        const answer = redactImportText(chatRuns.get(runId)?.answer ?? '').text.replace(/\[SECRET:[^\]]+\]/gi, '[redacted local reference]').slice(0, 8000);
+        // Review fix: only the owner's own reply in this task's chat, from this computer, finishes the task.
+        const live = chatRuns.get(runId);
+        if (!live || live.userId !== a.owner_id || live.sessionId !== sessionId || this.stopped) return;
+        const answer = redactImportText(live.answer ?? '').text.replace(/\[SECRET:[^\]]+\]/gi, '[redacted local reference]').slice(0, 8000);
         if (!answer) return;
         const membership = this.membership;
         await this.repo.mutate(a.task_id, function* (cur) { if (cur.state !== 'unknown' || cur.session_id !== sessionId || !membership.authority.fresh(cur.local_device_id, cur.source_id, cur.epoch)) throw Error('computer_execution_fenced'); yield* run("UPDATE computer_attempts SET state='completed',detail=? WHERE local_device_id=? AND task_id=?", answer, cur.local_device_id, cur.task_id); });
