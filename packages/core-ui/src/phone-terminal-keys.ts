@@ -10,6 +10,20 @@ export function isPhoneShell(w: unknown = typeof window === 'undefined' ? undefi
   return !!shell && typeof shell === 'object';
 }
 
+/**
+ * Asks the Girru phone app to open its own Settings (phone board P33): the iPhone app
+ * takes { type: 'settings.open' }, the Android app { method: 'settings.open', id, args: {} }.
+ * False outside the app.
+ */
+export function openPhoneSettings(w: unknown = typeof window === 'undefined' ? undefined : window): boolean {
+  if (!isPhoneShell(w)) return false;
+  const ios = (w as { webkit?: { messageHandlers?: { girru?: { postMessage?: (m: unknown) => unknown } } } }).webkit?.messageHandlers?.girru;
+  if (typeof ios?.postMessage === 'function') { void Promise.resolve(ios.postMessage({ type: 'settings.open' })).catch(() => undefined); return true; }
+  const android = (w as { girruNative?: { postMessage?: (m: string) => void } }).girruNative;
+  if (typeof android?.postMessage === 'function') { android.postMessage(JSON.stringify({ method: 'settings.open', id: 'settings-open', args: {} })); return true; }
+  return false;
+}
+
 export interface PhoneKey { id: string; label: string; aria: string; send?: string; mono?: boolean; strong?: boolean }
 
 /** In board order: the most used first, then arrows, then symbols the phone keyboard hides. */

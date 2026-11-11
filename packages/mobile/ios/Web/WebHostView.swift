@@ -169,6 +169,9 @@ final class WebBridge: ObservableObject {
             return text.map { ["text": $0] } ?? ["cancelled": true]
         case .pushPermission(let ask):
             return ["status": await push.refresh(ask: ask)]
+        case .openSettings:
+            NotificationCenter.default.post(name: .girruOpenSettings, object: nil)
+            return ["ok": true]
         }
     }
 

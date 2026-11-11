@@ -567,6 +567,14 @@ func checkBridge() throws {
     check(try BridgeMessageParser.parse(["type": "auth.request", "reason": " Open the terminal "]) == .authenticate(reason: "Open the terminal"), "auth.request")
     check(try BridgeMessageParser.parse(["type": "push.permission"]) == .pushPermission(request: false), "push.permission")
     check(try BridgeMessageParser.parse(["type": "push.permission", "request": NSNumber(value: true)]) == .pushPermission(request: true), "push.permission request")
+    check(try BridgeMessageParser.parse(["type": "settings.open"]) == .openSettings, "settings.open")
+    fails(BridgeError.unexpectedField("section"), "settings.open takes nothing") { _ = try BridgeMessageParser.parse(["type": "settings.open", "section": "keys"]) }
+    // Phone Settings commands (boards P33–P39).
+    check(try CommandBody.settingsRead(section: "permissions") == #"{"section":"permissions","type":"settings.read"}"#, "settings.read body")
+    check(try CommandBody.settingsChange(section: "general", change: ["notifyDone": false]) == #"{"change":{"notifyDone":false},"section":"general","type":"settings.change"}"#, "settings.change body")
+    check(try CommandBody.settingsChange(section: "phones", change: ["forget": "p1"], confirmed: true).contains(#""confirmed":true"#), "settings.change confirmed")
+    fails(ProtocolError.badFormat, "unknown settings section") { _ = try CommandBody.settingsRead(section: "backups") }
+    fails(ProtocolError.badFormat, "empty settings change") { _ = try CommandBody.settingsChange(section: "general", change: [:]) }
     fails(BridgeError.notAnObject, "string body") { _ = try BridgeMessageParser.parse("lock.state") }
     fails(BridgeError.unknownType, "unknown type") { _ = try BridgeMessageParser.parse(["type": "eval"]) }
     fails(BridgeError.unexpectedField("x"), "extra field") { _ = try BridgeMessageParser.parse(["type": "lock.state", "x": 1]) }
@@ -585,7 +593,7 @@ func checkBridge() throws {
     check(!BridgeGate.allowsOrigin(scheme: "https", host: "computer", isMainFrame: true), "https refused")
     check(!BridgeGate.allowsOrigin(scheme: "girru-app", host: "other", isMainFrame: true), "other host refused")
     check(!BridgeGate.allowsOrigin(scheme: "file", host: "", isMainFrame: true), "fallback file has no bridge")
-    let all: [BridgeRequest] = [.lockState, .authenticate(reason: "x"), .scanQR, .pushPermission(request: true), .pushPermission(request: false)]
+    let all: [BridgeRequest] = [.lockState, .authenticate(reason: "x"), .scanQR, .pushPermission(request: true), .pushPermission(request: false), .openSettings]
     check(all.allSatisfy { BridgeGate.allows($0, unlocked: true) }, "everything while unlocked")
     check(BridgeGate.allows(.lockState, unlocked: false), "lock.state while locked")
     check(all.dropFirst().allSatisfy { !BridgeGate.allows($0, unlocked: false) }, "nothing else while locked")
