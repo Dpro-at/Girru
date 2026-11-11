@@ -223,3 +223,7 @@
 .computers-filter button[aria-checked=true]{background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--text)}
 .computers-filter button span{opacity:.75}
 .computers-none{padding:6px 12px}
+/* CP17 E: the owner's groups in the sidebar. */
+.computers-group{display:flex;flex-direction:column}
+.computers-group-input{margin:4px 8px;height:26px;border-radius:6px;border:1px solid var(--accent);background:var(--surface);color:var(--text);padding:0 8px;font:inherit;font-size:12px}
+.computers-new-group{color:var(--accent)}

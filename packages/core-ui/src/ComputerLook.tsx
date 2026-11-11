@@ -14,7 +14,8 @@ export const COMPUTER_ICONS: ReadonlyArray<{key: ComputerIconKey; name: string; 
   {key: 'other', name: 'Other', icon: 'pc-other'},
 ];
 export type ComputerIconKey = 'macbook' | 'imac' | 'mac-mini' | 'mac-studio' | 'windows-laptop' | 'windows-pc' | 'linux' | 'other';
-export type ComputerLookPrefs = {icons: Record<string, ComputerIconKey>; names: Record<string, string>; notices?: boolean};
+export type ComputerGroup = {id: string; name: string; members: string[]};
+export type ComputerLookPrefs = {icons: Record<string, ComputerIconKey>; names: Record<string, string>; notices?: boolean; groups?: ComputerGroup[]};
 /** The picture Girru picks by itself from the system the computer runs. */
 export function systemIcon(osFamily?: string | null): ComputerIconKey {
   return osFamily === 'macos' ? 'macbook' : osFamily === 'windows' ? 'windows-pc' : osFamily === 'linux' ? 'linux' : 'other';
@@ -34,5 +35,11 @@ export function useComputerLook(client: SessionClient, enabled = true) {
     if (r.status !== 200) throw Error('computer_look_refused');
     setLook(r.body as ComputerLookPrefs);
   };
-  return {look, save};
+  /** CP17 E: the owner's groups (create, rename, delete, move a computer). */
+  const group = async (change: {action: 'create' | 'rename' | 'delete' | 'move'; id?: string | null; name?: string; deviceId?: string}) => {
+    const r = await client.request({method: 'POST', path: '/api/computers/look', body: {group: change}});
+    if (r.status !== 200) throw Error('computer_group_refused');
+    setLook(r.body as ComputerLookPrefs);
+  };
+  return {look, save, group};
 }

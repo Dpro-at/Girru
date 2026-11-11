@@ -48,7 +48,10 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   const [worksOn, setWorksOn] = useState(false);
   const [renaming, setRenaming] = useState<{id: string; name: string; icon: ComputerIconKey | null} | null>(null);
   const [sending, setSending] = useState('');
-  const {look, save} = useComputerLook(client, active);
+  const {look, save, group} = useComputerLook(client, active);
+  const [newGroup, setNewGroup] = useState<string | null>(null), [groupRenaming, setGroupRenaming] = useState<{id: string; name: string} | null>(null);
+  const groups = look?.groups ?? [];
+  const groupOf = (id: string) => groups.find(g => g.members.includes(id));
   const menu = useMenu();
   // CP9c: the account knows each computer's system; its key ties it to the computer in this list.
   const accountDevice = (publicKey?: string) => account?.view?.devices?.find(d => d.publicKey && d.publicKey === publicKey);
@@ -90,6 +93,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
     {label: 'Send a task…', icon: 'send', shortcut: '⌘↩', run: () => setSending(d.id)},
     {label: 'Project…', icon: 'board', run: () => { setSelected(d.id); setInspector(true); }},
     renameItem(d.id, nameOf(d.id, d.name)),
+    ...(groups.length ? ['sep' as const, ...groups.filter(g => !g.members.includes(d.id)).map(g => ({label: `Move to ${g.name}`, icon: 'folder' as const, run: () => void group({action: 'move', id: g.id, deviceId: d.id}).catch(() => setNotice('The group could not be changed.'))})), ...(groupOf(d.id) ? [{label: 'Remove from group', icon: 'close' as const, run: () => void group({action: 'move', id: null, deviceId: d.id}).catch(() => setNotice('The group could not be changed.'))}] : [])] : []),
     'sep',
     {label: 'Forget this computer', icon: 'trash', shortcut: '⌫', danger: true, run: () => { forgetComputerLater(client, {id: d.id, name: nameOf(d.id, d.name), publicKey: d.publicKey}); setSelected(self?.id ?? ''); }},
   ];
@@ -101,6 +105,11 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   const shown = listed.filter(d => matches(d.id, nameOf(d.id, d.name)) && (place === 'all' || (place === 'online') === isOn(d)));
   const onCount = listed.filter(isOn).length + (self ? 1 : 0), offCount = listed.filter(d => !isOn(d)).length;
   const selfShown = !!self && matches(self.id, nameOf(self.id, self.name)) && place !== 'offline';
+  const placeButton = (d: (typeof listed)[number]) => <button key={d.id} type="button" className="nav-item dk-place" aria-current={selected === d.id ? 'page' : undefined} onClick={() => setSelected(d.id)} onContextMenu={e => { setSelected(d.id); menu.at(e, menuFor(d)); }}>
+      <UiIcon name={iconOf(d.id, d.publicKey)} size={15}/><span className="dk-place-name">{nameOf(d.id, d.name)}</span>
+      <span className={`computer-dot ${d.state === 'available' || d.state === 'busy' ? 'on' : shownState(d) === 'connecting' ? 'connecting' : 'off'}`} title={stateWords(d)} aria-label={stateWords(d)}/>
+      {waitingFrom(d.id).length > 0 && <span className="dk-badge-pill" title="Needs you">{waitingFrom(d.id).length}</span>}
+    </button>;
   const nav = <nav className="dk-sidebar computers-places" aria-label="My computers">
     <div className="computers-search"><input ref={searchRef} type="search" aria-label="Search computers" placeholder="Search computers" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') setQuery(''); }}/></div>
     <div className="computers-filter" role="radiogroup" aria-label="Show">
@@ -114,11 +123,14 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
     {!self && accountSelf && <button type="button" className="nav-item dk-place" aria-current="page" title={accountSelf.status === 'pending' ? 'Waiting to be added to your account' : undefined}>
       <UiIcon name={computerIcon(look, accountSelf.id, accountSelf.osFamily)} size={15}/><span className="dk-place-name">{nameOf(accountSelf.id, accountSelf.label)}</span><span className="dk-count">{accountSelf.status === 'pending' ? 'waiting' : 'this one'}</span>
     </button>}
-    {shown.map(d => <button key={d.id} type="button" className="nav-item dk-place" aria-current={selected === d.id ? 'page' : undefined} onClick={() => setSelected(d.id)} onContextMenu={e => { setSelected(d.id); menu.at(e, menuFor(d)); }}>
-      <UiIcon name={iconOf(d.id, d.publicKey)} size={15}/><span className="dk-place-name">{nameOf(d.id, d.name)}</span>
-      <span className={`computer-dot ${d.state === 'available' || d.state === 'busy' ? 'on' : shownState(d) === 'connecting' ? 'connecting' : 'off'}`} title={stateWords(d)} aria-label={stateWords(d)}/>
-      {waitingFrom(d.id).length > 0 && <span className="dk-badge-pill" title="Needs you">{waitingFrom(d.id).length}</span>}
-    </button>)}
+    {shown.filter(d => !groupOf(d.id)).map(d => placeButton(d))}
+    {groups.map(g => { const inGroup = shown.filter(d => g.members.includes(d.id)); if (q && !inGroup.length) return null; return <div key={g.id} className="computers-group" role="group" aria-label={g.name}>
+      {groupRenaming?.id === g.id ? <input className="computers-group-input" autoFocus aria-label="Group name" maxLength={40} value={groupRenaming.name} onChange={e => setGroupRenaming({id: g.id, name: e.target.value})} onKeyDown={e => { if (e.key === 'Enter' && groupRenaming.name.trim()) { void group({action: 'rename', id: g.id, name: groupRenaming.name.trim()}).catch(() => setNotice('The group could not be renamed.')); setGroupRenaming(null); } else if (e.key === 'Escape') setGroupRenaming(null); }} onBlur={() => setGroupRenaming(null)}/>
+      : <p className="section-label dk-label computers-label" onContextMenu={e => menu.at(e, [{label: 'Rename group', icon: 'pencil', run: () => setGroupRenaming({id: g.id, name: g.name})}, {label: 'Delete group', icon: 'trash', danger: true, run: () => void group({action: 'delete', id: g.id}).catch(() => setNotice('The group could not be deleted.'))}])}><span>{g.name}</span></p>}
+      {inGroup.map(d => placeButton(d))}{!inGroup.length && <p className="fine-print computers-none">Empty · right-click a computer › Move to {g.name}</p>}
+    </div>; })}
+    {newGroup !== null ? <input className="computers-group-input" autoFocus aria-label="New group name" placeholder="Group name" maxLength={40} value={newGroup} onChange={e => setNewGroup(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && newGroup.trim()) { void group({action: 'create', name: newGroup.trim()}).catch(() => setNotice('The group could not be made.')); setNewGroup(null); } else if (e.key === 'Escape') setNewGroup(null); }} onBlur={() => setNewGroup(null)}/>
+      : <button type="button" className="nav-item dk-place computers-new-group" onClick={() => setNewGroup('')}><UiIcon name="plus" size={14}/><span className="dk-place-name">New group…</span></button>}
     {q && !shown.length && !selfShown && <p className="fine-print computers-none">No computer matches “{query.trim()}”.</p>}
     {olderCopies.length > 0 && <button type="button" className="nav-item dk-place computers-older" title="The same computers signed in before. They no longer work." onClick={() => { for (const d of olderCopies) forgetComputerLater(client, {id: d.id, name: nameOf(d.id, d.name), publicKey: d.publicKey}); }}>
       <UiIcon name="trash" size={14}/><span className="dk-place-name">Older copies ({olderCopies.length})</span><span className="dk-count">Forget</span>
