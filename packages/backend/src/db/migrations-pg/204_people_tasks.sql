@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS people_tasks (
   person_name text NOT NULL,
   device_id text NOT NULL,
   text text NOT NULL,
-  state text NOT NULL CHECK (state IN ('waiting','running','done','declined','failed')),
+  state text NOT NULL CHECK (state IN ('waiting','running','review','done','declined','failed')),
   answer text NOT NULL DEFAULT '',
   session_id text,
   delivered bigint NOT NULL DEFAULT 1,

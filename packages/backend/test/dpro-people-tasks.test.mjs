@@ -30,13 +30,17 @@ test('a task to a person waits for their Allow; Decline goes back to the sender'
  assert.deepEqual(await sara.request('people',{action:'decline-task',taskId:sent.taskId}),{declined:true});
  await until(async()=>(await mohamed.request('people',{action:'tasks'})).tasks.find(t=>t.id===sent.taskId)?.state==='declined');
 });
-test('Allow starts it in the receiver\'s own chat and the result goes back',async()=>{
+test('Allow starts it in the receiver\'s own chat; nothing goes back until the receiver sends the answer',async()=>{
  const sent=await until(async()=>{try{return await mohamed.request('people',{action:'send',linkId:link.linkId,text:'Report the date.'});}catch{return null;}});
  await until(async()=>(await sara.request('people',{action:'tasks'})).tasks.find(t=>t.id===sent.taskId));
- // The fixture has no model: the run either answers or ends; either way the sender learns the outcome.
- await sara.request('people',{action:'allow',taskId:sent.taskId,confirmed:true}).catch(()=>{});
- const back=await until(async()=>{const t=(await mohamed.request('people',{action:'tasks'})).tasks.find(x=>x.id===sent.taskId);return t&&t.state!=='waiting'&&t.state!=='running'?t:null;});
- assert.ok(['done','failed'].includes(back.state));assert.ok(back.answer.length>0);
+ // The fixture has no model: the run ends one way or another and leaves a draft for the receiver to check.
+ await sara.request('people',{action:'allow',taskId:sent.taskId,confirmed:true});
+ await until(async()=>(await sara.request('people',{action:'tasks'})).tasks.find(t=>t.id===sent.taskId)?.state==='review');
+ assert.equal((await mohamed.request('people',{action:'tasks'})).tasks.find(t=>t.id===sent.taskId).state,'waiting','no answer leaves by itself');
+ await assert.rejects(()=>sara.request('people',{action:'send-answer',taskId:sent.taskId,text:'x'}),/input_invalid/);
+ await sara.request('people',{action:'send-answer',taskId:sent.taskId,text:'Today is Wednesday. sk-ant-api03-'+'a'.repeat(90),confirmed:true});
+ const back=await until(async()=>{const t=(await mohamed.request('people',{action:'tasks'})).tasks.find(x=>x.id===sent.taskId);return t?.state==='done'?t:null;});
+ assert.match(back.answer,/^Today is Wednesday\./);assert.ok(!back.answer.includes('a'.repeat(90)),'secrets are removed before the answer leaves');
 });
 test('someone not linked cannot send a task; the link is needed both ways',async()=>{
  await assert.rejects(()=>stranger.request('people',{action:'send',linkId:link.linkId,text:'hello'}),/unavailable/);

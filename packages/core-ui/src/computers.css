@@ -248,3 +248,4 @@
 .people-pill.warn{background:color-mix(in srgb,#E5A93B 22%,transparent)}
 .people-code{display:block;font:600 22px/1.2 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.14em;background:var(--subtle);border-radius:8px;padding:10px 14px;text-align:center;margin:6px 0}
 .people-request .computer-task-actions{flex-wrap:wrap;align-self:flex-start}
+.people-answer{width:100%;box-sizing:border-box;margin:6px 0;border-radius:7px;border:1px solid var(--border);background:var(--surface);color:var(--text);padding:8px 10px;font:inherit;font-size:12.5px;resize:vertical}

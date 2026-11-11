@@ -3,9 +3,10 @@
  *
  * A person's computer may only offer a task or return an answer. Nothing runs until this
  * computer's owner presses Allow (never "always allow" for people), and the task then runs
- * in a normal "Ask me" chat of the owner's own main agent. Only the task text goes out and
- * only the answer (secrets removed, at most 8000 characters) comes back: never agents,
- * settings, memory, chats, files or backups. The relay passes messages and stores nothing.
+ * in a normal "Ask me" chat of the owner's own agent. Only the task text goes out. The answer
+ * never leaves by itself: the owner reads the draft (secrets removed, at most 8000 characters),
+ * may edit it, and presses Send answer. Never agents, settings, memory, chats, files or
+ * backups. The relay passes messages and stores nothing.
  */
 import {randomUUID} from 'node:crypto';
 import type {Actor} from '../repositories/actor.js';
@@ -21,11 +22,12 @@ import {redactImportText} from '../memory/import/redact.js';
 export const PERSON_TASK_CHARS=4000;
 export const PERSON_ANSWER_CHARS=8000;
 const MAX_WAITING_PER_PERSON=20;
-const MAX_PEOPLE_PINS=32;
+/** People get their own small pool of relay slots, so they can never use up the owner's own computers' slots. */
+const MAX_PEOPLE_PINS=16;
 
 export interface PeopleComputer {deviceId:string;publicKey:string;label:string;osFamily:string;viaGoogle?:boolean;presence:string}
 export interface PeopleLink {linkId:string;person:{publicId:string;nickname:string|null};computers:PeopleComputer[]}
-export interface PersonTaskRow {id:string;direction:'out'|'in';link_id:string;person_id:string;person_name:string;device_id:string;text:string;state:'waiting'|'running'|'done'|'declined'|'failed';answer:string;session_id:string|null;delivered:number;created_at:number;updated_at:number}
+export interface PersonTaskRow {id:string;direction:'out'|'in';link_id:string;person_id:string;person_name:string;device_id:string;text:string;state:'waiting'|'running'|'review'|'done'|'declined'|'failed';answer:string;session_id:string|null;delivered:number;created_at:number;updated_at:number}
 
 interface Deps {
   ownerId:()=>string;
@@ -46,6 +48,8 @@ function cleanAnswer(text:string){return redactImportText(text).text.replace(/\[
 
 export class PeopleTasks {
   private stopHook:(()=>void)|null=null;
+  /** Computers this module pinned for linked people (never the owner's own computers). */
+  private peoplePins=new Set<string>();
   constructor(private deps:Deps){}
 
   start(){if(!this.stopHook)this.stopHook=onSessionRunFinished((sessionId,runId,status)=>this.sessionFinished(sessionId,runId,status));}
@@ -54,8 +58,12 @@ export class PeopleTasks {
   /** Pins linked people's computers (not those added by Google alone) so the relay lets them reach this one. */
   async pinLinked(force=false){
     const control=this.deps.control();if(!control)return [];
-    const links=await this.deps.linked(force);let pinned=0;
-    for(const link of links)for(const c of link.computers){if(c.viaGoogle||pinned>=MAX_PEOPLE_PINS)continue;try{control.pin(c.publicKey);pinned++;}catch{/* capacity: the rest wait */}}
+    const links=await this.deps.linked(force);
+    /* Rebuilt from the current links each time: a removed person's computers lose their slot at once. */
+    const wanted=new Map<string,string>();
+    for(const link of links)for(const c of link.computers)if(!c.viaGoogle&&wanted.size<MAX_PEOPLE_PINS)wanted.set(peerOf(c),c.publicKey);
+    for(const id of [...this.peoplePins])if(!wanted.has(id)){control.unpin(id);this.peoplePins.delete(id);}
+    for(const [id,key] of wanted){if(this.peoplePins.has(id)||control.pinnedPublicKey(id))continue;try{control.pin(key);this.peoplePins.add(id);}catch{/* the channel is full: this one waits */}}
     await this.retryUndelivered().catch(()=>{});
     return links;
   }
@@ -127,10 +135,10 @@ export class PeopleTasks {
     const c=await findConversation(owner,made.id);if(!c)throw Error('account_people_task_start');
     const message=`${r.text}\n\n(A task from ${r.person_name}, a person you work with on another Girru account. Only your final answer goes back to them, so end with a clear, short report. Never include secrets, keys or private notes.)`;
     const start=this.deps.start??(await import('../api/routes/chat-conversations.js')).startTurn;
-    const runId=`person-${randomUUID()}`;
+    const runId=`person-${randomUUID()}`;/* Only this run and later runs in this one chat can fill the draft; the owner still sends it. */
     await this.set(r,{state:'running',session_id:c.id});
     const out=await start({userId:owner,role:'owner',c,runId,message,displayMessage:r.text,onFinished:async status=>{await this.sessionFinished(c.id,runId,status);}});
-    if(out.code!==202){await this.finish({...r,state:'running',session_id:c.id},'failed','The task could not start on their computer.');throw Error('account_people_task_start');}
+    if(out.code!==202){await this.set({...r,state:'running',session_id:c.id},{state:'waiting',session_id:null});throw Error('account_people_task_start');}
     return {allowed:true,sessionId:c.id};
   }
 
@@ -142,17 +150,28 @@ export class PeopleTasks {
     if(!r)throw Error('account_people_unavailable');return r;
   }
 
-  /** A run of a person's task ended: send the answer back, unless it waits for this owner's OK on a step. */
+  /** A run in a person's task chat ended: its reply becomes the draft answer the owner reviews.
+   *  Nothing is sent from here; a later run in the same chat only replaces the draft. */
   private async sessionFinished(sessionId:string,runId:string,status:string){
     const [u,a]=this.where();
-    const r=await q.one<PersonTaskRow>("SELECT * FROM people_tasks WHERE user_id=? AND account_id=? AND direction='in' AND session_id=? AND state='running'",u,a,sessionId);
+    const r=await q.one<PersonTaskRow>("SELECT * FROM people_tasks WHERE user_id=? AND account_id=? AND direction='in' AND session_id=? AND state IN ('running','review')",u,a,sessionId);
     if(!r)return;
     if(status==='complete'){
       const waits=await q.one<{n:number}>("SELECT COUNT(*) AS n FROM tool_approvals WHERE user_id=? AND session_id=? AND status='pending'",u,sessionId).catch(()=>({n:0}));
       if(Number(waits?.n??0)>0)return;
-      await this.finish(r,'done',cleanAnswer(chatRuns.get(runId)?.answer??'')||'Done.');
-    }else await this.finish(r,'failed',status==='stopped'?'Stopped on their computer.':'The task did not finish on their computer.');
+    }
+    const draft=status==='complete'?cleanAnswer(chatRuns.get(runId)?.answer??''):'';
+    await this.set(r,{state:'review',answer:draft||r.answer});
   }
+
+  /** The owner read the draft and sends it (edited or not); it is cleaned once more before it leaves. */
+  async sendAnswer(taskId:unknown,text:unknown){
+    const r=await this.incoming(taskId);if(r.state!=='review'&&r.state!=='running')throw Error('account_people_unavailable');
+    const answer=typeof text==='string'?cleanAnswer(text.trim()):'';if(!answer)throw Error('account_people_task_text');
+    await this.finish(r,'done',answer);return {sent:true};
+  }
+  /** The owner chose not to send an answer: the person only learns it did not finish. */
+  async dropAnswer(taskId:unknown){const r=await this.incoming(taskId);if(r.state!=='review'&&r.state!=='running')throw Error('account_people_unavailable');await this.finish(r,'failed','It did not finish on their computer.');return {sent:false};}
 
   private async finish(r:PersonTaskRow,state:'done'|'declined'|'failed',answer:string){
     await this.set(r,{state,answer,delivered:0});

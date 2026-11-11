@@ -13,7 +13,7 @@ export interface Person {publicId: string; nickname: string | null}
 export interface PersonComputer {deviceId: string; publicKey: string; label: string; osFamily: string; viaGoogle?: boolean; presence: 'online' | 'unknown'}
 export interface LinkedPerson {linkId: string; person: Person; linkedAt: number; computers: PersonComputer[]}
 export interface PeopleRequest {linkId: string; person: Person; expiresAt: number; code: string; codeExpiresAt: number}
-export interface PersonTask {id: string; direction: 'out' | 'in'; linkId: string; person: {publicId: string; name: string}; text: string; state: 'waiting' | 'running' | 'done' | 'declined' | 'failed'; answer: string; sessionId: string | null; createdAt: number}
+export interface PersonTask {id: string; direction: 'out' | 'in'; linkId: string; person: {publicId: string; name: string}; text: string; state: 'waiting' | 'running' | 'review' | 'done' | 'declined' | 'failed'; answer: string; sessionId: string | null; createdAt: number}
 export interface PeopleState {me: Person | null; people: LinkedPerson[]; blocked: {linkId: string; person: Person}[]; incoming: PeopleRequest[]; outgoing: PeopleRequest[]; tasks: PersonTask[]}
 
 const PATH = '/api/computers/account/people';
@@ -148,8 +148,8 @@ export function PersonPage({person, tasks, onOpenChat}: {person: LinkedPerson; t
 }
 
 const taskWords = (t: PersonTask, name: string) => t.direction === 'out'
-  ? {waiting: `Waits for ${name}'s OK`, running: `Running on ${name}'s computer`, done: 'Done', declined: `${name} said no`, failed: 'Did not finish'}[t.state]
-  : {waiting: 'Waits for your OK', running: 'Running here', done: 'Done · answer sent', declined: 'You said no', failed: 'Did not finish · they were told'}[t.state];
+  ? {waiting: `Waits for ${name}'s OK`, running: `Running on ${name}'s computer`, review: `Running on ${name}'s computer`, done: 'Done', declined: `${name} said no`, failed: 'Did not finish'}[t.state]
+  : {waiting: 'Waits for your OK', running: 'Running here', review: 'Answer ready: check it, then send', done: 'Done · answer sent', declined: 'You said no', failed: 'Did not finish · they were told'}[t.state];
 
 function PersonTaskRow({task, name, onOpenChat}: {task: PersonTask; name: string; onOpenChat: (id: string) => void}) {
   return <div className="computer-task" role="listitem">
@@ -179,14 +179,15 @@ export function SendToPersonSheet({client, person, onClose, onSent}: {client: Se
 /** CP17 D: on your own computer, tasks people sent you wait here for Allow. */
 export function IncomingPersonTasks({client, tasks, onChanged, onOpenChat}: {client: SessionClient; tasks: PersonTask[]; onChanged: () => void; onOpenChat: (id: string) => void}) {
   const [notice, setNotice] = useState(''), [busy, setBusy] = useState('');
-  const waiting = tasks.filter(t => t.direction === 'in' && t.state === 'waiting');
-  if (!waiting.length) return notice ? <p role="status" className="fine-print">{notice}</p> : null;
+  const waiting = tasks.filter(t => t.direction === 'in' && t.state === 'waiting'), review = tasks.filter(t => t.direction === 'in' && t.state === 'review');
+  if (!waiting.length && !review.length) return notice ? <p role="status" className="fine-print">{notice}</p> : null;
   const act = async (t: PersonTask, allow: boolean) => {
     setBusy(t.id);
     try { const r = await people(client, allow ? {action: 'allow', taskId: t.id, confirmed: true} : {action: 'decline-task', taskId: t.id}); setNotice(allow ? 'Started in a new chat.' : `${t.person.name} is told you said no.`); onChanged(); if (allow && r.sessionId) onOpenChat(r.sessionId); }
     catch (e) { setNotice(peopleWords((e as Error).message)); } finally { setBusy(''); }
   };
   return <div className="computer-list" role="list" aria-label="Tasks from people">
+    {review.map(t => <AnswerReview key={t.id} client={client} task={t} onChanged={onChanged} onOpenChat={onOpenChat} onNotice={setNotice}/>)}
     {waiting.map(t => <div key={t.id} className="computer-task people-request" role="listitem">
       <Avatar name={t.person.name} size={28}/>
       <span className="computer-task-text"><b>{t.person.name} asks: {t.text.split('\n')[0].slice(0, 120)}</b>
@@ -195,5 +196,22 @@ export function IncomingPersonTasks({client, tasks, onChanged, onOpenChat}: {cli
       <span className="computer-task-actions"><button type="button" className="primary" disabled={busy === t.id} onClick={() => void act(t, true)}>Allow</button><button type="button" disabled={busy === t.id} onClick={() => void act(t, false)}>Decline</button></span>
     </div>)}
     {notice && <p role="status" className="fine-print">{notice}</p>}
+  </div>;
+}
+
+/** The answer never leaves by itself: the owner reads the draft, may edit it, then sends it. */
+function AnswerReview({client, task, onChanged, onOpenChat, onNotice}: {client: SessionClient; task: PersonTask; onChanged: () => void; onOpenChat: (id: string) => void; onNotice: (t: string) => void}) {
+  const [text, setText] = useState(task.answer), [busy, setBusy] = useState(false);
+  const act = async (send: boolean) => {
+    setBusy(true);
+    try { await people(client, send ? {action: 'send-answer', taskId: task.id, text: text.trim(), confirmed: true} : {action: 'drop-answer', taskId: task.id}); onNotice(send ? `Answer sent to ${task.person.name}.` : `${task.person.name} is told it did not finish.`); onChanged(); }
+    catch (e) { onNotice(peopleWords((e as Error).message)); } finally { setBusy(false); }
+  };
+  return <div className="computer-task people-request" role="listitem">
+    <Avatar name={task.person.name} size={28}/>
+    <span className="computer-task-text"><b>Answer for {task.person.name}: {task.text.split('\n')[0].slice(0, 80)}</b>
+      <textarea aria-label="Answer" className="people-answer" rows={5} maxLength={8000} value={text} onChange={e => setText(e.target.value)} placeholder="Write what they should get back"/>
+      <small>Only this text goes to {task.person.name}. Check it holds nothing private.</small></span>
+    <span className="computer-task-actions"><button type="button" className="primary" disabled={busy || !text.trim()} onClick={() => void act(true)}>Send answer</button>{task.sessionId && <button type="button" onClick={() => onOpenChat(task.sessionId!)}>Open its chat</button>}<button type="button" disabled={busy} onClick={() => void act(false)}>Don't send</button></span>
   </div>;
 }

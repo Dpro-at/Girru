@@ -66,7 +66,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   useEffect(() => { if (!active) return; const onKey = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'n' && peopleOn) { e.preventDefault(); setAddingPerson(true); } }; window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey); }, [active, peopleOn]);
   const selectedPerson = selected.startsWith('person:') ? ppl?.people.find(p => p.linkId === selected.slice(7)) : undefined;
   const incoming = ppl?.incoming ?? [];
-  const personTasksWaiting = (ppl?.tasks ?? []).filter(t => t.direction === 'in' && t.state === 'waiting').length;
+  const personTasksWaiting = (ppl?.tasks ?? []).filter(t => t.direction === 'in' && (t.state === 'waiting' || t.state === 'review')).length;
   const [sendingPerson, setSendingPerson] = useState(false);
   // CP9c: the account knows each computer's system; its key ties it to the computer in this list.
   const accountDevice = (publicKey?: string) => account?.view?.devices?.find(d => d.publicKey && d.publicKey === publicKey);
