@@ -9,9 +9,10 @@
  *  - The child gets a minimal environment (no server secrets) and never the server's data folder.
  *  - Sign-ins and keys are never typed by the agent: the environment carries no secrets.
  */
-import {spawn} from 'node:child_process';
+import {spawn, spawnSync} from 'node:child_process';
 import path from 'node:path';
 import {realpathSync, statSync} from 'node:fs';
+import os from 'node:os';
 import type {Tool, ToolExecutionContext, ToolResult} from '../types.js';
 import {minimalChildEnv, safeChildCwd} from '../exec-policy.js';
 import {getPref} from '../../repositories/user-prefs.js';
@@ -34,6 +35,11 @@ const RISKY_WORDS: RegExp[] = [
   /\b(curl|wget|iwr|Invoke-WebRequest|Invoke-RestMethod)\b[^|]*\|\s*(sh|bash|zsh|pwsh|powershell|iex|python|node)\b/i,
   /\b(npm|pnpm|yarn)\s+publish\b|\bgh\s+(pr\s+merge|release|repo\s+delete)\b/i,
   /\b(shutdown|reboot|halt|poweroff|kill|killall|pkill|taskkill)\b/i,
+  // Review fix: deleting through other tools, and code given inline to an interpreter or a nested shell.
+  /\s-delete\b|-exec\s|\bxargs\b|\bmv\s|\bMove-Item\b/i,
+  /\b(sh|bash|zsh|dash|fish|pwsh|powershell|cmd)(\.exe)?\s+(-[a-z]*c|\/c|-command|-encodedcommand)\b/i,
+  /\b(python3?|node|deno|bun|perl|ruby|php|osascript)\s+(-[a-z]*[ce]\b|--eval|--exec)/i,
+  /\beval\b|\bsource\s|(^|[\s;&|])\.\s+\S|`|\$\(/,
 ];
 
 /** True when a command needs the owner's Run: it may delete, push, act as another user, or reach outside the project folder. */
@@ -50,8 +56,30 @@ export function riskyCommand(command: string, cwd: string): boolean {
   return /(^|[^<])>\s*\/dev\/(sd|disk|nvme)/.test(command);
 }
 
+/** Review fix: only the chat's own project folder; never the server's folder, its parents, the home folder or the disk root. */
 function projectCwd(context: ToolExecutionContext | undefined): string | null {
-  try { const cwd = realpathSync(safeChildCwd(context?.workspaceDir)); safeChildCwd(cwd); return statSync(cwd).isDirectory() ? cwd : null; } catch { return null; }
+  const root = context?.fileReadRoot || context?.workspaceDir;
+  if (!root) return null;
+  try {
+    const cwd = realpathSync(safeChildCwd(root));
+    const server = realpathSync(process.cwd());
+    const inside = (a: string, b: string) => { const r = path.relative(b, a); return r === '' || (!r.startsWith('..') && !path.isAbsolute(r)); };
+    if (inside(server, cwd) || cwd === realpathSync(os.homedir()) || cwd === path.parse(cwd).root) return null;
+    return statSync(cwd).isDirectory() ? cwd : null;
+  } catch { return null; }
+}
+
+/** Review fix (macOS): commands run without the owner's Run may write only inside the project folder and temp folders. */
+function sandboxed(command: string, cwd: string): {file: string; args: string[]} | null {
+  if (process.platform !== 'darwin') return null;
+  const q = (p: string) => JSON.stringify(p);
+  const home = os.homedir();
+  // Tool caches (npm, pip, builds) may be written too; nothing else outside the project.
+  const dirs = [cwd, realpathSync(os.tmpdir()), '/private/tmp', '/private/var/folders', '/dev', path.join(home, '.npm'), path.join(home, '.cache'), path.join(home, 'Library/Caches')];
+  // A git worktree keeps its repository data in the main checkout's .git folder.
+  try { const g = spawnSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {cwd, encoding: 'utf8', timeout: 3000, env: minimalChildEnv()}); const dir = g.status === 0 ? g.stdout.trim() : ''; if (dir && path.basename(dir) === '.git') dirs.push(realpathSync(dir)); } catch { /* not a repository */ }
+  const profile = `(version 1)(allow default)(deny file-write*)(allow file-write* ${dirs.map(d => `(subpath ${q(d)})`).join(' ')})`;
+  return {file: '/usr/bin/sandbox-exec', args: ['-p', profile, '/bin/sh', '-c', command]};
 }
 
 function readParams(params: unknown): {command: string; timeout: number} | null {
@@ -66,17 +94,26 @@ function readParams(params: unknown): {command: string; timeout: number} | null 
 
 const text = (s: string, error?: string): ToolResult => ({content: [{type: 'text', text: s}], ...(error ? {error} : {})});
 
-function runShell(command: string, cwd: string, timeout: number): Promise<{code: number | null; out: string; timedOut: boolean; ms: number}> {
+export function runShell(command: string, cwd: string, timeout: number, confined: boolean): Promise<{code: number | null; out: string; timedOut: boolean; ms: number}> {
   const started = Date.now();
   return new Promise(resolve => {
     const win = process.platform === 'win32';
-    const child = spawn(win ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh', win ? ['/d', '/s', '/c', command] : ['-c', command], {cwd, env: minimalChildEnv(), windowsHide: true, windowsVerbatimArguments: win});
-    let out = '', timedOut = false;
+    const box = confined ? sandboxed(command, cwd) : null;
+    const file = box?.file ?? (win ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh');
+    const args = box?.args ?? (win ? ['/d', '/s', '/c', command] : ['-c', command]);
+    const child = spawn(file, args, {cwd, env: minimalChildEnv(), windowsHide: true, windowsVerbatimArguments: win, detached: !win});
+    let out = '', timedOut = false, done = false;
+    const finish = (code: number | null, extra = '') => { if (done) return; done = true; clearTimeout(timer); resolve({code, out: out + extra, timedOut, ms: Date.now() - started}); };
     const add = (b: Buffer) => { if (out.length < MAX_OUTPUT) out += b.toString('utf8').slice(0, MAX_OUTPUT - out.length); };
     child.stdout.on('data', add); child.stderr.on('data', add);
-    const timer = setTimeout(() => { timedOut = true; child.kill(); }, timeout);
-    child.on('error', e => { clearTimeout(timer); resolve({code: null, out: out + String(e.message), timedOut, ms: Date.now() - started}); });
-    child.on('close', code => { clearTimeout(timer); resolve({code, out, timedOut, ms: Date.now() - started}); });
+    // Review fix: the timeout stops the whole process group (children too), and a child left holding the output cannot keep the call open.
+    const killAll = () => {
+      try { if (win && child.pid) spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {windowsHide: true}); else if (child.pid) process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* gone */ } }
+    };
+    const timer = setTimeout(() => { timedOut = true; killAll(); setTimeout(() => finish(null), 2000).unref(); }, timeout);
+    child.on('error', e => finish(null, String(e.message)));
+    child.on('exit', code => { setTimeout(() => { killAll(); finish(code); }, 500).unref(); });
+    child.on('close', code => finish(code));
   });
 }
 
@@ -87,7 +124,7 @@ async function execute(params: unknown, context: ToolExecutionContext | undefine
   const cwd = projectCwd(context);
   if (!cwd) return text('This chat has no project folder, so commands cannot run here. Choose a folder for the chat first.', 'no_project_folder');
   if (!ownerApproved && riskyCommand(plan.command, cwd)) return text(`This command needs the owner: call run_command_owner with the same command, and Girru shows it with a Run button.\n${plan.command}`, 'owner_run_required');
-  const r = await runShell(plan.command, cwd, plan.timeout);
+  const r = await runShell(plan.command, cwd, plan.timeout, !ownerApproved);
   const head = r.timedOut ? `Stopped after ${Math.round(plan.timeout / 1000)} s.` : `Exit code ${r.code ?? 'unknown'} · ${r.ms} ms.`;
   return text(`${head}\n${r.out || '(no output)'}`, r.timedOut ? 'timeout' : r.code === 0 ? undefined : 'nonzero_exit');
 }
