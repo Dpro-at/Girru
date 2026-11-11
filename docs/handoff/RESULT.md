@@ -559,3 +559,21 @@ is now `ScreenTitle(text: "Team") { … }`.
 
 **Not tested on purpose:** actually changing a setting, Forget this computer
 and Sign out (they change the owner's real setup; each needs his OK).
+
+### Retest: phone settings (4430cd7e)
+
+`origin/phone/settings` at `4430cd7e` "Phone Settings fixes from the
+simulator test" (on `696287fd`); the MacBook's test Girru runs it merged
+(backend phone tests 50/50 there, run by the MacBook session). The build Mac's
+local fix `4a2cc525` was dropped (the branch is deleted, never pushed); this
+build is from `4430cd7e` itself. Screenshots `result/set2-*.png`. Again no
+real setting was changed.
+
+| Fix | Result |
+|---|---|
+| 0. iPhone build | **BUILD SUCCEEDED** with no change (`ScreenTitle(text: "Team")`); CoreChecks **375 passed, 0 failed** |
+| 1. Approval rules | **Fixed:** "Approval rules need two-step sign-in on your account. Turn it on in Girru on your computer." instead of the error (`set2-03`) |
+| 2. Computers | **Partly:** lists "Mohamed's Mac Mini" and "Alarade", but not this MacBook Pro, which the owner's Girru shows as the third computer ("this one") (`set2-04`). If leaving out the computer the phone is paired with is meant, the page should say so |
+| 3. Account | **Fixed:** the session shows "Last used 1 min, 33 sec ago" (`set2-02`). Its name is still "Unknown device" |
+| 4. Chat page retry after a failed load | **Not tested:** making the load fail needs the relay cut for a moment, which here would mean changing the Mac's network settings. The page loaded normally on the first launch of this build |
+| 5. This phone's title | **Fixed:** one line, "Mohameds-MacBook-Pro" (`set2-01`) |
