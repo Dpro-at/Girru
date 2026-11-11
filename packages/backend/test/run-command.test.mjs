@@ -36,7 +36,7 @@ test('allowed words start without a shell, and a timeout stops the children too'
 test('review fixes 4: a project git config that starts other programs makes git commands wait for the owner', async () => {
   const m = await import('../src/tools/core/run-command.ts');
   assert.equal(m.gitConfigIsPlain(['core.bare=false', 'remote.origin.url=https://github.com/a/b', 'branch.main.remote=origin']), true);
-  for (const bad of ['filter.lfs.smudge=x', 'core.sshCommand=x', 'diff.x.textconv=y', 'remote.origin.uploadpack=z', 'credential.helper=h', 'include.path=../x', 'core.fsmonitor=x'])
+  for (const bad of ['hook.pre.command=x', 'core.editor=vi', 'extensions.objectformat=sha1', 'alias.st=!sh', 'filter.lfs.smudge=x', 'core.sshCommand=x', 'diff.x.textconv=y', 'remote.origin.uploadpack=z', 'credential.helper=h', 'include.path=../x', 'core.fsmonitor=x'])
     assert.equal(m.gitConfigIsPlain([bad]), false, bad);
   assert.equal(m.allowedCommand('git status', process.cwd(), () => ['origin'], () => ['filter.x.clean=evil']), null);
   assert.equal(m.allowedCommand('git status', process.cwd(), () => ['origin'], () => null), null);
