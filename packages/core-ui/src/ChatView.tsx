@@ -472,7 +472,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
   const mdActions = { ...(folder ? { openFile: (rel: string) => openBeside(rel) } : {}), ...(folder && client ? { openInCode: (rel: string) => void openInCodeFile(client, joinPath(folder, rel), null, say) } : {}),
     ...(owner && terminal ? { runCommand: runInTerminal, commandRun } : {}), ...(folder ? { folderName: folder.split(/[\\/]/).filter(Boolean).at(-1) } : {}) };
   useEffect(()=>{panes?.clearReply();},[panes,s.activeId]);
-  const moments = { client, conversationId: s.activeId, onOpenApprovals, steps, changeCards, nativeCode:embeddedCode,
+  const moments = { client, conversationId: s.activeId, onOpenApprovals, steps, changeCards, nativeCode:embeddedCode, folder,
     ...(folder ? { onOpenFile: openBeside } : {}), ...(folder && client ? { onFileMenu: (e: React.MouseEvent, rel: string) => fileCtl.at(e, fileMenu(client, joinPath(folder, rel), null, say)) } : {}),
     // CH6/CH10 team moments: Hand it again adds to the box (never sends), Set a model opens the agent, Always allow opens What agents may do.
     onOpenAgent, onOpenRules, onAnswer: (text: string) => { void controller.send(text); },

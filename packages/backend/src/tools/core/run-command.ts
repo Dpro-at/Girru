@@ -203,6 +203,11 @@ async function execute(params: unknown, context: ToolExecutionContext | undefine
   const words = ownerApproved ? null : allowedCommand(plan.command, cwd);
   if (!ownerApproved && !words) return text(`This command needs the owner: call run_command_owner with the same command, and Girru shows it with a Run button.\n${plan.command}`, 'owner_run_required');
   const r = await runShell(words ?? plan.command, cwd, plan.timeout);
+  // CP15: every command and its output also show in Girru's Terminal, in the "Agent commands" tab.
+  try {
+    const owner = context?.accessOwnerId ?? context?.userId;
+    if (owner) { const {terminalManager} = await import('../../api/routes/terminal.js'); terminalManager.appendLog(owner, `\x1b[2m${new Date().toLocaleTimeString()} · ${path.basename(cwd)}${ownerApproved ? ' · run by the owner' : ''}\x1b[0m\n$ ${plan.command}\n${r.out.slice(0, 16_000)}${r.out.endsWith('\n') || !r.out ? '' : '\n'}\x1b[2m${r.timedOut ? 'stopped (time limit)' : `exit ${r.code ?? '?'}`}\x1b[0m\n\n`); }
+  } catch { /* the Terminal is optional */ }
   const head = r.timedOut ? `Stopped after ${Math.round(plan.timeout / 1000)} s.` : `Exit code ${r.code ?? 'unknown'} · ${r.ms} ms.`;
   return text(`${head}\n${r.out || '(no output)'}`, r.timedOut ? 'timeout' : r.code === 0 ? undefined : 'nonzero_exit');
 }

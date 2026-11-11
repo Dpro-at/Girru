@@ -42,3 +42,19 @@ test('review fixes 4: a project git config that starts other programs makes git 
   assert.equal(m.allowedCommand('git status', process.cwd(), () => ['origin'], () => ['filter.x.clean']), null);
   assert.equal(m.allowedCommand('git status', process.cwd(), () => ['origin'], () => null), null);
 });
+
+test('CP15: the Agent commands tab in the Terminal is read-only, owner-scoped and not counted as a terminal', async () => {
+  const {TerminalManager} = await import('../src/terminal/manager.ts');
+  const t = new TerminalManager({env: {AGENT_PLAYER_TERMINAL: '1'}});
+  t.appendLog('owner', '$ git status\nclean\n');
+  t.appendLog('owner', '$ git log -1\nabc\n');
+  const tabs = t.list('owner');
+  assert.equal(tabs.length, 1); assert.equal(tabs[0].shell, 'Agent commands');
+  assert.equal(t.list('other').length, 0);
+  let seen = '';
+  const stop = t.subscribe('owner', tabs[0].id, 0, e => { if (e.type === 'data') seen += e.chunk.data; }); stop();
+  assert.match(seen, /git status\r\nclean\r\n/); assert.match(seen, /abc/);
+  assert.throws(() => t.write('owner', tabs[0].id, 'rm -rf /\r'), /only shows/);
+  t.stop('owner', tabs[0].id);
+  assert.equal(t.list('owner').length, 0);
+});
