@@ -98,6 +98,8 @@ const TERMINAL_KINDS: Record<string, Method[]> = {
 const APPROVALS_READ = /^\/api\/approvals\?status=pending&limit=(?:[1-9]\d?|100)$/;
 const STEER = /^\/api\/chat\/runs\/[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}\/steer$/;
 const AGENT = /^\/api\/agents\/[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+/** The open chat's meetings, read only (phone board P29): starting, steering and reviewing stay on the computer. */
+const MEETINGS_READ = /^\/api\/meetings\?conversationId=[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 
 /**
  * The phone's own list: only what the chat page needs (the owner's rule: the
@@ -111,6 +113,7 @@ export async function phoneMayCall(method: string, target: string): Promise<bool
   if (method === 'POST' && STEER.test(target)) return true;
   // The page's approvals badge reads the pending count; deciding stays on the phone's own Approvals screen.
   if (method === 'GET' && APPROVALS_READ.test(target)) return true;
+  if (method === 'GET' && MEETINGS_READ.test(target)) return true;
   // The owner's decision: the terminal opens on the phone too, behind the phone's own biometric check
   // (the app asks for it before it opens or joins a terminal). Its stream goes through api.stream.
   const term = (await terminalRoutes()).terminalPath(target)?.kind;

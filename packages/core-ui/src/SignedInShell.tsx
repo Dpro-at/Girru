@@ -1,6 +1,7 @@
 import {BrowserWorkspace} from './BrowserWorkspace';
 import {useBrowserApp} from './browser-app';
 import {PersonalityLibrary} from './PersonalityLibrary';
+import {isPhoneShell} from './phone-terminal-keys';
 import {WorkspaceModes,editorBounds,useNabuRuntime} from './WorkspaceModes';
 import {TradingWorkspace} from './TradingWorkspace';
 import {footerToolItem} from './AppsWorkspace';
@@ -132,7 +133,17 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
   const reloadApprovals=pendingApprovals.reload;
   const decided=useCallback(()=>{reloadApprovals();void chat?.pickUpContinuation();},[reloadApprovals,chat]);
   const mode = state.mode === 'mock' ? 'mock' : 'live';
-  const [rail, setRail] = useState(true);
+  // Phone boards P27–P29: inside the Girru phone app only the chat page shows; the chat list is a drawer, closed at the start.
+  const phone = isPhoneShell();
+  const [rail, setRail] = useState(!phone);
+  useEffect(() => { if (phone) setRail(false); }, [phone, chatState?.activeId]);
+  // With the phone keyboard up the page keeps its place: its height follows the visible part, and it never scrolls (no sideways slide).
+  useEffect(() => {
+    const vv = phone ? window.visualViewport : null; if (!vv) return;
+    const fit = () => { document.documentElement.style.setProperty('--phone-vh', `${Math.round(vv.height)}px`); if (window.scrollX || window.scrollY) window.scrollTo(0, 0); };
+    fit(); vv.addEventListener('resize', fit); vv.addEventListener('scroll', fit);
+    return () => { vv.removeEventListener('resize', fit); vv.removeEventListener('scroll', fit); document.documentElement.style.removeProperty('--phone-vh'); };
+  }, [phone]);
   const [palette, setPalette] = useState(false);
   const [settingsTab,setSettingsTab]=useState<SettingsTab>('general');
   const [memoryPane,setMemoryPane]=useState<MemorySettingsPane>('rules');
@@ -217,15 +228,15 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
     browser:{available:owner&&browser.available,current:page==='browser',run:go('browser'),parent:'store'},terminal:entry('terminal',owner,openTerminal,undefined,'store'),code:entry('code',owner&&(nativeEditor||codeMissing),nativeEditor?openCode:openCodeInStore,undefined,'store'),skills:entry('skills',owner,go('skills'),undefined,'library'),personalities:entry('personalities',owner,go('personalities'),undefined,'library'),specialties:entry('specialties',owner,go('specialties'),undefined,'library')};
 
   const sidebarShown = rail && (page === 'chat' || ownSidebar);
-  return <div className="shell app-shell" data-theme={theme} data-rail={sidebarShown ? 'open' : 'closed'} data-section={page} lang="en" dir="ltr">
+  return <div className="shell app-shell" data-theme={theme} data-rail={sidebarShown ? 'open' : 'closed'} data-section={page} data-phone={phone || undefined} lang="en" dir="ltr">
     <header className="titlebar">
-      {browser.problem&&<span role="alert">{browser.problem}</span>}<WorkspaceModes onModeChange={mode=>{if(mode==='code')setPage('code');else if(page==='code')setPage('chat');}}/>
+      {browser.problem&&<span role="alert">{browser.problem}</span>}{!phone&&<WorkspaceModes onModeChange={mode=>{if(mode==='code')setPage('code');else if(page==='code')setPage('chat');}}/>}
       <div className="titlebar-tools">
-        <button type="button" className="tool" aria-label={rail ? 'Hide the sidebar' : 'Show the sidebar'} title={rail ? 'Hide the sidebar (⌘\\)' : 'Show the sidebar (⌘\\)'} aria-pressed={rail} onClick={() => setRail(v => !v)}><UiIcon name="sidebar" size={14}/></button>
+        <button type="button" className="tool" aria-label={phone ? (rail ? 'Close the chat list' : 'Chats') : rail ? 'Hide the sidebar' : 'Show the sidebar'} title={phone ? undefined : rail ? 'Hide the sidebar (⌘\\)' : 'Show the sidebar (⌘\\)'} aria-pressed={rail} onClick={() => setRail(v => !v)}><UiIcon name="sidebar" size={14}/></button>
       </div>
       <p className="titlebar-title">{page === 'chat' && activeProject && <span className="titlebar-tile" aria-hidden="true"><UiIcon name="folder" size={12}/></span>}{pageTitle}{page === 'chat' && activeProject && <button type="button" className="titlebar-project" title={activeProject.folder ?? activeProject.name} aria-label={`${activeProject.name} · show its folder in Details`} onClick={() => setPlaceRequest(n => n + 1)}>{activeProject.name}</button>}</p>
       {/* CH1/SH1: Commands sits in the middle of the title bar; the theme lives in Settings › General and in Commands. */}
-      <button type="button" className="titlebar-cmdk" onClick={() => {if(page==='code'&&window.dproApp?.nabu?.showCommands)void window.dproApp.nabu.showCommands();else setPalette(true);}} aria-label={page==='code'?'Code commands':'Search or run a command (⌘K)'}><UiIcon name="search" size={13}/>Commands<kbd>⌘K</kbd></button>
+      {!phone&&<button type="button" className="titlebar-cmdk" onClick={() => {if(page==='code'&&window.dproApp?.nabu?.showCommands)void window.dproApp.nabu.showCommands();else setPalette(true);}} aria-label={page==='code'?'Code commands':'Search or run a command (⌘K)'}><UiIcon name="search" size={13}/>Commands<kbd>⌘K</kbd></button>}
       <div className="titlebar-tools end" ref={setTitleSlot}/>
     </header>
     <aside className="sidebar">
@@ -236,14 +247,15 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
       {page === 'chat' && <div className="session-list">
         {chat && <ConversationList controller={chat} search={user.role === 'guest' ? undefined : search?.side} onOpen={() => setPage('chat')} onNewChat={newChat} onAddToBoard={user.role === 'owner' ? id => { void chat.open(id).then(() => setBoardRequest(n => n + 1)); setPage('chat'); } : undefined}/>}
       </div>}
-      <div className="sidebar-footer">
+      {!phone&&<div className="sidebar-footer">
         <details className="account-menu"><summary className="user-chip" title="Account">
           <span className="avatar" aria-hidden="true">{(displayName(user) || '?').slice(0, 1).toUpperCase()}</span>
           <span className="user-name"><bdi>{displayName(user)}</bdi>{accountRoleLabel(user.role)&&<small>{accountRoleLabel(user.role)}</small>}</span>
         </summary><div><button onClick={() => openSettings('account')}>Account</button><button onClick={() => client.cancel()}>Sign out on this device</button></div></details>
         {owner && mode === 'live' && <SidebarPhoneButton client={client} onSettings={() => openSettings('phone')}/>}
-      </div>
+      </div>}
     </aside>
+    {phone && sidebarShown && <button type="button" className="phone-scrim" aria-label="Close the chat list" onClick={() => setRail(false)}/>}
     <main id="content" className="page-area">
       {notice}
       <section className="page page-chat" aria-label="Chat" hidden={page !== 'chat' && page !== 'code'}>
@@ -251,6 +263,8 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
           onOpenCard={(boardId, cardId) => { setPage('board'); void board?.reveal(boardId, cardId); }}
           onOpenMemory={(drawerId, memoryId) => { setMemoryFocus(f => ({ drawerId, memoryId, n: (f?.n ?? 0) + 1 })); setPage('memory'); }}/> : null}
       </section>
+      {/* The phone shows the chat only: the other sections are never mounted there, so they never ask the computer for anything. */}
+      {!phone&&<>
       <section className="page page-agents" hidden={page !== 'agents'}><AgentsDestination client={client} active={page === 'agents'} onPersonalities={()=>setPage('personalities')} onSpecialties={()=>setPage('specialties')} onSkills={()=>setPage('skills')} sidebarSlot={slot} onOpenMcp={()=>setPage('mcp')} onOpenApprovals={()=>setPage('approvals')} focusAgent={agentFocus} onChat={agentId => { if (chat) { chat.newChat(); chat.selectAgent(agentId); } setPage('chat'); }} onOpenMemory={agentId => { if (agentId) setMemoryFocus(f => ({ scope: `agent:${agentId}`, n: (f?.n ?? 0) + 1 })); setPage('memory'); }}/></section>
       <section className="page page-board" hidden={page !== 'board'}>{board && <TaskBoard controller={board} sidebarSlot={slot} active={page === 'board'} onOpenChat={id => { void chat?.open(id); setPage('chat'); }} onOpenMemory={to => { setMemoryFocus(f => ('handoffs' in to ? { handoffs: true as const, n: (f?.n ?? 0) + 1 } : { scope: to.scope, n: (f?.n ?? 0) + 1 })); setPage('memory'); }}/>}</section>
       {user.role!=='guest'&&<section className="page page-runs" hidden={page!=='runs'}><RunsDestination client={client} active={page==='runs'} sidebarSlot={slot} request={runsRequest} agents={chatState?.agents??[]} projects={chatState?.projects??[]} models={chatState?.models??[]} onOpenChat={id=>{void chat?.open(id);setPage('chat');}} onOpenCard={(boardId,cardId)=>{setPage('board');void board?.reveal(boardId,cardId);}} onOpenAgent={id=>{setAgentFocus(f=>({id,n:(f?.n??0)+1}));setPage('agents');}} onOpenApprovals={()=>setPage('approvals')} onOpenConnections={()=>openSettings('channels')}/></section>}
@@ -270,13 +284,14 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
       {user.role==='owner'&&<section className="page page-trading" hidden={page!=='trading'}><TradingWorkspace client={client} active={page==='trading'} sidebarSlot={slot} onBack={openMyApps}/></section>}
       <section className="page page-genvr" hidden={page !== 'genvr'}><GenVRPage key={user.id} client={client} active={page === 'genvr'}/></section>
       {page === 'settings' && <section className="page page-settings"><AppSettings key={settingsVisit} mcpOpenId={mcpOpen} onOpenStore={local=>openStore(false,local)} initialTab={settingsTab} initialMemoryPane={memoryPane} sidebarSlot={slot} active signedIn client={client} preference={appearance.preference} onTheme={appearance.setPreference} onAccount={() => openSettings('account')} onAgents={() => setPage('agents')} onOpenMemory={() => setPage('memory')} onOpenChat={() => setPage('chat')} onOpenApps={openMyApps} onOpenTool={tool => setPage(tool)} onOpenGenvr={() => setPage('genvr')} onApprovals={() => setPage('approvals')} onBoard={() => setPage('board')} onAgent={id => { setAgentFocus(f => ({ id, n: (f?.n ?? 0) + 1 })); setPage('agents'); }}/></section>}
+      </>}
     </main>
-    <ShellFooter controller={footer} settingsCurrent={page==='settings'} settingsAlert={backupFailed?'the last backup failed':undefined} onSettings={()=>backupFailed?openSettings('backups'):setPage('settings')} onCustomize={()=>openSettings('general')}
+    {!phone&&<ShellFooter controller={footer} settingsCurrent={page==='settings'} settingsAlert={backupFailed?'the last backup failed':undefined} onSettings={()=>backupFailed?openSettings('backups'):setPage('settings')} onCustomize={()=>openSettings('general')}
       status={mode === 'mock' ? <span className="status-item"><span className={`status-dot ${mode}`} aria-hidden="true"/>Offline practice — fictional data</span>
         : <span className="status-item status-dot-only" title="Connected · this installation" aria-label="Connected · this installation" role="img"><span className={`status-dot ${mode}`} aria-hidden="true"/></span>}
       extra={isDeveloperBuild(client) && <button className="status-item statusbar-button" onClick={() => client.selectMode('fixture')} title="Clears this local session; the server sign-in stays until you sign out">Leave to fixture</button>}
-      entries={footerEntries}/>
-    {owner && mode === 'live' && <NewPhoneNotice client={client} onSettings={() => openSettings('phone')}/>}
+      entries={footerEntries}/>}
+    {owner && mode === 'live' && !phone && <NewPhoneNotice client={client} onSettings={() => openSettings('phone')}/>}
     <CommandPalette open={palette} commands={commands} onClose={() => setPalette(false)}
       search={chat && search && user.role !== 'guest' ? { controller: search.palette, onOpen: (id, messageId) => { void chat.openAt(id, messageId); setPage('chat'); } } : undefined}/>
   </div>;
