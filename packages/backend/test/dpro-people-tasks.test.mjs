@@ -35,7 +35,7 @@ test('Allow starts it in the receiver\'s own chat; nothing goes back until the r
  await until(async()=>(await sara.request('people',{action:'tasks'})).tasks.find(t=>t.id===sent.taskId));
  // The fixture has no model: the run ends one way or another and leaves a draft for the receiver to check.
  await sara.request('people',{action:'allow',taskId:sent.taskId,confirmed:true});
- await until(async()=>(await sara.request('people',{action:'tasks'})).tasks.find(t=>t.id===sent.taskId)?.state==='review');
+ await until(async()=>(await sara.request('people',{action:'tasks'})).tasks.find(t=>t.id===sent.taskId)?.state==='review',180000);/* No model in the fixture: the run takes 30–60 s to end. */
  assert.equal((await mohamed.request('people',{action:'tasks'})).tasks.find(t=>t.id===sent.taskId).state,'waiting','no answer leaves by itself');
  await assert.rejects(()=>sara.request('people',{action:'send-answer',taskId:sent.taskId,text:'x'}),/input_invalid/);
  await sara.request('people',{action:'send-answer',taskId:sent.taskId,text:'Today is Wednesday. sk-ant-api03-'+'a'.repeat(90),confirmed:true});
