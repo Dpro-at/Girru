@@ -471,5 +471,22 @@ build Mac sent only one (one Return). core-ui has no automatic resend
 (`conversations.ts:681`: "never resend the user message"), so someone most
 likely pressed send again in the watched panel. Worth confirming.
 
+**Cause found and retested (11 November, owner's OK):** the missing reply was
+the Main Agent's model setting (an API model with no key fell back to a local
+ollama model that ran out of memory), not the phone and not the coding app;
+with the owner's choice it is now "Claude Code · existing account". The same
+message in a new chat: the reply **"Phone chat test received, and everything is
+working."** appeared about 5 seconds after sending, one user message and one
+reply (`fit3-11`). The sentence is short and appeared whole between two samples
+0.4 s apart, so word-by-word streaming of a longer reply is still not shown.
+
+Two small things on the way:
+- The first attempt to type the message came out as "Hum with short."
+  (characters lost and changed while typing fast on the simulator keyboard);
+  typed again in three pieces it was exact. Probably the simulator's fast
+  typing, but watch for it on a real iPhone.
+- After sending, the keyboard closed but its toolbar (⌃ ⌄ ✓) stayed over the
+  bottom bar (`fit3-11`).
+
 **Still open:** the terminal key row (^C) was not part of this change and
 still does not stop a command (see the `e1d207fb` section).
