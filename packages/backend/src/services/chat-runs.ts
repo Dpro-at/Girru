@@ -76,9 +76,9 @@ export type RunStatus = 'running' | TurnStatus;
 
 /** Notices a turn may show (CHAT-BUILD-01). */
 export const NOTICE_SUMMARY_CHARS = 2400;
-export const NOTICE_CODES = new Set(['rate_limited', 'claude_key_missing', 'local_model_slow', 'injection', 'summarized', 'plan_limit', 'images_not_seen']);
+export const NOTICE_CODES = new Set(['rate_limited', 'claude_key_missing', 'local_model_slow', 'injection', 'summarized', 'plan_limit', 'images_not_seen', 'not_signed_in']);
 /** Notices kept with the stored reply (CH10): the owner sees them again when the chat opens. */
-const KEPT_NOTICES = new Set(['injection', 'summarized', 'plan_limit', 'images_not_seen']);
+const KEPT_NOTICES = new Set(['injection', 'summarized', 'plan_limit', 'images_not_seen', 'not_signed_in']);
 /** Runs one user may have running at the same time. */
 export const MAX_RUNNING_PER_USER = 3;
 /** How long a finished run stays attachable in memory. */

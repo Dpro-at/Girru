@@ -72,6 +72,7 @@ export function NoticeCard({ part }: { part: Extract<Part, { kind: 'notice' }> }
   if (part.code === 'choices') { const options = (part.text ?? '').split('\n').map(t => t.trim()).filter(Boolean).slice(0, 8);
     return options.length ? <div className="moment-choices" role="group" aria-label="Quick answers">{options.map(o => <button key={o} type="button" className="moment-choice" disabled={!m.onDraft} onClick={() => m.onDraft?.(o)}>{o}</button>)}</div> : null; }
   if (part.code === 'images_not_seen') return <p className="moment-line"><UiIcon name="image" size={12}/>{part.text ?? 'This model does not see images in this chat.'}</p>;
+  if (part.code === 'not_signed_in') return <p className="moment-line"><UiIcon name="alert" size={12}/>{part.text ?? 'The coding app is not signed in on this computer.'}</p>;
   if (part.code === 'plan_limit' && shown) return <p className="moment-line"><UiIcon name="pulse" size={12}/>Kept the model. It answers again when its plan allows.</p>;
   if (part.code === 'plan_limit') return <div className="moment-card" data-tone="needs" role="note">
     <p><UiIcon name="pulse" size={14}/>{part.text ?? 'The coding app hit its plan limit.'}</p>

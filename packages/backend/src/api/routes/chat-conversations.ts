@@ -293,7 +293,7 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
   if (t.canStart && !await t.canStart()) { await recoverStaleRun(b.runId).catch(() => false); return send(409, { code: 'group_paused' }); }
   chatRuns.start({
     runId: b.runId, userId, sessionId: c.id, agentId: b.agentId ?? null,
-    onFinished: async status=>{await t.onFinished?.(status);await continueDecidedReportApprovals(t.userId,c.id);},
+    onFinished: async status=>{await t.onFinished?.(status);await continueDecidedReportApprovals(t.userId,c.id);await sessionRunFinished(c.id,t.runId,status);},
     // A failed checkpoint leaves the outcome unknown: close the row as interrupted (later turns ask before every tool).
     onUnstored: async () => { await recoverStaleRun(b.runId); },
     onPersisted: async status => {
@@ -488,7 +488,7 @@ export async function continueAfterApproval(approvalId: string): Promise<TurnSta
   const user = await q.one<{ role: string; status: string }>('SELECT role, status FROM users WHERE id = ?', a.user_id);
   if (!user || user.status !== 'active' || user.role === 'guest') return null;
   await ensureChatRecovery();const reportRunId=`approval-${approvalId}`.slice(0,128);let report;try{report=await resumeReportAfterApproval(a.user_id,c.id,reportRunId);}catch{return null;}if(report===false)return null;
-  const out = await startTurn({ userId: a.user_id, role: user.role, c, runId: reportRunId, message: CONTINUE_MESSAGE + openPlanReminder(await listConversationMessages(c.id)), ...(c.model ? { model: c.model } : {}),...(report?{agentId:report.row.agent_id,canStart:()=>reportCanStart(a.user_id!,report.row.id,Number(report.row.revision)),onFinished:async(status:string)=>{await finishReportRun(a.user_id!,c.id,reportRunId,status);await sessionRunFinished(c.id,reportRunId,status);}}:{onFinished:(status:string)=>sessionRunFinished(c.id,reportRunId,status)}) });
+  const out = await startTurn({ userId: a.user_id, role: user.role, c, runId: reportRunId, message: CONTINUE_MESSAGE + openPlanReminder(await listConversationMessages(c.id)), ...(c.model ? { model: c.model } : {}),...(report?{agentId:report.row.agent_id,canStart:()=>reportCanStart(a.user_id!,report.row.id,Number(report.row.revision)),onFinished:(status:string)=>finishReportRun(a.user_id!,c.id,reportRunId,status)}:{}) });
   if(report&&out.code!==202)await finishReportRun(a.user_id,c.id,reportRunId,'refused');
   console.log('[ChatRuns] Continue after approval', { approvalId, status: out.code });
   return out;
