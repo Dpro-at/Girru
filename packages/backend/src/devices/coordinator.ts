@@ -256,8 +256,8 @@ export class ComputerCoordinator {
         return; yield* run('UPDATE computer_attempts SET state=?,session_id=?,run_id=?,detail=?,status_sequence=? WHERE local_device_id=? AND task_id=?', p.state, p.sessionId, p.runId, p.detail, e.sequence, a.local_device_id, a.task_id);if(p.targetCardId)yield* run('UPDATE computer_attempts SET target_card_id=?,timing_json=? WHERE local_device_id=? AND task_id=?',p.targetCardId,canonical(p.timing??{mode:'immediate'}),a.local_device_id,a.task_id); });/* Steps only from the bound sender of this exact attempt; dropped once the task has ended. */if(bound&&p.steps&&!['completed','cancelled','unknown'].includes(p.state))this.stepsSeen.set(p.taskId,p.steps);else if(bound&&['completed','cancelled','unknown'].includes(p.state))this.stepsSeen.delete(p.taskId);const after=await this.repo.attempt(p.taskId);if(after?.source_card_id&&after.state===p.state&&before?.state!==p.state&&!this.stopped)void this.followCard(after,p.state,p.detail); }
     private async receiveCancel(e: Extract<Envelope, {
         kind: 'cancel';
-    }>) { for (const [sid, w] of this.waitingOk) if (w.task === e.payload.taskId) this.waitingOk.delete(sid); const a = await this.repo.attempt(e.payload.taskId); if (!a || a.source_id !== e.sender || a.target_id !== e.target || a.attempt_id !== e.payload.attemptId)
-        throw Error('computer_cancel_binding'); if (['waiting_approval', 'scheduled', 'blocked'].includes(a.state)) {
+    }>) { const a = await this.repo.attempt(e.payload.taskId); if (!a || a.source_id !== e.sender || a.target_id !== e.target || a.attempt_id !== e.payload.attemptId)
+        throw Error('computer_cancel_binding'); /* Review fix: only a cancel bound to this attempt forgets its wait for an OK. */ for (const [sid, w] of this.waitingOk) if (w.task === a.task_id) this.waitingOk.delete(sid); if (['waiting_approval', 'scheduled', 'blocked'].includes(a.state)) {
         await this.change(a.task_id, 'cancelled', 'The target confirmed cancellation before execution.');
         return;
     } if (['accepted', 'running'].includes(a.state)) {
