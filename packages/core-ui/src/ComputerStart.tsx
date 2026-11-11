@@ -94,7 +94,8 @@ export function JoinStart({client, onFresh, onSame}: {client: SessionClient; onF
         // CP13: when the other computer has not let this one in yet, say what to do there; this page keeps asking by itself.
         const code = (e as Error).message, name = from.label ?? 'your other computer';
         const words = ['computer_request_refused', 'computer_owner_request_refused', 'account_peer_unavailable'].includes(code) ? `Go to ${name} and press “Yes, it’s me”. This page asks again by itself.`
-          : code === 'account_peer_pin_required' ? `Go to ${name} and press Keep for this computer. This page asks again by itself.`
+          // P15 test 2026-11-11: there is no Keep to press on the other computer here; say what really works today.
+          : code === 'account_peer_pin_required' ? `This computer does not trust ${name} yet, so it cannot copy from it. Choose Start fresh, or link the two in Settings › Computers › Account and workspaces… (compare the code on both).`
           : computerAccountWords(code);
         if (live) setNotice(words);
       }
