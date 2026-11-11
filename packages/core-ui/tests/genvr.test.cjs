@@ -11,9 +11,15 @@ test('Studio bridge only accepts bounded private project operations and drops en
 test('unprepared SDK returns unavailable without broadening arbitrary static files',()=>{
  const folder=fs.mkdtempSync(path.join(os.tmpdir(),'genvr-assets-'));try{const serve=createGenVRAssets(folder),responses=[];const res={writeHead:status=>responses.push(status),end:()=>{}};assert.equal(serve({method:'GET'},res,'/genvr/studio.html'),true);assert.equal(responses[0],503);assert.equal(serve({method:'GET'},res,'/private/secrets.env'),false);}finally{fs.rmSync(folder,{recursive:true,force:true});}
 });
-test('GenVR opens on a spaces library with Create space and no eager Studio frame',()=>{
+test('GV1: GenVR opens on its places and never opens the Studio by itself',()=>{
  const React=require('../node_modules/react'),{renderToStaticMarkup}=require('../node_modules/react-dom/server'),{GenVRPage}=require('../src/GenVRPage.tsx');
- const html=renderToStaticMarkup(React.createElement(GenVRPage,{client:{},active:false}));assert.match(html,/Create space/);assert.match(html,/My spaces/);assert.match(html,/Search spaces/);assert.doesNotMatch(html,/<iframe/);
+ const html=renderToStaticMarkup(React.createElement(GenVRPage,{client:{},active:false}));assert.match(html,/Loading your spaces/);assert.doesNotMatch(html,/<iframe/);assert.doesNotMatch(html,/Save &amp; close Studio|Local MCP ready/);
+ const H=require('../src/GenVRHome.tsx');
+ const cards=renderToStaticMarkup(React.createElement(H.SpaceCards,{spaces:[{id:'a',title:'Lake garden',style:'realistic'}],onInside(){},onOpen(){},onNew(){}}));assert.match(cards,/Lake garden/);assert.match(cards,/New space/);assert.match(cards,/style-realistic\.webp/);
+ const side=renderToStaticMarkup(React.createElement(H.GenVRSidebar,{place:'spaces',onPlace(){},counts:{spaces:1,published:0}}));for(const t of ['My spaces','On GenVR','Market','Motion lab'])assert.match(side,new RegExp(t));
+ const inner=renderToStaticMarkup(React.createElement(H.GenVRSidebar,{place:'spaces',onPlace(){},counts:{spaces:1,published:0},inside:{id:'a',title:'Lake garden'},section:'basic'}));for(const t of ['Basic info','Pictures','How it is played','Game','Blocks','Avatars','Collaborators','Access and publishing','Where it is available'])assert.match(inner,new RegExp(t));
+ const place=renderToStaticMarkup(React.createElement(H.SpaceInside,{space:{id:'a',title:'Lake garden',style:'voxel',sizeTier:'medium'},section:'basic',onOpen(){},onRename:async()=>{}}));assert.match(place,/Open in Studio/);assert.match(place,/Medium · 1 km × 1 km · up to 50 players/);assert.match(place,/Voxel/);
+ const create=renderToStaticMarkup(React.createElement(H.CreateSpace,{first:true,onCreate(){}}));for(const t of ['Make your first space','My first space','Realistic','2D side view','TV with a controller','Either way','Biggest','8 km × 8 km · 100 players','Create and open'])assert.match(create,new RegExp(t));
 });
 
 test('space agent contracts reject duplicates, forged grants and invalid avatars',()=>{

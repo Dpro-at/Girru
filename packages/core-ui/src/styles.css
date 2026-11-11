@@ -4174,3 +4174,35 @@ html:has(.app-shell[data-phone]), body:has(.app-shell[data-phone]) { overflow:hi
 .app-shell[data-phone] .chat-thread :is(.reply-meta, .turn-time, .turn-chip, small, [class*="chat-card"], [class*="card-"]) { font-size:14px !important; }
 .app-shell[data-phone] .chat-thread [class*="chat-card"] :is(small, span, p, div, li) { font-size:14px !important; }
 .app-shell[data-phone] .chat-screen textarea { font-size:16px !important; }
+/* GV1 / GV1b: GenVR home cards, inside a place, and the create page. */
+.genvr-toolbar-slim{display:flex;align-items:center;justify-content:space-between;min-block-size:36px;padding:2px 12px}
+.genvr-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
+.genvr-card{display:flex;flex-direction:column;gap:6px;padding:8px;border-radius:12px;border:0;background:transparent;color:var(--text);text-align:left;font:inherit;cursor:pointer}
+.genvr-card:hover,.genvr-card:focus-visible{background:var(--subtle)}
+.genvr-card img{inline-size:100%;aspect-ratio:16/10;object-fit:cover;border-radius:9px}
+.genvr-card b{font-size:14px}.genvr-card small{color:var(--muted)}
+.genvr-card-new{display:grid;place-items:center;align-content:center;gap:6px;min-block-size:160px;border:1.5px dashed var(--border);color:var(--accent)}
+.genvr-dim{filter:brightness(.5)}
+.genvr-inside-name{display:flex;align-items:center;gap:8px;padding:8px 10px 6px}
+.genvr-inside-name img{inline-size:28px;block-size:28px;border-radius:6px;object-fit:cover}
+.genvr-inside{display:flex;flex-direction:column;gap:14px;max-inline-size:620px}
+.genvr-inside-head{display:flex;align-items:center;gap:12px}.genvr-inside-head h2{flex:1;margin:0;font-size:18px}
+.genvr-inside-head button{display:inline-flex;align-items:center;gap:6px}
+.genvr-inside-picture{inline-size:100%;max-inline-size:520px;aspect-ratio:16/10;object-fit:cover;border-radius:10px}
+.genvr-field{display:flex;flex-direction:column;gap:4px}.genvr-field small,.genvr-group>small{color:var(--muted);font-weight:600}
+.genvr-field input{block-size:32px;border-radius:7px;border:1px solid var(--border);background:var(--surface);color:var(--text);padding:0 10px;font:inherit}
+.genvr-create{display:flex;flex-direction:column;gap:14px;max-inline-size:680px;margin:0 auto}
+.genvr-create h2{margin:0;text-align:center;font-size:18px}
+.genvr-group{display:flex;flex-direction:column;gap:6px}
+.genvr-tiles{display:grid;gap:10px}.genvr-tiles.four{grid-template-columns:repeat(4,minmax(0,1fr))}.genvr-tiles.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+.genvr-tile{display:flex;flex-direction:column;gap:3px;padding:6px;border-radius:10px;border:0;background:transparent;color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.genvr-tile img{inline-size:100%;aspect-ratio:16/10;object-fit:cover;border-radius:7px}
+.genvr-tile small{color:var(--muted)}.genvr-tile[aria-pressed=true]{box-shadow:0 0 0 2px var(--accent);background:var(--subtle)}
+.genvr-tile:disabled{opacity:.55;cursor:default}
+.genvr-chips{display:flex;gap:6px;flex-wrap:wrap}
+.genvr-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit;font-size:12.5px;cursor:pointer}
+.genvr-chip[aria-pressed=true]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.genvr-chip:disabled{opacity:.55;cursor:default}
+.genvr-chip-two{display:flex;flex-direction:column;line-height:1.25;text-align:left}.genvr-chip-two small{color:var(--muted);font-size:11px}
+.genvr-later{color:var(--muted);font-size:11px;font-weight:400}
+.genvr-create-go{align-self:center;min-inline-size:200px}

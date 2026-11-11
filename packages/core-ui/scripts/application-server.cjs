@@ -441,7 +441,7 @@ function createApplicationServer({ browserController = null, packageRoot = root,
       const name = ['/', '/chat', '/agents', '/memory', '/tasks', '/settings', '/channels'].includes(raw) ? 'index.html' : raw.slice(1);
       const data = assets.files.get(name);
       if (!data) return send(404);
-      return send(200, data, name.endsWith('.html') ? 'text/html; charset=utf-8' : name.endsWith('.js') ? 'text/javascript; charset=utf-8' : name.endsWith('.css') ? 'text/css; charset=utf-8' : name.endsWith('.gif') ? 'image/gif' : 'text/plain; charset=utf-8');
+      return send(200, data, name.endsWith('.html') ? 'text/html; charset=utf-8' : name.endsWith('.js') ? 'text/javascript; charset=utf-8' : name.endsWith('.css') ? 'text/css; charset=utf-8' : name.endsWith('.gif') ? 'image/gif' : name.endsWith('.webp') ? 'image/webp' : 'text/plain; charset=utf-8');
     }
     if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return send(405);
     const chat = raw === '/api/chat' && req.method === 'POST';

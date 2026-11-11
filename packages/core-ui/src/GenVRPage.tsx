@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { CreateSpace, GenVRSidebar, PublishedCards, SpaceCards, SpaceInside, type CreateSpec, type GenVRPlace, type SpaceRow } from './GenVRHome';
+import { UiIcon } from './ui-icons';
 import { WhoButton, type Who } from './ChatComposerControls';
 import type { SpaceAgent } from './GenVRTeam';
 import type { Publication } from './connections-contract.js';
 import type { SessionClient } from './session';
 import { GENVR_PATH, GENVR_AGENTS, STUDIO_TICKET_PATH, genvrId, validStudioProject, validWorldTurn, changesWorld } from './genvr-contract.js';
-type Project={id:string;title:string;agentCount?:number};
+type Project=SpaceRow;
 /** GENVR-WORLD-01 (board W1): the open world as the Studio tells it, who answers there, and its folder. */
 type Place={projectId:string;name:string;tab:string;look:string;kind:string};
 type Answerer={id:string;name:string;detail:string;color:string};
@@ -14,7 +17,10 @@ const TABS=['build','items','avatar','filming','lab'];
 const placeOf=(value:unknown):Place|null=>{const c=value as Record<string,unknown>|null;return c&&typeof c==='object'&&genvrId(c.projectId)&&typeof c.name==='string'&&c.name.length<=200&&TABS.includes(c.tab as string)&&typeof c.look==='string'&&c.look.length<=40&&typeof c.kind==='string'&&c.kind.length<=40?{projectId:c.projectId as string,name:c.name,tab:c.tab as string,look:c.look,kind:c.kind}:null;};
 /** One tool call in plain words for the approval card: "place item · Oak tree". */
 export function callLine(call:Call):string{const a=call.function.arguments;const hint=['name','title','item','itemId','query','text','kind','preset'].map(k=>a[k]).find(v=>typeof v==='string'&&v.trim());return call.function.name.replace(/_/g,' ')+(hint?` · ${String(hint).slice(0,60)}`:'');}
-export function GenVRPage({client,active}:{client:SessionClient;active:boolean}){
+export function GenVRPage({client,active,sidebarSlot}:{client:SessionClient;active:boolean;sidebarSlot?:HTMLElement|null}){
+ /* GV1: the section's place in the sidebar, the space we are inside (its settings), and the create page. */
+ const [genvrPlace,setGenvrPlace]=useState<GenVRPlace>('spaces'),[insideId,setInsideId]=useState(''),[section,setSection]=useState('basic'),[creating,setCreating]=useState(false);
+ const createSpec=useRef<CreateSpec|undefined>(undefined);
  const frame=useRef<HTMLIFrameElement>(null),revisions=useRef(new Map<string,number>()),opening=useRef<string | undefined>(undefined);
  const selection=useRef<SpaceAgent[]|undefined>(undefined);
  const [mcp,setMcp]=useState('Preparing local MCP…');
@@ -42,10 +48,8 @@ export function GenVRPage({client,active}:{client:SessionClient;active:boolean})
  }
  const [published,setPublished]=useState<Publication[]>([]);
  useEffect(()=>{if(!active||channel||client.getSnapshot().user?.role!=='owner')return;let disposed=false;void client.request({method:'GET',path:'/api/connections/genvr/publications'} as never).then(r=>{if(!disposed&&r.status===200)setPublished((r.body as {publications:Publication[]}).publications);}).catch(()=>{});return()=>{disposed=true;};},[client,active,channel,retry]);
- // No space yet: start a new one right away (once per visit).
- const started=useRef(false);
- useEffect(()=>{if(active&&!channel&&listing==='ready'&&projects.length===0&&!started.current){started.current=true;open();}},[active,channel,listing,projects.length]);
- function open(id?:string){selection.current=undefined;opening.current=id;place.current=null;opened.current='';shown.current={folder:'',answerer:''};setWorld(null);setAnswerer(null);setFolder('');setAsking(null);setUndo(null);setChatNote('');setNotice('');setPhase('loading');setChannel(crypto.randomUUID());}
+ // GV1: with no space, the create page shows (the Studio no longer opens by itself).
+ function open(id?:string,create?:CreateSpec){createSpec.current=create;selection.current=undefined;opening.current=id;place.current=null;opened.current='';shown.current={folder:'',answerer:''};setWorld(null);setAnswerer(null);setFolder('');setAsking(null);setUndo(null);setChatNote('');setNotice('');setPhase('loading');setChannel(crypto.randomUUID());}
  useEffect(()=>{
   if(!channel)return;let disposed=false;
   const send=(value:Record<string,unknown>)=>frame.current?.contentWindow?.postMessage({type:'dpro-genvr',channel,...value},window.location.origin);sendRef.current=send;
@@ -81,10 +85,10 @@ export function GenVRPage({client,active}:{client:SessionClient;active:boolean})
   };
   const receive=async(event:MessageEvent)=>{
    if(disposed||event.source!==frame.current?.contentWindow||event.origin!==window.location.origin||event.data?.type!=='dpro-genvr'||event.data.channel!==channel)return;
-   const data=event.data;if(data.operation==='ready'){let privateLibrary:string|undefined;if(client.getSnapshot().user?.role==='owner'){try{const t=await client.request({method:'POST',path:STUDIO_TICKET_PATH,body:{}} as never);if(t.status===200)privateLibrary=(t.body as {ticket:string}).ticket;}catch{/* library stays off */}}if(disposed)return;send({operation:'start',projectId:opening.current,storageNamespace:client.getSnapshot().user?.id,privateLibrary,chat:owner});return;}if(data.operation==='mounted'){setPhase('ready');return;}
+   const data=event.data;if(data.operation==='ready'){let privateLibrary:string|undefined;if(client.getSnapshot().user?.role==='owner'){try{const t=await client.request({method:'POST',path:STUDIO_TICKET_PATH,body:{}} as never);if(t.status===200)privateLibrary=(t.body as {ticket:string}).ticket;}catch{/* library stays off */}}if(disposed)return;send({operation:'start',projectId:opening.current,storageNamespace:client.getSnapshot().user?.id,privateLibrary,chat:owner,...(createSpec.current?{create:createSpec.current}:{})});return;}if(data.operation==='mounted'){setPhase('ready');return;}
    if(data.operation==='unavailable'){setPhase('unavailable');return;}
    if(data.operation==='open-failed'){setNotice('Choose the saved space from the Studio project menu to open it.');return;}
-   if(data.operation==='closed'){if(data.ok){setChannel('');setPhase('idle');}else setNotice('Studio is busy or saving failed. Keep it open and save or export your edits.');return;}
+   if(data.operation==='closed'){if(data.ok){setChannel('');setPhase('idle');setGenvrPlace(p=>p==='lab'?'spaces':p);}else setNotice('Studio is busy or saving failed. Keep it open and save or export your edits.');return;}
    if(data.operation==='context'){const world=owner?placeOf(data.context):null;if(!world)return;place.current=world;setWorld(world);void openWorld(world);return;}
    if(data.operation==='choose-answerer'){if(owner&&place.current){void loadAgents();setPicking(true);}return;}
    if(data.operation==='model'&&typeof data.id==='string'&&/^m\d{1,10}$/.test(data.id)){void model(data.id,data.value);return;}
@@ -127,14 +131,23 @@ export function GenVRPage({client,active}:{client:SessionClient;active:boolean})
   window.addEventListener('message',receive);const timer=setTimeout(()=>{if(!disposed)setPhase(current=>current==='loading'?'unavailable':current);},20000);
   return()=>{disposed=true;clearTimeout(timer);if(approvals)clearInterval(approvals);window.removeEventListener('message',receive);for(const stop of turns.current.values())stop.abort();turns.current.clear();sendRef.current=()=>{};};
  },[client,channel]);
- const visible=projects.filter(project=>project.title.toLocaleLowerCase().includes(query.toLocaleLowerCase().trim()));
- return <div className="genvr-page"><header className="genvr-toolbar"><div><h2>GenVR</h2><p className="fine-print">Your private spaces in this workspace. Film exports are saved separately.</p></div>
- {channel?<button type="button" onClick={()=>{setNotice('');frame.current?.contentWindow?.postMessage({type:'dpro-genvr',channel,operation:'close'},window.location.origin);}}>Save & close Studio</button>:<button type="button" className="primary" onClick={()=>open()}>Create space</button>}</header>
- <p className="fine-print" role="status">{mcp}</p>
+ const spaces=projects.filter(p=>!p.lab),lab=projects.find(p=>p.lab),inside=spaces.find(p=>p.id===insideId)??null;
+ async function rename(id:string,title:string){const r=await client.request({method:'GET',path:`${GENVR_PATH}/${id}`} as never);const b=r.body as {project?:Record<string,unknown>;revision?:number};if(r.status!==200||!b.project||typeof b.revision!=='number')throw Error();const w=await client.request({method:'PUT',path:`${GENVR_PATH}/${id}`,body:{project:{...b.project,title},revision:b.revision}} as never);if(w.status!==200)throw Error();setProjects(list=>list.map(p=>p.id===id?{...p,title}:p));}
+ const goPlace=(p:GenVRPlace)=>{setInsideId('');setCreating(false);setGenvrPlace(p);if(p==='lab')open(lab?.id);};
+ const nav=<GenVRSidebar place={genvrPlace} onPlace={goPlace} counts={{spaces:spaces.length,published:published.length}} inside={channel?null:inside} section={section} onSection={setSection} onBack={()=>setInsideId('')}/>;
+ const mcpProblem=/could not|managed by/i.test(mcp);
+ return <div className="genvr-page">{sidebarSlot&&active?createPortal(nav,sidebarSlot):null}
+ {channel?<header className="genvr-toolbar genvr-toolbar-slim"><b>{world?.name??'Studio'}</b><button type="button" className="tool" title="Save and close (⌘W)" aria-label="Save and close" onClick={()=>{setNotice('');frame.current?.contentWindow?.postMessage({type:'dpro-genvr',channel,operation:'close'},window.location.origin);}}><UiIcon name="close" size={15}/></button></header>:null}
+ {mcpProblem&&<p className="fine-print" role="status">{mcp}</p>}
  {notice&&<p role="alert">{notice}</p>}
- {!channel?<section className="genvr-library" aria-label="My spaces"><div className="genvr-library-heading"><h3>My spaces <span className="fine-print">{projects.length}</span></h3><input type="search" aria-label="Search spaces" placeholder="Search spaces" value={query} maxLength={200} onChange={event=>setQuery(event.target.value)}/></div>
- {listing==='loading'?<p role="status">Loading your spaces…</p>:listing==='error'?<div role="alert"><p>Your spaces could not be loaded.</p><button type="button" onClick={()=>setRetry(value=>value+1)}>Try again</button></div>:projects.length===0?<p className="empty-note">No spaces yet. Starting a new space…</p>:visible.length===0?<p className="empty-note">No spaces match your search.</p>:<ul className="genvr-world-list">{visible.map(project=><li key={project.id}><button type="button" className="genvr-world-row" onClick={()=>open(project.id)} aria-label={`Open space: ${project.title}`}><span aria-hidden="true">◇</span><strong>{project.title}</strong><span className="fine-print">Open space →</span></button></li>)}</ul>}
- {published.length>0&&<><div className="genvr-library-heading"><h3>Published on Genvr <span className="fine-print">{published.length}</span></h3></div><ul className="genvr-world-list">{published.map(p=><li key={p.serverId}><div className="genvr-world-row"><span aria-hidden="true">◆</span><strong>{p.title}</strong><span className="fine-print">{p.status==='published'?`Published · ${p.access}`:'Private draft'} · {p.link?<a href={p.link} target="_blank" rel="noopener noreferrer">Open place</a>:p.serverId}</span></div></li>)}</ul></>}
+ {!channel?<section className="genvr-library" aria-label="GenVR">
+ {listing==='loading'?<p role="status">Loading your spaces…</p>:listing==='error'?<div role="alert"><p>Your spaces could not be loaded.</p><button type="button" onClick={()=>setRetry(value=>value+1)}>Try again</button></div>
+  :genvrPlace==='published'?<PublishedCards published={published}/>
+  :genvrPlace==='market'?<div className="dk-empty"><p>The market gets its own page next. Until then, add market items from the Studio’s Items tab.</p></div>
+  :genvrPlace==='lab'?<p role="status">Opening the Motion lab…</p>
+  :inside?<SpaceInside key={inside.id} space={inside} section={section} onOpen={()=>open(inside.id)} onRename={title=>rename(inside.id,title)}/>
+  :creating||spaces.length===0?<CreateSpace first={spaces.length===0} onCreate={spec=>{setCreating(false);open(undefined,spec);}}/>
+  :<SpaceCards spaces={spaces} onInside={id=>{setSection('basic');setInsideId(id);}} onOpen={id=>open(id)} onNew={()=>setCreating(true)}/>}
  </section>:<>{phase==='loading'&&<p role="status">Opening GenVR Studio…</p>}{phase==='unavailable'&&<p role="alert">GenVR is unavailable in this build. Your saved spaces remain in your workspace.</p>}<div className="genvr-stage"><iframe ref={frame} title="GenVR Studio" className="genvr-frame" src={`/genvr/studio.html#${channel}`} sandbox="allow-scripts allow-same-origin allow-downloads allow-pointer-lock"/>
  {asking&&<div className="genvr-ask" role="alertdialog" aria-labelledby="genvr-ask-title" aria-describedby="genvr-ask-body"><h3 id="genvr-ask-title">Changes the world</h3><p id="genvr-ask-body">{asking.who} wants to:</p><ul>{asking.calls.slice(0,8).map((call,i)=><li key={i}>{callLine(call)}</li>)}{asking.calls.length>8&&<li>and {asking.calls.length-8} more</li>}</ul>
   <div className="genvr-ask-actions"><button type="button" className="primary" autoFocus onClick={()=>asking.decide(true)}>Allow</button><button type="button" onClick={()=>asking.decide(false)}>Not now</button><span className="fine-print">You can undo after</span></div></div>}
