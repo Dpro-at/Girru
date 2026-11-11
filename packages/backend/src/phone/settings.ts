@@ -97,13 +97,16 @@ export async function settingsRead(ctx: CommandContext, body: Body) {
     return { section: s, actions: PERMISSION_ACTIONS, agents: rows };
   }
   if (s === 'approval-rules') {
-    const b = await get(ctx, '/api/reviewer-policies');
+    // The computer shows approval rules only to an owner with account verification on; otherwise the phone says so.
+    const r = await ownerInject(ctx.ownerId, 'GET', '/api/reviewer-policies');
+    if (r.status !== 200) return { section: s, rules: [], needsVerification: r.status === 401 || r.status === 403 };
+    const b = r.body;
     const items = list(record(b) ? (b.policies ?? b.items) : []).slice(0, 50);
-    return { section: s, rules: items.map(r => ({ id: str(r.id, 128), name: str(r.name ?? r.title, 160), state: str(r.state ?? r.status, 40) })) };
+    return { section: s, rules: items.map(x => ({ id: str(x.id, 128), name: str(x.name ?? x.title, 160), state: str(x.state ?? x.status, 40) })) };
   }
   if (s === 'computers') {
     const b = await get(ctx, '/api/computers');
-    const devices = record(b) && record(b.configuration) && record(b.configuration.membership) ? b.configuration.membership.devices : record(b) ? b.devices : [];
+    const devices = record(b) && Array.isArray(b.devices) ? b.devices : record(b) && record(b.configuration) && record(b.configuration.membership) ? b.configuration.membership.devices : [];
     return { section: s, computers: list(devices).slice(0, 50).map(d => ({ id: str(d.id, 128), name: str(d.name, 120) })) };
   }
   const b = await get(ctx, '/api/phone');

@@ -13,7 +13,7 @@ struct TeamScreen: View {
         let board = data.board
         let shown = TeamBoard.filter(board, chip: chip, query: query)
         VStack(alignment: .leading, spacing: 0) {
-            ScreenTitle("Team") {
+            ScreenTitle(text: "Team") {
                 Button { NotificationCenter.default.post(name: .girruOpenSettings, object: nil) } label: {
                     Image(systemName: "gearshape").font(.system(size: 20)).frame(width: 44, height: 44)
                 }

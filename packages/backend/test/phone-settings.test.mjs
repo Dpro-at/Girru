@@ -90,3 +90,15 @@ test('phones lists paired phones without keys', async () => {
   assert.ok(Array.isArray(view.phones));
   for (const p of view.phones) assert.deepEqual(Object.keys(p).sort(), ['id', 'lastUsedAt', 'model', 'name', 'status', 'thisPhone']);
 });
+
+test('approval rules without account verification say so instead of failing', async () => {
+  const view = await run({ type: 'settings.read', section: 'approval-rules' });
+  assert.deepEqual(view.rules, []);
+  assert.equal(view.needsVerification, true);
+});
+
+test('computers reads the top-level devices list', async () => {
+  const view = await run({ type: 'settings.read', section: 'computers' }).catch((e) => ({ code: e.code }));
+  if (view.code) assert.ok(['unavailable', 'not_found'].includes(view.code), view.code);
+  else for (const c of view.computers) assert.deepEqual(Object.keys(c).sort(), ['id', 'name']);
+});

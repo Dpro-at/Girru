@@ -173,6 +173,7 @@ private struct ThisPhoneScreen: View {
             } footer: { Text("This phone stops reaching it. Pair again with a new code.") }
         }
         .navigationTitle(computer.computerName ?? "This phone")
+        .navigationBarTitleDisplayMode(.inline)
         .task { await data.read("general") }
         .confirmationDialog("Forget this computer?", isPresented: $confirmForget, titleVisibility: .visible) {
             Button("Forget", role: .destructive) { Task { await forget() } }
@@ -299,7 +300,12 @@ private struct AccountScreen: View {
                 ForEach(rows(v["sessions"]).indices, id: \.self) { i in
                     let s = rows(v["sessions"])[i]
                     HStack {
-                        Text(text(s["label"]) ?? "Device")
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(text(s["label"]) ?? "Device")
+                            if let seen = s["lastSeenAt"] as? Double {
+                                Text("Last used \(Date(timeIntervalSince1970: seen > 1e12 ? seen / 1000 : seen), style: .relative) ago").font(.footnote).foregroundStyle(Theme.secondaryText)
+                            }
+                        }
                         Spacer()
                         if s["current"] as? Bool == true { Text("This one").font(.footnote).foregroundStyle(Theme.secondaryText) }
                         else if let id = text(s["id"]) {
@@ -329,7 +335,9 @@ private struct ReadOnlyScreen: View {
         let items = rows(data.view(section)[key])
         List {
             Section {
-                if items.isEmpty { Text("Nothing here yet").foregroundStyle(Theme.secondaryText) }
+                if data.view(section)["needsVerification"] as? Bool == true {
+                    Text("Approval rules need two-step sign-in on your account. Turn it on in Girru on your computer.").foregroundStyle(Theme.secondaryText)
+                } else if items.isEmpty { Text("Nothing here yet").foregroundStyle(Theme.secondaryText) }
                 ForEach(items.indices, id: \.self) { i in
                     LabeledContent(text(items[i]["name"]) ?? "—") { Text(text(items[i]["state"]) ?? "") }
                 }
