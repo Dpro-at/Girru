@@ -10,7 +10,7 @@ export type Part =
   | Readonly<{ kind: 'text'; text: string }>
   | Readonly<{ kind: 'tools'; step: number; calls: readonly ToolCall[] }>
   | Readonly<{ kind: 'steer'; text: string; step: number }>
-  | Readonly<{ kind: 'notice'; code: 'injection' | 'summarized' | 'plan_limit' | 'images_not_seen' | 'choices'; text?: string }>
+  | Readonly<{ kind: 'notice'; code: 'injection' | 'summarized' | 'plan_limit' | 'images_not_seen' | 'choices' | 'not_signed_in'; text?: string }>
   | Readonly<{ kind: 'images'; images: readonly Readonly<{ id: string; type: string; name: string }>[] }>;
 export type TurnStatus = 'running' | 'complete' | 'stopped' | 'error';
 export type Turn = Readonly<{
@@ -107,7 +107,7 @@ export function applyEvent(turn: Turn, e: RunEvent, received: number): Turn {
       parts.push({ kind: 'steer', text: e.content, step: e.step });
       break;
     case 'notice':
-      if ((e.code === 'injection' || e.code === 'summarized' || e.code === 'plan_limit' || e.code === 'images_not_seen') && !parts.some(p => p.kind === 'notice' && p.code === e.code)) parts.push({ kind: 'notice', code: e.code, ...(e.text ? { text: e.text } : {}) });
+      if ((e.code === 'injection' || e.code === 'summarized' || e.code === 'plan_limit' || e.code === 'images_not_seen' || e.code === 'not_signed_in') && !parts.some(p => p.kind === 'notice' && p.code === e.code)) parts.push({ kind: 'notice', code: e.code, ...(e.text ? { text: e.text } : {}) });
       break;
     case 'end':
       closeReasoning();

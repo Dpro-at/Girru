@@ -206,3 +206,12 @@
 .setup-note.join-scan p { margin:0 0 8px; }
 .setup-note.join-scan p:last-child { margin-bottom:0; }
 .setup-note.join-scan .computer-steps { display:flex; gap:12px; margin-bottom:12px; }
+.computer-dot.connecting { background: transparent; border: 1.5px dashed #9DBBFF; }
+/* CP16 B: the answer of a task this computer sent, on its row. */
+.computer-task-answer{display:flex;flex-direction:column;gap:6px;margin-top:6px;min-width:0}
+.computer-task-answer pre{margin:0;max-height:220px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.55 ui-monospace,Menlo,Consolas,monospace;color:var(--text);background:var(--subtle);border-radius:8px;padding:8px 10px}
+.computer-task-answer-foot{display:flex;align-items:center;gap:10px}
+/* CP16 A: one code compared on both computers. */
+.computer-trust{display:flex;flex-direction:column;gap:8px;min-width:0;flex:1}
+.computer-trust-code{font:600 20px/1.2 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.12em;background:var(--subtle);border-radius:8px;padding:10px 14px;text-align:center}
+.computer-trust-actions{display:flex;gap:8px;flex-wrap:wrap}

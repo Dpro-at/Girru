@@ -1,81 +1,66 @@
 import type React from 'react';
 import {useState} from 'react';
 import type {SessionClient} from './session';
-import {useComputerOverview, computerStateLabel, computerPathLabel} from './ComputerDevices';
+import {useComputerOverview} from './ComputerDevices';
 import {DproAccountPanel} from './DproAccountPanel';
 import {AccountTwoFactor, ThisComputerCheck, useAccountStatus} from './ComputerJoin';
-import {computerIcon, computerName, useComputerLook, type ComputerIconKey} from './ComputerLook';
-import {RenameComputerSheet, forgetComputerLater, ForgetNotice, useForgetPending} from './ComputerActions';
+import {computerName, useComputerLook} from './ComputerLook';
 import {ComputerEnrollment} from './ComputerEnrollment';
 import {ComputerLinkControls, ComputerDirectControls} from './ComputerLinkControls';
 import {ComputerSyncWorkspace} from './ComputerSyncWorkspace';
-import {ComputerTaskRules, TasksAtOnce} from './ComputerTaskRules';
+import {ComputerTaskRules, TasksAtOnce, ComputerAiTool} from './ComputerTaskRules';
 import {ComputerShare} from './ComputerShare';
 import {UiIcon} from './ui-icons';
-import type {UiIconName} from './ui-icons';
 
-/** Settings › Computers places (board CP6). */
-export type ComputerSettingsPane = 'mine' | 'tasks' | 'share' | 'connection' | 'account';
-export const COMPUTER_SETTINGS_PANES: ReadonlyArray<{key: ComputerSettingsPane; label: string; icon: UiIconName; note: string}> = [
-  {key: 'mine', label: 'My computers', icon: 'screen', note: 'Your computers, the ones waiting to be added, and Forget.'},
-  {key: 'tasks', label: 'Tasks from other computers', icon: 'inbox', note: 'What this computer does when another of your computers sends it a task.'},
-  {key: 'share', label: 'What they share', icon: 'link', note: 'What your computers keep the same.'},
-  {key: 'connection', label: 'Connection', icon: 'wifi', note: 'Same Wi‑Fi first; otherwise over the internet, end-to-end encrypted.'},
-  {key: 'account', label: 'Account and safety', icon: 'shield', note: 'Your Dpro account, recovery and history.'},
-];
-
-/** One place at a time; every control from the old Devices pane lives in one of them (board CP8). */
-export function ComputerSettings({client, pane, onApprovals}: {client: SessionClient; pane: ComputerSettingsPane; onApprovals?: () => void}) {
+/** CP12 D: Settings › Computers is one page. The computers themselves live on the Computers page
+ * (right-click there to rename or forget); the account and two-step sign-in live in Settings › Account. */
+export function ComputerSettings({client, onApprovals}: {client: SessionClient; onApprovals?: () => void}) {
   const view = useComputerOverview();
   const [notice, setNotice] = useState('');
+  const [copyOpen, setCopyOpen] = useState(false);
   const devices = (view?.devices ?? []).filter(d => d.state !== 'revoked');
   const usable = !!view && (view.testOnly || !!view.configured);
-  const place = COMPUTER_SETTINGS_PANES.find(p => p.key === pane)!;
-  const account = useAccountStatus(client, pane !== 'tasks');
-  const {look, save} = useComputerLook(client, pane === 'mine' || pane === 'tasks');
-  const [renaming, setRenaming] = useState<{id: string; name: string; icon: ComputerIconKey | null} | null>(null);
-  const forgetting = useForgetPending();
-  const os = (publicKey?: string, self = false) => account?.view?.devices?.find(d => self ? d.id === account?.view?.deviceId : !!publicKey && d.publicKey === publicKey)?.osFamily;
+  const account = useAccountStatus(client, !usable);
+  const {look} = useComputerLook(client, true);
+  const names = Object.fromEntries(devices.map(d => [d.id, computerName(look, d.id, d.name)]));
   return <div className="phone-settings computer-settings">
     <div className="phone-main">
-      <header className="phone-head"><div><h2 className="settings-page-title">{place.label}</h2><p className="settings-page-desc">{place.note}</p></div></header>
+      <header className="phone-head"><div><h2 className="settings-page-title">Computers</h2><p className="settings-page-desc">What this computer does with tasks from your other computers.</p></div></header>
       {notice && <p role="status" className="fine-print">{notice}</p>}
-      {pane === 'account' && <div className="computer-task-rules cp-account">
-        <AccountSafety client={client}/>
-        <section className="cp-block"><b className="cp-h">Safety</b>
-          <div className="cp-list" role="list">
-            <AccountTwoFactor client={client}/>
-            <div className="cp-list-row" role="listitem"><span className="cp-tile" style={{'--tint': '#F29BC0'} as React.CSSProperties}><UiIcon name="alert" size={16}/></span><span className="cp-choice-text"><span>A lost or stolen computer</span><small>Select it in Computers and choose Forget this computer. Its work stays on it; it can no longer send or take tasks.</small></span></div>
-            <div className="cp-list-row" role="listitem"><span className="cp-tile" style={{'--tint': '#C4A5FF'} as React.CSSProperties}><UiIcon name="history" size={16}/></span><DproAccountPanel client={client}/></div>
-          </div>
-        </section>
-        <details><summary>Advanced: add a computer with a code</summary><ThisComputerCheck client={client}/>{view && <ComputerLinkControls client={client} view={view} onNotice={setNotice}/>}<ComputerEnrollment client={client}/></details>
-      </div>}
-      {pane !== 'account' && pane !== 'tasks' && !usable && <NotReadyYet account={account}/>}
-      {pane === 'mine' && usable && view && <>
-        <div className="phone-list" role="list" aria-label="My computers">
-          {view.self && <div className="phone-row" role="listitem"><span className="phone-tile"><UiIcon name={computerIcon(look, view.self.id, os(undefined, true))} size={16}/></span><span className="phone-row-text"><b>{computerName(look, view.self.id, view.self.name)}</b><small>This computer</small></span>
-            <button type="button" className="tool" title="Rename and icon…" aria-label="Rename and icon" onClick={() => setRenaming({id: view.self!.id, name: computerName(look, view.self!.id, view.self!.name), icon: (look?.icons[view.self!.id] as ComputerIconKey) ?? null})}><UiIcon name="pencil" size={14}/></button></div>}
-          {devices.filter(d => d.id !== forgetting).map(d => <div key={d.id} className="phone-row" role="listitem"><span className="phone-tile"><UiIcon name={computerIcon(look, d.id, os(d.publicKey))} size={16}/></span><span className="phone-row-text"><b>{computerName(look, d.id, d.name)}</b><small>{computerStateLabel(d.state)} · {computerPathLabel(d.path)}</small></span>
-            <button type="button" className="tool" title="Rename and icon…" aria-label={`Rename ${d.name}`} onClick={() => setRenaming({id: d.id, name: computerName(look, d.id, d.name), icon: (look?.icons[d.id] as ComputerIconKey) ?? null})}><UiIcon name="pencil" size={14}/></button>
-            <button type="button" className="tool" title="Forget this computer" aria-label={`Forget ${d.name}`} onClick={() => forgetComputerLater(client, {id: d.id, name: computerName(look, d.id, d.name), publicKey: d.publicKey})}><UiIcon name="trash" size={14}/></button></div>)}
-        </div>
-        <ForgetNotice/>
-        <TasksAtOnce client={client}/>
-        <p className="fine-print">A new computer joins by itself: install Girru there and sign in with the same Google account.</p>
-        {renaming && <RenameComputerSheet target={renaming} onSave={save} onClose={() => setRenaming(null)}/>}
-      </>}
-      {pane === 'tasks' && <ComputerTaskRules client={client} deviceNames={Object.fromEntries((devices ?? []).map(d => [d.id, computerName(look, d.id, d.name)]))}/>}
-      {pane === 'share' && usable && view && <>
-        <ComputerShare client={client}/>
-        <details><summary>Share one item with one computer…</summary><ComputerSyncWorkspace client={client} devices={view.devices} onApprovals={onApprovals}/></details>
-      </>}
-      {pane === 'connection' && usable && view && (devices.length ? <>
-        <div className="phone-list" role="list">{devices.map(d => <div key={d.id} className="phone-row" role="listitem"><span className="phone-tile"><UiIcon name={d.path === 'direct' ? 'wifi' : 'globe'} size={15}/></span><span className="phone-row-text"><b>{d.name}</b><small>{computerPathLabel(d.path)}</small></span></div>)}</div>
-        <p className="fine-print">Over the internet, your computers talk end-to-end encrypted; our server only passes the messages on. On the same Wi‑Fi they can talk directly once you allow it.</p>
-        <details><summary>Advanced… same Wi‑Fi, network and port</summary>{devices.map(d => <section key={d.id} className="computer-connection" aria-label={d.name}><p className="section-label"><UiIcon name="screen" size={13}/> {d.name}</p><ComputerDirectControls client={client} view={view} device={d} onNotice={setNotice}/></section>)}</details>
-      </> : <p className="fine-print">Add a computer first; then you can let it use the same Wi‑Fi.</p>)}
+      <ComputerAiTool client={client}/>
+      <ComputerTaskRules client={client} deviceNames={names} part="main"/>
+      <TasksAtOnce client={client}/>
+      <div className="phone-list" role="list"><div className="phone-row" role="listitem">
+        <span className="phone-tile"><UiIcon name="layers" size={15}/></span>
+        <span className="phone-row-text"><b>What a new computer can copy (Same as)</b><small>Nothing goes until you press Allow here.</small></span>
+        <button type="button" className="cp-link" aria-expanded={copyOpen} onClick={() => setCopyOpen(o => !o)}>Agents, skills, rules</button>
+      </div></div>
+      {copyOpen && (usable ? <ComputerShare client={client}/> : <NotReadyYet account={account}/>)}
+      <details className="cp-advanced"><summary>Advanced</summary>
+        <ComputerTaskRules client={client} deviceNames={names} part="advanced"/>
+        {usable && view && <>
+          {devices.length > 0 && <section className="cp-block"><b className="cp-h">Same Wi‑Fi</b>
+            {devices.map(d => <section key={d.id} className="computer-connection" aria-label={names[d.id]}><p className="section-label"><UiIcon name="screen" size={13}/> {names[d.id]}</p><ComputerDirectControls client={client} view={view} device={d} onNotice={setNotice}/></section>)}
+          </section>}
+          <details><summary>Share one item with one computer…</summary><ComputerSyncWorkspace client={client} devices={view.devices} onApprovals={onApprovals}/></details>
+        </>}
+        <details><summary>Add a computer with a code</summary><ThisComputerCheck client={client}/>{view && <ComputerLinkControls client={client} view={view} onNotice={setNotice}/>}<ComputerEnrollment client={client}/></details>
+      </details>
     </div>
+  </div>;
+}
+
+/** CP12 D: the Dpro account part of Settings › Account (who is signed in here, two-step, a lost computer, history). */
+export function ComputerAccountPart({client}: {client: SessionClient}) {
+  return <div className="computer-task-rules cp-account" aria-label="Dpro account">
+    <AccountSafety client={client}/>
+    <section className="cp-block"><b className="cp-h">Safety</b>
+      <div className="cp-list" role="list">
+        <AccountTwoFactor client={client}/>
+        <div className="cp-list-row" role="listitem"><span className="cp-tile" style={{'--tint': '#F29BC0'} as React.CSSProperties}><UiIcon name="alert" size={16}/></span><span className="cp-choice-text"><span>A lost or stolen computer</span><small>Right-click it in Computers and choose Forget this computer. Its work stays on it; it can no longer send or take tasks.</small></span></div>
+        <div className="cp-list-row" role="listitem"><span className="cp-tile" style={{'--tint': '#C4A5FF'} as React.CSSProperties}><UiIcon name="history" size={16}/></span><DproAccountPanel client={client}/></div>
+      </div>
+    </section>
   </div>;
 }
 

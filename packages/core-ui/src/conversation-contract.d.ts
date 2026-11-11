@@ -42,7 +42,7 @@ export function conversationResponse(path: string, status: number, body: unknown
 export type WireConversation = { model?: string; id: string; title: string | null; agentId: string | null; projectId: string | null; pinned: boolean; preview: string; createdAt: string; updatedAt: string; archived?: boolean; parentId?: string; running?: boolean; waiting?: number; mode?: ChatMode; thinking?: ChatThinking; queued?: { key: string; text: string }[]; schedule?: { next: string; paused: boolean }; meeting?: { id: string; state: 'active' | 'paused' | 'review' | 'completed' } };
 export type WireToolCall = { id: string; name: string; input: string; output?: string; isError?: boolean; ms?: number; approvalId?: string };
 export type WirePart = { kind: 'text'; text: string } | { kind: 'reasoning'; text: string; ms?: number } | { kind: 'tools'; step: number; calls: WireToolCall[] }
-  | { kind: 'steer'; text: string; step: number } | { kind: 'notice'; code: 'injection' | 'summarized' | 'plan_limit' | 'images_not_seen'; text?: string }
+  | { kind: 'steer'; text: string; step: number } | { kind: 'notice'; code: 'injection' | 'summarized' | 'plan_limit' | 'images_not_seen' | 'not_signed_in'; text?: string }
   | { kind: 'images'; images: { id: string; type: string; name: string }[] };
 export type WireMessage = { id: string; role: 'user' | 'assistant' | 'system'; content: string; parts: WirePart[] | null; status: 'complete' | 'stopped' | 'error'; runId: string | null; durationMs: number | null; createdAt: string; agentId?: string; code?: 'run_interrupted' | 'model_unavailable' | 'local_model_missing' | 'lmstudio_not_running' | 'subscription_org_blocked'; changes?: { files: number; undone: boolean; unavailable?: boolean; added?: number; removed?: number } };
 export type RunEvent = ({ seq: number; at?: number }) & (
@@ -50,7 +50,7 @@ export type RunEvent = ({ seq: number; at?: number }) & (
   | { type: 'tool_start'; step: number; tools: { id: string; name: string; input: string }[] }
   | { type: 'tool_result'; step: number; results: { id: string; name: string; output: string; isError: boolean; ms?: number; approvalId?: string }[] }
   | { type: 'preview'; content: string; tool?: string; steps?: LiveStep[]; plan?: LivePlanStep[] }
-  | { type: 'notice'; code: 'rate_limited' | 'claude_key_missing' | 'local_model_slow' | 'injection' | 'summarized' | 'plan_limit' | 'images_not_seen'; waitSec?: number; model?: string; text?: string }
+  | { type: 'notice'; code: 'rate_limited' | 'claude_key_missing' | 'local_model_slow' | 'injection' | 'summarized' | 'plan_limit' | 'images_not_seen' | 'not_signed_in'; waitSec?: number; model?: string; text?: string }
   | { type: 'steer'; content: string; step: number }
   | { type: 'end'; status: 'complete' | 'stopped' | 'error'; ms: number; code?: 'model_unavailable' | 'local_model_missing' | 'lmstudio_not_running' | 'subscription_org_blocked' });
 export function projectRunEvent(x: unknown): RunEvent | undefined;

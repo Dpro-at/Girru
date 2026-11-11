@@ -239,7 +239,7 @@ async function applyMode() {
 function readSelection() { return require('./workspace-selection.cjs').readSelection(settingsDir()); }
 async function scanData(extra) {
   const payload = resolvePayload({ packaged: app.isPackaged, resourcesPath: process.resourcesPath });
-  const dirs = discovery.candidates({ defaultDir: path.join(settingsDir(), 'data'), home: app.getPath('home'), cwd: process.cwd(), backendDir: payload.backendDir, savedDir: readSelection(), workspaceRoot: path.join(settingsDir(), 'workspaces'), explicitDir: process.env.DPRO_DESKTOP_DATA_DIR });
+  const dirs = discovery.candidates({ defaultDir: path.join(settingsDir(), 'data'), home: app.getPath('home'), cwd: process.cwd(), backendDir: payload.backendDir, savedDir: readSelection(), workspaceRoot: path.join(settingsDir(), 'workspaces'), explicitDir: process.env.DPRO_DESKTOP_DATA_DIR, isolated: !!process.env.GIRRU_PROFILE_DIR || process.argv.some(a => a.startsWith('--user-data-dir=')) });
   if (extra && !dirs.includes(extra)) dirs.push(extra);
   discovered = await discovery.discover(payload.node, payload.backendDir, dirs, extra ? null : readSelection());
   fs.writeFileSync(path.join(settingsDir(), 'workspace-discovery.json'), JSON.stringify(discovered), { mode: 0o600 });
@@ -530,9 +530,10 @@ app.on('before-quit', event => {
     try { await nabuEditor?.stop(); } finally {
       try { await session.defaultSession.cookies.flushStore(); session.defaultSession.flushStorageData(); }
       catch { log?.write('Session storage could not be flushed before shutdown.'); }
-      await stopLocal();
-      await desktopDeviceCustody?.close();
-      nativeControlAuthority?.close();nativeControlAuthority=null;nativeControlRoot=null;nativeControlLease=null;
+      // Each step runs even when an earlier one fails, so this computer's keys are always unlocked for the next start.
+      try { await stopLocal(); } catch (error) { log?.write(`Local stop failed before quit: ${error.message}`); }
+      try { await desktopDeviceCustody?.close(); } catch (error) { log?.write(`Device keys could not be released: ${error.message}`); }
+      try { nativeControlAuthority?.close(); } catch { /* closing anyway */ } nativeControlAuthority=null;nativeControlRoot=null;nativeControlLease=null;
     }
     return true;
   })

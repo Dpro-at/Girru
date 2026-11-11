@@ -167,16 +167,17 @@ function GeneralPart({ card, agents, onDone, onChat, onGone }: { card: AgentCard
   </div>;
 }
 
-/** Who answers for the agent: installed local models, and Claude only when a key exists. */
+/** Who answers for the agent: signed-in coding apps, installed local models, and Claude only when a key exists. */
 function AnswersWith({ card, busy, onPick }: { card: AgentCardController; busy: boolean; onPick: (model: string, label: string) => void }) {
   const s = useSyncExternalStore(card.subscribe, card.getSnapshot, card.getSnapshot);
   const models = s.models ?? [];
   const current = s.profile.model;
   const known = models.some(m => m.id === current);
   const claudeWithoutKey = s.agent?.provider === 'claude' && !models.some(m => m.provider === 'claude');
-  return <label className="ag-field">Answers with<span className="ag-picker"><UiIcon name={s.agent?.provider==='claude'?'sparkle':'screen'} size={14}/>
+  return <label className="ag-field">Answers with<span className="ag-picker"><UiIcon name={s.agent?.provider==='claude'||s.agent?.provider==='subscription'?'sparkle':'screen'} size={14}/>
     <select aria-label="Answers with" value={current} disabled={busy || !models.length} onChange={e => { const m = models.find(x => x.id === e.target.value); onPick(e.target.value, m?.label ?? e.target.value); }}>
       {!known && <option value={current}>{modelDisplayName(current) || 'Not set'}{claudeWithoutKey ? ' · no key' : ''}</option>}
+      {models.some(m => m.provider === 'subscription') && <optgroup label="Coding apps (your subscription)">{models.filter(m => m.provider === 'subscription').map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</optgroup>}
       {models.some(m => m.provider === 'ollama') && <optgroup label="On this computer">{models.filter(m => m.provider === 'ollama').map(m => <option key={m.id} value={m.id}>{m.label}{m.size ? ` · ${m.size}` : ''}</option>)}</optgroup>}
       {models.some(m => m.provider === 'claude') && <optgroup label="Claude (paid)">{models.filter(m => m.provider === 'claude').map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</optgroup>}
     </select></span>

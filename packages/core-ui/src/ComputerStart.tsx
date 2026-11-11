@@ -1,6 +1,6 @@
 import {useEffect, useRef, useState} from 'react';
 import type {SessionClient} from './session';
-import {AddThisComputer, call, computerAccountWords, useAccountStatus, type Status} from './ComputerJoin';
+import {AddThisComputer, call, computerAccountWords, useAccountStatus, TrustCompare, type Status} from './ComputerJoin';
 import {UiIcon} from './ui-icons';
 import type {UiIconName} from './ui-icons';
 import {computerIcon, useComputerLook} from './ComputerLook';
@@ -47,6 +47,12 @@ export function whatComes(resources: Resource[]) {
 }
 const portable = (status: Status | null | undefined, resources: Resource[]) => resources.filter(r => (status?.coverage ?? []).some((c: {category: string; available: boolean; continuity: boolean}) => c.category === r.category && c.available && c.continuity));
 
+/** CP12 E: the five steps of a new computer, the same on every screen of that road. */
+const ROAD = ['Sign in', 'Name', 'New or Same as', 'AI tools', 'Ready'] as const;
+export function SetupRoad({at}: {at: 1 | 2 | 3 | 4 | 5}) {
+  return <p className="computer-steps computer-join-steps" aria-label={`Step ${at} of ${ROAD.length}`}>{ROAD.map((s, i) => i + 1 === at ? <b key={s}>{i + 1} {s}</b> : <span key={s}>{i + 1} {s}</span>)}</p>;
+}
+
 export function JoinStart({client, onFresh, onSame}: {client: SessionClient; onFresh: () => void; onSame: (from: string, comes: string, name: string) => void}) {
   const status = useAccountStatus(client);
   const [choice, setChoice] = useState<'same' | 'fresh'>('same');
@@ -75,6 +81,8 @@ export function JoinStart({client, onFresh, onSame}: {client: SessionClient; onF
   }, [approved, status?.workspaces?.length, others.length]);
 
   // “Same as …”: ask the other computer what it shares, and ask again while it is off.
+  // CP16 A: this computer does not trust the source yet: one code compare on both screens.
+  const [pinNeeded, setPinNeeded] = useState(false);
   useEffect(() => {
     if (!approved || choice !== 'same' || !from || status?.workspaces?.length) return;
     let live = true;
@@ -83,8 +91,16 @@ export function JoinStart({client, onFresh, onSame}: {client: SessionClient; onF
         let next: Preview = await call(client, root + '/workspaces/source', {sourceDeviceId: from.id});
         const first = next.workspaces?.[0];
         if (!next.waitingForSource && first) next = await call(client, root + '/workspaces/source', {sourceDeviceId: from.id, workspaceId: first.workspaceId});
-        if (live) setPreview(next);
-      } catch (e) { if (live) setNotice(computerAccountWords((e as Error).message)); }
+        if (live) { setPreview(next); setNotice(''); setPinNeeded(false); }
+      } catch (e) {
+        // CP13: when the other computer has not let this one in yet, say what to do there; this page keeps asking by itself.
+        const code = (e as Error).message, name = from.label ?? 'your other computer';
+        const words = ['computer_request_refused', 'computer_owner_request_refused', 'account_peer_unavailable'].includes(code) ? `Go to ${name} and press “Yes, it’s me”. This page asks again by itself.`
+          // P15 test 2026-11-11: there is no Keep to press on the other computer here; say what really works today.
+          : code === 'account_peer_pin_required' ? ''
+          : computerAccountWords(code);
+        if (live) { setNotice(words); setPinNeeded(code === 'account_peer_pin_required'); }
+      }
     };
     void load();
     const t = setInterval(() => { if (!preview?.resources) void load(); }, 4000);
@@ -122,7 +138,7 @@ export function JoinStart({client, onFresh, onSame}: {client: SessionClient; onF
   };
   const box = (on: boolean) => `computer-start-choice${on ? ' is-on' : ''}`;
   return <section className="computer-join computer-start" aria-label="How should this computer start">
-    <p className="computer-steps"><span>1 Added</span><b>2 What comes</b><span>3 AI tools</span><span>4 Open Girru</span></p>
+    <SetupRoad at={3}/>
     <h2>How should {name} start?</h2>
     <div role="radiogroup" aria-label="How to start" className="computer-start-choices">
       <button type="button" role="radio" aria-checked={choice === 'same'} className={box(choice === 'same')} onClick={() => setChoice('same')}>
@@ -135,7 +151,10 @@ export function JoinStart({client, onFresh, onSame}: {client: SessionClient; onF
       </button>
     </div>
     {choice === 'same' && others.length > 1 && <label className="phone-field"><span>From</span><select value={from?.id ?? ''} onChange={e => { setSource(e.target.value); setPreview(null); }}>{others.map(d => <option key={d.id} value={d.id}>{d.label}{d.presence === 'online' ? '' : ' (off)'}</option>)}</select></label>}
-    {choice === 'same' && (preview?.waitingForSource || from?.presence !== 'online' && !preview?.resources
+    {choice === 'same' && pinNeeded && from && status?.trust?.some(t => t.deviceId === from.id) ? <TrustCompare client={client} item={status.trust!.find(t => t.deviceId === from.id)!}
+      intro={<>Before copying, make sure this is your {from.label}. The same code shows on {from.label}, under Computers › Needs you.</>}
+      extra={<button type="button" onClick={() => setChoice('fresh')}>Start fresh instead</button>}/>
+    : choice === 'same' && (preview?.waitingForSource || from?.presence !== 'online' && !preview?.resources
       ? <p role="status" className="fine-print"><UiIcon name="clock" size={13}/> {from?.label ?? 'Your other computer'} is off. Go to {from?.label ?? 'your other computer'}, open Girru and keep it open: it sends the list by itself.{others.some(d => d.presence === 'online' && d.id !== from?.id) ? ' Or choose a computer that is on above.' : ''}</p>
       : !preview ? <p role="status" className="fine-print">Asking {from?.label ?? 'your other computer'} what it shares…</p>
       : !preview.workspaceId || !resources.length ? <p role="status" className="fine-print">{from?.label ?? 'Your other computer'} is getting ready to share. Keep Girru open there for a moment.</p>
@@ -153,7 +172,7 @@ export function JoinStart({client, onFresh, onSame}: {client: SessionClient; onF
 /** CP2d: the last screen on a computer that started “Same as …”. */
 export function JoinReady({name, from, comes, onOpen}: {name: string; from: string; comes: string; onOpen: () => void}) {
   return <section className="computer-join computer-start" aria-label={`${name} is ready`}>
-    <p className="computer-steps"><span>1 Added</span><span>2 What comes</span><span>3 AI tools</span><b>4 Open Girru</b></p>
+    <SetupRoad at={5}/>
     <span className="computer-start-done"><UiIcon name="check" size={28}/></span>
     <h2>{name} is ready</h2>
     <p>{comes ? `${comes[0].toUpperCase()}${comes.slice(1)} come from ${from}.` : `Your agents and projects come from ${from}.`} Now go to {from}: under Computers › Needs you press Allow. Then come back here: in Computers › this computer › Needs you press Apply all.</p>
@@ -197,30 +216,29 @@ export function useContinuity(client: SessionClient, status: Status | null | und
 
 /** On the computer a new one copies from: one Allow for “start the same as this computer”. */
 /**
- * "Same as …" on the new computer: the other computer sent the setup; one confirm here applies all of it
- * (agents, specialties, skills, rules), using this computer's Main agent model for the agents.
+ * CP13 “Same as …” on the new computer: the other computer allowed it, so what arrives is applied by itself
+ * (by the program, in order). This list only shows how far it got, kind by kind; agents use this computer's AI tool.
  */
+const SAME_ORDER: [string, string][] = [['personality', 'Personalities'], ['specialty', 'Specialties'], ['skill', 'Skills'], ['rule', 'Rules'], ['preferences', 'Settings'], ['agent', 'Agents']];
 export function SameSetupArrived({client, status}: {client: SessionClient; status: Status | null | undefined}) {
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState('');
-  const waiting = (status?.workspaces ?? []).filter((w: any) => w.mode === 'continuity' && w.state === 'waiting_local_review');
-  if (!waiting.length) return notice ? <p role="status" className="fine-print">{notice}</p> : null;
-  const nameOf = (id: string) => (status?.view?.devices ?? []).find((d: any) => d.id === id)?.label ?? 'your other computer';
-  const apply = async (w: any) => {
-    setBusy(true); setNotice('Applying… this can take a minute.');
-    try {
-      const r = await call(client, root + '/workspaces/apply-same', {workspaceId: w.id, confirmed: true});
-      setNotice(r.failed?.length || r.waiting ? `Applied ${r.applied} of ${r.total}. ${r.waiting ? r.waiting + ' wait in Approvals. ' : ''}${r.failed?.length ? r.failed.length + ' could not be applied (' + [...new Set(r.failed.map((f: any) => f.code))].join(', ') + ').' : ''}` : `Done: ${r.applied} items from ${nameOf(w.sourceDeviceId)} are on this computer.`);
-    } catch (e) { setNotice(`That did not work (${e instanceof Error ? e.message : 'error'}). Try again in a moment.`); }
-    finally { setBusy(false); }
-  };
-  return <section className="computer-join-requests" aria-label="Setup that arrived from your other computer">
-    {waiting.map((w: any) => <div key={w.id} className="computer-task" role="listitem">
-      <UiIcon name="copy" size={16}/>
-      <span className="computer-task-text"><b>The setup from {nameOf(w.sourceDeviceId)} arrived</b><small>Agents, specialties, skills and rules · they use this computer's Main agent model · chats and memory stay on {nameOf(w.sourceDeviceId)}</small></span>
-      <span className="computer-task-actions"><button type="button" className="primary" disabled={busy} onClick={() => void apply(w)}>{busy ? 'Applying…' : 'Apply all'}</button></span>
-    </div>)}
-    {notice && <p role="status" className="fine-print">{notice}</p>}
+  const [records, setRecords] = useState<{direction: string; category: string; state: string}[]>([]);
+  const copying = (status?.workspaces ?? []).filter((w: any) => w.mode === 'continuity' && w.state !== 'ready');
+  const on = copying.length > 0;
+  useEffect(() => { if (!on) return; let live = true; const load = () => void client.request({method: 'GET', path: '/api/computers/sync'}).then(r => { if (live && r.status === 200) setRecords(((r.body as any)?.records ?? []).filter((x: any) => x.direction === 'in')); }).catch(() => {}); load(); const t = setInterval(load, 4000); return () => { live = false; clearInterval(t); }; }, [on, client]);
+  if (!on) return null;
+  const nameOf = (id: string) => (status?.view?.devices ?? []).find((d: any) => d.id === id)?.label || 'Your other computer';
+  const skippedStates = new Set(['rejected', 'failed', 'unknown']);
+  return <section className="computer-join-requests" aria-label="Setup arriving from your other computer">
+    <p className="cp-note">{records.length ? `Coming over from ${nameOf(String(copying[0].sourceDeviceId ?? ''))} now; chats and memory stay there.` : `Getting the setup from ${nameOf(String(copying[0].sourceDeviceId ?? ''))}… keep Girru open there.`}</p>
+    {SAME_ORDER.map(([kind, label]) => {
+      const of = records.filter(r => r.category === kind), arrived = of.filter(r => r.state === 'applied').length, skipped = of.filter(r => skippedStates.has(r.state)).length, coming = of.length - arrived - skipped;
+      const pill = !of.length ? 'waiting' : coming ? `${arrived} of ${of.length} · arriving…` : `${arrived} arrived`;
+      return <div key={kind} className="computer-task" role="listitem">
+        <UiIcon name={coming || !of.length ? 'clock' : 'check'} size={15}/>
+        <span className="computer-task-text"><b>{label}</b>{kind === 'agent' && <small>They use this computer’s AI tool.</small>}{skipped > 0 && <small className="cp-warn">{skipped} could not come over. Add {skipped === 1 ? 'it' : 'them'} here by hand.</small>}</span>
+        <span className="computer-task-actions"><small>{pill}</small></span>
+      </div>;
+    })}
   </section>;
 }
 
@@ -282,6 +300,7 @@ export function NameThisComputer({client, onDone}: {client: SessionClient; onDon
     try { await save(selfId, {name: value.trim()}); onDone(); } catch { setNotice('It could not be saved. Try again.'); } finally { setBusy(false); }
   };
   return <section className="computer-join" aria-label="Name this computer">
+    <SetupRoad at={2}/>
     <span className="computer-start-done"><UiIcon name={computerIcon(look, selfId, status.view?.devices?.find(d => d.id === selfId)?.osFamily)} size={26}/></span>
     <h2>Name this computer</h2>
     <p>Your other computers see it with this name.</p>

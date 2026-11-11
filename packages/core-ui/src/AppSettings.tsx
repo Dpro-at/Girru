@@ -1,4 +1,4 @@
-import {ComputerSettings,COMPUTER_SETTINGS_PANES,type ComputerSettingsPane} from './ComputerSettings';
+import {ComputerSettings,ComputerAccountPart} from './ComputerSettings';
 import {VoiceSettings} from './VoiceSettings';
 import {FooterSettings} from './FooterSettings';
 import {ChatNoticeSettings} from './ChatNoticeSettings';
@@ -76,7 +76,6 @@ export function AppSettings({ onOpenDeviceChat,onOpenChannelsStore,onOpenStore, 
   const [query,setQuery]=useState('');const search=useRef<HTMLInputElement>(null);
   const info=useAppInfo();const [tab,setTab]=useState<Place>(named(initialTab));
   const [pane,setPane]=useState<MemorySettingsPane>(initialMemoryPane);
-  const [computersPane,setComputersPane]=useState<ComputerSettingsPane>('mine');
   const [permAgent,setPermAgent]=useState<string|undefined>();
   const [mcpNav,setMcpNav]=useState<HTMLDivElement|null>(null);
   const [contentUpdates,setContentUpdates]=useState(false);
@@ -98,7 +97,7 @@ export function AppSettings({ onOpenDeviceChat,onOpenChannelsStore,onOpenStore, 
   useEffect(()=>{if(!active||aboutOnly)return;const onKey=(e:KeyboardEvent)=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='f'&&!document.querySelector('dialog[open]')&&!e.defaultPrevented){e.preventDefault();search.current?.focus();}};window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);},[active,aboutOnly]);
   const sidebar=<nav className="dk-sidebar settings-sidebar" aria-label="Settings sections">
     <div className="dk-side-top"><label className="dk-search"><UiIcon name="search" size={13}/><input ref={search} type="search" aria-label="Search settings" placeholder="Search settings" value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{if(e.key==='Escape')setQuery('');}}/></label></div>
-    {groups.map(group=>{const rows=group.keys.map(k=>ROWS[k]).filter(found);return rows.length?<div key={group.name||'end'} className="settings-nav-group">{group.name&&<p className="section-label dk-label">{group.name}</p>}{rows.map(t=><div key={t.value} className="dk-group"><button type="button" className="nav-item dk-place" title={t.jump?`Open ${t.label}`:undefined} aria-current={active_===t.value?'page':undefined} aria-expanded={t.value==='memory'||t.value==='mcp'||t.value==='computers'?active_===t.value:undefined} onClick={()=>choose(t.value)}><UiIcon name={t.icon} size={15}/><span className="dk-place-name">{t.label}</span>{t.jump&&<UiIcon name="chevron" size={11}/>}</button>{t.value==='computers'&&active_==='computers'&&COMPUTER_SETTINGS_PANES.map(p=><button key={p.key} type="button" className="nav-item dk-place" data-nested aria-current={computersPane===p.key?'page':undefined} onClick={()=>setComputersPane(p.key)}><UiIcon name={p.icon} size={14}/><span className="dk-place-name">{p.label}</span></button>)}{t.value==='memory'&&active_==='memory'&&MEMORY_PANES.map(p=><button key={p.key} type="button" className="nav-item dk-place" data-nested aria-current={pane===p.key?'page':undefined} onClick={()=>setPane(p.key)}><span className="dk-place-name">{p.label}</span></button>)}{t.value==='mcp'&&active_==='mcp'&&<div ref={setMcpNav} className="mcp-settings-nav"/>}</div>)}{group.name==='Security'&&owner&&!q&&<div className="dk-group"><button type="button" className="nav-item dk-place settings-later" disabled title="Coming later"><UiIcon name="shield" size={15}/><span className="dk-place-name">Security check</span><small>later</small></button></div>}</div>:null;})}
+    {groups.map(group=>{const rows=group.keys.map(k=>ROWS[k]).filter(found);return rows.length?<div key={group.name||'end'} className="settings-nav-group">{group.name&&<p className="section-label dk-label">{group.name}</p>}{rows.map(t=><div key={t.value} className="dk-group"><button type="button" className="nav-item dk-place" title={t.jump?`Open ${t.label}`:undefined} aria-current={active_===t.value?'page':undefined} aria-expanded={t.value==='memory'||t.value==='mcp'?active_===t.value:undefined} onClick={()=>choose(t.value)}><UiIcon name={t.icon} size={15}/><span className="dk-place-name">{t.label}</span>{t.jump&&<UiIcon name="chevron" size={11}/>}</button>{t.value==='memory'&&active_==='memory'&&MEMORY_PANES.map(p=><button key={p.key} type="button" className="nav-item dk-place" data-nested aria-current={pane===p.key?'page':undefined} onClick={()=>setPane(p.key)}><span className="dk-place-name">{p.label}</span></button>)}{t.value==='mcp'&&active_==='mcp'&&<div ref={setMcpNav} className="mcp-settings-nav"/>}</div>)}{group.name==='Security'&&owner&&!q&&<div className="dk-group"><button type="button" className="nav-item dk-place settings-later" disabled title="Coming later"><UiIcon name="shield" size={15}/><span className="dk-place-name">Security check</span><small>later</small></button></div>}</div>:null;})}
     {q&&!groups.some(g=>g.keys.some(k=>found(ROWS[k])))&&<p className="settings-search-empty">No setting matches “{query.trim()}”.</p>}
     {!signedIn&&<div className="settings-signin-note"><p>Sign in to see your account, keys and workspace settings.</p><button type="button" onClick={onAccount}>Sign in</button></div>}
   </nav>;
@@ -114,7 +113,7 @@ export function AppSettings({ onOpenDeviceChat,onOpenChannelsStore,onOpenStore, 
         {live&&<ChatNoticeSettings client={client!}/>}
         <PreferenceGroup title="Language"><PreferenceRow title="Program language" description="More languages come later."><span className="preference-status">English</span></PreferenceRow></PreferenceGroup>
       </>}
-      {active_==='account'&&(live?<AccountSettings client={client!}/>:signIn('Account','Connect to your workspace to manage your account.'))}
+      {active_==='account'&&(live?<><AccountSettings client={client!}/>{owner&&<ComputerAccountPart client={client!}/>}</>:signIn('Account','Connect to your workspace to manage your account.'))}
       {active_==='replies'&&<>
         <PreferenceGroup title="Agent replies"><PreferenceRow title="Model for each agent" description="Select an agent to choose its model and provider." icon="cpu"><button type="button" onClick={live&&onAgents?onAgents:onAccount}>{live?'Choose agent…':'Sign in'}</button></PreferenceRow></PreferenceGroup>
         {live&&owner&&<><PrimaryReplySettings client={client!} onAgents={onAgents}/><ReplyAppsSettings client={client!} onOpenChat={onOpenChat} onOpenStore={onOpenStore}/></>}
@@ -122,6 +121,7 @@ export function AppSettings({ onOpenDeviceChat,onOpenChannelsStore,onOpenStore, 
       {active_==='move'&&owner&&<WorkspacePackSettings client={client!}/>}
       {active_==='voice'&&owner&&<VoiceSettings client={client!}/>}
       {active_==='permissions'&&owner&&<>
+        <AgentCommandsSwitch client={client!}/>
         <AgentPermissionsGrid client={client!} active={active} onAgent={id=>setPermAgent(id)}/>
         <h3 className="settings-sub-title">One agent's tools and memory</h3>
         <PermissionsSettings client={client!} parts={['tools','memory']} agentId={permAgent} onApprovals={onApprovals??(()=>{})} onAccount={()=>setTab('account')} onAgent={onAgent}/>
@@ -133,7 +133,7 @@ export function AppSettings({ onOpenDeviceChat,onOpenChannelsStore,onOpenStore, 
       {active_==='accounts'&&owner&&<ConnectionsSettings client={client!} onOpenGenvr={onOpenGenvr}/>}
       {active_==='departments'&&owner&&<DepartmentsSettings client={client!} onAgent={onAgent}/>}
       {active_==='channels'&&owner&&<AgentConnectSettings client={client!} onOpenStore={onOpenChannelsStore}/>}
-      {active_==='computers'&&owner&&<ComputerSettings client={client!} pane={computersPane} onApprovals={onApprovals}/>}
+      {active_==='computers'&&owner&&<ComputerSettings client={client!} onApprovals={onApprovals}/>}
       {active_==='phone'&&owner&&<PhoneSettings client={client!} active={active}/>}
       {active_==='memory'&&owner&&<MemorySettings client={client!} pane={pane} onOpenMemory={onOpenMemory}/>}
       {active_==='mcp'&&owner&&<McpSection client={client!} active={active} nav={mcpNav} openId={mcpOpenId} onOpenAgents={onAgents}/>}
@@ -152,4 +152,13 @@ export function AppSettings({ onOpenDeviceChat,onOpenChannelsStore,onOpenStore, 
     {!aboutOnly&&!sidebarSlot&&sidebar}
     {page}
   </div>;
+}
+
+/** CP15: the owner's switch for agents running commands on this computer (in the chat's project folder; risky ones wait for Run). */
+function AgentCommandsSwitch({client}:{client:SessionClient}){
+ const [on,setOn]=useState<boolean|null>(null),[notice,setNotice]=useState('');
+ useEffect(()=>{let live=true;void client.request({method:'GET',path:'/api/me/agent-commands'} as never).then(r=>{if(!live)return;if(r.status===200)setOn((r.body as {on?:boolean}).on===true);else{setOn(false);setNotice(r.status===403?'Only the owner can change this.':'Its state could not be read. It counts as off.');}}).catch(()=>{if(live){setOn(false);setNotice('Its state could not be read. It counts as off.');}});return()=>{live=false;};},[client]);
+ if(on===null)return null;
+ const change=(next:boolean)=>{setNotice('');void client.request({method:'PUT',path:'/api/me/agent-commands',body:{on:next}} as never).then(r=>{if(r.status===200)setOn(next);else setNotice('It could not be saved. Try again.');}).catch(()=>setNotice('It could not be saved. Try again.'));};
+ return <div className="phone-list" role="list"><div className="phone-row" role="listitem"><span className="phone-row-text"><b>Agents can run commands on this computer</b><small>In the chat’s project folder, with any AI tool. Reading and syncing (git status, log, pull…) run at once; anything else waits for your Run.</small></span><label className="switch"><input type="checkbox" checked={on} onChange={e=>change(e.target.checked)} aria-label="Agents can run commands on this computer"/><span aria-hidden="true"/></label>{notice&&<small role="status">{notice}</small>}</div></div>;
 }

@@ -118,6 +118,8 @@ export function terminalRoutesWith(manager: TerminalManager) {
         audit(request, owner, 'terminal.session.open', created.id);
         return reply.code(201).send(created);
       } catch (err) {
+        // P15 test (MacBook, 2026-11-11): a terminal that cannot start leaves a short reason in the log (a code or a known word, never output).
+        { const code = err instanceof TerminalError ? err.code : (err as { code?: unknown })?.code; const known = err instanceof Error ? (err.message.match(/posix_spawnp|spawn-helper|ENOENT|EACCES|node-pty|dlopen|NODE_MODULE_VERSION/) ?? [''])[0] : ''; console.warn('terminal_start_failed', typeof code === 'string' && /^[A-Za-z0-9_]{1,40}$/.test(code) ? code : err instanceof Error ? err.name : 'unknown', known); }
         return fail(reply, err);
       }
     });
