@@ -13,7 +13,8 @@ export interface Person {publicId: string; nickname: string | null}
 export interface PersonComputer {deviceId: string; publicKey: string; label: string; osFamily: string; viaGoogle?: boolean; presence: 'online' | 'unknown'}
 export interface LinkedPerson {linkId: string; person: Person; linkedAt: number; computers: PersonComputer[]}
 export interface PeopleRequest {linkId: string; person: Person; expiresAt: number; code: string; codeExpiresAt: number}
-export interface PeopleState {me: Person | null; people: LinkedPerson[]; blocked: {linkId: string; person: Person}[]; incoming: PeopleRequest[]; outgoing: PeopleRequest[]}
+export interface PersonTask {id: string; direction: 'out' | 'in'; linkId: string; person: {publicId: string; name: string}; text: string; state: 'waiting' | 'running' | 'done' | 'declined' | 'failed'; answer: string; sessionId: string | null; createdAt: number}
+export interface PeopleState {me: Person | null; people: LinkedPerson[]; blocked: {linkId: string; person: Person}[]; incoming: PeopleRequest[]; outgoing: PeopleRequest[]; tasks: PersonTask[]}
 
 const PATH = '/api/computers/account/people';
 export const people = (client: SessionClient, body: Record<string, unknown>) => call(client, PATH, body);
@@ -31,6 +32,9 @@ export function peopleWords(code: string) {
     account_people_code_changed: 'The code changed. Compare the new code and try again.',
     account_people_capacity: 'You have too many open requests. Wait for some to finish.',
     account_sign_in_required: 'Sign in to your Girru account first.',
+    account_people_offline: 'None of their computers is on right now. Try again when one is open.',
+    account_people_task_text: 'Write the task in 1 to 4000 characters.',
+    account_people_task_start: 'The task could not start here. Try again.',
   };
   return words[code] ?? 'That did not work. Try again.';
 }
@@ -40,8 +44,8 @@ export function usePeople(client: SessionClient, active: boolean, ready: boolean
   const [state, setState] = useState<PeopleState | null>(null);
   const refresh = useCallback(async () => {
     try {
-      const [me, list, requests] = await Promise.all([people(client, {action: 'me'}), people(client, {action: 'list'}), people(client, {action: 'requests'})]);
-      setState({me, people: list.people ?? [], blocked: list.blocked ?? [], incoming: requests.incoming ?? [], outgoing: requests.outgoing ?? []});
+      const [me, list, requests, tasks] = await Promise.all([people(client, {action: 'me'}), people(client, {action: 'list'}), people(client, {action: 'requests'}), people(client, {action: 'tasks'}).catch(() => ({tasks: []}))]);
+      setState({me, people: list.people ?? [], blocked: list.blocked ?? [], incoming: requests.incoming ?? [], outgoing: requests.outgoing ?? [], tasks: tasks.tasks ?? []});
     } catch { /* The account service is not reachable: keep what was shown. */ }
   }, [client]);
   useEffect(() => {
@@ -126,15 +130,70 @@ export function PeopleRequests({client, incoming, onChanged}: {client: SessionCl
   </div>;
 }
 
-/** Board D: a person's page: their computers (online or not), and Remove person in the More menu. */
-export function PersonPage({person}: {person: LinkedPerson}) {
+/** Board D: a person's page: tasks with them, their computers, and Remove person in the More menu. */
+export function PersonPage({person, tasks, onOpenChat}: {person: LinkedPerson; tasks: PersonTask[]; onOpenChat: (id: string) => void}) {
+  const name = personName(person.person), mine = tasks.filter(t => t.linkId === person.linkId);
   return <>
+    <section aria-label="Tasks"><p className="section-label">Tasks</p>
+      {mine.length ? <div className="computer-list" role="list">{mine.map(t => <PersonTaskRow key={t.direction + t.id} task={t} name={name} onOpenChat={onOpenChat}/>)}</div> : <p className="fine-print">No task yet. Send one: it waits for {name}'s OK, then the answer shows here.</p>}
+    </section>
     <section aria-label="Their computers"><p className="section-label">Their computers</p>
       <div className="computer-list" role="list">{person.computers.map(c => <div key={c.deviceId} className="computer-task" role="listitem">
         <UiIcon name={c.osFamily === 'windows' ? 'pc-tower' : 'pc-imac'} size={15}/>
         <span className="computer-task-text"><b>{c.label}</b><small>{c.presence === 'online' ? 'On' : 'Off or not seen'}{c.viaGoogle ? ' · added without a code check' : ''}</small></span>
       </div>)}{!person.computers.length && <p className="fine-print">No computer yet.</p>}</div>
     </section>
-    <p className="fine-print">Only tasks are shared with {personName(person.person)}: never agents, settings, memory, chats or backups. A task from them always waits for your OK. Sending tasks to people comes in the next step.</p>
+    <p className="fine-print">Only tasks are shared with {personName(person.person)}: never agents, settings, memory, chats or backups. A task from them always waits for your OK.</p>
   </>;
+}
+
+const taskWords = (t: PersonTask, name: string) => t.direction === 'out'
+  ? {waiting: `Waits for ${name}'s OK`, running: `Running on ${name}'s computer`, done: 'Done', declined: `${name} said no`, failed: 'Did not finish'}[t.state]
+  : {waiting: 'Waits for your OK', running: 'Running here', done: 'Done · answer sent', declined: 'You said no', failed: 'Did not finish · they were told'}[t.state];
+
+function PersonTaskRow({task, name, onOpenChat}: {task: PersonTask; name: string; onOpenChat: (id: string) => void}) {
+  return <div className="computer-task" role="listitem">
+    <UiIcon name={task.state === 'done' ? 'check' : task.direction === 'in' ? 'inbox' : 'send'} size={15}/>
+    <span className="computer-task-text"><b>{task.text.split('\n')[0].slice(0, 120)}</b><small>{taskWords(task, name)} · {task.direction === 'out' ? `sent to ${name}` : `from ${name}`}</small>
+      {task.direction === 'out' && task.answer && <span className="computer-task-answer"><pre dir="auto">{task.answer}</pre></span>}</span>
+    <span className="computer-task-actions">{task.direction === 'in' && task.sessionId && <button type="button" onClick={() => onOpenChat(task.sessionId!)}>Open its chat</button>}</span>
+  </div>;
+}
+
+/** CP17 D: send a task to a person; it goes to one of their computers that is on and waits for their OK. */
+export function SendToPersonSheet({client, person, onClose, onSent}: {client: SessionClient; person: LinkedPerson; onClose: () => void; onSent: (text: string) => void}) {
+  const [text, setText] = useState(''), [busy, setBusy] = useState(false), [notice, setNotice] = useState('');
+  const name = personName(person.person), on = person.computers.some(c => c.presence === 'online' && !c.viaGoogle);
+  const send = async () => {
+    setBusy(true); setNotice('');
+    try { const r = await people(client, {action: 'send', linkId: person.linkId, text: text.trim()}); onSent(`Sent to ${name} (${r.to?.computer ?? 'their computer'}). It waits for their OK.`); onClose(); }
+    catch (e) { setNotice(peopleWords((e as Error).message)); } finally { setBusy(false); }
+  };
+  return <Sheet title={`Send a task to ${name}`} onClose={onClose} actions={<><button type="button" onClick={onClose}>Cancel</button><button type="button" className="primary" disabled={busy || !text.trim() || text.length > 4000} onClick={() => void send()}>Send</button></>}>
+    <label className="phone-field"><span>The task</span><textarea autoFocus rows={6} maxLength={4000} value={text} onChange={e => setText(e.target.value)} placeholder="What should they do, and what should the answer say?" onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && text.trim()) void send(); }}/></label>
+    <p className="fine-print">Runs on: {name} (any of their computers that is on{on ? '' : '; none is on right now'}). It waits for their OK and runs with their own agent. Only the text goes, only the answer comes back.</p>
+    {notice && <p role="status" className="fine-print">{notice}</p>}
+  </Sheet>;
+}
+
+/** CP17 D: on your own computer, tasks people sent you wait here for Allow. */
+export function IncomingPersonTasks({client, tasks, onChanged, onOpenChat}: {client: SessionClient; tasks: PersonTask[]; onChanged: () => void; onOpenChat: (id: string) => void}) {
+  const [notice, setNotice] = useState(''), [busy, setBusy] = useState('');
+  const waiting = tasks.filter(t => t.direction === 'in' && t.state === 'waiting');
+  if (!waiting.length) return notice ? <p role="status" className="fine-print">{notice}</p> : null;
+  const act = async (t: PersonTask, allow: boolean) => {
+    setBusy(t.id);
+    try { const r = await people(client, allow ? {action: 'allow', taskId: t.id, confirmed: true} : {action: 'decline-task', taskId: t.id}); setNotice(allow ? 'Started in a new chat.' : `${t.person.name} is told you said no.`); onChanged(); if (allow && r.sessionId) onOpenChat(r.sessionId); }
+    catch (e) { setNotice(peopleWords((e as Error).message)); } finally { setBusy(''); }
+  };
+  return <div className="computer-list" role="list" aria-label="Tasks from people">
+    {waiting.map(t => <div key={t.id} className="computer-task people-request" role="listitem">
+      <Avatar name={t.person.name} size={28}/>
+      <span className="computer-task-text"><b>{t.person.name} asks: {t.text.split('\n')[0].slice(0, 120)}</b>
+        {t.text.length > 120 || t.text.includes('\n') ? <span className="computer-task-answer"><pre dir="auto">{t.text}</pre></span> : null}
+        <small>Runs here in a new chat with your agent, and asks you before any change. Only its answer goes back.</small></span>
+      <span className="computer-task-actions"><button type="button" className="primary" disabled={busy === t.id} onClick={() => void act(t, true)}>Allow</button><button type="button" disabled={busy === t.id} onClick={() => void act(t, false)}>Decline</button></span>
+    </div>)}
+    {notice && <p role="status" className="fine-print">{notice}</p>}
+  </div>;
 }

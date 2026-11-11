@@ -13,7 +13,7 @@ import {AllowTask, TakesNewTasks} from './ComputerTaskRules';
 import {ComputerWorksOn, ProjectCopyAsks} from './ComputerWorksOn';
 import {RenameComputerSheet, forgetComputerLater, ForgetNotice, useForgetPending} from './ComputerActions';
 import {UiIcon} from './ui-icons';
-import {AddPersonSheet, PeopleRequests, PersonPage, YouOnGirru, people as peopleCall, peopleWords, personName, personOnline, usePeople} from './ComputerPeople';
+import {AddPersonSheet, IncomingPersonTasks, PeopleRequests, PersonPage, SendToPersonSheet, YouOnGirru, people as peopleCall, peopleWords, personName, personOnline, usePeople} from './ComputerPeople';
 import {Avatar} from './desktop-ui';
 
 /** Tasks that wait for this computer's owner to allow them. */
@@ -66,6 +66,8 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   useEffect(() => { if (!active) return; const onKey = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'n' && peopleOn) { e.preventDefault(); setAddingPerson(true); } }; window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey); }, [active, peopleOn]);
   const selectedPerson = selected.startsWith('person:') ? ppl?.people.find(p => p.linkId === selected.slice(7)) : undefined;
   const incoming = ppl?.incoming ?? [];
+  const personTasksWaiting = (ppl?.tasks ?? []).filter(t => t.direction === 'in' && t.state === 'waiting').length;
+  const [sendingPerson, setSendingPerson] = useState(false);
   // CP9c: the account knows each computer's system; its key ties it to the computer in this list.
   const accountDevice = (publicKey?: string) => account?.view?.devices?.find(d => d.publicKey && d.publicKey === publicKey);
   /** The account sees it online but the direct link is not up yet: “Connecting…”, not “Off”. */
@@ -137,7 +139,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
     <p className="section-label dk-label computers-label"><span>My computers</span></p>
     {self && selfShown && <button type="button" className="nav-item dk-place" aria-current={isSelf ? 'page' : undefined} onClick={() => setSelected(self.id)}>
       <UiIcon name={iconOf(self.id)} size={15}/><span className="dk-place-name">{nameOf(self.id, self.name)}</span><span className="dk-count">this one</span>
-      {attempts.filter(a => a.targetDevice === self.id && WAITING.has(a.state)).length + incoming.length > 0 && <span className="dk-badge-pill" title="Needs you">{attempts.filter(a => a.targetDevice === self.id && WAITING.has(a.state)).length + incoming.length}</span>}
+      {attempts.filter(a => a.targetDevice === self.id && WAITING.has(a.state)).length + incoming.length + personTasksWaiting > 0 && <span className="dk-badge-pill" title="Needs you">{attempts.filter(a => a.targetDevice === self.id && WAITING.has(a.state)).length + incoming.length + personTasksWaiting}</span>}
     </button>}
     {!self && accountSelf && <button type="button" className="nav-item dk-place" aria-current="page" title={accountSelf.status === 'pending' ? 'Waiting to be added to your account' : undefined}>
       <UiIcon name={computerIcon(look, accountSelf.id, accountSelf.osFamily)} size={15}/><span className="dk-place-name">{nameOf(accountSelf.id, accountSelf.label)}</span><span className="dk-count">{accountSelf.status === 'pending' ? 'waiting' : 'this one'}</span>
@@ -187,10 +189,12 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
       <header className="computers-head">
         <span className="computers-tile"><Avatar name={personName(selectedPerson.person)} size={26}/></span>
         <span className="computers-title"><h2>{personName(selectedPerson.person)}</h2><small>{selectedPerson.person.publicId} · {personOnline(selectedPerson) ? 'On' : 'Off'} · {selectedPerson.computers.length === 1 ? '1 computer' : `${selectedPerson.computers.length} computers`}</small></span>
+        <button type="button" className="primary" onClick={() => setSendingPerson(true)}>Send a task</button>
         <button type="button" className="tool" title="More" aria-label="More" onClick={e => menu.at(e, menuForPerson(selectedPerson))}><UiIcon name="more" size={15}/></button>
       </header>
       {notice && <p role="status" className="fine-print">{notice}</p>}
-      <PersonPage person={selectedPerson}/>
+      <PersonPage person={selectedPerson} tasks={ppl?.tasks ?? []} onOpenChat={onOpenChat}/>
+      {sendingPerson && <SendToPersonSheet client={client} person={selectedPerson} onClose={() => setSendingPerson(false)} onSent={text => { setNotice(text); void refreshPeople(); }}/>}
     </div>;
   else {
     const name = isSelf ? nameOf(self?.id ?? '', self?.name ?? 'This computer') : device ? nameOf(device.id, device.name) : 'Computer';
@@ -212,9 +216,9 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
       {isSelf && ppl?.me && <YouOnGirru client={client} me={ppl.me} onAdd={() => setAddingPerson(true)} onChanged={() => void refreshPeople()}/>}
       {isSelf && newerElsewhere && <div className="computer-task computer-version" role="status"><UiIcon name="download" size={16}/><span className="computer-task-text"><b>Update Girru on this computer</b><small>{newerElsewhere.label} has a newer Girru ({newerElsewhere.appVersion}). Until this computer is updated, they can’t send each other tasks.</small></span>{onUpdates && <span className="computer-task-actions"><button type="button" className="primary" onClick={onUpdates}>Update…</button></span>}</div>}
       {!isSelf && device && older(device.publicKey) && <div className="computer-task computer-version" role="status"><UiIcon name="download" size={16}/><span className="computer-task-text"><b>{nameOf(device.id, device.name)} has another Girru version</b><small>It can still be seen, but it can’t take new tasks until both run the same version. It updates by itself the next time it opens (backup first).</small></span></div>}
-      <section aria-label="Needs you"><p className="section-label">Needs you</p>{isSelf && <ComputerJoinRequests client={client} status={account}/>}{isSelf && <ContinuityRequests client={client} status={account}/>}{isSelf && <SameSetupArrived client={client} status={account}/>}{isSelf && <TrustRequests client={client} status={account}/>}{isSelf && <PeopleRequests client={client} incoming={incoming} onChanged={() => void refreshPeople()}/>}{needs.length > 0 ? <div className="computer-list" role="list">
+      <section aria-label="Needs you"><p className="section-label">Needs you</p>{isSelf && <ComputerJoinRequests client={client} status={account}/>}{isSelf && <ContinuityRequests client={client} status={account}/>}{isSelf && <SameSetupArrived client={client} status={account}/>}{isSelf && <TrustRequests client={client} status={account}/>}{isSelf && <PeopleRequests client={client} incoming={incoming} onChanged={() => void refreshPeople()}/>}{isSelf && <IncomingPersonTasks client={client} tasks={ppl?.tasks ?? []} onChanged={() => void refreshPeople()} onOpenChat={onOpenChat}/>}{needs.length > 0 ? <div className="computer-list" role="list">
         {needs.map(a => (a.runWaiting ?? 0) > 0 && !WAITING.has(a.state) ? row(a, <><span className="fine-print">A command waits for your Run</span>{a.sessionId && <button type="button" onClick={() => onOpenChat(a.sessionId!)}>Open its chat</button>}</>) : row(a, <>{a.state === 'blocked' ? null : a.approvalId ? <AllowTask client={client} approvalId={a.approvalId} sourceName={nameOf(a.sourceDevice, a.sourceName)} onDone={setNotice} onApprovals={onApprovals}/> : <button type="button" onClick={onApprovals}>Open Approvals</button>}{a.state === 'blocked' ? <TryAgain client={client} taskId={a.taskId} onDone={setNotice}/> : <ComputerTaskTiming client={client} taskId={a.taskId} onPrepared={onApprovals}/>}</>))}
-      </div> : !(isSelf && ((account?.pairing?.addedWithCode?.length ?? 0) > 0 || (account?.pairing?.requests?.length ?? 0) > 0 || incoming.length > 0)) && <p className="fine-print">Nothing waits for you.</p>}</section>
+      </div> : !(isSelf && ((account?.pairing?.addedWithCode?.length ?? 0) > 0 || (account?.pairing?.requests?.length ?? 0) > 0 || incoming.length > 0 || personTasksWaiting > 0)) && <p className="fine-print">Nothing waits for you.</p>}</section>
       <section aria-label="Working on"><p className="section-label">Working on</p>
         {working.length ? <div className="computer-list" role="list">
           {working.map(a => row(a, <>{a.sessionId && !sentHere(a) && <button type="button" onClick={() => onOpenChat(a.sessionId!)}>Open its chat</button>}{WORKING.has(a.state) && a.state !== 'cancel_requested' && <button type="button" className="danger-text" onClick={() => void cancel(a)}>Stop</button>}</>))}
