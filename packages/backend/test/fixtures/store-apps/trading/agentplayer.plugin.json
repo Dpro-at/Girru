@@ -1,0 +1,8 @@
+{
+  "id": "trading",
+  "name": "Trading practice",
+  "version": "1.0.0",
+  "type": "app",
+  "main": "index.js",
+  "permissions": []
+}

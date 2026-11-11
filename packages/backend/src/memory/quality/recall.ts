@@ -1,3 +1,4 @@
+import {assertNoDefaultMemoryAccess} from '../encryption/execution-context.js';
 /**
  * Reply recall of the quality engine (STORE-MAP-01 P9b, MD5, MD6, MD8;
  * GIRRU_STORE_P9B).
@@ -173,6 +174,7 @@ function timeout(ms: number): { promise: Promise<'late'>; clear: () => void } {
 }
 
 export async function qualityRecall(input: QualityRecallInput): Promise<QualityRecall> {
+  assertNoDefaultMemoryAccess();
   const intent = classifyIntent(input.query);
   const limit = input.limit ?? 6;
   const questionLike = isMemoryQuestion(input.query, lexicalTokens(input.query).length);

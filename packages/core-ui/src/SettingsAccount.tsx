@@ -1,3 +1,4 @@
+import {GoogleAccountLink} from './GoogleAccountLink';
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {displayName} from './session';
 import type {SessionClient} from './session';
@@ -32,6 +33,7 @@ export function AccountSettings({client}:{client:SessionClient}){
  return <section className="account-settings" aria-label="Account">
   <div className="account-settings-head"><span className="team-avatar account-avatar" aria-hidden="true">{displayName(user).trim().slice(0,1).toUpperCase()||'?'}</span><div><strong><bdi>{displayName(user)}</bdi></strong><small><bdi>{user.email}</bdi> · {roleLine[user.role]??user.role}</small><small className="account-role-help">{roleHelp[user.role]??''}</small></div></div>
   <VerificationSettings client={client}/>
+  <GoogleAccountLink client={client}/>
   <PreferenceGroup title="Signed in" note="Signing out a device ends only its sign-in; your agents keep working.">
    <div className="preference-row"><span className="preference-icon"><UiIcon name="screen" size={18}/></span><div className="preference-label"><strong>This device</strong><small>{state.mode==='live'?'Now · this installation':state.mode==='mock'?'Now · offline practice with fictional data':'Now · preview'} · this window only; the sign-in is not stored on disk.</small></div>
     {Array.isArray(devices)&&devices.some(d=>d.current)&&<div className="preference-control"><button type="button" disabled={!!busy} onClick={()=>void signOut(devices.find(d=>d.current)!)}>Sign out</button></div>}</div>

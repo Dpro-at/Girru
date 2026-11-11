@@ -194,7 +194,47 @@ Each answers `404 not_found` while the switch is off. Agents never mark a memory
 | `POST /api/memory/open-questions/:id/answer` | `{ text, drawer? }` → `{ question, memoryId }`: saved as the owner's own fact; `409 not_open` when it no longer waits |
 | `POST /api/memory/open-questions/:id/forget` · `/restore` | forget (no confirmation) → `{ id, undo }`; restore within 10 minutes → `{ question }`, else `410 gone` |
 
-### Open in Code (owner only, CODE-OPEN-01)
+### Memory helper (owner only, `GIRRU_MEMORY_HELPER`)
+
+| Route | Body / answer |
+|---|---|
+| `GET /api/memory/helper` | `{ status, row }`: the helper's phase (`waiting`, `checking`, `starting_runtime`, `downloading`, `verifying`, `reembedding`, `ready` or `fallback`), download progress and the fallback reason; codes and counts only, never memory text or paths. `row` is its Memory › Health row |
+| `POST /api/memory/helper/retry` | try again now after a failure; answers at once |
+
+### Document memory (owner only, `GIRRU_DOC_INDEX`)
+
+| Route | Body / answer |
+|---|---|
+| `GET /api/memory/documents` | `{ projects, agents }`: each project with its folders (with files read), and `source` (on, state, files, files that cannot be read with a reason code); the agents' Knowledge folders together. No file text |
+| `PUT /api/memory/documents/sources` | `{ kind: "project", refId, enabled }` turns a project's documents on or off; off forgets its index (the files are not touched) |
+| `POST /api/memory/documents/sources/:id/reindex` | look at the files again now (background; `202`) |
+| `POST /api/memory/documents/read-pdf` | `{ data }` (base64, 10 MB at most) → `{ text }` with `--- page N ---` markers, or `{ reason }`; nothing is kept (chat attachments) |
+
+### Store package validation
+
+Store package paths must resolve consistently on Linux, macOS and Windows. Case-folded file/directory collisions, noncanonical `migrations` directory names, trailing dots and Windows device names are refused before activation. During installation, SQL migrations execute only the checksum-verified in-memory bytes that passed the app-table allowlist; the installer never re-reads those statements from an installed path.
+
+### Agent Connect (owner configuration)
+
+| Route | Body / answer |
+|---|---|
+| `GET /api/agent-connect/catalog` | Existing channel metadata and masked configuration state, plus `app: { installed, ready }`; `configurable` is false until the separate app is ready. No credentials or program paths are returned. |
+| `PUT /api/agent-connect/:id/config` | Saves the existing allowed sender/conversation lists and provider configuration; saving never starts a provider. |
+| `PUT /api/agent-connect/:id/activation` | `{ enabled }`; enabling requires the installed runtime, an owner and configured channel. A restart may be needed for the app's routes to load. |
+
+`store:agent-connect` uses the normal Store install/consent/job APIs. Its reviewed package includes a bounded `runtime-packages.npm` list of exact npm archives. These are streamed, size/hash checked and unpacked before atomic activation, without running package scripts. Removing the app retains its channel configuration, credentials and `channel_events`; it stops running hosts and removes only program files. Older hosts without the integration capability are asked to update before the Store plugin registers anything.
+
+### Optional app runtimes (owner only except local program metadata)
+
+| Route | Body / answer |
+|---|---|
+| `GET /api/apps/code` | `{ state, platform, version, update, available, job }`; `state` is `installed`, `missing`, `unsupported` (no archive for this platform), `bundled` (a developer build that includes Code) or `unavailable`; `update` names a newer version when there is one; `job` is a running install |
+| `GET /api/apps/genvr` | Owner-only, loopback-only runtime/install metadata: `{ state, platform, version, update, available, job }`; same state vocabulary as Code; only the SDK version pinned by this Girru build can be installed |
+| `GET /api/genvr/runtime` | Local UI bridge only: `{ state: "installed" \| "bundled" \| "missing", version }` describes the runtime loaded by this bridge; no account, paths or job details; GET without query/body |
+| `POST /api/store/install` | `{ id: "girru:genvr" \| "girru:code", hash }` adds the reviewed app runtime using the exact catalogue consent hash (download, size and SHA-256 check, unpack); follow `GET /api/store/install/:job`; existing job progress reports whether a restart is automatic or manual |
+| `POST /api/store/uninstall` | `{ id: "girru:genvr" }` removes only the managed runtime and closes its managed MCP connection; worlds, projects and account settings remain; removal retains grants, but re-adding or moving the managed launch resets agent grants for review; a restart may be required |
+
+### Open in Code (owner only)
 
 | Route | Body / answer |
 |---|---|
@@ -267,33 +307,6 @@ Owner only. "Schedule a task": `{ instructions, every, at, weekday?, agentId?, n
 
 ### GET /api/runs/schedules/:id/runs
 The last runs of one schedule (`job:…`, `chatsch:…`, `cardsch:…`, `checkin:…`).
-
-## Calendar
-
-### GET /api/calendar/events
-List calendar events
-
-### POST /api/calendar/events
-Create event
-```json
-{
-  "title": "Meeting",
-  "start": "2026-02-22T10:00:00Z",
-  "end": "2026-02-22T11:00:00Z",
-  "type": "meeting"
-}
-```
-
-### GET /api/calendar/sources
-List calendar sources (Google, iCal)
-
-### POST /api/calendar/sources
-Add calendar source
-
-### POST /api/calendar/sync/:sourceId
-Sync calendar source
-
----
 
 ## Storage
 
@@ -471,3 +484,77 @@ Get token from login response and store in `localStorage`.
 - 403: Forbidden
 - 404: Not found
 - 500: Server error
+
+
+### Chat file previews and command sessions
+
+The owner-only project pane routes accept a relative `path` within the selected project:
+`GET /api/chat/projects/:id/file`, `/pdf`, and `/media`.
+Text previews are limited to 512 KB. The media route returns `{path,size,mime,base64}`
+for supported images (PNG/JPEG/GIF/WebP/SVG), video (MP4/WebM), and audio (MP3/WAV/M4A),
+or `{path,size,reason}` when hidden, unavailable, unsupported, or over the 32 MB preview limit.
+Secret files and symlink targets outside the project remain refused. SVG is displayed as an
+image, never as an active document. CSV and JSON previews are read-only; CSV formulas are text.
+
+`POST /api/terminal/sessions` optionally accepts `command` (1–16,000 characters; tab and
+newline allowed, but no other control or format characters (zero-width, text-direction,
+tag), no line or paragraph separators and no invisible fillers, so what the owner approves
+is exactly what runs; otherwise `400 invalid`). The approval shows the exact command text
+with the existing `projectId`, `cols`, and `rows`. The owner reviews and approves the exact
+command in chat before creation. This starts a dedicated command session in the same Girru
+PTY manager, using the existing owner/loopback checks, project folder and environment rules.
+Its stream exit event is the actual command-shell exit. Opening the Terminal pane attaches
+the same controller and transcript, and does not create or execute another command.
+`POST /api/terminal/sessions/:id/stop` requests termination without discarding the transcript;
+the UI waits for the real exit event. Closing a terminal still uses DELETE.
+This does not grant agents additional execution permissions.
+On Windows a `command` is refused with `501 unsupported` until it is verified on a real
+Windows shell; an interactive terminal still opens there. A finished command session keeps
+its transcript for replay but no longer counts toward the four-terminal limit, and it is
+released after the idle timeout.
+
+`GET /api/chat/projects/:id/office?path=…` previews DOCX/XLSX inside the same owner-only
+project pane. The response is `{path,kind,parts:[{name,text}],images:[{name,mime,base64}],truncated}`
+or `{path,reason}`. The file cap is 16 MB, selected XML is bounded to 2 MB/128 parts,
+and the projected response stays below 3 MB. Archive members are read in memory with
+size and CRC checks; no files are extracted. Encrypted, split/ZIP64, malformed and
+DTD/entity-bearing packages are refused. External links, macros and embedded programs
+are not loaded or executed.
+DOCX supports basic paragraphs, emphasis, headings, raster images and tables; layout
+is approximate. XLSX shows visible sheets/rows and saved cell values, with search and
+copy-cell, without recalculating formulas or loading external data. Preview limits are
+20 sheets, 1,000 rows, 100 columns and 20,000 cells per sheet. Advanced formatting,
+charts and legacy DOC/XLS files are not supported.
+
+The same `/office` route also previews PPTX. It reads the presentation's ordered slide
+relationships and supports up to 40 visible slides, 200 basic shapes per slide, plain/rich
+text and embedded raster images. The viewer offers previous/next, slide selection and
+arrow keys. Direct shape coordinates are retained where available; slides depending on
+layout inheritance use a simplified content layout. Master themes, grouped shapes,
+charts, embedded programs, hyperlinks, transitions and animation are not reproduced or
+executed. Hidden slides are omitted. All archive, XML, image and response limits above
+remain in force. Legacy PPT is not supported.
+
+Format references: [Office Open XML document structure](https://learn.microsoft.com/en-us/office/open-xml/word/structure-of-a-wordprocessingml-document),
+[SpreadsheetML structure](https://learn.microsoft.com/en-us/office/open-xml/spreadsheet/structure-of-a-spreadsheetml-document),
+and [ZIP format specification](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT).
+
+### Optional app hosts
+
+Call Center, Trading and Browser are optional reviewed Store programs. Adding one does not by itself grant agent tools or paper execution authority. Existing paper proof, consent and ledger checks stay in the host. Activation is owner-only on loopback through `GET /api/store/apps/:id/status` and `POST /api/store/apps/:id/activation` with exactly `{enabled:boolean}`; a restart completes lifecycle changes. Removal retains app data and saved permission decisions.
+
+Store backend programs run with Node privileges. Installed Trading renderer code is likewise trusted application code in the application origin, not an isolated third-party sandbox. Its scoped client adapter prevents accidental unrelated calls but is not a JavaScript security boundary. Only install reviewed packages from a trusted Store repository; independent backend owner verification still applies to paper execution.
+
+### Discovery after setup
+
+The first-run inventory is a saved scan, not an installation step. Discoverable skills include bounded, non-symlink folders under the coding-app skill roots and plugin caches; `.system` skills are included. Skills are added only after owner review in Library → Skills → From my coding apps (Look again rescans). MCP connections can be rescanned and added in Settings → MCP connections → Found, not added; added connections remain off until explicitly enabled. Settings → SSH keys lists local key metadata, while Terminal → Saved SSH hosts lists aliases from `~/.ssh/config`. Configured custom key filenames without a public half remain visible as metadata only; unconfigured files without a public half cannot be identified reliably as keys. Host aliases and SSH identities are distinct; private key contents are never imported. These section-level scans remain available after first-run setup is complete.
+
+### Company activity during owner setup
+
+`POST /api/setup/admin` accepts optional `companyKind` only when `workspaceType` is `company`. It may be an empty string for general work, a known activity identifier from the company catalogue, or `custom:<text>` with 1–64 trimmed Unicode letters, numbers, spaces, hyphens or underscores. Invalid kinds and kinds supplied for personal workspaces are rejected before creating the owner.
+
+The saved answer is returned by `GET /api/first-run` and reused by the Team step to suggest departments. Existing setups without an answer remain supported. Renaming the company preserves the answer; switching to a personal workspace removes it. This field does not grant tools or change agent permissions.
+
+### Chat details actions
+
+The chat side panel offers schedule Pause/Resume, folder reveal/copy, elapsed times and Undo for the latest reply with file changes. Pause/Resume uses the existing owner-only schedule update with the complete schedule and its `paused` flag. Undo uses the existing message checkpoint endpoint and reports a conflict when files have since changed. File rows open their selected file, and connection rows remain limited to the chat agent's granted MCP connections. Existing sub-session controls and phone setup continue to use their current flows.

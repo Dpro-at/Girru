@@ -27,10 +27,11 @@ export function workspaceAppsResponse(status,body){
  const seen=new Set();
  return {items:body.items.map(x=>{
   if(!x||typeof x.id!=='string'||!(/^(terminal|trading|code|genvr|mcp:[a-f0-9-]{36}|app:[a-z0-9]+(?:-[a-z0-9]+)*)$/).test(x.id)||seen.has(x.id)||!['builtin','mcp','api','added'].includes(x.kind)||!['included','disabled','connected','connecting','disconnected','attention','not_connected','expired'].includes(x.state)||!Number.isSafeInteger(x.tools)||x.tools<0||x.tools>10000||!Array.isArray(x.permissions)||x.permissions.length>60)throw Error('protocol');
-  if(x.kind==='mcp'?(x.id!=='mcp:'+x.sourceId||x.removable!==true):x.kind==='added'?(x.id!=='app:'+x.sourceId||x.removable!==true||!['store','private'].includes(x.origin)):x.sourceId!==(x.id==='genvr'?'genvr':null)||x.removable!==false)throw Error('protocol');
+  if(x.id==='genvr'&&x.runtime!==undefined&&!['bundled','installed','missing'].includes(x.runtime))throw Error('protocol');
+  if(x.kind==='mcp'?(x.id!=='mcp:'+x.sourceId||x.removable!==true):x.kind==='added'?(x.id!=='app:'+x.sourceId||x.removable!==true||!['store','private'].includes(x.origin)):x.sourceId!==(x.id==='genvr'?'genvr':null)||x.removable!==(x.id==='genvr'&&x.runtime==='installed'))throw Error('protocol');
   if(x.kind!==(x.id==='genvr'?'api':x.id.startsWith('mcp:')?'mcp':x.id.startsWith('app:')?'added':'builtin'))throw Error('protocol');
   seen.add(x.id);
-  return {id:x.id,name:text(x.name,180),kind:x.kind,version:x.version===null?null:text(x.version,80),summary:text(x.summary,1500),state:x.state,sourceId:x.sourceId,permissions:x.permissions.map(p=>{if(typeof p!=='string')throw Error('protocol');return text(p,180);}),tools:x.tools,removable:x.removable,...(x.kind==='added'?{origin:x.origin}:{})};
+  return {id:x.id,name:text(x.name,180),kind:x.kind,version:x.version===null?null:text(x.version,80),summary:text(x.summary,1500),state:x.state,sourceId:x.sourceId,permissions:x.permissions.map(p=>{if(typeof p!=='string')throw Error('protocol');return text(p,180);}),tools:x.tools,removable:x.removable,...(x.kind==='added'?{origin:x.origin}:{}),...(x.id==='genvr'&&x.runtime!==undefined?{runtime:x.runtime}:{})};
  })};
 }
 

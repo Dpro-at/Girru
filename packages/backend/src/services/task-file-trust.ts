@@ -14,6 +14,7 @@
  * Off (the default), nothing changes. Girru's own cards (made from a project
  * chat) are not from the file until the file changes their block.
  */
+import { isOutsideProject } from '../memory/project-trust.js';
 import { q } from '../repositories/sql-steps.js';
 import { storeP7Enabled } from './store-p7.js';
 import type { TaskBlock } from './task-file-format.js';
@@ -40,9 +41,13 @@ export async function projectApproved(projectId: string): Promise<boolean> {
  * card's task came from the file and the owner has not approved the project.
  */
 export async function approvalNeeded(cardId: string): Promise<{ projectId: string; taskNo: string } | null> {
-  if (!storeP7Enabled()) return null;
-  const link = await q.one<{ project_id: string; task_no: string; from_file: number }>('SELECT project_id, task_no, from_file FROM task_file_cards WHERE card_id = ?', cardId).catch(() => undefined);
-  if (!link || Number(link.from_file) !== 1 || await projectApproved(link.project_id)) return null;
+  const link = await q.one<{ project_id: string; task_no: string; from_file: number; user_id: string | null }>(
+    'SELECT c.project_id, c.task_no, c.from_file, p.user_id FROM task_file_cards c LEFT JOIN chat_projects p ON p.id = c.project_id WHERE c.card_id = ?', cardId).catch(() => undefined);
+  if (!link) return null;
+  // REPO-TRUST-01: in an outside project every task from its file waits for the owner once (even one Girru wrote there).
+  const outside = !!link.user_id && await isOutsideProject(link.user_id, link.project_id);
+  if (!outside && (!storeP7Enabled() || Number(link.from_file) !== 1)) return null;
+  if (await projectApproved(link.project_id)) return null;
   return { projectId: link.project_id, taskNo: link.task_no };
 }
 

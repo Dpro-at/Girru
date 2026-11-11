@@ -29,8 +29,8 @@ if (URL_) {
   process.env.OLLAMA_URL = 'http://127.0.0.1:9';
   process.env.AGENT_PLAYER_DB = 'postgres';
   process.env.AGENT_PLAYER_PG_URL = URL_;
-  delete process.env.GIRRU_STORE_P9;
-  delete process.env.GIRRU_STORE_P9B;
+  process.env.GIRRU_STORE_P9 = '0';
+  process.env.GIRRU_STORE_P9B = '0';
   const quiet = { log: console.log, warn: console.warn };
   console.log = () => {}; console.warn = () => {};
   const { getDatabase, closeDatabase } = await import('../src/db/database.ts');
@@ -124,5 +124,5 @@ test('P9b write pipeline, confidence, quality recall, ask once and use (PostgreS
   assert.ok(!(await m.q.one('SELECT memory_id FROM memory_trust WHERE memory_id = ?', ans.saved[0].id)));
   assert.equal(Number((await m.q.one('SELECT COUNT(*) AS n FROM memory_open_questions WHERE user_id = ?', owner)).n), 0);
   await m.pipeline.enrichmentIdle();
-  delete process.env.GIRRU_STORE_P9B;
+  process.env.GIRRU_STORE_P9B = '0';
 });

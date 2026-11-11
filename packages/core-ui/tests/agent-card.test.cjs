@@ -204,3 +204,41 @@ test('the model list survives both projections on the live path (bridge, then br
   assert.deepEqual(twice, once);
   assert.deepEqual(once.models.map(m => [m.id, m.provider, m.label]), [['qwen3.8:27b', 'ollama', 'qwen3.8:27b'], ['claude-x-1', 'claude', 'Claude X']]);
 });
+
+test('a stale or unknown model never guesses its provider or sends a profile update', async t => {
+  const base = await client(), calls = [];
+  const cl = { request: async r => { calls.push(r); return base.request(r); } };
+  const c = new AgentCardController(cl, 'sample-main'); t.after(() => c.dispose());
+  await c.load();
+  for (const model of ['claude-unknown-fixture', 'unknown-local-fixture']) {
+    c.editProfile({ model });
+    const before = calls.filter(r => r.method === 'PUT').length;
+    await c.saveProfile();
+    assert.equal(calls.filter(r => r.method === 'PUT').length, before);
+    assert.match(c.getSnapshot().notice, /backend catalogue/);
+  }
+});
+
+test('thinking controls use backend catalogue capabilities, including variants, without provider guessing', () => {
+  const { canThink } = require('../src/conversations.ts');
+  const id = 'subscription:codex:' + 'a'.repeat(32);
+  assert.equal(canThink(id, []), false);
+  assert.equal(canThink(id + '/deep', [{ id, think: true }]), true);
+  assert.equal(canThink('org/model', [{ id: 'org/model', think: true }]), true);
+  assert.equal(canThink('claude-unknown', [{ id: 'claude-unknown', think: false }]), false);
+  assert.equal(canThink('auto', []), true);
+});
+
+test('browser and bridge accept selection intent but reject a conflicting provider decision', () => {
+  for (const permit of [allowedRequest, allowed]) {
+    assert.equal(permit('PUT', '/api/agents/sample-main', { expectedVersion: 1, modelSelection: 'qwen-fiction:7b' }), true);
+    assert.equal(permit('PUT', '/api/agents/sample-main', { expectedVersion: 1, modelSelection: 'subscription:codex' }), true);
+    assert.equal(permit('PUT', '/api/agents/sample-main', { expectedVersion: 1, modelSelection: 'qwen-fiction:7b', model: 'x', provider: 'claude' }), false);
+    assert.equal(permit('PUT', '/api/agents/sample-main', { expectedVersion: 1, modelSelection: { id: 'x' } }), false);
+  }
+  const { agentResponse } = require('../src/agents.ts');
+  const { project } = require('../scripts/application-server.cjs');
+  const body = project('/api/agents/sample-main', 400, { code: 'invalid_model', error: 'private backend text' });
+  assert.deepEqual(body, { code: 'invalid_model' });
+  assert.deepEqual(agentResponse('/api/agents/sample-main', { status: 400, body }).body, { code: 'invalid_model' });
+});

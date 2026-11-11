@@ -1,3 +1,6 @@
+import {admitReportRun,finishReportRun,reportCanStart,reconcileReportAttempts,recordReportApprovalDecision,decidedReportApprovals,resumeReportAfterApproval,isBoardReport,captureBoardReport} from '../../services/reports.js';
+import { runEventWire } from '../../agent/contracts/events.js';
+import { preferredMention } from '../../agent/context/target.js';
 import { meetingAttendanceChat } from '../../services/meeting-attendance.js';
 import { dispatchReplyRound, replyRoundStatus, replyRoundWriter, stopReplyRound } from '../../services/chat-reply-rounds.js';
 import { assertMeetingWriter, invalidateMeetingSummary, MeetingError } from '../../services/meetings.js';
@@ -8,7 +11,7 @@ import {projectFolders} from '../../services/project-folder-picker.js';
  *
  *   GET    /api/chat/conversations                 the caller's conversations (pinned first)
  *   GET    /api/chat/search?q=&projectId=&limit=   the caller's conversations containing q, grouped, newest first (CHAT-PRO-02 D)
- *   POST   /api/chat/conversations                 { title?, agentId? } → new conversation
+ *   POST   /api/chat/conversations                 { title?, agentId?, targetMessage? } → new conversation (owner mention intent resolved by backend)
  *   PUT    /api/chat/conversations/:id             { title?, pinned? }
  *   DELETE /api/chat/conversations/:id
  *   GET    /api/chat/conversations/:id/messages    turns with their work + the running run id
@@ -41,18 +44,19 @@ import {
   addUserMessage, createConversation, createProject, deleteConversation, deleteProject, findConversation, findProject, gitInfo,
   listConversationMessages, listConversations, pageConversationMessages, CHAT_MODES, CHAT_THINKING, listProjects, patchConversation, patchProject, ProjectInputError, type Conversation, type ConversationMessage,
 } from '../../repositories/chat-conversations.js';
-import { ProjectPathError, gitChanges, gitFileDiff, listFolder, readFolderFile } from '../../repositories/project-files.js';
+import { ProjectPathError, gitChanges, gitFileDiff, listFolder, readFolderFile, readFolderPdf, readFolderMedia, readFolderOffice } from '../../repositories/project-files.js';
 import { MAX_AUDIO_BYTES, STT_LANGUAGES, SttError, sttSetup, transcribe } from '../../services/local-stt.js';
-import { acceptChatRun, approvalResultsSince, recoverChatRuns, recoverStaleRun, needsRecoveryReview, journalContext, finishChatRun, recoveryApprovalResults } from '../../repositories/chat-recovery.js';
+import { QueuedTurnChangedError, acceptChatRun, approvalResultsSince, recoverChatRuns, recoverStaleRun, needsRecoveryReview, journalContext, finishChatRun, recoveryApprovalResults } from '../../repositories/chat-recovery.js';
 import { withChatRun, type ChatRunContext } from '../../services/chat-run-context.js';
 import { chatRuns, MAX_RUNNING_PER_USER, type RunEvent } from '../../services/chat-runs.js';
 import { openSseStream } from '../../services/chat-sse.js';
-import { AUTO_MODEL, executeChatTurn } from './chat.js';
+import { AUTO_MODEL } from '../../agent/execution/chat-turn.js';
+import { executeChatTurn } from '../../agent/public.js';
 import { addApprovalDecidedListener } from '../../tools/approvals.js';
 import { delegationSteps, stopDelegations } from '../../tools/tasks/team.js';
 import { codingRunsFor, stopCodingRun, stopCodingRuns } from '../../services/coding-runs.js';
 import { getPref, setPref } from '../../repositories/user-prefs.js';
-import { CheckpointError, changedFiles, lineCounts, restore, snapshot, snapshotState } from '../../services/chat-checkpoints.js';
+import { CheckpointError, checkpointChanges, checkpointFileDiff, changedFiles, lineCounts, restore, snapshot, snapshotState } from '../../services/chat-checkpoints.js';
 import { changesSomething } from '../../tools/registry.js';
 import { projectPullRequest } from '../../services/github-pr-state.js';
 import { ChatImageError, MAX_IMAGES_PER_MESSAGE, MAX_IMAGE_BYTES, readChatImage, saveChatImage } from '../../services/chat-images.js';
@@ -188,7 +192,8 @@ interface TurnStart { code: number; body: Record<string, unknown>; retryAfter?: 
  * Starts one turn of a saved conversation (checked input). Shared by POST runs and by the
  * continuation after the owner decides a waiting approval (CHAT-BUILD-01).
  */
-export async function startTurn(t: { userId: string; role: string; c: Conversation; runId: string; message: string; displayMessage?: string; model?: string; agentId?: string; images?: string[]; continuationMessageId?: string; onFinished?: (status: string) => Promise<void>; participantReply?: boolean; participantContext?: string; canStart?: () => Promise<boolean> }): Promise<TurnStart> {
+export async function startTurn(t: { userId: string; role: string; c: Conversation; runId: string; message: string; queuedKey?: string; displayMessage?: string; model?: string; agentId?: string; images?: string[]; continuationMessageId?: string; onFinished?: (status: string) => Promise<void>; participantReply?: boolean; participantContext?: string; canStart?: () => Promise<boolean>; effectFence?:()=>Promise<boolean> }): Promise<TurnStart> {
+  await ensureChatRecovery();
   const { userId, c } = t;
   const b = { runId: t.runId, message: t.message, model: t.model, agentId: t.agentId };
   const send = (code: number, body: Record<string, unknown>): TurnStart => ({ code, body });
@@ -235,7 +240,7 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
     if (t.canStart && !await t.canStart()) return send(409, { code: 'group_paused' });
     // Marked as starting before the row exists, so a parallel request never takes it for a stale row.
     starting.add(b.runId);
-    try { await acceptChatRun(journal, displayed.text, !continuation); return null; } catch {
+    try { await acceptChatRun(journal, displayed.text, !continuation, t.queuedKey); return null; } catch (error) {
       starting.delete(b.runId);
       // Unique run/session indexes arbitrate racing starts across awaits.
       const active = chatRuns.activeFor(c.id);
@@ -245,6 +250,7 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
       if (used) return used.session_id === c.id && used.user_id === userId ? replay() : send(409, { code: 'run_id_reused' });
       const held = await q.one<{ run_id: string }>("SELECT run_id FROM chat_run_journal WHERE session_id = ? AND state = 'running'", c.id).catch(() => undefined);
       if (held) return send(409, { code: 'conversation_busy', runId: held.run_id });
+      if (error instanceof QueuedTurnChangedError) return send(409, { code: 'queued_turn_changed' });
       return send(503, { code: 'checkpoint_unavailable' });
     }
   };
@@ -282,10 +288,11 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
     chatMode: c.mode ?? 'auto', thinking: c.thinking ?? 'normal', ...(project?.folders.length ? { readRoots: project.folders.map((f) => f.path) } : {}),
     // CHAT-BUILD-01 stage 5: Steer now, and notices from tools (text that tried to give orders).
     takeSteers: () => chatRuns.get(b.runId)?.takeSteers() ?? [], notice: (code, text) => chatRuns.get(b.runId)?.notice(code, text) };
+  if(t.effectFence){const beforeTool=runContext.beforeTool.bind(runContext);runContext.beforeTool=async(name,params)=>{if(!await t.effectFence!()){chatRuns.get(b.runId)?.requestStop();throw Error('device_execution_fenced');}return beforeTool(name,params);};}
   if (t.canStart && !await t.canStart()) { await recoverStaleRun(b.runId).catch(() => false); return send(409, { code: 'group_paused' }); }
   chatRuns.start({
     runId: b.runId, userId, sessionId: c.id, agentId: b.agentId ?? null,
-    onFinished: t.onFinished,
+    onFinished: async status=>{await t.onFinished?.(status);await continueDecidedReportApprovals(t.userId,c.id);},
     // A failed checkpoint leaves the outcome unknown: close the row as interrupted (later turns ask before every tool).
     onUnstored: async () => { await recoverStaleRun(b.runId); },
     onPersisted: async status => {
@@ -308,13 +315,13 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
       void refreshSummaries({ sessionId: c.id, userId, turns }).catch(() => 0);
     },
     execute: (runReply) => withChatRun(runContext, () => executeChatTurn(runReply, {
-      agentId: resolvedReplyAgent, messages, stream: true, sessionId: c.id, userId, uiSet: 'chat',
+      targetResolved: true, agentId: resolvedReplyAgent, messages, stream: true, sessionId: c.id, userId, uiSet: 'chat',
       runId: b.runId, conversation: { turns }, handoff,
       ...(images.length ? { images: images.map((i) => ({ type: i.type, data: i.bytes.toString('base64'), name: i.name, file: i.file })) } : {}),
       ...(project?.folders.some((f) => f.write) ? { writeFolders: project.folders.filter((f) => f.write).map((f) => f.path) } : {}),
       ...(project ? { memoryScope: { project: projectKeyOf(project) }, ...(project.folder ? { fileReadRoot: project.folder } : {}) } : {}),
       ...(codingFolder ? { fileReadRoot: codingFolder } : {}),
-      systemPromptAppend: [codeEnabled ? 'Code is open on this conversation folder. Use the separately granted edit tool for reviewed changes to existing project files. The write tool still writes only to your own agent workspace; do not substitute it for a project edit. If edit is unavailable, explain that the owner must enable that file-edit capability. Never claim a file changed until the tool confirms it. A stale proposal must be read and proposed again.' : '', t.participantContext ?? '', t.participantReply ? 'You are the selected participant in this shared conversation. Give only your own reply, in your own personality and department; never impersonate or answer on behalf of another participant.' : '', approvedResults, project ? projectNote(project.name, project.folder, project.repoUrl, project.folders) : '', PLAN_NOTE, c.mode === 'plan' ? PLAN_FIRST_NOTE : c.mode === 'ask' ? ASK_NOTE : '', HANDOFF_NOTE, [...prior, userMessage].some((m) => new RegExp(SECRET_REF_RE.source).test(m.content)) ? SECRET_NOTE : '', prior.some((m) => m.role === 'assistant' && (m.agentId ?? c.agentId ?? null) !== (replyAgent ?? null)) ? TEAM_NOTE : ''].filter(Boolean).join('\n\n'),
+      systemPromptAppend: [codeEnabled ? 'Code is open on this conversation folder. Change its files with edit (part of an existing file) or write (a whole file); both change the real files in this folder after the owner approves (in "Accept edits" they run at once). Never claim a file changed until the tool confirms it. A stale proposal must be read and proposed again.' : '', t.participantContext ?? '', t.participantReply ? 'You are the selected participant in this shared conversation. Give only your own reply, in your own personality and department; never impersonate or answer on behalf of another participant.' : '', approvedResults, project ? projectNote(project.name, project.folder, project.repoUrl, project.folders) : '', PLAN_NOTE, c.mode === 'plan' ? PLAN_FIRST_NOTE : c.mode === 'ask' ? ASK_NOTE : '', HANDOFF_NOTE, [...prior, userMessage].some((m) => new RegExp(SECRET_REF_RE.source).test(m.content)) ? SECRET_NOTE : '', prior.some((m) => m.role === 'assistant' && (m.agentId ?? c.agentId ?? null) !== (replyAgent ?? null)) ? TEAM_NOTE : ''].filter(Boolean).join('\n\n'),
       ...(effectiveModel ? { model: effectiveModel, ...(effectiveModel === AUTO_MODEL ? {} : { provider: modelProvider(effectiveModel) }) } : {}),
     })),
   });
@@ -335,11 +342,15 @@ export function panelPrefs(x: unknown): { order: string[]; folded: string[]; dif
 
 /** CHAT-BUILD-01 stage 4: a scheduled message goes to its chat like a typed one (same owner gates and Mode). */
 export async function sendScheduled(userId: string, sessionId: string, message: string, runKey: string): Promise<boolean> {
+  await ensureChatRecovery();
   const c = await findConversation(userId, sessionId);
   const user = await q.one<{ role: string; status: string }>('SELECT role, status FROM users WHERE id = ?', userId);
   if (!c || c.archived || !user || user.status !== 'active' || user.role !== 'owner' || chatRuns.activeFor(c.id)) return false;
   try { await assertMeetingWriter(userId,c.id,c.agentId); } catch(error) { if(error instanceof MeetingError)return false; throw error; }
-  const out = await startTurn({ userId, role: user.role, c, runId: runKey.slice(0, 128), message, ...(c.model ? { model: c.model } : {}) });
+  let report;try{report=await admitReportRun(userId,sessionId,runKey.slice(0,128),true);}catch{return false;}
+  if(report&&isBoardReport(report.row)){try{await captureBoardReport(userId,report.row.id,runKey.slice(0,128),true);return true;}catch{await finishReportRun(userId,sessionId,runKey.slice(0,128),'failed').catch(()=>null);return false;}}
+  const out = await startTurn({ userId, role: user.role, c, runId: runKey.slice(0, 128), message:report?.message??message, ...(c.model ? { model: c.model } : {}),...(report?{agentId:report.row.agent_id,canStart:()=>reportCanStart(userId,report.row.id,Number(report.row.revision),true),onFinished:(status:string)=>finishReportRun(userId,sessionId,runKey.slice(0,128),status)}:{}) });
+  if(report&&out.code!==202)await finishReportRun(userId,sessionId,runKey.slice(0,128),'refused');
   if(out.code===202)await invalidateMeetingSummary(userId,c.id);
   return out.code === 202;
 }
@@ -468,17 +479,23 @@ export async function continueAfterApproval(approvalId: string): Promise<TurnSta
   const a = await q.one<{ user_id: string | null; session_id: string | null; agent_id: string | null }>('SELECT user_id, session_id, agent_id FROM tool_approvals WHERE id = ?', approvalId);
   if (!a?.user_id || !a.session_id) return null;
   const c = await findConversation(a.user_id, a.session_id);
-  if (!c || chatRuns.activeFor(c.id)) return null;
-  const waiting = await q.one("SELECT id FROM tool_approvals WHERE user_id = ? AND session_id = ? AND status = 'pending' LIMIT 1", a.user_id, c.id);
+  if (!c) return null;
+  await recordReportApprovalDecision(approvalId);
+  if (chatRuns.activeFor(c.id)) return null;
+  const waiting = await q.one("SELECT id FROM tool_approvals WHERE user_id = ? AND session_id = ? AND status IN ('pending','approved') LIMIT 1", a.user_id, c.id);
   if (waiting) return null;
   const user = await q.one<{ role: string; status: string }>('SELECT role, status FROM users WHERE id = ?', a.user_id);
   if (!user || user.status !== 'active' || user.role === 'guest') return null;
-  const out = await startTurn({ userId: a.user_id, role: user.role, c, runId: `approval-${approvalId}`.slice(0, 128), message: CONTINUE_MESSAGE + openPlanReminder(await listConversationMessages(c.id)), ...(c.model ? { model: c.model } : {}) });
+  await ensureChatRecovery();const reportRunId=`approval-${approvalId}`.slice(0,128);let report;try{report=await resumeReportAfterApproval(a.user_id,c.id,reportRunId);}catch{return null;}if(report===false)return null;
+  const out = await startTurn({ userId: a.user_id, role: user.role, c, runId: reportRunId, message: CONTINUE_MESSAGE + openPlanReminder(await listConversationMessages(c.id)), ...(c.model ? { model: c.model } : {}),...(report?{agentId:report.row.agent_id,canStart:()=>reportCanStart(a.user_id!,report.row.id,Number(report.row.revision)),onFinished:(status:string)=>finishReportRun(a.user_id!,c.id,reportRunId,status)}:{}) });
+  if(report&&out.code!==202)await finishReportRun(a.user_id,c.id,reportRunId,'refused');
   console.log('[ChatRuns] Continue after approval', { approvalId, status: out.code });
   return out;
 }
 
+async function continueDecidedReportApprovals(owner?:string,session?:string){for(const d of await decidedReportApprovals(owner,session))await continueAfterApproval(d.approval_id).catch(()=>null);}
 let recoveryReady: Promise<unknown> | undefined;
+export async function ensureChatRecovery(){recoveryReady??=recoverChatRuns().catch(err=>{recoveryReady=undefined;throw err;});await recoveryReady;}
 let approvalListener = false;
 /** Runs accepted into the journal whose in-memory run is not registered yet (not stale). */
 const starting = new Set<string>();
@@ -501,7 +518,7 @@ export async function chatConversationRoutes(fastify: FastifyInstance) {
   if (!approvalListener) {
     approvalListener = true; addApprovalDecidedListener((id) => { void continueAfterApproval(id).catch(() => null); });
     // CHAT-BUILD-01 stage 4: chats on a schedule, checked once a minute while the background is on.
-    if (backgroundEnabled()) setInterval(() => { void runDueSchedules(sendScheduled).catch(() => 0); void runDueCardSchedules(runScheduledCard).catch(() => 0); }, 60_000).unref();
+    if (backgroundEnabled()) setInterval(() => { void ensureChatRecovery().then(async()=>{await reconcileReportAttempts();await continueDecidedReportApprovals();await runDueSchedules(sendScheduled);}).catch(()=>null); void runDueCardSchedules(runScheduledCard).catch(() => 0); }, 60_000).unref();
   }
   fastify.addHook('preHandler', async (request, reply) => {
     const user = authenticateActiveUser(request);
@@ -509,8 +526,7 @@ export async function chatConversationRoutes(fastify: FastifyInstance) {
     (request as any).chatUserId = user.id;
     (request as any).chatUserRole = user.role;
     // PostgreSQL migrations finish in startup after plugin registration.
-    recoveryReady ??= recoverChatRuns().catch(err => { recoveryReady = undefined; throw err; });
-    await recoveryReady;
+    await ensureChatRecovery();
   });
   const notFound = (reply: FastifyReply) => reply.code(404).send({ error: 'Not found', code: 'not_found' });
   const bad = (reply: FastifyReply, error: string) => reply.code(400).send({ error, code: 'invalid_request' });
@@ -636,6 +652,14 @@ export async function chatConversationRoutes(fastify: FastifyInstance) {
     if (b.title !== undefined && (typeof b.title !== 'string' || b.title.length > TITLE_CHARS)) return bad(reply, 'title must be text of at most 120 characters');
     if (b.agentId !== undefined && b.agentId !== null && (typeof b.agentId !== 'string' || !AGENT_ID.test(b.agentId))) return bad(reply, 'invalid agentId');
     if (b.projectId !== undefined && b.projectId !== null && (typeof b.projectId !== 'string' || !(await findProject(caller(request), b.projectId)))) return bad(reply, 'unknown project');
+    if (b.targetMessage !== undefined && (typeof b.targetMessage !== 'string' || b.targetMessage.length > MESSAGE_CHARS)) return bad(reply, 'invalid target message');
+    if (b.targetMessage !== undefined && (request as any).chatUserRole === 'owner') {
+      try {
+        const team = await agentNames();
+        b.agentId = preferredMention(b.targetMessage, [...team].map(([id, name]) => ({ id, name }))) ?? b.agentId;
+      } catch { return reply.code(400).send({ code: 'ambiguous_group_mentions', error: 'Choose the intended agent.' }); }
+    }
+
     // CHAT-BUILD-01 stage 3: Mode and Thinking chosen before the first message are saved with the new chat itself.
     if (b.mode !== undefined && !(CHAT_MODES as readonly unknown[]).includes(b.mode)) return bad(reply, 'mode must be auto, ask, accept_edits or plan');
     if (b.thinking !== undefined && !(CHAT_THINKING as readonly unknown[]).includes(b.thinking)) return bad(reply, 'thinking must be quick, normal or deep');
@@ -657,6 +681,7 @@ export async function chatConversationRoutes(fastify: FastifyInstance) {
     // CH5: the folder is fixed after the first message; moving keeps working only between projects on the same folder
     // (Continue in another folder… starts a new chat for anything else).
     if (b.projectId !== undefined && await folderFixed(caller(request), request.params.id!, b.projectId)) return reply.code(409).send({ code: 'folder_fixed', error: 'This chat already worked in its folder. Continue in another folder starts a new chat there.' });
+    if (b.queued !== undefined && new Set(b.queued.map((item: { key: string }) => item.key)).size !== b.queued.length) return bad(reply, 'queued keys must be unique');
     const c = await patchConversation(caller(request), request.params.id!, { title: cleanTitle(b.title), pinned: b.pinned, projectId: b.projectId, model: b.model, archived: b.archived, mode: b.mode, thinking: b.thinking, queued: b.queued === undefined ? undefined : await queuedSafe(caller(request), request.params.id!, b.queued) });
     return c ? { conversation: c } : notFound(reply);
   });
@@ -719,12 +744,13 @@ export async function chatConversationRoutes(fastify: FastifyInstance) {
     if (typeof b.runId !== 'string' || !ID.test(b.runId)) return bad(reply, 'runId must be 8-128 characters (A-Z, a-z, 0-9, _ . : -)');
     if (typeof b.message !== 'string' || !b.message.trim() || b.message.length > MESSAGE_CHARS) return bad(reply, 'message must be 1-100000 characters');
     if (b.model !== undefined && (typeof b.model !== 'string' || !MODEL.test(b.model))) return bad(reply, 'invalid model');
+    if (b.queuedKey !== undefined && (typeof b.queuedKey !== 'string' || !ID.test(b.queuedKey) || b.queuedKey !== b.runId)) return bad(reply, 'queuedKey must equal runId');
     // CHAT-PRO-02 I: another agent of the team may write this reply (owner only: other users talk to the conversation's agent).
     if (b.agentId !== undefined && (typeof b.agentId !== 'string' || !AGENT_ID.test(b.agentId))) return bad(reply, 'invalid agentId');
     if (b.images !== undefined && (!Array.isArray(b.images) || b.images.length > MAX_IMAGES_PER_MESSAGE || b.images.some((id: unknown) => !readChatImage(c.id, id)))) return bad(reply, `images must be up to ${MAX_IMAGES_PER_MESSAGE} images saved with this chat`);
-    if ((request as any).chatUserRole==='owner') { try { const attendance=await meetingAttendanceChat(userId,c.id,b.runId,b.message);if(attendance)return reply.code(attendance.code).send(attendance.body); } catch(error) { if(error instanceof MeetingError)return reply.code(error.status).send({code:error.code,error:error.message});throw error; } }
+    if ((request as any).chatUserRole==='owner') { try { const attendance=await meetingAttendanceChat(userId,c.id,b.runId,b.message,b.queuedKey);if(attendance)return reply.code(attendance.code).send(attendance.body); } catch(error) { if(error instanceof QueuedTurnChangedError)return reply.code(409).send({code:'queued_turn_changed'});if(error instanceof MeetingError)return reply.code(error.status).send({code:error.code,error:error.message});throw error; } }
     try { await assertMeetingWriter(userId, c.id, b.agentId ?? c.agentId); } catch (error) { if(error instanceof MeetingError) return reply.code(error.status).send({code:error.code,error:error.message});throw error; }
-    const input = { userId, role: (request as any).chatUserRole, c, runId: b.runId, message: b.message, model: b.model, agentId: b.agentId, images: b.images };
+    const input = { userId, role: (request as any).chatUserRole, c, runId: b.runId, message: b.message, queuedKey: b.queuedKey, model: b.model, agentId: b.agentId, images: b.images };
     const out = await dispatchReplyRound(input, startTurn) ?? await startTurn(input);
     if (out.code === 202) await invalidateMeetingSummary(userId, c.id);
     if (out.retryAfter) reply.header('Retry-After', out.retryAfter);
@@ -904,7 +930,7 @@ export async function chatConversationRoutes(fastify: FastifyInstance) {
     const c = await gitChanges(folder);
     return c ?? { branch: null, changes: [], truncated: false, notGit: true };
   });
-  for (const [route, fn] of [['diff', gitFileDiff], ['tree', listFolder], ['file', readFolderFile]] as const) {
+  for (const [route, fn] of [['diff', gitFileDiff], ['tree', listFolder], ['file', readFolderFile], ['pdf', readFolderPdf], ['media', readFolderMedia], ['office', readFolderOffice]] as const) {
     fastify.get(`/api/chat/projects/:id/${route}`, { config: { access: 'owner' } }, async (request: Req, reply) => {
       const folder = await folderOf(request, reply); if (!folder) return reply;
       try { return await fn(folder, (request.query as Record<string, unknown>).path); } catch (err) { return paneError(reply, err); }
@@ -918,13 +944,15 @@ export async function chatConversationRoutes(fastify: FastifyInstance) {
     if (!Number.isSafeInteger(after) || after < 0) return bad(reply, 'after must be a whole number');
     const raw = reply.raw;
     openSseStream(raw);
-    const send = (e: RunEvent) => { if (!raw.writableEnded) raw.write(`id: ${e.seq}\ndata: ${JSON.stringify({ seq: e.seq, ...e.frame })}\n\n`); };
+    const send = (e: RunEvent) => { if (!raw.writableEnded) raw.write(`id: ${e.seq}\ndata: ${JSON.stringify(runEventWire(e))}\n\n`); };
     const backlog = run.since(after);
     backlog.forEach(send);
     if (run.status !== 'running') { raw.end(); return reply; }
     const onEvent = (e: RunEvent) => send(e);
     // CHAT-BUILD-01 stage 5: the live preview (no number; never stored) while the reply is written.
     const onPreview = (p: Record<string, unknown>) => { if (!raw.writableEnded) raw.write(`data: ${JSON.stringify(p)}\n\n`); };
+    // CHAT-LIVE-01: a reader that (re)attaches sees the work so far at once, not only at the next change.
+    if (run.latestPreview) onPreview(run.latestPreview);
     const onEnd = () => { cleanup(); raw.end(); };
     const cleanup = () => { run.emitter.off('event', onEvent); run.emitter.off('preview', onPreview); run.emitter.off('end', onEnd); };
     run.emitter.on('event', onEvent);
@@ -935,6 +963,16 @@ export async function chatConversationRoutes(fastify: FastifyInstance) {
   });
 
   // CHAT-BUILD-01 stage 5 (CH10): undo (or redo) the files one reply changed. Owner only; refused if they changed since.
+  for(const kind of ['changes','diff'] as const)fastify.get('/api/chat/conversations/:id/messages/:messageId/'+kind,{config:{access:'owner'}},async(request:Req,reply)=>{
+    const c=await findConversation(caller(request),request.params.id!);if(!c)return notFound(reply);
+    const m=await q.one<{checkpoint_before:string|null;checkpoint_after:string|null}>("SELECT checkpoint_before,checkpoint_after FROM chat_messages WHERE id=? AND session_id=? AND role='assistant'",(request.params as any).messageId,c.id);
+    if(!m?.checkpoint_before||!m.checkpoint_after)return notFound(reply);
+    const query=request.query as Record<string,unknown>;
+    if(Object.keys(query).some(key=>kind!=='diff'||key!=='path')||kind==='diff'&&typeof query.path!=='string')return bad(reply,'Invalid file');
+    try{return kind==='changes'?await checkpointChanges(m.checkpoint_before,m.checkpoint_after):await checkpointFileDiff(m.checkpoint_before,m.checkpoint_after,query.path as string);}
+    catch{return reply.code(409).send({error:'Saved changes unavailable',code:'checkpoint_unavailable'});}
+  });
+
   fastify.post('/api/chat/conversations/:id/messages/:messageId/undo', { config: { access: 'owner' } }, async (request: Req, reply) => {
     const c = await findConversation(caller(request), request.params.id!);
     if (!c) return notFound(reply);

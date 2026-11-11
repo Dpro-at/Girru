@@ -1,3 +1,6 @@
+import {selectedMemoryExecution} from './encryption/execution-context.js';
+import {MemoryCipherError} from './encryption/envelope.js';
+import {memoryFromDecryptedRow} from './row-memory.js';
 /**
  * Memory Storage
  *
@@ -20,7 +23,7 @@ import { MIN_RECALL_SCORE, WORKING_LAYER_BOOST, bm25FromCounts, bm25Scores, hybr
 import { onMemorySaved } from './graph/store.js';
 import { NOT_ARCHIVED_SQL } from './scopes/store.js';
 import { NOT_REPLACED_SQL } from './validity.js';
-import { unpackVector, writeVectorStep } from './vectors.js';
+import { packVector, unpackVector, writeVectorStep } from './vectors.js';
 import { storeP3Enabled } from '../services/store-p3.js';
 import { storeP9Enabled } from '../services/store-p9.js';
 import { LIGHT_COLUMNS, entriesFor, entryCosine, type LightRow } from './recall-index.js';
@@ -382,9 +385,11 @@ export class MemoryStorage implements IMemoryStorage {
    * Get all memories for a user (with optional layer filter)
    */
   async getByUser(userId: string, layer?: string): Promise<Memory[]> {
+    // P5: an agent's own notes are read only through memory/agent-drawer.ts (like get and search),
+    // so the memory list, the doctor, consolidation and "forget all" never touch them.
     let query = `
       SELECT * FROM memories
-      WHERE user_id = ?
+      WHERE user_id = ? AND ${NOT_AGENT_NOTES_SQL}
     `;
     const params: any[] = [userId];
 
@@ -597,9 +602,10 @@ export class MemoryStorage implements IMemoryStorage {
    */
   async setEmbedding(userId: string, id: string, content: string, vector: number[], model: string): Promise<boolean> {
     const res = await sql().read(run(
-      // The packed copy (P3) is cleared with it: it would still hold the old model's numbers.
-      'UPDATE memories SET embedding = ?, embedding_model = ?, embedding_dims = ?, embedding_vec = NULL WHERE id = ? AND user_id = ? AND content = ?',
-      JSON.stringify(vector), model, vector.length, id, userId, content,
+      // The packed copy (P3) is written with it (it would still hold the old model's numbers);
+      // the start-up backfill has already run when the memory helper re-embeds. Off: cleared.
+      'UPDATE memories SET embedding = ?, embedding_model = ?, embedding_dims = ?, embedding_vec = ? WHERE id = ? AND user_id = ? AND content = ?',
+      JSON.stringify(vector), model, vector.length, storeP3Enabled() && vector.length ? packVector(vector) : null, id, userId, content,
     ));
     return res.changes === 1;
   }
@@ -677,30 +683,7 @@ ${JSON.stringify(memory.metadata, null, 2)}
   /**
    * Convert database row to Memory object
    */
-  private rowToMemory(row: any): Memory {
-    return {
-      id: row.id,
-      userId: row.user_id,
-      type: row.type as MemoryType,
-      content: row.content,
-      // STORE-MAP-01 P3: the packed Float32 vector when there is one, else the JSON text.
-      embedding: (row.embedding_vec ? unpackVector(row.embedding_vec) : null) ?? (row.embedding ? JSON.parse(row.embedding) : undefined),
-      embeddingModel: row.embedding ? (row.embedding_model || LEGACY_HASH_MODEL) : undefined,
-      memoryLayer: row.memory_layer || 'factual',
-      importanceScore: row.importance_score ?? 0.5,
-      status: row.status || 'active',
-      metadata: row.metadata ? JSON.parse(row.metadata) : {},
-      createdAt: new Date(row.created_at),
-      lastAccessedAt: row.last_accessed_at || null,
-      accessCount: row.access_count ?? 0,
-      tags: row.tags ? JSON.parse(row.tags) : [],
-      expiryTimestamp: row.expiry_timestamp || null,
-      consolidationStatus: row.consolidation_status || 'pending',
-      drawer: rowDrawer(row),
-      topicKey: row.topic_key ?? null,
-      sourceAgentId: row.source_agent_id ?? null,
-    };
-  }
+  private rowToMemory(row: any): Memory { return memoryFromDecryptedRow(row); }
 }
 
 /** The user's drawers that hold memories, with counts (SQL step). */
@@ -744,8 +727,15 @@ function rowDrawer(row: any): DrawerRef {
 let memoryStorage: MemoryStorage | null = null;
 
 export function getMemoryStorage(): MemoryStorage {
+  const selected=selectedMemoryExecution();if(selected)return new Proxy(selected.storage,{get(target,key){const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):()=>{throw new MemoryCipherError();};}}) as unknown as MemoryStorage;
   if (!memoryStorage) {
     memoryStorage = new MemoryStorage();
   }
   return memoryStorage;
+}
+
+// Existing retained instances must not bypass selected-scope storage by keeping an old singleton reference.
+for(const [name,descriptor] of Object.entries(Object.getOwnPropertyDescriptors(MemoryStorage.prototype))){
+ if(name==='constructor'||typeof descriptor.value!=='function')continue;const original=descriptor.value;
+ Object.defineProperty(MemoryStorage.prototype,name,{...descriptor,value:function(this:MemoryStorage,...args:unknown[]){const selected=selectedMemoryExecution();if(selected){const allowed=new Set(['initialize','get','getOwned','getByUser','getByDrawers','getByTopicKey','listDrawers','search']);const method=Reflect.get(selected.storage,name);if(!allowed.has(name)||typeof method!=='function')throw new MemoryCipherError();return method.apply(selected.storage,args);}return original.apply(this,args);}});
 }

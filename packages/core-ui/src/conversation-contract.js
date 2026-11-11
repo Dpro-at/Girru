@@ -82,8 +82,10 @@ export function conversationPath(path) {
   if (pm) return uuid(pm[1]) ? { kind: 'project-git', id: pm[1] } : null;
   pm = /^\/api\/chat\/projects\/([^/?#]+)\/changes$/.exec(path);
   if (pm) return uuid(pm[1]) ? { kind: 'project-changes', id: pm[1] } : null;
-  pm = /^\/api\/chat\/projects\/([^/?#]+)\/(diff|tree|file)(?:\?path=([A-Za-z0-9%._~!*'()-]{0,3000}))?$/.exec(path);
+  pm = /^\/api\/chat\/projects\/([^/?#]+)\/(diff|tree|file|pdf|media|office)(?:\?path=([A-Za-z0-9%._~!*'()-]{0,3000}))?$/.exec(path);
   if (pm) { const rel = paneRel(pm[3]); return uuid(pm[1]) && rel !== null && (rel !== '' || pm[2] === 'tree') ? { kind: `project-${pm[2]}`, id: pm[1], rel } : null; }
+  const saved=/^\/api\/chat\/conversations\/([^/?#]+)\/messages\/([^/?#]+)\/(changes|diff)(?:\?path=([A-Za-z0-9%._~!*'()-]{0,3000}))?$/.exec(path);
+  if(saved){const rel=paneRel(saved[4]);return uuid(saved[1])&&uuid(saved[2])&&(saved[3]==='changes'?saved[4]===undefined:rel!==null&&rel!=='')?{kind:saved[3]==='changes'?'reply-changes':'reply-diff',id:saved[1],messageId:saved[2],rel}:null;}
   let m = /^\/api\/chat\/conversations\/([^/?#]+)$/.exec(path);
   if (m) return uuid(m[1]) ? { kind: 'one', id: m[1] } : null;
   // CHAT-BUILD-01: one page of a long conversation (?limit=N[&before=<message id>]).
@@ -132,7 +134,7 @@ export function allowedConversation(method, path, body) {
   if (p.kind === 'last') return method === 'GET' ? body === undefined : method === 'PUT' && record(body) && onlyKeys(body, ['last']) && (body.last === null || uuid(body.last));
   if (p.kind === 'sidebar') return method === 'GET' ? body === undefined : method === 'PUT' && record(body) && Object.keys(body).length > 0 && onlyKeys(body, ['order', 'hidden', 'folded'])
     && (body.order === undefined || sectionList(body.order)) && (body.hidden === undefined || sectionList(body.hidden)) && (body.folded === undefined || folderList(body.folded));
-  if (method === 'GET') return body === undefined && ['list', 'messages', 'events', 'projects', 'project-git', 'project-pr', 'project-changes', 'project-diff', 'project-tree', 'project-file', 'transcribe', 'variables', 'image'].includes(p.kind);
+  if (method === 'GET') return body === undefined && ['list', 'messages', 'events', 'projects', 'project-git', 'project-pr', 'project-changes', 'project-diff', 'reply-changes', 'reply-diff', 'project-tree', 'project-file', 'project-pdf', 'project-media', 'project-office', 'transcribe', 'variables', 'image'].includes(p.kind);
   if (method === 'POST' && p.kind === 'transcribe') return record(body) && onlyKeys(body, ['audio', 'language']) && typeof body.audio === 'string' && body.audio.length > 0 && body.audio.length <= MAX_AUDIO_CHARS && /^[A-Za-z0-9+/]+={0,2}$/.test(body.audio)
     && (body.language === undefined || STT_LANGUAGES.includes(body.language));
   if (method === 'DELETE') return body === undefined && (p.kind === 'one' || p.kind === 'project' || p.kind === 'variable');
@@ -144,11 +146,11 @@ export function allowedConversation(method, path, body) {
     && (body.folder === undefined || folderOk(body.folder)) && (body.repoUrl === undefined || repoOk(body.repoUrl));
   if (method === 'PUT' && p.kind === 'project') return record(body) && Object.keys(body).length > 0 && onlyKeys(body, ['name', 'folder', 'repoUrl', 'folders'])
     && (body.name === undefined || (title(body.name) && body.name.trim().length > 0)) && (body.folder === undefined || body.folder === null || folderOk(body.folder)) && (body.repoUrl === undefined || body.repoUrl === null || repoOk(body.repoUrl));
-  if (method === 'POST' && p.kind === 'list') return record(body) && onlyKeys(body, ['title', 'agentId', 'projectId', 'model', 'mode', 'thinking']) && (body.title === undefined || title(body.title)) && (body.agentId === undefined || agentId(body.agentId)) && (body.projectId === undefined || uuid(body.projectId)) && savedModel(body.model)
+  if (method === 'POST' && p.kind === 'list') return record(body) && (body.targetMessage === undefined || text(body.targetMessage, MAX_MESSAGE)) && onlyKeys(body, ['title', 'agentId', 'projectId', 'model', 'mode', 'thinking', 'targetMessage']) && (body.title === undefined || title(body.title)) && (body.agentId === undefined || agentId(body.agentId)) && (body.projectId === undefined || uuid(body.projectId)) && savedModel(body.model)
     && (body.mode === undefined || CHAT_MODES.includes(body.mode)) && (body.thinking === undefined || CHAT_THINKING.includes(body.thinking));
   if (method === 'POST' && p.kind === 'images') return record(body) && onlyKeys(body, ['data', 'name']) && typeof body.data === 'string' && body.data.length > 0 && body.data.length <= MAX_IMAGE_CHARS && /^[A-Za-z0-9+/]+={0,2}$/.test(body.data) && (body.name === undefined || (typeof body.name === 'string' && body.name.length <= 200));
   if (method === 'GET' && p.kind === 'image') return body === undefined;
-  if (method === 'POST' && p.kind === 'runs') return record(body) && onlyKeys(body, ['runId', 'message', 'model', 'agentId', 'images']) && (body.images === undefined || (Array.isArray(body.images) && body.images.length <= MAX_IMAGES && body.images.every(x => typeof x === 'string' && IMAGE_ID.test(x)))) && (body.agentId === undefined || agentId(body.agentId)) && validRunId(body.runId) && text(body.message, MAX_MESSAGE) && body.message.trim().length > 0
+  if (method === 'POST' && p.kind === 'runs') return record(body) && onlyKeys(body, ['runId', 'message', 'model', 'agentId', 'images', 'queuedKey']) && (body.queuedKey === undefined || (validRunId(body.queuedKey) && body.queuedKey === body.runId)) && (body.images === undefined || (Array.isArray(body.images) && body.images.length <= MAX_IMAGES && body.images.every(x => typeof x === 'string' && IMAGE_ID.test(x)))) && (body.agentId === undefined || agentId(body.agentId)) && validRunId(body.runId) && text(body.message, MAX_MESSAGE) && body.message.trim().length > 0
     && (body.model === undefined || (typeof body.model === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:@\/-]{0,99}$/.test(body.model)));
   if (method === 'POST' && p.kind === 'stop') return body === undefined;
   if (method === 'PUT' && p.kind === 'one') return record(body) && Object.keys(body).length > 0 && onlyKeys(body, ['title', 'pinned', 'projectId', 'model', 'archived', 'mode', 'thinking', 'queued']) && (body.projectId === undefined || body.projectId === null || uuid(body.projectId)) && (body.title === undefined || body.title === null || title(body.title)) && (body.pinned === undefined || typeof body.pinned === 'boolean') && (body.archived === undefined || typeof body.archived === 'boolean') && savedModel(body.model)
@@ -196,7 +198,7 @@ function message(x) {
   return { id: str(x.id, 64), role: x.role, content: x.content.slice(0, 1000000), parts,
     status: ['complete', 'stopped', 'error'].includes(x.status) ? x.status : 'complete',
     runId: validRunId(x.runId) ? x.runId : null, durationMs: num(x.durationMs) ?? null, createdAt: str(x.createdAt, 40),
-    ...(x.code === 'run_interrupted' ? { code: 'run_interrupted' } : {}),
+    ...(['run_interrupted', 'model_unavailable', 'local_model_missing', 'lmstudio_not_running', 'subscription_org_blocked'].includes(x.code) ? { code: x.code } : {}),
     ...(agentId(x.agentId) ? { agentId: x.agentId } : {}),
     ...(record(x.changes) && num(x.changes.files) ? { changes: { files: num(x.changes.files), undone: x.changes.undone === true, ...(Number.isSafeInteger(x.changes.added) && x.changes.added >= 0 && Number.isSafeInteger(x.changes.removed) && x.changes.removed >= 0 ? { added: x.changes.added, removed: x.changes.removed } : {}) } } : record(x.changes) && x.changes.unavailable === true ? { changes: { files: 0, undone: false, unavailable: true } } : {}) };
 }
@@ -213,7 +215,7 @@ function replyRound(x) {
   const speaker = record(a) && typeof a.id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(a.id) && typeof a.name === 'string' && a.name.length <= 200 && (a.department === null || typeof a.department === 'string' && a.department.length <= 200) ? { id: a.id, name: a.name, department: a.department } : undefined;
   return { replyRound: { id: x.id, state: x.state, activeRunId: x.activeRunId, total: x.total, remaining: x.remaining, ...(speaker ? { speaker } : {}) } };
 }
-const ERROR_CODES = { 503: ['stt_unavailable', 'checkpoint_unavailable'], 500: ['stt_failed'], 400: ['invalid_request', 'attendance_needs_scope', 'invalid_meeting', 'ambiguous_group_mentions', 'group_too_large', 'invalid_project', 'bad_path', 'no_folder', 'stt_invalid', 'invalid_variable', 'invalid_image'], 404: ['not_found'], 409: ['conversation_busy', 'meeting_conflict', 'group_paused', 'run_id_reused', 'folder_fixed'], 429: ['rate_limited', 'stt_busy'] };
+const ERROR_CODES = { 503: ['stt_unavailable', 'checkpoint_unavailable'], 500: ['stt_failed'], 400: ['invalid_request', 'attendance_needs_scope', 'invalid_meeting', 'ambiguous_group_mentions', 'group_too_large', 'invalid_project', 'bad_path', 'no_folder', 'stt_invalid', 'invalid_variable', 'invalid_image'], 404: ['not_found'], 409: ['queued_turn_changed', 'conversation_busy', 'meeting_conflict', 'group_paused', 'run_id_reused', 'folder_fixed'], 429: ['rate_limited', 'stt_busy'] };
 
 /** A link on github.com only (repository, branch or compare page). */
 const githubUrl = x => typeof x === 'string' && x.length <= 600 && /^https:\/\/github\.com\/[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}(\/[A-Za-z0-9._~%\/-]*(\.\.\.[A-Za-z0-9._~%\/-]+)?(\?expand=1)?)?$/.test(x);
@@ -258,18 +260,45 @@ export function conversationResponse(path, status, body) {
   const n = x => (Number.isSafeInteger(x) && x >= 0 ? x : null);
   if (p.kind === 'transcribe') return typeof body.text === 'string' ? { text: body.text.slice(0, 20_000), ms: n(body.ms) ?? 0 }
     : { available: body.available === true, missing: Array.isArray(body.missing) ? body.missing.filter(m => typeof m === 'string').slice(0, 5).map(m => m.slice(0, 40)) : [] };
-  if (p.kind === 'project-changes') {
+  if (p.kind === 'project-changes'||p.kind === 'reply-changes') {
     if (!Array.isArray(body.changes)) throw Error('protocol');
     const statuses = ['modified', 'added', 'deleted', 'renamed', 'untracked'];
     return { branch: typeof body.branch === 'string' ? body.branch.slice(0, 200) : null, truncated: body.truncated === true, notGit: body.notGit === true,
       changes: body.changes.slice(0, 1000).filter(c => record(c) && typeof c.path === 'string' && statuses.includes(c.status))
         .map(c => ({ path: c.path.slice(0, 1024), status: c.status, added: n(c.added), removed: n(c.removed), ...(typeof c.from === 'string' ? { from: c.from.slice(0, 1024) } : {}) })) };
   }
-  if (p.kind === 'project-diff') return { path: str(body.path, 1024), diff: typeof body.diff === 'string' ? body.diff.slice(0, 400_000) : '', truncated: body.truncated === true, binary: body.binary === true, hidden: body.hidden === true };
+  if (p.kind === 'project-diff'||p.kind === 'reply-diff') return { path: str(body.path, 1024), diff: typeof body.diff === 'string' ? body.diff.slice(0, 400_000) : '', truncated: body.truncated === true, binary: body.binary === true, hidden: body.hidden === true };
   if (p.kind === 'project-tree') {
     if (!Array.isArray(body.entries)) throw Error('protocol');
     return { path: str(body.path, 1024), truncated: body.truncated === true,
       entries: body.entries.slice(0, 1000).filter(e => record(e) && typeof e.name === 'string' && e.name && !e.name.includes('/') && (e.kind === 'dir' || e.kind === 'file')).map(e => ({ name: e.name.slice(0, 255), kind: e.kind, size: n(e.size) })) };
+  }
+  // CHAT-CONTENT-01: a PDF's pages as text for the viewer (bounded), or why it cannot be shown.
+  if (p.kind === 'project-pdf') return typeof body.reason === 'string' ? { path: str(body.path, 1024), reason: str(body.reason, 40) }
+    : { path: str(body.path, 1024), pageCount: n(body.pageCount) ?? 0, pages: (Array.isArray(body.pages) ? body.pages : []).slice(0, 200).filter(x => record(x) && Number.isInteger(x.page) && typeof x.text === 'string').map(x => ({ page: x.page, text: x.text.slice(0, 20_000) })) };
+  if (p.kind === 'project-office') {
+    if (typeof body.reason === 'string') return { path: str(body.path, 1024), reason: str(body.reason, 40) };
+    const safeName = x => typeof x === 'string' && x.length <= 1024 && !/[\\\x00-\x1f:#?%]/.test(x) && !x.startsWith('/') && x.split('/').every(p => p && p !== '..' && p !== '.');
+    if (!['docx', 'xlsx', 'pptx'].includes(body.kind) || !Array.isArray(body.parts) || body.parts.length > 128 || !Array.isArray(body.images) || body.images.length > 32) throw Error('protocol');
+    let bytes = 0;
+    const parts = body.parts.map(x => {
+      if (!record(x) || !safeName(x.name) || typeof x.text !== 'string' || x.text.length > 2 * 1024 * 1024 || /<!\s*(?:DOCTYPE|ENTITY)/i.test(x.text)) throw Error('protocol');
+      bytes += new TextEncoder().encode(x.text).length; return { name: x.name, text: x.text };
+    });
+    if (bytes > 2 * 1024 * 1024) throw Error('protocol');
+    let imageChars = 0;
+    const images = body.images.map(x => {
+      if (!record(x) || !safeName(x.name) || !['image/png','image/jpeg','image/gif','image/webp'].includes(x.mime) || typeof x.base64 !== 'string' || x.base64.length > 699052 || !/^[A-Za-z0-9+/]*={0,2}$/.test(x.base64)) throw Error('protocol');
+      imageChars += x.base64.length; return { name: x.name, mime: x.mime, base64: x.base64 };
+    });
+    if (imageChars > 1398200) throw Error('protocol');
+    return { path: str(body.path, 1024), kind: body.kind, parts, images, truncated: body.truncated === true };
+  }
+  if (p.kind === 'project-media') {
+    if (typeof body.reason === 'string') return { path: str(body.path, 1024), size: 0, reason: str(body.reason, 40) };
+    const types = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml', 'video/mp4', 'video/webm', 'audio/mpeg', 'audio/wav', 'audio/mp4'];
+    if (!types.includes(body.mime) || typeof body.base64 !== 'string' || body.base64.length > 44_739_244 || !/^[A-Za-z0-9+/]*={0,2}$/.test(body.base64)) throw Error('protocol');
+    return { path: str(body.path, 1024), size: n(body.size) ?? 0, mime: body.mime, base64: body.base64 };
   }
   if (p.kind === 'project-file') return { path: str(body.path, 1024), text: typeof body.text === 'string' ? body.text.slice(0, 524_288) : null, size: n(body.size) ?? 0, binary: body.binary === true, hidden: body.hidden === true, truncated: body.truncated === true };
   if (p.kind === 'list' && status === 200) {
@@ -336,6 +365,22 @@ function projectEvent(x) {
   return undefined;
 }
 
+/** CHAT-LIVE-01: the live steps and plan a preview may carry (shape-checked, short; never stored). */
+export function previewWork(raw) {
+  const out = {};
+  if (Array.isArray(raw.steps)) {
+    const steps = raw.steps.slice(-12).filter(x => x && typeof x === 'object' && typeof x.name === 'string' && x.name)
+      .map(x => ({ name: x.name.slice(0, 64), input: str(x.input, 300), done: x.done === true, failed: x.failed === true, ...(num(x.ms) !== undefined ? { ms: num(x.ms) } : {}) }));
+    if (steps.length) out.steps = steps;
+  }
+  if (Array.isArray(raw.plan)) {
+    const plan = raw.plan.slice(0, 20).filter(x => x && typeof x === 'object' && typeof x.title === 'string' && x.title.trim())
+      .map(x => ({ title: x.title.trim().slice(0, 120), status: ['pending', 'active', 'done', 'skipped'].includes(x.status) ? x.status : 'pending', ...(Number.isInteger(x.parent) && x.parent > 0 && x.parent <= 20 ? { parent: x.parent } : {}) }));
+    if (plan.length) out.plan = plan;
+  }
+  return out;
+}
+
 /** Incremental parser for a run's SSE stream: numbered frames in order, comments ignored. */
 export class RunEventParser {
   constructor(after = 0) { this.last = after; this.decoder = new TextDecoder('utf-8', { fatal: true }); this.line = ''; this.data = []; this.size = 0; this.cr = false; this.ended = false; }
@@ -350,8 +395,8 @@ export class RunEventParser {
             const raw = JSON.parse(this.data.join('\n'));
             this.data = []; this.size = 0;
             // CHAT-BUILD-01 stage 5: the live preview has no number; it never moves the resume point.
-            if (raw && raw.type === 'preview' && raw.seq === undefined) { if (!this.ended) out.push({ seq: 0, type: 'preview', content: str(raw.content, RUN_FRAME_BYTES), ...(typeof raw.tool === 'string' ? { tool: raw.tool.slice(0, 128) } : {}) }); }
-            const frame = raw && raw.type === 'preview' && raw.seq === undefined ? undefined : projectRunEvent(raw);
+            if (raw && raw.type === 'preview' && (raw.seq === undefined || raw.seq === 0)) { if (!this.ended) out.push({ seq: 0, type: 'preview', content: str(raw.content, RUN_FRAME_BYTES), ...(typeof raw.tool === 'string' ? { tool: raw.tool.slice(0, 128) } : {}), ...previewWork(raw) }); }
+            const frame = raw && raw.type === 'preview' && (raw.seq === undefined || raw.seq === 0) ? undefined : projectRunEvent(raw);
             if (frame && frame.seq > this.last) {
               if (this.ended) throw Error('protocol');
               this.last = frame.seq; if (frame.type === 'end') this.ended = true; out.push(frame);

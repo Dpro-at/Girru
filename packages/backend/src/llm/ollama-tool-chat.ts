@@ -62,6 +62,8 @@ export async function ollamaToolChat(opts: {
   signal?: AbortSignal;
   /** STORE-MAP-01 P2b: the model's own window (num_ctx); unset = Ollama's default, as before. */
   numCtx?: number;
+  /** GENVR-WORLD-01: false asks a thinking model for a direct answer (unset = the server's OLLAMA_THINK default). */
+  think?: boolean;
 }): Promise<OllamaToolChatResult> {
   const messages: OllamaMessage[] = opts.systemPrompt
     ? [{ role: 'system', content: opts.systemPrompt }, ...opts.messages]
@@ -73,7 +75,7 @@ export async function ollamaToolChat(opts: {
       model: opts.model,
       messages,
       stream: false,
-      ...ollamaThinkOption(),
+      ...(opts.think === undefined ? ollamaThinkOption() : { think: opts.think }),
       ...(opts.tools && opts.tools.length > 0 ? { tools: toOllamaTools(opts.tools) } : {}),
       options: {
         ...(typeof opts.temperature === 'number' ? { temperature: opts.temperature } : {}),

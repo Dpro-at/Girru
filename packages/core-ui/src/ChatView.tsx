@@ -1,4 +1,7 @@
+import {ComputerTaskRequest} from './ComputerTaskRequest';
+import {ComputerExecutionBadge} from './ComputerDevices';
 import { ChatVoice } from './ChatVoice';
+import { useOutsideProjects } from './outside-projects';
 import {CodeChatResize} from './CodeChatResize';
 import { DepartmentBadge } from './DepartmentBadge';
 import { MeetingPanels } from './MeetingPanels';
@@ -8,7 +11,7 @@ import { ChatDetails, DetailsRail } from './ChatDetails';
 import { isPhoneShell } from './phone-terminal-keys';
 import { PhoneMeetingBar } from './Meetings';
 import type { PanelPart } from './ChatDetails';
-import { ApprovalCard, ChangesLine, DelegationCard, MomentsContext, NoticeCard, SteerLine, TaskList, TitleFaces, chatPeople, redoTarget } from './ChatMoments';
+import { ApprovalCard, ChangesLine, ChoiceCard, DelegationCard, FileChips, MomentsContext, replyFiles, NoticeCard, SessionsCard, StartedByLine, SteerLine, TaskList, TitleFaces, chatPeople, redoTarget } from './ChatMoments';
 import { ScheduleSheet } from './ScheduleSheet';
 import { KeysSheet, ModeButton, ModelButton, PlusButton, ProjectChip, ProjectSheet, SlashList, WhoButton, slashMatches } from './ChatComposerControls';
 import { modelDisplayName } from './model-names';
@@ -25,17 +28,22 @@ import { splitAttached } from './conversations';
 import { AgentPanel } from './AgentPanel';
 import { ChangesPane, FilesPane } from './ProjectPanes';
 import { PanesController } from './panes';
+import { ChatOrb } from './ChatOrb';
+import { orbStateOf } from './chat-orb';
 import { TerminalPrefsController, TerminalTabs } from './terminal';
 import { TerminalPane } from './TerminalPane';
 import { MicController } from './mic';
 import type { PaneName } from './panes';
 import type { SessionClient } from './session';
-import { Markdown } from './markdown';
+import { Markdown, MarkdownActionsContext, terminalLine } from './markdown';
+import { fileMenu, openFile as openInCodeFile } from './CodeOpen';
+import { joinPath } from './code-open';
 import { UiIcon } from './ui-icons';
 import { ClaudeCodeIcon, CodexIcon, GeminiIcon } from './brand-icons';
 import type { UiIconName } from './ui-icons';
-import { approxTokens, duration, groupLabel, splitWork, toolCount, toolView, turnOutputs, turnPlan, turnSuggestions, withoutPlan, workGroups, workSegments, type WorkItem } from './turns';
-import type { CardSuggestion, PlanStep } from './turns';
+import { approxTokens, duration, groupLabel, liveCalls, livePhase, planOf, splitWork, toolCount, toolView, turnChoice, turnOutputs, turnOffer, turnSessions, turnSuggestions, withoutPlan, workGroups, workSegments, type WorkItem } from './turns';
+import type { CardSuggestion, ComputerOffer } from './turns';
+import { ComputerOfferCard } from './ComputerOfferCard';
 import { ChatCardsController, activityLine, cardDraftFrom } from './chat-board';
 import type { ChatCard, ChatProgress } from './chat-board';
 import type { Priority } from './board';
@@ -43,11 +51,12 @@ import { ChatMemoryController, messageRef, proposalsByRun, rememberDraft, MAX_RE
 import type { ChatMemory, RememberDrawer, RememberType } from './chat-memory';
 import { drawerLabel } from './MemoryViews';
 import { ChatRecallController } from './chat-recall';
+import { PDF_BYTES, PDF_UNREADABLE, readPdf } from './doc-index';
 import { ContextCard, HandoffCard, RecallChip, RecallPanel, SpeedDetails } from './ChatRecall';
 import { MemoryMoveController } from './memory-move';
 import { MoveDialog } from './MemoryDialogs';
 import { exportConversation, exportNote } from './chat-export';
-import { ContextMenu, Sheet, useMenu } from './desktop-ui';
+import { ContextMenu, IconButton, Sheet, useMenu } from './desktop-ui';
 import type { MenuItem } from './desktop-ui';
 import { ContinueElsewhere, openChatWindow } from './chat-actions';
 import { secretLabel, splitSecrets } from './chat-secrets';
@@ -73,7 +82,7 @@ export const LIVE_ROWS = 4;
  * finished turn folds its work into "Worked for …". Behaviour lives in
  * ConversationsController; this file is layout and local view state only.
  */
-export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, productName = 'Girru', client, onAddConnector, onOpenCard, onOpenMemory, onChooseContext, onSetUpModel, onOpenApprovals, onOpenAgent, onOpenRules, terminalRequest = 0, boardRequest = 0, placeRequest = 0, active = true, titleSlot = null }: { embeddedCode?:boolean; onOpenCode?:(folder:string,file?:string)=>void; titleSlot?: HTMLElement | null; placeRequest?: number; controller: ConversationsController; mode: 'live' | 'mock'; productName?: string; terminalRequest?: number; boardRequest?: number; client?: SessionClient; onChooseContext?:()=>void; onAddConnector?: () => void; onSetUpModel?: () => void; onOpenApprovals?: () => void; onOpenAgent?: (agentId: string) => void; onOpenRules?: (agentId: string, category: string) => void; onOpenCard?: (boardId: string, cardId: string) => void; onOpenMemory?: (drawerId: string, memoryId: string) => void; active?: boolean }) {
+export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, productName = 'Girru', client, onAddConnector, onOpenCard, onOpenMemory, onOpenMemoryPage, onChooseContext, onSetUpModel, onOpenApprovals, onOpenAgent, onOpenRules, terminalRequest = 0, boardRequest = 0, placeRequest = 0, active = true, titleSlot = null }: { embeddedCode?:boolean; onOpenCode?:(folder:string,file?:string)=>void; titleSlot?: HTMLElement | null; placeRequest?: number; controller: ConversationsController; mode: 'live' | 'mock'; productName?: string; terminalRequest?: number; boardRequest?: number; client?: SessionClient; onChooseContext?:()=>void; onAddConnector?: () => void; onSetUpModel?: () => void; onOpenApprovals?: () => void; onOpenAgent?: (agentId: string) => void; onOpenRules?: (agentId: string, category: string) => void; onOpenCard?: (boardId: string, cardId: string) => void; onOpenMemory?: (drawerId: string, memoryId: string) => void; onOpenMemoryPage?: () => void; active?: boolean }) {
   const s = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const [meetingMeta, setMeetingMeta] = useState<MeetingRecord | null>(null);
   const [meetingCall, setMeetingCall] = useState(false), [meetingStage, setMeetingStage] = useState<HTMLDivElement | null>(null);
@@ -159,11 +168,16 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
       // CHAT-GAPS-01: images go to a model that can see; other binary files are still refused.
       const pics=[...list].filter(f=>/^image\/(png|jpeg|gif|webp)$/.test(f.type));
       if(pics.length){const read=await Promise.all(pics.map(f=>new Promise<{name:string;type:string;data:string}>((ok,no)=>{const r=new FileReader();r.onload=()=>ok({name:f.name,type:f.type,data:String(r.result).replace(/^data:[^,]*,/,'')});r.onerror=()=>no(r.error);r.readAsDataURL(f);})));setAttachError(controller.attachImages(read));if(pics.length===list.length){if(picker.current)picker.current.value='';return;}}
-      if([...list].some(f=>!pics.includes(f)&&(/^(image|audio|video)\//.test(f.type)||/\.(pdf|zip|gz|png|jpe?g|gif|webp|mp4|mov|mp3|wav|svg)$/i.test(f.name)))){setAttachError('This chat attaches text and code files and PNG, JPEG, GIF or WebP images. PDFs and other binary files are not supported here yet.');return;}
-      if([...list].some(f=>f.size>2_000_000)){setAttachError('Choose smaller text files. Each attachment can contain up to 60,000 characters.');return;}
-      const files = await Promise.all([...list].filter(f=>!pics.includes(f)).map(async f => ({ name: f.name, text: await f.text() })));
+      // KNOW-INDEX-01: a PDF is read with Girru's own reader (its text, pages marked); never guessed when it can't be read.
+      const pdfs=[...list].filter(f=>!pics.includes(f)&&(f.type==='application/pdf'||/\.pdf$/i.test(f.name)));
+      if([...list].some(f=>!pics.includes(f)&&!pdfs.includes(f)&&(/^(image|audio|video)\//.test(f.type)||/\.(zip|gz|png|jpe?g|gif|webp|mp4|mov|mp3|wav|svg)$/i.test(f.name)))){setAttachError('This chat attaches text and code files, PDFs, and PNG, JPEG, GIF or WebP images. Other binary files are not supported here yet.');return;}
+      if([...list].some(f=>!pdfs.includes(f)&&f.size>2_000_000)){setAttachError('Choose smaller text files. Each attachment can contain up to 60,000 characters.');return;}
+      if(pdfs.some(f=>f.size>PDF_BYTES)){setAttachError('Choose a smaller PDF (up to 10 MB).');return;}
+      const pdfErrors:string[]=[];
+      const read = await Promise.all(pdfs.map(async f => { if(!client){pdfErrors.push(`${f.name}: PDFs need the desktop app.`);return null;} const r = await readPdf(client, f); if('text' in r)return { name: f.name, text: r.text }; pdfErrors.push(`${f.name}: ${PDF_UNREADABLE[r.reason] ?? PDF_UNREADABLE.unreadable}`); return null; }));
+      const files = [...read.filter((x): x is { name: string; text: string } => !!x), ...await Promise.all([...list].filter(f=>!pics.includes(f)&&!pdfs.includes(f)).map(async f => ({ name: f.name, text: await f.text() })))];
       // CH3: the files that can be read are added; each one that cannot shows its reason in a red chip.
-      const errors = files.map(f => controller.attach([f])).filter((e): e is string => !!e);
+      const errors = [...pdfErrors, ...files.map(f => controller.attach([f])).filter((e): e is string => !!e)];
       setAttachError(errors.length ? errors.join(' · ') : null);
     } catch { setAttachError('The file could not be read.'); }
     if (picker.current) picker.current.value = '';
@@ -237,6 +251,15 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
   const agentName = s.agents.find(a => a.id === (meetingMeta ? s.replyAgent || s.agentId : s.agentId))?.name;
   const who = whoAnswers(s.model, s.models);
   const activeConv = s.conversations.find(c => c.id === s.activeId);
+  // CHAT-LIVE-01 (LW1 §3): a short re-attach is silent; only 5 s without news shows a quiet "Catching up…".
+  const [catchingUp, setCatchingUp] = useState(false);
+  useEffect(() => { if (!s.reconnecting) { setCatchingUp(false); return; } const t = setTimeout(() => setCatchingUp(true), 5000); return () => clearTimeout(t); }, [s.reconnecting]);
+  // CHAT-ORCH-01 (LW4): while a sub-session of this chat works, the list (their states) refreshes every 5 s; nothing when none works.
+  const sessionsWorking = !!s.activeId && s.conversations.some(c => c.parentId === s.activeId && (c as { running?: boolean; waiting?: number }).running);
+  // A session just started and not yet in the list also refreshes it (once it shows, sessionsWorking takes over).
+  const lastReply = [...s.turns].reverse().find(t => t.role === 'assistant');
+  const startedNow = !!lastReply && turnSessions(lastReply.parts).some(x => !s.conversations.some(c => c.id === x.id));
+  useEffect(() => { if (!sessionsWorking && !startedNow) return; const t = setInterval(() => void controller.refreshList(), 5000); return () => clearInterval(t); }, [sessionsWorking, startedNow, controller]);
   const convAgentId = activeConv?.agentId ?? null;
   const nameOf = (id: string | null | undefined) => (id ? s.agents.find(a => a.id === id)?.name : s.agents.find(a => a.primary)?.name) ?? 'Main agent';
   const departmentOf = (id?: string | null) => (id ? s.agents.find(a => a.id === id) : s.agents.find(a => a.primary))?.department;
@@ -258,6 +281,14 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
   const [maximized, setMaximized] = useState(false);
   useEffect(() => { if (!client) return; const p = new PanesController(client); setPanes(p); const t = { tabs: new TerminalTabs(client), prefs: new TerminalPrefsController(client) }; setTerminal(t); return () => { p.dispose(); t.tabs.dispose(); t.prefs.dispose(); }; }, [client]);
   const owner = client?.getSnapshot().user?.role === 'owner';
+  // REPO-TRUST-01 (board R1 · R2): the first chat in a project Girru found to be someone else's says so once.
+  const trust = useOutsideProjects(owner ? client : null);
+  // Shown only while the verdict is Girru's own: either answer is the owner's choice (kept on the server), so it never comes back.
+  const outsideNotice = (() => {
+    const v = project ? trust?.verdict(project.id) : null;
+    if (!project || !v?.outside || v.source !== 'auto') return null;
+    return { project, remote: v.remote };
+  })();
   const p8 = useStoreP8(client);
   useEffect(()=>{if(terminalRequest>0&&owner)setTermOpen(true);},[terminalRequest,owner]);
   // The phone app opens the terminal with #terminal (after its own fingerprint check): full size, then the hash is dropped.
@@ -409,27 +440,61 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
     window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
   });
   // CHAT-BUILD-01 stage 5: what the trust moments in the thread need (approvals, undo, switch to Auto, start fresh).
-  // CH6: while a reply works, the step each delegated agent is on (read every 3 s from the chat's team).
+  // CH6: while a reply works, the step each delegated agent is on (read every 3 s from the chat's team) — only while it hands work to someone (CHAT-LIVE-01).
+  const liveReply = s.turns.find(t => t.status === 'running');
+  const handingOff = !!liveReply && (liveReply.previewSteps ?? []).some(x => x.name === 'team_delegate' && !x.done) || !!liveReply?.parts.some(p => p.kind === 'tools' && p.calls.some(c => c.name === 'team_delegate' && c.running));
   const [steps, setSteps] = useState<readonly { agentId: string; tool: string; at: string }[]>([]);
   useEffect(() => {
-    if (!client || !s.activeId || !s.runId) { setSteps([]); return; }
+    if (!client || !s.activeId || !s.runId || !handingOff) { setSteps([]); return; }
     let on = true; const id = s.activeId;
     const read = async () => { try { const r = await client.request({ method: 'GET', path: `/api/chat/conversations/${id}/team` } as never); if (on && r.status === 200) setSteps(((r.body as { steps?: { agentId: string; tool: string; at: string }[] }).steps) ?? []); } catch { /* the card keeps "Thinking…" */ } };
     void read(); const t = setInterval(() => void read(), 3000);
     return () => { on = false; clearInterval(t); };
-  }, [client, s.activeId, s.runId]);
+  }, [client, s.activeId, s.runId, handingOff]);
+  // CHAT-CONTENT-01: files and commands named in replies: open beside the chat, Code, Finder, copy path, run in your Terminal.
+  const fileCtl = useMenu();
+  const folder = project?.folder ?? null;
+  const say = (t: string) => controller.say(t);
+  const openBeside = (rel: string, mark?: string) => { if (!panes || !folder) return; setPane('files'); void panes.openFile(rel.replace(/^\.\//, ''), { mark }); };
+  const runInTerminal = (command: string) => {
+    if (!owner || !terminal) return;
+    const line = terminalLine(command);
+    if (!line) { say('This command has several lines; copy it instead.'); return; }
+    setTermOpen(true);
+    // Typed into your own Terminal beside the chat; nothing runs until you press Enter.
+    let tries = 0;
+    const put = () => { const st = terminal.tabs.getSnapshot(); const tab = st.tabs.find(t => t.key === st.active) ?? st.tabs[0];
+      if (tab && tab.terminal.getSnapshot().phase === 'open') { tab.terminal.write(line); return; }
+      if (++tries < 40) setTimeout(put, 150); else say('The Terminal did not open; copy the command instead.'); };
+    setTimeout(put, 150);
+  };
+  const commandRun = (command: string, start = false) => {
+    if (!owner || !terminal || !s.activeId) return null;
+    const key = `${s.activeId}:${command}`;
+    const previous = terminal.tabs.getSnapshot().tabs.find(t => t.commandKey === key);
+    if (start && previous?.terminal.getSnapshot().phase === 'exited' && previous.terminal.getSnapshot().exitCode !== undefined) terminal.tabs.close(previous.key);
+    const tab = terminal.tabs.getSnapshot().tabs.find(t => t.commandKey === key) ?? (start ? terminal.tabs.command(key, command, folderProject) : null);
+    if (!tab) { if (start) say('Close a Terminal tab before running another command.'); return null; }
+    return { terminal: tab.terminal, prefs: terminal.prefs, show: () => { terminal.tabs.select(tab.key); setTermOpen(true); } };
+  };
+  const mdActions = { ...(folder ? { openFile: (rel: string) => openBeside(rel) } : {}), ...(folder && client ? { openInCode: (rel: string) => void openInCodeFile(client, joinPath(folder, rel), null, say) } : {}),
+    ...(owner && terminal ? { runCommand: runInTerminal, commandRun } : {}), ...(folder ? { folderName: folder.split(/[\\/]/).filter(Boolean).at(-1) } : {}) };
+  useEffect(()=>{panes?.clearReply();},[panes,s.activeId]);
   const moments = { client, conversationId: s.activeId, onOpenApprovals, steps, changeCards, nativeCode:embeddedCode,
+    ...(folder ? { onOpenFile: openBeside } : {}), ...(folder && client ? { onFileMenu: (e: React.MouseEvent, rel: string) => fileCtl.at(e, fileMenu(client, joinPath(folder, rel), null, say)) } : {}),
     // CH6/CH10 team moments: Hand it again adds to the box (never sends), Set a model opens the agent, Always allow opens What agents may do.
-    onOpenAgent, onOpenRules, onDraft: (text: string) => { const d = controller.getSnapshot().draft.trim(); controller.edit(d ? `${d}\n\n${text}` : text); },
+    onOpenAgent, onOpenRules, onAnswer: (text: string) => { void controller.send(text); },
+    onOpenChat: (id: string) => { void controller.open(id); }, onStopChat: (id: string) => { void controller.stopChat(id); },
+    chatState: (id: string) => { const x = s.conversations.find(c => c.id === id) as (typeof s.conversations[number] & { running?: boolean; waiting?: number }) | undefined; return x ? { running: x.running === true, waiting: x.waiting ?? 0, title: x.title ?? undefined } : undefined; }, onDraft: (text: string) => { const d = controller.getSnapshot().draft.trim(); controller.edit(d ? `${d}\n\n${text}` : text); },
     agentAbout: (id?: string) => s.agents.find(a => a.id === id)?.about, subAgentOf: (id?: string) => s.agents.find(a => a.id === id)?.subAgentOf, onStop: () => void controller.stopAll(), agentName: (id?: string) => (id ? s.agents.find(a => a.id === id)?.name ?? id : nameOf(convAgentId)),
-    onSwitchAuto: () => controller.selectModel('auto'), onReviewChanges: () => setPane('changes'), onChanged: () => void controller.refreshGit(), onDecided: () => void controller.pickUpContinuation(),
+    onSwitchAuto: () => controller.selectModel('auto'), onReviewChanges: () => {panes?.clearReply();setPane('changes');}, onReviewFile:(messageId:string,path:string,changes:import('./conversation-contract.js').WireChanges)=>{if(panes&&s.activeId){setPane('changes');void panes.openReplyDiff(s.activeId,messageId,path,changes);}}, onChanged: () => void controller.refreshGit(), onDecided: () => void controller.pickUpContinuation(),
     onStartFresh: (summary: string) => { const title = activeConv?.title ?? 'the last chat'; controller.newChat(); controller.edit(`Continue from “${title}”. ${summary}`.slice(0, 4000)); } };
-  return <MomentsContext.Provider value={moments}><div className="chat-layout" data-code-expanded={embeddedCode&&codeExpanded||undefined} data-panel={pane ?? 'rail'} data-empty={empty || undefined} data-max={(maximized && termOpen) || undefined}>
+  return <MarkdownActionsContext.Provider value={mdActions}><MomentsContext.Provider value={moments}><div className="chat-layout" data-code-expanded={embeddedCode&&codeExpanded||undefined} data-panel={pane ?? 'rail'} data-empty={empty || undefined} data-max={(maximized && termOpen) || undefined}>
   {embeddedCode&&<CodeChatResize onResize={()=>setCodeExpanded(false)}/>}
   <div className="chat-screen" onDragOver={e=>{if(e.dataTransfer.types.includes('Files'))e.preventDefault();}} onDrop={e=>{if(e.dataTransfer.files.length){e.preventDefault();void onFiles(e.dataTransfer.files);}}}>
     {embeddedCode&&<div className="code-chat-heading"><strong>{activeConv?.title||'Chat'}</strong><button type="button" className="tool" aria-label={codeExpanded?'Narrow chat':'Expand chat'} aria-expanded={codeExpanded} title={codeExpanded?'Narrow chat':'Expand chat'} onClick={()=>setCodeExpanded(v=>!v)}><UiIcon name="expand" size={14}/></button></div>}
     {/* CH1: the chat's tools sit in the window's title bar (Terminal · Add to board · ⋯ · side panel); no second bar. */}
-    {active && titleSlot && createPortal(<span className="chat-title-tools" role="toolbar" aria-label="This chat">
+    {active && titleSlot && createPortal(<span className="chat-title-tools" role="toolbar" aria-label="This chat"><ComputerExecutionBadge sessionId={s.activeId}/>{client&&s.activeId&&owner&&<ComputerTaskRequest client={client} conversationId={s.activeId}/>}
       {!phone && pane === null && s.activeId && s.turns.length > 0 && <TitleFaces names={chatPeople(s.turns, convAgentId, nameOf)} onOpen={() => openPart('team')}/>}
       {client && s.activeId && s.threadPhase !== 'loading' && <ExportMenu key={s.activeId} client={client} conversationId={s.activeId} disabled={running} openKey={exportKey} bare/>}
       {terminal && owner && <button type="button" className="tool" aria-pressed={termOpen} aria-label="Terminal" title={termOpen ? 'Hide the terminal (⌃`)' : 'Terminal (⌃`)'} onClick={() => { if (phone) { setTermOpen(true); setMaximized(true); } else setTermOpen(v => !v); }}><UiIcon name="terminal" size={15}/></button>}
@@ -445,8 +510,13 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
     {!phone && !embeddedCode && mode === 'live' && client && client.getSnapshot().user?.role === 'owner' && <Meetings key={s.activeId ?? 'new'} client={client} controller={controller} active={active} onMeetingChanged={setMeetingMeta} callTarget={meetingStage} onCallChanged={setMeetingCall} onOpenCard={onOpenCard}/>}
     <MeetingPanels active={meetingCall} onStage={setMeetingStage}>
     {mode === 'live' && avatarOn && !meetingMeta && <ChatAvatar turns={s.turns} agentId={convAgentId ?? s.agentId ?? ''} agentName={nameOf(convAgentId ?? s.agentId)} onClose={toggleAvatar}/>}
+    {outsideNotice && <div className="outside-notice" role="status"><UiIcon name="shield" size={16}/>
+        <span><b>{outsideNotice.project.name} is someone else’s repository</b>{outsideNotice.remote ? ` (${outsideNotice.remote.host}/${outsideNotice.remote.owner})` : ''}. Girru reads its files as data only and keeps it on Outside projects. Trust it if it is yours.</span>
+        <button type="button" onClick={() => void trust?.set(outsideNotice.project.id, false)}>Trust it</button>
+        <IconButton icon="close" label="OK, keep it outside" onClick={() => void trust?.set(outsideNotice.project.id, true)}/></div>}
     <div className="chat-thread" ref={thread} onScroll={onScroll} aria-label="Conversation">
-      {s.threadPhase === 'loading' && <p className="chat-loading" role="status"><span className="pulse" aria-hidden="true"/>Opening the conversation</p>}
+
+      {s.threadPhase === 'loading' && <div className="chat-opening" role="status"><p className="chat-opening-head"><ChatOrb state="load"/>Loading the chat…</p><div className="sk" style={{ inlineSize: '70%' }}/><div className="sk" style={{ inlineSize: '90%' }}/><div className="sk" style={{ inlineSize: '55%' }}/></div>}
       {empty ? <div className="chat-empty">
         {/* CHAT-BUILD-01 stage 3 (CH5): one sentence and three ideas. */}
         <span className="chat-empty-tile" aria-hidden="true"><UiIcon name="message" size={22}/></span>
@@ -463,10 +533,12 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
             <button type="button" className="ghost-action" onClick={onSetUpModel}>Local model…</button></span>
         </div>}
       </div> : <div className="chat-column" role="log" aria-live="polite" aria-relevant="additions">
+        {activeConv?.parentId && <StartedByLine parentId={activeConv.parentId} parentTitle={s.conversations.find(c => c.id === activeConv.parentId)?.title ?? undefined}/>}
         {s.hasEarlier && <button type="button" className="ghost-action chat-earlier" disabled={s.loadingEarlier} onClick={() => void controller.loadEarlier()}>{s.loadingEarlier ? 'Loading earlier messages…' : 'Show earlier messages'}</button>}
         {s.turns.map((t, i) => t.role === 'user'
           ? <UserMessage key={t.key} turn={t} highlight={flash === t.key} onKey={client ? setKeysOpen : undefined} onEdit={running ? undefined : text => { controller.edit(text); input.current?.focus(); }} onRemember={canRemember && messageRef(t) ? () => openRemember(t, t.content) : undefined}/>
           : <AssistantTurn recovery={t.code === 'run_interrupted' && client && s.activeId ? <RecoveryApprovals key={`${s.activeId}:${client.getSnapshot().epoch}`} client={client} conversationId={s.activeId}/> : undefined} key={t.key} turn={t} highlight={flash === t.key} writer={nameOf(t.agentId ?? convAgentId)} writerDepartment={departmentOf(t.agentId ?? convAgentId)} writerRole={s.agents.find(a => a.id === (t.agentId ?? convAgentId))?.primary || (!(t.agentId ?? convAgentId) && s.agents.some(a => a.primary)) ? 'main agent' : undefined} last={i === s.turns.length - 1} onRetry={lastUser ? () => void controller.send(t.code === 'run_interrupted' ? 'Continue the interrupted work from the saved checkpoints. Review what is already done and inspect unknown outcomes before repeating any action. Ask me to approve each tool call.' : lastUser.content) : undefined}
+            offerCard={owner && client && i === s.turns.length - 1 ? (o => <ComputerOfferCard client={client} offer={o} conversationId={s.activeId} onKeepHere={() => void controller.send('Keep it here: do this work on this computer.')}/>) : undefined}
             onSuggest={owner && cardsCtl && s.activeId ? openCardForm : undefined} onRemember={canRemember && messageRef(t) ? text => openRemember(t, text) : undefined}
             proposals={t.runId && memCtl ? <MemoryProposals controller={memCtl} items={byRun.get(t.runId) ?? []}/> : null} recall={recallCtl} onWrongPlace={moveCtl ? m => void moveCtl.open(m) : undefined}/>)}
         {moveCtl && <MoveDialog c={moveCtl} from="From a reply’s “wrong place”"/>}
@@ -493,7 +565,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
         <p>“{activeConv.title || 'New chat'}” and its messages are deleted for good. To keep it out of the way instead, archive it from the sidebar.</p></Sheet>}
       {remember && memCtl && <RememberForm key={remember.key} controller={memCtl} seed={remember} project={project?.name ?? null} agent={convAgentName} onClose={() => setRemember(null)}/>}
       {cardForm && cardsCtl && <ChatCardForm key={cardForm.key} controller={cardsCtl} seed={cardForm} agents={s.agents} onClose={() => setCardForm(null)}/>}
-      {s.reconnecting && <p className="chat-notice" role="status">Reconnecting to the reply…</p>}
+      {catchingUp && <p className="chat-notice" role="status">Catching up…</p>}
       {s.elsewhere && s.queue.length > 0 && !s.queuePaused && <p className="chat-notice" role="status">This chat is working in another window. Your message waits until it is done.</p>}
       {s.queuePaused && s.queue.length > 0 && <p className="chat-notice" role="status">Stopped. The waiting {s.queue.length === 1 ? 'message stays' : 'messages stay'} here until you send {s.queue.length === 1 ? 'it' : 'them'}.</p>}
       {s.queue.length > 0 && <ul className="chat-queue" aria-label="Waiting to send">
@@ -526,7 +598,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
           onChange={e => controller.edit(e.target.value)} onPaste={e=>{if(e.clipboardData.files.length){e.preventDefault();void onFiles(e.clipboardData.files);}}} onKeyDown={onKeyDown} disabled={s.access === 'denied'}/>
         <div className="chat-composer-row">
           <input ref={picker} type="file" multiple hidden onChange={e => void onFiles(e.target.files)}
-            accept=".txt,.md,.csv,.json,.yml,.yaml,.xml,.toml,.ini,.log,.ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.rb,.go,.rs,.java,.php,.sh,.sql,.html,.css,text/*,image/png,image/jpeg,image/gif,image/webp"/>
+            accept=".txt,.md,.pdf,application/pdf,.csv,.json,.yml,.yaml,.xml,.toml,.ini,.log,.ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.rb,.go,.rs,.java,.php,.sh,.sql,.html,.css,text/*,image/png,image/jpeg,image/gif,image/webp"/>
           {!s.activeId && onChooseContext && <ProjectChip controller={controller} onNewProject={folder => setProjectSheet({ id: null, folder })}/>}
           <PlusButton onFiles={() => picker.current?.click()} onLong={() => setLongDraft(true)}/>
           <ModeButton value={s.mode} onChange={m => void controller.setMode(m)} open={popover === 'mode'} setOpen={v => setPopover(v ? 'mode' : null)}/>
@@ -551,17 +623,18 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
       memoryCard={s.activeId ? <>{recallCtl && <HandoffCard c={recallCtl} agentId={convAgentId || s.agentId || s.agents[0]?.id || ''} agentName={convAgentName}/>}{memCtl && <ChatMemoryCard controller={memCtl} onOpen={onOpenMemory}/>}</> : undefined}
       resultsExtra={withRunNotes(project?.folder && s.git?.branch ? <GitHubCard git={s.git} pr={owner && client ? { client, projectId: project.id } : undefined} onRefresh={() => void controller.refreshGit()}/> : undefined, p8 && owner && client && s.runId ? <ChatRunNotes client={client} runId={s.runId}/> : undefined)}
       placeExtra={client && owner && project?.folder ? <details className="details-more"><summary>Coding sessions in this folder</summary><CodingSessions key={project.id + ':' + project.folder} client={client} controller={controller} folder={project.folder}/></details> : undefined}
-      onOpenPane={p => (p === 'terminal' ? setTermOpen(true) : setPane(p))} onStop={() => void controller.stopAll()}
-      onSchedule={() => setScheduleOpen(true)} onAddFolder={() => project && setProjectSheet({ id: project.id })} onContinue={() => setChatSheet('continue')} focusPart={focusPart}
+      onOpenPane={(p, file) => { if (p === 'terminal') setTermOpen(true); else { setPane(p); if (p === 'files' && file) void panes?.openFile(file); } }} onStop={() => void controller.stopAll()}
+      onSchedule={() => setScheduleOpen(true)} onAddFolder={() => project && setProjectSheet({ id: project.id })} onChooseFolder={!s.activeId || !s.turns.length ? () => setProjectSheet({ id: null }) : undefined} onOpenMemory={onOpenMemoryPage} onContinue={() => setChatSheet('continue')} focusPart={focusPart}
       switcher={<PaneSwitch items={paneButtons} pane={pane} onPane={setPane}/>}/>
-    : pane === null && !embeddedCode && !phone && <DetailsRail controller={controller} onOpen={openPart}/>}
+    : pane === null && !embeddedCode && !phone && <DetailsRail controller={controller} client={client} onOpen={openPart}/>}
   {phone && pane !== null && <button type="button" className="phone-scrim" aria-label="Close the details" onClick={() => setPane(null)}/>}
   {scheduleOpen && client && s.activeId && <ScheduleSheet client={client} chatId={s.activeId} onClose={() => setScheduleOpen(false)}/>}
   {panes && (pane === 'changes' || pane === 'files') && <aside className="chat-panel chat-pane" aria-label={pane === 'changes' ? 'Changes' : 'Files'} onKeyDown={e => { if (e.key === 'Escape') setPane(null); }}><PaneSwitch items={paneButtons} pane={pane} onPane={setPane}/>
     {pane === 'changes' ? <ChangesPane panes={panes} client={client} folder={project?.folder ?? null}/> : <FilesPane panes={panes} onOpenCode={onOpenCode&&project?.folder?file=>onOpenCode(project.folder!,file):undefined}/>}
   </aside>}
 
-  </div></MomentsContext.Provider>;
+  <ContextMenu menu={fileCtl.menu} onClose={fileCtl.close}/>
+  </div></MomentsContext.Provider></MarkdownActionsContext.Provider>;
 }
 
 const PHONE_OFF = /^(Open in a new window|Open in Code|Continue in another folder|Show the agent as an avatar|Hide the avatar)/;
@@ -762,11 +835,17 @@ function SecretChip({ type, id, onOpen }: { type: string; id: string; onOpen?: (
 }
 
 /** One assistant turn: live parts in order while running; work folded once finished. */
-function AssistantTurn({ turn, last, onRetry, writer, writerDepartment, writerRole, recovery, onSuggest, onRemember, proposals, highlight, recall, onWrongPlace }: { turn: Turn; last: boolean; onRetry?: () => void; writer?: string; writerDepartment?: string | null; writerRole?: string; recovery?: ReactNode; onSuggest?: (s: CardSuggestion) => void; onRemember?: (text: string) => void; proposals?: ReactNode; highlight?: boolean; recall?: ChatRecallController | null; onWrongPlace?: (m: { id: string; text: string; drawerId: string }) => void }) {
+function AssistantTurn({ turn, last, onRetry, writer, writerDepartment, writerRole, recovery, onSuggest, onRemember, proposals, highlight, recall, onWrongPlace, offerCard }: { offerCard?: (offer: ComputerOffer) => ReactNode; turn: Turn; last: boolean; onRetry?: () => void; writer?: string; writerDepartment?: string | null; writerRole?: string; recovery?: ReactNode; onSuggest?: (s: CardSuggestion) => void; onRemember?: (text: string) => void; proposals?: ReactNode; highlight?: boolean; recall?: ChatRecallController | null; onWrongPlace?: (m: { id: string; text: string; drawerId: string }) => void }) {
   const live = turn.status === 'running';
-  const plan = turnPlan(turn.parts);
+  const plan = planOf(turn);
   const suggestions = turnSuggestions(turn.parts);
-  const parts = plan || suggestions.length ? withoutPlan(turn.parts) : turn.parts;
+  const choice = turnChoice(turn.parts);
+  const sessions = turnSessions(turn.parts);
+  const offer = turnOffer(turn.parts);
+  const parts = plan || suggestions.length || choice || sessions.length || offer ? withoutPlan(turn.parts) : turn.parts;
+  // CHAT-LIVE-01 (LW1): while it runs, the steps so far come from the live preview (the checked parts replace them at the end).
+  const liveSteps = live && parts.length === 0 ? liveCalls(turn.previewSteps) : [];
+  const phase = livePhase(turn);
   const { work, answer } = splitWork(parts);
   const tools = toolCount(parts);
   const answerText = answer.filter(p => p.kind === 'text').map(p => (p as { text: string }).text).join('');
@@ -775,18 +854,21 @@ function AssistantTurn({ turn, last, onRetry, writer, writerDepartment, writerRo
     {/* CH1/CH2: who wrote it, their role and the time, beside their face. */}
     {writer ? <p className="reply-writer"><span className="avatar" aria-hidden="true">{writer.slice(0, 1).toUpperCase()}</span><span className="reply-writer-name">{writer}</span><DepartmentBadge department={writerDepartment}/>{(writerRole || turn.at) && <span className="reply-meta">{[writerRole, turn.at ? clockTime(turn.at) : ''].filter(Boolean).map(x => ` · ${x}`).join('')}</span>}</p> : <p className="sr-only">Agent</p>}
     {/* CHAT-BUILD-01 stage 5 (CH1): the plan's steps live in Tasks above the box; here only one quiet line. */}
-    {live && plan && <p className="moment-line"><UiIcon name="list" size={12}/>Plan: {plan.length} {plan.length === 1 ? 'step' : 'steps'}, {plan.filter(s => s.status === 'done').length} done · the steps are in Tasks above the box</p>}
+    {live && plan && <p className="moment-line"><UiIcon name="list" size={12}/>Plan: {plan.filter(s => !s.parent).length} {plan.filter(s => !s.parent).length === 1 ? 'step' : 'steps'}, {plan.filter(s => !s.parent && s.status === 'done').length} done · the steps are in Tasks above the box</p>}
     {live
       ? <>{parts.map((p, i) => <PartView key={i} part={p} live last={i === parts.length - 1}/>)}
         {/* CHAT-BUILD-01 stage 5: the reply as it is written (checked text replaces it at the end). */}
-        {!parts.some(p => p.kind === 'text') && turn.preview && <div className="chat-prose turn-text md-host chat-live" aria-live="off"><Markdown text={turn.preview}/></div>}
-        {(quiet || parts.length === 0) && <WorkingRow since={since} label={turn.previewTool ? `Using ${turn.previewTool}` : turn.preview ? 'Writing' : parts.length ? 'Working' : 'Thinking'}/>}</>
+        {!parts.some(p => p.kind === 'text') && turn.preview && <div className="chat-prose turn-text md-host chat-live" aria-live="off"><Markdown text={turn.preview}/><span className="orb-caret" aria-hidden="true"/></div>}
+        {liveSteps.length > 0 && <ToolStep calls={liveSteps} live/>}
+        {(quiet || parts.length === 0) && <WorkingRow since={since} label={parts.length && !turn.previewSteps ? 'Working' : phase.verb} target={phase.target}/>}</>
       : <>
         {tools > 0
           ? <WorkedRow parts={work} ms={turn.durationMs}/>
           : work.map((p, i) => <PartView key={i} part={p}/>)}
         {/* CH1: the plan's quiet line comes after the work row. */}
-        {plan && <p className="moment-line"><UiIcon name="list" size={12}/>Plan: {plan.length} {plan.length === 1 ? 'step' : 'steps'}, {plan.filter(s => s.status === 'done').length} done · the steps are in Tasks above the box</p>}
+        {/* CHAT-LIVE-01: a finished reply keeps its plan as one line that opens to the steps (the box above is for live work). */}
+        {plan && <details className="plan-line"><summary className="moment-line"><UiIcon name="list" size={12}/>Plan · {plan.filter(s => !s.parent && s.status === 'done').length} of {plan.filter(s => !s.parent).length} done</summary>
+          <ol>{plan.map((p, i) => <li key={i} data-state={p.status} data-sub={p.parent ? true : undefined}><span className="task-dot" aria-hidden="true">{p.status === 'done' ? <UiIcon name="check" size={10}/> : null}</span><span dir="auto">{p.title}</span></li>)}</ol></details>}
         {/* CHAT-BUILD-01 stage 5: hand-offs, what waits for you and notices stay in view when the work is folded. */}
         {/* CH6: a hand-off to a sub-agent of someone handed work in the same reply sits inside that person's card. */}
         <HandOffs calls={work.flatMap(p => (p.kind === 'tools' ? p.calls : [])).filter(c => c.name === 'team_delegate')}/>
@@ -795,11 +877,17 @@ function AssistantTurn({ turn, last, onRetry, writer, writerDepartment, writerRo
         {answer.map((p, i) => <PartView key={`a${i}`} part={p}/>)}
         {turn.changes && <ChangesLine turn={turn} messageId={turn.key}/>}
         {turn.status === 'error' && <div className="chat-error" role="alert">
-          <strong>{turn.code === 'run_interrupted' ? 'Work interrupted by restart' : turn.code === 'subscription_org_blocked' ? 'Claude subscription access is disabled' : turn.code === 'lmstudio_not_running' ? 'LM Studio is not running' : turn.code === 'local_model_missing' ? 'The local model is not installed' : turn.code === 'model_unavailable' ? 'The model could not be reached' : 'This reply failed'}</strong>
-          <span>{turn.code === 'run_interrupted' ? 'Your request and tool checkpoints are saved. Continue safely after reviewing them; previous actions are not replayed automatically.' : turn.code === 'subscription_org_blocked' ? 'Your organization has disabled Claude Code subscription access. Ask its administrator to enable access, or choose another signed-in coding app.' : turn.code === 'lmstudio_not_running' ? 'Open LM Studio, load the model and start its local server (port 1234), then try again.' : turn.code === 'local_model_missing' ? 'This agent answers with a local model that is not on this computer. Pick an installed model or add a Claude key in Settings, then try again.' : turn.code === 'model_unavailable' ? 'Check that the model is running, then try again.' : 'Anything above was written before the failure.'}</span>
+          <span className="chat-state-mark" data-kind="fail" aria-hidden="true"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="9"/><path d="M7 7l6 6M13 7l-6 6"/></svg></span>
+          <strong>{turn.code === 'run_interrupted' ? 'Work interrupted by restart' : turn.code === 'subscription_org_blocked' ? 'Claude subscription access is disabled' : turn.code === 'lmstudio_not_running' ? 'LM Studio is not running' : turn.code === 'local_model_missing' ? 'The local model is not installed' : turn.code === 'model_unavailable' ? 'The model did not answer' : 'This reply did not finish'}</strong>
+          <span>{turn.code === 'run_interrupted' ? 'Your request and tool checkpoints are saved. Continue safely after reviewing them; previous actions are not replayed automatically.' : turn.code === 'subscription_org_blocked' ? 'Your organization has disabled Claude Code subscription access. Ask its administrator to enable access, or choose another signed-in coding app.' : turn.code === 'lmstudio_not_running' ? 'Open LM Studio, load the model and start its local server (port 1234), then try again.' : turn.code === 'local_model_missing' ? 'This agent answers with a local model that is not on this computer. Pick an installed model or add a Claude key in Settings, then try again.' : turn.code === 'model_unavailable' ? 'The model or coding app stopped before the reply was done. Check that it is running and signed in, then try again; anything above was written before it stopped.' : 'Something went wrong before the reply was done; anything above was written before it.'}</span>
           {last && onRetry && <button type="button" className="chat-error-action" onClick={onRetry}><UiIcon name="refresh" size={12}/>{turn.code === 'run_interrupted' ? 'Continue safely' : 'Try again'}</button>}
         </div>}
+        {/* CHAT-CONTENT-01: the files this reply changed, wrote or read. */}
+        <FileChips files={replyFiles(turn.parts)}/>
+        {sessions.length > 0 && <SessionsCard sessions={sessions}/>}
+        {choice && <ChoiceCard choice={choice} open={last}/>}
         {suggestions.map((g, i) => <CardSuggestionView key={i} suggestion={g} onCreate={onSuggest}/>)}
+        {offer && offerCard?.(offer)}
         {proposals}
         {recovery}
         <TurnFooter text={answerText || turn.content} ms={turn.durationMs} stopped={turn.status === 'stopped'} onRemember={onRemember} recall={recall ? <RecallChip c={recall} turn={turn}/> : null}
@@ -895,35 +983,6 @@ function ChatCardBlock({ card, progress, nameOf, onOpen }: { card: ChatCard; pro
   </section>;
 }
 
-/** The agent's task plan as a live checklist; folds to one line once every step is done. */
-function PlanCard({ steps, live, status }: { steps: readonly PlanStep[]; live: boolean; status: Turn['status'] }) {
-  const done = steps.filter(s => s.status === 'done').length;
-  const counted = steps.filter(s => s.status !== 'skipped').length;
-  const finished = !live && steps.every(s => s.status === 'done' || s.status === 'skipped');
-  const [open, setOpen] = useState(!finished);
-  // Fold once the run ends with every step done (the owner can open it again).
-  useEffect(() => { if (finished) setOpen(false); }, [finished]);
-  const halted = !live && status !== 'complete';
-  const active = steps.find(s => s.status === 'active');
-  return <section className="plan-card" aria-label="Task plan" data-live={live || undefined}>
-    <button type="button" className="plan-head" aria-expanded={open} onClick={() => setOpen(v => !v)}>
-      <UiIcon name="check" size={12}/>
-      <span className="plan-title">{finished ? 'Plan done' : 'Plan'}</span>
-      <span className="plan-count">{done} of {counted}</span>
-      <span className="plan-bar" aria-hidden="true"><i style={{ inlineSize: `${counted ? Math.round((done / counted) * 100) : 0}%` }}/></span>
-      {!open && active && <span className="plan-now" dir="auto">{active.title}</span>}
-      <span className="plan-chevron" aria-hidden="true"><UiIcon name="chevron" size={10}/></span>
-    </button>
-    {open && <ol className="plan-steps">{steps.map((s, i) => {
-      const state = s.status === 'active' && halted ? 'halted' : s.status;
-      return <li key={i} data-status={state}>
-        <span className="plan-mark" aria-hidden="true">{state === 'done' ? <UiIcon name="check" size={10}/> : state === 'active' ? <i className="plan-spin"/> : null}</span>
-        <span className="plan-step" dir="auto">{s.title}</span>
-        <span className="sr-only">{state === 'done' ? 'done' : state === 'active' ? 'in progress' : state === 'halted' ? 'stopped here' : state === 'skipped' ? 'skipped' : 'to do'}</span>
-      </li>;
-    })}</ol>}
-  </section>;
-}
 
 /** True when a live turn produced nothing for QUIET_MS; returns when that quiet began. */
 function useQuiet(turn: Turn, live: boolean): [boolean, number] {
@@ -1004,10 +1063,29 @@ function ToolDetail({ call, kind, command, args }: { call: ToolCall; kind: ToolK
       <div key={k}><dt>{k}</dt><dd dir="auto">{typeof val === 'string' ? val.slice(0, 400) : JSON.stringify(val).slice(0, 400)}</dd></div>)}</dl>}
     {call.output !== undefined && <div className="tool-output">
       <div className="tool-output-head"><span>{call.isError ? 'Error' : 'Output'}</span><Copy text={call.output} label="Copy output"/></div>
-      <pre dir="ltr">{call.output || '(no output)'}</pre>
+      {kind === 'command' ? <CommandOutput call={call}/> : <pre dir="ltr">{call.output || '(no output)'}</pre>}
     </div>}
     {call.running && <p className="tool-running">Running…</p>}
   </div>;
+}
+
+/** CHAT-CONTENT-01: a command's output folds after 6 lines; its end state shows (the exit code when the output gives it). */
+export const OUTPUT_FOLD_LINES = 6;
+export function exitOf(output: string, isError?: boolean): string {
+  const m = /\bexit(?:ed)?(?: with)?(?: code| status)?[:=\s]+(-?\d{1,3})\b/i.exec(output);
+  const code = m ? Number(m[1]) : null;
+  return code !== null ? (code === 0 && !isError ? 'Done · exit 0' : `Failed · exit ${code}`) : isError ? 'Failed' : 'Done';
+}
+function CommandOutput({ call }: { call: ToolCall }) {
+  const [all, setAll] = useState(false);
+  const lines = (call.output ?? '').split('\n');
+  const fold = !all && lines.length > OUTPUT_FOLD_LINES;
+  const end = call.running ? null : exitOf(call.output ?? '', call.isError);
+  return <>
+    <pre dir="ltr">{(fold ? lines.slice(0, OUTPUT_FOLD_LINES).join('\n') : call.output) || '(no output)'}</pre>
+    {fold && <button type="button" className="md-code-more" onClick={() => setAll(true)}>Show {lines.length - OUTPUT_FOLD_LINES} more lines</button>}
+    {end && <p className="tool-exit" data-failed={/^Failed/.test(end) || undefined}>{end}{call.ms !== undefined ? ` · ${stepTime(call.ms)}` : ''}</p>}
+  </>;
 }
 
 function HandOffs({ calls }: { calls: ToolCall[] }) {
@@ -1026,7 +1104,7 @@ export function WorkedRow({ parts, ms }: { parts: Part[]; ms: number | null }) {
   const segments = workSegments(parts);
   return <div className="scaffold worked" data-open={open || undefined}>
     <button type="button" className="scaffold-row" aria-expanded={open} onClick={() => setOpen(v => !v)}>
-      <UiIcon name="check" size={14}/><span>{ms !== null ? `Worked for ${duration(ms)}` : 'Worked'}</span>
+      <span className="chat-state-mark" data-kind="done" aria-hidden="true"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="9"/><path d="M5.5 10.5l3 3 6-6.5"/></svg></span><span>{ms !== null ? `Worked for ${duration(ms)}` : 'Worked'}</span>
       {segments.length > 0 && <span className="worked-summary">{segments.map(s => <span key={s.kind} className="worked-seg" data-error={s.failed > 0 || undefined}><span aria-hidden="true">· </span>{s.label}{s.failed > 0 && `, ${s.failed} failed`}<span className="worked-seg-caret" aria-hidden="true"> ›</span></span>)}</span>}
       <span className="caret" aria-hidden="true"><UiIcon name="chevron" size={11}/></span>
     </button>
@@ -1057,8 +1135,9 @@ function ToolGroup({ item }: { item: Extract<WorkItem, { kind: 'group' }> }) {
   </div>;
 }
 
-function WorkingRow({ since, label }: { since: number; label: string }) {
-  return <p className="scaffold working" role="status"><span className="pulse" aria-hidden="true"/><span className="shimmer">{label}</span><Elapsed since={since}/></p>;
+function WorkingRow({ since, label, target }: { since: number; label: string; target?: string }) {
+  // CHAT-LOADER-01: the agent's orb; its ring and motion follow the phase words.
+  return <p className="scaffold working orb-row" role="status"><ChatOrb state={orbStateOf(label)}/><span className="shimmer">{label}</span>{target && <span className="working-target" dir="auto">{target}</span>}<Elapsed since={since}/></p>;
 }
 
 function Elapsed({ since }: { since: number }) {

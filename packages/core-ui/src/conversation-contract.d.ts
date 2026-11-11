@@ -15,7 +15,7 @@ export type WireDiff = { path: string; diff: string; truncated: boolean; binary:
 export type WireEntry = { name: string; kind: 'dir' | 'file'; size: number | null };
 export type WireTree = { path: string; truncated: boolean; entries: WireEntry[] };
 export type WireFile = { path: string; text: string | null; size: number; binary: boolean; hidden: boolean; truncated: boolean };
-export function panePath(id: string, kind: 'diff' | 'tree' | 'file', rel?: string): string;
+export function panePath(id: string, kind: 'diff' | 'tree' | 'file' | 'pdf' | 'media' | 'office', rel?: string): string;
 export const TRANSCRIBE_PATH: '/api/chat/transcribe';
 export const MAX_AUDIO_CHARS: number;
 export const MAX_IMAGE_CHARS: number;
@@ -32,7 +32,8 @@ export function validRunId(x: unknown): x is string;
 export type ConversationPath =
   | { kind: 'list' | 'projects' | 'transcribe' | 'approval' | 'folder-picker' | 'sidebar' | 'panel' | 'last' | 'chat-settings' } | { kind: 'chat-usage' | 'chat-team' | 'chat-schedule' | 'chat-stop'; id: string } | { kind: 'app-stop'; id: string; run: string } | { kind: 'variables'; id: string } | { kind: 'variable'; id: string; name: string } | { kind: 'one' | 'messages' | 'runs' | 'project' | 'project-git' | 'project-pr'; id: string }
   | { kind: 'images'; id: string } | { kind: 'image'; id: string; image: string } | { kind: 'events'; run: string; after: number } | { kind: 'stop'; run: string }
-  | { kind: 'project-changes'; id: string } | { kind: 'project-diff' | 'project-tree' | 'project-file'; id: string; rel: string };
+  | {kind:'reply-changes';id:string;messageId:string} | {kind:'reply-diff';id:string;messageId:string;rel:string}
+  | { kind: 'project-changes'; id: string } | { kind: 'project-diff' | 'project-tree' | 'project-file' | 'project-pdf'; id: string; rel: string };
 export function conversationPath(path: string): ConversationPath | null;
 export function conversationRoute(path: string): boolean;
 export function allowedConversation(method: string, path: string, body?: unknown): boolean;
@@ -43,12 +44,12 @@ export type WireToolCall = { id: string; name: string; input: string; output?: s
 export type WirePart = { kind: 'text'; text: string } | { kind: 'reasoning'; text: string; ms?: number } | { kind: 'tools'; step: number; calls: WireToolCall[] }
   | { kind: 'steer'; text: string; step: number } | { kind: 'notice'; code: 'injection' | 'summarized' | 'plan_limit' | 'images_not_seen'; text?: string }
   | { kind: 'images'; images: { id: string; type: string; name: string }[] };
-export type WireMessage = { id: string; role: 'user' | 'assistant' | 'system'; content: string; parts: WirePart[] | null; status: 'complete' | 'stopped' | 'error'; runId: string | null; durationMs: number | null; createdAt: string; agentId?: string; code?: 'run_interrupted'; changes?: { files: number; undone: boolean; unavailable?: boolean; added?: number; removed?: number } };
+export type WireMessage = { id: string; role: 'user' | 'assistant' | 'system'; content: string; parts: WirePart[] | null; status: 'complete' | 'stopped' | 'error'; runId: string | null; durationMs: number | null; createdAt: string; agentId?: string; code?: 'run_interrupted' | 'model_unavailable' | 'local_model_missing' | 'lmstudio_not_running' | 'subscription_org_blocked'; changes?: { files: number; undone: boolean; unavailable?: boolean; added?: number; removed?: number } };
 export type RunEvent = ({ seq: number; at?: number }) & (
   | { type: 'text' | 'reasoning'; content: string }
   | { type: 'tool_start'; step: number; tools: { id: string; name: string; input: string }[] }
   | { type: 'tool_result'; step: number; results: { id: string; name: string; output: string; isError: boolean; ms?: number; approvalId?: string }[] }
-  | { type: 'preview'; content: string; tool?: string }
+  | { type: 'preview'; content: string; tool?: string; steps?: LiveStep[]; plan?: LivePlanStep[] }
   | { type: 'notice'; code: 'rate_limited' | 'claude_key_missing' | 'local_model_slow' | 'injection' | 'summarized' | 'plan_limit' | 'images_not_seen'; waitSec?: number; model?: string; text?: string }
   | { type: 'steer'; content: string; step: number }
   | { type: 'end'; status: 'complete' | 'stopped' | 'error'; ms: number; code?: 'model_unavailable' | 'local_model_missing' | 'lmstudio_not_running' | 'subscription_org_blocked' });
@@ -60,3 +61,8 @@ export class RunEventParser {
   push(bytes: Uint8Array): RunEvent[];
   finish(): void;
 }
+
+/** CHAT-LIVE-01: a step of a running reply, from its live preview. */
+export type LiveStep = { name: string; input: string; done: boolean; failed: boolean; ms?: number };
+export type LivePlanStep = { title: string; status: 'pending' | 'active' | 'done' | 'skipped'; parent?: number };
+export function previewWork(raw: Record<string, unknown>): { steps?: LiveStep[]; plan?: LivePlanStep[] };

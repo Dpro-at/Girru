@@ -1,3 +1,4 @@
+import {deviceSqlBefore,deviceSqlAfter} from '../devices/storage.js';
 /**
  * SQL steps (B2.2b-3): one copy of a module's database logic for both
  * drivers, including multi-statement transactions.
@@ -40,11 +41,12 @@
  *                              e.g. createToolsRegistry); throws on PostgreSQL
  */
 
+import {selectedMemoryExecution,assertNoDefaultMemoryAccess} from '../memory/encryption/execution-context.js';
 import type Database from 'better-sqlite3';
 import type { Dialect } from '../db/pg/dialect.js';
 import { getDatabase } from '../db/index.js';
 import { dbDriver } from '../db/pg/config.js';
-import { pgAll, pgOne, pgRun, withPgTransaction } from '../db/pg/pool.js';
+import { pgAll, pgOne, pgRun, withPgTransaction, inPgTransaction } from '../db/pg/pool.js';
 
 /** A bound value; Buffer = BLOB on SQLite, bytea on PostgreSQL. */
 export type SqlParam = string | number | null | Buffer;
@@ -145,6 +147,10 @@ export function* tableColumns(table: string): Step<string[]> {
 
 export interface StepRunner {
   readonly dialect: Dialect;
+  /** Authoritative connection/context transaction state for post-commit side effects. */
+  inTransaction?(): boolean;
+  /** Same-connection synchronous SQLite reads for trusted control-domain checks; absent on async drivers. */
+  readSync?<T>(step:Step<T>):T;
   /** Run one step without a transaction of its own. */
   read<T>(step: Step<T>): Promise<T>;
   /**
@@ -169,18 +175,19 @@ const mainSqlite = (): SqliteHandle => getDatabase();
 function sqliteOp(op: Op, h: SqliteHandle): unknown {
   if (op.kind === 'dialect') return 'sqlite';
   if (op.kind === 'tx') return h.getDb().transaction(() => driveSync(op.body(), h))();
-  const stmt = h.prepare(op.sql);
-  if (op.kind === 'one') return stmt.get(...op.params);
-  if (op.kind === 'all') return stmt.all(...op.params);
-  return { changes: stmt.run(...op.params).changes };
+  const prepared=deviceSqlBefore(op);const stmt=h.prepare(prepared.sql);
+  if(op.kind==='one')return deviceSqlAfter(op,stmt.get(...prepared.params));
+  if(op.kind==='all')return deviceSqlAfter(op,stmt.all(...prepared.params));
+  return {changes:stmt.run(...prepared.params).changes};
 }
 
 async function pgOp(op: Op): Promise<unknown> {
   if (op.kind === 'dialect') return 'postgres';
   if (op.kind === 'tx') return withPgTransaction(() => driveAsync(op.body()));
-  if (op.kind === 'one') return pgOne(op.sql, ...op.params);
-  if (op.kind === 'all') return pgAll(op.sql, ...op.params);
-  return { changes: (await pgRun(op.sql, ...op.params)).changes };
+  const prepared=deviceSqlBefore(op);
+  if(op.kind==='one')return deviceSqlAfter(op,await pgOne(prepared.sql,...prepared.params));
+  if(op.kind==='all')return deviceSqlAfter(op,await pgAll(prepared.sql,...prepared.params));
+  return {changes:(await pgRun(prepared.sql,...prepared.params)).changes};
 }
 
 /** Drive a step synchronously on SQLite. */
@@ -199,12 +206,12 @@ function driveSync<T>(step: Step<T>, h: SqliteHandle = mainSqlite()): T {
   return r.value;
 }
 
-async function driveAsync<T>(step: Step<T>): Promise<T> {
+async function driveAsync<T>(step: Step<T>,execute:(op:Op)=>Promise<unknown>=pgOp): Promise<T> {
   let r = step.next();
   while (!r.done) {
     let value: unknown;
     try {
-      value = await pgOp(r.value);
+      value = await execute(r.value);
     } catch (err) {
       r = step.throw(err);
       continue;
@@ -217,6 +224,8 @@ async function driveAsync<T>(step: Step<T>): Promise<T> {
 function sqliteRunner(handle: () => SqliteHandle): StepRunner {
   return {
     dialect: 'sqlite',
+    inTransaction: () => handle().getDb().inTransaction,
+    readSync<T>(step:Step<T>):T{return driveSync(step,handle());},
     read<T>(step: Step<T>): Promise<T> {
       try {
         return Promise.resolve(driveSync(step, handle()));
@@ -250,6 +259,7 @@ export function sqliteStepsOn(db: Database.Database): StepRunner {
 
 export const pgSteps: StepRunner = {
   dialect: 'postgres',
+  inTransaction: inPgTransaction,
   read: (step) => driveAsync(step),
   // PostgreSQL has no BEGIN IMMEDIATE: a step that needs a write lock up
   // front takes it itself (FOR UPDATE, pg_advisory_xact_lock).
@@ -263,6 +273,7 @@ export function stepsFor(driver: 'sqlite' | 'postgres'): StepRunner {
 
 /** The runner for the process driver (AGENT_PLAYER_DB, db/pg/config.ts). */
 export function sql(): StepRunner {
+  const selected=selectedMemoryExecution();if(selected)return selectedReadSteps(selected.runner,()=>selectedMemoryExecution()===selected);
   return stepsFor(dbDriver());
 }
 
@@ -274,6 +285,7 @@ export class SyncOnPostgresError extends Error {}
  * (use the async API there).
  */
 export function sqliteSync<T>(step: Step<T>): T {
+  assertNoDefaultMemoryAccess();
   if (dbDriver() === 'postgres') {
     throw new SyncOnPostgresError('synchronous database access is SQLite only; use the async API on PostgreSQL');
   }
@@ -308,4 +320,26 @@ export const q = {
 export function num<T extends number | null | undefined>(v: unknown): T {
   if (v === null || v === undefined) return v as T;
   return (typeof v === 'number' ? v : Number(v)) as T;
+}
+
+/** Explicit separately owned PostgreSQL connection adapter; never selects the process pool. */
+export function postgresStepsOn(connection:{one:<T>(sql:string,...params:SqlParam[])=>Promise<T|undefined>;all:<T>(sql:string,...params:SqlParam[])=>Promise<T[]>;run:(sql:string,...params:SqlParam[])=>Promise<{changes:number}>;tx:<T>(operation:()=>Promise<T>)=>Promise<T>;inTransaction:()=>boolean}):StepRunner{
+ const execute=async(op:Op):Promise<unknown>=>{if(op.kind==='dialect')return 'postgres';if(op.kind==='tx')return connection.tx(()=>driveAsync(op.body(),execute));if(op.kind==='one')return connection.one(op.sql,...op.params);if(op.kind==='all')return connection.all(op.sql,...op.params);return connection.run(op.sql,...op.params);};
+ return{dialect:'postgres',inTransaction:()=>connection.inTransaction(),read:step=>driveAsync(step,execute),tx:body=>connection.tx(()=>driveAsync(body(),execute))};
+}
+
+/** Legacy consumers inside an encrypted execution may read metadata only; adapted gateways use their explicit runner. */
+function selectedReadSteps(runner:StepRunner,current:()=>boolean):StepRunner{
+ const check=()=>{if(!current())throw new Error('selected_memory_execution_expired');};
+ function* guarded<T>(step:Step<T>):Step<T>{
+  check();let next=step.next();while(!next.done){check();let op=next.value;
+   if(op.kind==='tx'){const body=op.body;op={...op,body:()=>guarded(body())};}
+   else if(op.kind!=='dialect'){
+    const text=op.sql.trim();const select=/^SELECT\b/i.test(text)&&!text.includes(';'),sharedLock=op.kind==='run'&&/^LOCK TABLE [a-z0-9_, ]+ IN SHARE MODE$/i.test(text);
+    if(!select&&!sharedLock)throw new Error('encrypted_legacy_write_requires_adapter');
+   }
+   try{next=step.next(yield op);}catch(error){next=step.throw(error);}
+  }check();return next.value;
+ }
+ return{dialect:runner.dialect,inTransaction:()=>{check();return runner.inTransaction?.()??false;},read:step=>{check();return runner.read(guarded(step));},tx:(body,options)=>{check();return runner.tx(()=>guarded(body()),options);}};
 }

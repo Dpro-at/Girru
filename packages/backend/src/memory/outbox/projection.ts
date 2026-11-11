@@ -1,3 +1,4 @@
+import {assertNoDefaultMemoryAccess} from '../encryption/execution-context.js';
 /**
  * STORE-MAP-01 pilot: the brief-file projection.
  *
@@ -18,8 +19,10 @@
 
 import fs, { constants } from 'node:fs';
 import path from 'node:path';
-import { createHash, randomBytes } from 'node:crypto';
-import { q } from '../../repositories/sql-steps.js';
+import { randomBytes } from 'node:crypto';
+import { contentSha256 } from '../../services/content-hash.js';
+import { q,sql } from '../../repositories/sql-steps.js';
+import {encryptedProjectionHeldStep} from '../encryption/projection-hold.js';
 import { nowText } from '../../db/pg/dialect.js';
 import { findProject, type Project } from '../../repositories/chat-conversations.js';
 import { assertProjectFilesOnly, briefMarkdown, projectBrief } from '../bridge/brief.js';
@@ -68,7 +71,7 @@ export interface RunOptions {
   beforeRename?: () => Promise<void> | void;
 }
 
-const sha = (text: string | Buffer): string => createHash('sha256').update(text).digest('hex');
+const sha = contentSha256;
 
 /** A file or folder Girru may not write through: a link, a different kind of entry, or a hard-linked file. */
 class UnsafeEntryError extends Error {}
@@ -166,15 +169,22 @@ function stage(dir: string, text: string): string {
   return tmp;
 }
 
-const running = new Map<string, Promise<RunResult>>();
+const running = new Map<string, Promise<unknown>>();
+
+/** Shared per-scope queue; a forget coordinator can drain in-flight projections before touching copies. */
+export function withBriefProjectionBarrier<T>(scope:string,operation:()=>Promise<T>):Promise<T>{
+  if(typeof scope!=='string'||!scope||Buffer.byteLength(scope)>512)return Promise.reject(new Error('Invalid projection scope'));
+  const key = `${BRIEF_CONSUMER}\u0000${scope}`;
+  const prev = running.get(key) ?? Promise.resolve();
+  const next = prev.catch(() => undefined).then(operation);
+  running.set(key, next);
+  return next.finally(() => { if (running.get(key) === next) running.delete(key); });
+}
 
 /** Bring the scope's brief file up to date. One run per scope at a time. */
 export function runBriefProjection(scope: string, opts: RunOptions = {}): Promise<RunResult> {
-  const key = `${BRIEF_CONSUMER}\u0000${scope}`;
-  const prev = running.get(key) ?? Promise.resolve(null as unknown as RunResult);
-  const next = prev.catch(() => null).then(() => runOnce(scope, opts));
-  running.set(key, next);
-  return next.finally(() => { if (running.get(key) === next) running.delete(key); });
+  assertNoDefaultMemoryAccess();
+  return withBriefProjectionBarrier(scope,()=>runOnce(scope,opts));
 }
 
 async function runOnce(scope: string, opts: RunOptions): Promise<RunResult> {
@@ -182,6 +192,7 @@ async function runOnce(scope: string, opts: RunOptions): Promise<RunResult> {
   const result = (st: ProjectionState, wrote: boolean, reason?: string): RunResult =>
     ({ status: st.status, wrote, watermark: st.watermark, projectionVersion: st.projectionVersion, ...(reason ? { reason } : {}) });
 
+  if(await sql().read(encryptedProjectionHeldStep(scope)))return result(await setStatus(s,'waiting','Encrypted memory projection hold',false),false,'encrypted projection hold');
   if (s.status === 'dead' && !opts.force) return result(s, false, 'dead: rebuild to retry');
 
   const { ownerId, project } = await projectOf(scope);
@@ -239,6 +250,7 @@ async function runOnce(scope: string, opts: RunOptions): Promise<RunResult> {
       await opts.beforeRename?.();
       // Re-check: a newer projection or an outside edit since we looked wins.
       const fresh = (await getState(BRIEF_CONSUMER, scope))!;
+      if(await sql().read(encryptedProjectionHeldStep(scope))){fs.rmSync(tmp,{force:true});return result(await setStatus(fresh,'waiting','Encrypted memory projection hold',false),false,'encrypted projection hold');}
       if (fresh.watermark > max || fresh.projectionVersion >= nextVersion) {
         fs.rmSync(tmp, { force: true });
         return result(fresh, false, 'superseded by a newer projection');
@@ -274,6 +286,7 @@ async function writeSafely(scope: string, folder: string, target: string, text: 
   s: ProjectionState, keepOutside: boolean, opts: RunOptions, result: (st: ProjectionState, wrote: boolean, reason?: string) => RunResult): Promise<RunResult> {
   const rel = BRIEF_FILE.split(path.sep).join('/');
   try {
+    if(await sql().read(encryptedProjectionHeldStep(scope)))return result(await setStatus(s,'waiting','Encrypted memory projection hold',false),false,'encrypted projection hold');
     if (keepOutside) {
       const kept = readNoFollow(target);
       if (kept) safeWriteFile(folder, `.girru/brief.outside-${nextVersion}.md`, kept, { expectSha256: null });
@@ -281,6 +294,7 @@ async function writeSafely(scope: string, folder: string, target: string, text: 
     await opts.beforeRename?.();
     const fresh = (await getState(BRIEF_CONSUMER, scope))!;
     if (fresh.watermark > max || fresh.projectionVersion >= nextVersion) return result(fresh, false, 'superseded by a newer projection');
+    if(await sql().read(encryptedProjectionHeldStep(scope)))return result(await setStatus(fresh,'waiting','Encrypted memory projection hold',false),false,'encrypted projection hold');
     const w = safeWriteFile(folder, rel, text, { expectSha256: current });
     const done = await q.run(`UPDATE projection_state SET target = ?, watermark = ?, projection_version = ?, content_hash = ?, status = 'up_to_date',
       attempts = 0, last_error = NULL, pending_hash = NULL, updated_at = ${nowText(q.dialect)} WHERE consumer = ? AND scope = ? AND projection_version = ?`,

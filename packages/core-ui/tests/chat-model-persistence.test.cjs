@@ -20,7 +20,7 @@ test('per-conversation selection survives controller recreation and rapid change
  a.selectModel('qwen');a.selectModel('subscription:codex');await a.open(id);
  assert.equal(f.rows.get(id).model,'subscription:codex');
  const b=f.make();await b.load();await b.open(id);assert.equal(b.getSnapshot().model,'subscription:codex');
- b.newChat();assert.equal(b.getSnapshot().model,'auto','CHAT-BUILD-01: a new chat starts on Auto');assert.equal(f.rows.get(id).model,'subscription:codex');
+ b.newChat();assert.equal(b.getSnapshot().model,'subscription:codex','CHAT-LIVE-01 (LW6): a new chat keeps the model of the chat it came from');assert.equal(f.rows.get(id).model,'subscription:codex');
  await b.open(id);b.selectModel('');await b.open(id);assert.equal(b.getSnapshot().model,'');assert.equal(f.rows.get(id).model,undefined);
 });
 test('failed model persistence blocks sending instead of silently using another provider',async t=>{
@@ -33,4 +33,22 @@ test('model wire contract accepts bounded ids/default reset and strips unreviewe
  for(const model of [null,{},'x\nsecret','x'.repeat(101)])assert.equal(allowedConversation('PUT',`/api/chat/conversations/${id}`,{model}),false);
  const conversation={id,title:'Trial',agentId:null,projectId:null,pinned:false,preview:'',createdAt:'',updatedAt:'',model:'subscription:codex',private:'hidden'};
  const out=conversationResponse('/api/chat/conversations',200,{conversations:[conversation]});assert.equal(out.conversations[0].model,'subscription:codex');assert.equal(out.conversations[0].private,undefined);
+});
+
+test('resumed coding sessions inherit thinking only from an available backend descriptor', async t => {
+  const { canThink } = require('../src/conversations.ts');
+  for (const think of [true, false]) {
+    const client = { getSnapshot: () => ({ phase: 'authenticated', epoch: 1, user: { role: 'owner' } }), subscribe: () => () => {}, request: async r => {
+      if (r.path === '/api/models') return { status: 200, body: { models: [{ id: 'subscription:codex', provider: 'subscription', label: 'Codex', size: '', think, sessionPrefix: 'subscription:codex:' }] } };
+      if (r.path === '/api/chat/projects') return { status: 200, body: { projects: [{ id, name: 'Fixture', folder: '/tmp/fixture-project' }] } };
+      return { status: 200, body: {} };
+    } };
+    const c = new ConversationsController(client); t.after(() => c.dispose());
+    await c.loadProjects(); await c.loadModels(); c.filterProject(id);
+    c.resumeCodingSession('a'.repeat(32), 'codex');
+    assert.equal(c.getSnapshot().model, 'subscription:codex:' + 'a'.repeat(32));
+    assert.equal(canThink(c.getSnapshot().model, c.getSnapshot().models), think);
+    await c.loadModels();
+    assert.equal(canThink(c.getSnapshot().model, c.getSnapshot().models), think, 'catalogue reload retains advertised session binding capability');
+  }
 });

@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // MEM-CACHE-01: reply recall trace, context-pack cache, embedding cache,
 // long conversations (rolling summaries) and memory moves.
 //  - the second turn is served from the pack cache; edit / forget / a direct
@@ -18,7 +19,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { offeredNames, expectedNumCtx, expectedNumPredict, p2bOn } from './helpers/p2b.mjs';
 
-const backendDir = process.cwd();
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-recall-cache-'));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });
 process.chdir(dir);

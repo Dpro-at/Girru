@@ -137,6 +137,18 @@ export async function gatedModelCall<T extends { usage?: Usage | null; content?:
   return { response, used, ticket };
 }
 
+/** Owner-present Claude turns with tools use the same interactive usage ledger as text chat. */
+export async function interactiveClaudeMessage(
+  paid: PaidProviderConfig,
+  messages: Parameters<ClaudeClient['sendMessage']>[0],
+  options: Parameters<ClaudeClient['sendMessage']>[1],
+  purpose = 'interactive_chat',
+): Promise<Awaited<ReturnType<ClaudeClient['sendMessage']>>> {
+  const result = await new ClaudeClient(paid.apiKey, paid.model).sendMessage(messages, options);
+  await recordInteractiveUsage({ provider: paid.provider, model: paid.model, usage: result.usage, outputText: result.content, purpose });
+  return result;
+}
+
 /** Model call for a background (or interactive) purpose; never throws. */
 export async function modelCall(ctx: ModelCallContext, req: ModelCallRequest): Promise<ModelCallResult> {
   const maxOutputTokens = Math.max(1, req.maxOutputTokens ?? 1024);

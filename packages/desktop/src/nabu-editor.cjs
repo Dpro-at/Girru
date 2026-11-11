@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const FOOTER_NAMES = Object.freeze({ chat: 'Chat', agents: 'Agents', library: 'Library', board: 'Board', memory: 'Memory', approvals: 'Approvals', store: 'Store', terminal: 'Terminal', code: 'Code', genvr: 'GenVR', skills: 'Skills', personalities: 'Personalities', specialties: 'Specialties', settings: 'Settings' });
 const { pathToFileURL } = require('node:url');
+const { stopProcessTree } = require('./process-tree.cjs');
 
 const CHANNELS = Object.freeze({ status: 'dpro:nabu-status', select: 'dpro:nabu-select', layout: 'dpro:nabu-layout', state: 'dpro:nabu-state', open: 'dpro:nabu-open' });
 
@@ -24,6 +25,15 @@ function compatibleRuntime(root) {
 
 function loopbackOrigin(value) {
   try { const u = new URL(value); return u.protocol === 'http:' && u.hostname === '127.0.0.1' && !!u.port && u.origin === value; } catch { return false; }
+}
+
+/**
+ * The runtime's stop() ends its server process only; the extension host it started would then keep
+ * running after Girru quits or Code is removed. Stopping goes through the whole process tree instead.
+ */
+function withProcessTree(host, onLog) {
+  let stopping = null;
+  return { start: () => host.start(), get pid() { return host.pid; }, stop: () => stopping ||= stopProcessTree(host.pid, () => host.stop(), { onLog }) };
 }
 
 /** Optional desktop adapter. The editor implementation stays in the shared Nabu runtime. */
@@ -82,7 +92,7 @@ function installNabuEditor({ win, electron, getOrigin, runtimeRoot, resolveRunti
       const factory = createHost || (await import(pathToFileURL(path.join(root, 'nabu/dpro/editor-runtime.mjs')).href));
       if (disposed) throw Error('Stopped');
       if (!createHost && factory.protocolVersion !== 1) throw Error('Unsupported editor runtime');
-      host = (createHost || factory.createEditorHost)({ node, dataDir, onLog, onExit: runtimeExited });
+      host = withProcessTree((createHost || factory.createEditorHost)({ node, dataDir, onLog, onExit: runtimeExited }), onLog);
       const result = await host.start();
       const u = new URL(result.url);
       if (!loopbackOrigin(result.origin) || u.origin !== result.origin || !u.searchParams.get('tkn')) throw Error('Invalid editor address');

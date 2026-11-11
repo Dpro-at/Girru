@@ -4,3 +4,4 @@ export function libraryPath(id: string, part?: string, query?: Record<string, st
 export function libraryRoute(path: string): boolean;
 export function allowedLibrary(method: string, path: string, body?: unknown): boolean;
 export function libraryResponse(path: string, status: number, body: unknown): unknown;
+export const LIBRARY_PDF_BASE64: number;

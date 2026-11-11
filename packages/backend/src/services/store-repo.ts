@@ -46,8 +46,8 @@ export function runtimeUrlAllowed(value: string): boolean {
   let u: URL;
   try { u = new URL(value); } catch { return false; }
   if (u.username || u.password || u.search || u.hash) return false;
-  if (u.protocol === 'http:' && u.hostname === '127.0.0.1' && (process.env.GIRRU_STORE_URL ?? '').startsWith('http://127.0.0.1:')) return /\.tar\.gz$/.test(u.pathname);
-  return u.protocol === 'https:' && u.hostname === 'github.com' && !u.port && /^\/(?:Dpro-at\/girru-store|9mtm\/nabu-code)\/releases\/download\/[A-Za-z0-9_.+-]+\/[A-Za-z0-9_.+-]+\.tar\.gz$/.test(u.pathname);
+  if (u.protocol === 'http:' && u.hostname === '127.0.0.1' && (process.env.GIRRU_STORE_URL ?? '').startsWith('http://127.0.0.1:')) return /(?:\.tar\.gz|\.tgz)$/.test(u.pathname);
+  return u.protocol === 'https:' && u.hostname === 'github.com' && !u.port && (/^\/(?:Dpro-at\/girru-store|9mtm\/nabu-code)\/releases\/download\/[A-Za-z0-9_.+-]+\/[A-Za-z0-9_.+-]+\.tar\.gz$/.test(u.pathname) || /^\/Dpro-at\/genvr-world-sdk\/releases\/download\/v([0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?)\/3d-world-sdk-\1\.tgz$/.test(u.pathname));
 }
 /** A runtime as the repository lists it; anything outside these rules is refused. */
 export function parseRuntime(raw: unknown): StoreRuntime {
@@ -71,6 +71,7 @@ export function runtimesFrom(raw: unknown): Record<string, StoreRuntime> {
   return out;
 }
 const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+const WINDOWS_DEVICE = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
 const PACKAGE_EXT = /\.(js|mjs|json|sql|md|css|svg|png|txt)$/; // lower case only: the type check and the SQL check see the same files
 const HEX = /^[a-f0-9]{64}$/;
 /** A package as the repository lists it; anything outside these rules is refused. */
@@ -78,12 +79,19 @@ export function parsePackage(raw: unknown): StorePackage {
   const p = raw as { files?: unknown; sha256?: unknown };
   if (!p || typeof p !== 'object' || !Array.isArray(p.files) || p.files.length < 1 || p.files.length > 300 || typeof p.sha256 !== 'string' || !HEX.test(p.sha256)) throw new TypeError('store package');
   let total = 0;
-  const seen = new Set<string>();
+  const portablePaths = new Map<string, { spelling: string; file: boolean }>();
   const files = (p.files as Array<Record<string, unknown>>).map((f) => {
     if (!f || typeof f.path !== 'string' || typeof f.sha256 !== 'string' || !HEX.test(f.sha256) || !Number.isSafeInteger(f.size) || (f.size as number) < 0) throw new TypeError('store package');
     const parts = f.path.split('/');
-    if (seen.has(f.path) || parts.length > 8 || !parts.every((x) => SEGMENT.test(x)) || !PACKAGE_EXT.test(f.path)) throw new TypeError('store package');
-    seen.add(f.path); total += f.size as number;
+    if (parts.length > 8 || !parts.every((x) => SEGMENT.test(x) && !x.endsWith('.') && !WINDOWS_DEVICE.test(x)) || !(PACKAGE_EXT.test(f.path)||['runtime-packages.npm','app-host.npm'].includes(f.path))) throw new TypeError('store package');
+    if (parts[0].toLowerCase() === 'migrations' && parts[0] !== 'migrations') throw new TypeError('store package');
+    // Every supported filesystem must resolve the same reviewed files and directories.
+    for (let i = 1; i <= parts.length; i++) {
+      const spelling = parts.slice(0, i).join('/'), folded = spelling.toLowerCase(), previous = portablePaths.get(folded);
+      if (previous && (previous.spelling !== spelling || previous.file || i === parts.length)) throw new TypeError('store package');
+      portablePaths.set(folded, { spelling, file: i === parts.length });
+    }
+    total += f.size as number;
     return { path: f.path, sha256: f.sha256, size: f.size as number };
   });
   if (total > 5 * 1024 * 1024 || !files.some((f) => f.path === 'agentplayer.plugin.json')) throw new TypeError('store package');

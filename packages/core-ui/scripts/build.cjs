@@ -2,6 +2,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { root, beginBuild, completeBuild, failBuild } = require('./build-artifacts.cjs');
 const { copyNotices } = require('./copy-notices.cjs');
+const { reactResolve } = require('./react-runtime.cjs');
 function parseBuildArgs(args) {
   if (args.some(arg => !['--candidate', '--live-entry', '--dev-quick-login'].includes(arg)) || new Set(args).size !== args.length) throw new Error('Invalid build arguments');
   const channel = args.includes('--candidate') ? 'candidate' : 'current';
@@ -38,7 +39,7 @@ async function main(args = process.argv.slice(2)) {
     const check = spawnSync(process.execPath, [path.join(__dirname, 'typecheck.cjs')], { cwd: root, stdio: 'inherit' });
     if (check.error || check.status !== 0) throw new Error('Typecheck failed');
     const { build } = await import('vite');
-    await build({ configFile: false, root, base: '/', envDir: false, publicDir: false,
+    await build({ configFile: false, root, base: '/', resolve: reactResolve(), envDir: false, publicDir: false,
       define: { __LIVE_ENTRY_CANDIDATE__: JSON.stringify(entryMode === 'live-candidate'), __DEV_QUICK_LOGIN__: JSON.stringify(devAccounts) },
       plugins: [{ name: 'entry-provenance', transformIndexHtml: () => [
         { tag: 'meta', attrs: { name: 'core-ui-entry', content: entryMode }, injectTo: 'head' },

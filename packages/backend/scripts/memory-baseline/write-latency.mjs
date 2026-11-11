@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { syntheticMemories } from './corpus.mjs';
 
 const p9b = process.argv.includes('--p9b');
-if (p9b) process.env.GIRRU_STORE_P9B = '1'; else delete process.env.GIRRU_STORE_P9B;
+if (p9b) process.env.GIRRU_STORE_P9B = '1'; else process.env.GIRRU_STORE_P9B = '0';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 const size = Number(argValue('size', '2000'));
 const saves = Number(argValue('saves', '200'));

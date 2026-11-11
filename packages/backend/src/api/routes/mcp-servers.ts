@@ -27,6 +27,10 @@ import {
   refreshServer, reconnectServer, connectionState, setToolApproval, updateServer, type McpServerView,
 } from '../../mcp-client/index.js';
 import { handleError } from '../error-handler.js';
+import { allSources, type SourceView } from '../../mcp-client/sources.js';
+
+/** Servers Girru adds by itself (GenVR's local studio). */
+const BUILT_IN = new Set(['genvr-local']);
 
 const ID = /^[0-9a-f-]{36}$/;
 const liveView=(server:McpServerView)=>({...server,connectionState:connectionState(server.id)});
@@ -78,7 +82,9 @@ export async function mcpServersRoutes(fastify: FastifyInstance) {
 
   fastify.get('/api/mcp/servers', { config }, async (request, reply) => {
     if (ownerOf(request, reply) === null) return reply;
-    return { servers: (await listServers()).map(liveView) };
+    // MCP-ONE-01: each server once, with every place it was found (Girru's own built-ins say so).
+    const sources = await allSources().catch(() => new Map<string, SourceView[]>());
+    return { servers: (await listServers()).map((s) => ({ ...liveView(s), sources: [...(BUILT_IN.has(s.name) ? [{ origin: 'Girru', file: '', key: s.name, project: null, appId: null, seenAt: s.createdAt }] : []), ...(sources.get(s.id) ?? [])] })) };
   });
 
   fastify.post<{ Body: Record<string, unknown> }>('/api/mcp/servers', { config }, async (request, reply) => {

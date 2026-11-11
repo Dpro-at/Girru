@@ -18,6 +18,7 @@ export async function chatCommand(initialMessage?: string): Promise<void> {
   if (!isRunning) {
     error('Backend is not running');
     console.log(chalk.gray('Run "agent-player start" to start the backend\n'));
+    process.exitCode = 1;
     return;
   }
 
@@ -30,6 +31,7 @@ export async function chatCommand(initialMessage?: string): Promise<void> {
 
   if (!message || message.trim().length === 0) {
     error('Please provide a message');
+    process.exitCode = 1;
     return;
   }
 
@@ -47,5 +49,6 @@ export async function chatCommand(initialMessage?: string): Promise<void> {
   } catch (err: any) {
     spinner.fail('Failed to send message');
     error(err.message);
+    process.exitCode = 1;
   }
 }

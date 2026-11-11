@@ -1,3 +1,4 @@
+import './fixtures/trading-runtime.mjs';
 import {Worker} from 'node:worker_threads';
 import test from 'node:test';
 import assert from 'node:assert/strict';

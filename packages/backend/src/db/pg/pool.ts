@@ -1,3 +1,4 @@
+import {assertNoDefaultMemoryAccess} from '../../memory/encryption/execution-context.js';
 /**
  * PostgreSQL pool, query helpers and transactions (B2.2a).
  *
@@ -76,6 +77,7 @@ export async function createPgPool(cfg: PgConfig): Promise<pg.Pool> {
 
 /** The process pool (AGENT_PLAYER_DB=postgres only); created once, on first use. */
 export function getPgPool(): Promise<pg.Pool> {
+  assertNoDefaultMemoryAccess();
   if (!pool) {
     const cfg = readPgConfig();
     if (!cfg) return Promise.reject(new PgConfigError('PostgreSQL is not configured (AGENT_PLAYER_DB=postgres)'));
@@ -168,6 +170,7 @@ async function runAfterCommit(hooks: Array<() => unknown>): Promise<void> {
 type Queryable = Pick<pg.Pool, 'query'> | Pick<pg.PoolClient, 'query'>;
 
 function target(): Queryable | Promise<Queryable> {
+  assertNoDefaultMemoryAccess();
   const f = txStore.getStore();
   if (!f) return getPgPool();
   if (f.shared.closed) throw new PgTransactionError('query after its transaction ended (missing await inside withTransaction?)');
@@ -189,6 +192,7 @@ function prepare(sql: string, params: readonly Param[]): { text: string; values:
 }
 
 async function query(sql: string, params: readonly Param[]): Promise<pg.QueryResult> {
+  assertNoDefaultMemoryAccess();
   const { text, values } = prepare(sql, params);
   return (await target()).query(text, values);
 }

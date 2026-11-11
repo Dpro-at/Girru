@@ -16,7 +16,7 @@ test('app inventory is owner-only and rejects query/mutation escape hatches',asy
 test('one inventory joins existing registries without duplicate GenVR or a second installation table',async()=>{
  const tables=()=>db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all();await (await import('../src/services/genvr-account.ts')).genvrConnection('apps-owner');const before=tables();
  const result=await get();assert.equal(result.statusCode,200,result.body);assert.equal(result.headers['cache-control'],'no-store');
- assert.deepEqual(result.json().items.map(x=>[x.id,x.kind]),[['terminal','builtin'],['trading','builtin'],['code','builtin'],['genvr','api']]);assert.equal(result.json().items.find(x=>x.id==='genvr').state,'not_connected');assert.ok(result.json().items.find(x=>x.id==='genvr').permissions.includes('Account access is reviewed in Apps › Accounts'));assert.ok(!JSON.stringify(result.json()).includes('reviewed in Connections'));assert.deepEqual(tables(),before);
+ assert.deepEqual(result.json().items.map(x=>[x.id,x.kind]),[['terminal','builtin'],['code','builtin'],['genvr','api']]);assert.equal(result.json().items.find(x=>x.id==='genvr').state,'not_connected');assert.ok(result.json().items.find(x=>x.id==='genvr').permissions.includes('Account access is reviewed in Apps › Accounts'));assert.ok(!JSON.stringify(result.json()).includes('reviewed in Connections'));assert.deepEqual(tables(),before);
 });
 test('adding, duplicate refusal, disabling and removal reuse the actual MCP registry',async()=>{
  const created=await app.inject({method:'POST',url:'/api/mcp/servers',headers:owner,payload:{name:'sample-app',description:'A synthetic tool connection',transport:'http',url:'http://127.0.0.1:9/mcp'}});
@@ -37,4 +37,21 @@ test('inventory strips executable, URL, secret and account payloads and derives 
 test('a failed source is unavailable instead of fabricating a disconnected app list',async()=>{
  const unavailable=Fastify();unavailable.decorateRequest('authUser',null);unavailable.addHook('onRequest',async request=>{request.authUser={id:'apps-owner',role:'owner'};});await unavailable.register(workspaceAppsRoutes,{sources:{servers:async()=>{throw Error('PRIVATE-FAILURE');},account:async()=>({status:'not_connected'}),state:()=>''}});
  const r=await unavailable.inject({url:'/api/apps'});assert.equal(r.statusCode,503);assert.deepEqual(r.json(),{code:'apps_unavailable'});await unavailable.close();
+});
+
+test('GenVR runtime removal is separate from the preserved account connection',async()=>{
+ const source={servers:async()=>[],account:async()=>({status:'connected'}),state:()=>'',genvr:()=>null};
+ const item=async()=> (await listWorkspaceApps('apps-owner',source)).items.find(x=>x.id==='genvr');
+ assert.equal((await item()).runtime,'missing');assert.equal((await item()).removable,false);
+ source.genvr=()=>({source:'installed',version:'0.3.0-preview.17'});
+ assert.equal((await item()).runtime,'installed');assert.equal((await item()).removable,true);assert.equal((await item()).state,'connected');
+ source.genvr=()=>({source:'bundled',version:'0.3.0-preview.17'});
+ assert.equal((await item()).removable,false);
+});
+
+test('real My apps metadata remains available without an SDK after removal',async()=>{
+ const oldRoot=process.env.GIRRU_APP_RUNTIMES_DIR,oldBundled=process.env.GIRRU_GENVR_BUNDLED;
+ process.env.GIRRU_APP_RUNTIMES_DIR=path.join(root,'empty-runtimes');process.env.GIRRU_GENVR_BUNDLED='0';
+ try{const response=await get();assert.equal(response.statusCode,200);assert.equal(response.json().items.find(x=>x.id==='genvr').runtime,'missing');}
+ finally{if(oldRoot===undefined)delete process.env.GIRRU_APP_RUNTIMES_DIR;else process.env.GIRRU_APP_RUNTIMES_DIR=oldRoot;if(oldBundled===undefined)delete process.env.GIRRU_GENVR_BUNDLED;else process.env.GIRRU_GENVR_BUNDLED=oldBundled;}
 });

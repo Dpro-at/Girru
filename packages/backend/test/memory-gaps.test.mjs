@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // Memory backend gaps after the phase-2 merge (MEM-SCALE-01, MEM-BRIDGE-01,
 // CORE-MEM-GRAPH, CORE-MEM-HANDOFF, MEM-CACHE-01):
 //  - one source of pinned facts in a reply: the owner's scope facts are in the
@@ -20,7 +21,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-const backendDir = process.cwd();
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-mem-gaps-'));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });
 process.chdir(dir);

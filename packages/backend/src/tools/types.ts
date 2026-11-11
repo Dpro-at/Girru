@@ -25,6 +25,7 @@ export interface ToolParameter {
 
 export interface ToolParameters {
   type: 'object';
+  additionalProperties?: boolean;
   properties: Record<string, ToolParameter>;
   required?: string[];
   examples?: Array<Record<string, any>>; // Professional examples for better AI understanding
@@ -72,6 +73,8 @@ export interface Tool {
 
 export interface ToolExecutionContext {
   workspaceDir: string;
+  /** Trusted server injection only; memory tool calls must never fall back to plaintext while bound. */
+  encryptedMemory?:{execute:(toolName:string,params:Record<string,unknown>,context:ToolExecutionContext)=>Promise<ToolResult>};
   timeout?: number;
   userId?: string;
   /**
@@ -133,4 +136,6 @@ export interface ToolExecutionContext {
    * (repositories/actor.ts actorFromToolContext). Repositories take it first.
    */
   actor?: import('../repositories/actor.js').Actor;
+  /** Server-derived offering hint only; execution revalidates the owner and primary chat. */
+  teamAdminAvailable?: boolean;
 }

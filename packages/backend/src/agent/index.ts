@@ -31,4 +31,4 @@ export type {
   Memory,
   AgentConfig,
   PerformanceMetrics,
-} from './types';
+} from './types.js';

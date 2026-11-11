@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
+import { switchValueOn } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const dir = mkdtempSync(join(tmpdir(), 'ap-agent-rules-'));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });
@@ -46,7 +47,7 @@ const { ruleSuggestTool } = await import(join(backendDir, 'src/tools/rules/rule-
 const app = await buildServer({ logger: false });
 await app.ready();
 const call = (user, method, url, payload) => app.inject({ method, url, headers: { authorization: `Bearer ${generateToken(user, 1)}` }, ...(payload ? { payload } : {}) });
-const p2 = /^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P2 ?? '');
+const p2 = switchValueOn(process.env.GIRRU_STORE_P2 ?? '');
 const texts = (list) => list.filter((r) => r.source !== 'girru').map((r) => r.text);
 
 test('where and who decide who gets a rule; the order is everywhere, project, chosen agents; paused rules are left out', async () => {

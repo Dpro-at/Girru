@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // S1.3: risky tool calls wait for a one-time owner approval.
 // Pending record (encrypted params), nothing executed until approved, approve
 // runs exactly once, deny never runs, non-owners cannot approve.
@@ -10,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-const backendDir = process.cwd();
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-approvals-'));
 mkdirSync(join(dir, '.data'), { recursive: true });
 process.chdir(dir);

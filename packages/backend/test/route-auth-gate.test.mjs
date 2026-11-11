@@ -1,3 +1,4 @@
+import './fixtures/trading-runtime.mjs';
 // S0-A.1 / S0-A.2 / S0-A.11: global deny-by-default auth gate.
 // Builds the real app (buildServer(), same as server.ts, without listening),
 // enumerates EVERY registered route and checks who may reach it.
@@ -133,7 +134,7 @@ test('bad, disabled and suspended tokens get 401 on every guarded route; guests 
   assert.deepEqual(wrong, []);
 });
 
-test('CL-06: guest tokens get 403 on every optional route outside the public-room set', async () => {
+test('CL-06: guest tokens get 403 on every optional route', async () => {
   const wrong = [];
   for (const r of routes.filter((x) => x.access === 'optional' && !gate.guestMayUse(x.method, x.url))) {
     const res = await send(r, bearer('g-guest'));
@@ -141,7 +142,7 @@ test('CL-06: guest tokens get 403 on every optional route outside the public-roo
   }
   assert.deepEqual(wrong, []);
   const pw = await app.inject({ method: 'POST', url: '/api/auth/change-password', headers: bearer('g-guest'), payload: {} });
-  assert.equal(pw.statusCode, 403, 'guests: only who-am-I, logout and public rooms');
+  assert.equal(pw.statusCode, 403, 'guests: only who-am-I and logout');
 });
 
 test('public routes answer without a token', async () => {
@@ -277,7 +278,7 @@ const OWNER_ONLY = [
 const OWNER_OR_ADMIN = [
   ['POST', '/api/marketplace/install'], ['POST', '/api/marketplace/uninstall'], ['POST', '/api/marketplace/process-update/:id'],
   ['POST', '/api/webhooks'], ['POST', '/api/webhooks/:id/test'], ['POST', '/api/webhooks/trigger'], ['GET', '/api/webhooks'],
-  ['POST', '/api/telephony/numbers/purchase'], ['POST', '/api/telephony/calls/make'], ['GET', '/api/telephony/sessions'],
+
   ['GET', '/api/audit/events'], ['GET', '/api/scheduler/jobs'], ['GET', '/api/workflows'],
   ['POST', '/api/channels/:id/send'], ['GET', '/api/channels/whatsapp/qr'],
   ['POST', '/api/plugins/:id/enable'],
@@ -364,26 +365,10 @@ test('Swagger UI and spec are not registered outside development', async () => {
 
 // --- S0-A.10: anonymous public chat is rate limited -------------------------
 
-test('anonymous public-chat post over the limit gets 429 (before any model call)', async () => {
-  db.prepare(`INSERT INTO public_chat_rooms (id, name, owner_user_id, is_public, require_auth) VALUES ('room-pub', 'Pub', 'g-owner', 1, 0)`).run();
-  // CL-07: anonymous access is off by default; the owner turns it on in Settings.
-  const { getSettingsManager } = await import(join(backendDir, 'src/settings/index.ts'));
-  const off = await app.inject({ method: 'POST', url: '/api/public-chat/rooms/room-pub/messages', payload: { content: 'hi' } });
-  assert.equal(off.statusCode, 404, 'anonymous refused while the setting is off');
-  await getSettingsManager().updateSettings({ publicRooms: { allowAnonymous: true } });
-  process.env.PUBLIC_CHAT_ANON_PER_IP_PER_MIN = '0';
-  try {
-    const res = await app.inject({ method: 'POST', url: '/api/public-chat/rooms/room-pub/messages', payload: { content: 'hi' } });
-    assert.equal(res.statusCode, 429, res.body);
-    assert.ok(Number(res.headers['retry-after']) > 0);
-    const empty = await app.inject({ method: 'POST', url: '/api/public-chat/rooms/room-pub/messages', payload: {} });
-    assert.equal(empty.statusCode, 400, 'missing content is a 400, not a crash');
-  } finally {
-    delete process.env.PUBLIC_CHAT_ANON_PER_IP_PER_MIN;
-    await getSettingsManager().updateSettings({ publicRooms: { allowAnonymous: false } });
-  }
+test('removed public-chat routes are not registered (anonymous gets 404)', async () => {
+  const res = await app.inject({ method: 'POST', url: '/api/public-chat/rooms/room-pub/messages', payload: { content: 'hi' } });
+  assert.equal(res.statusCode, 404);
 });
-
 
 test('real application registers every reviewer endpoint with explicit human or owner access',()=>{
  const reviewer=routes.filter(r=>/^\/api\/reviewer-(policies|requests|votes)(?:\/|$)/.test(r.url));

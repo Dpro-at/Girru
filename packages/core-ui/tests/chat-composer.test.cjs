@@ -83,3 +83,79 @@ test('Code chat resizing preserves editor space and supports narrow windows',()=
  const {codeChatWidth}=require('../src/CodeChatResize.tsx');assert.equal(codeChatWidth(420,1280),420);assert.equal(codeChatWidth(1200,1280),960);assert.equal(codeChatWidth(100,1280),280);assert.equal(codeChatWidth(780,800),480);
  const source=require('node:fs').readFileSync(require('node:path').join(__dirname,'../src/ChatView.tsx'),'utf8');assert.match(source,/!embeddedCode && mode === 'live'.*<Meetings/);assert.match(source,/embeddedCode&&<CodeChatResize/);
 });
+
+test('two window controllers reuse the queued item identity and keep failed admission paused', async t => {
+  const key = 'queued-fixture-1234', queued = [{ key, text: 'Do this once' }], calls = [];
+  let fail = false;
+  const conversation = { id: CID, title: 'Queued', agentId: null, projectId: null, pinned: false, preview: '', createdAt: '', updatedAt: '', queued };
+  const client = {
+    getSnapshot: () => ({ phase: 'authenticated', epoch: 1, user: { role: 'owner' } }), subscribe: () => () => {},
+    request: async r => {
+      if (r.method === 'POST' && r.path.endsWith('/runs')) { calls.push(r); return fail ? { status: 409, body: { code: 'queued_turn_changed' } } : { status: 202, body: { runId: r.body.runId } }; }
+      if (/\/messages/.test(r.path)) return { status: 200, body: { conversation, messages: [], activeRunId: null } };
+      if (r.method === 'PUT') return { status: 200, body: { conversation: { ...conversation, ...r.body } } };
+      return { status: 200, body: { conversations: [conversation], projects: [], agents: [], sidebar: {} } };
+    },
+    runEvents: async (_id, _after, callback) => { callback({ seq: 1, type: 'end', status: 'complete', ms: 1 }); return { last: 1, ended: true }; },
+  };
+  const windows = [new ConversationsController(client), new ConversationsController(client)];
+  t.after(() => windows.forEach(c => c.dispose()));
+  for (const c of windows) { await c.load(); await c.open(CID); assert.equal(c.getSnapshot().queuePaused, true); }
+  for (const c of windows) c.sendQueued(key);
+  for (let i = 0; calls.length < 2 && i < 100; i++) await new Promise(r => setTimeout(r, 5));
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls.map(r => [r.body.runId, r.body.queuedKey]), [[key, key], [key, key]]);
+  fail = true;
+  await windows[0].open(CID);
+  windows[0].sendQueued(key);
+  for (let i = 0; (calls.length < 3 || windows[0].getSnapshot().starting) && i < 100; i++) await new Promise(r => setTimeout(r, 5));
+  assert.equal(calls.length, 3);
+  assert.equal(windows[0].getSnapshot().queuePaused, true);
+  assert.deepEqual(windows[0].getSnapshot().queue, queued);
+  assert.equal(windows[0].getSnapshot().draft, '');
+  assert.match(windows[0].getSnapshot().notice, /changed or was removed/);
+});
+
+test('queued admission wire contract binds queuedKey to the exact stable run identity', () => {
+  const path = `/api/chat/conversations/${CID}/runs`;
+  assert.equal(allow('POST', path, { runId: 'queue-fixture-1', queuedKey: 'queue-fixture-1', message: 'Next' }), true);
+  assert.equal(allow('POST', path, { runId: 'new-run-1234', queuedKey: 'queue-fixture-1', message: 'Next' }), false);
+});
+
+test('queue conflict projection keeps only the reviewed code through repeated projection', () => {
+  const path = `/api/chat/conversations/${CID}/runs`;
+  const projected = res(path, 409, { code: 'queued_turn_changed', error: 'private text', queued: ['private'] });
+  assert.deepEqual(projected, { code: 'queued_turn_changed' });
+  assert.deepEqual(res(path, 409, projected), projected);
+});
+
+test('queued admission waits for the backend canonical text instead of revaulting stale raw text', async t => {
+  const calls = [], canonical = '[SECRET:password:fixture123]', active = 'active-fixture-run';
+  let finish;
+  const conversation = { id: CID, title: 'Queued', agentId: null, projectId: null, pinned: false, preview: '', createdAt: '', updatedAt: '' };
+  const client = {
+    getSnapshot: () => ({ phase: 'authenticated', epoch: 1, user: { role: 'owner' } }), subscribe: () => () => {},
+    request: async r => {
+      if (/\/messages/.test(r.path)) return { status: 200, body: { conversation, messages: [], activeRunId: active } };
+      if (r.method === 'PUT' && r.body.queued) return { status: 200, body: { conversation: { ...conversation, queued: r.body.queued.map(item => ({ ...item, text: canonical })) } } };
+      if (r.method === 'POST' && r.path.endsWith('/runs')) { calls.push(r); return { status: 202, body: { runId: r.body.runId } }; }
+      return { status: 200, body: { conversations: [conversation], agents: [], projects: [], sidebar: {} } };
+    },
+    runEvents: async (id, _after, callback, signal) => {
+      if (id !== active) { callback({ seq: 1, type: 'end', status: 'complete', ms: 1 }); return { last: 1, ended: true }; }
+      return new Promise(resolve => { finish = () => { callback({ seq: 1, type: 'end', status: 'stopped', ms: 1 }); resolve({ last: 1, ended: true }); }; signal.addEventListener('abort', () => resolve({ last: 0, ended: false }), { once: true }); });
+    },
+  };
+  const c = new ConversationsController(client, () => 'queued-secret-fixture'); t.after(() => c.dispose());
+  await c.load(); await c.open(CID);
+  c.edit('raw fixture input'); await c.send();
+  for (let i = 0; c.getSnapshot().queue[0]?.text !== canonical && i < 100; i++) await new Promise(r => setTimeout(r, 5));
+  assert.equal(c.getSnapshot().queue[0].text, canonical);
+  finish();
+  for (let i = 0; c.getSnapshot().runId && i < 100; i++) await new Promise(r => setTimeout(r, 5));
+  c.sendQueued('queued-secret-fixture');
+  for (let i = 0; !calls.length && i < 100; i++) await new Promise(r => setTimeout(r, 5));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].body.message, canonical);
+  assert.equal(calls[0].body.runId, 'queued-secret-fixture');
+});

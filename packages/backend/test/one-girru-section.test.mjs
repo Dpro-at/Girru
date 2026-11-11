@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
+import { clearEnv } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-one-section-')));
 mkdirSync(join(dir, '.data'), { recursive: true });
@@ -27,7 +28,7 @@ process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway, test
 process.env.NODE_ENV = 'test';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_PILOT', 'AGENT_PLAYER_DATA_DIR']) delete process.env[k];
+for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_PILOT', 'AGENT_PLAYER_DATA_DIR']) clearEnv(k);
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
@@ -57,7 +58,7 @@ const OLD_MEMORY = '<!-- dpro-memory:start — managed by Dpro: old -->\n## Girr
 const OLD_RULES = '<!-- girru:rules · written by Girru from Agents › Rules; change the rules there -->\n# Rules\n1. old rule\n<!-- /girru:rules -->';
 const read = (n) => readFileSync(join(folder, n), 'utf8');
 const count = (text, re) => (text.match(re) ?? []).length;
-const p2 = async (fn) => { process.env.GIRRU_STORE_P2 = '1'; try { return await fn(); } finally { delete process.env.GIRRU_STORE_P2; } };
+const p2 = async (fn) => { process.env.GIRRU_STORE_P2 = '1'; try { return await fn(); } finally { process.env.GIRRU_STORE_P2 = '0'; } };
 
 test('rules files on: one section replaces both old ones in place; owner text kept; rules once', async () => {
   writeFileSync(join(folder, 'AGENTS.md'), `${OWNER_TOP}${OLD_MEMORY}\n${OLD_RULES}${OWNER_END}`);

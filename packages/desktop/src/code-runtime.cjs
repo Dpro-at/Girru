@@ -19,9 +19,16 @@ function resolveCodeRuntime({ bundled, runtimesDir }) {
     const codeDir = path.join(runtimesDir, 'code');
     for (const at of [runtimesDir, codeDir]) { const info = fs.lstatSync(at); if (!info.isDirectory() || info.isSymbolicLink()) return null; }
     const file = path.join(codeDir, 'current.json');
-    const info = fs.lstatSync(file);
-    if (!info.isFile() || info.isSymbolicLink() || info.size > 4096) return null;
-    const current = JSON.parse(fs.readFileSync(file, 'utf8'));
+    let current;
+    const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
+    try {
+      const info = fs.fstatSync(fd), entry = fs.lstatSync(file);
+      if (!info.isFile() || !entry.isFile() || entry.isSymbolicLink() || info.dev !== entry.dev || info.ino !== entry.ino || info.size > 4096) return null;
+      const bytes = Buffer.alloc(4097);
+      const length = fs.readSync(fd, bytes, 0, bytes.length, 0);
+      if (length > 4096) return null;
+      current = JSON.parse(bytes.subarray(0, length).toString('utf8'));
+    } finally { fs.closeSync(fd); }
     if (typeof current.dir !== 'string' || !DIR_NAME.test(current.dir) || typeof current.version !== 'string' || !current.dir.startsWith(current.version + '-')) return null;
     const root = path.join(codeDir, current.dir);
     const dir = fs.lstatSync(root);

@@ -141,7 +141,7 @@ function validPrevious(p) {
     backupFolder: typeof p.backupFolder === 'string' && path.isAbsolute(p.backupFolder) ? p.backupFolder : null, at: typeof p.at === 'string' ? p.at : null };
 }
 
-function createUpdater({ currentVersion, settingsDir, backUp, relaunch, fetchRelease = () => get(LATEST, { json: true }), download = get, now = () => Date.now(), platform = process.platform, arch = process.arch, execPath = process.execPath, unpack = (zip, dir) => run('/usr/bin/ditto', ['-x', '-k', zip, dir]), readApp = appInfo, keepPrevious = /^(1|true|yes|on)$/i.test(String(process.env.GIRRU_STORE_P3 || '').trim()) }) {
+function createUpdater({ currentVersion, settingsDir, backUp, relaunch, fetchRelease = () => get(LATEST, { json: true }), download = get, now = () => Date.now(), platform = process.platform, arch = process.arch, execPath = process.execPath, unpack = (zip, dir) => run('/usr/bin/ditto', ['-x', '-k', zip, dir]), readApp = appInfo, keepPrevious = !/^(0|false|no|off)$/i.test(String(process.env.GIRRU_STORE_P3 || '').trim()) }) {
   const stateFile = path.join(settingsDir, 'app-update.json');
   let state = { version: currentVersion, checkedAt: null, release: null, busy: null, error: null, previous: null };
   // Only when it last looked is kept on disk; what GitHub offers (and where to download it) is asked again after a restart.

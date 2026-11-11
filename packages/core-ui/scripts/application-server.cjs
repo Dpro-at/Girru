@@ -1,3 +1,7 @@
+const {reportsRoute,allowedReports,reportsResponse}=require('../src/reports-contract.js');
+const {hostAppRoute,allowedHostApp,hostAppResponse}=require('../src/store-host-app-contract.js');
+const {storeAppAsset}=require('./store-app-assets.cjs');
+const path = require('node:path');
 const {BROWSER_APP_PATH,allowedBrowserApp,browserAppResponse}=require('../src/browser-app-contract.js');
 const {createVoiceLibrary}=require('./voice-library-host.cjs');
 const {VOICE_LIBRARY_PATH,allowedVoiceLibrary,voiceLibraryResponse}=require('../src/voice-library-contract.js');
@@ -26,12 +30,16 @@ const {approvalRoute,allowedApproval,approvalResponse}=require('../src/approvals
 const { allowedConnections, connectionsRoute, connectionsResponse } = require('../src/connections-contract.js');
 const {allowedTemplates,templatePath,templatesResponse}=require('../src/specialty-contract.js');
 const { allowedMcpImport, mcpImportPath, mcpImportResponse } = require('../src/mcp-import-contract.js');
+const { allowedSshKeys, sshKeysRoute, sshKeysResponse } = require('../src/ssh-keys-contract.js');
 const { allowedSkillLibrary, skillLibraryPath, skillLibraryResponse } = require('../src/skill-library-contract.js');
 const { createGenVRAssets } = require('./genvr-assets.cjs');
+const { resolveGenvrRuntime } = require('./genvr-runtime-path.cjs');
 const { createChatVoice } = require('./chat-voice-host.cjs');
 const { CHAT_VOICE_PATH, allowedChatVoice, chatVoiceResponse } = require('../src/chat-voice-contract.js');
 const { createStudioHost } = require('./genvr-studio-host.cjs');
-const { allowedGenVR, genvrRoute, genvrResponse, GENVR_BYTES, STUDIO_TICKET_PATH } = require('../src/genvr-contract.js');
+const { allowedGenVR, genvrRoute, genvrResponse, GENVR_BYTES, STUDIO_TICKET_PATH, GENVR_WORLD, GENVR_RUNTIME } = require('../src/genvr-contract.js');
+// GENVR-WORLD-01: one agent turn in a GenVR world may run a coding app; it gets the chat's own deadline window.
+const WORLD_TURN_MS = 300_000;
 const { allowedChannel, channelRoute, channelResponse } = require('../src/agent-connect-contract.js');
 const { allowedPersonality, personalityRoute, personalityResponse } = require('../src/personality-contract.js');
 const { allowedHire, hireRoute, hireResponse } = require('../src/hire-contract.js');
@@ -46,12 +54,20 @@ const { allowedChatExport, chatExportRoute, chatExportResponse } = require('../s
 const { allowedChatSecrets, chatSecretsRoute, chatSecretsResponse } = require('../src/chat-secrets-contract.js');
 const { allowedTerminal, terminalPath, terminalRoute, terminalResponse, TerminalEventParser, TERMINAL_STREAM_MS } = require('../src/terminal-contract.js');
 const { allowedFooter, footerRoute, footerResponse } = require('../src/footer-contract.js');
+const { allowedMemoryHelper, memoryHelperRoute, memoryHelperResponse } = require('../src/memory-helper-contract.js');
+const { allowedDocIndex, docIndexResponse, docIndexRoute, READ_PDF_BASE64 } = require('../src/doc-index-contract.js');
+const { allowedProjectTrust, projectTrustResponse, projectTrustRoute } = require('../src/project-trust-contract.js');
 const { allowedStoreSwitches, storeSwitchesResponse, storeSwitchesRoute } = require('../src/store-switches-contract.js');
 const { allowedBackups, backupsRoute, backupsResponse } = require('../src/backups-contract.js');
 const { allowedChartPrefs, chartPrefsRoute, chartPrefsResponse } = require('../src/chart-prefs-contract.js');
 const { allowedDepartments, departmentsRoute, departmentsResponse } = require('../src/departments-contract.js');
 const { allowedFirstRun, firstRunRoute, firstRunResponse } = require('../src/first-run-contract.js');
 const { allowedPhone, phoneRoute, phoneResponse } = require('../src/phone-contract.js');
+// DEVICES-PROJECT-01: Computers and the Dpro account (owner only; the backend checks owner, loopback and desktop custody).
+const { allowedComputer, computerRoute, computerResponse } = require('../src/computer-contract.js');
+// Google sign-in (Welcome › Create account / Sign in): the desktop broker verifies Google; only the reviewed
+// local flow fields pass here, never a Google token.
+const { googleAuthRoute, allowedGoogleAuth, googleAuthResponse } = require('../src/google-auth-contract.js');
 const { allowedAgentRules, agentRulesRoute, agentRulesResponse } = require('../src/agent-rules-contract.js');
 const { allowedOrg, orgRoute, orgResponse, orgFields } = require('../src/org-contract.js');
 const { allowedLibrary: allowedAgentLibrary, libraryRoute: agentLibraryRoute, libraryResponse: agentLibraryResponse } = require('../src/agent-library-contract.js');
@@ -135,22 +151,30 @@ function allowed(method, target, body) {
   if(coverageRoute(target))return allowedCoverage(method,target,body);
   if(workspaceAppsRoute(target))return allowedWorkspaceApps(method,target,body);
   if(appsCatalogueRoute(target))return allowedAppsCatalogue(method,target,body);
+  if(hostAppRoute(target))return allowedHostApp(method,target,body);
   if(storeRoute(target))return allowedStore(method,target,body);
   if(chatAddonsRoute(target))return allowedChatAddons(method,target,body);
   if (approvalRoute(target)) return allowedApproval(method,target,body);
   if (connectionsRoute(target)) return allowedConnections(method,target,body);
   if (mcpImportPath(target)) return allowedMcpImport(method,target,body);
+  if (sshKeysRoute(target)) return allowedSshKeys(method,target,body);
   if (libraryPath(target)) return allowedLibrary(method,target,body);
   if (templatePath(target)) return allowedTemplates(method,target,body);
   if (skillLibraryPath(target)) return allowedSkillLibrary(method,target,body);
   if (footerRoute(target)) return allowedFooter(method, target, body);
+  if (memoryHelperRoute(target)) return allowedMemoryHelper(method, target, body);
+  if (docIndexRoute(target)) return allowedDocIndex(method, target, body);
+  if (projectTrustRoute(target)) return allowedProjectTrust(method, target, body);
   if (storeSwitchesRoute(target)) return allowedStoreSwitches(method, target, body);
   if (backupsRoute(target)) return allowedBackups(method, target, body);
   if (chartPrefsRoute(target)) return allowedChartPrefs(method, target, body);
   if (departmentsRoute(target)) return allowedDepartments(method, target, body);
+  if(reportsRoute(target))return allowedReports(method,target,body);
   if (meetingsRoute(target)) return allowedMeetings(method,target,body);
   if (firstRunRoute(target)) return allowedFirstRun(method, target, body);
   if (phoneRoute(target)) return allowedPhone(method, target, body);
+  if (computerRoute(target)) return allowedComputer(method, target, body);
+  if (googleAuthRoute(target)) return allowedGoogleAuth(method, target, body);
   if (agentRulesRoute(target)) return allowedAgentRules(method, target, body);
   if (orgRoute(target)) return allowedOrg(method, target, body);
   if (agentLibraryRoute(target)) return allowedAgentLibrary(method, target, body);
@@ -225,6 +249,7 @@ function project(target, status, body) {
   if(coverageRoute(target))return coverageResponse(status,body);
   if(workspaceAppsRoute(target))return workspaceAppsResponse(status,body);
   if(appsCatalogueRoute(target))return appsCatalogueResponse(status,body);
+  if(hostAppRoute(target))return hostAppResponse(target,status,body);
   if(storeRoute(target))return storeResponse(target,status,body);
   if(chatAddonsRoute(target))return chatAddonsResponse(status,body);
   if (target === '/api/setup/status') return setupStatus(status, body);
@@ -242,13 +267,19 @@ function project(target, status, body) {
   if (cardRoute(target)) return agentCardResponse(target, status, body);
   if (terminalRoute(target)) return terminalResponse(target, status, body);
   if (footerRoute(target)) return footerResponse(status, body);
+  if (memoryHelperRoute(target)) return memoryHelperResponse(target, status, body);
+  if (docIndexRoute(target)) return docIndexResponse(target, status, body);
+  if (projectTrustRoute(target)) return projectTrustResponse(target, status, body);
   if (storeSwitchesRoute(target)) return storeSwitchesResponse(status, body);
   if (backupsRoute(target)) return backupsResponse(target, status, body);
   if (chartPrefsRoute(target)) return chartPrefsResponse(status, body);
   if (departmentsRoute(target)) return departmentsResponse(status, body, target);
+  if(reportsRoute(target))return reportsResponse(target,status,body);
   if (meetingsRoute(target)) return meetingsResponse(target,status,body);
   if (firstRunRoute(target)) return firstRunResponse(target, status, body);
   if (phoneRoute(target)) return phoneResponse(target, status, body);
+  if (computerRoute(target)) return computerResponse(target, status, body);
+  if (googleAuthRoute(target)) return googleAuthResponse(target, status, body);
   if (agentRulesRoute(target)) return agentRulesResponse(target, status, body);
   if (orgRoute(target)) return orgResponse(target, status, body);
   if (agentLibraryRoute(target)) return agentLibraryResponse(target, status, body);
@@ -256,6 +287,7 @@ function project(target, status, body) {
   if (sessionsRoute(target) || updatesRoute(target)) return accountSettingsResponse(target, status, body);
   if (connectionsRoute(target)) return connectionsResponse(target,status,body);
   if (mcpImportPath(target)) return mcpImportResponse(target,status,body);
+  if (sshKeysRoute(target)) return sshKeysResponse(target,status,body);
   if (libraryPath(target)) return libraryResponse(target,status,body);
   if (templatePath(target)) return templatesResponse(target,status,body);
   if (skillLibraryPath(target)) return skillLibraryResponse(target,status,body);
@@ -294,7 +326,7 @@ function project(target, status, body) {
       return { code: 'version_conflict', currentVersion: a.version, agent: a };
     }
     const code = body?.code;
-    return (status === 409 && code === 'name_taken') || (status === 400 && code === 'invalid_version') || (status === 403 && code === 'reserved_agent') ? { code } : null;
+    return (status === 409 && code === 'name_taken') || (status === 400 && ['invalid_version', 'invalid_model'].includes(code)) || (status === 403 && code === 'reserved_agent') ? { code } : null;
   }
   if (status !== 200) {
     const decision = /^\/api\/memory\/proposals\/[A-Za-z0-9-]{1,64}\/(approve|reject)$/.test(target);
@@ -329,7 +361,8 @@ const launchTokenShape = /^[A-Za-z0-9_-]{43}$/;
  * launchToken (desktop app) is the per-launch secret the backend requires on
  * every request; it is added here and never reaches the page.
  */
-function createApplicationServer({ browserController = null, packageRoot = root, channel, stage1ReadOnly = false, upstreamPort = 42521, launchToken = null, timeoutMs = 10000, streamTimeoutMs = CHAT_DEADLINE_MS, streamIdleMs = CHAT_IDLE_MS, runStreamMs = RUN_STREAM_MS, runIdleMs = RUN_IDLE_MS } = {}) {
+function createApplicationServer({ browserController = null, packageRoot = root, genvrRuntimesDir = process.env.GIRRU_APP_RUNTIMES_DIR, storeAppsDataDir, channel, stage1ReadOnly = false, upstreamPort = 42521, launchToken = null, timeoutMs = 10000, streamTimeoutMs = CHAT_DEADLINE_MS, streamIdleMs = CHAT_IDLE_MS, runStreamMs = RUN_STREAM_MS, runIdleMs = RUN_IDLE_MS } = {}) {
+  if(storeAppsDataDir!==undefined&&(typeof storeAppsDataDir!=='string'||!path.isAbsolute(storeAppsDataDir)))throw Error('Invalid Store workspace.');
   if (typeof stage1ReadOnly !== 'boolean') throw Error('Invalid stage1 configuration');
   const validPort = x => Number.isInteger(x) && x >= 1 && x <= 65535;
   if (launchToken !== null && !(typeof launchToken === 'string' && launchTokenShape.test(launchToken))) throw Error('Invalid launch configuration');
@@ -337,19 +370,20 @@ function createApplicationServer({ browserController = null, packageRoot = root,
   if (!Number.isInteger(streamTimeoutMs) || streamTimeoutMs < 1 || streamTimeoutMs > CHAT_DEADLINE_MS || !Number.isInteger(streamIdleMs) || streamIdleMs < 1 || streamIdleMs > CHAT_IDLE_MS) throw Error('Invalid stream limits');
   if (!Number.isInteger(runStreamMs) || runStreamMs < 1 || runStreamMs > RUN_STREAM_MS || !Number.isInteger(runIdleMs) || runIdleMs < 1 || runIdleMs > RUN_IDLE_MS) throw Error('Invalid run stream limits');
   // Live bridge (MCP + local voice) and the owner's private library for the GenVR frame.
-  const studio = createStudioHost({ packageRoot, voiceProvider:generated=>voiceLibrary.shared(generated) });
+  const genvrRuntime = resolveGenvrRuntime({ runtimesDir:typeof genvrRuntimesDir==='string'&&path.isAbsolute(genvrRuntimesDir)?genvrRuntimesDir:undefined, bundledRoot:process.env.GIRRU_GENVR_BUNDLED==='0'?undefined:path.join(packageRoot,'vendor/genvr') });
+  const studio = createStudioHost({ packageRoot, runtimePackage:genvrRuntime?.packageDir??null, voiceProvider:generated=>voiceLibrary.shared(generated) });
   const chatVoice = createChatVoice({ packageRoot, blocked:()=>voiceLibrary.isBusy() });
   const voiceLibrary=createVoiceLibrary({packageRoot,blocked:()=>chatVoice.isBusy()});
-  let studioToken = null;
-  void studio.token().then(t => { studioToken = t; }, () => {});
-  const serveGenVR = createGenVRAssets(packageRoot, () => studioToken);
+  let studioToken = null, genvrRetired = false;
+  void studio.token().then(t => { if(!genvrRetired)studioToken = t; }, () => {});
+  const serveGenVR = createGenVRAssets(packageRoot, () => studioToken, {runtime:genvrRuntime});
   const assets = readCurrent(packageRoot, channel); // Pin validated bytes for this server lifetime.
   const server = http.createServer({ maxHeaderSize: 16384, requestTimeout: 10000, headersTimeout: 10000 }, async (req, res) => {
     for (const [k, v] of Object.entries(HEADERS)) res.setHeader(k, v);
     // Explicit chat talk mode uses only this origin's microphone and generated local audio.
     if(!stage1ReadOnly){
       res.setHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=()');
-      res.setHeader('Content-Security-Policy', HEADERS['Content-Security-Policy'] + "; media-src 'self' blob:");
+      res.setHeader('Content-Security-Policy', HEADERS['Content-Security-Policy']);
     }
     const send = (status, body = null, type = 'application/json; charset=utf-8') => {
       if (res.destroyed || res.writableEnded) return;
@@ -377,6 +411,21 @@ function createApplicationServer({ browserController = null, packageRoot = root,
     if (stage1ReadOnly && raw.startsWith('/api/') && !stage1Route(req.method, raw)) return send(403, { code: 'stage1_read_only' });
     if (requestPath(raw) === null || raw.length > 2048) return send(400);
     const studioPath = requestPath(raw);
+    if(studioPath.startsWith('/store-apps/')){if(!['GET','HEAD'].includes(req.method))return send(405);const asset=storeAppAsset(raw,{dataDir:storeAppsDataDir});if(!asset)return send(404);res.setHeader('Cache-Control','no-store');return send(asset.status,asset.data??null,asset.type);}
+    const runtimeRequest=studioPath===GENVR_RUNTIME||studioPath.startsWith('/studio-bridge/')||studioPath.startsWith('/studio-library/')||studioPath.startsWith('/genvr/');
+    if(runtimeRequest){
+      const current=resolveGenvrRuntime({runtimesDir:typeof genvrRuntimesDir==='string'&&path.isAbsolute(genvrRuntimesDir)?genvrRuntimesDir:undefined,bundledRoot:process.env.GIRRU_GENVR_BUNDLED==='0'?undefined:path.join(packageRoot,'vendor/genvr')});
+      const ready=!genvrRetired&&!!genvrRuntime&&current?.packageDir===genvrRuntime.packageDir;
+      if(genvrRuntime&&!ready&&!genvrRetired){genvrRetired=true;studioToken=null;void studio.close();}
+      // Local program metadata contains no account state, paths or install-job details.
+      if(studioPath===GENVR_RUNTIME){
+        if(req.method!=='GET')return send(405);
+        if(raw!==GENVR_RUNTIME||req.headers['transfer-encoding']||Number(req.headers['content-length']||0))return send(400);
+        res.setHeader('Cache-Control','no-store');
+        return send(200,{state:ready?(genvrRuntime.source==='installed'?'installed':'bundled'):'missing',version:ready?genvrRuntime.version:null});
+      }
+      if(!ready)return send(503,{code:'unavailable'});
+    }
     if (studioPath.startsWith('/studio-bridge/') || studioPath.startsWith('/studio-library/')) {
       // Long polls, voice generation and library files outlive the API deadline.
       clearTimeout(timer);
@@ -398,7 +447,9 @@ function createApplicationServer({ browserController = null, packageRoot = root,
     if (Object.keys(req.headers).some(k => !passiveHeaders.has(k) && !(chat && k === 'idempotency-key')) || (req.headers.connection && !/^(close|keep-alive)$/i.test(req.headers.connection)) || (req.headers['sec-fetch-mode'] && req.headers['sec-fetch-mode'] !== 'same-origin') || (req.headers['sec-fetch-dest'] && req.headers['sec-fetch-dest'] !== 'empty')) return send(400);
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && req.headers.origin !== origin) return send(403);
     if (chat && !validKey(req.headers['idempotency-key'])) return send(400);
-    const login = raw === '/api/auth/login' || (raw === OWNER_SETUP_PATH && req.method === 'POST');
+    // Google sign-in runs before there is a session (the link flow belongs to a signed-in owner).
+    const googleLogin = googleAuthRoute(raw) && !raw.startsWith('/api/auth/google/link');
+    const login = raw === '/api/auth/login' || (raw === OWNER_SETUP_PATH && req.method === 'POST') || googleLogin;
     const discovery = raw === '/api/setup/status' && req.method === 'GET';
     let auth = req.headers.authorization;
     if (auth === 'Bearer dpro-remembered-session') {
@@ -410,7 +461,8 @@ function createApplicationServer({ browserController = null, packageRoot = root,
     const length = Number(req.headers['content-length'] || 0);
     const audio = req.method === 'POST' && raw === '/api/chat/transcribe';
     // Agent files are up to 1 MB of text; JSON escaping can double it.
-    const limit = raw===VOICE_LIBRARY_PATH ? 4_200_000 : meetingsRoute(raw) ? 512 * 1024 : agentLibraryRoute(raw) ? 2_400_000 : notesRoute(raw) ? 4_300_000 : packRoute(raw) ? 2_100_000 : genvrRoute(raw) ? GENVR_BYTES + 65536 : audio ? AUDIO_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/images$/.test(raw) ? IMAGE_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/runs$/.test(raw) ? RUN_LIMIT : LIMIT;
+    // KNOW-INDEX-01: a Knowledge PDF or a chat's PDF comes as base64 (10 MB of PDF).
+    const limit = raw===VOICE_LIBRARY_PATH ? 4_200_000 : (req.method === 'POST' && (/^\/api\/agents\/[^/?#]+\/library\/file$/.test(raw) || raw === '/api/memory/documents/read-pdf')) ? READ_PDF_BASE64 + 65536 : meetingsRoute(raw) ? 512 * 1024 : agentLibraryRoute(raw) ? 2_400_000 : notesRoute(raw) ? 4_300_000 : packRoute(raw) ? 2_100_000 : conversationPath(raw)?.kind === 'project-media' ? 44_739_244 + 8192 : raw===GENVR_RUNTIME ? 8192 : genvrRoute(raw) ? GENVR_BYTES + 65536 : audio ? AUDIO_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/images$/.test(raw) ? IMAGE_LIMIT : req.method === 'POST' && /^\/api\/chat\/conversations\/[^/?#]+\/runs$/.test(raw) ? RUN_LIMIT : LIMIT;
     if (!Number.isSafeInteger(length) || length < 0 || length > limit) return send(413);
     if (req.headers['content-type'] && !/^application\/json(?:;\s*charset=utf-8)?$/i.test(req.headers['content-type'])) return send(415);
     try {
@@ -454,6 +506,7 @@ function createApplicationServer({ browserController = null, packageRoot = root,
       // A run reader ends cleanly after RUN_STREAM_MS; the page re-attaches with after=<seq>.
       if (runEvents || termStream) clearTimeout(timer);
       if (audio) { clearTimeout(timer); timer = setTimeout(() => { send(504); upstream?.destroy(); }, AUDIO_TIMEOUT_MS); }
+      if (req.method === 'POST' && GENVR_WORLD.exec(raw)?.[2] === 'turn') { clearTimeout(timer); timer = setTimeout(() => { send(504); upstream?.destroy(); }, WORLD_TURN_MS); }
       upstream = http.request({ hostname: HOST, port, path: raw, method: req.method, headers, agent: false, maxHeaderSize: 16384 }, response => {
         const fail = () => { response.destroy(); send(502); };
         const status = response.statusCode;
@@ -474,7 +527,8 @@ function createApplicationServer({ browserController = null, packageRoot = root,
             touch();
             try {
               const frames = parser.push(chunk);
-              for (const frame of frames) if (!res.write(`data: ${JSON.stringify(frame)}\n\n`)) response.pause();
+              // CHAT-LIVE-01: the live preview keeps no number on the way out (with seq 0 the window took it for a numbered frame and dropped it).
+              for (const frame of frames) { const out = frame.type === 'preview' ? (({ seq: _seq, ...rest }) => rest)(frame) : frame; if (!res.write(`data: ${JSON.stringify(out)}\n\n`)) response.pause(); }
               const now = performance.now();
               if (!frames.length && now - lastKeepalive >= KEEPALIVE_MS) { res.write(': keepalive\n\n'); lastKeepalive = now; }
               if (parser.ended) finish();
@@ -524,7 +578,7 @@ function createApplicationServer({ browserController = null, packageRoot = root,
         }
         // The terminal answers input, resize and close with 204: a fixed { ok: true } leaves the bridge.
         if (status === 204 && terminalRoute(raw) && req.method !== 'GET') { response.resume(); return send(200, { ok: true }); }
-        const responseLimit = genvrRoute(raw) ? GENVR_BYTES + 65536 : chat ? 16384 : req.method === 'GET' && /^\/api\/chat\/conversations\/[^/?#]+\/images\/[a-f0-9]{32}$/.test(raw) ? IMAGE_LIMIT : RESPONSE_LIMIT;
+        const responseLimit = conversationPath(raw)?.kind === 'project-media' ? 44_739_244 + 8192 : raw===GENVR_RUNTIME ? 8192 : genvrRoute(raw) ? GENVR_BYTES + 65536 : chat ? 16384 : req.method === 'GET' && /^\/api\/chat\/conversations\/[^/?#]+\/images\/[a-f0-9]{32}$/.test(raw) ? IMAGE_LIMIT : RESPONSE_LIMIT;
         if (status >= 300 && status < 400 || response.headers.location || response.headers['set-cookie'] || response.headers['content-encoding'] || !/^application\/json(?:\s*;|$)/i.test(response.headers['content-type'] || '') || Number(response.headers['content-length'] || 0) > responseLimit) return fail();
         const parts = []; let count = 0;
         response.on('data', chunk => { count += chunk.length; if (count > responseLimit) fail(); else parts.push(chunk); });
@@ -542,7 +596,7 @@ function createApplicationServer({ browserController = null, packageRoot = root,
             const delayHeaders = response.rawHeaders.filter((value, i) => i % 2 === 0 && value.toLowerCase() === 'retry-after').length;
             const delay = status === 429 && delayHeaders === 1 ? retryAfterSeconds(response.headers['retry-after']) : undefined;
             if (delay !== undefined && !res.headersSent) res.setHeader('Retry-After', String(delay));
-            if (raw === '/api/auth/login' && status === 200 && typeof projected?.token === 'string') {
+            if ((raw === '/api/auth/login' || raw === '/api/auth/google/finish') && status === 200 && typeof projected?.token === 'string') {
               res.setHeader('Set-Cookie', `dpro_session=${projected.token}; HttpOnly; SameSite=Strict; Path=/api; Max-Age=604800`);
             } else if ((verificationRoute(raw)&&status===200&&projected?.requiresSignIn===true) || (raw === '/api/auth/login' && status === 200 && projected?.recovered === true) || (raw === '/api/auth/logout' && status === 200) || (raw === '/api/auth/me' && status === 401 && req.headers.authorization === 'Bearer dpro-remembered-session')) {
               res.setHeader('Set-Cookie', 'dpro_session=; HttpOnly; SameSite=Strict; Path=/api; Max-Age=0');

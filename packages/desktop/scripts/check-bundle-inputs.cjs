@@ -1,9 +1,9 @@
 'use strict';
 /**
  * Runs before every installer build (npm "predist:*"). electron-builder skips a
- * missing extraResources folder without a word, so an app could ship without
- * GenVR and only fail on the owner's computer. This stops the build instead and
- * names what to stage.
+ * missing extraResources folder without a word. GenVR and Code are Store apps;
+ * the core builds without their runtimes. An optional developer copy must be
+ * complete if it is staged.
  *
  * The Code editor (Nabu) is a Store app (D-CODE-STORE): a release builds without
  * nabu-runtime/ and Girru installs Code from the Girru Store. A developer may still
@@ -36,11 +36,14 @@ function codeRuntimeState(desktop = path.resolve(__dirname, '..')) {
 /** Problems with the staged inputs, as short reasons (empty = ready). */
 function bundleProblems(desktop = path.resolve(__dirname, '..'), pin = require('../../core-ui/scripts/prepare-genvr.cjs')) {
   const problems = [];
+  if (!fs.existsSync(path.join(desktop, '..', 'identity', 'src', 'google.cjs'))) problems.push('shared Google identity verifier is missing from the source resource mapping');
+  if (!fs.existsSync(path.join(desktop, '..', 'identity', 'src', 'memory-native-proof.cjs'))) problems.push('shared memory proof codec is missing from the source resource mapping');
+  if (!fs.existsSync(path.join(desktop, '..', 'identity', 'src', 'memory-native-owner-wire.cjs'))) problems.push('shared native owner codec is missing from the source resource mapping');
   const { VERSION, SHA256 } = pin;
   let manifest = null;
   try { manifest = JSON.parse(fs.readFileSync(path.join(desktop, 'payload', 'core-ui', 'vendor', 'genvr', 'manifest.json'), 'utf8')); } catch { /* not staged */ }
-  if (!manifest) problems.push('payload has no GenVR SDK: prepare core-ui/vendor/genvr, then run npm run stage');
-  else if (manifest.version !== VERSION || manifest.archiveSha256 !== SHA256) problems.push(`payload GenVR SDK is not the pinned ${VERSION}: prepare it again, then run npm run stage`);
+  if (!manifest && fs.existsSync(path.join(desktop, 'payload', 'core-ui', 'vendor', 'genvr'))) problems.push('payload GenVR SDK is only partly staged');
+  else if (manifest && (manifest.version !== VERSION || manifest.archiveSha256 !== SHA256)) problems.push(`payload GenVR SDK is not the pinned ${VERSION}: prepare it again, then run npm run stage`);
   const code = codeRuntimeState(desktop);
   if (code !== 'none' && code !== 'ready') problems.push(code);
   return problems;
@@ -51,8 +54,8 @@ if (require.main === module) {
   const problems = bundleProblems(desktop);
   if (problems.length) { for (const p of problems) console.error(`Build stopped: ${p}`); process.exitCode = 1; }
   else console.log(codeRuntimeState(desktop) === 'ready'
-    ? 'Bundle inputs ready: payload with GenVR SDK, Code editor runtime (bundled)'
-    : 'Bundle inputs ready: payload with GenVR SDK; Code is not bundled (Girru installs it from the Store)');
+    ? 'Bundle inputs ready: core payload, optional bundled Code runtime'
+    : 'Bundle inputs ready: GenVR and Code are supplied by the Store');
 }
 
 module.exports = { bundleProblems, codeRuntimeState, CODE_FILES };

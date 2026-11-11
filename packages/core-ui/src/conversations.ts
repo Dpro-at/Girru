@@ -19,12 +19,12 @@ export type Conversation = WireConversation;
 export type Project = WireProject;
 /** about: the first words of the agent's description ("Frontend developer"), shown after its name; subAgentOf: whose sub-agent it is. */
 export type AgentChoice = Readonly<{ id: string; name: string; department?: string | null; primary?: boolean; about?: string; subAgentOf?: string }>;
-export type ModelOption = Readonly<{ id: string; provider: 'ollama' | 'claude' | 'lmstudio' | 'subscription'; label: string; size: string; think?: boolean; variants?: readonly Readonly<{ id: string; label: string; note?: string }>[] }>;
-/** CH3: the Thinking choice applies (Auto and each agent's own pass it where the model can; Claude Code / Codex sessions; a listed model marked think). */
+export type ModelOption = Readonly<{ id: string; provider: 'ollama' | 'claude' | 'lmstudio' | 'subscription'; label: string; size: string; think?: boolean; sessionPrefix?: string; variants?: readonly Readonly<{ id: string; label: string; note?: string }>[] }>;
+/** Capability display comes from the backend catalogue; Auto/agent-default remains server-resolved. */
 export const canThink = (model: string, models: readonly ModelOption[]): boolean => {
   if (model === 'auto' || !model) return true;
   const base = model.split('/')[0];
-  return /^subscription:(?:claude|codex):[a-f0-9]{32}$/.test(base) || models.some(m => m.id === base && m.think === true);
+  return models.some(m => (m.id === model || m.id === base || (m.sessionPrefix && base.startsWith(m.sessionPrefix) && /^[a-f0-9]{32}$/.test(base.slice(m.sessionPrefix.length)))) && m.think === true);
 };
 export type ConversationsState = Readonly<{
   access: 'ready' | 'denied';
@@ -151,6 +151,8 @@ export class ConversationsController {
   }
   dispose() { this.#follow?.abort(); this.#unsubscribe(); this.#disposed = true; this.#listeners.clear(); }
 
+  /** CHAT-CONTENT-01: one short notice under the box (Open in Code, copy path…). */
+  say(text: string) { if (this.live()) this.publish({ notice: text.slice(0, 300) }); }
   edit(draft: string) { this.publish({ draft: draft.slice(0, MAX_MESSAGE), ...(draft.length > MAX_MESSAGE ? { notice: `A message can be at most ${MAX_MESSAGE.toLocaleString('en')} characters. The rest was not added.` } : {}) }); }
   selectAgent(agentId: string) { if (!this.#state.activeId) this.publish({ agentId }); }
   /** In an open conversation: which agent writes the next replies ('' = the conversation's own agent). */
@@ -162,7 +164,7 @@ export class ConversationsController {
     this.publish({ agents, replyAgent: agent.id });
   }
 
-  /** The agent an "@Name" in the text points to (longest name wins), if any. */
+  /** Picker preview only. Backend target resolution owns admission and group ambiguity. */
   mentioned(text: string): AgentChoice | undefined {
     const lower = text.toLowerCase();
     return [...this.#state.agents].sort((a, b) => b.name.length - a.name.length)
@@ -240,6 +242,8 @@ export class ConversationsController {
       const models = r.body.models as ModelOption[];
       // A picked model that is gone (its server stopped) stays picked: the reply then says why it failed.
       this.publish({ modelsLoaded: true, models: this.#state.model && !models.some(m => m.id === this.#state.model) ? [...models, ...this.#state.models.filter(m => m.id === this.#state.model)] : models });
+      // A blank new chat picks up the last chosen model once the list is known.
+      if (!this.#state.activeId && this.#state.model === 'auto' && !this.#state.turns.length) { const m = this.lastModelOr('auto'); if (m !== 'auto') this.publish({ model: m }); }
     } catch { /* the picker stays as it was */ }
   }
   async loadProjects() {
@@ -372,8 +376,10 @@ export class ConversationsController {
 
   resumeCodingSession(id:string,source:'claude-code'|'codex'){
     const project=this.activeProject();if(!this.live()||!project?.folder||!/^[a-f0-9]{32}$/.test(id))return;
-    const model='subscription:'+(source==='claude-code'?'claude':'codex')+':'+id;this.filterProject(project.id);this.newChat();
-    this.publish({model,models:[...this.#state.models.filter(m=>m.id!==model),{id:model,provider:'subscription',label:(source==='codex'?'Codex':'Claude Code')+' · previous session',size:''}]});
+    const base='subscription:'+(source==='claude-code'?'claude':'codex');
+    const capability=this.#state.models.find(m=>m.id===base)?.think===true;
+    const model=base+':'+id;this.filterProject(project.id);this.newChat();
+    this.publish({model,models:[...this.#state.models.filter(m=>m.id!==model),{id:model,provider:'subscription',label:(source==='codex'?'Codex':'Claude Code')+' · previous session',size:'',...(capability?{think:true}:{})}]});
   }
   #modelWrites: Promise<void> = Promise.resolve();
   #pendingModelWrites = 0;
@@ -385,8 +391,15 @@ export class ConversationsController {
     if(m[3]&&!this.#state.model.startsWith(m[1]+m[3]))return false;
     return !m[4]||!!app.variants?.some(v=>v.id===m[4]);
   }
+  /** CHAT-LIVE-01 (LW6): the model the owner picked last (or the open chat's); a new chat starts with it instead of Auto. Kept while the app is open (no browser storage). */
+  #lastModel: string | null = null;
+  private lastModelOr(fallback: string): string {
+    const m = this.#lastModel;
+    return m && (m === 'auto' || this.#state.models.some(x => x.id === m) || this.#appModel(m)) ? m : fallback;
+  }
   selectModel(model: string) {
     if(!this.live() || !(model===''||model==='auto'||this.#state.models.some(m=>m.id===model)||this.#appModel(model)))return;
+    if (model) this.#lastModel = model;
     this.publish({model});const id=this.#state.activeId;if(!id)return;
     this.#pendingModelWrites++;
     this.#modelWrites=this.#modelWrites.then(async()=>{
@@ -428,7 +441,7 @@ export class ConversationsController {
   newChat() {
     this.#follow?.abort(); this.#openSeq++;
     this.rememberLast(null);
-    this.publish({ ...this.codeDraftFor('_new'), activeId: null, model: 'auto', turns: [], threadPhase: 'empty', runId: null, starting: false, stopping: false, reconnecting: false, queue: [], queuePaused: false, elsewhere: false, notice: undefined, agentId: '', replyAgent: '', git: null, focus: null, hasEarlier: false, loadingEarlier: false, mode: 'auto', thinking: 'normal' });
+    this.publish({ ...this.codeDraftFor('_new'), activeId: null, model: this.lastModelOr('auto'), turns: [], threadPhase: 'empty', runId: null, starting: false, stopping: false, reconnecting: false, queue: [], queuePaused: false, elsewhere: false, notice: undefined, agentId: '', replyAgent: '', git: null, focus: null, hasEarlier: false, loadingEarlier: false, mode: 'auto', thinking: 'normal' });
     void this.loadGit();
   }
 
@@ -457,6 +470,8 @@ export class ConversationsController {
       const conversation=r.body.conversation as Conversation;this.replace(conversation);
       // CHAT-BUILD-01 stage 3: messages that waited when the window closed wait again (Send now sends them).
       const waiting = conversation.queued ?? [];
+      // The open chat's model is also what a new chat starts with (unless 'default' / the agent's own).
+      if (conversation.model && conversation.model !== 'default') this.#lastModel = conversation.model;
       this.publish({ turns, threadPhase: 'ready', runId: active, model: conversation.model ?? '', hasEarlier: r.body.hasMore === true,
         mode: conversation.mode ?? 'auto', thinking: conversation.thinking ?? 'normal', queue: waiting, queuePaused: waiting.length > 0 && !active, elsewhere: !!active });
       void this.loadGit();
@@ -529,7 +544,15 @@ export class ConversationsController {
   clearFocus() { if (this.#state.focus) this.publish({ focus: null }); }
 
   /** Sends the draft (or `text`); while the agent works, the message waits in the queue. */
-  async send(text?: string, frame?: { name: string; type: string; data: string }) {
+  async send(text?: string, frame?: { name: string; type: string; data: string }, queuedKey?: string) {
+    const queuedConversation = queuedKey ? this.#state.activeId : null;
+    if (queuedKey) {
+      await this.#queueSaves;
+      if (!this.live() || this.#state.activeId !== queuedConversation) return;
+      const current = this.#state.queue.find(item => item.key === queuedKey);
+      if (!current) return;
+      text = current.text; // The backend save may have replaced secrets with scoped references.
+    }
     if (frame && (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(frame.type) || frame.data.length > MAX_IMAGE_CHARS)) { this.publish({ notice: 'The meeting frame is not a supported image or is too large. Nothing was sent.' }); return; }
     const files = text === undefined ? this.#state.attachments : [];
     const images = frame ? [{ ...frame, name: frame.name.slice(0,120), key: this.newId() }] : text === undefined ? this.#state.images : [];
@@ -546,14 +569,16 @@ export class ConversationsController {
     const attendanceControl = !!this.#state.conversations.find(c=>c.id===this.#state.activeId)?.meeting && !images.length && /(?:يحضر|تحضر|احضر|حضروا|انضم|يدخل|استدع|ادعو|تخرج|يخرج|يطلع|انسحب|ينسحب|يبقى|يبقون|خلي|فقط|قسم|\binvite\b|\bdismiss\b|\bkeep\b|\bleave\b|\bonly\b)/iu.test(message);
     if ((this.#state.runId || this.#state.starting) && images.length) { this.publish({ notice: 'Images go with a message once the team is done with this one. Send them after the reply.' }); return; }
     if ((this.#state.runId || this.#state.starting) && (!attendanceControl || this.#state.starting)) {
-      this.publish({ queue: [...this.#state.queue, { key: this.newId(), text: message }], ...(text === undefined ? { draft: '' } : {}) });
+      const key = queuedKey ?? this.newId();
+      this.publish({ queue: [...this.#state.queue.filter(q => q.key !== key), { key, text: message }], ...(text === undefined ? { draft: '' } : {}) });
       this.#saveQueue(this.#state.activeId, this.#state.queue);
       return;
     }
+    if (queuedKey && this.#state.activeId !== queuedConversation) return;
     const seq = this.#openSeq;
     this.#history.push(message);
     let runId: string;
-    try { runId = `run-${this.newId()}`; } catch { this.publish({ notice: 'A secure id is not available here. Nothing was sent.' }); return; }
+    try { runId = queuedKey ?? `run-${this.newId()}`; } catch { this.publish({ notice: 'A secure id is not available here. Nothing was sent.' }); return; }
     if (!validRunId(runId)) return;
     const optimistic = userTurn(`pending:${runId}`, message, runId, true);
     this.publish({ starting: true, notice: undefined, turns: [...this.#state.turns, optimistic], threadPhase: 'ready', ...(text === undefined ? { draft: '', attachments: [], images: [] } : {}) });
@@ -561,8 +586,11 @@ export class ConversationsController {
       let id = this.#state.activeId;
       const named = this.mentioned(message)?.id;
       if (!id) {
-        const c = await this.call('POST', '/api/chat/conversations', { ...(this.#state.model?{model:this.#state.model}:{}), ...(this.#state.mode !== 'auto' ? { mode: this.#state.mode } : {}), ...(this.#state.thinking !== 'normal' && canThink(this.#state.model, this.#state.models) ? { thinking: this.#state.thinking } : {}), ...((named ?? this.#state.agentId) ? { agentId: named ?? this.#state.agentId } : {}), ...(this.#state.projectFilter ? { projectId: this.#state.projectFilter } : {}) });
+        const c = await this.call('POST', '/api/chat/conversations', { ...(this.#state.model?{model:this.#state.model}:{}), ...(this.#state.mode !== 'auto' ? { mode: this.#state.mode } : {}), ...(this.#state.thinking !== 'normal' && canThink(this.#state.model, this.#state.models) ? { thinking: this.#state.thinking } : {}), ...(this.#state.agentId ? { agentId: this.#state.agentId } : {}), ...(message.includes('@') ? { targetMessage: message } : {}), ...(this.#state.projectFilter ? { projectId: this.#state.projectFilter } : {}) });
         if (!this.live() || seq !== this.#openSeq) return;
+        if (c.status === 400 && record(c.body) && c.body.code === 'ambiguous_group_mentions') {
+          this.publish({ starting: false, turns: this.#state.turns.filter(t => t !== optimistic), draft: this.#state.draft || message, notice: 'Two agents share a mentioned name. Choose the intended agent before sending.' }); return;
+        }
         if ((c.status !== 201 && c.status !== 200) || !record(c.body) || !record(c.body.conversation)) throw new SessionFailure('unavailable');
         const conv = c.body.conversation as Conversation;
         id = conv.id;
@@ -571,7 +599,8 @@ export class ConversationsController {
       }
       // CHAT-PRO-02 I: "@Name" or the reply picker chooses who writes this reply.
       const convAgent = this.#state.conversations.find(x => x.id === id)?.agentId ?? (this.#state.agentId || null);
-      const writer = named ?? (this.#state.replyAgent || undefined);
+      // Mention routing is canonical on the backend; the picker is explicit user intent.
+      const writer = this.#state.replyAgent || undefined;
       const agentForRun = writer && writer !== convAgent ? writer : undefined;
       if (named && named !== this.#state.replyAgent && this.#state.activeId) this.publish({ replyAgent: named === convAgent ? '' : named });
       // CHAT-GAPS-01: images are saved with the chat first; the message names them.
@@ -586,7 +615,7 @@ export class ConversationsController {
         }
         imageIds.push(u.body.image.id);
       }
-      const body = { runId, message, ...(this.#state.model ? { model: this.#state.model } : {}), ...(agentForRun ? { agentId: agentForRun } : {}), ...(imageIds.length ? { images: imageIds } : {}) };
+      const body = { runId, message, ...(queuedKey ? { queuedKey } : {}), ...(this.#state.model ? { model: this.#state.model } : {}), ...(agentForRun ? { agentId: agentForRun } : {}), ...(imageIds.length ? { images: imageIds } : {}) };
       // CHAT-BUILD-01: a lost answer is retried with the same runId; the server returns the accepted turn instead of a second one.
       let r: Awaited<ReturnType<typeof this.call>> | undefined;
       for (let attempt = 0; !r; attempt++) {
@@ -599,7 +628,7 @@ export class ConversationsController {
       if (!this.live() || seq !== this.#openSeq) return;
       if (r.status === 409 && record(r.body) && r.body.code === 'conversation_busy' && typeof r.body.runId === 'string') {
         // Another tab is still answering here: wait in the queue and follow that run.
-        this.publish({ starting: false, turns: this.#state.turns.filter(t => t !== optimistic), queue: [{ key: runId, text: message }, ...this.#state.queue], runId: r.body.runId, elsewhere: true, notice: undefined });
+        this.publish({ starting: false, turns: this.#state.turns.filter(t => t !== optimistic), queue: [{ key: runId, text: message }, ...this.#state.queue.filter(q => q.key !== runId)], runId: r.body.runId, elsewhere: true, notice: undefined });
         this.#saveQueue(id, this.#state.queue);
         this.publish({ turns: [...this.#state.turns, liveTurn(r.body.runId, this.now())] });
         void this.follow(r.body.runId, seq);
@@ -607,10 +636,11 @@ export class ConversationsController {
       }
       if (r.status !== 202 || !record(r.body)) {
         const code = record(r.body) ? r.body.code : undefined;
-        this.publish({ starting: false, turns: this.#state.turns.filter(t => t !== optimistic), draft: this.#state.draft || message,
-          notice: code === 'attendance_needs_scope' ? 'Specify the department and whether to invite, dismiss or keep its participants.' : code === 'group_too_large' ? 'Choose up to 20 speakers here, or use a meeting round for a larger group.' : code === 'ambiguous_group_mentions' ? 'Two agents share a mentioned name. Choose the intended agent before sending.' : code === 'group_paused' ? 'The group paused before starting. Send a new request when you are ready.' : code === 'rate_limited' ? 'Too many conversations are answering right now. Your message is back in the box; send it again in a moment.' : r.status === 413 ? 'The message is too long to send. Shorten it or attach it as a file.' : 'The message was not sent. It is back in the box.' });
+        this.publish({ starting: false, turns: this.#state.turns.filter(t => t !== optimistic), draft: queuedKey ? this.#state.draft : this.#state.draft || message, queuePaused: !!queuedKey || this.#state.queuePaused,
+          notice: code === 'queued_turn_changed' ? 'The waiting message changed or was removed. Reopen this chat before sending it again.' : code === 'attendance_needs_scope' ? 'Specify the department and whether to invite, dismiss or keep its participants.' : code === 'group_too_large' ? 'Choose up to 20 speakers here, or use a meeting round for a larger group.' : code === 'ambiguous_group_mentions' ? 'Two agents share a mentioned name. Choose the intended agent before sending.' : code === 'group_paused' ? 'The group paused before starting. Send a new request when you are ready.' : code === 'rate_limited' ? 'Too many conversations are answering right now. Your message is back in the box; send it again in a moment.' : r.status === 413 ? 'The message is too long to send. Shorten it or attach it as a file.' : 'The message was not sent. It is back in the box.' });
         return;
       }
+      if (queuedKey) { this.publish({ queue: this.#state.queue.filter(q => q.key !== queuedKey), queuePaused: false }); this.#saveQueue(id, this.#state.queue); }
       if (r.body.completed === true && record(r.body.assistantMessage)) { this.publish({ starting:false, runId:null, meetingRevision:(this.#state.meetingRevision??0)+1, turns:this.#state.turns.filter(t=>t!==optimistic) });await this.open(id);void this.refreshList();return; }
       this.readReplyRound(r.body);
       const roundSpeaker = record(r.body.replyRound) && record(r.body.replyRound.speaker) && typeof r.body.replyRound.speaker.id === 'string' ? r.body.replyRound.speaker.id : agentForRun;
@@ -619,7 +649,7 @@ export class ConversationsController {
       void this.follow(runId, seq);
       void this.refreshList(); // the first message names the conversation
     } catch {
-      if (this.live() && seq === this.#openSeq) this.publish({ starting: false, turns: this.#state.turns.filter(t => t !== optimistic), draft: this.#state.draft || message, notice: 'The message was not sent (no connection). It is back in the box.' });
+      if (this.live() && seq === this.#openSeq) this.publish({ starting: false, turns: this.#state.turns.filter(t => t !== optimistic), draft: queuedKey ? this.#state.draft : this.#state.draft || message, queuePaused: !!queuedKey || this.#state.queuePaused, notice: queuedKey ? 'Could not confirm the waiting message. Reopen this chat before sending it again.' : 'The message was not sent (no connection). It is back in the box.' });
     }
   }
 
@@ -739,24 +769,28 @@ export class ConversationsController {
     this.publish({ runId: null, stopping: false, reconnecting: false, elsewhere: false, queuePaused: stopped && this.#state.queue.length > 0 });
     void this.refreshList();
     if (stopped) return;
-    const [next, ...rest] = this.#state.queue;
-    if (next) { this.publish({ queue: rest }); this.#saveQueue(this.#state.activeId, rest); void this.send(next.text); }
+    const [next] = this.#state.queue;
+    if (next) void this.send(next.text, undefined, next.key);
   }
 
   /** Sends a waiting message now (after a Stop paused the queue). */
   sendQueued(key: string) {
     const item = this.#state.queue.find(q => q.key === key);
     if (!item || this.#state.runId || this.#state.starting) return;
-    this.publish({ queue: this.#state.queue.filter(q => q.key !== key), queuePaused: false });
-    this.#saveQueue(this.#state.activeId, this.#state.queue);
-    void this.send(item.text);
+    void this.send(item.text, undefined, item.key);
   }
 
-  private async refreshList() {
+  /** CHAT-ORCH-01: the list again (sub-session states); public for the sessions card's quiet refresh. */
+  async refreshList() {
     try {
       const r = await this.call('GET', '/api/chat/conversations');
       if (this.live() && r.status === 200 && record(r.body) && Array.isArray(r.body.conversations)) this.publish({ conversations: r.body.conversations as Conversation[] });
     } catch { /* the list refreshes on the next load */ }
+  }
+
+  /** CHAT-ORCH-01 (LW4): stop another chat's work (a sub-session) from the sessions card; what it did is kept. */
+  async stopChat(id: string): Promise<boolean> {
+    try { const r = await this.call('POST', `/api/chat/conversations/${id}/stop`); void this.refreshList(); return r.status === 200 || r.status === 202 || r.status === 204; } catch { return false; }
   }
 
   /** Stops the running reply; what it wrote so far is kept. Queued messages stay queued until sent. */
@@ -858,7 +892,16 @@ export class ConversationsController {
     if (!id || !this.live()) return;
     const body = { queued: queue.map(q => ({ key: q.key, text: q.text })) };
     // One after another, so an older list never lands after a newer one.
-    this.#queueSaves = this.#queueSaves.then(() => this.call('PUT', `/api/chat/conversations/${id}`, body)).catch(() => undefined);
+    this.#queueSaves = this.#queueSaves.then(async () => {
+      const result = await this.call('PUT', `/api/chat/conversations/${id}`, body);
+      if (this.live() && this.#state.activeId === id && this.#state.queue === queue && result.status === 200
+        && record(result.body) && record(result.body.conversation)) {
+        const saved = result.body.conversation.queued;
+        if (Array.isArray(saved)) this.publish({ queue: saved as ConversationsState['queue'] });
+        else if (saved === undefined) this.publish({ queue: [] });
+      }
+      return result;
+    }).catch(() => undefined);
   }
 
   /** CHAT-BUILD-01 stage 3 (CH5): a project's variables (names only; values never come back). */

@@ -2,7 +2,7 @@
 // Run: node --import tsx --test test/ollama-agent-loop.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runOllamaAgentLoop, toOllamaTools, ModelUnavailable, TOOL_OUTPUT_CHARS } from '../src/services/ollama-agent-loop.ts';
+import { runOllamaAgentLoop, toOllamaTools, ModelUnavailable, TOOL_OUTPUT_CHARS, EMPTY_ANSWER_NUDGE, EMPTY_ANSWER_NUDGE_FIRST } from '../src/services/ollama-agent-loop.ts';
 
 /** A fake local model: each call returns the next scripted list of NDJSON chunks. */
 function fakeModel(script) {
@@ -90,4 +90,22 @@ test('abort stops the loop without a done frame', async () => {
 test('a refused model call throws ModelUnavailable', async () => {
   const { fetchImpl } = fakeModel(['fail']);
   await assert.rejects(runOllamaAgentLoop(base({ fetchImpl, write: () => {} })), ModelUnavailable);
+});
+
+test('an empty answer (after tools, or thinking only) gets one short follow-up ask; a second empty answer stays empty', async () => {
+  const call = [{ message: { content: '', tool_calls: [{ function: { name: 'memory_save', arguments: { content: 'x' } } }] } }, { done: true }];
+  const empty = [{ message: { content: '' } }, { done: true }];
+  const done = [{ message: { content: 'Saved.' } }, { done: true }];
+  const { fetchImpl, bodies } = fakeModel([call, empty, done]);
+  const r = await runOllamaAgentLoop(base({ fetchImpl, write: () => {} }));
+  assert.equal(r.answer, 'Saved.');
+  assert.equal(r.steps, 3);
+  assert.equal(bodies[2].messages.at(-1).content, EMPTY_ANSWER_NUDGE);
+  const again = fakeModel([call, empty, empty]);
+  const r2 = await runOllamaAgentLoop(base({ fetchImpl: again.fetchImpl, write: () => {} }));
+  assert.equal(r2.answer, '');
+  assert.equal(again.bodies.length, 3, 'asked only once');
+  const first = fakeModel([[{ message: { thinking: 'hmm' } }, { done: true }], done]);
+  assert.equal((await runOllamaAgentLoop(base({ fetchImpl: first.fetchImpl, write: () => {} }))).answer, 'Saved.', 'thinking only: one follow-up too');
+  assert.equal(first.bodies[1].messages.at(-1).content, EMPTY_ANSWER_NUDGE_FIRST);
 });

@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // MEM-UX-02 backend: exported memory files follow the database in the
 // background (never over the owner's edits), and coding apps + project folders
 // connect on their own once the owner allowed reading this computer (backup and
@@ -11,7 +12,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-const backendDir = process.cwd();
+import { switchValueOn } from './helpers/switches.mjs';
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-memsync-')));
 mkdirSync(join(dir, '.data'), { recursive: true });
 process.chdir(dir);
@@ -43,7 +45,7 @@ const B = await import(join(backendDir, 'src/memory/bridge/service.ts'));
 const { syncMemoryBridge } = await import(join(backendDir, 'src/memory/bridge/sync.ts'));
 const { MARK_START, GIRRU_START } = await import(join(backendDir, 'src/memory/bridge/managed-files.ts'));
 // P2: the one Girru section replaces the dpro-memory markers.
-const SECTION_START = /^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P2 ?? '') ? GIRRU_START : MARK_START;
+const SECTION_START = switchValueOn(process.env.GIRRU_STORE_P2 ?? '') ? GIRRU_START : MARK_START;
 const P = await import(join(backendDir, 'src/discovery/places.ts'));
 const { createProject } = await import(join(backendDir, 'src/repositories/chat-conversations.ts'));
 const { getMemoryIndexer } = await import(join(backendDir, 'src/memory/indexer.ts'));

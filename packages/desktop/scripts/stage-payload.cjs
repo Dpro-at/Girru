@@ -4,28 +4,29 @@
  * (copied into the app by electron-builder as extraResources):
  *
  *   payload/node/node[.exe]  the Node runtime that runs the backend
- *   payload/backend/         backend source + its installed node_modules
+ *   payload/backend/         compiled backend + its runtime node_modules
  *   payload/node_modules/    hoisted dependencies, copied by an explicit resource mapping
  *   payload/core-ui/         UI bridge scripts + contracts + the candidate UI build
  *
  * Local builds only: the Node runtime is the one running this script (or
  * --node), the modules are the ones already installed (--backend-modules).
- * Nothing is downloaded. Release bundles with a pinned, checksummed Node and
- * production-only modules are INSTALLER-04.
+ * Nothing is downloaded. Only locked runtime modules for the current
+ * platform are copied; build tools stay in the development environment.
  *
  * Usage: node scripts/stage-payload.cjs [--node <path>] [--backend-modules <dir>] [--root-modules <dir>] [--core-ui-dist <dir>]
  */
 const fs = require('node:fs');
 const path = require('node:path');
+const { productionModules, moduleFilter, compileBackend, BUILD_TOOLS, validateModules, compilerOptions, assertBridgeImports, assertExtensionRuntime, assertCompiledRuntime } = require('./payload-runtime.cjs');
 
 const here = path.resolve(__dirname, '..');
 const packages = path.resolve(here, '..');
 const out = path.join(here, 'payload');
 
 /** Backend parts the server needs at run time (no tests, no one-off maintenance scripts). */
-const BACKEND_PARTS = ['package.json', 'tsconfig.json', 'src', 'extensions', 'skills', 'python-scripts'];
+const BACKEND_PARTS = ['extensions', 'skills', 'python-scripts'];
 /** Bridge parts: its scripts and the plain-JS contracts it requires. */
-const CORE_UI_SCRIPTS = ['application-server.cjs', 'build-artifacts.cjs', 'preview.cjs', 'memory-response.cjs', 'genvr-assets.cjs', 'genvr-studio-host.cjs', 'prepare-genvr.cjs', 'genvr-host.js', 'voice-library-host.cjs', 'voice-runtime.cjs', 'chat-voice-host.cjs', 'chat-voice-worker.py', 'portable-voice-host.cjs', 'portable-voice-worker.py', 'portable-voice-models.json'];
+const CORE_UI_SCRIPTS = ['store-app-assets.cjs', 'application-server.cjs', 'build-artifacts.cjs', 'preview.cjs', 'memory-response.cjs', 'genvr-assets.cjs', 'genvr-studio-host.cjs', 'genvr-runtime-path.cjs', 'genvr-host.js', 'genvr-avatar-host.js', 'voice-library-host.cjs', 'voice-runtime.cjs', 'chat-voice-host.cjs', 'chat-voice-worker.py', 'portable-voice-host.cjs', 'portable-voice-worker.py', 'portable-voice-models.json'];
 
 function parseArgs(argv) {
   const options = { node: process.execPath, backendModules: path.join(packages, 'backend', 'node_modules'), rootModules: path.join(packages, '..', 'node_modules'), coreUiDist: path.join(packages, 'core-ui', 'dist') };
@@ -37,7 +38,6 @@ function parseArgs(argv) {
   return options;
 }
 
-const SKIP_MODULES = new Set(['.bin', '.cache', '.vite']);
 const copy = (from, to, filter) => fs.cpSync(from, to, { recursive: true, verbatimSymlinks: true, filter });
 const noSecrets = src => !/(^|[\\/])\.env(\.|$)(?!example)/.test(src) && !src.split(path.sep).includes('.data');
 
@@ -54,16 +54,6 @@ function refuseDevAccounts(coreUi, buildDir) {
   }
 }
 
-/** The prepared, pinned GenVR SDK folder; refuses a missing or different one instead of building without GenVR. */
-function requireGenVR(coreUi) {
-  const { VERSION, SHA256 } = require(path.join(coreUi, 'scripts', 'prepare-genvr.cjs'));
-  const genvr = path.join(coreUi, 'vendor', 'genvr');
-  let manifest = null;
-  try { manifest = JSON.parse(fs.readFileSync(path.join(genvr, 'manifest.json'), 'utf8')); } catch { /* not prepared */ }
-  if (!manifest || manifest.version !== VERSION || manifest.archiveSha256 !== SHA256) throw new Error(`GenVR SDK ${VERSION} is not prepared in core-ui/vendor/genvr (run: node packages/core-ui/scripts/prepare-genvr.cjs <3d-world-sdk-${VERSION}.tgz>)`);
-  return genvr;
-}
-
 /** Dependencies of the backend's package.json that none of the module folders holds. */
 function missingPackages(backendDir, moduleDirs) {
   const deps = Object.keys(JSON.parse(fs.readFileSync(path.join(backendDir, 'package.json'), 'utf8')).dependencies || {});
@@ -75,6 +65,8 @@ function stageUiBridge(coreUi, ui) {
   fs.mkdirSync(path.join(ui, 'scripts'), { recursive: true });
   fs.copyFileSync(path.join(coreUi, 'package.json'), path.join(ui, 'package.json'));
   for (const file of CORE_UI_SCRIPTS) fs.copyFileSync(path.join(coreUi, 'scripts', file), path.join(ui, 'scripts', file));
+  // The source bridge's proxy becomes a standalone copy of the shared path validator.
+  fs.copyFileSync(path.join(coreUi, '..', 'backend', 'src', 'config', 'genvr-runtime-path.cjs'), path.join(ui, 'scripts', 'genvr-runtime-path.cjs'));
   copy(path.join(coreUi,'scripts','voice-engine'),path.join(ui,'scripts','voice-engine'),src=>fs.statSync(src).isDirectory()||/\.(mjs|py|json|txt)$/.test(src));
   copy(path.join(coreUi, 'src'), path.join(ui, 'src'), src => fs.statSync(src).isDirectory() || /\.(c?js)$/.test(src));
 }
@@ -83,6 +75,14 @@ function stage(options) {
   for (const [label, p] of [['Node runtime', options.node], ['backend node_modules', options.backendModules], ['root node_modules', options.rootModules], ['core-ui dist', options.coreUiDist]]) {
     if (!fs.existsSync(p)) throw new Error(`${label} not found: ${p}`);
   }
+  const backend = path.join(packages, 'backend');
+  const ts = require(require.resolve('typescript', { paths: [backend, path.join(packages, 'core-ui')] }));
+  const compiler = compilerOptions(backend, ts);
+  const lock = JSON.parse(fs.readFileSync(path.join(backend, 'package-lock.json'), 'utf8'));
+  const allowed = productionModules(lock);
+  validateModules(lock, allowed, [options.backendModules, options.rootModules]);
+  assertExtensionRuntime(path.join(backend, 'extensions'), ts);
+  assertExtensionRuntime(path.join(backend, 'skills'), ts);
   fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });
 
@@ -91,14 +91,24 @@ function stage(options) {
   fs.copyFileSync(fs.realpathSync(options.node), path.join(out, 'node', nodeName));
   fs.chmodSync(path.join(out, 'node', nodeName), 0o755);
 
-  const backend = path.join(packages, 'backend');
   for (const part of BACKEND_PARTS) copy(path.join(backend, part), path.join(out, 'backend', part), noSecrets);
-  const moduleFilter = src => !SKIP_MODULES.has(path.basename(src)) && noSecrets(src);
-  copy(fs.realpathSync(options.backendModules), path.join(out, 'backend', 'node_modules'), moduleFilter);
-  copy(fs.realpathSync(options.rootModules), path.join(out, 'node_modules'), moduleFilter);
+  compileBackend(path.join(backend, 'src'), path.join(out, 'backend', 'src'), ts, compiler);
+  // The selected Node child shares only the closed proof codec, never native custody or credentials.
+  fs.mkdirSync(path.join(out, 'identity', 'src'), { recursive: true });
+  for (const shared of ['memory-native-proof.cjs', 'memory-native-owner-wire.cjs']) fs.copyFileSync(path.join(packages, 'identity', 'src', shared), path.join(out, 'identity', 'src', shared));
+  assertCompiledRuntime(path.join(out, 'backend', 'src'), ts);
+  const manifest = JSON.parse(fs.readFileSync(path.join(backend, 'package.json'), 'utf8'));
+  // Development still uses tsx; the shipped server is JavaScript and needs no loader.
+  for (const name of BUILD_TOOLS) delete manifest.dependencies?.[name];
+  delete manifest.devDependencies;
+  fs.writeFileSync(path.join(out, 'backend', 'package.json'), JSON.stringify(manifest, null, 2) + '\n');
+  for (const [source, destination] of [[options.backendModules, path.join(out, 'backend', 'node_modules')], [options.rootModules, path.join(out, 'node_modules')]]) {
+    const root = fs.realpathSync(source);
+    copy(root, destination, moduleFilter(root, allowed, noSecrets));
+  }
   // MACAPP-01: every package the program depends on must be in the app (the agent-connect
   // extension, which runs every chat channel, loads agent-connect-dpro at run time; a missing one fails quietly).
-  const missing = missingPackages(backend, [path.join(out, 'backend', 'node_modules'), path.join(out, 'node_modules')]);
+  const missing = missingPackages(path.join(out, 'backend'), [path.join(out, 'backend', 'node_modules'), path.join(out, 'node_modules')]);
   if (missing.length) throw new Error(`packages missing from the payload: ${missing.join(', ')}`);
   // node-pty's helper must stay executable (npm may have installed it without the bit).
   for (const helper of ['build/Release/spawn-helper', `prebuilds/${process.platform}-${process.arch}/spawn-helper`]) {
@@ -109,6 +119,8 @@ function stage(options) {
   const coreUi = path.join(packages, 'core-ui');
   const ui = path.join(out, 'core-ui');
   stageUiBridge(coreUi, ui);
+  assertBridgeImports(path.join(ui, 'scripts'), ts);
+  assertBridgeImports(path.join(ui, 'src'), ts);
   // Only the candidate build the pointer names, nothing older.
   const pointer = JSON.parse(fs.readFileSync(path.join(options.coreUiDist, 'candidate.json'), 'utf8'));
   if (pointer.status !== 'ready' || !/^build-[a-f0-9-]{36}$/.test(pointer.buildId)) throw new Error('core-ui candidate build is not ready');
@@ -116,8 +128,7 @@ function stage(options) {
   fs.mkdirSync(path.join(ui, 'dist'));
   fs.copyFileSync(path.join(options.coreUiDist, 'candidate.json'), path.join(ui, 'dist', 'candidate.json'));
   copy(path.join(options.coreUiDist, pointer.buildId), path.join(ui, 'dist', pointer.buildId));
-  // GenVR (Studio, worlds, account link) runs from the pinned SDK: an app without it opens a broken GenVR page.
-  copy(requireGenVR(coreUi), path.join(ui, 'vendor', 'genvr'), noSecrets);
+  // GenVR is installed through the Store; no SDK bytes go into the core payload.
   refuseDevAccounts(coreUi, path.join(ui, 'dist', pointer.buildId));
   return out;
 }
@@ -131,4 +142,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { stage, parseArgs, BACKEND_PARTS, refuseDevAccounts, missingPackages, stageUiBridge, requireGenVR };
+module.exports = { stage, parseArgs, BACKEND_PARTS, refuseDevAccounts, missingPackages, stageUiBridge };

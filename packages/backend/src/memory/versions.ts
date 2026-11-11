@@ -1,3 +1,4 @@
+import {selectedMemoryExecution} from './encryption/execution-context.js';
 /**
  * Memory version history (CORE-04/05).
  *
@@ -123,6 +124,7 @@ export function recordBaselineIfMissing(m: Memory, actor: string, reason?: strin
 
 /** History of one memory, oldest first. */
 export function memoryVersions(userId: string, memoryId: string): Promise<any[]> {
+  const selected=selectedMemoryExecution();if(selected)return selected.versions(userId,memoryId);
   return sql().read(all(`
     SELECT memory_id AS "memoryId", drawer_kind AS "drawerKind", drawer_key AS "drawerKey", drawer_revision AS "drawerRevision",
            version, change, type, content, importance_score AS "importanceScore", proposal_id AS "proposalId",

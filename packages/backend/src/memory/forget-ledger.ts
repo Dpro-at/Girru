@@ -40,21 +40,21 @@ export interface LedgerLine {
   mac?: string;
 }
 
-const ledgerPath = () => path.join(dataRoot(), LEDGER_FILE);
+const ledgerPath = (root = dataRoot()) => path.join(root, LEDGER_FILE);
 
-function ledgerKey(create: boolean): Buffer | null {
-  const file = path.join(dataRoot(), LEDGER_KEY_FILE);
-  try { const k = fs.readFileSync(file); if (k.length === 32) return k; } catch { /* none yet */ }
+function ledgerKey(create: boolean, root = dataRoot()): Buffer | null {
+  const file = path.join(root, LEDGER_KEY_FILE);
+  try { const fd=fs.openSync(file,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW??0));try{const stat=fs.fstatSync(fd);if(!stat.isFile()||stat.nlink!==1||stat.size!==32)throw new Error('Invalid ledger key');const k=fs.readFileSync(fd);if(k.length===32)return k;}finally{fs.closeSync(fd);} } catch { /* Missing or unsafe keys cannot be read through a link. */ }
   if (!create) return null;
   const k = randomBytes(32);
-  try { fs.writeFileSync(file, k, { mode: 0o600, flag: 'wx' }); } catch { return ledgerKey(false); }
+  try { fs.writeFileSync(file, k, { mode: 0o600, flag: 'wx' }); } catch { return ledgerKey(false, root); }
   return k;
 }
 
 /** Keyed hash of a text (never the text itself); null without a key. */
-export function textMac(text: string, create = false): string | null {
-  const key = ledgerKey(create);
-  return key ? createHmac('sha256', key).update(text.normalize('NFC')).digest('hex') : null;
+export function textMac(text: string, create = false, root = dataRoot()): string | null {
+  const key = ledgerKey(create, root);
+  if(!key)return null;try{return createHmac('sha256',key).update(text.normalize('NFC')).digest('hex');}finally{key.fill(0);}
 }
 
 function valid(l: unknown): l is LedgerLine {
@@ -77,9 +77,9 @@ export function readLedger(file = ledgerPath()): LedgerLine[] {
 }
 
 /** Append lines (0600); a forget that already has a line is not written twice. */
-export function recordForgets(lines: Array<Omit<LedgerLine, 'v' | 'at'> & { at?: string }>): void {
+export function recordForgets(lines: Array<Omit<LedgerLine, 'v' | 'at'> & { at?: string }>, root = dataRoot()): void {
   if (lines.length === 0) return;
-  const file = ledgerPath();
+  const file = ledgerPath(root);
   const have = new Set(readLedger(file).map((l) => `${l.kind}\u0000${l.userId}\u0000${l.memoryId}\u0000${l.mac ?? ''}`));
   const fresh: LedgerLine[] = [];
   for (const l of lines) {
@@ -91,14 +91,14 @@ export function recordForgets(lines: Array<Omit<LedgerLine, 'v' | 'at'> & { at?:
   }
   if (fresh.length === 0) return;
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.appendFileSync(file, fresh.map((l) => JSON.stringify(l)).join('\n') + '\n', { mode: 0o600 });
-  fs.chmodSync(file, 0o600);
+  const fd=fs.openSync(file,fs.constants.O_WRONLY|fs.constants.O_APPEND|fs.constants.O_CREAT|(fs.constants.O_NOFOLLOW??0),0o600);
+  try{const stat=fs.fstatSync(fd);if(!stat.isFile()||stat.nlink!==1)throw new Error('Unsafe forget ledger');fs.appendFileSync(fd,fresh.map((l)=>JSON.stringify(l)).join('\n')+'\n');fs.fchmodSync(fd,0o600);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}
 }
 
 /** One forgotten memory: its id and the keyed hash of each text it had. */
-export function recordMemoryForget(userId: string, memoryId: string, texts: string[]): void {
-  const macs = [...new Set(texts.map((t) => textMac(t, true)).filter((m): m is string => !!m))];
-  recordForgets(macs.length ? macs.map((mac) => ({ userId, memoryId, kind: 'memory' as const, mac })) : [{ userId, memoryId, kind: 'memory' }]);
+export function recordMemoryForget(userId: string, memoryId: string, texts: string[], root = dataRoot()): void {
+  const macs = [...new Set(texts.map((t) => textMac(t, true, root)).filter((m): m is string => !!m))];
+  recordForgets(macs.length ? macs.map((mac) => ({ userId, memoryId, kind: 'memory' as const, mac })) : [{ userId, memoryId, kind: 'memory' }], root);
 }
 
 /**

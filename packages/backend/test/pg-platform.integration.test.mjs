@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 
+import { switchOn } from './helpers/switches.mjs';
 const URL_ = process.env.AGENT_PLAYER_PG_TEST_URL;
 const skip = URL_ ? false : 'AGENT_PLAYER_PG_TEST_URL is not set (PostgreSQL integration test)';
 
@@ -213,7 +214,8 @@ test('named jobs and memory jobs: created once under concurrent processes', { sk
   assert.equal((await one('SELECT COUNT(*) AS n FROM cron_jobs WHERE name = ?', def.name)).n, 1);
   const runs = await Promise.all([m.memoryJobs.ensureMemoryJobs(), m.memoryJobs.ensureMemoryJobs()]);
   const mine = runs.flat().filter((j) => j.actionData.userId === ids.owner);
-  assert.equal(mine.length, 2, 'weekly summary + retention, once');
+  // Weekly summary, retention and trash; P9 adds the doctor and quality jobs, P9B the usage job.
+  assert.equal(mine.length, 3 + (switchOn('GIRRU_STORE_P9') ? 2 : 0) + (switchOn('GIRRU_STORE_P9B') ? 1 : 0), 'memory jobs, once each');
   for (const name of ['weekly-summary', 'retention', 'trash']) {
     assert.equal((await one('SELECT COUNT(*) AS n FROM cron_jobs WHERE name = ?', m.memoryJobs.memoryJobName(name, ids.owner))).n, 1);
   }

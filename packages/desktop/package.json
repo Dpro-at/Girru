@@ -57,6 +57,15 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "../identity/src",
+        "to": "identity/src",
+        "filter": [
+          "google.cjs",
+          "memory-native-proof.cjs",
+          "memory-native-owner-wire.cjs"
+        ]
       }
     ],
     "asar": true,

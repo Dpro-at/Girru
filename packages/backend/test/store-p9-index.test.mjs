@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
+import { clearEnv } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const load = (rel) => import(pathToFileURL(join(backendDir, rel)).href);
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-store-p9-index-')));
@@ -29,7 +30,7 @@ process.env.NODE_ENV = 'test';
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_P3', 'GIRRU_STORE_P9', 'GIRRU_STORE_PILOT', 'GIRRU_RECALL_INDEX_MB']) delete process.env[k];
+for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_P3', 'GIRRU_STORE_P9', 'GIRRU_STORE_PILOT', 'GIRRU_RECALL_INDEX_MB']) clearEnv(k);
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
@@ -77,12 +78,12 @@ const OPEN = D.selectDrawers({ audience: 'owner', project: 'alpha' });
 const QUERIES = ['deploy server', 'invoice customer payment', 'قاعدة الدخول', 'النشر الخادم', 'backup نسخة', 'design meeting', 'nothing here at all', 'note 42'];
 const shape = (rs) => rs.map((r) => ({ id: r.memory.id, s: r.similarity, v: r.scoreBreakdown.vectorScore, k: r.scoreBreakdown.keywordScore, c: r.memory.content, d: r.memory.drawer }));
 async function both(q) {
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
   const off = shape(await storage.search(q));
   process.env.GIRRU_STORE_P9 = '1';
   const on = shape(await storage.search(q));
   const again = shape(await storage.search(q)); // from the index
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
   return { off, on, again };
 }
 
@@ -108,7 +109,7 @@ test('a row without a vector is embedded by a P9 search, as by the old one (16 a
     await storage.search({ query: 'x', userId: OWNER, drawers: [...OPEN, { kind: 'project', key: 'beta' }, { kind: 'people', key: 'sam' }], limit: 1 });
     await storage.search({ query: 'x', userId: OTHER, drawers: [...OPEN, { kind: 'project', key: 'beta' }, { kind: 'people', key: 'sam' }], limit: 1 });
   }
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM memories WHERE embedding IS NULL').get().n, 0);
 });
 
@@ -143,10 +144,10 @@ test('an edit, a delete and a replaced fact are seen by the next search', async 
   assert.equal((await storage.search(q)).length, 1);
   db.prepare("DELETE FROM memories WHERE id = 'm-0000'").run();
   assert.equal((await storage.search(q)).length, 0);
-  const off = (delete process.env.GIRRU_STORE_P9, shape(await storage.search({ ...q, query: 'deploy server' })));
+  const off = (process.env.GIRRU_STORE_P9 = '0', shape(await storage.search({ ...q, query: 'deploy server' })));
   process.env.GIRRU_STORE_P9 = '1';
   assert.deepEqual(shape(await storage.search({ ...q, query: 'deploy server' })), off);
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
 });
 
 test('forget drops the user index; a gone row leaves its drawer entry list on the next search', async () => {
@@ -163,7 +164,7 @@ test('forget drops the user index; a gone row leaves its drawer entry list on th
     VALUES ('v-p9', ?, ?, 'owner', '', 1, 1, 'create', 'fact', 'x', ?, ?)`).run(live.id, OWNER, OWNER, new Date().toISOString());
   assert.ok(await forgetMemory(OWNER, live.id, OWNER));
   assert.equal(recallIndexStats().users, 0);
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
 });
 
 test('past the size cap nothing more is kept and recall still matches', async () => {
@@ -172,7 +173,7 @@ test('past the size cap nothing more is kept and recall still matches', async ()
   forgetRecallIndex();
   const on = shape(await storage.search({ query: 'invoice customer', userId: OWNER, drawers: OPEN, limit: 10 }));
   assert.equal(recallIndexStats().entries, 0);
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
   delete process.env.GIRRU_RECALL_INDEX_MB;
   assert.deepEqual(on, shape(await storage.search({ query: 'invoice customer', userId: OWNER, drawers: OPEN, limit: 10 })));
 });

@@ -23,7 +23,7 @@ process.env.NODE_ENV = 'test';
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-delete process.env.GIRRU_STORE_P3;
+process.env.GIRRU_STORE_P3 = '0';
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 console.log = () => {}; console.info = () => {}; console.warn = () => {};
 
@@ -68,7 +68,7 @@ test('switch on: recall reads the packed vector and finds the same memory', asyn
   assert.ok(vec(fresh.id), 'a save writes the packed copy');
   const hits = await storage.search({ userId: OWNER, query: 'Alpha ships', drawers: [drawer], limit: 3 });
   assert.equal(hits[0].memory.id, fresh.id);
-  delete process.env.GIRRU_STORE_P3;
+  process.env.GIRRU_STORE_P3 = '0';
   const same = await storage.search({ userId: OWNER, query: 'Alpha ships', drawers: [drawer], limit: 3 });
   assert.deepEqual(same.map((h) => h.memory.id), hits.map((h) => h.memory.id), 'the same order with the switch off');
 });
@@ -76,4 +76,17 @@ test('switch on: recall reads the packed vector and finds the same memory', asyn
 test('switch off again: an edit clears the packed copy so it never goes stale', async () => {
   await updateVersioned(OWNER, older[1].id, { content: 'The office opens at ten.' }, OWNER, 'test');
   assert.equal(vec(older[1].id), null);
+});
+
+test('a re-embed (the memory helper) writes the new packed copy while on, and clears it while off', async () => {
+  const m = await save('Builds run on the second Mac.');
+  const next = Array.from({ length: 8 }, (_, i) => (i + 1) / 10);
+  process.env.GIRRU_STORE_P3 = '1';
+  assert.equal(await storage.setEmbedding(OWNER, m.id, 'Builds run on the second Mac.', next, 'test-model'), true);
+  const packed = V.unpackVector(vec(m.id));
+  assert.equal(packed.length, 8, 'the start-up backfill has already run, so the re-embed packs it');
+  packed.forEach((x, i) => assert.ok(Math.abs(x - next[i]) < 1e-6));
+  process.env.GIRRU_STORE_P3 = '0';
+  assert.equal(await storage.setEmbedding(OWNER, m.id, 'Builds run on the second Mac.', next, 'test-model'), true);
+  assert.equal(vec(m.id), null, 'off: no packed copy that could go stale');
 });

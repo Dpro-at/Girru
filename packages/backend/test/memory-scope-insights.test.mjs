@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // Memory backend gaps from the memory boards (MEM-GAPS-02):
 //  - "used in N replies" per memory (reply trace -> memory_recall_uses), and
 //    the drawers a reply did not load and why;
@@ -21,7 +22,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-const backendDir = process.cwd();
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-mem-insights-'));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });
 process.chdir(dir);
@@ -583,7 +584,7 @@ test('11. task runs: the owner\'s inherited access narrows the run (not policies
   assert.ok(!run.getContext().permissions.memoryRead.includes('experience'), 'the owner\'s company rule applies');
   const before = await createAgentToolsRegistry({ workspaceDir: dir, userId: 'ms-writer', agentId: 'ms-writer', sessionId: 'cron-t2' });
   assert.ok(before.getContext().permissions.memoryRead.includes('experience'), 'without the owner nothing narrowed it (the old behaviour)');
-  const src = readFileSync(join(backendDir, 'src/services/task-run-executor.ts'), 'utf8');
+  const src = readFileSync(join(backendDir, 'src/agent/execution/task-turn.ts'), 'utf8');
   assert.match(src, /accessOwnerId: accessOwner/, 'the executor passes the run owner');
   await access([{ op: 'clear_rule', scope: 'company', drawerKind: 'experience' }]);
 });

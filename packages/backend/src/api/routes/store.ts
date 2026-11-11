@@ -1,3 +1,5 @@
+import {storeHostApp,storeHostStatus,retireStoreHostApp} from '../../services/store-host-apps.js';
+import {q} from '../../repositories/sql-steps.js';
 import type {FastifyInstance} from 'fastify';
 import {authorizeActiveRole} from '../../auth/route-guards.js';
 import {isLoopbackPeer} from './terminal.js';
@@ -5,6 +7,7 @@ import {extensionsAvailable} from '../../plugins/extension-runner.js';
 import {readStore,localCatalogue,installFromStore,uninstallFromStore} from '../../services/store-catalogue.js';
 import {addJob} from '../../services/store-install.js';
 import {codeRuntimeStatus} from '../../services/code-runtime.js';
+import {genvrRuntimeStatus} from '../../services/genvr-runtime.js';
 import {addPrivateApp} from '../../services/private-apps.js';
 import {requestRestart} from '../restart-request.js';
 
@@ -27,6 +30,20 @@ export async function storeRoutes(app:FastifyInstance,options:{home?:string}={})
   if(!isLoopbackPeer(request)){reply.code(403).send({code:'not_loopback'});return false;}
   return true;
  };
+ app.get('/api/store/apps/:id/status',{config:{access:'owner'}},async(request,reply)=>{
+  if(!guard(request,reply))return;
+  const {id}=request.params as {id:string};if(!storeHostApp(id)||Object.keys(request.query as object).length)return reply.code(400).send({code:'invalid_app_status'});
+  reply.header('Cache-Control','no-store');return storeHostStatus(id);
+ });
+ app.post('/api/store/apps/:id/activation',{config:{access:'owner'},bodyLimit:1024},async(request,reply)=>{
+  if(!guard(request,reply))return;
+  const {id}=request.params as {id:string},value=request.body as {enabled?:unknown}|null;
+  if(!storeHostApp(id)||Object.keys(request.query as object).length||!value||Object.keys(value).length!==1||!Object.hasOwn(value,'enabled')||typeof value.enabled!=='boolean')return reply.code(400).send({code:'invalid_app_activation'});
+  const state=await storeHostStatus(id);if(!state.installed||value.enabled&&!state.ready)return reply.code(409).send({code:'app_not_ready'});
+  await q.run("INSERT INTO extension_configs(extension_id,enabled,updated_at) VALUES(?,?,CURRENT_TIMESTAMP) ON CONFLICT(extension_id) DO UPDATE SET enabled=excluded.enabled,updated_at=CURRENT_TIMESTAMP",id,value.enabled?1:0);
+  if(!value.enabled){if(id==='browser')await (await import('../../services/browser-runtime.js')).stopBrowserRuntime();if(id==='call-center')await (await import('../../services/call-center-runtime.js')).stopCallCenterRuntime();retireStoreHostApp(id);if(id==='call-center')(await import('../../services/call-center-runtime.js')).retireCallCenterRuntime();}
+  return {ok:true,enabled:value.enabled,restart:restart()?'auto':'manual'};
+ });
  app.get('/api/store',{config:{access:'owner'}},async(request,reply)=>{
   if(!guard(request,reply))return;
   if(Object.keys(request.query as object).length)return reply.code(400).send({code:'invalid_input'});
@@ -64,6 +81,12 @@ export async function storeRoutes(app:FastifyInstance,options:{home?:string}={})
   if(Object.keys(request.query as object).length)return reply.code(400).send({code:'invalid_input'});
   reply.header('Cache-Control','no-store');
   return codeRuntimeStatus();
+ });
+ app.get('/api/apps/genvr',{config:{access:'owner'}},async(request,reply)=>{
+  if(!guard(request,reply))return;
+  if(Object.keys(request.query as object).length)return reply.code(400).send({code:'invalid_input'});
+  reply.header('Cache-Control','no-store');
+  return genvrRuntimeStatus();
  });
  // APPS-06: how adding an app from the Girru Store goes (the window asks while it waits).
  app.get('/api/store/install/:job',{config:{access:'owner'}},async(request,reply)=>{

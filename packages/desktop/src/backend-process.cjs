@@ -28,8 +28,12 @@ const PASS_THROUGH = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_AL
   // Test runs of the app on a copy of the data: background work off, backups kept apart.
   'AGENT_PLAYER_BACKGROUND', 'GIRRU_BACKUPS_DIR',
   // A test copy of the Girru Store (the backend accepts only https, or http on 127.0.0.1).
-  'GIRRU_STORE_URL'];
+  'GIRRU_STORE_URL',
+  // The memory switches are on by default; `=0` turns one off (backend services/memory-switches.ts).
+  'GIRRU_STORE_P2', 'GIRRU_STORE_P2B', 'GIRRU_STORE_P3', 'GIRRU_STORE_P4', 'GIRRU_STORE_P5', 'GIRRU_STORE_P6',
+  'GIRRU_STORE_P7', 'GIRRU_STORE_P8', 'GIRRU_STORE_P9', 'GIRRU_STORE_P9B', 'GIRRU_MEMORY_HELPER', 'GIRRU_DOC_INDEX', 'GIRRU_REPO_TRUST'];
 
+const DESKTOP_VERSION = (() => { try { const v = require('../package.json').version; return typeof v === 'string' && /^[A-Za-z0-9.+_-]{1,40}$/.test(v) ? v : '1'; } catch { return '1'; } })();
 function backendEnv({ base = process.env, dataDir, token, allowedOrigin, extra = {} }) {
   const env = {};
   for (const key of PASS_THROUGH) if (typeof base[key] === 'string') env[key] = base[key];
@@ -42,6 +46,8 @@ function backendEnv({ base = process.env, dataDir, token, allowedOrigin, extra =
     AGENT_PLAYER_LAUNCH_TOKEN: token,
     ALLOWED_ORIGINS: allowedOrigin,
     FRONTEND_URL: allowedOrigin,
+    // The version this computer shows to your other computers (Dpro account device list).
+    GIRRU_APP_VERSION: DESKTOP_VERSION,
     ...extra,
   };
 }
@@ -58,7 +64,7 @@ function redactor(secrets) {
  * cwd, env (from backendEnv), secrets (values to redact), onLog(line), onExit({ code, signal }) after ready,
  * spawn (tests), readyTimeoutMs.
  */
-function startBackend({ node, args, cwd, env, secrets = [], onLog = () => {}, onExit = () => {}, spawn = nodeSpawn, readyTimeoutMs = READY_TIMEOUT_MS, signal }) {
+function startBackend({ node, args, cwd, env, secrets = [], onLog = () => {}, onExit = () => {}, spawn = nodeSpawn, readyTimeoutMs = READY_TIMEOUT_MS, signal, deviceCustody, memoryOwnerFactory, memoryControlBootstrap }) {
   const redact = redactor([env.AGENT_PLAYER_LAUNCH_TOKEN, ...secrets]);
   const tail = [];
   const log = line => {
@@ -79,9 +85,29 @@ function startBackend({ node, args, cwd, env, secrets = [], onLog = () => {}, on
     });
     stream.on('end', () => { if (rest) log(rest); rest = ''; });
   }
+  let custodyPending=0,custodyLastId=0;
+  child.on('message',async message=>{if(!deviceCustody||!message||message.type!=='device-custody-request')return;if(!Number.isSafeInteger(message.id)||message.id<=custodyLastId||custodyPending>=8||typeof message.operation!=='string'||JSON.stringify(message).length>270000)return;custodyLastId=message.id;custodyPending++;try{const result=await deviceCustody(message.operation,message.input);if(child.connected)child.send({type:'device-custody-response',id:message.id,result});}catch(error){if(child.connected)child.send({type:'device-custody-response',id:message.id,error:/^device_[a-z_]+$/.test(error?.message??'')?error.message:'device_custody_refused'});}finally{custodyPending--;}});
   let exited = false;
   let timedOut = false;
   const exitedPromise = new Promise(resolve => child.once('exit', (code, signal) => { exited = true; resolve({ code, signal }); }));
+  let controlReady=false;
+  child.on('message',message=>{if(message?.type!=='memory-control-ready')return;if(controlReady||message.v!==1||Object.keys(message).sort().join()!=='type,v'||typeof memoryControlBootstrap!=='function'){child.kill();return;}controlReady=true;void Promise.resolve().then(()=>memoryControlBootstrap()).then(plan=>{if(!child.connected||exited)throw new Error('memory_control_bootstrap_unavailable');child.send({v:1,type:'memory-control-bootstrap',plan});}).catch(()=>child.kill());});
+  let memoryOwner=null,ownerReady=false;
+  const ownerBinding={launchId:newLaunchToken(),epoch:newLaunchToken()};
+  if(memoryOwnerFactory!==undefined){
+    if(typeof memoryOwnerFactory!=='function'){child.kill();throw new Error('memory_owner_channel_unavailable');}
+    memoryOwner=memoryOwnerFactory({binding:ownerBinding,send:message=>new Promise((resolve,reject)=>{if(!child.connected)return reject(new Error('memory_owner_channel_unavailable'));child.send(message,error=>error?reject(error):resolve());}),childIsCurrent:()=>!exited&&child.connected,stopChild:()=>stopChild(child,()=>exited,exitedPromise,STOP_GRACE_MS)});
+    if(!memoryOwner||typeof memoryOwner.handleMessage!=='function'||typeof memoryOwner.close!=='function'){child.kill();throw new Error('memory_owner_channel_unavailable');}
+    child.on('message',message=>{
+      if(message?.type==='memory-owner-ready'){
+        if(ownerReady||message.v!==1||Object.keys(message).sort().join()!=='type,v'){void memoryOwner.close();return;}
+        ownerReady=true;child.send({v:1,type:'memory-owner-bootstrap',binding:ownerBinding});return;
+      }
+      if(['memory-owner-channel','memory-background-epoch-revoke'].includes(message?.type))void memoryOwner.handleMessage(message).catch(()=>memoryOwner.close());
+    });
+    child.once('exit',()=>{void memoryOwner.close();});
+  }
+
 
   return new Promise((resolve, reject) => {
     let ready = false, failed = false;

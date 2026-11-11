@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url';
 // S1.2 fix: the delegation origin of a task (who spawned it, its parent task)
 // is recorded server-side and never taken from model input. A task without a
 // recorded origin that the owner did not create through the API runs with at
@@ -12,7 +13,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-const backendDir = process.cwd();
+import { switchValueOn } from './helpers/switches.mjs';
+const backendDir = fileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-delegation-'));
 mkdirSync(join(dir, '.data'), { recursive: true });
 process.chdir(dir);
@@ -127,7 +129,7 @@ test('owner-created tasks run with the agent\'s own grants', async () => {
 });
 
 // STORE-MAP-01 P2 (AG1): an agent may read its own guides (guide_read) wherever it runs; it is prompt text on demand, not a grant.
-const P2_ON = /^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P2 ?? '');
+const P2_ON = switchValueOn(process.env.GIRRU_STORE_P2 ?? '');
 const noGuide = (list) => list.filter((n) => n !== 'guide_read');
 test('cron run: delegated task offers only the subset; recurring copy keeps origin and assignee', async () => {
   const parentTask = await quietly(() => orchestrator.createTask({ title: 'p', description: 'p', origin: 'owner' }));

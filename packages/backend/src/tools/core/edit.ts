@@ -1,3 +1,4 @@
+import {assertProtectedMemoryFileDescriptor,closeProtectedMemoryFileDescriptor} from '../../memory/encryption/protected-filesystem.js';
 import fs from 'node:fs';
 import { isUtf8 } from 'node:buffer';
 import { q } from '../../repositories/sql-steps.js';
@@ -9,7 +10,7 @@ import type { Tool, ToolExecutionContext } from '../types.js';
 export const MAX_EDIT_BYTES = 24_000;
 
 /** The existing file grants do not imply this separately granted project-edit capability. */
-async function projectRoot(context: ToolExecutionContext): Promise<string> {
+export async function projectRoot(context: ToolExecutionContext): Promise<string> {
   if (!context.userId || !context.sessionId || !context.fileReadRoot || context.toolPolicy) throw Error('An owner project chat is required');
   const user = await q.one<{ role: string; status: string }>('SELECT role,status FROM users WHERE id=?', context.userId);
   if (user?.role !== 'owner' || user.status !== 'active') throw Error('An active owner is required');
@@ -26,6 +27,7 @@ export function checkedFileEdit(root: string, input: unknown, before: unknown, a
   const { real, rel } = resolveReadPath(root, input);
   const fd = fs.openSync(real, fs.constants.O_RDWR | (fs.constants.O_NOFOLLOW ?? 0));
   try {
+    assertProtectedMemoryFileDescriptor(fd);
     const stat = fs.fstatSync(fd);
     if (!stat.isFile() || stat.nlink !== 1 || stat.size > MAX_EDIT_BYTES) throw Error('A small, regular, unlinked text file is required');
     const bytes = Buffer.alloc(stat.size + 1); let size = 0;
@@ -38,12 +40,12 @@ export function checkedFileEdit(root: string, input: unknown, before: unknown, a
     while (written < output.length) { const n = fs.writeSync(fd, output, written, output.length - written, written); if (!n) throw Error('The file could not be written completely'); written += n; }
     fs.ftruncateSync(fd, output.length); fs.fsyncSync(fd);
     return { path: rel, size: output.length };
-  } finally { fs.closeSync(fd); }
+  } finally { closeProtectedMemoryFileDescriptor(fd,()=>fs.closeSync(fd)); }
 }
 
 export const editTool: Tool = {
   name: 'edit',
-  description: 'Replace the exact current text of an existing file in the owner-selected chat project. Read it first and provide its complete before and after text (24 KB, 1000 lines maximum each). A changed file is refused. Ask/Plan mode waits for review before writing; Auto follows this separately granted capability. No paths outside the selected project or protected files.',
+  description: 'Replace the exact current text of an existing file in this chat\'s project folder. Read it first and provide its complete before and after text (24 KB, 1000 lines maximum each). A changed file is refused. The owner approves each edit unless the chat is in "Accept edits". No paths outside the folder or protected files.',
   input_schema: { type: 'object', properties: { path: { type: 'string' }, before: { type: 'string' }, after: { type: 'string' } }, required: ['path', 'before', 'after'] },
   async execute(params, context) {
     try {

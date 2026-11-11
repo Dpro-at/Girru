@@ -1,3 +1,4 @@
+import {invalidateEncryptedRunAdmissions} from '../encryption/run-invalidation.js';
 /**
  * Memory access by inheritance (MEM-SCALE-01).
  *
@@ -150,7 +151,7 @@ const RULES_SQL = `SELECT id, scope_kind, scope_id, agent_id, drawer_kind, read_
   ORDER BY created_at, id`;
 const rulesTable = (column: AccessColumn) => (isScopeColumn(column) ? 'memory_access_scope_rules' : 'memory_access_rules');
 
-function* loadSnapshotStep(ownerId: string): Step<AccessSnapshot> {
+export function* loadSnapshotStep(ownerId: string): Step<AccessSnapshot> {
   const version = Number((yield* one<{ version: number }>('SELECT version FROM memory_access_versions WHERE owner_id = ?', ownerId))?.version ?? 0);
   const rules = yield* all<RuleRow>(RULES_SQL, ownerId, ownerId);
   const trows = yield* all<TemplateRow>('SELECT id, name, memory_read, memory_write, scope_read, scope_write FROM memory_role_templates WHERE owner_id = ? ORDER BY norm_name, id', ownerId);
@@ -188,6 +189,7 @@ export function accessSnapshotSync(ownerId: string): AccessSnapshot {
 }
 
 export function invalidateAccess(ownerId?: string): void {
+  invalidateEncryptedRunAdmissions(ownerId);
   if (ownerId) cache.delete(ownerId); else cache.clear();
 }
 
@@ -264,6 +266,25 @@ function templateMask(snap: AccessSnapshot, agentId: string): number {
 /** The effective mask of an agent in a project, given its own permissions mask (CORE-PERMS-01). */
 export function effectiveMask(snap: AccessSnapshot, agentId: string, ownMask: number, project: string | null, now = Date.now()): number {
   return normalizeMask(chainMask(snap, project, agentId, now) & ownMask & templateMask(snap, agentId));
+}
+
+/** Read-only rule-grid projection, not an authorization decision. The UI may
+ * preview these scope rules, but execution additionally applies own grants,
+ * role templates and delegation narrowing through effectiveMask.
+ * Reuses exactly the runtime rule ordering, expiry and mask normalization.
+ */
+export function projectRuleCell(snap: AccessSnapshot, scopes: readonly string[], targetScope: string,
+  agentId: string | null, kind: AccessColumn, now = Date.now()): { read: boolean; write: boolean; own: boolean } {
+  let mask = ALL;
+  const ix = indexed(snap);
+  for (const scope of scopes) for (const r of ix.base.get(scope) ?? []) mask = applyRule(mask, r);
+  if (agentId) for (const scope of scopes) for (const r of ix.agent.get(agentId)?.get(scope) ?? []) {
+    if (!ended(r, now)) mask = applyRule(mask, r);
+  }
+  mask = normalizeMask(mask);
+  const own = (agentId ? ix.agent.get(agentId)?.get(targetScope) : ix.base.get(targetScope))
+    ?.some(r => r.drawer_kind === kind && (!agentId || !ended(r, now))) ?? false;
+  return { read: !!(mask & READ_BIT(kind)), write: !!(mask & WRITE_BIT(kind)), own };
 }
 
 /**

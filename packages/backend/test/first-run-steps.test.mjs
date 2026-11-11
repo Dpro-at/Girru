@@ -26,7 +26,7 @@ const { default: setupRoutes } = await import('../src/api/routes/setup.ts');
 const { authRoutes } = await import('../src/api/routes/auth.ts');
 const { firstRunRoutes } = await import('../src/api/routes/first-run.ts');
 const { issueSetupToken } = await import('../src/auth/setup-token.ts');
-const { aiTools, localModelStep, localModelCommand, recommendedLocal, welcomeText, firstRunState } = await import('../src/onboarding/first-run.ts');
+const { aiTools, localModelStep, localModelCommand, recommendedLocal, welcomeText, teamLine, firstRunState } = await import('../src/onboarding/first-run.ts');
 const { sql, one } = await import('../src/repositories/sql-steps.js');
 const { listConversationMessages } = await import('../src/repositories/chat-conversations.ts');
 
@@ -94,13 +94,57 @@ test('AI tools: installed and signed-in states come from the tools\' own files, 
   for (const name of ['claude', 'codex', 'npm']) { writeFileSync(join(bin, name), '#!/bin/sh\n'); chmodSync(join(bin, name), 0o755); }
   writeFileSync(join(home, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'x@example.test' } }));
   // The Gemini CLI entry as it is with GIRRU_STORE_P7 off (SUB1 below covers it on).
-  const p7 = process.env.GIRRU_STORE_P7; delete process.env.GIRRU_STORE_P7;
-  const tools = await aiTools({ home, platform: 'darwin', dirs: [bin] }).finally(() => { if (p7 !== undefined) process.env.GIRRU_STORE_P7 = p7; });
+  const p7 = process.env.GIRRU_STORE_P7; process.env.GIRRU_STORE_P7 = '0';
+  const asked = [];
+  const tools = await aiTools({ home, platform: 'darwin', dirs: [bin], keychain: async (service, h) => { asked.push([service, h]); return true; } }).finally(() => { if (p7 !== undefined) process.env.GIRRU_STORE_P7 = p7; });
+  assert.deepEqual(asked, [['Claude Code-credentials', home]], 'the keychain of this HOME is asked for the saved login by name only');
   const byId = Object.fromEntries(tools.map(t => [t.id, t]));
   assert.deepEqual([byId.claude.installed, byId.claude.signedIn, byId.claude.install], [true, true, null]);
   assert.deepEqual([byId.codex.installed, byId.codex.signedIn, byId.codex.signIn], [true, false, 'codex login']);
   assert.deepEqual([byId.gemini.installed, byId.gemini.install], [false, 'npm install -g @google/gemini-cli']);
   assert.ok(!JSON.stringify(tools).includes('x@example.test'), 'no account detail is returned');
+});
+
+test('Claude Code is not "signed in" when its login was not saved (account written, keychain item missing)', async () => {
+  // The test build: claude wrote oauthAccount to ~/.claude.json, then "Couldn't save your login" (a temp HOME has no login keychain).
+  const home = mkdtempSync(join(dir, 'home-unsaved-')), bin = join(home, 'bin');
+  mkdirSync(bin); writeFileSync(join(bin, 'claude'), '#!/bin/sh\n'); chmodSync(join(bin, 'claude'), 0o755);
+  writeFileSync(join(home, '.claude.json'), JSON.stringify({ userID: 'u', oauthAccount: { emailAddress: 'x@example.test' } }));
+  const claude = async (opts) => (await aiTools({ home, dirs: [bin], ...opts })).find(t => t.id === 'claude');
+  assert.equal((await claude({ platform: 'darwin', keychain: async () => false })).signedIn, false, 'macOS: no keychain item = not signed in');
+  assert.equal((await claude({ platform: 'darwin', keychain: async () => true })).signedIn, true, 'macOS: saved in the keychain = signed in');
+  assert.equal((await claude({ platform: 'linux', keychain: async () => true })).signedIn, false, 'Linux/Windows: the account alone is not a saved login');
+  mkdirSync(join(home, '.claude')); writeFileSync(join(home, '.claude', '.credentials.json'), '{}');
+  assert.equal((await claude({ platform: 'linux', keychain: async () => false })).signedIn, true, 'the credentials file is a saved login');
+  rmSync(join(home, '.claude', '.credentials.json')); rmSync(join(home, '.claude.json'));
+  let asked = false;
+  assert.equal((await claude({ platform: 'darwin', keychain: async () => { asked = true; return true; } })).signedIn, false, 'never started: not signed in');
+  assert.equal(asked, false, 'the keychain is only asked once Claude has an account');
+});
+
+test('Claude Code: what the CLI itself reports (auth status) decides first; files only when it cannot answer', async () => {
+  const home = mkdtempSync(join(dir, 'home-status-')), bin = join(home, 'bin');
+  mkdirSync(bin); writeFileSync(join(bin, 'claude'), '#!/bin/sh\n'); chmodSync(join(bin, 'claude'), 0o755);
+  const claude = async (opts) => (await aiTools({ home, platform: 'darwin', dirs: [bin], ...opts })).find(t => t.id === 'claude');
+  const asked = [];
+  // Signed in with the real login keychain, nothing under HOME at all (Mohamed's case): the CLI says yes.
+  assert.equal((await claude({ claudeStatus: async (b, h) => { asked.push([b, h]); return true; }, keychain: async () => false })).signedIn, true);
+  assert.deepEqual(asked, [[join(bin, 'claude'), home]], 'the found claude binary is asked, with this HOME');
+  writeFileSync(join(home, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'x@example.test' } }));
+  assert.equal((await claude({ claudeStatus: async () => false, keychain: async () => true })).signedIn, false, 'the CLI saying no wins over files');
+  assert.equal((await claude({ claudeStatus: async () => null, keychain: async () => true })).signedIn, true, 'no answer: the saved-login check decides');
+});
+
+test('claudeAuthStatus reads only loggedIn from the real CLI output', async () => {
+  const { claudeAuthStatus } = await import('../src/onboarding/first-run.ts');
+  const b = join(dir, 'auth'); const home = mkdtempSync(join(dir, 'home-cli-'));
+  const fixture = (text, code = 0) => writeFileSync(b, `if (JSON.stringify(process.argv.slice(2)) !== '["status","--json"]' || process.env.HOME !== ${JSON.stringify(home)}) process.exit(2); process.stdout.write(${JSON.stringify(text)}); process.exit(${code});`);
+  fixture('{"loggedIn":true,"email":"x@example.test"}');
+  assert.equal(await claudeAuthStatus(process.execPath, home), true);
+  fixture('{"loggedIn":false}', 1);
+  assert.equal(await claudeAuthStatus(process.execPath, home), false, 'exit 1 with loggedIn false still answers false');
+  fixture('nope');
+  assert.equal(await claudeAuthStatus(process.execPath, home), null, 'an older CLI without the command gives no answer');
 });
 
 test('SUB1 (GIRRU_STORE_P7): the Google app is Antigravity (agy), signed in by its cached account', async () => {
@@ -122,7 +166,7 @@ test('SUB1 (GIRRU_STORE_P7): the Google app is Antigravity (agy), signed in by i
     g = tools.find(t => t.id === 'gemini');
     assert.deepEqual([g.installed, g.signedIn, g.install], [true, true, null]);
     assert.ok(!JSON.stringify(tools).includes('x@example.test'), 'no account detail is returned');
-  } finally { delete process.env.GIRRU_STORE_P7; }
+  } finally { process.env.GIRRU_STORE_P7 = '0'; }
   assert.equal((await aiTools({ home, platform: 'darwin', dirs: [bin] })).find(t => t.id === 'gemini').name, 'Gemini CLI', 'P7 off: unchanged');
   process.env.GIRRU_STORE_P7 = p7Before ?? ''; if (p7Before === undefined) delete process.env.GIRRU_STORE_P7;
 });
@@ -159,6 +203,14 @@ test('finish opens one Welcome chat with the Main agent\'s greeting and the firs
   assert.match(message.content, /Hi Mohamed/);
   assert.match(message.content, /Where do you want to talk to me\?/);
   assert.ok(JSON.stringify(message.parts).includes('Telegram'));
+});
+
+test('the team summary counts exactly the agents hired (3 picked: no "more"; 250: six names and 244 more)', () => {
+  const team = n => Array.from({ length: n }, (_, i) => ({ name: `A${i}`, department: 'marketing' }));
+  assert.doesNotMatch(teamLine(team(3)), /more/);
+  assert.equal((teamLine(team(3)).match(/\*\*A\d\*\*/g) ?? []).length, 3);
+  assert.match(teamLine(team(250)), / and 244 more$/, 'the "244 more" seen in the test build means 250 agents were hired');
+  assert.match(teamLine(team(7)), / and 1 more$/);
 });
 
 test('welcome text names the team in plain words', () => {

@@ -16,8 +16,9 @@ export function ChannelCatalogSelect({ channels, selected, busy, onSelect }: { c
   return <label className="field"><span>Integration ({channels.length})</span><select aria-label="Agent Connect integration" value={selected} disabled={busy} onChange={e => onSelect(e.target.value)}><option value="">Choose an integration</option>{channels.map(c => <option key={c.id} value={c.id}>{c.label}{c.configured ? ' · configured' : ''}</option>)}</select></label>;
 }
 
-export function AgentConnectSettings({ client }: { client: SessionClient }) {
+export function AgentConnectSettings({ client,onOpenStore }: { client: SessionClient;onOpenStore?:()=>void }) {
   const owner = useSyncExternalStore(client.subscribe, client.getSnapshot, client.getSnapshot).user?.role === 'owner';
+  const [app,setApp]=useState<{installed:boolean;ready:boolean}|null>(null);
   const [channels, setChannels] = useState<ChannelEntry[]>([]), [selected, select] = useState('');
   const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading');
   const [configurable, setConfigurable] = useState(false), [busy, setBusy] = useState(false), [notice, setNotice] = useState('');
@@ -29,9 +30,9 @@ export function AgentConnectSettings({ client }: { client: SessionClient }) {
   useEffect(() => {
     if (!owner) return; let disposed = false;
     void client.request({ method: 'GET', path: `${AGENT_CONNECT_PATH}/catalog` } as never).then(r => {
-      if (disposed) return; const body = r.body as { channels?: ChannelEntry[]; configurable?: boolean };
+      if (disposed) return; const body = r.body as { channels?: ChannelEntry[]; configurable?: boolean;app?:{installed:boolean;ready:boolean} };
       if (r.status !== 200 || !Array.isArray(body?.channels)) { setPhase('error'); return; }
-      setChannels(body.channels); setConfigurable(body.configurable === true); setPhase('ready');
+      setApp(body.app??null);setChannels(body.channels); setConfigurable(body.configurable === true); setPhase('ready');
     }).catch(() => { if (!disposed) setPhase('error'); });
     return () => { disposed = true; };
   }, [client, owner]);
@@ -76,20 +77,21 @@ export function AgentConnectSettings({ client }: { client: SessionClient }) {
     let disposed = false;
     const timer = setInterval(() => {
       void client.request({ method: 'GET', path: `${AGENT_CONNECT_PATH}/catalog` } as never).then(r => {
-        const body = r.body as { channels?: ChannelEntry[] };
-        if (!disposed && r.status === 200 && Array.isArray(body?.channels)) setChannels(body.channels);
+        const body = r.body as { channels?: ChannelEntry[];configurable?:boolean;app?:{installed:boolean;ready:boolean} };
+        if (!disposed && r.status === 200 && Array.isArray(body?.channels)){setChannels(body.channels);setApp(body.app??null);setConfigurable(body.configurable===true);}
       }).catch(() => {});
     }, 5000);
     return () => { disposed = true; clearInterval(timer); };
   }, [client, owner]);
   if (!owner) return null;
+  if(phase==='ready'&&app&&!app.ready)return <section aria-label="Channels" className="channels-settings apps-channels"><div className="channel-no-selection"><UiIcon name="message" size={28}/><h3>{app.installed?'Restart Girru to finish':'Add Agent Connect'}</h3><p>{app.installed?'Your channel settings are kept. Restart Girru to load the app.':'Your messaging channels come from Agent Connect. Your existing settings and history are kept.'}</p>{onOpenStore&&<button className="primary" onClick={onOpenStore}>{app.installed?'Open in Store':'Get Agent Connect'}</button>}</div></section>;
   const line = (c: ChannelEntry) => !c.configured ? 'Not set up' : c.state === 'restart_required' ? 'Restart Girru to finish' : c.enabled ? 'On' : 'Off · set up';
   // The live connection, only while a channel is on (the old header showed it too).
   const liveWords: Record<string, string> = { connected: 'Connected', connecting: 'Connecting…', reconnecting: 'Reconnecting…', error: 'Connection error', disconnected: 'Disconnected' };
   const liveState = (c: ChannelEntry) => c.enabled && liveWords[c.state as string] ? ` · ${liveWords[c.state as string]}` : '';
   const dotState = (c: ChannelEntry) => c.enabled ? 'ready' : c.configured ? 'warn' : 'off';
   const keyDone = !!current && (current.hasSecrets || !current.requiredEnv.length), whoDone = !!current && (current.allowedUsers.length > 0 || current.allowedChannels.length > 0);
-  return <section aria-label="Channels" className="channels-settings apps-channels"><div className="channel-workspace"><div className="channel-service-list"><p className="apps-help">Where your agents can be reached.</p><label className="channel-service-search"><UiIcon name="search" size={14}/><input type="search" aria-label="Find messaging service" placeholder="Find a service" value={query} onChange={e=>setQuery(e.target.value)}/></label>{phase==='loading'?<p role="status">Reading services…</p>:phase==='error'?<p role="alert">Services could not be loaded. Open Channels again to retry.</p>:<div role="listbox" aria-label="Messaging services">{channels.filter(c=>c.label.toLowerCase().includes(query.toLowerCase())).map(c=><button type="button" role="option" aria-selected={selected===c.id} disabled={busy} key={c.id} onClick={()=>select(c.id)}><span className="channel-tile" aria-hidden="true"><ChannelMark id={c.id} size={17}/></span><span><strong>{c.label}</strong><small>{c.runtime==='node'?'Built in':'Needs Python'}</small></span><span className="st-state" data-state={dotState(c)}><i aria-hidden="true"/>{line(c)}</span></button>)}</div>}</div><div className="channel-detail-pane"><div className="channel-select-fallback"><ChannelCatalogSelect channels={channels} selected={selected} busy={busy} onSelect={select}/></div>
+  return <section aria-label="Channels" className="channels-settings apps-channels"><div className="channel-workspace"><div className="channel-service-list"><p className="apps-help">Where your agents can be reached.</p><label className="channel-service-search"><UiIcon name="search" size={14}/><input type="search" aria-label="Find messaging service" placeholder="Find a service" value={query} onChange={e=>setQuery(e.target.value)}/></label>{phase==='loading'?<p role="status">Reading services…</p>:phase==='error'?<p role="alert">Services could not be loaded. Open Channels again to retry.</p>:<div role="listbox" aria-label="Messaging services">{channels.filter(c=>c.label.toLowerCase().includes(query.toLowerCase())).map(c=><button type="button" role="option" aria-selected={selected===c.id} disabled={busy} key={c.id} onClick={()=>select(c.id)}><span className="channel-tile" aria-hidden="true"><ChannelMark id={c.id} size={17}/></span><span><strong>{c.label}</strong><small>{c.runtime==='node'?'Ready in Agent Connect':'Needs Python'}</small></span><span className="st-state" data-state={dotState(c)}><i aria-hidden="true"/>{line(c)}</span></button>)}</div>}</div><div className="channel-detail-pane"><div className="channel-select-fallback"><ChannelCatalogSelect channels={channels} selected={selected} busy={busy} onSelect={select}/></div>
  {notice&&<p role="status" className="preference-notice">{notice}</p>}{!configurable&&phase==='ready'&&<p role="status">Channels can only be set up in a SQLite workspace.</p>}
  {current?<form className="channel-configuration" aria-label={`${current.label} configuration`} onSubmit={e=>{e.preventDefault();void save();}}><header className="channel-service-head"><span className="channel-tile" aria-hidden="true"><ChannelMark id={current.id} size={22}/></span><div><h3>{current.label}</h3><p>{line(current)}{liveState(current)}{current.configured?'':` · set up ${[keyDone,whoDone].filter(Boolean).length} of 3`}</p></div><button type="button" className={current.enabled?undefined:'primary'} title={`${current.enabled?'Turn off':'Turn on'} ${current.label}`} aria-label={`${current.enabled?'Disable':'Enable'} ${current.label}`} disabled={busy||!configurable||(!current.configured&&!current.enabled)} onClick={()=>void activate(current)}><UiIcon name="power" size={15}/>{current.enabled?'Turn off':'Turn on'}</button></header>
  <ol className="channel-steps">

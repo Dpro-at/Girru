@@ -1,3 +1,5 @@
+import type { OfficePayload } from './office-content';
+import { mediaKind } from './file-content';
 import type { SessionClient } from './session';
 import { panePath } from './conversation-contract.js';
 import type { WireChanges, WireDiff, WireFile, WireTree } from './conversation-contract.js';
@@ -8,16 +10,21 @@ export type DiffView = 'unified' | 'split';
 export const DIFF_VIEW_PATH = '/api/chat/panel';
 /** Below this pane width Side by side shows as one column; the choice is kept. */
 export const SPLIT_MIN_WIDTH = 520;
+/** CHAT-CONTENT-01: a PDF's pages as text (or why it cannot be shown). */
+export type WireMedia = { path: string; size: number; mime?: string; base64?: string; reason?: string };
+export type WirePdf = { path: string; pageCount: number; pages: { page: number; text: string }[] } | { path: string; reason: string };
 type Load<T> = { phase: 'loading' } | { phase: 'ready'; data: T } | { phase: 'error'; message: string };
 export type PanesState = Readonly<{
   projectId: string | null;
+  reply?:{conversationId:string;messageId:string};
+  focusPath?:string;
   changes?: Load<WireChanges>;
   /** Open diffs, by file path. */
   diffs: Readonly<Record<string, Load<WireDiff>>>;
   /** Loaded folder levels, by relative path ("" is the project folder). */
   tree: Readonly<Record<string, Load<WireTree>>>;
   expanded: readonly string[];
-  file?: { path: string; load: Load<WireFile> };
+  file?: { path: string; load: Load<WireFile>; pdf?: Load<WirePdf>; media?: Load<WireMedia>; office?: Load<OfficePayload>; diff?: Load<WireDiff>; mark?: string };
   diffView: DiffView;
 }>;
 
@@ -60,17 +67,22 @@ export class PanesController {
   private current(id: string) { return !this.#disposed && this.#state.projectId === id; }
 
   async loadChanges() {
-    const id = this.#state.projectId; if (!id) return;
+    const id = this.#state.projectId,reply=this.#state.reply;if(!id&&!reply)return;
     this.publish({ changes: { phase: 'loading' } });
-    const r = await this.get<WireChanges>(`/api/chat/projects/${id}/changes`);
-    if (this.current(id)) this.publish({ changes: r, diffs: {} });
+    const r = await this.get<WireChanges>(reply?`/api/chat/conversations/${reply.conversationId}/messages/${reply.messageId}/changes`:`/api/chat/projects/${id}/changes`);
+    if(!this.#disposed&&this.#state.projectId===id&&this.#state.reply===reply)this.publish({ changes: r, diffs: {} });
+  }
+  clearReply(){if(this.#state.reply)this.publish({reply:undefined,focusPath:undefined,changes:undefined,diffs:{}});}
+  async openReplyDiff(conversationId:string,messageId:string,path:string,changes:WireChanges){
+    if(this.#disposed||!changes.changes.some(file=>file.path===path))return;
+    this.publish({reply:{conversationId,messageId},focusPath:path,changes:{phase:'ready',data:changes},diffs:{}});await this.toggleDiff(path);
   }
   async toggleDiff(path: string) {
-    const id = this.#state.projectId; if (!id) return;
+    const id = this.#state.projectId,reply=this.#state.reply;if(!id&&!reply)return;
     if (this.#state.diffs[path]) { const { [path]: _gone, ...rest } = this.#state.diffs; this.publish({ diffs: rest }); return; }
-    this.publish({ diffs: { ...this.#state.diffs, [path]: { phase: 'loading' } } });
-    const r = await this.get<WireDiff>(panePath(id, 'diff', path));
-    if (this.current(id) && this.#state.diffs[path]) this.publish({ diffs: { ...this.#state.diffs, [path]: r } });
+    const loading={phase:'loading' as const};this.publish({ diffs: { ...this.#state.diffs, [path]: loading } });
+    const r = await this.get<WireDiff>(reply?`/api/chat/conversations/${reply.conversationId}/messages/${reply.messageId}/diff?path=${encodeURIComponent(path)}`:panePath(id!, 'diff', path));
+    if (!this.#disposed&&this.#state.projectId===id&&this.#state.reply===reply&&this.#state.diffs[path]===loading) this.publish({ diffs: { ...this.#state.diffs, [path]: r } });
   }
   async loadFolder(rel = '') {
     const id = this.#state.projectId; if (!id) return;
@@ -83,11 +95,35 @@ export class PanesController {
     this.publish({ expanded: open ? this.#state.expanded.filter(x => x !== rel) : [...this.#state.expanded, rel] });
     if (!open && !this.#state.tree[rel]) await this.loadFolder(rel);
   }
-  async openFile(path: string) {
+  /** Opens a file in the viewer; a PDF opens as its pages, `mark` is text to find and mark (what the agent quoted). */
+  async openFile(path: string, options: { mark?: string } = {}) {
     const id = this.#state.projectId; if (!id) return;
-    this.publish({ file: { path, load: { phase: 'loading' } } });
+    const mark = options.mark?.trim().slice(0, 200) || undefined;
+    this.publish({ file: { path, load: { phase: 'loading' }, ...(mark ? { mark } : {}) } });
+    if (/\.(docx|xlsx|pptx)$/i.test(path)) {
+      const office = await this.get<OfficePayload>(panePath(id, 'office', path));
+      if (this.current(id) && this.#state.file?.path === path) this.publish({ file: { ...this.#state.file, load: { phase: 'ready', data: { path, text: null, size: 0, binary: true, hidden: office.phase === 'ready' && office.data.reason === 'hidden', truncated: false } }, office } });
+      return;
+    }
+    if (mediaKind(path)) {
+      const media = await this.get<WireMedia>(panePath(id, 'media', path));
+      if (this.current(id) && this.#state.file?.path === path) this.publish({ file: { ...this.#state.file, load: { phase: 'ready', data: { path, text: null, size: media.phase === 'ready' ? media.data.size : 0, binary: true, hidden: media.phase === 'ready' && media.data.reason === 'hidden', truncated: false } }, media } });
+      return;
+    }
+    if (/\.pdf$/i.test(path)) {
+      const pdf = await this.get<WirePdf>(panePath(id, 'pdf', path));
+      if (this.current(id) && this.#state.file?.path === path) this.publish({ file: { ...this.#state.file, load: { phase: 'ready', data: { path, text: null, size: 0, binary: true, hidden: false, truncated: false } as WireFile }, pdf } });
+      return;
+    }
     const r = await this.get<WireFile>(panePath(id, 'file', path));
-    if (this.current(id) && this.#state.file?.path === path) this.publish({ file: { path, load: r } });
+    if (this.current(id) && this.#state.file?.path === path) this.publish({ file: { ...this.#state.file, load: r } });
+  }
+  /** The open file's changes (the viewer's Changes tab), from the same diff as the Changes pane. */
+  async loadFileDiff() {
+    const id = this.#state.projectId, f = this.#state.file; if (!id || !f || f.diff) return;
+    this.publish({ file: { ...f, diff: { phase: 'loading' } } });
+    const r = await this.get<WireDiff>(panePath(id, 'diff', f.path));
+    if (this.current(id) && this.#state.file?.path === f.path) this.publish({ file: { ...this.#state.file, diff: r } });
   }
   closeFile() { this.publish({ file: undefined }); }
   /** Reloads what is open: the change list, the root folder and open folders. */

@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
+import { clearEnv } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const load = (rel) => import(pathToFileURL(join(backendDir, rel)).href);
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-store-p6-screens-')));
@@ -34,7 +35,7 @@ process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
 const SWITCHES = ['GIRRU_STORE_P2', 'GIRRU_STORE_P3', 'GIRRU_STORE_P4', 'GIRRU_STORE_P5', 'GIRRU_STORE_P6', 'GIRRU_STORE_P7', 'GIRRU_STORE_P8', 'GIRRU_STORE_P9', 'GIRRU_STORE_P9B', 'GIRRU_STORE_PILOT'];
-for (const k of [...SWITCHES, 'CODEX_HOME', 'DEFAULT_MODEL']) delete process.env[k];
+for (const k of [...SWITCHES, 'CODEX_HOME', 'DEFAULT_MODEL']) clearEnv(k);
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
@@ -88,8 +89,8 @@ await offApp.ready();
 process.env.GIRRU_STORE_P6 = '1';
 const onApp = await buildServer();
 await onApp.ready();
-delete process.env.GIRRU_STORE_P6;
-const p6 = async (fn) => { process.env.GIRRU_STORE_P6 = '1'; try { return await fn(); } finally { delete process.env.GIRRU_STORE_P6; } };
+process.env.GIRRU_STORE_P6 = '0';
+const p6 = async (fn) => { process.env.GIRRU_STORE_P6 = '1'; try { return await fn(); } finally { process.env.GIRRU_STORE_P6 = '0'; } };
 const auth = { authorization: `Bearer ${generateToken(OWNER, 1)}` };
 const call = (app, method, url, payload) => app.inject({ method, url, headers: auth, ...(payload !== undefined ? { payload } : {}) });
 const on = (method, url, payload) => call(onApp, method, url, payload);
@@ -229,7 +230,7 @@ test('with the one Girru section (P2) and the safe file writer (P7): the same fl
       assert.equal((await on('POST', `/api/memory/project-files/${gamma.project.id}/undo`, { undo: u.undo })).statusCode, 200);
       assert.match(readFileSync(f, 'utf8'), /Gamma note/);
     });
-  } finally { for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_P7']) delete process.env[k]; }
+  } finally { for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_P7']) clearEnv(k); }
 });
 
 test('the brief file: changed in the folder, Use Girru keeps the text as a proposal and no outside copy', async () => {

@@ -5,17 +5,22 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { bundleProblems, codeRuntimeState, CODE_FILES } = require('../scripts/check-bundle-inputs.cjs');
-const { requireGenVR } = require('../scripts/stage-payload.cjs');
 
 const pin = { VERSION: '9.9.9-test', SHA256: 'a'.repeat(64) };
 const write = (file, text) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text); };
 
-test('an installer build stops without GenVR; Code is optional but never half-staged', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'girru-bundle-inputs-'));
+test('a core installer builds without runtimes; optional developer copies must be complete', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'girru-bundle-inputs-'));
+  const root = path.join(base, 'desktop');
+  fs.mkdirSync(root);
+  const identity = path.join(base, 'identity', 'src', 'google.cjs');
+  write(identity, 'module.exports = {};');
+  const proofCodec = path.join(base, 'identity', 'src', 'memory-native-proof.cjs');
+  write(proofCodec, 'module.exports = {};');
+  write(path.join(base, 'identity', 'src', 'memory-native-owner-wire.cjs'), 'module.exports = {};');
   try {
     const problems = bundleProblems(root, pin);
-    assert.equal(problems.length, 1);
-    assert.match(problems[0], /no GenVR SDK/);
+    assert.deepEqual(problems, []);
     assert.equal(codeRuntimeState(root), 'none');
 
     write(path.join(root, 'payload', 'core-ui', 'vendor', 'genvr', 'manifest.json'), JSON.stringify({ version: '0.0.1', archiveSha256: pin.SHA256 }));
@@ -33,18 +38,10 @@ test('an installer build stops without GenVR; Code is optional but never half-st
     write(path.join(root, 'nabu-runtime', 'nabu', 'runtime.json'), JSON.stringify({ protocolVersion: 1, entry: 'dpro/editor-runtime.mjs' }));
     assert.deepEqual(bundleProblems(root, pin), []);
     assert.equal(codeRuntimeState(root), 'ready');
-  } finally { fs.rmSync(root, { recursive: true, force: true }); }
-});
-
-test('staging refuses to build the payload without the pinned GenVR SDK', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'girru-genvr-stage-'));
-  try {
-    const { VERSION, SHA256 } = require('../../core-ui/scripts/prepare-genvr.cjs');
-    write(path.join(root, 'scripts', 'prepare-genvr.cjs'), `module.exports=${JSON.stringify({ VERSION, SHA256 })};`);
-    assert.throws(() => requireGenVR(root), /GenVR SDK .* is not prepared/);
-    write(path.join(root, 'vendor', 'genvr', 'manifest.json'), JSON.stringify({ version: VERSION, archiveSha256: 'b'.repeat(64) }));
-    assert.throws(() => requireGenVR(root), /is not prepared/);
-    write(path.join(root, 'vendor', 'genvr', 'manifest.json'), JSON.stringify({ version: VERSION, archiveSha256: SHA256 }));
-    assert.equal(requireGenVR(root), path.join(root, 'vendor', 'genvr'));
-  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    fs.unlinkSync(proofCodec);
+    assert.match(bundleProblems(root, pin)[0], /memory proof codec is missing/);
+    write(proofCodec, 'module.exports = {};');
+    fs.unlinkSync(identity);
+    assert.match(bundleProblems(root, pin)[0], /identity verifier is missing/);
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
 });

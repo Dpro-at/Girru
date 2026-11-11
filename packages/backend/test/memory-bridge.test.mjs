@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // MEM-BRIDGE-01: Girru memory is the one brain for Claude Code, Codex, Gemini CLI and Antigravity.
 //  - a fact approved in Girru appears in the managed AGENTS.md brief and in the MCP read tools;
 //  - owner text outside Girru's markers stays byte for byte; no secret reaches any written file;
@@ -14,7 +15,8 @@ import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-const backendDir = process.cwd();
+import { switchValueOn } from './helpers/switches.mjs';
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-bridge-')));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });
 process.chdir(dir);
@@ -56,7 +58,7 @@ const { setBridgeEnv } = await import(join(backendDir, 'src/memory/bridge/servic
 const { syncMemoryBridge } = await import(join(backendDir, 'src/memory/bridge/sync.ts'));
 const { MARK_START: OLD_START, MARK_END: OLD_END, GIRRU_START, GIRRU_END } = await import(join(backendDir, 'src/memory/bridge/managed-files.ts'));
 // P2: the one Girru section replaces the dpro-memory markers.
-const P2 = /^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P2 ?? '');
+const P2 = switchValueOn(process.env.GIRRU_STORE_P2 ?? '');
 const [MARK_START, MARK_END] = P2 ? [GIRRU_START, GIRRU_END] : [OLD_START, OLD_END];
 const { claudeProjectDir } = await import(join(backendDir, 'src/memory/bridge/clients.ts'));
 const { memoryBridgeTool, memoryBridgeApplyTool } = await import(join(backendDir, 'src/tools/memory/bridge.ts'));
@@ -83,7 +85,7 @@ const injectFetch = async (url, init = {}) => {
 };
 // STORE-MAP-01 P6 (SEC2-1): with the switch on, a coding app reaches a project only with the session
 // capability Girru's launcher gives it. Here the owner allowed company facts for the project.
-const P6 = /^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P6 ?? '');
+const P6 = switchValueOn(process.env.GIRRU_STORE_P6 ?? '');
 const { launchCapability } = await import(join(backendDir, 'src/memory/bridge/capability.ts'));
 const capabilityFor = async (client, cwd) =>
   P6 && (cwd === folder || cwd.startsWith(folder + sep)) ? (await launchCapability(OWNER, project.id, client, true)).token : null;
@@ -394,8 +396,10 @@ test('the real stdio server starts the way a CLI starts it, lists its tools and 
   const tools = (await c.listTools()).tools.map((t) => t.name).sort();
   assert.deepEqual(tools, ['handoff_write', 'latest_handoff', 'memory_propose', 'memory_search', 'pinned_facts', 'project_brief', 'project_design']);
   const r = await c.callTool({ name: 'project_brief', arguments: {} });
-  assert.ok(r.isError);
-  assert.match(r.content[0].text, /Cannot reach Girru/);
+  // The CLI's process starts with the memory switches at their defaults (on): with P9 a read
+  // while Girru is away answers that memory is offline instead of failing (handoff-queue.ts).
+  assert.ok(!r.isError);
+  assert.match(r.content[0].text, /Girru memory is offline right now/);
   await c.close();
 });
 

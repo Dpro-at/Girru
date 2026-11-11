@@ -1,3 +1,4 @@
+import { switchValueOn } from './helpers/switches.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {randomBytes} from 'node:crypto';
 const root=await fs.mkdtemp(path.join(os.tmpdir(),'department-board-'));process.env.AGENT_PLAYER_DATA_DIR=root;process.env.DATABASE_PATH=path.join(root,'test.db');process.env.JWT_SECRET=randomBytes(64).toString('hex');process.env.ENCRYPTION_KEY=randomBytes(32).toString('hex');
 const {getDatabase,closeDatabase}=await import('../src/db/database.ts');const db=getDatabase();await db.initialize();
@@ -10,7 +11,7 @@ const app=Fastify();registerAuthGate(app);await app.register(taskBoardRoutes);aw
 const call=(method,url,payload,who='dept-owner')=>app.inject({method,url,headers:{authorization:'Bearer '+generateToken(who,1)},...(payload===undefined?{}:{payload})});
 const list=async()=> (await call('GET','/api/boards')).json().boards;
 let education,hr,company,task,shared;
-const p3=/^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P3??'');
+const p3=switchValueOn(process.env.GIRRU_STORE_P3??'');
 test.after(async()=>{await app.close();closeDatabase();await fs.rm(root,{recursive:true,force:true});});
 test('owner-only idempotent sync provisions actual departments and adopts existing work',async()=>{
  assert.equal((await app.inject({method:'POST',url:'/api/boards/sync-departments',payload:{}})).statusCode,401);

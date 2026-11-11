@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
+import { clearEnv } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-store-p3-dep-')));
 mkdirSync(join(dir, '.data'), { recursive: true });
@@ -26,7 +27,7 @@ process.env.DATABASE_PATH = join(dir, '.data', 'agent-player.db');
 process.env.JWT_SECRET = randomBytes(64).toString('hex'); // throwaway, test only
 process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway, test only
 process.env.NODE_ENV = 'test';
-for (const k of ['GIRRU_STORE_P3', 'AGENT_PLAYER_DATA_DIR']) delete process.env[k];
+for (const k of ['GIRRU_STORE_P3', 'AGENT_PLAYER_DATA_DIR']) clearEnv(k);
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 console.log = () => {}; console.info = () => {}; console.warn = () => {};
 
@@ -172,7 +173,7 @@ test('a new agent in a new department joins the list', async () => {
 
 test('the switch can go off again: memory shows the same list', async () => {
   const on = (await sql().read(store.listDepartmentsStep(OWNER))).map((d) => `${d.id}|${d.name}`);
-  delete process.env.GIRRU_STORE_P3;
+  process.env.GIRRU_STORE_P3 = '0';
   const off = (await sql().read(store.listDepartmentsStep(OWNER))).map((d) => `${d.id}|${d.name}`);
   process.env.GIRRU_STORE_P3 = '1';
   assert.deepEqual(off, on);

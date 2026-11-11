@@ -19,6 +19,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { randomBytes } from 'node:crypto';
 
+import { clearEnv } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-store-p2b-')));
 const home = join(dir, 'home');
@@ -40,7 +41,7 @@ process.env.LMSTUDIO_API_URL = LMSTUDIO;
 process.env.GIRRU_LOCAL_OPENAI_URL = GENERIC;
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-for (const k of ['CODEX_HOME', 'AGENT_EXEC_TOOLS', 'DEFAULT_MODEL', 'GIRRU_STORE_PILOT_AGENT', 'CHAT_NUM_CTX', 'OLLAMA_THINK']) delete process.env[k];
+for (const k of ['CODEX_HOME', 'AGENT_EXEC_TOOLS', 'DEFAULT_MODEL', 'GIRRU_STORE_PILOT_AGENT', 'CHAT_NUM_CTX', 'OLLAMA_THINK']) clearEnv(k);
 const SWITCHES = ['GIRRU_STORE_PILOT', 'GIRRU_STORE_P2', 'GIRRU_STORE_P3', 'GIRRU_STORE_P4', 'GIRRU_STORE_P5', 'GIRRU_STORE_P6', 'GIRRU_STORE_P7', 'GIRRU_STORE_P8', 'GIRRU_STORE_P9', 'GIRRU_STORE_P9B', 'GIRRU_STORE_P2B'];
 for (const k of SWITCHES) process.env[k] = '1';
 
@@ -146,7 +147,7 @@ test('8k Ollama model: the streamed chat request fits too (the UI spec in its sh
 });
 
 test('P2b off: the same request is unchanged (every tool, the fixed window)', async () => {
-  delete process.env.GIRRU_STORE_P2B;
+  process.env.GIRRU_STORE_P2B = '0';
   try {
     captured.length = 0;
     const r = await call('POST', '/api/chat', { stream: true, agentId: 'p2b-main', sessionId: 'p2b-s3', messages: [...HISTORY, QUESTION] });

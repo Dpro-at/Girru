@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
+import { clearEnv } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-store-p3-keys-')));
 mkdirSync(join(dir, '.data'), { recursive: true });
@@ -28,7 +29,7 @@ process.env.NODE_ENV = 'test';
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-for (const k of ['GIRRU_STORE_P3', 'AGENT_PLAYER_DATA_DIR']) delete process.env[k];
+for (const k of ['GIRRU_STORE_P3', 'AGENT_PLAYER_DATA_DIR']) clearEnv(k);
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 console.log = () => {}; console.info = () => {}; console.warn = () => {};
 
@@ -112,7 +113,7 @@ test('a new project with the name of a deleted one starts empty (D10)', async ()
 });
 
 test('turning the switch off moves the keys back to slugs', async () => {
-  delete process.env.GIRRU_STORE_P3;
+  process.env.GIRRU_STORE_P3 = '0';
   const [r] = await keys.moveProjectKeys('slug');
   assert.equal(r.direction, 'to_slug');
   assert.equal(get('SELECT drawer_key FROM memories WHERE id = ?', m2.id).drawer_key, 'beta-notes');
@@ -120,4 +121,18 @@ test('turning the switch off moves the keys back to slugs', async () => {
   assert.equal((await store.listProjects(OWNER)).find((p) => p.chatProjectId === beta.id).slug, 'beta-notes');
   const [none] = await keys.moveProjectKeys('slug');
   assert.equal(none.direction, 'none');
+});
+
+test('released encryption hold keeps generation through key rewrite; active hold blocks reattachment',async()=>{
+ const H=await import(join(backendDir,'src/memory/encryption/projection-hold.ts'));
+ const E=await import(join(backendDir,'src/memory/outbox/events.ts'));
+ const from='synthetic-hold-source',to='synthetic-hold-destination';
+ const scope=await E.enableScope(OWNER,{id:from,slug:from});
+ const hold=await sql().tx(()=>H.claimEncryptedProjectionHoldStep(OWNER,scope));
+ await assert.rejects(sql().tx(()=>keys.rewriteStep(OWNER,from,to)),/encrypted projections are held/);
+ await sql().tx(()=>H.releaseEncryptedProjectionHoldStep(OWNER,scope,hold.id,hold.generation));
+ await sql().tx(()=>keys.rewriteStep(OWNER,from,to));
+ const moved=get('SELECT * FROM memory_encryption_projection_holds WHERE owner_id=? AND scope=?',OWNER,'project:'+to);
+ assert.equal(moved.generation,hold.generation);assert.equal(moved.state,'released');
+ assert.equal(get('SELECT * FROM memory_encryption_projection_holds WHERE owner_id=? AND scope=?',OWNER,scope),undefined);
 });

@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
+import { clearEnv } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const dir = mkdtempSync(join(tmpdir(), 'ap-store-p7-brief-'));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });
@@ -26,7 +27,7 @@ process.env.DATABASE_PATH = join(dir, '.data', 'agent-player.db');
 process.env.JWT_SECRET = randomBytes(64).toString('hex'); // throwaway, test only
 process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway, test only
 process.env.NODE_ENV = 'test';
-for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_P3', 'GIRRU_STORE_P6', 'GIRRU_STORE_P7', 'GIRRU_STORE_PILOT']) delete process.env[k];
+for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_P3', 'GIRRU_STORE_P6', 'GIRRU_STORE_P7', 'GIRRU_STORE_PILOT']) clearEnv(k);
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 const quiet = () => {}; console.log = quiet; console.info = quiet; console.warn = quiet; console.error = quiet;
 
@@ -58,7 +59,7 @@ await learn({ userId: OWNER, actor: `owner:${OWNER}`, candidates: [
 ] }).catch(() => {});
 await addPinnedFact(OWNER, { kind: 'company', id: 'company' }, 'We review every change.', OWNER);
 
-const withP7 = async (fn) => { process.env.GIRRU_STORE_P7 = '1'; try { return await fn(); } finally { delete process.env.GIRRU_STORE_P7; } };
+const withP7 = async (fn) => { process.env.GIRRU_STORE_P7 = '1'; try { return await fn(); } finally { process.env.GIRRU_STORE_P7 = '0'; } };
 
 test('P7 off: no topic index and no work guide; the brief is as before', async () => {
   const b = await brief.projectBrief(OWNER, project);

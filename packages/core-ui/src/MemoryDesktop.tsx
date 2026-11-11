@@ -3,6 +3,8 @@
 // an inspector for the selected memory, one main button (Remember), a ⋯ menu
 // and right-click menus for everything else, sheets for short tasks, and Undo
 // (⌘Z and the notice) for every reversible change.
+import { OutsideTag, useOutsideProjects } from './outside-projects';
+import type { OutsideProjects } from './outside-projects';
 import { skillTitle } from './skill-display';
 import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { DragEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
@@ -68,7 +70,8 @@ export type SettingsTarget = 'rules' | 'folders' | 'sources' | 'projects' | 'acc
 function useControllers(client: SessionClient) {
   const [c, setC] = useState<{ d: MemoryDesktopController; x: MemoryExplorerController; sc: MemoryScopesController; rv: MemoryReviewController; mv: MemoryMoveController; map: MemoryMapController; ho: MemoryHandoffsController; disc: DiscoveryController; pf: ProjectFilesController; pp: MemoryPeopleController; tr: MemoryTrustController }>();
   useEffect(() => {
-    const d = new MemoryDesktopController(client), x = new MemoryExplorerController(client), sc = new MemoryScopesController(client);
+    const x = new MemoryExplorerController(client), sc = new MemoryScopesController(client);
+    const d = new MemoryDesktopController(client, () => { void x.load(); void sc.load(true); });
     sc.light = true;
     const rv = new MemoryReviewController(client, () => void sc.load(true));
     const mv = new MemoryMoveController(client, (id, drawer) => x.moved(id, drawer));
@@ -96,6 +99,9 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
   onOpenChat?: (conversationId: string) => void; onOpenCard?: (boardId: string, cardId: string) => void; onOpenSettings?: (target: SettingsTarget) => void;
 }) {
   const owner = useSyncExternalStore(client.subscribe, client.getSnapshot, client.getSnapshot).user?.role === 'owner';
+  const trust = useOutsideProjects(owner ? client : null);
+  const [trustToast, setTrustToast] = useState<{ id: number; text: string; undo: boolean } | null>(null);
+  const trustUndo = useRef<(() => Promise<void>) | null>(null);
   const k = useControllers(client);
   const p3 = useStoreP3(client);
   const p6 = useStoreP6(client);
@@ -223,9 +229,20 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
     'sep',
     { label: 'Move to Trash', icon: 'trash', shortcut: '⌫', run: () => void trashIds(xs.checked.includes(i.id) ? xs.checked : [i.id]) },
   ];
+  // REPO-TRUST-01: someone else's repository shows "outside"; the owner trusts it or puts it there (Undo).
+  const trustIdOf = (p: TreeProject) => trust?.getSnapshot().view?.projects.find(v => v.projectId === p.slug)?.projectId
+    ?? trust?.getSnapshot().view?.projects.find(v => v.name === p.name)?.projectId ?? null;
+  async function setOutside(p: TreeProject, outside: boolean) {
+    const id = trustIdOf(p);
+    const u = id ? await trust?.set(id, outside) : null;
+    if (!u) return;
+    trustUndo.current = u;
+    setTrustToast({ id: Date.now(), text: outside ? `${p.name} is on Outside projects` : `${p.name} is trusted`, undo: true });
+  }
   const projectMenu = (p: TreeProject): MenuItem[] => {
     const groups = Array.isArray(ds.groups) ? (ds.groups as readonly ProjectGroup[]) : [];
     const inGroup = d.groupOf(p.slug);
+    const tid = trustIdOf(p);
     return [
       { label: 'Open', icon: 'folder', run: () => d.open(`project:${p.slug}`) },
       { label: p.pinned ? 'Unpin project' : 'Pin project', icon: 'pin', run: () => projectAction(p.slug, p.pinned ? 'unpin' : 'pin') },
@@ -238,6 +255,9 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
       { label: 'Separate…', icon: 'diff', run: () => onOpenSettings?.('projects') },
       { label: 'Rules for this project…', icon: 'sliders', run: () => onOpenSettings?.('rules') },
       { label: 'Coding apps for this project…', icon: 'code', run: () => onOpenSettings?.('sources') },
+      ...(tid && trust && !trust.getSnapshot().off ? [trust.isOutside(tid)
+        ? { label: 'Trust this project', icon: 'check' as const, run: () => void setOutside(p, false) }
+        : { label: 'Put on Outside projects', icon: 'shield' as const, run: () => void setOutside(p, true) }] : []),
       'sep',
       { label: 'Archive (kept, not loaded)', icon: 'archive', run: () => projectAction(p.slug, 'archive') },
       { label: 'Move the whole project to Trash…', icon: 'trash', danger: true, run: () => setSheet({ kind: 'trash-project', slug: p.slug }) },
@@ -278,7 +298,7 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
     try { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/markdown' })); a.download = `${e.project}-memory.md`; a.click(); URL.revokeObjectURL(a.href); d.say(`Exported ${e.files.length} files.`); } catch { d.say('The export could not be saved.'); }
   }
 
-  const sidebar = <MemorySidebar k={k} p6={p6} p9={p9} peopleLocal={peopleLocal} onPersonMenu={(e, key) => menu.at(e, personMenu(key, openPerson))} filesNeedYou={p6 ? pf.needsCount() : 0} waiting={waiting} searchRef={searchRef} onRemember={() => { x.startAdd(); setSheet({ kind: 'remember' }); }} menu={menu} projectMenu={projectMenu}
+  const sidebar = <MemorySidebar trust={trust} k={k} p6={p6} p9={p9} peopleLocal={peopleLocal} onPersonMenu={(e, key) => menu.at(e, personMenu(key, openPerson))} filesNeedYou={p6 ? pf.needsCount() : 0} waiting={waiting} searchRef={searchRef} onRemember={() => { x.startAdd(); setSheet({ kind: 'remember' }); }} menu={menu} projectMenu={projectMenu}
     onNewGroup={projects => setSheet({ kind: 'group', projects })} onRenameGroup={id => setSheet({ kind: 'rename-group', id })}/>;
 
   // ---- the content of the open place ----
@@ -370,14 +390,15 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
       onForgotten={text => { setSheet(null); if (d.getSnapshot().place === `people:${sheet.key}`) d.open('people'); d.say(text); void x.load(); void sc.load(true); void rv.load(); }}/>}
     {p6 && <CompareSheet c={pf} d={d}/>}
     <Notice toast={ds.toast} onUndo={() => void d.undo().then(() => { void x.load(); void sc.load(true); })} onShow={ds.toast?.show ? () => d.open(ds.toast!.show!) : undefined} onDone={id => d.dismiss(id)}/>
+    <Notice toast={trustToast} onUndo={() => { void trustUndo.current?.(); trustUndo.current = null; setTrustToast(null); }} onDone={id => setTrustToast(t => (t?.id === id ? null : t))}/>
   </section></P3.Provider>;
 }
 
 // ---------------------------------------------------------------- sidebar
 type K = NonNullable<ReturnType<typeof useControllers>>;
 
-function MemorySidebar({ k, p6, p9, peopleLocal, onPersonMenu, filesNeedYou, waiting, searchRef, onRemember, menu, projectMenu, onNewGroup, onRenameGroup }: {
-  k: K; p6: boolean; p9: boolean; peopleLocal: boolean; onPersonMenu: (e: React.MouseEvent, key: string) => void; filesNeedYou: number; waiting: number; searchRef: React.RefObject<HTMLInputElement | null>; onRemember: () => void; menu: ReturnType<typeof useMenu>;
+function MemorySidebar({ trust, k, p6, p9, peopleLocal, onPersonMenu, filesNeedYou, waiting, searchRef, onRemember, menu, projectMenu, onNewGroup, onRenameGroup }: {
+  trust: OutsideProjects | null; k: K; p6: boolean; p9: boolean; peopleLocal: boolean; onPersonMenu: (e: React.MouseEvent, key: string) => void; filesNeedYou: number; waiting: number; searchRef: React.RefObject<HTMLInputElement | null>; onRemember: () => void; menu: ReturnType<typeof useMenu>;
   projectMenu: (p: TreeProject) => MenuItem[]; onNewGroup: (projects: string[]) => void; onRenameGroup: (id: string) => void;
 }) {
   const { d, x, sc } = k;
@@ -415,7 +436,7 @@ function MemorySidebar({ k, p6, p9, peopleLocal, onPersonMenu, filesNeedYou, wai
   const projectRow = (p: TreeProject, nested: boolean) => <button key={p.slug} type="button" className="nav-item dk-place" data-nested={nested || undefined} data-drop={drop === `p:${p.slug}` || undefined}
     aria-current={ds.place === `project:${p.slug}` && !ds.extra ? 'page' : undefined} draggable onDragStart={e => dragStart(e, p.slug)} onDragOver={e => dragOver(e, `p:${p.slug}`)} onDragLeave={() => setDrop(null)} onDrop={e => dropOn(e, { project: p.slug })}
     onClick={() => go(`project:${p.slug}`)} onContextMenu={e => menu.at(e, projectMenu(p))} title={drop === `p:${p.slug}` ? `Drop on ${p.name}: make a group` : `Folder: ${p.name}`}>
-    <Tile name={p.name}/><span className="dk-place-name">{skillTitle(p.name)}</span>{p.pinned && <UiIcon name="pin" size={11}/>}{p.pendingReviews ? <span className="dk-count">{p.pendingReviews}</span> : null}
+    <Tile name={p.name}/><span className="dk-place-name">{skillTitle(p.name)}</span><OutsideTag store={trust} projectId={trust?.getSnapshot().view?.projects.find(v => v.projectId === p.slug || v.name === p.name)?.projectId}/>{p.pinned && <UiIcon name="pin" size={11}/>}{p.pendingReviews ? <span className="dk-count">{p.pendingReviews}</span> : null}
   </button>;
   return <nav className="dk-sidebar" aria-label="Memory places">
     <div className="dk-side-top">

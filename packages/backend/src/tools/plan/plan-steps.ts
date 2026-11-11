@@ -7,8 +7,9 @@
 import type { Tool, ToolResult } from '../types.js';
 
 export const PLAN_STATUSES = ['pending', 'active', 'done', 'skipped'] as const;
-export type PlanStep = { title: string; status: (typeof PLAN_STATUSES)[number] };
-export const MAX_PLAN_STEPS = 12;
+/** CHAT-LIVE-01: `parent` = the 1-based number of the step this one belongs to (sub-steps, one level). */
+export type PlanStep = { title: string; status: (typeof PLAN_STATUSES)[number]; parent?: number };
+export const MAX_PLAN_STEPS = 20;
 
 const fail = (text: string): ToolResult => ({ content: [{ type: 'text', text }], error: text });
 
@@ -21,16 +22,24 @@ export function planSteps(raw: unknown): PlanStep[] | string {
     const title = typeof s?.title === 'string' ? s.title.replace(/\s+/g, ' ').trim().slice(0, 120) : '';
     const status = (PLAN_STATUSES as readonly string[]).includes(s?.status) ? s.status : 'pending';
     if (!title) return 'every step needs a title';
-    out.push({ title, status });
+    let parent: number | undefined;
+    if (s?.parent !== undefined && s?.parent !== null) {
+      const n = Number(s.parent);
+      // A sub-step points at an earlier step that is not itself a sub-step.
+      if (!Number.isInteger(n) || n < 1 || n > out.length || out[n - 1].parent !== undefined) return 'parent must be the number of an earlier main step';
+      parent = n;
+    }
+    out.push({ title, status, ...(parent ? { parent } : {}) });
   }
-  if (out.filter(s => s.status === 'active').length > 1) return 'only one step can be active at a time';
+  if (out.filter(s => s.status === 'active' && s.parent === undefined).length > 1) return 'only one main step can be active at a time';
+  if (out.filter(s => s.status === 'active' && s.parent !== undefined).length > 1) return 'only one sub-step can be active at a time';
   return out;
 }
 
 export const planStepsTool: Tool = {
   name: 'plan_steps',
   selfOnly: true,
-  description: 'Show the owner your plan for a multi-step task as a live checklist. Call it once at the start with every step (the first one "active", the rest "pending"), then call it again with the whole list each time a step finishes ("done") and the next starts ("active"). Use "skipped" for a step you drop. Before your final answer, mark every step "done" or "skipped". Not needed for a quick question or a one-step answer.',
+  description: 'Show the owner your plan for a multi-step task as a live checklist. Call it once at the start with every step (the first one "active", the rest "pending"), then call it again with the whole list each time a step finishes ("done") and the next starts ("active"). Use "skipped" for a step you drop. A step may have sub-steps: give them "parent" = the number of their main step (one level only). Before your final answer, mark every step "done" or "skipped". Use it for every task of 3 or more steps; not needed for a quick question or a one-step answer.',
   input_schema: {
     type: 'object',
     properties: {
@@ -42,6 +51,7 @@ export const planStepsTool: Tool = {
           properties: {
             title: { type: 'string', description: 'The step, a short phrase (up to 120 characters)' },
             status: { type: 'string', enum: [...PLAN_STATUSES], description: 'pending, active (doing it now), done or skipped' },
+            parent: { type: 'number', description: 'For a sub-step: the number (1-based) of its main step' },
           },
           required: ['title', 'status'],
         },

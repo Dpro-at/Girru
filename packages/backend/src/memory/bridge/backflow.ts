@@ -1,3 +1,4 @@
+import {assertNoDefaultMemoryAccess} from '../encryption/execution-context.js';
 /**
  * Back-flow (MEM-BRIDGE-01): what Claude Code, Codex, Gemini CLI or
  * Antigravity write into their OWN memory files for a known project comes
@@ -16,6 +17,7 @@
  * that contradicts an approved memory becomes a conflict proposal. A chunk
  * is proposed once (its hash is remembered under an opaque file key).
  */
+import { isOutsideProject } from '../project-trust.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -64,8 +66,11 @@ const pointerOnly = (s: string) => s.split('\n').every((l) => !l.trim() || /^@\S
 export interface BackflowResult { files: number; proposed: number; known: number; skipped: number; proposalIds: string[] }
 
 export async function runBackflow(ownerId: string, project: Project, opts: { home?: string } = {}): Promise<BackflowResult> {
+  assertNoDefaultMemoryAccess();
   const out: BackflowResult = { files: 0, proposed: 0, known: 0, skipped: 0, proposalIds: [] };
   if (!project.folder) return out;
+  // REPO-TRUST-01: someone else's CLAUDE.md / AGENTS.md never become memory proposals.
+  if (await isOutsideProject(ownerId, project.id)) return out;
   let folder: string;
   try { folder = fs.realpathSync.native(project.folder); } catch { return out; }
   for (const src of backflowSources(folder, opts.home)) {

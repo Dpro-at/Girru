@@ -1,0 +1,17 @@
+import test from 'node:test';import assert from 'node:assert/strict';import Database from 'better-sqlite3';
+import {assertStoreAppQuery,createStoreAppData} from '../src/services/store-app-data.ts';
+test('the app data port refuses other tables, SQL programs and hidden joins',()=>{
+ const bad=["SELECT * FROM app_call_center__rows JOIN (users)","SELECT * FROM app_call_center__rows JOIN (sqlite_master)","SELECT * FROM app_call_center__rows JOIN (pragma_table_info('users'))","INSERT INTO app_call_center__rows SELECT * FROM (users)","SELECT * FROM app_call_center__rows WHERE id IN users","SELECT * FROM users","SELECT * FROM app_other__rows","SELECT * FROM main.app_call_center__rows","WITH app_call_center__x AS (SELECT * FROM users) SELECT * FROM app_call_center__x","SELECT * FROM app_call_center__rows, users","SELECT * FROM app_call_center__rows a JOIN app_call_center__rows b ON(1=1), users","SELECT * FROM app_call_center__rows AS \"x)\",users","SELECT * FROM (SELECT * FROM app_call_center__rows) x,users","SELECT * FROM app_call_center__rows; DELETE FROM users","SELECT load_extension(?) FROM app_call_center__rows","PRAGMA table_info(users)","CREATE TABLE app_call_center__x(id)","SELECT * FROM app_call_center__rows UNION SELECT * FROM users"];
+ for(const sql of bad)assert.throws(()=>assertStoreAppQuery('call-center',sql),undefined,sql);
+ for(const sql of ["SELECT * FROM app_call_center__rows WHERE text=?","SELECT a.id,b.id FROM app_call_center__rows a JOIN app_call_center__rows b ON a.id=b.id","UPDATE app_call_center__rows SET text='FROM users; DROP TABLE users' WHERE id=?","SELECT * FROM \"app_call_center__rows\" WHERE id=?"])assert.doesNotThrow(()=>assertStoreAppQuery('call-center',sql),sql);
+});
+test('scoped native statements and generator transactions preserve row operations and rollback',async()=>{
+ const db=new Database(':memory:');db.exec('CREATE TABLE users(secret TEXT);CREATE TABLE app_call_center__rows(id INTEGER PRIMARY KEY,text TEXT)');
+ try{const port=createStoreAppData('call-center',db);assert.equal(port.database.exec,undefined);assert.equal(port.database.getDb,undefined);assert.ok(Object.isFrozen(port));
+ port.database.prepare('INSERT INTO app_call_center__rows(text) VALUES(?)').run('one');assert.equal((await port.steps.q.all('SELECT * FROM app_call_center__rows')).length,1);
+ await port.steps.sql().tx(function*(){yield* port.steps.run('UPDATE app_call_center__rows SET text=? WHERE id=?','two',1);});assert.equal(port.database.prepare('SELECT text FROM app_call_center__rows WHERE id=?').get(1).text,'two');
+ await assert.rejects(port.steps.sql().tx(function*(){yield* port.steps.run('UPDATE app_call_center__rows SET text=?','bad');yield* port.steps.one('SELECT * FROM users');}));assert.equal(port.database.prepare('SELECT text FROM app_call_center__rows').get().text,'two');
+ }finally{db.close();}
+});
+
+test('already prepared statements and transactions cannot outlive app activation',async()=>{const db=new Database(':memory:');db.exec('CREATE TABLE app_call_center__rows(id INTEGER PRIMARY KEY,text TEXT)');let enabled=true;const port=createStoreAppData('call-center',db,()=>enabled),saved=port.database.prepare('SELECT * FROM app_call_center__rows');enabled=false;try{assert.throws(()=>saved.all());await assert.rejects(port.steps.q.run('INSERT INTO app_call_center__rows(text) VALUES(?)','blocked'));assert.equal(db.prepare('SELECT count(*) n FROM app_call_center__rows').get().n,0);}finally{db.close();}});

@@ -295,7 +295,18 @@ Pinned facts per company, department or project; which agents may read or write 
 Which project slugs were moved to project ids, and whether an owner's project keys are slugs or ids now. Start-up moves the keys to follow `GIRRU_STORE_P3`.
 
 ### change_scopes, change_events, projection_state
-The change log of opted-in project drawers (one event per write, in the same transaction) and the state of each generated copy (brief file, status). Used by the storage pilot.
+The change log of opted-in project drawers (one event per write, in the same transaction) and the state of each generated copy (brief file, status). Used by the storage pilot and, with `GIRRU_STORE_P6`, by every project with memory files on. `projection_state.pending_hash` (migration 182) is the hash of the file Girru is about to write, so a crash between the write and the state update is recognised as Girru's own write. A project rename is recorded in the change log too, so the brief follows.
+
+### memory_trust, memory_trust_sources, memory_open_questions
+Written while `GIRRU_STORE_P9B` is on (migration 181). `memory_trust` keeps, per memory, where it came from, how sure Girru is, whether it is verified (stated or approved by the owner, or confirmed by two trusted sources), the weight it earned from use (verified facts only) and flags such as corrected after use; `content_hash` ties the row to the text it judged. `memory_trust_sources` lists the distinct sources that stated the same text (ids and labels only). `memory_open_questions` holds a question an agent asked because no reliable memory existed, so it is asked only once.
+
+### memory_health_events
+Failed saves and recalls (`GIRRU_STORE_P9`, migration 180): ids, kinds and counts only, never memory text, kept 30 days.
+
+### run_notes
+A run's short working notes (`GIRRU_STORE_P8`, migration 178). They stay with the run, are never memory by themselves, and are cleared 14 days after the run's last note.
+
+Files outside the database are listed in the [storage map](architecture/storage-map.md): the forget ledger, the memory helper's state and the local model check results.
 
 ### memory_cache_revisions
 A counter per user and scope, raised by triggers on every memory write; recall caches use it to know they are out of date.

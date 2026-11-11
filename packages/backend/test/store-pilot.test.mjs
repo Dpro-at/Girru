@@ -22,6 +22,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
+import { switchValueOn, clearEnv } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-store-pilot-')));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });
@@ -35,7 +36,7 @@ process.env.NODE_ENV = 'test';
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-for (const k of ['CODEX_HOME', 'AGENT_PLAYER_DATA_DIR', 'AGENT_EXEC_TOOLS', 'DEFAULT_MODEL', 'OUTSIDER_AGENT_MEMORY', 'GIRRU_STORE_PILOT', 'GIRRU_STORE_PILOT_AGENT']) delete process.env[k];
+for (const k of ['CODEX_HOME', 'AGENT_PLAYER_DATA_DIR', 'AGENT_EXEC_TOOLS', 'DEFAULT_MODEL', 'OUTSIDER_AGENT_MEMORY', 'GIRRU_STORE_PILOT', 'GIRRU_STORE_PILOT_AGENT']) clearEnv(k);
 
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 const quiet = () => {};
@@ -278,7 +279,7 @@ test('capability: expired and revoked capabilities are refused', async () => {
 test('capability: the pilot project needs one; other projects work as before', async () => {
   const tok = await ensureToken(OWNER, 'claude-code');
   // P6 rolls the capability out to every project: then no project opens without one.
-  const p6 = /^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P6 ?? '');
+  const p6 = switchValueOn(process.env.GIRRU_STORE_P6 ?? '');
   const required = (e) => e.code === 'capability_required';
   if (p6) await assert.rejects(mcpCall('claude-code', tok, folder, 'project_brief'), required);
   else assert.match((await mcpCall('claude-code', tok, folder, 'project_brief')).text, /Alpha/, 'pilot off: unchanged');
@@ -300,7 +301,7 @@ test('resolved context: chat, task run and coding app share identity, hired inst
     ctx[entry] = await resolveAgentContext({ agentId: 'sp-agent', entry, ownerId: OWNER, projectId: project.id });
   }
   // P2 (AG6): the rules come in precedence groups.
-  const rules = await (/^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P2 ?? '') ? rulesByPrecedence('sp-agent', project.id) : rulesContext('sp-agent', { projectId: project.id }));
+  const rules = await (switchValueOn(process.env.GIRRU_STORE_P2 ?? '') ? rulesByPrecedence('sp-agent', project.id) : rulesContext('sp-agent', { projectId: project.id }));
   assert.ok(rules, 'the agent has owner rules');
   for (const entry of ['chat', 'task', 'coding_app', 'channel']) {
     assert.equal(ctx[entry].agent.name, 'Rafid');
@@ -350,7 +351,7 @@ test('routes: owner only; capability issue and revoke; sync status and rebuild o
     assert.equal((await call(OWNER, 'DELETE', `/api/memory-bridge/capabilities/${capability.id}`)).statusCode, 200);
     assert.equal((await call(OWNER, 'DELETE', `/api/memory-bridge/capabilities/${capability.id}`)).statusCode, 404);
     // P6 rolls the change log and brief projection out to every project.
-    if (!/^(1|true|yes|on)$/i.test(process.env.GIRRU_STORE_P6 ?? '')) assert.equal((await call(OWNER, 'GET', `${url}/sync`)).statusCode, 409, 'not the pilot project');
+    if (!switchValueOn(process.env.GIRRU_STORE_P6 ?? '')) assert.equal((await call(OWNER, 'GET', `${url}/sync`)).statusCode, 409, 'not the pilot project');
     process.env.GIRRU_STORE_PILOT = project.id;
     try {
       const s = await call(OWNER, 'GET', `${url}/sync`);
@@ -407,4 +408,28 @@ test('resolved context: an agent without project memory access gets no project f
   assert.doesNotMatch(closed.data.pinnedFacts, /Al-Zawraa/, 'no project facts without project memory access');
   assert.equal(closed.data.handoff, '', 'no project handoff without project memory access');
   assert.ok(!closed.drawers.some((d) => d.kind === 'project'));
+});
+
+test('projection barrier waits for an already-staged real writer before copy cleanup',async()=>{
+  await P.runBriefProjection(scope,{force:true,overwrite:true});await save('A synthetic staged projection must finish before forget cleanup.');
+  let enteredResolve,releaseResolve;const entered=new Promise(resolve=>{enteredResolve=resolve;}),release=new Promise(resolve=>{releaseResolve=resolve;});let cleanupRan=false;
+  const writing=P.runBriefProjection(scope,{force:true,beforeRename:async()=>{enteredResolve();await release;}});await entered;
+  const cleanup=P.withBriefProjectionBarrier(scope,async()=>{cleanupRan=true;writeFileSync(brief,'SYNTHETIC_POST_FORGET_VIEW');});
+  await Promise.resolve();assert.equal(cleanupRan,false);releaseResolve();
+  try{await writing;await cleanup;assert.equal(cleanupRan,true);assert.equal(readFileSync(brief,'utf8'),'SYNTHETIC_POST_FORGET_VIEW');}finally{await P.runBriefProjection(scope,{force:true,overwrite:true});}
+});
+
+test('durable encrypted hold blocks force rebuild and detects a hold inserted after render',async()=>{
+ const {sqliteStepsOn}=await import(join(backendDir,'src/repositories/sql-steps.ts')),{claimEncryptedProjectionHoldStep,releaseEncryptedProjectionHoldStep}=await import(join(backendDir,'src/memory/encryption/projection-hold.ts')),runner=sqliteStepsOn(db.getDb());
+ await P.runBriefProjection(scope,{force:true,overwrite:true});const before=readFileSync(brief,'utf8');let hold;
+ try{hold=await P.withBriefProjectionBarrier(scope,()=>runner.tx(()=>claimEncryptedProjectionHoldStep(OWNER,scope)));assert.equal((await P.runBriefProjection(scope,{force:true,overwrite:true})).reason,'encrypted projection hold');assert.equal(readFileSync(brief,'utf8'),before);
+ await runner.tx(()=>releaseEncryptedProjectionHoldStep(OWNER,scope,hold.id,hold.generation));const old=hold;hold=await runner.tx(()=>claimEncryptedProjectionHoldStep(OWNER,scope));await assert.rejects(runner.tx(()=>releaseEncryptedProjectionHoldStep(OWNER,scope,old.id,old.generation)));await runner.tx(()=>releaseEncryptedProjectionHoldStep(OWNER,scope,hold.id,hold.generation));hold=undefined;
+ await save('A staged synthetic quote must not be written while a durable hold is set.');const late=await P.runBriefProjection(scope,{force:true,overwrite:true,beforeRename:async()=>{hold=await runner.tx(()=>claimEncryptedProjectionHoldStep(OWNER,scope));}});assert.equal(late.wrote,false);assert.equal(late.reason,'encrypted projection hold');assert.equal(readFileSync(brief,'utf8'),before);
+ }finally{if(hold)await runner.tx(()=>releaseEncryptedProjectionHoldStep(OWNER,scope,hold.id,hold.generation));await P.runBriefProjection(scope,{force:true,overwrite:true});}
+});
+
+test('durable hold blocks managed-file apply, unified write and owner sync without changing consent',async()=>{
+ const B=await import(join(backendDir,'src/memory/bridge/service.ts')),{patchFolder,folderSettings}=await import(join(backendDir,'src/memory/bridge/store.ts')),{sqliteStepsOn}=await import(join(backendDir,'src/repositories/sql-steps.ts')),{claimEncryptedProjectionHoldStep,releaseEncryptedProjectionHoldStep}=await import(join(backendDir,'src/memory/encryption/projection-hold.ts')),runner=sqliteStepsOn(db.getDb()),file=join(folder,'AGENTS.md');
+ writeFileSync(file,'SYNTHETIC_OWNER_NOTES');await patchFolder(OWNER,project.id,{filesEnabled:true,backflowEnabled:true,confirmed:true});const consent=await folderSettings(OWNER,project.id),hold=await P.withBriefProjectionBarrier(scope,()=>runner.tx(()=>claimEncryptedProjectionHoldStep(OWNER,scope)));
+ try{const PF=await import(join(backendDir,'src/memory/bridge/project-files.ts'));for(const name of ['AGENTS.md','.girru/brief.md'])await assert.rejects(PF.useGirruVersion(OWNER,project.id,name),error=>error.code==='encrypted_hold');await assert.rejects(PF.undoUseGirru(OWNER,project.id,'synthetic-token'),error=>error.code==='encrypted_hold');await assert.rejects(B.filesApply(OWNER,project.id,{confirm:true,previewHash:'synthetic'}),error=>error instanceof B.BridgeError&&error.status===409&&error.code==='encrypted_hold');await assert.rejects(B.writeUnifiedSection(project.id),error=>error instanceof B.BridgeError&&error.status===409&&error.code==='encrypted_hold');assert.ok((await B.syncOwner(OWNER)).conflicts>=1);assert.equal(readFileSync(file,'utf8'),'SYNTHETIC_OWNER_NOTES');const after=await folderSettings(OWNER,project.id);assert.equal(after.filesEnabled,consent.filesEnabled);assert.equal(after.backflowEnabled,consent.backflowEnabled);}finally{await runner.tx(()=>releaseEncryptedProjectionHoldStep(OWNER,scope,hold.id,hold.generation));}
 });

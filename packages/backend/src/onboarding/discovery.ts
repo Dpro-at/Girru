@@ -51,11 +51,14 @@ async function begin(user: string, options: Options = {}): Promise<DiscoveryProg
       if(!await allowed())return;
       // Known hidden coding-app locations are counted immediately, without waiting for the device walk.
       if (!state.homes.includes(home)) { await addInventory(home, []); state.homes.push(home); await save(user, state); }
+      const checked = new Set<string>(state.documents);
       if (state.phase === 'files') do {
         if (!await allowed()) return;
         const page = await scanProjectDocuments(user, { auto: true, ...(state.cursor ? { cursor: state.cursor } : {}) }, { purpose: 'watch', home, ...(options.roots ? { roots: options.roots } : {}) });
         if ('allDocumentIds' in page) {
-          for (const id of page.allDocumentIds) if (!state.documents.includes(id) && await automaticNoteSource(user, id, home)) state.documents.push(id);
+          // allDocumentIds is every note seen so far, not only this page's: each note is checked once per run
+          // (a note in someone else's repository is turned down every time, so it must not be asked again each page).
+          for (const id of page.allDocumentIds) { if (checked.has(id)) continue; checked.add(id); if (await automaticNoteSource(user, id, home)) state.documents.push(id); }
           state.roots=[...new Set([...state.roots,...await preparedDiscoveryRoots(user)])];
           for (const sourceHome of page.memoryHomes) if (!state.homes.includes(sourceHome)) { await addInventory(sourceHome, []); state.homes.push(sourceHome); }
           state.scanned = page.scanned; state.denied = Math.max(page.deniedRoots,discoveryFs.diagnostics().pending); state.unavailable = page.unavailableRoots; state.limited = page.limited || discoveryFs.diagnostics().pending>0; state.cursor = page.nextCursor ?? undefined;

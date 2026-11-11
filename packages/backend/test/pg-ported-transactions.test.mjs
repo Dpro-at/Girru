@@ -21,6 +21,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const backend = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const movedTelephony=new Set(['src/api/routes/telephony.ts','src/services/telephony-service.ts','src/telephony/ivr-engine.ts','src/telephony/voice-handler.ts']);
+const sourcePath=rel=>movedTelephony.has(rel)?join(backend,'test/fixtures/legacy-apps',rel):join(backend,rel);
 
 // Every store under a temp folder: importing the modules below may open the
 // main SQLite database at the default path (<cwd>/.data, the real .data when
@@ -47,7 +49,7 @@ export const PORTED = [
   'src/services/evolution-proposals.ts',
   'src/services/task-runs.ts',
   'src/services/task-contracts.ts',
-  'src/services/task-run-executor.ts',
+  'src/agent/execution/task-turn.ts',
   'src/services/cost-budget.ts',
   'src/services/small-agent.ts',
   'src/services/agent-cron.ts',
@@ -78,7 +80,7 @@ export const PORTED = [
   'src/services/memory-enrichment.ts',
   'src/services/memory-quality-scorer.ts',
   // B2.2b-4: remaining readers of ported tables
-  'src/api/routes/chat.ts',
+  'src/agent/execution/chat-turn.ts',
   'src/api/routes/multi-agent.ts',
   'src/tools/tasks/task-create.tool.ts',
   'src/tools/tasks/task-list.tool.ts',
@@ -125,7 +127,6 @@ export const PORTED = [
   'src/api/routes/world-bots.ts',
   'src/api/routes/multiverse.ts',
   'src/api/routes/extensions.ts',
-  'src/api/routes/public-chat.ts',
   'src/api/routes/telephony.ts',
   'src/api/routes/avatar.ts',
 ];
@@ -192,7 +193,7 @@ test('the paper-trading cron ledger runs only on SQLite', () => {
 test('ported modules never call SQLite directly or use SQLite-only SQL', () => {
   const offenders = [];
   for (const rel of PORTED) {
-    const code = withoutPaperLedger(rel, stripComments(readFileSync(join(backend, rel), 'utf8')));
+    const code = withoutPaperLedger(rel, stripComments(readFileSync(sourcePath(rel), 'utf8')));
     for (const [re, what] of FORBIDDEN) {
       if (re.test(code)) offenders.push(`${rel}: ${what}`);
     }
@@ -204,7 +205,7 @@ test('ported modules take their SQL helpers from sql-steps (one runner per drive
   const missing = PORTED.filter((rel) => {
     // Modules that only compose the ported services (scope checks, no SQL of their own).
     if (NO_SQL.has(rel)) return false;
-    return !/from '\.{1,2}\/(?:\.\.\/)?(?:repositories\/)?sql-steps\.js'/.test(readFileSync(join(backend, rel), 'utf8'));
+    return !/from '(?:\.\.?\/)+(?:src\/)?(?:repositories\/)?sql-steps\.js'/.test(readFileSync(sourcePath(rel), 'utf8'));
   });
   assert.deepEqual(missing, []);
 });
@@ -258,7 +259,7 @@ test('rowid tie-breaks are replaced by time-ordered primary keys (same order on 
   for (const id of ids.slice(0, 20)) assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   // The row ids that break created_at ties come from orderedId().
   for (const rel of ['src/services/task-runs.ts', 'src/services/personality-store.ts', 'src/services/evolution-proposals.ts']) {
-    assert.match(readFileSync(join(backend, rel), 'utf8'), /const id = orderedId\(\)/, rel);
+    assert.match(readFileSync(sourcePath(rel), 'utf8'), /const id = orderedId\(\)/, rel);
   }
 });
 
@@ -410,7 +411,7 @@ test('B2.2c part 2: the evolution scheduler writes cron_jobs only through the cr
   assert.match(src, /deleteJobByName\(/);
   // S0-Q.23: no Evolution service writes capabilities.
   for (const rel of ['src/services/agent-learning-engine.js', 'src/services/agent-evolution-orchestrator.js', 'src/services/agent-performance-analyzer.js']) {
-    assert.doesNotMatch(stripComments(readFileSync(join(backend, rel), 'utf8')), /UPDATE\s+agents_config/i, rel);
+    assert.doesNotMatch(stripComments(readFileSync(sourcePath(rel), 'utf8')), /UPDATE\s+agents_config/i, rel);
   }
 });
 
@@ -420,7 +421,7 @@ test('B2.2c part 2: with AGENT_PLAYER_DB=postgres webhooks, telephony and the on
   const { closePgPool } = await import('../src/db/pg/pool.ts');
   const { WebhookManager } = await import('../src/webhooks/manager.ts');
   const tel = await import('../src/telephony/credentials.ts');
-  const { getTelephonyService } = await import('../src/services/telephony-service.ts');
+  const { getTelephonyService } = await import('./fixtures/legacy-apps/src/services/telephony-service.ts');
   const wizard = await import('../src/onboarding/web-wizard.ts');
   const authority = await import('../src/credentials/authority.ts');
   const pgErr = (e) => e instanceof PgConfigError;
@@ -443,7 +444,7 @@ test('B2.2c part 2: with AGENT_PLAYER_DB=postgres webhooks, telephony and the on
 
 test('B2.2c part 2: camelCase column aliases are quoted in the ported routes (PostgreSQL folds unquoted names)', () => {
   for (const rel of ['src/api/routes/telephony.ts', 'src/api/routes/avatar.ts']) {
-    const code = stripComments(readFileSync(join(backend, rel), 'utf8'));
+    const code = stripComments(readFileSync(sourcePath(rel), 'utf8'));
     // An unquoted SQL alias like `phone_number as phoneNumber` would come back as `phonenumber`.
     assert.doesNotMatch(code, /\b[a-z_]+\.?[a-z_]* as [a-z]+[A-Z]\w*\b(?!['"])/, rel);
   }

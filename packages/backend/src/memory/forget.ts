@@ -309,7 +309,7 @@ export async function forgetAll(userId: string, actor: string, drawer?: DrawerRe
   for (const m of live) ids.add(m.id);
   const hist = drawer
     ? await sql().read(all<{ memory_id: string }>(`SELECT DISTINCT memory_id FROM memory_versions WHERE user_id = ? AND drawer_kind = ? AND drawer_key = ? AND memory_id NOT IN (SELECT memory_id FROM memory_versions WHERE user_id = ? AND change = 'forget') ORDER BY memory_id`, userId, drawer.kind, drawer.key || '', userId))
-    : await sql().read(all<{ memory_id: string }>(`SELECT DISTINCT memory_id FROM memory_versions WHERE user_id = ? AND memory_id NOT IN (SELECT memory_id FROM memory_versions WHERE user_id = ? AND change = 'forget') ORDER BY memory_id`, userId, userId));
+    : await sql().read(all<{ memory_id: string }>(`SELECT DISTINCT memory_id FROM memory_versions WHERE user_id = ? AND COALESCE(drawer_kind, '') <> 'agent' AND memory_id NOT IN (SELECT memory_id FROM memory_versions WHERE user_id = ? AND change = 'forget') ORDER BY memory_id`, userId, userId));
   for (const r of hist) ids.add(r.memory_id);
   const results: ForgetResult[] = [];
   for (const id of ids) {

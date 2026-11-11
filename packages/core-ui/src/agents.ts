@@ -57,7 +57,7 @@ export function agentResponse(path: string, response: WireResponse): WireRespons
     if (agent.id !== path.slice('/api/agents/'.length) || (b as Record<string, unknown>).currentVersion !== agent.version) throw Error('Invalid conflict');
     return { status: 409, body: { code, currentVersion: agent.version, agent } };
   }
-  return { status: response.status, body: (response.status === 409 && code === 'name_taken') || (response.status === 400 && code === 'invalid_version') || (response.status === 403 && code === 'reserved_agent') ? { code } : null };
+  return { status: response.status, body: (response.status === 409 && code === 'name_taken') || (response.status === 400 && ['invalid_version', 'invalid_model'].includes(code as string)) || (response.status === 403 && code === 'reserved_agent') ? { code } : null };
 }
 export type AgentsState = Readonly<{
   agents: readonly PublicAgent[]; selected?: PublicAgent; draft: string;

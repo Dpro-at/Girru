@@ -1,6 +1,8 @@
+import {JoinStart, JoinReady, NameThisComputer, quietDiscovery, readSetupEntry, writeSetupEntry, setupRoad, type QuietDiscoveryProgress} from './ComputerStart';
+import {useAccountStatus} from './ComputerJoin';
 import { DiscoveryStream } from './DiscoveryStream';
 import { SetupOrb } from './SetupOrb';
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { SessionClient } from './session';
 import { UiIcon } from './ui-icons';
 import { ClaudeCodeIcon, CodexIcon, GeminiIcon } from './brand-icons';
@@ -13,6 +15,7 @@ import { AgentsController } from './agents';
 import { WorkspaceTypeStep, type WorkspaceType } from './WorkspaceTypeStep';
 import { useAppTheme } from './app-navigation';
 import { PhoneSetupStep } from './PhonePairing';
+import { SetupHelperPill } from './MemoryHelper';
 
 /** FIRSTRUN-01 (boards FR2–FR3): the steps after the owner account, in the one setup window. */
 export type FirstRunStep = 'discovery' | 'tools' | 'model' | 'team' | 'phone';
@@ -34,12 +37,12 @@ async function get<T>(client: SessionClient, path: string): Promise<T | null> {
 const save = (client: SessionClient, step: FirstRunStep) => client.request({ method: 'PUT', path: '/api/first-run', body: { step } } as never).catch(() => null);
 
 /** True while the signed-in owner still has setup steps to do (null while asking). */
-export function useFirstRun(client: SessionClient, owner: boolean): { pending: boolean | null; step: FirstRunStep; workspaceType?: WorkspaceType; companyName?: string } {
-  const [state, setState] = useState<{ pending: boolean | null; step: FirstRunStep; workspaceType?: WorkspaceType; companyName?: string }>({ pending: owner ? null : false, step: 'tools' });
+export function useFirstRun(client: SessionClient, owner: boolean): { pending: boolean | null; step: FirstRunStep; workspaceType?: WorkspaceType; companyName?: string; companyKind?: string } {
+  const [state, setState] = useState<{ pending: boolean | null; step: FirstRunStep; workspaceType?: WorkspaceType; companyName?: string; companyKind?: string }>({ pending: owner ? null : false, step: 'tools' });
   useEffect(() => {
     if (!owner) { setState({ pending: false, step: 'tools' }); return; }
     let live = true;
-    void get<{ pending: boolean; step: FirstRunStep; workspaceType?: WorkspaceType; companyName?: string }>(client, '/api/first-run').then(r => { if (live) setState({ pending: !!r?.pending, step: r?.step ?? 'tools', workspaceType: r?.workspaceType, companyName: r?.companyName }); });
+    void get<{ pending: boolean; step: FirstRunStep; workspaceType?: WorkspaceType; companyName?: string; companyKind?: string }>(client, '/api/first-run').then(r => { if (live) setState({ pending: !!r?.pending, step: r?.step ?? 'tools', workspaceType: r?.workspaceType, companyName: r?.companyName, companyKind: r?.companyKind }); });
     return () => { live = false; };
   }, [client, owner]);
   return state;
@@ -47,15 +50,27 @@ export function useFirstRun(client: SessionClient, owner: boolean): { pending: b
 
 /** Clears what is typed on the shell's line first (Ctrl+U; Esc in PowerShell), so an earlier command is not run with it. */
 const CLEAR_LINE = typeof navigator !== 'undefined' && /win/i.test(navigator.platform) ? '\u001b' : '\u0015';
+/**
+ * The tab a setup command is typed into: one that has not run a setup command yet (and is still open),
+ * else a new tab. A command is never typed into a tab where an earlier one may still run, such as a
+ * sign-in waiting for the browser (Install on the Local model step once went into Claude's prompt).
+ */
+export function setupTab<T extends { key: string }>(tabs: { getSnapshot(): { tabs: readonly T[]; active: string | null }; add(): T | null; select(key: string): void }, used: ReadonlySet<string>): T | null {
+  const free = tabs.getSnapshot().tabs.find(tab => !used.has(tab.key));
+  if (free) { tabs.select(free.key); return free; }
+  return tabs.add();
+}
 /** Runs a fixed command in Girru's terminal when the owner presses Install or Sign in (Mohamed 2026-10-30: no extra Enter); the output stays in view. */
 function useSetupTerminal(client: SessionClient) {
   const t = useMemo(() => ({ tabs: new TerminalTabs(client), prefs: new TerminalPrefsController(client) }), [client]);
   const [shown, setShown] = useState<string | null>(null);
+  const used = useMemo(() => new Set<string>(), [t]);
   useEffect(() => () => t.tabs.dispose(), [t]);
   const type = (label: string, command: string) => {
     setShown(label);
-    const tab = t.tabs.getSnapshot().tabs[0] ?? t.tabs.add();
+    const tab = setupTab(t.tabs, used);
     if (!tab) return;
+    used.add(tab.key);
     // Type once the shell has printed its prompt, so the command is not echoed before it.
     let typed = false;
     const off = tab.terminal.onOutput(() => { if (typed) return; typed = true; setTimeout(() => { off(); tab.terminal.write(CLEAR_LINE + command + '\r'); }, 150); });
@@ -67,7 +82,7 @@ function useSetupTerminal(client: SessionClient) {
   return { type, pane, open: !!shown };
 }
 
-export function FirstRunSetup({ client, initialStep, workspaceType: initialType, companyName: initialName, onDone }: { client: SessionClient; initialStep: FirstRunStep; workspaceType?: WorkspaceType; companyName?: string; onDone: (chatId: string | null) => void }) {
+export function FirstRunSetup({ client, initialStep, workspaceType: initialType, companyName: initialName, companyKind, onDone }: { client: SessionClient; initialStep: FirstRunStep; workspaceType?: WorkspaceType; companyName?: string; companyKind?: string; onDone: (chatId: string | null) => void }) {
   const [step, setStep] = useState<FirstRunStep>(initialStep);
   const [stepNotice, setStepNotice] = useState<string>();
   const [workspaceType, setWorkspaceType] = useState(initialType);
@@ -84,6 +99,29 @@ export function FirstRunSetup({ client, initialStep, workspaceType: initialType,
     finally { setSavingType(false); }
   };
   const [signedIn, setSignedIn] = useState(false);
+  // DEVICES-PROJECT-01 (CP1–CP2): “Sign in” on the welcome joins an account that may already have computers.
+  const [chosen, setEntry] = useState(readSetupEntry);
+  const [alone, setAlone] = useState(false);
+  const account = useAccountStatus(client);
+  const entry = alone ? null : chosen ?? setupRoad(account);
+  const [joined, setJoined] = useState<{ from: string; comes: string; name: string } | null>(null);
+  const [joinReady, setJoinReady] = useState(false);
+  const [named, setNamed] = useState(false);
+  const [preparing, setPreparing] = useState(false);
+  const [scan, setScan] = useState<QuietDiscoveryProgress | null>(null);
+  const [scanFailed, setScanFailed] = useState(false);
+  const movedOn = useRef(false);
+  const startSame = async () => {
+    setPreparing(true); setScanFailed(false);
+    const done = await quietDiscovery(client, setScan);
+    setPreparing(false);
+    if (movedOn.current) return;
+    if (!done) { setScanFailed(true); return; }
+    await go('tools');
+  };
+  /* The scan runs in the backend, so the owner can go on and let it finish in the background. */
+  const continueInBackground = async () => { movedOn.current = true; await go('tools'); };
+  useEffect(() => { if (entry === 'same' && step === 'discovery' && !preparing) void startSame(); }, [entry, step]);
   const terminal = useSetupTerminal(client);
   useEffect(() => { void window.dproApp?.setSetupWindow?.(true).catch(() => {}); }, []);
   // "Skip" on the local model needs a signed-in subscription, also when setup continues at that step.
@@ -94,26 +132,59 @@ export function FirstRunSetup({ client, initialStep, workspaceType: initialType,
     if (response?.status === 200) setStep(s);
     else setStepNotice('Could not save this step. Try again before continuing.');
   };
+  // CP7a: where the system has no key store (Windows today), say once that memory is not encrypted yet.
+  const [plainNote, setPlainNote] = useState<'show' | 'seen' | null>(null);
   const finish = async () => {
+    if (plainNote === null) {
+      const info = await window.dproApp?.info?.().catch(() => null);
+      if (info?.memoryEncrypted === false) { setPlainNote('show'); return; }
+    }
+    await finishAfterNote();
+  };
+  const finishAfterNote = async () => {
     let chatId: string | null = null;
     try { const r = await client.request({ method: 'POST', path: '/api/first-run/finish' } as never); chatId = (r.body as { conversationId?: string } | null)?.conversationId ?? null; } catch { /* the workspace opens anyway */ }
     void window.dproApp?.setSetupWindow?.(false).catch(() => {});
+    writeSetupEntry(null);
     onDone(chatId);
   };
   // Team → Phone stays on this page: the backend does not store the phone step yet, so it is not saved.
   const [teamReady, setTeamReady] = useState(false);
   const appearance = useAppTheme();
+  if (plainNote === 'show') return <div className="shell app-shell first-run-shell" data-theme={appearance.theme} lang="en" dir="ltr"><main className="first-run-setup" aria-label="Set up Girru">
+    <section className="computer-join" aria-label="Memory on this computer"><span className="computer-start-done"><UiIcon name="info" size={26}/></span>
+      <h2>Memory on this computer is not encrypted</h2>
+      <p>This system has no key store Girru can use yet. Your work runs normally; Girru will offer to encrypt when it can.</p>
+      <div className="setup-actions"><button type="button" className="primary" onClick={() => { setPlainNote('seen'); void finishAfterNote(); }}>OK</button></div></section>
+  </main></div>;
   return <div className="shell app-shell first-run-shell" data-theme={appearance.theme} lang="en" dir="ltr"><main className="first-run-setup" aria-label="Set up Girru">
-    {!workspaceType || (workspaceType === 'company' && !companyName) ? <WorkspaceTypeStep value={workspaceType} companyName={companyName} busy={savingType} notice={typeNotice} onNext={(type, name) => void chooseType(type, name)}/> : <>
+    {!named ? <NameThisComputer client={client} onDone={() => setNamed(true)}/>
+    : entry === 'signin' ? <JoinStart client={client} onFresh={() => { writeSetupEntry(null); setEntry(null); setAlone(true); }} onSame={(from, comes, name) => { writeSetupEntry('same'); setJoined({ from, comes, name }); setEntry('same'); }}/>
+    : entry === 'same' ? <>
+      {stepNotice && <p className="setup-note" role="alert">{stepNotice}</p>}
+      {joinReady ? <JoinReady name={joined?.name ?? 'This computer'} from={joined?.from ?? 'your other computer'} comes={joined?.comes ?? ''} onOpen={() => void finish()}/>
+        : step === 'discovery' ? <section className="setup-note join-scan" role="status" aria-live="polite">
+            <p className="computer-steps computer-join-steps"><span>1 Added</span><b>2 What comes</b><span>3 AI tools</span><span>4 Open Girru</span></p>
+            {scanFailed ? <><p>Looking through this computer did not finish.</p><div className="setup-actions"><button type="button" className="primary" onClick={() => void startSame()}>Try again</button></div></>
+            : <><p><b>Getting this computer ready</b></p>
+              <p>Girru is looking through this computer for your projects and notes. Nothing leaves this computer. On a big disk this can take a few minutes. You do not need to do anything on {joined?.from ?? 'your other computer'} now.</p>
+              {scan && scan.status === 'scanning' && <p>{scan.scanned.toLocaleString()} files looked at · {scan.projects} projects · {scan.notes} notes</p>}
+              {scan && scan.status === 'scanning' && <div className="setup-actions"><button type="button" className="primary" onClick={() => void continueInBackground()}>Continue, keep looking in the background</button></div>}</>}
+          </section>
+        : <><p className="computer-steps computer-join-steps"><span>1 Added</span><span>2 What comes</span><b>3 AI tools</b><span>4 Open Girru</span></p><ToolsStep client={client} terminal={terminal} onSignedIn={setSignedIn} onNext={() => setJoinReady(true)}/></>}
+    </>
+    : !workspaceType || (workspaceType === 'company' && !companyName) ? <WorkspaceTypeStep value={workspaceType} companyName={companyName} busy={savingType} notice={typeNotice} onNext={(type, name) => void chooseType(type, name)}/> : <>
     {step !== 'discovery' && <SetupOrb/>}
     <SetupSteps current={step === 'discovery' ? 'Your files' : step === 'tools' ? 'AI tools' : step === 'model' ? 'Local model' : step === 'phone' ? 'Phone' : 'Team'}/>
     {stepNotice && <p className="setup-note" role="alert">{stepNotice}</p>}
     {step === 'discovery' && <DiscoveryStep client={client} onNext={() => go('tools')}/>}
     {step === 'tools' && <ToolsStep client={client} terminal={terminal} onSignedIn={setSignedIn} onNext={() => go('model')}/>}
     {step === 'model' && <ModelStep client={client} terminal={terminal} canSkip={signedIn} onBack={() => go('tools')} onNext={() => go('team')}/>}
-    {step === 'team' && <TeamStep client={client} workspaceType={workspaceType} ready={teamReady} onReady={() => setTeamReady(true)} onBack={() => go('model')} onDone={() => setStep('phone')}/>}
+    {step === 'team' && <TeamStep client={client} workspaceType={workspaceType} companyKind={workspaceType === 'company' ? companyKind : undefined} ready={teamReady} onReady={() => setTeamReady(true)} onBack={() => go('model')} onDone={() => setStep('phone')}/>}
     {step === 'phone' && <PhoneSetupStep client={client} onBack={() => { setTeamReady(true); setStep('team'); }} onDone={finish}/>}
     </>}
+    {/* MODELS-01-INSTALL (M1–M2): the memory helper installs itself; one quiet pill in the step's bottom bar, no step and no choice. */}
+    <SetupHelperPill client={client}/>
   </main></div>;
 }
 
@@ -164,7 +235,7 @@ export function DiscoveryInventoryView({ result, error = false, onRetry, onNext 
     <dl className="setup-discovery-counts">{(Object.keys(labels) as Array<keyof typeof labels>).map(key => <div key={key}><UiIcon name={key === 'projects' ? 'folder' : key === 'ssh' ? 'key' : key === 'skills' ? 'sparkle' : key === 'mcp' ? 'tool' : 'file'} size={20}/><dt>{labels[key]}</dt><dd>{(result?.counts[key] ?? 0).toLocaleString('en-US')}</dd></div>)}</dl>
     <p className="fine-print">{result?.scanned ?? 0} entries checked{result?.denied ? ` · ${result.denied} ${result.denied === 1 ? 'folder' : 'folders'} denied access` : ''}{result?.unavailable ? ` · ${result.unavailable} ${result.unavailable === 1 ? 'folder' : 'folders'} unavailable` : ''}.</p>
     {result?.limited && <p className="setup-note">Some locations could not be fully searched. The results show what Girru could reach.</p>}
-    <p className="fine-print">Your source files stay unchanged. Memory imports begin after your team is ready. Skills and MCP connections wait for your approval; private SSH key contents are never read or imported.</p>
+    <p className="fine-print">Your source files stay unchanged. Memory imports begin after your team is ready. Review skills in Library → Skills → From my coding apps and MCP connections in Settings → MCP connections → Found, not added. Add only what you want; connections stay off. SSH keys are in Settings → SSH keys; saved hosts are in Terminal → Saved SSH hosts. Your private SSH key contents are never read or imported.</p>
     <div className="setup-actions">
       {(error || result?.status === 'error') && <button type="button" onClick={onRetry}>Try again</button>}
       <button type="button" className="primary" disabled={error || result?.status !== 'done'} onClick={onNext}>Next</button>
@@ -224,10 +295,10 @@ function ModelStep({ client, terminal, canSkip, onBack, onNext }: { client: Sess
   </section>;
 }
 
-function TeamStep({ client, workspaceType, ready, onReady, onBack, onDone }: { client: SessionClient; workspaceType: WorkspaceType; ready: boolean; onReady: () => void; onBack: () => void; onDone: () => void }) {
+function TeamStep({ client, workspaceType, companyKind, ready, onReady, onBack, onDone }: { client: SessionClient; workspaceType: WorkspaceType; companyKind?: string; ready: boolean; onReady: () => void; onBack: () => void; onDone: () => void }) {
   const controller = useMemo(() => new CompanyController(client), [client]);
   useEffect(() => () => controller.dispose(), [controller]);
-  return ready ? <TeamReady client={client} onStart={onDone}/> : <TeamFlow controller={controller} workspaceType={workspaceType} mode="setup" onBack={onBack} onHired={onReady}/>;
+  return ready ? <TeamReady client={client} onStart={onDone}/> : <TeamFlow controller={controller} workspaceType={workspaceType} companyKind={companyKind} mode="setup" onBack={onBack} onHired={onReady}/>;
 }
 
 /** A steady colour per name, so each person is told apart at a glance. */

@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // CORE-05: mixed learning approval (routine saved, important -> proposal),
 // versioning of every API/tool change, weekly summary.
 // Run: node --import tsx --test test/memory-learning.test.mjs
@@ -10,17 +11,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-const backendDir = process.cwd();
+import { switchValueOn } from './helpers/switches.mjs';
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-memlearn-'));
 mkdirSync(join(dir, '.data'), { recursive: true });
 process.chdir(dir);
 process.env.HOME = dir;
 process.env.DATABASE_PATH = join(dir, '.data', 'agent-player.db');
+process.env.AGENT_PLAYER_DATA_DIR = join(dir, '.data');
 process.env.JWT_SECRET = randomBytes(64).toString('hex'); // throwaway, test only
 process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway, test only
 delete process.env.MEMORY_SUMMARY_MODEL;
 delete process.env.OUTSIDER_AGENT_MEMORY;
 
+process.env.OLLAMA_URL = 'http://127.0.0.1:11434'; // Matches the intercepted URL below; no server is contacted.
 // The extraction model is stubbed: only the local Ollama generate URL answers.
 let extraction = [];
 const outbound = [];
@@ -335,9 +339,11 @@ test('weekly summary: deterministic digest per drawer, stubbed model, owner only
 test('weekly summary job: in-process, owner-scoped, created once per owner', async () => {
   const created = await J.ensureMemoryJobs();
   // STORE-MAP-01 P9: with GIRRU_STORE_P9 on, the nightly read-only memory doctor and the weekly quality job are scheduled too.
-  assert.deepEqual(created.map((j) => j.name), ['memory-weekly-summary-ml-owner', 'memory-retention-ml-owner', 'memory-trash-ml-owner', ...(process.env.GIRRU_STORE_P9 === '1' ? ['memory-doctor-ml-owner', 'memory-quality-ml-owner'] : []),
+  assert.deepEqual(created.map((j) => j.name), ['memory-weekly-summary-ml-owner', 'memory-retention-ml-owner', 'memory-trash-ml-owner', ...(switchValueOn(process.env.GIRRU_STORE_P9) ? ['memory-doctor-ml-owner', 'memory-quality-ml-owner'] : []),
     // P9b: the weekly "learn from use" job.
-    ...(process.env.GIRRU_STORE_P9B === '1' ? ['memory-usage-ml-owner'] : [])]);
+    ...(switchValueOn(process.env.GIRRU_STORE_P9B) ? ['memory-usage-ml-owner'] : []),
+    // KNOW-INDEX-01: the documents job (every 20 minutes) while document memory is on.
+    ...(switchValueOn(process.env.GIRRU_DOC_INDEX) ? ['memory-documents-ml-owner'] : [])]);
   assert.deepEqual(await J.ensureMemoryJobs(), [], 'idempotent');
   const row = db.prepare(`SELECT action_type, action_data, cron_expression FROM cron_jobs WHERE name = 'memory-weekly-summary-ml-owner'`).get();
   assert.equal(row.action_type, 'memory-job');

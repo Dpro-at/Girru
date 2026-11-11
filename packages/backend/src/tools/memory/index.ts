@@ -17,6 +17,7 @@ export { memoryBridgeTool, memoryBridgeApplyTool } from './bridge.js';
 export { memoryReviewTool, memoryReviewDecideTool, memoryReviewRoutineTool, memoryGraphReviewTool } from './review.js';
 export { memoryPersonExportTool, memoryPersonForgetTool, memoryPrivacyReviewTool, memoryPrivacyDecideTool } from './person.js'; // STORE-MAP-01 P9
 export { memoryTrustReviewTool, memoryCorrectedCheckedTool, memoryQuestionAnswerTool, memoryQuestionForgetTool } from './trust.js'; // STORE-MAP-01 P9b screens
+export { projectTrustReviewTool, projectTrustApplyTool } from './project-trust.js'; // REPO-TRUST-01: Outside projects
 export { memoryRecallTool } from './recall.js';
 export { memoryTrashTool, memoryRestoreTool, memoryTrashEmptyTool, memoryProjectTrashTool, memoryGroupsTool, memoryGroupApplyTool } from './desktop.js';
 export { projectDesignTool, projectDesignApplyTool, projectDatabasesTool, projectDatabasesApplyTool } from './project-tech.js';

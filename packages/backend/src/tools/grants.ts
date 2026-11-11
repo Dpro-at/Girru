@@ -91,6 +91,8 @@ export const DEFAULT_AGENT_TOOLS: readonly string[] = [
   'memory_corrected_checked', // STORE-MAP-01 P9b: mark a corrected memory as checked; every call needs one-time owner approval
   'memory_question_answer', // STORE-MAP-01 P9b: save the owner's answer to an open question; every call needs one-time owner approval
   'memory_question_forget', // STORE-MAP-01 P9b: forget an open question; every call needs one-time owner approval
+  'project_trust_review', // REPO-TRUST-01: read-only Outside projects list, owner's own turns
+  'project_trust_apply', // REPO-TRUST-01: trust / put outside / own accounts; every call needs one-time owner approval
   'open_in_code', // CODE-OPEN-01: a file in a project or the data folder at a line; every call needs one-time owner approval
   'storage_search',
   // BOARD-02: the agent's own board cards only (list, comment, move)
@@ -261,7 +263,7 @@ function* ensureGrantProfileStep(agentId: string, available: Available): Step<Pr
     const profile = yield* readProfile(agentId);
     if (profile && profile.source !== 'legacy-pending') return profile;
     if (profile) {
-      const names = available.filter((t) => !isToolExecClass(t) && !isMcpToolName(t.name) && t.name !== 'edit').map((t) => t.name);
+      const names = available.filter((t) => !isToolExecClass(t) && !isMcpToolName(t.name) && t.name !== 'edit' && t.name !== 'computer_task_accept' && t.name !== 'computer_sync_apply' && !t.name.startsWith('device_')).map((t) => t.name);
       yield* writeGrantRows(agentId, names.map((tool) => ({ tool, scopes: null })), 'system:legacy');
       yield* run(`UPDATE agent_grant_profiles SET source = 'legacy', updated_at = ${nowText(d)} WHERE agent_id = ?`, agentId);
     } else {

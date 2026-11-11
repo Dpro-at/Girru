@@ -17,6 +17,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
+import { clearEnv } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const load = (rel) => import(pathToFileURL(join(backendDir, rel)).href);
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-store-p9-person-')));
@@ -32,7 +33,7 @@ process.env.NODE_ENV = 'test';
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_P3', 'GIRRU_STORE_P9', 'GIRRU_STORE_PILOT']) delete process.env[k];
+for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_P3', 'GIRRU_STORE_P9', 'GIRRU_STORE_PILOT']) clearEnv(k);
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
@@ -104,7 +105,7 @@ test('retention (PRIV5): an old replaced fact about a person goes, a current one
   assert.equal(db.prepare("SELECT 1 FROM memories WHERE id = 'sam-old'").get(), undefined);
   assert.ok(db.prepare("SELECT 1 FROM memories WHERE id = 'sam-1'").get());
   assert.ok(db.prepare("SELECT 1 FROM memories WHERE id = 'sam-recent-old'").get());
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
 });
 
 test('forget the person in one action', async () => {
@@ -123,7 +124,7 @@ test('forget the person in one action', async () => {
   assert.ok(db.prepare("SELECT 1 FROM agent_handoffs WHERE id = 'h-1'").get(), 'handoffs are work records: kept');
   assert.ok(L.readLedger().some((l) => l.kind === 'person' && l.memoryId === 'sam' && l.userId === OWNER));
   assert.ok(db.prepare("SELECT 1 FROM memories WHERE id = 'o-sam'").get(), 'another user keeps their Sam');
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
 });
 
 test('routes: off = 404, owner only, export and forget', async () => {
@@ -148,6 +149,6 @@ test('routes: off = 404, owner only, export and forget', async () => {
   const f = await call2(OWNER, 'POST', '/api/memory/people/ali/forget', { confirm: 'ali', mentionIds: ['m-ali'] });
   assert.equal(f.statusCode, 200, f.body);
   assert.deepEqual(f.json(), { drawer: 1, mentions: 1, graph: 0 });
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
   await app.close();
 });

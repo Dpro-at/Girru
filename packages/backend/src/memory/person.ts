@@ -1,3 +1,5 @@
+import {assertNoLegacyMemoryAccess,selectedEncryptedOwnerRuntime} from './encryption/consumer-host.js';
+import {assertNoDefaultMemoryAccess} from './encryption/execution-context.js';
 /**
  * STORE-MAP-01 P9 (PRIV5, PRIV6): one person's data (GIRRU_STORE_P9).
  *
@@ -68,6 +70,8 @@ async function graphOf(userId: string, key: string): Promise<Array<{ id: string;
 
 /** Everything about one person (PRIV6). */
 export async function exportPerson(userId: string, personKey: string, now: Date = new Date()): Promise<PersonExport> {
+  const encrypted=await selectedEncryptedOwnerRuntime(userId);if(encrypted)return encrypted.ownerPerson(personKey,true);
+  assertNoLegacyMemoryAccess();assertNoDefaultMemoryAccess();
   if (!isValidDrawerKey('people', personKey)) throw new PersonError(400, 'Not a valid person');
   const entities = await graphOf(userId, personKey);
   const names = [...new Set([personKey, ...entities.flatMap((e) => [e.name, ...e.aliases])].map(norm).filter(Boolean))];
@@ -117,6 +121,8 @@ export async function exportPerson(userId: string, personKey: string, now: Date 
  * person's export (others are refused); `confirm` must be the person's key.
  */
 export async function forgetPerson(userId: string, personKey: string, actor: string, opts: { confirm: unknown; mentionIds?: unknown }): Promise<{ drawer: number; mentions: number; graph: number }> {
+  const encrypted=await selectedEncryptedOwnerRuntime(userId);if(encrypted){if(actor!==userId||opts.confirm!==personKey||opts.mentionIds!==undefined&&(!Array.isArray(opts.mentionIds)||opts.mentionIds.some(id=>typeof id!=='string')))throw new PersonError(400,'Explicit owner confirmation required');return encrypted.ownerForgetPerson(personKey,{confirm:personKey,mentionIds:opts.mentionIds as string[]|undefined});}
+  assertNoLegacyMemoryAccess();assertNoDefaultMemoryAccess();
   if (!isValidDrawerKey('people', personKey)) throw new PersonError(400, 'Not a valid person');
   if (opts.confirm !== personKey) throw new PersonError(400, 'Type the person\'s name to confirm');
   const wanted = opts.mentionIds === undefined ? [] : opts.mentionIds;
@@ -150,6 +156,7 @@ export async function forgetPerson(userId: string, personKey: string, actor: str
 
 /** PRIV5: replaced facts about people, replaced longer than PEOPLE_REPLACED_DAYS ago. */
 export async function stalePeopleFacts(userId: string, now: Date = new Date()): Promise<Array<{ id: string; person: string; validTo: string }>> {
+  assertNoLegacyMemoryAccess();assertNoDefaultMemoryAccess();
   const cutoff = new Date(now.getTime() - PEOPLE_REPLACED_DAYS * DAY).toISOString();
   const rows = await sql().read(all<{ id: string; dkey: string; valid_to: string | null; created_at: string }>(
     `SELECT id, ${DRAWER_KEY_SQL} AS dkey, valid_to, created_at FROM memories

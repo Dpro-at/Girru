@@ -5,7 +5,7 @@ import { exportPath } from './chat-export-contract.js';
 
 type Msg = { id: string; role: 'user' | 'assistant'; content: string; parts: unknown[] | null; status: 'complete' | 'stopped' | 'error'; runId: string | null; durationMs: number | null; createdAt: string; agentId?: string };
 type Proj = { id: string; name: string; slug: string; folder: string | null; repoUrl: string | null };
-type Conv = { id: string; title: string | null; agentId: string | null; projectId: string | null; pinned: boolean; preview: string; createdAt: string; updatedAt: string; messages: Msg[]; order: number };
+type Conv = { queued?: { key: string; text: string }[]; id: string; title: string | null; agentId: string | null; projectId: string | null; pinned: boolean; preview: string; createdAt: string; updatedAt: string; messages: Msg[]; order: number };
 type Run = { id: string; conv: Conv; events: Record<string, unknown>[]; done: boolean; stopped: boolean; started: number; agentId?: string };
 
 /** Fictional GitHub links (the scheme is joined here so no full address appears in the source). */
@@ -27,7 +27,9 @@ export function createConversationsMock(options: { stepMs?: number } = {}) {
   let n = 0; let clock = 0;
   let sidebar: Record<string, unknown> = { order: ['scheduled', 'running', 'pinned', 'projects', 'other', 'archived'], hidden: ['running', 'archived'], folded: [] };
   const now = () => `2026-10-15 12:${String(Math.floor(clock / 60) % 60).padStart(2, '0')}:${String(clock++ % 60).padStart(2, '0')}`;
-  const view = (c: Conv) => ({ id: c.id, title: c.title, agentId: c.agentId, projectId: c.projectId, pinned: c.pinned, preview: c.preview, createdAt: c.createdAt, updatedAt: c.updatedAt });
+  // Fictional backend fixture only; live target decisions come from the backend.
+  const fixtureMention = (text: unknown) => typeof text === 'string' && /(?:^|\s)@Offline helper(?:$|[^\p{L}\p{N}_])/iu.test(text) ? 'sample-helper' : undefined;
+  const view = (c: Conv) => ({ ...(c.queued?.length ? { queued: c.queued.map(item => ({ ...item })) } : {}), id: c.id, title: c.title, agentId: c.agentId, projectId: c.projectId, pinned: c.pinned, preview: c.preview, createdAt: c.createdAt, updatedAt: c.updatedAt });
   const list = () => [...convs.values()].sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.order - a.order).map(view);
   const script = (prompt: string) => {
     const ev: Record<string, unknown>[] = [
@@ -140,6 +142,8 @@ export function createConversationsMock(options: { stepMs?: number } = {}) {
       const pr: Proj = { id: `proj-${String(++n).padStart(8, '0')}`, name: body!.name.trim(), slug: body!.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-'), folder: body?.folder || null, repoUrl: body?.repoUrl || null };
       projects.set(pr.id, pr); return { status: 201, body: { project: pr } };
     }
+    if(p.kind==='reply-changes')return{status:200,body:{branch:null,notGit:false,truncated:false,changes:[{path:'src/app.ts',status:'modified',added:2,removed:1},{path:'notes/plan.md',status:'added',added:3,removed:0}]}};
+    if(p.kind==='reply-diff')return{status:200,body:{path:p.rel,diff:'@@ -1 +1,2 @@\n-old\n+new\n+added\n',binary:false,hidden:false,truncated:false}};
     if (p.kind === 'project-changes' || p.kind === 'project-diff' || p.kind === 'project-tree' || p.kind === 'project-file') {
       const pr = projects.get(p.id);
       if (!pr) return { status: 404, body: { code: 'not_found' } };
@@ -161,7 +165,7 @@ export function createConversationsMock(options: { stepMs?: number } = {}) {
     }
     if (p.kind === 'list') {
       if (request.method === 'GET') return { status: 200, body: { conversations: list() } };
-      const c: Conv = { id: `conv-${String(++n).padStart(8, '0')}`, title: body?.title ?? null, agentId: body?.agentId ?? null, projectId: body?.projectId ?? null, pinned: false, preview: '', createdAt: now(), updatedAt: now(), messages: [], order: n };
+      const c: Conv = { id: `conv-${String(++n).padStart(8, '0')}`, title: body?.title ?? null, agentId: fixtureMention(body?.targetMessage) ?? body?.agentId ?? null, projectId: body?.projectId ?? null, pinned: false, preview: '', createdAt: now(), updatedAt: now(), messages: [], order: n };
       convs.set(c.id, c);
       return { status: 201, body: { conversation: view(c) } };
     }
@@ -175,6 +179,7 @@ export function createConversationsMock(options: { stepMs?: number } = {}) {
     if (!c) return { status: 404, body: { code: 'not_found' } };
     if (p.kind === 'one') {
       if (request.method === 'DELETE') { convs.delete(c.id); return { status: 200, body: { ok: true } }; }
+      if (Array.isArray(body?.queued)) c.queued = body.queued.filter((item: { key: string }) => !runs.has(item.key));
       if (body?.title !== undefined) c.title = body.title?.trim() || null;
       if (body?.pinned !== undefined) c.pinned = body.pinned;
       if (body?.projectId !== undefined) c.projectId = body.projectId;
@@ -185,14 +190,19 @@ export function createConversationsMock(options: { stepMs?: number } = {}) {
       return { status: 200, body: { conversation: view(c), messages: c.messages.map(m => ({ ...m })), activeRunId: active?.id ?? null } };
     }
     // runs
+    if (runs.has(body!.runId)) return { status: 202, body: { runId: body!.runId, replayed: true } };
     const busy = [...runs.values()].find(r => r.conv === c && !r.done);
     if (busy) return { status: 409, body: { code: 'conversation_busy', runId: busy.id } };
     if (runs.has(body!.runId)) return { status: 202, body: { runId: body!.runId, replayed: true } };
+    if (body!.queuedKey) {
+      if (!c.queued?.some(item => item.key === body!.queuedKey && item.text === body!.message)) return { status: 409, body: { code: 'queued_turn_changed' } };
+      c.queued = c.queued.filter(item => item.key !== body!.queuedKey);
+    }
     const user: Msg = { id: `m-${++n}`, role: 'user', content: body!.message, parts: null, status: 'complete', runId: body!.runId, durationMs: null, createdAt: now() };
     c.messages.push(user);
     c.title ??= String(body!.message).split('\n')[0].split(/\s+/).slice(0, 7).join(' ').slice(0, 60);
     c.preview = String(body!.message).slice(0, 140); c.updatedAt = now(); c.order = ++n;
-    const run: Run = { id: body!.runId, conv: c, events: [], done: false, stopped: false, started: Date.now(), ...(typeof body!.agentId === 'string' ? { agentId: body!.agentId } : {}) };
+    const run: Run = { id: body!.runId, conv: c, events: [], done: false, stopped: false, started: Date.now(), ...((fixtureMention(body!.message) ?? body!.agentId) ? { agentId: fixtureMention(body!.message) ?? body!.agentId } : {}) };
     runs.set(run.id, run);
     advance(run, script(body!.message), /fail/i.test(body!.message));
     return { status: 202, body: { runId: run.id, userMessage: user } };

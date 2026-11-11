@@ -12,12 +12,13 @@
 // Throwaway DB + cwd + HOME, random test-only secrets, no network, no real model.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, realpathSync, readFileSync, statSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, fstatSync, existsSync, openSync, closeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
+import { clearEnv } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const load = (rel) => import(pathToFileURL(join(backendDir, rel)).href);
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-store-p9-health-')));
@@ -34,7 +35,7 @@ process.env.NODE_ENV = 'test';
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-for (const k of ['GIRRU_STORE_P9', 'GIRRU_STORE_P3', 'GIRRU_STORE_P2', 'GIRRU_MEMORY_HELPER']) delete process.env[k]; // the helper row has its own test (memory-helper-install)
+for (const k of ['GIRRU_STORE_P9', 'GIRRU_STORE_P3', 'GIRRU_STORE_P2', 'GIRRU_MEMORY_HELPER']) clearEnv(k); // the helper row has its own test (memory-helper-install)
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
@@ -82,7 +83,7 @@ test('failures are counted; the second of a kind in a day raises one notice', as
   assert.equal(saving.word, '3 not saved');
   assert.equal(h.rows.find((r) => r.id === 'remembering').state, 'ok');
   assert.equal(h.rows.find((r) => r.id === 'backups').word, 'No backup yet');
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
 });
 
 test('the doctor job only reads and records its counts', async () => {
@@ -97,7 +98,7 @@ test('the doctor job only reads and records its counts', async () => {
   assert.equal(bg.state, 'needs_you');
   const sum = Object.values(r.counts).reduce((a, b) => a + b, 0);
   assert.equal(bg.word, `${sum} to tidy`); // the duplicate and the two rows without a vector
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
 });
 
 test('the support file holds counts and ids, never memory text or the home folder', async () => {
@@ -109,7 +110,7 @@ test('the support file holds counts and ids, never memory text or the home folde
   assert.doesNotMatch(text, /purple-otter|vault code/);
   assert.ok(!text.includes(dir), 'no home or data path');
   assert.ok(!text.includes(process.env.JWT_SECRET) && !text.includes(process.env.ENCRYPTION_KEY));
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
 });
 
 test('coding apps: a handoff waits while Girru is away and is sent when it is back', async () => {
@@ -130,18 +131,21 @@ test('coding apps: a handoff waits while Girru is away and is sent when it is ba
   await other.call('handoff_write', { done: ['C'] });
   await b.call('handoff_write', { done: ['D'], refuse: true });
   const file = join(configDir, Q.QUEUE_FILE);
-  assert.equal(statSync(file).mode & 0o077, 0, 'owner only');
+  const initial = openSync(file, 'r');
+  try { assert.equal(fstatSync(initial).mode & 0o077, 0, 'owner only'); }
+  finally { closeSync(initial); }
   assert.equal(Q.queuedHandoffs(configDir), 4);
   process.env.GIRRU_STORE_P9 = '1';
   assert.equal((await H.memoryHealth(OWNER)).rows.find((r) => r.id === 'coding_apps').word, '4 handoffs waiting');
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
   up = true;
   assert.equal((await b.call('project_brief', {})).text, 'ok');
   assert.equal(got[0][0], 'project_brief');
   assert.deepEqual(got.slice(1).map(([t, a]) => [t, a.done[0]]), [['handoff_write', 'A'], ['memory_handoff', 'B']], 'this folder\'s notes, oldest first; the refused one dropped');
   assert.equal(Q.queuedHandoffs(configDir), 1, 'the other folder\'s note waits');
-  assert.match(readFileSync(file, 'utf8'), /beta/);
   await other.call('latest_handoff', {});
+  assert.equal(got.at(-1)[0], 'handoff_write', 'the other folder flushes its own waiting handoff');
+  assert.deepEqual(got.at(-1)[1].done, ['C']);
   assert.equal(existsSync(file), false);
 });
 
@@ -165,6 +169,6 @@ test('routes: off = 404, owner gets health and the support file', async () => {
   assert.equal(s.statusCode, 200);
   assert.match(s.headers['content-disposition'], /girru-support-/);
   assert.doesNotMatch(s.body, /purple-otter/);
-  delete process.env.GIRRU_STORE_P9;
+  process.env.GIRRU_STORE_P9 = '0';
   await app.close();
 });

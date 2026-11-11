@@ -1,0 +1,17 @@
+/** Same-agent private notes, audited before key access. Never imports or falls back to MEMORY.md. */
+import {one,type StepRunner} from '../../repositories/sql-steps.js';
+import {createHash} from 'node:crypto';
+import {captureAuthenticatedMemoryRun,authenticatedMemoryRunStep} from './auth-capture.js';
+import {createMemoryRevisionValidator} from './revision-validator.js';
+import {createMemoryUnlockSession} from './unlock-session.js';
+import {loadEncryptedMemoryCandidates} from './candidate-loader.js';
+import {decryptMemoryRow,encryptedFieldProducer} from './row-codec.js';
+import {canonicalEncryptedRow} from './content-commit.js';
+import {observeEncryptedRunFieldProducer} from './run-admission.js';
+import type {MemoryReadIntent} from './read-audit.js';
+import {MemoryCipherError} from './envelope.js';
+export async function readAuthenticatedEncryptedAgentNotes(input:{runner:StepRunner;token:string;session:ReturnType<typeof createMemoryUnlockSession>;run:Parameters<typeof authenticatedMemoryRunStep>[1];agentId:string;recordRead:(intent:MemoryReadIntent)=>Promise<boolean>}):Promise<{memoryId:string;content:string;hash:string}|null>{
+ let key:Buffer|undefined;const {runner,token,session}=input;try{const run={...input.run,delegatedFrom:[...input.run.delegatedFrom],drawers:input.run.drawers.map(drawer=>({...drawer}))};if(!input.agentId||input.agentId!==run.agentId||run.audience!=='owner')throw new MemoryCipherError();const lease=session.capture(),auth=await captureAuthenticatedMemoryRun(runner,token,run);if(auth.ownerId!==lease.scope.ownerId)throw new MemoryCipherError();const validate=createMemoryRevisionValidator(runner,auth.revision,session.lock),check=async()=>{if(runner.inTransaction?.()!==false||!lease.isCurrent()||await validate()!==true||!lease.isCurrent())throw new MemoryCipherError();};await check();const rows=await loadEncryptedMemoryCandidates(runner,auth.ownerId);await check();const selected=rows.filter(row=>row.drawer_kind==='agent'&&row.drawer_key===input.agentId&&(row.status??'active')==='active');if(selected.length>1)throw new MemoryCipherError();if(!selected.length)return null;const cipher=selected[0];if(cipher.source_agent_id!==null&&cipher.source_agent_id!==input.agentId)throw new MemoryCipherError();if(await input.recordRead({readerKind:'agent',readerId:input.agentId,purpose:'recall',records:[{table:'memories',id:String(cipher.id)}]})!==true)throw new MemoryCipherError();await check();const material=await lease.resolveKey({user_id:auth.ownerId});key=material.key;await check();const plain=decryptMemoryRow('memories',cipher,lease.scope,key,material.id);if(typeof plain.content!=='string'||Buffer.byteLength(plain.content)>32768||plain.drawer_kind!=='agent'||plain.drawer_key!==input.agentId)throw new MemoryCipherError();
+ await runner.tx(function*(){const fresh=yield* authenticatedMemoryRunStep(token,run),current=yield* one<Record<string,unknown>>('SELECT * FROM memories WHERE user_id=? AND id=?',auth.ownerId,String(cipher.id));if(JSON.stringify(fresh.revision)!==JSON.stringify(auth.revision)||!current||canonicalEncryptedRow(current)!==canonicalEncryptedRow(cipher)||!lease.isCurrent())throw new MemoryCipherError();},{immediate:true});await check();observeEncryptedRunFieldProducer(encryptedFieldProducer('memories',plain,'content',lease.scope),{kind:'memory',id:String(plain.id)});return{memoryId:String(plain.id),content:plain.content,hash:createHash('sha256').update(plain.content).digest('hex')};
+ }catch{session.lock();throw new MemoryCipherError();}finally{key?.fill(0);}
+}

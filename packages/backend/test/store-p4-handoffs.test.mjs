@@ -21,7 +21,7 @@ process.env.DATABASE_PATH = join(dir, '.data', 'agent-player.db');
 process.env.JWT_SECRET = randomBytes(64).toString('hex'); // throwaway, test only
 process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway, test only
 process.env.NODE_ENV = 'test';
-delete process.env.GIRRU_STORE_P4;
+process.env.GIRRU_STORE_P4 = '0';
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 console.log = () => {}; console.info = () => {}; console.warn = () => {};
 
@@ -75,6 +75,6 @@ test('the brief takes the newest note of agents and apps', async () => {
 });
 
 test('switch off again: the old table still has every app note', async () => {
-  delete process.env.GIRRU_STORE_P4;
+  process.env.GIRRU_STORE_P4 = '0';
   assert.equal((await bridge.listBridgeHandoffs(O, { projectId: p.id })).length, 2);
 });

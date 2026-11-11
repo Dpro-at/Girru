@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // CORE-MEM-TOPIC / CORE-MEM-CONFLICT / CORE-MEM-DOCTOR: stable topic keys,
 // conflict surfacing with keep new / keep old / keep both, memory doctor.
 // Run: node --import tsx --test test/memory-quality.test.mjs
@@ -9,7 +10,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes, createHash } from 'node:crypto';
 
-const backendDir = process.cwd();
+import { switchValueOn } from './helpers/switches.mjs';
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-memquality-'));
 mkdirSync(join(dir, '.data'), { recursive: true });
 process.chdir(dir);
@@ -73,8 +75,8 @@ const call = (method, url, who = 'mq-owner', payload) => quietly(() => app.injec
 const reviewHashOf = async (id) => (await call('GET', `/api/memory/proposals/${id}`)).json().reviewHash;
 const mem = (id) => db.prepare('SELECT * FROM memories WHERE id = ?').get(id);
 // STORE-MAP-01 P9 (M4): keep new supersedes; the current fact is at the end of superseded_by.
-const P9 = process.env.GIRRU_STORE_P9 === '1';
-const P3 = process.env.GIRRU_STORE_P3 === '1'; // a topic update replaces the row (new id, the old one superseded)
+const P9 = switchValueOn(process.env.GIRRU_STORE_P9);
+const P3 = switchValueOn(process.env.GIRRU_STORE_P3); // a topic update replaces the row (new id, the old one superseded)
 const current = (id) => { let r = mem(id); while (r?.superseded_by) r = mem(r.superseded_by); return r; };
 const byTopic = (key, kind = 'owner', dkey = '') => db.prepare('SELECT * FROM memories WHERE user_id = ? AND drawer_kind = ? AND drawer_key = ? AND topic_key = ?').all('mq-owner', kind, dkey, key);
 const versions = (id) => db.prepare('SELECT version, change, content, reason FROM memory_versions WHERE memory_id = ? ORDER BY version').all(id).map((r) => ({ ...r }));

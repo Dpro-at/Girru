@@ -1,5 +1,7 @@
+import {isEncryptedMemoryServer} from '../memory/encryption/server-mode.js';
 import { backendPath } from '../config/backend-root.js';
-import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { genvrRuntime } from '../config/genvr-runtime.js';
 /**
  * Backend startup chain (moved out of server.ts so it can be tested).
  *
@@ -11,7 +13,6 @@ import { fileURLToPath } from 'node:url';
 
 import type { FastifyInstance } from 'fastify';
 import { processScheduledNotifications } from '../services/notification-service.js';
-import { startCalendarSyncScheduler } from '../services/calendar-sync.js';
 import { config } from '../config/index.js';
 import { backgroundEnabled } from '../config/background.js';
 import { dataPathOr } from '../config/data-root.js';
@@ -40,7 +41,6 @@ export const BACKGROUND_JOBS: ReadonlyArray<{ id: string; off: string }> = [
   { id: 'memory-files-sync', off: 'startMemoryFilesSync not called (exported memory files follow the database only on owner request)' },
   { id: 'login-pruning', off: 'startLoginRecordPruning not called' },
   { id: 'scheduled-notifications', off: '60 s interval not started' },
-  { id: 'calendar-sync', off: 'startCalendarSyncScheduler not called' },
   { id: 'extension-stats', off: 'hourly interval not started' },
   { id: 'memory-consolidation', off: 'startScheduler not called' },
   { id: 'gateway-session-cleanup', off: 'SessionManager starts no 5 min cleanup interval' },
@@ -57,8 +57,22 @@ export const BACKGROUND_JOBS: ReadonlyArray<{ id: string; off: string }> = [
 ];
 
 export async function initializeBackend(fastify: FastifyInstance): Promise<StartupSummary> {
+  // Explicit encrypted runtimes supply their already-selected runner/custody and start through
+  // app hooks. Legacy bootstrap must not initialize defaults, replay a permissive ledger,
+  // import agent notes, backfill vectors, or start plaintext projection/summary workers.
+  if(isEncryptedMemoryServer(fastify))return{background:false,skills:0,jobs:0,channels:0,dockerAvailable:false};
   const background = backgroundEnabled();
   if (!background) console.log('[Server] AGENT_PLAYER_BACKGROUND=off: no schedulers, timers, watchers or probes\n');
+  {
+    // STORE-MAP-01: the memory switches are on by default; say which ones a variable turned off,
+    // and (OPS9) which are past their removal date, so an old path does not live on unnoticed.
+    const { memorySwitchStates } = await import('../services/memory-switches.js');
+    const states = memorySwitchStates();
+    const off = states.filter((s) => !s.on).map((s) => s.env);
+    if (off.length) console.warn(`[Memory] switches turned off: ${off.join(', ')}`);
+    const expired = states.filter((s) => s.expired).map((s) => s.env);
+    if (expired.length) console.warn(`[Memory] switches past their removal date (remove the off path): ${expired.join(', ')}`);
+  }
 
   // Initialize Database
   const { initializeDatabase, getDatabase } = await import('../db/index.js');
@@ -72,9 +86,10 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
   console.log('[Server] ✅ Database initialized\n');
 
   // STORE-MAP-01 P3: project memory keys follow the switch (ids while on, slugs again when it goes off),
-  // before anything reads memory. Small set-based updates; a failure is logged and start-up goes on.
+  // before anything reads memory. Refuse startup on failure: writers must not use a new
+  // key mode while durable projection holds or project rows still use the old mode.
   const { moveProjectKeys } = await import('../memory/project-keys.js');
-  await moveProjectKeys().catch((err) => console.warn('[Store P3] project keys not moved:', (err as Error)?.message));
+  await moveProjectKeys();
   // STORE-MAP-01 P3: the one list of departments and its ids (small tables; idempotent; before the first request).
   if ((await import('../services/store-p3.js')).storeP3Enabled()) {
     const { syncDepartments } = await import('../services/departments.js');
@@ -115,7 +130,8 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
   const { getSkillsRegistry } = await import('../skills/registry.js');
   const skillsRegistry = getSkillsRegistry();
   // GenVR SDK skills first: an SDK skill wins over an older Girru copy of the same name.
-  await skillsRegistry.load([fileURLToPath(new URL('../../../core-ui/vendor/genvr/package/skills/', import.meta.url)), backendPath('skills')]);
+  const genvr=genvrRuntime();
+  await skillsRegistry.load([...(genvr?[path.join(genvr.packageDir,'skills')]:[]), backendPath('skills')]);
   if (background) skillsRegistry.watch(); // Enable hot reload
   console.log(`[Server] ✅ Loaded ${skillsRegistry.getAll().length} skills\n`);
 
@@ -173,10 +189,7 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
   await gateway.start();
   console.log('[Server] ✅ Gateway initialized with 2 channels\n');
 
-  // Initialize Telephony Service (Twilio + Google Voice)
-  const { initializeTelephonyService } = await import('../services/telephony-service.js');
-  await initializeTelephonyService();
-  console.log('[Server] ✅ Telephony service initialized\n');
+  // Telephony providers initialize only through the enabled Store app.
 
   // Initialize Inbox System
   const { createInboxSystem } = await import('../inbox/index.js');
@@ -333,10 +346,6 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
       processScheduledNotifications().catch(() => { /* non-fatal */ });
     }, 60_000);
 
-    // Initialize Calendar Sync Scheduler
-    startCalendarSyncScheduler();
-    console.log('[Server] ✅ Calendar sync scheduler started\n');
-
     // Initialize Extension Storage Stats Scheduler (hourly updates)
     const { updateAllExtensionStorageStats } = await import('../services/extension-analytics.js');
     setInterval(() => {
@@ -420,10 +429,6 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
 
   console.log('[Server] ✅ Extension analytics middleware registered\n');
 
-  // Email Sync Service moved to email-client extension
-  // const { emailSyncService } = await import('../services/email-sync-service.js');
-  // await emailSyncService.startAllAutoSync();
-  // console.log('[Server] ✅ Email sync service initialized\n');
 
   // MCP-01b: per-install identity next to the CLI token, so the MCP server
   // can verify this backend before it sends the owner's token.

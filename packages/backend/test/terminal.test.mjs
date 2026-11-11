@@ -183,6 +183,57 @@ test('per-owner session cap and malformed ids', async () => {
   assert.equal((await call('POST', '/api/terminal/sessions/not-a-uuid/input', 'tm-owner', { data: 'x' })).statusCode, 404);
 });
 
+test('finished sessions free their place; they are let go after the idle time', async () => {
+  const exits = [];
+  const fake = () => ({ onData() {}, onExit(fn) { exits.push(fn); }, write() {}, resize() {}, kill() {} });
+  const m = new mgr.TerminalManager({ env: { AGENT_TERMINAL: 'true', PATH: '/bin' }, spawn: fake, idleTimeoutMs: 40, cwd: dir });
+  for (let i = 0; i < mgr.MAX_SESSIONS_PER_OWNER; i++) await m.create('o1', { command: 'true' });
+  await assert.rejects(m.create('o1'), err => err.code === 'limit');
+  exits[0]({ exitCode: 0 });
+  const next = await m.create('o1'); // the finished one no longer counts
+  assert.ok(next.id);
+  assert.equal(m.list('o1').filter(s => s.exited).length, 1, 'its transcript is still there to replay');
+  await new Promise(r => setTimeout(r, 90));
+  assert.equal(m.list('o1').filter(s => s.exited).length, 0, 'let go after the idle time');
+  m.closeAll();
+});
+
+test('a chat command with hidden or control characters is refused', async () => {
+  const fake = () => ({ onData() {}, onExit() {}, write() {}, resize() {}, kill() {} });
+  const m = new mgr.TerminalManager({ env: { AGENT_TERMINAL: 'true', PATH: '/bin' }, spawn: fake, cwd: dir, os: 'darwin' });
+  for (const bad of ['ls\u202e', 'echo a\u200bb', 'ls\x1b[2J', 'ls\r', 'x\0', ' ', 'a'.repeat(16001), 'ls\u061c', 'ls\u3164x', 'ls\u{E0041}', 'ls\u2028x', 'ls\u00ad']) {
+    await assert.rejects(m.create('o1', { command: bad }), err => err.code === 'invalid', JSON.stringify(bad.slice(0, 20)));
+  }
+  assert.ok((await m.create('o1', { command: 'npm test\n\tnpm run build' })).id, 'newline and tab are fine');
+  assert.equal(mgr.commandAllowed('npm test'), true);
+  assert.equal(mgr.commandAllowed('echo "مرحبًا"'), true, 'Arabic with marks is fine');
+  m.closeAll();
+});
+
+test('chat commands are refused on Windows until verified there; shells still open', async () => {
+  const fake = () => ({ onData() {}, onExit() {}, write() {}, resize() {}, kill() {} });
+  const m = new mgr.TerminalManager({ env: { AGENT_TERMINAL: 'true', PATH: 'C:\\Windows' }, spawn: fake, os: 'win32', cwd: dir });
+  await assert.rejects(m.create('o1', { command: 'dir' }), err => err.code === 'unsupported');
+  assert.ok((await m.create('o1')).id);
+  m.closeAll();
+});
+
+test('a running command is not ended for being quiet; Stop escalates if it does not end', async () => {
+  const signals = []; let exit;
+  const fake = () => ({ onData() {}, onExit(fn) { exit = fn; }, write() {}, resize() {}, kill(sig) { signals.push(sig ?? 'default'); } });
+  const m = new mgr.TerminalManager({ env: { AGENT_TERMINAL: 'true', PATH: '/bin' }, spawn: fake, idleTimeoutMs: 20, stopGraceMs: 30, cwd: dir, os: 'darwin' });
+  const s = await m.create('o1', { command: 'sleep 100' });
+  await new Promise(r => setTimeout(r, 60));
+  assert.equal(m.list('o1').length, 1, 'still there after the idle time');
+  m.stop('o1', s.id);
+  m.stop('o1', s.id); // a second Stop while waiting sends nothing new
+  assert.deepEqual(signals, ['SIGTERM']);
+  await new Promise(r => setTimeout(r, 60));
+  assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+  exit({ exitCode: 0, signal: 9 });
+  m.closeAll();
+});
+
 test('idle sessions are closed', async () => {
   let killed = false;
   const fake = () => ({ onData() {}, onExit() {}, write() {}, resize() {}, kill() { killed = true; } });
@@ -239,4 +290,31 @@ test('node-pty spawn-helper gets the run permission it is installed without', { 
   // Already runnable: nothing to do. Windows: never touched.
   assert.deepEqual(mgr.ensureSpawnHelper('darwin', 'x64', () => j(pkg, 'package.json')), []);
   assert.deepEqual(mgr.ensureSpawnHelper('win32', 'x64', () => j(pkg, 'package.json')), []);
+});
+
+
+test('reviewed command mode starts once and returns the actual shell exit', { skip: !posix }, async () => {
+  const r = await call('POST','/api/terminal/sessions','tm-owner',{command:'printf COMMAND_MODE_OK; exit 7'});
+  assert.equal(r.statusCode,201);
+  const id=r.json().id;
+  try {
+    const transcript=await readStream(id,'tm-owner',s=>s.includes('"exitCode":7'));
+    assert.match(transcript.text,/COMMAND_MODE_OK/);
+    assert.match(transcript.text,/"exitCode":7/);
+    assert.equal((await call('POST',`/api/terminal/sessions/${id}/stop`,'tm-user')).statusCode,403);
+    assert.equal((await call('POST',`/api/terminal/sessions/${id}/stop`,'tm-owner')).statusCode,204);
+  } finally { await call('DELETE',`/api/terminal/sessions/${id}`,'tm-owner'); }
+});
+
+test('Stop terminates a real command PTY and preserves the authoritative termination status', { skip: !posix }, async () => {
+  const r=await call('POST','/api/terminal/sessions','tm-owner',{command:'printf READY_TO_STOP; read reply'});
+  assert.equal(r.statusCode,201);const id=r.json().id;
+  try {
+    const started=await readStream(id,'tm-owner',s=>s.includes('READY_TO_STOP'));
+    assert.match(started.text,/READY_TO_STOP/);
+    assert.equal((await call('POST',`/api/terminal/sessions/${id}/stop`,'tm-owner')).statusCode,204);
+    const finished=await readStream(id,'tm-owner',s=>s.includes('event: exit'));
+    const event=finished.text.split('\n').filter(x=>x.startsWith('data: ')).map(x=>JSON.parse(x.slice(6))).find(x=>'exitCode' in x);
+    assert.ok(event && (event.signal>0 || event.exitCode!==0));
+  } finally { await call('DELETE',`/api/terminal/sessions/${id}`,'tm-owner'); }
 });

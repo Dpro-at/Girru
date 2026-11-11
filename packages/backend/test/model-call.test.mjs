@@ -128,8 +128,8 @@ test('static: no file outside the choke point calls a paid model provider from a
   const ALLOWED = {
     'llm/model-call.ts': 'the choke point (gated background calls; interactive usage recorded)',
     'llm/claude-client.ts': 'the provider client itself',
-    'services/task-run-executor.ts': 'builds the agent driver; every step call goes through gatedModelCall',
-    'api/routes/agentic-chat.ts': 'interactive owner chat (not gated, usage recorded)',
+    'agent/execution/task-turn.ts': 'builds the agent driver; every step call goes through gatedModelCall',
+    'agent/execution/cloud-turn.ts': 'interactive owner chat (not gated, usage recorded)',
     'api/routes/settings.ts': 'owner tests an API key',
     'api/routes/agents-status.ts': 'owner checks provider status',
     'services/audio-service.ts': 'interactive transcription / speech requested by a user',
@@ -149,8 +149,8 @@ test('static: no file outside the choke point calls a paid model provider from a
   assert.deepEqual(ledgerUsers, ['llm/model-call.ts', 'services/cost-budget.ts']);
 
   // Background paths use the choke point.
-  for (const rel of ['memory/retrieval.ts', 'memory/weekly-summary.ts', 'services/agent-cron.ts', 'services/task-run-executor.ts']) {
-    assert.match(readFileSync(join(src, rel), 'utf8'), /from '\.\.\/llm\/model-call\.js'/, rel);
+  for (const rel of ['memory/retrieval.ts', 'memory/weekly-summary.ts', 'services/agent-cron.ts', 'agent/execution/task-turn.ts']) {
+    assert.match(readFileSync(join(src, rel), 'utf8'), /from '(?:\.\.\/){1,2}llm\/model-call\.js'/, rel);
   }
   // Evolution is rule-based: no model client at all.
   for (const rel of ['services/agent-evolution-orchestrator.js', 'services/agent-evolution-scheduler.js', 'services/agent-learning-engine.js', 'services/agent-performance-analyzer.js']) {
@@ -304,87 +304,24 @@ test('interactive owner chat is not gated (cap 0) but its paid usage is recorded
   }
 });
 
-// --- public rooms and world generator (R2.3, Q-32d) ---------------------------------------------
+// --- world generator (Q-32d) ---------------------------------------------
 
 const { default: Fastify } = await import('fastify');
-const { registerPublicChatRoutes } = await import(join(backendDir, 'src/api/routes/public-chat.ts'));
 const { worldGeneratorRoutes } = await import(join(backendDir, 'src/api/routes/world-generator.ts'));
-const { getSettingsManager } = await import(join(backendDir, 'src/settings/index.ts'));
-const roomsApp = Fastify();
-await roomsApp.register(registerPublicChatRoutes);
-await roomsApp.register(worldGeneratorRoutes);
-await roomsApp.ready();
-test.after(async () => { try { await roomsApp.close(); } catch { /* ignore */ } });
+const worldApp = Fastify();
+await worldApp.register(worldGeneratorRoutes);
+await worldApp.ready();
+test.after(async () => { try { await worldApp.close(); } catch { /* ignore */ } });
 
-db.prepare(`INSERT INTO users (id, email, username, password_hash, role, status, email_verified) VALUES ('mc-member', 'mc-member@example.test', 'mc-member', 'x', 'user', 'active', 1)`).run();
-db.prepare(`INSERT INTO public_chat_rooms (id, name, owner_user_id, model, is_public, require_auth) VALUES ('mc-room', 'Lobby', 'mc-owner', 'claude-haiku-test', 1, 0)`).run();
 // B2.2d-10: the generator reads the agent's model from agents_config.
 db.prepare(`INSERT INTO agents_config (id, name, model) VALUES ('mc-world-agent', 'World Agent', 'claude-sonnet-test')`).run();
 
-const roomPost = (headers = {}) => roomsApp.inject({ method: 'POST', url: '/api/public-chat/rooms/mc-room/messages', headers, payload: { content: 'hello', username: 'visitor' } });
-const sseText = (body) => body.split('\n').filter((l) => l.startsWith('data: ')).map((l) => JSON.parse(l.slice(6)))
-  .filter((e) => e.type === 'content').map((e) => e.content).join('');
-const generateWorld = () => roomsApp.inject({ method: 'POST', url: '/api/world-generator/ai', headers: bearer('mc-owner'), payload: { prompt: 'a meadow', agent_id: 'mc-world-agent' } });
+const generateWorld = () => worldApp.inject({ method: 'POST', url: '/api/world-generator/ai', headers: bearer('mc-owner'), payload: { prompt: 'a meadow', agent_id: 'mc-world-agent' } });
 const withEnv = async (env, fn) => {
   const keep = {};
   for (const [k, v] of Object.entries(env)) { keep[k] = process.env[k]; process.env[k] = v; }
   try { return await fn(); } finally { for (const k of Object.keys(env)) { if (keep[k] === undefined) delete process.env[k]; else process.env[k] = keep[k]; } }
 };
-
-test('public room, cap 0: no sender (owner, member, anonymous) triggers a paid call; the local model answers', async () => {
-  await getSettingsManager().updateSettings({ publicRooms: { allowAnonymous: true } });
-  await withEnv({ ANTHROPIC_API_KEY: testKey(), BACKGROUND_PAID_PURPOSES: 'public_room' }, async () => {
-    assert.equal(budget.dailyCapCents(), 0);
-    const before = ledger().length;
-    for (const headers of [bearer('mc-owner'), bearer('mc-member'), {}]) {
-      reset();
-      const res = await silent(() => roomPost(headers));
-      assert.equal(res.statusCode, 200, res.body.slice(0, 300));
-      assert.equal(sseText(res.body), 'local room reply');
-      assert.equal(calls.paid.length, 0, 'no paid call');
-      assert.equal(calls.local.length, 1);
-      assert.equal(calls.local[0].model, 'qwen3.5:9b', 'a paid room model is answered by the default local model');
-    }
-    assert.equal(ledger().length, before, 'nothing reserved');
-  });
-});
-
-test('public room, cap > 0 but not opted in: anonymous visitors and members never trigger a paid call', async () => {
-  await withEnv({ ANTHROPIC_API_KEY: testKey(), DAILY_PAID_CAP_CENTS: '1000' }, async () => {
-    const before = ledger().length;
-    for (const headers of [{}, bearer('mc-member'), bearer('mc-owner')]) {
-      reset();
-      const res = await silent(() => roomPost(headers));
-      assert.equal(sseText(res.body), 'local room reply');
-      assert.equal(calls.paid.length, 0);
-    }
-    assert.equal(ledger().length, before);
-  });
-});
-
-test('public room, opted in and cap > 0: the paid reply is reserved first and recorded under public_room', async () => {
-  await withEnv({ ANTHROPIC_API_KEY: testKey(), BACKGROUND_PAID_PURPOSES: 'public_room', DAILY_PAID_CAP_CENTS: '1000',
-    MODEL_PRICES_JSON: JSON.stringify({ claude: { default: { input: 1, output: 1 } } }) }, async () => {
-    const before = ledger().length;
-    reset();
-    const res = await silent(() => roomPost());
-    assert.equal(sseText(res.body), 'chat reply');
-    assert.equal(calls.paid.length, 1);
-    assert.equal(calls.paid[0].model, 'claude-haiku-test');
-    assert.equal(calls.local.length, 0);
-    const rows = ledger().slice(before);
-    assert.deepEqual(rows.map((u) => [u.purpose, u.status, u.cost_cents]), [['public_room', 'recorded', 3]]);
-    assert.ok(rows[0].estimated_cents > 0, 'worst case reserved before the call');
-
-    // Cap reached: the next reply is refused before the call and falls back to local.
-    process.env.DAILY_PAID_CAP_CENTS = String(Math.ceil((await budget.spentCents())));
-    reset();
-    const again = await silent(() => roomPost(bearer('mc-member')));
-    assert.equal(sseText(again.body), 'local room reply');
-    assert.equal(calls.paid.length, 0);
-    assert.equal(ledger().length, before + 1);
-  });
-});
 
 test('world generator: local by default (cap 0, key set); paid only when opted in and the cap allows', async () => {
   await withEnv({ ANTHROPIC_API_KEY: testKey(), MODEL_PRICES_JSON: JSON.stringify({ claude: { default: { input: 1, output: 1 } } }) }, async () => {
@@ -429,4 +366,16 @@ test('world generator: a clear refusal when neither the local model nor an allow
   } finally {
     globalThis.fetch = keep;
   }
+});
+
+
+test('interactive tool turns record paid usage without using the autonomous reservation gate', async () => {
+  const before = db.prepare("SELECT COUNT(*) AS n FROM interactive_usage WHERE purpose='genvr_chat'").get().n;
+  const result = await MC.interactiveClaudeMessage(
+    { provider: 'claude', apiKey: testKey(), model: 'claude-sonnet-test' },
+    [{ role: 'user', content: 'A Studio chat turn' }], { maxTokens: 256 }, 'genvr_chat');
+  assert.equal(result.content, 'chat reply');
+  const recorded = db.prepare("SELECT input_tokens,output_tokens FROM interactive_usage WHERE purpose='genvr_chat' ORDER BY rowid DESC LIMIT 1").get();
+  assert.deepEqual(recorded, { input_tokens: 2000, output_tokens: 1000 });
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM interactive_usage WHERE purpose='genvr_chat'").get().n, before + 1);
 });

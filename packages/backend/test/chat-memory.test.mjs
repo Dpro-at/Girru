@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
+import { switchValueOn } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const dir = mkdtempSync(join(tmpdir(), 'ap-chat-memory-'));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });
@@ -189,7 +190,7 @@ test('a conflict proposed in the chat and kept new shows as saved with the new t
   const after = (await call('cm-owner', 'GET', url)).json().memories.find((x) => x.id === p.id);
   assert.equal(after.status, 'saved');
   // STORE-MAP-01 P9 (M4): keep new supersedes; the link shows the new current memory.
-  assert.equal(after.memoryId, process.env.GIRRU_STORE_P9 === '1' ? db.prepare('SELECT superseded_by FROM memories WHERE id = ?').get(full.conflictWith).superseded_by : full.conflictWith);
+  assert.equal(after.memoryId, switchValueOn(process.env.GIRRU_STORE_P9) ? db.prepare('SELECT superseded_by FROM memories WHERE id = ?').get(full.conflictWith).superseded_by : full.conflictWith);
   assert.equal(after.text, 'The team does not meet every Monday at 9');
 });
 

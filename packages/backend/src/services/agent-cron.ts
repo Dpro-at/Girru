@@ -1,3 +1,6 @@
+import {isEncryptedMemoryProfileSelected} from '../memory/encryption/consumer-host.js';
+import {createScheduledEncryptedRun} from '../agent/execution/stored-run-scheduler.js';
+import {withStoredRunControl} from '../agent/execution/stored-run-entry.js';
 /**
  * Agent Cron Service
  *
@@ -21,8 +24,8 @@ import { contractPrompt, getTaskContract } from './task-contracts.js';
 import { backgroundPaidPurposes, modelCall, type PaidProviderConfig } from '../llm/model-call.js';
 import { executeTaskRun, type AgentRow } from './task-run-executor.js';
 import { storeP4Enabled } from './store-p4.js';
-import { resolveAgentContext } from './agent-context/resolve.js';
-import { renderSystemPrompt } from './agent-context/render.js';
+import { resolveAgentContext } from '../agent/context/resolve.js';
+import { renderSystemPrompt } from '../agent/context/render.js';
 
 const HEARTBEAT_OK_TOKEN = 'HEARTBEAT_OK';
 const HEARTBEAT_ACK_MAX_CHARS = 300;
@@ -56,6 +59,7 @@ function readHeartbeatFile(agentName: string): string | null {
  * returns anything other than a HEARTBEAT_OK acknowledgment.
  */
 export async function runHeartbeat(agent: AgentRow, heartbeatContent: string): Promise<void> {
+ if(isEncryptedMemoryProfileSelected()){await withStoredRunControl(async()=>{const run=await createScheduledEncryptedRun({kind:'agent-cron',agentId:agent.id});if(!run)throw Error('background_native_parent_required');await executeTaskRun(run.id);});return;}
   // STORE-MAP-01 P4 (D16): the heartbeat uses the agent's one context (no owner memory); off, as before.
   const systemPrompt = storeP4Enabled()
     ? await resolveAgentContext({ agentId: agent.id, entry: 'heartbeat', ownerId: null }).then((ctx) => renderSystemPrompt(ctx), () => agent.system_prompt ?? `You are ${agent.name}, an AI agent.`)
@@ -129,7 +133,9 @@ const activeJobs = new Map<string, ReturnType<typeof cron.schedule>>();
  * resumes (startTaskRunRecovery) without repeating completed actions.
  * Returns the final output (or the reason it stopped). Exported for tests.
  */
-export async function runAgentTask(agent: AgentRow, taskId: string, taskDescription: string): Promise<string> {
+export function runAgentTask(agent:AgentRow,taskId:string,taskDescription:string):Promise<string>{return withStoredRunControl(()=>runAgentTaskInControl(agent,taskId,taskDescription));}
+async function runAgentTaskInControl(agent: AgentRow, taskId: string, taskDescription: string): Promise<string> {
+  const encryptedRun=isEncryptedMemoryProfileSelected()?await createScheduledEncryptedRun({kind:'task',taskId},taskId):null;
   const orchestrator = getOrchestrator();
 
   // Mark task as in-progress
@@ -144,8 +150,9 @@ export async function runAgentTask(agent: AgentRow, taskId: string, taskDescript
   // R1: the task's contract (if any) is pinned on the run and shown to the model.
   const contract = await getTaskContract(taskId);
   const prompt = contract ? `${taskDescription}\n${contractPrompt(contract)}` : taskDescription;
-  const run = await createRun({ taskId, agentId: agent.id, userId: null, prompt, contract });
+  const run = encryptedRun??await createRun({ taskId, agentId: agent.id, userId: null, prompt, contract });
   const res = await executeTaskRun(run.id);
+  if(res.reason==='native-background-delegation-required')return `Task run ${run.id} remains queued until native background consent and an unlocked profile are available.`;
   if (res.status === 'waiting_approval') return `Task run ${run.id} is waiting for the owner (${res.reason}).`;
   if (res.status === 'not_claimed' || res.status === 'lease_lost') return `Task run ${run.id} is being executed by another worker.`;
   if (res.verification === 'needs_review') return `${res.output ?? ''}\n\n(Task run ${run.id} is waiting for a review.)`;
@@ -171,7 +178,7 @@ function registerAgentCron(agent: AgentRow): void {
   // RUN-ISO F2: AGENT_PLAYER_BACKGROUND=off schedules nothing.
   if (!backgroundEnabled()) return;
 
-  const task = cron.schedule(agent.cron_schedule, async () => {
+  const task = cron.schedule(agent.cron_schedule, async () => withStoredRunControl(async()=>{
     // Update last_heartbeat (timestamptz on PostgreSQL; CURRENT_TIMESTAMP on both drivers)
     await sql().read(run(`UPDATE agents_config SET last_heartbeat = CURRENT_TIMESTAMP WHERE id = ?`, agent.id));
 
@@ -181,6 +188,7 @@ function registerAgentCron(agent: AgentRow): void {
 
     if (tasks.length === 0) {
       // No tasks assigned — run heartbeat check if HEARTBEAT.md exists
+      if(isEncryptedMemoryProfileSelected()){try{await runHeartbeat(agent,'');}catch(error:any){console.warn('[AgentCron] Native background delegation required',error?.message);}return;}
       const heartbeatContent = readHeartbeatFile(agent.name);
       if (heartbeatContent) {
         try {
@@ -209,7 +217,7 @@ function registerAgentCron(agent: AgentRow): void {
     } catch (err: any) {
       console.error(`[AgentCron] ❌ Task "${pendingTask.title}" failed:`, err.message);
     }
-  });
+  }));
 
   activeJobs.set(agent.id, task);
   console.log(`[AgentCron] ⏰ Registered cron for agent "${agent.name}" (${agent.cron_schedule})`);

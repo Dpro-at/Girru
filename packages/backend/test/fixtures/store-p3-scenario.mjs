@@ -8,7 +8,7 @@ export async function runDepartmentScenario({ q, deps, store, lifecycle, owner, 
   const rows = (s, ...a) => q.all(s, ...a);
   const one = async (s, ...a) => (await q.all(s, ...a))[0];
   // Today's data, made while the switch is off.
-  delete process.env.GIRRU_STORE_P3;
+  process.env.GIRRU_STORE_P3 = '0';
   const mem = await store.createDepartment(owner, 'Engineering', owner);
   await q.run(`INSERT INTO memory_project_scopes (owner_id, slug, name, department_id) VALUES (?, ?, 'Alpha', ?)`, owner, id('alpha'), mem.id);
   for (const [a, n, d] of [['omar', 'Omar', 'engineering'], ['nora', 'Nora', 'marketing'], ['lina', 'Lina', 'hr']]) {

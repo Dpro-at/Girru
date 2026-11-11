@@ -35,8 +35,8 @@ test('the contract keeps Gemini Pro / Flash with their notes and only a real thi
 
 test('canThink: Claude, Claude Code, Codex and thinking local models; never Gemini, LM Studio or a plain local model', () => {
   const { models } = agentCardResponse('/api/models', 200, wire);
-  for (const m of ['auto', '', 'subscription:claude', 'subscription:claude/opus', 'subscription:codex/gpt-5.5', `subscription:codex:${'a'.repeat(32)}`, 'qwen3:8b', 'claude-sonnet-4-5-20250929']) assert.equal(canThink(m, models), true, m);
-  for (const m of ['subscription:gemini', 'subscription:gemini/gemini-3.1-pro', 'llama3.2:3b', 'lmstudio:qwen/qwen3-8b', 'gone:1b']) assert.equal(canThink(m, models), false, m);
+  for (const m of ['auto', '', 'subscription:claude', 'subscription:claude/opus', 'subscription:codex/gpt-5.5', 'qwen3:8b', 'claude-sonnet-4-5-20250929']) assert.equal(canThink(m, models), true, m);
+  for (const m of [`subscription:codex:${'a'.repeat(32)}`, 'subscription:gemini', 'subscription:gemini/gemini-3.1-pro', 'llama3.2:3b', 'lmstudio:qwen/qwen3-8b', 'gone:1b']) assert.equal(canThink(m, models), false, m);
   // The muted word is left out for a model that cannot think; the saved value is unchanged.
   assert.equal(answersLabel('llama3.2:3b', models, 'deep'), 'llama3.2:3b');
   assert.equal(answersLabel('subscription:gemini/gemini-3.8-flash', models, 'quick'), 'Gemini · Gemini Flash');
@@ -78,4 +78,22 @@ test('a model that cannot think never gets a thinking level sent, and the saved 
   await c.setThinking('quick');
   assert.deepEqual(puts.filter(p => 'thinking' in p), [{ thinking: 'quick' }], 'a thinking model saves it');
   assert.match(src('conversations.ts'), /this\.#state\.thinking !== 'normal' && canThink\(this\.#state\.model, this\.#state\.models\) \? \{ thinking: this\.#state\.thinking \}/, 'a new chat sends thinking only when the model can think');
+});
+
+
+test('advertised bound-session capability survives both projections and cannot cross sources', () => {
+  const raw = { models: [
+    { id: 'subscription:codex', provider: 'subscription', sessionPrefix: 'subscription:codex:', think: true },
+    { id: 'subscription:claude', provider: 'subscription', sessionPrefix: 'subscription:codex:', think: true },
+    { id: 'qwen', provider: 'local', sessionPrefix: 'subscription:gemini:', think: true },
+  ] };
+  const once = agentCardResponse('/api/models', 200, raw);
+  assert.deepEqual(agentCardResponse('/api/models', 200, once), once);
+  assert.equal(once.models[0].sessionPrefix, 'subscription:codex:');
+  assert.equal(once.models[1].sessionPrefix, undefined);
+  assert.equal(once.models[2].sessionPrefix, undefined);
+  assert.equal(canThink('subscription:codex:' + 'a'.repeat(32) + '/deep', once.models), true);
+  assert.equal(canThink('subscription:claude:' + 'a'.repeat(32), once.models), false);
+  assert.equal(canThink('subscription:codex:invalid', once.models), false);
+  assert.equal(canThink('subscription:gemini:' + 'a'.repeat(32), once.models), false);
 });

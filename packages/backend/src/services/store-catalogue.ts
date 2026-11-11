@@ -1,8 +1,12 @@
+import {BROWSER_ITEM,browserWorkspaceStoreActive,installedBrowserWorkspace,browserWorkspaceReviewHash,installBrowserWorkspace,removeBrowserWorkspace} from './browser-workspace-runtime.js';
+import {withGenvrStopped} from '../mcp-client/genvr-local.js';
 import {createHash} from 'node:crypto';
 import {addonCatalogue} from './addon-catalogue.js';
 import {searchMarketplace,checkForUpdates,installExtension,uninstallExtension,getExtensionDetails} from './extension-marketplace.js';
 import {readStoreRepo,type RepoRead,type StoreRuntime} from './store-repo.js';
 import {CODE_ITEM,codeStoreActive,codeBundled,installedCodeRuntime,runtimePlatform,startCodeInstall,removeCodeRuntime,type RuntimeFetch} from './code-runtime.js';
+import {GENVR_ITEM,genvrBundled,genvrInstalled,genvrStoreActive,startGenvrInstall,removeGenvrRuntime} from './genvr-runtime.js';
+import {PIN as GENVR_PIN} from '../config/genvr-runtime-path.cjs';
 import {existsSync} from 'node:fs';
 import {backendPath} from '../config/backend-root.js';
 import {COMPANY_SPECIALTIES} from './company-specialties.js';
@@ -21,11 +25,10 @@ export const STORE_CONFIG={featured:process.env.GIRRU_STORE_FEATURED||'girru:gen
 /** The apps that come with Girru, as store manifests (the same apps as My apps). */
 const INCLUDED:ReadonlyArray<StoreManifest>=([
  {id:'girru:genvr',name:'GenVR',icon:'globe',category:'worlds',summary:'3D worlds for your agents.',description:'Give your agents a place to live and work: build 3D spaces, walk through them with your team and publish them when you are ready. Uses your GenVR account connection.',permissions:['Uses your GenVR account once you connect it','Publishing a world always waits for your OK']},
- {id:'girru:trading',name:'Trading',icon:'chart',category:'trading',summary:'Practice trading with an agent team.',description:'Paper practice with fictional money and prices: your agents research, propose and keep a journal while nothing real is bought or sold.',permissions:['Practice money only; live orders are not connected','Setting up practice waits for your OK']},
  {id:'girru:terminal',name:'Terminal',icon:'terminal',category:'developer',summary:'Your shell next to your agents.',description:'Command sessions on this computer, beside your chats. Agents only run commands you allow.',permissions:['Uses your computer account when you start a shell']},
  {id:'girru:code',name:'Code',icon:'code',category:'developer',summary:'The project editor beside your chats.',description:'Open a project folder and edit it next to your chats, in the Girru desktop app.',permissions:['Opens only in the Girru desktop app that has the editor','Edits files in the project folder you open']},
 ] as const).map(x=>({...x,kind:'app' as const,source:'girru' as const,maker:'Girru',verified:true,version:null,updated:null,permissions:[...x.permissions],worksWith:[],languages:[]}));
-const INCLUDED_APP:Record<string,string>={'girru:genvr':'genvr','girru:trading':'trading','girru:terminal':'terminal','girru:code':'code'};
+const INCLUDED_APP:Record<string,string>={'girru:genvr':'genvr','girru:terminal':'terminal','girru:code':'code'};
 /** The id of the app a Girru item opens (for the window's Open button). */
 export const includedApp=(id:string)=>INCLUDED_APP[id]??null;
 
@@ -40,10 +43,12 @@ const category=(x:unknown):StoreCategoryId=>{const v=typeof x==='string'?x.trim(
 
 /** Today's source: the local catalogues on this computer. Reading never downloads or installs. */
 export function localCatalogue(options:{home?:string;repo?:()=>Promise<RepoRead>}={}):LocalCatalogue{
- let limited:string[]=[],have:Have={installed:new Set(),present:new Set()},asOf:string|null=null,addable=new Set<string>(),code:StoreRuntime|null=null;
+ let limited:string[]=[],have:Have={installed:new Set(),present:new Set()},asOf:string|null=null,addable=new Set<string>(),code:StoreRuntime|null=null,genvr:StoreRuntime|null=null,browser:StoreRuntime|null=null;
  return {
   addable:()=>addable,
   codeRuntime:()=>code,
+  genvrRuntime:()=>genvr,
+  browserRuntime:()=>browser,
   limited:()=>limited,
   have:()=>have,
   asOf:()=>asOf,
@@ -54,7 +59,8 @@ export function localCatalogue(options:{home?:string;repo?:()=>Promise<RepoRead>
    // anything else it lists is shown as "store:<id>" (adding those comes with real installs).
    const repo=await (options.repo??readStoreRepo)().catch(():RepoRead=>({index:null,asOf:null,fresh:false}));
    asOf=repo.asOf;if(!repo.fresh)limited.push('store');
-   code=repo.runtimes?.[CODE_ITEM]??null;
+   code=repo.runtimes?.[CODE_ITEM]??null;browser=repo.runtimes?.[BROWSER_ITEM]??null;
+   genvr=repo.runtimes?.[GENVR_ITEM]??null;
    const added=await installedApps();
    for(const [id,x] of Object.entries(added))if(x.source==='store')have.installed.add('store:'+id);
    addable=new Set(Object.keys(repo.packages??{}).map(k=>'store:'+k.slice(6)));
@@ -84,7 +90,7 @@ export function localCatalogue(options:{home?:string;repo?:()=>Promise<RepoRead>
 
 type Have={installed:Set<string>;present:Set<string>};
 /** A source that also knows what this owner already has (installed registry apps, add-ons present on this computer). */
-export type LocalCatalogue=CatalogueSource&{limited:()=>string[];have:()=>Have;asOf?:()=>string|null;addable?:()=>Set<string>;codeRuntime?:()=>StoreRuntime|null};
+export type LocalCatalogue=CatalogueSource&{limited:()=>string[];have:()=>Have;asOf?:()=>string|null;addable?:()=>Set<string>;codeRuntime?:()=>StoreRuntime|null;genvrRuntime?:()=>StoreRuntime|null;browserRuntime?:()=>StoreRuntime|null};
 
 /**
  * CODE-STORE-01: in the desktop app Code is a Store app. It reads as included when the app
@@ -97,6 +103,14 @@ function codeState(runtime:StoreRuntime|null):{state:StoreState;update:string|nu
  // Added from the Store: "installed" (it opens like an app that comes with Girru, and it can be removed).
  if(installed)return {state:'installed',version:installed.version,update:archive&&runtime!.version!==installed.version?runtime!.version:null};
  return {state:archive?'available':'elsewhere',update:null};
+}
+function genvrState(runtime:StoreRuntime|null):{state:StoreState;update:string|null;version?:string}{
+ const installed=genvrInstalled();
+ if(installed)return {state:'installed',version:installed.version,update:null};
+ if(genvrBundled())return {state:'included',version:GENVR_PIN.version,update:null};
+ if(!genvrStoreActive())return {state:'elsewhere',update:null};
+ const platform=runtimePlatform(),archive=runtime&&platform?runtime.archives[platform]:undefined;
+ return {state:archive&&runtime!.version===GENVR_PIN.version&&archive.sha256===GENVR_PIN.archiveSha256&&archive.size===GENVR_PIN.size?'available':'elsewhere',update:null};
 }
 
 export type StoreState='included'|'installed'|'available'|'elsewhere';
@@ -115,7 +129,13 @@ export async function readStore(ownerId:string,source:LocalCatalogue=localCatalo
  const {installed:registry,present}=source.have();
  const items:StoreEntry[]=index.items.map(x=>{
   const state:StoreState=x.id.startsWith('girru:')?'included':x.id.startsWith('registry:')?(registry.has(x.id)?'installed':'available'):x.id.startsWith('store:')?(registry.has(x.id)?'installed':source.addable?.().has(x.id)?'available':'elsewhere'):'elsewhere';
+  if(x.id==='store:browser'){
+   const runtime=source.browserRuntime?.()??null,platform=runtimePlatform(),archive=platform&&runtime?.archives[platform],installed=installedBrowserWorkspace(),complete=registry.has(x.id)&&!!installed;
+   const state:StoreState=!browserWorkspaceStoreActive()?'elsewhere':complete?'installed':archive&&source.addable?.().has(x.id)?'available':'elsewhere';
+   return {...x,version:runtime?.version??x.version,state,present:complete,update:complete&&archive&&installed!.version!==runtime!.version?runtime!.version:null,hash:browserWorkspaceReviewHash({...x,version:runtime?.version??x.version},runtime)};
+  }
   if(x.id===CODE_ITEM){const c=codeState(source.codeRuntime?.()??null);return {...x,...(c.version?{version:c.version}:{}),state:c.state,present:c.state==='included'||c.state==='installed',update:c.update,hash:consentHash(x)};}
+  if(x.id===GENVR_ITEM){const c=genvrState(source.genvrRuntime?.()??null);return {...x,...(c.version?{version:c.version}:{}),state:c.state,present:c.state==='included'||c.state==='installed',update:c.update,hash:consentHash(x)};}
   const update=updates.find(u=>'registry:'+u.extension_id===x.id)?.latest_version??null;
   return {...x,state,present:state==='included'||state==='installed'||present.has(x.id),update:state==='installed'?update:null,hash:consentHash(x)};
  });
@@ -129,6 +149,14 @@ const refuseOther=(id:string):StoreChange=>({ok:false,code:'not_installable',mes
 
 /** Add one registry app, only with the hash of exactly what the owner was shown. */
 export async function installFromStore(ownerId:string,id:string,hash:string,options:{restart?:()=>boolean;repo?:()=>Promise<RepoRead>;fetch?:RuntimeFetch}={}):Promise<StoreChange>{
+ if(id===GENVR_ITEM&&!genvrBundled()){
+  const read=options.repo??readStoreRepo,repo=await read(),runtime=repo.runtimes?.[GENVR_ITEM];
+  if(!runtime)return {ok:false,code:'not_found',message:'The Girru Store has no GenVR for this computer yet.'};
+  const item=repo.index?.items.find(i=>i.id===GENVR_ITEM),shown=INCLUDED.find(i=>i.id===GENVR_ITEM)!;
+  if(consentHash({id,version:runtime.version,permissions:item?.permissions.length?item.permissions:shown.permissions})!==hash)return {ok:false,code:'changed',message:'GenVR changed since you saw it. Read what it asks for again.'};
+  const r=await startGenvrInstall({repo:async()=>repo,fetch:options.fetch,restart:options.restart});
+  return r.ok?{ok:true,state:'adding',job:r.job.id}:{ok:false,code:r.code,message:r.message};
+ }
  // CODE-STORE-01: Code (add or update) is a job that downloads its runtime for this computer.
  if(id===CODE_ITEM&&codeStoreActive()&&!codeBundled()){
   const read=options.repo??readStoreRepo,repo=await read();
@@ -139,6 +167,14 @@ export async function installFromStore(ownerId:string,id:string,hash:string,opti
   const r=await startCodeInstall({repo:async()=>repo,fetch:options.fetch});
   return r.ok?{ok:true,state:'adding',job:r.job.id}:{ok:false,code:r.code,message:r.message};
  }
+ // The owner workspace needs its full native runtime as well as the separate automation host.
+ if(id==='store:browser'){
+  const repo=await (options.repo??readStoreRepo)(),runtime=repo.runtimes?.[BROWSER_ITEM],item=repo.index?.items.find(x=>x.id===BROWSER_ITEM),platform=runtimePlatform();
+  if(!browserWorkspaceStoreActive()||!runtime||!platform||!runtime.archives[platform]||!item||!repo.packages?.[BROWSER_ITEM])return{ok:false,code:'not_installable',message:'The Store has no full Browser workspace for this desktop yet.'};
+  if(browserWorkspaceReviewHash({...item,id,version:runtime.version},runtime)!==hash)return{ok:false,code:'changed',message:'Browser changed; review its permissions and download again.'};
+  const job=startAdd('browser',{repo:async()=>repo,runtimeFetch:options.fetch,restart:options.restart,finishRuntime:async job=>installBrowserWorkspace(job,runtime,options.fetch)});
+  return{ok:true,state:'adding',job:job.id};
+ }
  // APPS-06: an app from the Girru Store is added by a job the window follows.
  if(id.startsWith('store:')){
   const app=id.slice(6),repo=await (options.repo??readStoreRepo)();
@@ -147,7 +183,7 @@ export async function installFromStore(ownerId:string,id:string,hash:string,opti
   if(consentHash({id,version:x.version,permissions:x.permissions})!==hash)return {ok:false,code:'changed',message:'This app changed since you saw it. Read what it asks for again.'};
   // SA6: never replace a private app that has the same id.
   if((await installedApps())[app]?.source==='private')return {ok:false,code:'refused',message:'You have a private app with the same name. Remove it in My apps first.'};
-  const job:AddJob=startAdd(app,{restart:options.restart});
+  const job:AddJob=startAdd(app,{repo:async()=>repo,restart:options.restart});
   return {ok:true,state:'adding',job:job.id};
  }
  const ext=registryId(id);if(!ext)return refuseOther(id);
@@ -157,11 +193,13 @@ export async function installFromStore(ownerId:string,id:string,hash:string,opti
  return r.success?{ok:true,state:'installed'}:{ok:false,code:'refused',message:r.error||'It could not be added.'};
 }
 export async function uninstallFromStore(ownerId:string,id:string,options:{confirm?:boolean;restart?:()=>boolean}={}):Promise<StoreChange>{
+ if(id===GENVR_ITEM&&!genvrBundled()){const r=await withGenvrStopped(()=>removeGenvrRuntime({restart:options.restart}));return r.ok?{ok:true,state:'available',restart:r.restart}:{ok:false,code:r.code,message:r.message};}
  // CODE-STORE-01: removing Code deletes only Girru's own code folder; your projects are never touched.
  if(id===CODE_ITEM&&codeStoreActive()&&!codeBundled()){const r=removeCodeRuntime();return r.ok?{ok:true,state:'available'}:{ok:false,code:r.code==='not_found'?'not_found':'refused',message:r.message};}
  // SA6: a private app (added from a folder) is removed the same way as a Store app.
  if(id.startsWith('store:')||id.startsWith('private:')){
   const r=await removeApp(id.slice(id.indexOf(':')+1),options);
+  if(r.ok&&id==='store:browser')removeBrowserWorkspace();
   return r.ok?{ok:true,state:'available',copy:r.copy,restart:r.restart}:r;
  }
  const ext=registryId(id);if(!ext)return refuseOther(id);

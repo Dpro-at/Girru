@@ -1,3 +1,4 @@
+import {assertNoDefaultMemoryAccess} from '../encryption/execution-context.js';
 /**
  * STORE-MAP-01 P6 screens (P6a, D20-D22): the files Girru keeps in each
  * project folder, one state per file, for Memory › Coding apps › Project files.
@@ -32,10 +33,12 @@ import { readRegularFile } from './regular-file.js';
 import { BridgeError, extrasOf, filesApply, filesPreview, sectionHash, setFolder } from './service.js';
 import { CURSOR_RULE, CURSOR_RULE_TEXT } from './layout.js';
 import { audit, folderSettings } from './store.js';
-import { BRIEF_CONSUMER, getState, runBriefProjection } from '../outbox/projection.js';
+import { BRIEF_CONSUMER, getState, runBriefProjection, withBriefProjectionBarrier } from '../outbox/projection.js';
 import { disableScope, enableScope, latestSeq, projectScope, scopeInfo } from '../outbox/events.js';
 import { pilotProjectId } from '../outbox/pilot.js';
 import { safeWriteFile, SafeFileError } from '../../services/safe-file.js';
+import { sql } from '../../repositories/sql-steps.js';
+import { encryptedProjectionHeldStep } from '../encryption/projection-hold.js';
 import { ensureTaskFile, TASKS_FILE, taskFileOn } from '../../services/task-file.js';
 
 export type FileState = 'up_to_date' | 'waiting' | 'changed_in_both' | 'folder_not_found' | 'could_not_write';
@@ -173,6 +176,7 @@ function writable(i: Inspected, relative: string): Detail & { root: string } {
 
 /** Every project with a folder, needs-you first, then by name. */
 export async function listProjectFiles(ownerId: string): Promise<{ projects: ProjectFiles[] }> {
+  assertNoDefaultMemoryAccess();
   const out: ProjectFiles[] = [];
   for (const p of (await listProjects(ownerId)).filter((x) => x.folder)) out.push((await inspect(ownerId, p)).view);
   out.sort((a, b) => Number(b.needsYou) - Number(a.needsYou) || a.name.localeCompare(b.name));
@@ -180,11 +184,13 @@ export async function listProjectFiles(ownerId: string): Promise<{ projects: Pro
 }
 
 export async function projectFiles(ownerId: string, projectId: unknown): Promise<ProjectFiles> {
+  assertNoDefaultMemoryAccess();
   return (await inspect(ownerId, await filesProject(ownerId, projectId))).view;
 }
 
 /** Girru's version beside the folder's (Girru's part only for AGENTS.md / CLAUDE.md / GEMINI.md). */
 export async function compareFile(ownerId: string, projectId: unknown, relative: unknown) {
+  assertNoDefaultMemoryAccess();
   const rel = tracked(relative);
   const i = await inspect(ownerId, await filesProject(ownerId, projectId));
   const d = writable(i, rel);
@@ -195,6 +201,7 @@ export async function compareFile(ownerId: string, projectId: unknown, relative:
 
 /** ⌘R: write the files again where Girru may; a file changed in the folder (or one Girru cannot write) is left as it is. */
 export async function rewriteFiles(ownerId: string, projectId: unknown): Promise<{ project: ProjectFiles }> {
+  assertNoDefaultMemoryAccess();
   const p = await filesProject(ownerId, projectId);
   const i = await inspect(ownerId, p);
   if (!i.root) throw new BridgeError('The project folder is not on this computer', 409, 'folder_not_found');
@@ -230,8 +237,18 @@ function addedLines(folder: string, girru: string): string {
  * a memory proposal (reason repository-file), then Girru's version is written.
  */
 export async function useGirruVersion(ownerId: string, projectId: unknown, relative: unknown): Promise<{ project: ProjectFiles; undo: string }> {
+  assertNoDefaultMemoryAccess();
   const rel = tracked(relative);
   const p = await filesProject(ownerId, projectId);
+  // The brief writer already owns this queue; managed sections must join it here.
+  if (rel === BRIEF) return useGirruVersionInside(ownerId, projectId, rel);
+  return withBriefProjectionBarrier(projectScope(p), () => useGirruVersionInside(ownerId, projectId, rel));
+}
+
+async function useGirruVersionInside(ownerId: string, projectId: unknown, relative: unknown): Promise<{ project: ProjectFiles; undo: string }> {
+  const rel = tracked(relative);
+  const p = await filesProject(ownerId, projectId);
+  if (await sql().read(encryptedProjectionHeldStep(projectScope(p)))) throw new BridgeError('Encrypted memory projection hold', 409, 'encrypted_hold');
   const i = await inspect(ownerId, p);
   const d = writable(i, rel);
   if (d.file.state === 'could_not_write') throw new BridgeError(d.file.reason ?? `Girru cannot write ${rel}`, 409, 'could_not_write');
@@ -251,6 +268,7 @@ export async function useGirruVersion(ownerId: string, projectId: unknown, relat
     }
   }
   try {
+    if (await sql().read(encryptedProjectionHeldStep(scope))) throw new BridgeError('Encrypted memory projection hold', 409, 'encrypted_hold');
     if (rel === BRIEF) {
       const r = await runBriefProjection(scope, { force: true, overwrite: true, keepOutsideFile: false });
       if (!r.wrote) throw new BridgeError(r.reason ?? `Girru could not write ${rel}`, 409, 'could_not_write');
@@ -281,7 +299,14 @@ async function withdraw(ownerId: string, proposalId: string): Promise<void> {
 
 /** Undo "Use Girru's version": the folder text back and the proposal withdrawn, only while the file is as Girru left it. */
 export async function undoUseGirru(ownerId: string, projectId: unknown, token: unknown): Promise<{ project: ProjectFiles }> {
+  assertNoDefaultMemoryAccess();
   const p = await filesProject(ownerId, projectId);
+  return withBriefProjectionBarrier(projectScope(p), () => undoUseGirruInside(ownerId, projectId, token));
+}
+
+async function undoUseGirruInside(ownerId: string, projectId: unknown, token: unknown): Promise<{ project: ProjectFiles }> {
+  const p = await filesProject(ownerId, projectId);
+  if (await sql().read(encryptedProjectionHeldStep(projectScope(p)))) throw new BridgeError('Encrypted memory projection hold', 409, 'encrypted_hold');
   const e = typeof token === 'string' ? undos.get(token) : undefined;
   const expired = () => new BridgeError('Undo is no longer possible: the file changed since', 409, 'undo_expired');
   if (!e || e.ownerId !== ownerId || e.projectId !== p.id || Date.now() - e.at > UNDO_MS) throw expired();
@@ -301,6 +326,7 @@ export async function undoUseGirru(ownerId: string, projectId: unknown, token: u
 
 /** The project's two switches: write project files (preview + apply in one step) and company facts (D22). */
 export async function patchProjectFiles(ownerId: string, projectId: unknown, body: { writeFiles?: unknown; companyFacts?: unknown }): Promise<{ project: ProjectFiles }> {
+  assertNoDefaultMemoryAccess();
   const p = await filesProject(ownerId, projectId);
   if (body.writeFiles !== undefined && typeof body.writeFiles !== 'boolean') throw new BridgeError('writeFiles must be true or false');
   if (body.companyFacts !== undefined && typeof body.companyFacts !== 'boolean') throw new BridgeError('companyFacts must be true or false');

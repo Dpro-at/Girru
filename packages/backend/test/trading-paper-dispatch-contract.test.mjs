@@ -1,3 +1,4 @@
+import './fixtures/trading-runtime.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {capturePaperDispatchDefinition as capture} from '../src/services/trading-paper-dispatch-contract.ts';

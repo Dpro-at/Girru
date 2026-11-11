@@ -43,6 +43,9 @@ export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'executed' | 'f
 
 /** Built-in and known tools that always need approval. */
 export const APPROVAL_REQUIRED_TOOLS: Readonly<Record<string, ApprovalCategory>> = {
+  workspace_control_apply:'settings', // Internal executor: only a real owner approval ticket admits it.
+  team_control_apply:'settings',
+  team_agent_create:'settings',team_agent_update:'settings',team_personality_apply:'settings',team_specialty_apply:'settings',
   // sending messages on the owner's behalf
   telegram_send: 'message',
   discord_send: 'message',
@@ -72,6 +75,7 @@ export const APPROVAL_REQUIRED_TOOLS: Readonly<Record<string, ApprovalCategory>>
   memory_corrected_checked: 'other', // STORE-MAP-01 P9b: marks a corrected memory as checked; the approval is the confirm
   memory_question_answer: 'other', // STORE-MAP-01 P9b: the owner approves the exact answer text that is saved
   memory_question_forget: 'other', // STORE-MAP-01 P9b: forgets an open question; the approval is the confirm
+  project_trust_apply: 'settings', // REPO-TRUST-01: what agents may take from a project's files; the approval is the confirm
   open_in_code: 'other', // CODE-OPEN-01: the owner approves which file opens in Code
   memory_privacy_decide: 'other', // STORE-MAP-01 P9: keeps or drops a personal-data / sensitive memory; the approval is the confirm
   memory_graph_sync: 'other', // MEM-FINISH-01 (M14 Rebuild map): re-indexes the map and prunes orphan links; the approval is the confirm
@@ -231,6 +235,8 @@ export interface ApprovalRunScope {
   /** Owner-selected project boundary, bound into the approval hash. */
   fileReadRoot?: string;
   taskId?: string;
+  /** CHAT-LIVE-01 (LW6): asked from the owner's chat (its folder's edit/write run there once allowed). */
+  chat?: true;
   /** CORE-08: durable task run + step that asked; the run continues once decided. */
   runId?: string;
   runStep?: number;
@@ -240,6 +246,7 @@ export function runScopeOf(context: ToolExecutionContext): ApprovalRunScope {
   const scope: ApprovalRunScope = { memoryDrawers: toolMemoryDrawers(context).map((d) => ({kind:d.kind,...(d.key?{key:d.key}:{}),...(d.readOnly===true?{readOnly:true}:{} )})) };
   if (typeof context.taskId === 'string' && context.taskId) scope.taskId = context.taskId;
   if (typeof context.fileReadRoot === 'string' && context.fileReadRoot) scope.fileReadRoot = context.fileReadRoot;
+  if (context.chatPlan === true && !context.toolPolicy) scope.chat = true;
   if (context.taskRun && typeof context.taskRun.runId === 'string' && Number.isInteger(context.taskRun.stepIndex)) {
     scope.runId = context.taskRun.runId;
     scope.runStep = context.taskRun.stepIndex;
@@ -263,6 +270,7 @@ function parseRunScope(raw: unknown): ApprovalRunScope | null | 'invalid' {
     if (v.taskId !== undefined && typeof v.taskId !== 'string') return 'invalid';
     if (v.runId !== undefined && typeof v.runId !== 'string') return 'invalid';
     if (v.runStep !== undefined && !Number.isInteger(v.runStep)) return 'invalid';
+    if (v.chat !== undefined && v.chat !== true) return 'invalid';
     if (v.fileReadRoot !== undefined && (typeof v.fileReadRoot !== 'string' || !v.fileReadRoot || v.fileReadRoot.length > 4096 || v.fileReadRoot.includes('\0'))) return 'invalid';
     return v as ApprovalRunScope;
   } catch {
@@ -340,7 +348,8 @@ export async function requestApproval(
   tool: Tool,
   params: Record<string, any>,
   context: ToolExecutionContext,
-  category: ApprovalCategory
+  category: ApprovalCategory,
+  onStored?: (approvalId:string)=>import('../repositories/sql-steps.js').Step<void>
 ): Promise<ToolResult> {
   const agentId = context.agentId ?? null;
   const pending = await sql().read((function* () {
@@ -364,7 +373,7 @@ export async function requestApproval(
   const origin = policy
     ? JSON.stringify({ channel: policy.channel, conversationId: policy.conversationId, allowedDestinations: policy.allowedDestinations })
     : null;
-  await sql().read(run(`
+  await sql().tx(function*(){yield* run(`
     INSERT INTO tool_approvals (id, status, agent_id, user_id, session_id, tool_name, category,
       params_encrypted, params_iv, params_tag, params_preview, origin, delegated_from,
       params_hash, params_salt, preview_truncated, run_scope, run_id, run_step)
@@ -375,7 +384,7 @@ export async function requestApproval(
     context.delegatedFrom?.length ? JSON.stringify(context.delegatedFrom) : null,
     hash, salt, truncated ? 1 : 0, canonicalJson(runScope),
     runScope.runId ?? null, runScope.runStep ?? null,
-  ));
+  );if(onStored)yield* onStored(id);});
   console.log(`[Approvals] ⏸️  Pending approval ${id} for ${tool.name} (agent ${agentId ?? '(none)'})`);
 
   return {
@@ -611,7 +620,7 @@ export async function approveAndRun(id: string, ownerId: string, expectedHash: u
   // Old rows without a stored scope keep the previous default (owner +
   // experience drawers).
   const scoped = runScope && typeof runScope === 'object'
-    ? { memoryDrawers: approvalRunDrawers(runScope.memoryDrawers, { toolPolicy }), ...(runScope.taskId ? { taskId: runScope.taskId } : {}), ...(runScope.fileReadRoot ? { fileReadRoot: runScope.fileReadRoot } : {}) }
+    ? { memoryDrawers: approvalRunDrawers(runScope.memoryDrawers, { toolPolicy }), ...(runScope.taskId ? { taskId: runScope.taskId } : {}), ...(runScope.fileReadRoot ? { fileReadRoot: runScope.fileReadRoot } : {}), ...(runScope.chat === true && !toolPolicy ? { chatPlan: true } : {}) }
     : {};
   // CORE-08: the call keeps the idempotency key of the run step that asked.
   let taskRun: ToolExecutionContext['taskRun'];

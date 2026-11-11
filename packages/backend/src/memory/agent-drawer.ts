@@ -1,3 +1,5 @@
+import {selectedMemoryExecution,assertNoDefaultMemoryAccess} from './encryption/execution-context.js';
+import {consumeCurrentEncryptedMemoryScope,assertNoLegacyMemoryFileAccess} from './encryption/consumer-host.js';
 /**
  * STORE-MAP-01 P5 (T4, CX1): an agent's own notes live in its own drawer.
  *
@@ -58,6 +60,7 @@ function* notesStep(agentId: string): Step<{ id: string; content: string; user_i
  * safely (tried again at the next start).
  */
 export async function importAgentMemory(agentId: string): Promise<boolean> {
+  assertNoLegacyMemoryFileAccess();
   if (!storeP5Enabled()) return false;
   if (await sql().read(ledgerStep(agentId))) return false;
   let current: Awaited<ReturnType<typeof readMemorySnapshot>>;
@@ -94,6 +97,7 @@ export async function importAgentMemory(agentId: string): Promise<boolean> {
 
 /** Start-up (expand → backfill): import every agent's notes once. Returns how many were imported now. */
 export async function importAllAgentMemory(): Promise<number> {
+  assertNoLegacyMemoryFileAccess();
   if (!storeP5Enabled()) return 0;
   let n = 0;
   for (const { id } of await sql().read(all<{ id: string }>('SELECT id FROM agents_config ORDER BY id'))) {
@@ -104,6 +108,7 @@ export async function importAllAgentMemory(): Promise<number> {
 
 /** Verify step: agents without imported notes (0 after a full import). */
 export async function agentsWithoutImportedMemory(): Promise<number> {
+  assertNoLegacyMemoryFileAccess();
   return sql().read((function* () {
     const row = yield* one<{ n: number }>('SELECT COUNT(*) AS n FROM agents_config a WHERE NOT EXISTS (SELECT 1 FROM agent_memory_imports i WHERE i.agent_id = a.id)');
     return Number(row?.n ?? 0);
@@ -111,7 +116,8 @@ export async function agentsWithoutImportedMemory(): Promise<number> {
 }
 
 /** The notes and their version tag (sha256 of the text), or null before the import / with the switch off. */
-export async function agentNotes(agentId: string): Promise<{ content: string; hash: string; memoryId: string } | null> {
+async function agentNotesCurrent(agentId: string): Promise<{ content: string; hash: string; memoryId: string } | null> {
+ const selected=selectedMemoryExecution();if(selected)return selected.agentNotes(agentId);
   if (!storeP5Enabled()) return null;
   return sql().read((function* () {
     if (!(yield* ledgerStep(agentId))) return null;
@@ -121,7 +127,8 @@ export async function agentNotes(agentId: string): Promise<{ content: string; ha
 }
 
 /** What a prompt reads as the agent's own notes: the drawer with the switch on (after the import), else the file. */
-export async function agentMemoryForPrompt(agentId: string): Promise<string> {
+async function agentMemoryForPromptCurrent(agentId: string): Promise<string> {
+ const selected=selectedMemoryExecution();if(selected)return(await selected.agentNotes(agentId))?.content??'';
   const notes = await agentNotes(agentId).catch(() => null);
   return notes ? notes.content : readMemory(agentId);
 }
@@ -132,6 +139,7 @@ export async function agentMemoryForPrompt(agentId: string): Promise<string> {
  * history row per change; then the file view is written.
  */
 export async function saveAgentNotes(agentId: string, content: unknown, expectedHash: unknown, actor: string): Promise<{ content: string; hash: string; redacted: boolean }> {
+  assertNoLegacyMemoryFileAccess();
   if (typeof content !== 'string' || typeof expectedHash !== 'string' || !/^[a-f0-9]{64}$/.test(expectedHash)) throw new AgentMemoryInputError('invalid');
   const clean = redactImportText(content).text;
   if (Buffer.byteLength(clean, 'utf8') > MAX_AGENT_NOTES) throw new AgentMemoryInputError('too_large');
@@ -153,6 +161,7 @@ export async function saveAgentNotes(agentId: string, content: unknown, expected
  * last wrote it is never overwritten (agentMemoryStatus says so).
  */
 export async function writeAgentNotesView(agentId: string): Promise<'written' | 'unchanged' | 'outside_change' | 'off'> {
+  assertNoLegacyMemoryFileAccess();
   if (!storeP5Enabled()) return 'off';
   const state = await sql().read((function* () { return { ledger: yield* ledgerStep(agentId), notes: yield* notesStep(agentId) }; })());
   if (!state.ledger || !state.notes) return 'off';
@@ -166,6 +175,7 @@ export async function writeAgentNotesView(agentId: string): Promise<'written' | 
 
 /** For the owner: imported or not, how many history rows, and whether MEMORY.md was changed outside Girru. */
 export async function agentMemoryStatus(agentId: string): Promise<{ imported: boolean; versions: number; outsideChange: boolean }> {
+  assertNoLegacyMemoryFileAccess();
   const ledger = await sql().read(ledgerStep(agentId));
   if (!ledger) return { imported: false, versions: 0, outsideChange: false };
   const file = await readMemorySnapshot(agentId).catch(() => null);
@@ -175,6 +185,7 @@ export async function agentMemoryStatus(agentId: string): Promise<{ imported: bo
 
 /** P5a: the notes' history for the owner, newest first (who: the owner, an agent id, or an import word). */
 export async function agentNotesHistory(agentId: string): Promise<Array<{ version: number; change: string; createdAt: string; by: string; reason: string | null; content: string | null }> | null> {
+  assertNoLegacyMemoryFileAccess();
   if (!storeP5Enabled()) return null;
   const ledger = await sql().read(ledgerStep(agentId));
   if (!ledger) return [];
@@ -186,6 +197,7 @@ export async function agentNotesHistory(agentId: string): Promise<Array<{ versio
 
 /** P5b: MEMORY.md as it is now next to the notes Girru keeps, only while the file was changed outside Girru. */
 export async function agentNotesOutside(agentId: string): Promise<{ file: string; fileHash: string; notes: string; notesHash: string } | null> {
+  assertNoLegacyMemoryFileAccess();
   if (!storeP5Enabled()) return null;
   const state = await sql().read((function* () { return { ledger: yield* ledgerStep(agentId), notes: yield* notesStep(agentId) }; })());
   if (!state.ledger || !state.notes) return null;
@@ -202,6 +214,7 @@ export async function agentNotesOutside(agentId: string): Promise<{ file: string
  *  - 'keep': Girru's notes stay and the file is written back from them.
  */
 export async function settleAgentNotesOutside(agentId: string, pick: unknown, fileHash: unknown, actor: string): Promise<{ hash: string; previousHash: string }> {
+  assertNoLegacyMemoryFileAccess();
   if ((pick !== 'use' && pick !== 'keep') || typeof fileHash !== 'string' || !/^[a-f0-9]{64}$/.test(fileHash)) throw new AgentMemoryInputError('invalid');
   const now = await agentNotesOutside(agentId);
   if (!now) throw new AgentMemoryConflict('no_outside_change');
@@ -213,3 +226,7 @@ export async function settleAgentNotesOutside(agentId: string, pick: unknown, fi
   await writeAgentNotesView(agentId);
   return { hash, previousHash: now.notesHash };
 }
+
+export function agentNotes(...args:Parameters<typeof agentNotesCurrent>):ReturnType<typeof agentNotesCurrent>{return consumeCurrentEncryptedMemoryScope(()=>agentNotesCurrent(...args));}
+
+export function agentMemoryForPrompt(...args:Parameters<typeof agentMemoryForPromptCurrent>):ReturnType<typeof agentMemoryForPromptCurrent>{return consumeCurrentEncryptedMemoryScope(()=>agentMemoryForPromptCurrent(...args));}
