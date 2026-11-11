@@ -132,7 +132,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
       {waitingFrom(d.id).length > 0 && <span className="dk-badge-pill" title="Needs you">{waitingFrom(d.id).length}</span>}
     </button>;
   const nav = <nav className="dk-sidebar computers-places" aria-label="My computers">
-    <div className="computers-search"><input ref={searchRef} type="search" aria-label="Search computers" placeholder={peopleOn ? 'Search computers and people' : 'Search computers'} value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') setQuery(''); }}/>{peopleOn && <button type="button" className="tool computers-add" title="Add a person (⌘⇧N)" aria-label="Add" onClick={() => setAddingPerson(true)}><UiIcon name="plus" size={13}/>Add</button>}</div>
+    <div className="computers-search"><input ref={searchRef} type="search" aria-label="Search computers" placeholder="Search" title={peopleOn ? 'Search computers and people (⌘F)' : 'Search computers (⌘F)'} value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') setQuery(''); }}/>{peopleOn && <button type="button" className="tool computers-add" title="Add a person (⌘⇧N)" aria-label="Add" onClick={() => setAddingPerson(true)}><UiIcon name="plus" size={13}/>Add</button>}</div>
     <div className="computers-filter" role="radiogroup" aria-label="Show">
       {([['all', 'All', listed.length + (self ? 1 : 0) + (ppl?.people.length ?? 0)], ['online', 'Online', onCount], ['offline', 'Offline', offCount]] as const).map(([k, label, n]) => <button key={k} type="button" role="radio" aria-checked={place === k} onClick={() => setPlace(k)}>{label} <span>{n}</span></button>)}
     </div>
