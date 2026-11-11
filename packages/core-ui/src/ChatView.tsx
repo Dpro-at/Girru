@@ -83,7 +83,7 @@ export const LIVE_ROWS = 4;
 /** The server's automatic message after an approval is decided (CONTINUE_MESSAGE): shown as a quiet line, not as the owner's words. */
 const APPROVAL_CONTINUE = 'I decided the waiting approval. Continue the task with its result.';
 
-export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, productName = 'Girru', client, onAddConnector, onOpenCard, onOpenMemory, onOpenMemoryPage, onChooseContext, onSetUpModel, onOpenApprovals, onOpenAgent, onOpenRules, terminalRequest = 0, boardRequest = 0, placeRequest = 0, active = true, titleSlot = null }: { embeddedCode?:boolean; onOpenCode?:(folder:string,file?:string)=>void; titleSlot?: HTMLElement | null; placeRequest?: number; controller: ConversationsController; mode: 'live' | 'mock'; productName?: string; terminalRequest?: number; boardRequest?: number; client?: SessionClient; onChooseContext?:()=>void; onAddConnector?: () => void; onSetUpModel?: () => void; onOpenApprovals?: () => void; onOpenAgent?: (agentId: string) => void; onOpenRules?: (agentId: string, category: string) => void; onOpenCard?: (boardId: string, cardId: string) => void; onOpenMemory?: (drawerId: string, memoryId: string) => void; onOpenMemoryPage?: () => void; active?: boolean }) {
+export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, productName = 'Girru', client, onAddConnector, onOpenCard, onOpenMemory, onOpenMemoryPage, onChooseContext, onSetUpModel, onOpenVoiceSettings, onOpenApprovals, onOpenAgent, onOpenRules, terminalRequest = 0, boardRequest = 0, placeRequest = 0, active = true, titleSlot = null }: { embeddedCode?:boolean; onOpenCode?:(folder:string,file?:string)=>void; titleSlot?: HTMLElement | null; placeRequest?: number; controller: ConversationsController; mode: 'live' | 'mock'; productName?: string; terminalRequest?: number; boardRequest?: number; client?: SessionClient; onChooseContext?:()=>void; onAddConnector?: () => void; onSetUpModel?: () => void; onOpenVoiceSettings?: () => void; onOpenApprovals?: () => void; onOpenAgent?: (agentId: string) => void; onOpenRules?: (agentId: string, category: string) => void; onOpenCard?: (boardId: string, cardId: string) => void; onOpenMemory?: (drawerId: string, memoryId: string) => void; onOpenMemoryPage?: () => void; active?: boolean }) {
   const s = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const [meetingMeta, setMeetingMeta] = useState<MeetingRecord | null>(null);
   const [meetingCall, setMeetingCall] = useState(false), [meetingStage, setMeetingStage] = useState<HTMLDivElement | null>(null);
@@ -605,12 +605,12 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
             onChange={id => (s.activeId ? controller.setReplyAgent(id) : controller.selectAgent(id))} open={popover === 'who'} setOpen={v => setPopover(v ? 'who' : null)}/>}
           {owner && <ModelButton controller={controller} open={popover === 'model'} setOpen={v => setPopover(v ? 'model' : null)}/>}
           {mic && <MicButton mic={mic}/>}
+          {client && owner && mode === 'live' && !meetingMeta && <ChatVoice client={client} controller={controller} active={active} onOpenVoiceSettings={onOpenVoiceSettings}/>}
           {running && !s.draft.trim()
             ? <button type="button" className="round-button stop" onClick={() => void controller.stop()} disabled={s.stopping} aria-label={s.stopping ? 'Stopping' : 'Stop the reply'}><UiIcon name="stop" size={10}/></button>
             : <button type="submit" className="round-button" disabled={(!s.draft.trim() && !s.attachments.length) || s.access === 'denied'} aria-label={busy ? 'Queue the message' : 'Send'}><UiIcon name="arrow-up" size={15}/></button>}
         </div>
       </form>
-      {client && owner && mode === 'live' && !meetingMeta && <ChatVoice client={client} controller={controller} active={active}/>}
     </div>
     </MeetingPanels>
     {terminal && termOpen && <section className="chat-terminal" aria-label="Terminal"><TerminalPane tabs={terminal.tabs} prefs={terminal.prefs} projectId={folderProject} maximized={maximized} onToggleMax={() => setMaximized(v => !v)} onClose={() => { setMaximized(false); setTermOpen(false); }}/></section>}
