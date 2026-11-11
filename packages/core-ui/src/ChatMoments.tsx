@@ -164,7 +164,8 @@ export function ApprovalCard({ call, who, what, onTask }: { call: ToolCall; who?
   const allowNow = () => { if (denyTimer.current) clearTimeout(denyTimer.current); denyTimer.current = null; setState('review'); if (detail?.verificationRequired) setVerify(true); else void allow(); };
   useEffect(() => () => { if (denyTimer.current) { clearTimeout(denyTimer.current); void client?.request({ method: 'POST', path: `/api/approvals/${id}/deny` } as never).catch(() => null); } }, []);
   if (!client || !id) return null;
-  const title = requestTitle(call.name, null);
+  const commandText = call.name === 'run_command_owner' ? (() => { try { const p = JSON.parse(call.input) as { command?: unknown }; return typeof p.command === 'string' ? p.command : null; } catch { return null; } })() : null;
+  const title = commandText ? `run ${commandText.split('\n')[0].slice(0, 80)}` : requestTitle(call.name, null);
   const said = what ?? title;
   if (state === 'allowed') return <p className="moment-line"><UiIcon name="check" size={12}/>Allowed: {title}. The chat carries on with the result.</p>;
   if (state === 'denied') return <p className="moment-line"><UiIcon name="close" size={12}/>You said no: {said}. It did not run.</p>;
