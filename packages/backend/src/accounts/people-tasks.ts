@@ -25,7 +25,8 @@ const MAX_WAITING_PER_PERSON=20;
 /** People get their own small pool of relay slots, so they can never use up the owner's own computers' slots. */
 const MAX_PEOPLE_PINS=16;
 
-export interface PeopleComputer {deviceId:string;publicKey:string;label:string;osFamily:string;viaGoogle?:boolean;presence:string}
+/** What the account service shares about a person's computer: only its key (to seal and deliver) and whether it is on. */
+export interface PeopleComputer {publicKey:string;presence:string;viaGoogle?:boolean}
 export interface PeopleLink {linkId:string;person:{publicId:string;nickname:string|null};computers:PeopleComputer[]}
 export interface PersonTaskRow {id:string;direction:'out'|'in';link_id:string;person_id:string;person_name:string;device_id:string;text:string;state:'waiting'|'running'|'review'|'done'|'declined'|'failed';answer:string;session_id:string|null;delivered:number;created_at:number;updated_at:number}
 
@@ -94,7 +95,7 @@ export class PeopleTasks {
         const r=await control.request(device,'person.task.offer',{taskId:id,text:body});
         if(r?.received!==true)continue;
         await q.run("INSERT INTO people_tasks(id,user_id,account_id,direction,link_id,person_id,person_name,device_id,text,state,answer,session_id,delivered,created_at,updated_at) VALUES(?,?,?,'out',?,?,?,?,?,'waiting','',NULL,1,?,?)",id,u,a,link.linkId,link.person.publicId,nameOf(link.person),device,body,now,now);
-        return {sent:true,taskId:id,to:{name:nameOf(link.person),computer:target.label}};
+        return {sent:true,taskId:id,to:{name:nameOf(link.person)}};
       }catch{/* That computer is off or did not answer: try the next one. */}
     }
     throw Error('account_people_offline');

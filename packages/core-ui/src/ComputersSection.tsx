@@ -188,7 +188,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   else if (selectedPerson) main = <div className="computers-main">
       <header className="computers-head">
         <span className="computers-tile"><Avatar name={personName(selectedPerson.person)} size={26}/></span>
-        <span className="computers-title"><h2>{personName(selectedPerson.person)}</h2><small>{selectedPerson.person.publicId} · {personOnline(selectedPerson) ? 'On' : 'Off'} · {selectedPerson.computers.length === 1 ? '1 computer' : `${selectedPerson.computers.length} computers`}</small></span>
+        <span className="computers-title"><h2>{personName(selectedPerson.person)}</h2><small>{selectedPerson.person.publicId} · {personOnline(selectedPerson) ? 'On' : 'Off'}</small></span>
         <button type="button" className="primary" onClick={() => setSendingPerson(true)}>Send a task</button>
         <button type="button" className="tool" title="More" aria-label="More" onClick={e => menu.at(e, menuForPerson(selectedPerson))}><UiIcon name="more" size={15}/></button>
       </header>

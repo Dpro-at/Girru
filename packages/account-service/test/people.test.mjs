@@ -43,7 +43,7 @@ test('nickname: optional, unique, 3-24 letters/numbers/dot/dash, never shaped li
 
 test('find only by the exact nickname or ID; never yourself; no listing',()=>{
   const byName=request(mohamed,'people.find',{query:'Sara.Dev'});
-  assert.equal(byName.found,true);assert.equal(byName.person.publicId,hers.publicId);assert.equal(byName.computers,1);
+  assert.equal(byName.found,true);assert.equal(byName.person.publicId,hers.publicId);assert.equal(byName.computers,undefined,'no computer count');
   assert.equal(request(mohamed,'people.find',{query:hers.publicId.toLowerCase()}).person.nickname,'sara.dev');
   assert.equal(request(mohamed,'people.find',{query:'sara'}).found,false);
   assert.equal(request(mohamed,'people.find',{query:'%'}).found,false);
@@ -77,13 +77,13 @@ test('request → both see the same code; it changes every 90 s; only the receiv
   assert.throws(()=>request(mohamed,'people.request',{publicId:hers.publicId}),/linked/);
 });
 
-test('linked people see only each other\'s approved computers (public keys), nothing else',()=>{
+test('linked people never see each other\'s computers: only keys of confirmed ones, for delivery',()=>{
   const list=request(mohamed,'people.list');
   assert.equal(list.people.length,1);
   const sara1=list.people[0];
   assert.equal(sara1.person.nickname,'sara.dev');
   assert.equal(sara1.computers.length,1,'the pending laptop is not shared');
-  assert.deepEqual(Object.keys(sara1.computers[0]).sort(),['deviceId','label','osFamily','presence','publicKey','viaGoogle']);
+  assert.deepEqual(Object.keys(sara1.computers[0]).sort(),['presence','publicKey']);assert.ok(!JSON.stringify(sara1).includes('Computer of'),'no computer names');
   assert.equal(request(sara,'people.list').people[0].person.publicId,mine.publicId);
   assert.equal(request(ali,'people.list').people.length,0);
 });

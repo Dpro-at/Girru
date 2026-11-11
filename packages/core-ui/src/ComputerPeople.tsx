@@ -13,7 +13,8 @@ import {UiIcon} from './ui-icons';
 export interface Person {publicId: string; nickname: string | null}
 /** Your own: whether this computer may exchange tasks with people, and whether the account has two-step sign-in. */
 export interface Me extends Person {confirmed?: boolean; twoFactor?: boolean}
-export interface PersonComputer {deviceId: string; publicKey: string; label: string; osFamily: string; viaGoogle?: boolean; presence: 'online' | 'unknown'}
+/** Only what delivery needs; a person's computers are never shown (names, count or system). */
+export interface PersonComputer {publicKey: string; presence: 'online' | 'unknown'; viaGoogle?: boolean}
 export interface LinkedPerson {linkId: string; person: Person; linkedAt: number; computers: PersonComputer[]}
 export interface PeopleRequest {linkId: string; person: Person; expiresAt: number; code: string; codeExpiresAt: number}
 export interface PersonTask {id: string; direction: 'out' | 'in'; linkId: string; person: {publicId: string; name: string}; text: string; state: 'waiting' | 'running' | 'review' | 'done' | 'declined' | 'failed'; answer: string; sessionId: string | null; createdAt: number}
@@ -83,7 +84,7 @@ export function YouOnGirru({client, me, onAdd, onChanged, onSettings}: {client: 
 
 /** Board B: add someone by nickname or ID, then both compare the code. */
 export function AddPersonSheet({client, outgoing, onClose, onChanged}: {client: SessionClient; outgoing: PeopleRequest[]; onClose: () => void; onChanged: () => void}) {
-  const [query, setQuery] = useState(''), [found, setFound] = useState<{person: Person; computers: number; linked: boolean; waiting: boolean} | null>(null);
+  const [query, setQuery] = useState(''), [found, setFound] = useState<{person: Person; linked: boolean; waiting: boolean} | null>(null);
   const [notice, setNotice] = useState(''), [sentId, setSentId] = useState(''), [busy, setBusy] = useState(false);
   const sent = outgoing.find(r => r.linkId === sentId);
   const find = async () => {
@@ -100,7 +101,7 @@ export function AddPersonSheet({client, outgoing, onClose, onChanged}: {client: 
   };
   return <Sheet title="Add a person" onClose={onClose} actions={<button type="button" onClick={onClose}>{sent ? 'Done' : 'Cancel'}</button>}>
     {!sentId && <span className="people-find"><input autoFocus aria-label="Nickname or ID" placeholder="Nickname or ID (GR-…)" maxLength={40} value={query} onChange={e => { setQuery(e.target.value); setFound(null); }} onKeyDown={e => { if (e.key === 'Enter') void find(); }}/><button type="button" className={found ? undefined : 'primary'} disabled={busy || !query.trim()} onClick={() => void find()}>Find</button></span>}
-    {found && <span className="people-person"><Avatar name={personName(found.person)} size={28}/><span><b>{personName(found.person)}</b><small>{found.person.publicId} · {found.computers === 1 ? '1 computer' : `${found.computers} computers`}</small></span>
+    {found && <span className="people-person"><Avatar name={personName(found.person)} size={28}/><span><b>{personName(found.person)}</b><small>{found.person.publicId}</small></span>
       {found.linked ? <span className="people-pill">Already added</span> : sentId ? <span className="people-pill warn">Waiting for {personName(found.person)}</span> : <button type="button" className="primary" disabled={busy} onClick={() => void ask()}>Add</button>}
     </span>}
     {sent && found && <><div className="people-code" aria-label="Code">{sent.code.slice(0, 4)} {sent.code.slice(4)}</div>
@@ -134,18 +135,12 @@ export function PeopleRequests({client, incoming, onChanged}: {client: SessionCl
   </div>;
 }
 
-/** Board D: a person's page: tasks with them, their computers, and Remove person in the More menu. */
+/** Board D: a person's page: tasks with them, and Remove person in the More menu. Their computers stay private. */
 export function PersonPage({person, tasks, onOpenChat}: {person: LinkedPerson; tasks: PersonTask[]; onOpenChat: (id: string) => void}) {
   const name = personName(person.person), mine = tasks.filter(t => t.linkId === person.linkId);
   return <>
     <section aria-label="Tasks"><p className="section-label">Tasks</p>
       {mine.length ? <div className="computer-list" role="list">{mine.map(t => <PersonTaskRow key={t.direction + t.id} task={t} name={name} onOpenChat={onOpenChat}/>)}</div> : <p className="fine-print">No task yet. Send one: it waits for {name}'s OK, then the answer shows here.</p>}
-    </section>
-    <section aria-label="Their computers"><p className="section-label">Their computers</p>
-      <div className="computer-list" role="list">{person.computers.map(c => <div key={c.deviceId} className="computer-task" role="listitem">
-        <UiIcon name={c.osFamily === 'windows' ? 'pc-tower' : 'pc-imac'} size={15}/>
-        <span className="computer-task-text"><b>{c.label}</b><small>{c.viaGoogle ? `Waits for ${personName(person.person)} to confirm it is theirs · no tasks yet` : c.presence === 'online' ? 'On' : 'Off or not seen'}</small></span>
-      </div>)}{!person.computers.length && <p className="fine-print">No computer yet.</p>}</div>
     </section>
     <p className="fine-print">Only tasks are shared with {personName(person.person)}: never agents, settings, memory, chats or backups. A task from them always waits for your OK.</p>
   </>;
@@ -170,12 +165,12 @@ export function SendToPersonSheet({client, person, onClose, onSent}: {client: Se
   const name = personName(person.person), on = person.computers.some(c => c.presence === 'online' && !c.viaGoogle);
   const send = async () => {
     setBusy(true); setNotice('');
-    try { const r = await people(client, {action: 'send', linkId: person.linkId, text: text.trim()}); onSent(`Sent to ${name} (${r.to?.computer ?? 'their computer'}). It waits for their OK.`); onClose(); }
+    try { const r = await people(client, {action: 'send', linkId: person.linkId, text: text.trim()}); onSent(`Sent to ${name}. It waits for their OK.`); onClose(); }
     catch (e) { setNotice(peopleWords((e as Error).message)); } finally { setBusy(false); }
   };
   return <Sheet title={`Send a task to ${name}`} onClose={onClose} actions={<><button type="button" onClick={onClose}>Cancel</button><button type="button" className="primary" disabled={busy || !text.trim() || text.length > 4000} onClick={() => void send()}>Send</button></>}>
     <label className="phone-field"><span>The task</span><textarea autoFocus rows={6} maxLength={4000} value={text} onChange={e => setText(e.target.value)} placeholder="What should they do, and what should the answer say?" onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && text.trim()) void send(); }}/></label>
-    <p className="fine-print">Runs on: {name} (any of their computers that is on{on ? '' : '; none is on right now'}). It waits for their OK and runs with their own agent. Only the text goes, only the answer comes back.</p>
+    <p className="fine-print">Runs on: {name}{on ? '' : ' (not on right now)'}. It waits for their OK and runs with their own agent. Only the text goes, only the answer comes back.</p>
     {notice && <p role="status" className="fine-print">{notice}</p>}
   </Sheet>;
 }

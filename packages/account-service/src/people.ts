@@ -3,7 +3,8 @@
  * optional nickname. Another person adds you by typing either one exactly (nobody can list
  * people); you see a code that changes every 90 seconds and press Yes only when it matches
  * the code the other person reads to you. A link only lets the two accounts exchange tasks:
- * it shares their computers' public keys and nothing else.
+ * the other person never sees their computers: no names, no count, no system. Only the public keys of the
+ * confirmed ones travel, so a task can be sealed for and delivered to one of them.
  */
 import {createHmac,randomBytes,randomUUID,timingSafeEqual} from 'node:crypto';
 import type {AccountStore} from './store.js';
@@ -80,10 +81,10 @@ export class People {
   private computers(accountId:string){
     const now=this.now();
     const anchor=anchorDevice(this.store,accountId);
-    return this.store.all<DeviceRow>("SELECT * FROM devices WHERE account_id=? AND status='approved' ORDER BY registered_at,id LIMIT 64",accountId).map(d=>{
+    /* Only computers their owner confirmed (Google sign-in alone is not enough), and only what delivery needs. */
+    return this.store.all<DeviceRow>("SELECT * FROM devices WHERE account_id=? AND status='approved' ORDER BY registered_at,id LIMIT 64",accountId).filter(d=>d.approved_via!=='google'||d.id===anchor).map(d=>{
       const seen=this.presence.get(d.id);
-      /* viaGoogle: added by a Google sign-in alone, not yet compared by its owner; the other person's app shows it and does not send to it by default. */
-      return {deviceId:d.id,publicKey:d.public_key,label:d.label,osFamily:d.os_family,viaGoogle:d.approved_via==='google'&&d.id!==anchor,presence:seen&&seen.at+RETENTION.presenceMs>now?'online':'unknown'};
+      return {publicKey:d.public_key,presence:seen&&seen.at+RETENTION.presenceMs>now?'online':'unknown'};
     });
   }
   private purge(){this.store.run("DELETE FROM people_links WHERE status='pending' AND expires_at<=?",this.now());}
@@ -126,7 +127,7 @@ export class People {
         if(!row)return {found:false};
         const rows=this.between(me,row.account_id);
         if(rows.some(r=>r.status==='blocked'))return {found:false};
-        return {found:true,person:this.person(row),computers:this.computers(row.account_id).length,linked:rows.some(r=>r.status==='linked'),waiting:rows.some(r=>r.status==='pending')};
+        return {found:true,person:this.person(row),linked:rows.some(r=>r.status==='linked'),waiting:rows.some(r=>r.status==='pending')};
       }
       case 'people.request':{
         exact(payload,['publicId']);
