@@ -24,6 +24,10 @@ interface ProfileRow {account_id:string;public_id:string;nickname:string|null;ni
 interface LinkRow {id:string;from_account:string;to_account:string;status:'pending'|'linked'|'blocked';code_seed:string;created_at:number;expires_at:number;linked_at:number|null}
 interface Presence {at:number}
 
+/** The account's oldest computer still approved counts as confirmed: it came in first, so a computer added later
+ *  by someone with the Google password can never be it. It is where the owner's confirmations start. */
+export function anchorDevice(store:AccountStore,accountId:string){return store.one<{id:string}>("SELECT id FROM devices WHERE account_id=? AND status='approved' ORDER BY registered_at,id LIMIT 1",accountId)?.id??null;}
+
 export const isPeopleOperation=(op:string):op is PeopleOperation=>(PEOPLE_OPERATIONS as readonly string[]).includes(op);
 
 /** A nickname is 3–24 lowercase letters, numbers, dot or dash, and never shaped like an ID. */
@@ -75,10 +79,11 @@ export class People {
   }
   private computers(accountId:string){
     const now=this.now();
+    const anchor=anchorDevice(this.store,accountId);
     return this.store.all<DeviceRow>("SELECT * FROM devices WHERE account_id=? AND status='approved' ORDER BY registered_at,id LIMIT 64",accountId).map(d=>{
       const seen=this.presence.get(d.id);
       /* viaGoogle: added by a Google sign-in alone, not yet compared by its owner; the other person's app shows it and does not send to it by default. */
-      return {deviceId:d.id,publicKey:d.public_key,label:d.label,osFamily:d.os_family,viaGoogle:d.approved_via==='google',presence:seen&&seen.at+RETENTION.presenceMs>now?'online':'unknown'};
+      return {deviceId:d.id,publicKey:d.public_key,label:d.label,osFamily:d.os_family,viaGoogle:d.approved_via==='google'&&d.id!==anchor,presence:seen&&seen.at+RETENTION.presenceMs>now?'online':'unknown'};
     });
   }
   private purge(){this.store.run("DELETE FROM people_links WHERE status='pending' AND expires_at<=?",this.now());}
