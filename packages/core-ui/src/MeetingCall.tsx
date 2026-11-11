@@ -5,6 +5,7 @@ import type { SessionClient } from './session';
 import type { MeetingRecord } from './meetings-contract.js';
 import { MeetingCapture, meetingFrame, meetingCaptureError, type CaptureKind } from './meeting-media';
 import { MeetingVoice } from './meeting-voice';
+import { isPhoneShell } from './phone-terminal-keys';
 import { ChatAvatar, speakable } from './ChatAvatar';
 import { UiIcon } from './ui-icons';
 import { Sheet } from './desktop-ui';
@@ -50,7 +51,8 @@ export function MeetingCall({ client, controller, meeting, onLeave, onMicrophone
  </div><div className="meeting-call-controls">
   <button type="button" className="tool" aria-label={micState.enabled ? 'Mute microphone' : 'Unmute microphone'} title={micState.enabled ? 'Mute microphone' : 'Unmute and speak naturally'} aria-pressed={micState.enabled} disabled={['unknown','off'].includes(micState.phase) || meeting.state !== 'active'} onClick={() => { if (micState.enabled) mic.mute(); else { onMicrophoneEnabled?.(); void mic.unmute(); } }}><UiIcon name="mic"/></button>
   <button type="button" className="tool" aria-label={camera ? 'Turn camera off' : 'Turn camera on'} title={camera ? 'Turn camera off' : 'Turn camera on'} aria-pressed={!!camera} onClick={() => void toggle('camera')}><UiIcon name="meeting-camera"/></button>
-  <button type="button" className="tool" aria-label={screen ? 'Stop sharing' : 'Share a screen or window'} title={screen ? 'Stop sharing' : 'Share a screen or window'} aria-pressed={!!screen} onClick={() => void toggle('screen')}><UiIcon name="screen"/></button>
+  {/* Phone board P42: no screen sharing on the phone. */}
+  {!isPhoneShell() && <button type="button" className="tool" aria-label={screen ? 'Stop sharing' : 'Share a screen or window'} title={screen ? 'Stop sharing' : 'Share a screen or window'} aria-pressed={!!screen} onClick={() => void toggle('screen')}><UiIcon name="screen"/></button>}
   <button type="button" className="tool" aria-label="Add current frame to next message" title="Add current frame to next message" disabled={!camera && !screen} onClick={() => void attachFrame()}><UiIcon name="image"/></button>
   <button type="button" className="tool" aria-label="Call voice settings" title="Call voice settings" onClick={() => setSettings(true)}><UiIcon name="gear"/></button>
   <button type="button" className="tool danger" aria-label="Leave call" title="Leave call" onClick={onLeave}><UiIcon name="phone"/></button>

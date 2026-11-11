@@ -42,3 +42,15 @@ test('outside the app nothing changes', () => {
   assert.equal(localSessionKeep('computer', 'http://computer'), null);
   assert.equal(localSessionKeep('127.0.0.1', 'http://127.0.0.1:42522').load(), 'dpro-remembered-session');
 });
+
+test('meetings on the phone ask the app for Face ID and cap a spoken turn', async () => {
+  const { phoneConfirm, PHONE_TURN_MS, PHONE_AUDIO_CHARS } = require('../src/phone-terminal-keys.ts');
+  assert.equal(await phoneConfirm('Start the meeting', undefined), true, 'outside the app nothing is asked');
+  const asked = [];
+  const ios = (ok) => ({ girruShell: { platform: 'ios', bridge: 1 }, webkit: { messageHandlers: { girru: { postMessage: async (m) => { asked.push(m); return { ok }; } } } } });
+  assert.equal(await phoneConfirm('Start the meeting', ios(true)), true);
+  assert.equal(await phoneConfirm('End the meeting', ios(false)), false, 'a cancelled Face ID stops the step');
+  assert.deepEqual(asked, [{ type: 'auth.request', reason: 'Start the meeting' }, { type: 'auth.request', reason: 'End the meeting' }]);
+  assert.equal(PHONE_TURN_MS, 40_000);
+  assert.ok(PHONE_AUDIO_CHARS + 1024 <= 256 * 1024, 'a capped turn fits the phone request');
+});

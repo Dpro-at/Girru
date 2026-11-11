@@ -38,7 +38,9 @@
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>Girru uses the camera only to scan the pairing code shown on your computer.</string>
+	<string>Girru uses the camera to scan the pairing code shown on your computer, and to add a photo to a meeting when you ask.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Girru uses the microphone when you talk in a meeting. Your computer writes down what you say; nothing is kept on the phone.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Girru uses Face ID to unlock the app and to confirm sensitive actions.</string>
 	<key>NSLocalNetworkUsageDescription</key>

@@ -10,6 +10,22 @@ export function isPhoneShell(w: unknown = typeof window === 'undefined' ? undefi
   return !!shell && typeof shell === 'object';
 }
 
+/**
+ * Face ID (or the passcode) before a sensitive step on the phone (meetings: start, end, approve).
+ * Outside the app it is true. The iPhone app answers { type: 'auth.request', reason } with { ok };
+ * on Android the step goes ahead (its bridge reply path is not wired here yet).
+ */
+export async function phoneConfirm(reason: string, w: unknown = typeof window === 'undefined' ? undefined : window): Promise<boolean> {
+  if (!isPhoneShell(w)) return true;
+  const ios = (w as { webkit?: { messageHandlers?: { girru?: { postMessage?: (m: unknown) => unknown } } } }).webkit?.messageHandlers?.girru;
+  if (typeof ios?.postMessage !== 'function') return true;
+  try { const r = await ios.postMessage({ type: 'auth.request', reason }) as { ok?: unknown } | null; return !!r && r.ok === true; } catch { return false; }
+}
+
+/** A spoken meeting turn on the phone: at most 40 s and small enough for the phone's 256 KiB request. */
+export const PHONE_TURN_MS = 40_000;
+export const PHONE_AUDIO_CHARS = 240_000;
+
 export interface PhoneKey { id: string; label: string; aria: string; send?: string; mono?: boolean; strong?: boolean }
 
 /** In board order: the most used first, then arrows, then symbols the phone keyboard hides. */

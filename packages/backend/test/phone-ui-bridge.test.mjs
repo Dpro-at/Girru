@@ -63,6 +63,11 @@ test('the phone list is exactly the chat page (pinned)', async () => {
     ['GET', '/api/chat/last'], ['GET', '/api/chat/settings'], ['GET', '/api/approvals?status=pending&limit=100'],
     // Phone board P29: the open chat's meetings, read only.
     ['GET', '/api/meetings?conversationId=abcdefgh1'],
+    // Boards P40–P45: run a meeting and talk from the phone (the desktop gate checks each body).
+    ['GET', '/api/meetings/departments'], ['GET', '/api/meetings/roster?q=sa'], ['POST', '/api/meetings'], ['GET', '/api/meetings/m-1'],
+    ['POST', '/api/meetings/m-1/turns'], ['POST', '/api/meetings/m-1/state'], ['POST', '/api/meetings/m-1/attendance'],
+    ['POST', '/api/meetings/m-1/review'], ['PUT', '/api/meetings/m-1/decisions'], ['POST', '/api/meetings/m-1/approve'],
+    ['POST', '/api/chat/transcribe'],
     // The owner's decision (11 November): the desktop side panel, export, delete, Add to board and Remember.
     ['DELETE', '/api/chat/conversations/abcdefgh1'], ['GET', '/api/chat/conversations/abcdefgh1/export'], ['GET', '/api/chat/conversations/abcdefgh1/export?tools=1'],
     ['GET', '/api/chat/conversations/abcdefgh1/cards'], ['POST', '/api/chat/conversations/abcdefgh1/cards'], ['GET', '/api/boards'], ['GET', '/api/boards/board-1'],
@@ -79,12 +84,11 @@ test('the phone list is exactly the chat page (pinned)', async () => {
     ['GET', '/api/phone/devices'], ['POST', '/api/phone/pairing'], ['DELETE', '/api/phone/devices'], ['PUT', '/api/phone/settings'],
     ['GET', '/api/terminal/sessions'], ['GET', `/api/terminal/sessions/${TID}/stream`], ['POST', '/api/terminal/sessions/not-an-id/input'], ['DELETE', '/api/terminal/sessions'],
     ['GET', '/api/chat/projects/abcdefgh1/variables'], ['PUT', '/api/chat/projects/abcdefgh1/variables/API_KEY'], ['GET', '/api/chat/project-folders'],
-    ['POST', '/api/chat/transcribe'], ['POST', '/api/chat/conversations/abcdefgh1/images'],
+    ['POST', '/api/chat/conversations/abcdefgh1/images'],
     ['GET', '/api/chat/runs/run-abcdefgh/events'], ['PUT', '/api/chat/settings'],
     ['POST', '/api/auth/login'], ['POST', '/api/auth/logout'], ['GET', '/api/users'], ['PUT', '/api/agents/main'], ['POST', '/api/agents/name-suggestion'],
     ['GET', '/api/credentials'], ['GET', '/api/backups'], ['GET', '/api/audit'], ['GET', '/api/extensions'], ['POST', '/api/mcp/servers'],
-    ['GET', '/api/meetings'], ['POST', '/api/meetings'], ['GET', '/api/meetings/departments'], ['GET', '/api/meetings?conversationId=abcdefgh1&x=1'],
-    ['POST', '/api/meetings/abcdefgh1/turns'], ['POST', '/api/meetings/abcdefgh1/state'], ['GET', '/api/specialty-templates'],
+    ['DELETE', '/api/meetings/m-1'], ['PATCH', '/api/meetings/m-1'], ['GET', '/api/specialty-templates'],
     ['POST', `/api/chat/projects/${PID}/tree`], ['DELETE', `/api/chat/projects/${PID}`], ['POST', '/api/memory/proposals/prop-1/edit'], ['POST', '/api/boards'],
     ['GET', '/api/runs'], ['GET', '/api/approvals'], ['POST', '/api/approvals/0b8a1c4e-0000-4000-8000-000000000001/approve'], ['GET', '/api/approvals?status=all&limit=100'], ['GET', '/api/health'], ['GET', '/api/memory/proposals'], ['GET', '/health'], ['GET', '/api/../api/phone/devices'],
   ];

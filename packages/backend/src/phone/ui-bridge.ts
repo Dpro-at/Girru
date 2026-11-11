@@ -91,6 +91,8 @@ const CHAT_KINDS: Record<string, Method[]> = {
   panel: ['GET', 'PUT'],
   last: ['GET'],
   'chat-settings': ['GET'],
+  // Phone board P42: a meeting turn spoken on the phone is written down on the computer (owner's decision, 11 November).
+  transcribe: ['POST'],
 };
 
 /** Terminal request kinds (terminal-contract.js › terminalPath); `stream` only through api.stream. */
@@ -115,7 +117,11 @@ const BOARDS_READ = new RegExp(`^/api/boards(?:/${ID})?$`);
 const CHAT_MEMORIES = new RegExp(`^/api/chat/conversations/${ID}/memories$`);
 const PROPOSAL = new RegExp(`^/api/memory/proposals/${ID}$`);
 const PROPOSAL_DECIDE = new RegExp(`^/api/memory/proposals/${ID}/(?:approve|reject)$`);
-const MEETINGS_READ = /^\/api\/meetings\?conversationId=[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
+/**
+ * Meetings from the phone (boards P40–P45, owner's decision 11 November): start, run, talk, review and approve.
+ * The desktop gate (meetings-contract.js) still checks every path and body exactly.
+ */
+const MEETINGS = /^\/api\/meetings(?:$|[/?])/;
 
 /**
  * The phone's own list: only what the chat page needs (the owner's rule: the
@@ -129,7 +135,7 @@ export async function phoneMayCall(method: string, target: string): Promise<bool
   if (method === 'POST' && STEER.test(target)) return true;
   // The page's approvals badge reads the pending count; deciding stays on the phone's own Approvals screen.
   if (method === 'GET' && APPROVALS_READ.test(target)) return true;
-  if (method === 'GET' && MEETINGS_READ.test(target)) return true;
+  if ((method === 'GET' || method === 'POST' || method === 'PUT') && MEETINGS.test(target)) return true;
   if (method === 'GET' && (CHAT_EXPORT.test(target) || BOARDS_READ.test(target) || PROPOSAL.test(target))) return true;
   if ((method === 'GET' || method === 'POST') && (CHAT_CARDS.test(target) || CHAT_MEMORIES.test(target))) return true;
   if (method === 'POST' && PROPOSAL_DECIDE.test(target)) return true;

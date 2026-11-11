@@ -23,6 +23,8 @@ struct WebHostView: UIViewRepresentable {
         // Nothing from the chats is cached on the phone; it stays on the computer.
         config.websiteDataStore = .nonPersistent()
         config.preferences.javaScriptCanOpenWindowsAutomatically = false
+        // The meeting call shows the camera preview inside the page (board P42), not full screen.
+        config.allowsInlineMediaPlayback = true
         config.setURLSchemeHandler(CoreUISchemeHandler(source: source), forURLScheme: CoreUIOrigin.scheme)
 
         let content = WKUserContentController()
@@ -73,6 +75,15 @@ struct WebHostView: UIViewRepresentable {
         }
 
         deinit { if let terminalWatch { NotificationCenter.default.removeObserver(terminalWatch) } }
+
+        /// Phone board P42: the meeting page may use the microphone and camera, only the paired page in
+        /// the main frame and only while the app is unlocked. iOS asks the person once on first use.
+        func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+            let unlocked = MainActor.assumeIsolated { bridge.unlocked }
+            let ok = policy.paired && frame.isMainFrame && unlocked
+                && BridgeGate.allowsOrigin(scheme: origin.protocol, host: origin.host, isMainFrame: true)
+            decisionHandler(ok ? .grant : .deny)
+        }
 
         func load(in web: WKWebView) {
             if policy.paired {
@@ -141,6 +152,9 @@ final class WebBridge: ObservableObject {
     private let lock: AppLock
     private let push: PushRegistrar
     private var lockWatch: AnyCancellable?
+
+    /// True while the app is unlocked (the page's microphone and camera are allowed only then).
+    var unlocked: Bool { lock.isUnlocked }
 
     init(lock: AppLock, push: PushRegistrar) {
         self.lock = lock

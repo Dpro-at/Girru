@@ -1,5 +1,8 @@
 import type { SessionClient } from './session';
-import { MAX_AUDIO_CHARS, TRANSCRIBE_PATH } from './conversation-contract.js';
+import { MAX_AUDIO_CHARS as DESK_AUDIO_CHARS, TRANSCRIBE_PATH } from './conversation-contract.js';
+import { isPhoneShell, PHONE_AUDIO_CHARS, PHONE_TURN_MS } from './phone-terminal-keys';
+// Phone board P42: on the phone a turn is capped at 40 s so it fits the phone's request.
+const MAX_AUDIO_CHARS = isPhoneShell() ? PHONE_AUDIO_CHARS : DESK_AUDIO_CHARS;
 
 /** Local energy-based turn detection; no audio is transmitted until a speech segment ends. */
 export class MeetingVoiceActivity {
@@ -39,7 +42,8 @@ export const openMeetingMicrophone: MeetingVoiceFactory = async (clip, failed) =
    let deliver = false, size = 0;
    r.ondataavailable = event => { if (event.data.size) { size += event.data.size; if (size <= MAX_AUDIO_CHARS * .75) chunks.push(event.data); else { close(); failed(); } } };
    r.onerror = () => { close(); failed(); };
-   r.onstop = () => { if (closed || epoch !== version || !armed) return; recorder = null; if (deliver) { armed = false; stream.getAudioTracks().forEach(track => { track.enabled = false; }); clip(new Blob(chunks, { type: r.mimeType || mimeType || 'audio/webm' })); } else begin(); };
+   const cap = isPhoneShell() ? setTimeout(() => { if (closed || epoch !== version || r.state === 'inactive') return; clearInterval(timer); timer = undefined; deliver = true; r.stop(); }, PHONE_TURN_MS) : undefined;
+   r.onstop = () => { clearTimeout(cap); if (closed || epoch !== version || !armed) return; recorder = null; if (deliver) { armed = false; stream.getAudioTracks().forEach(track => { track.enabled = false; }); clip(new Blob(chunks, { type: r.mimeType || mimeType || 'audio/webm' })); } else begin(); };
    r.start(500);
    timer = setInterval(() => {
     if (closed || epoch !== version) return;

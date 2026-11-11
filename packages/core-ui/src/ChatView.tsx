@@ -9,7 +9,6 @@ import { Meetings } from './Meetings';
 import type { MeetingRecord } from './meetings-contract.js';
 import { ChatDetails, DetailsRail } from './ChatDetails';
 import { isPhoneShell } from './phone-terminal-keys';
-import { PhoneMeetingBar } from './Meetings';
 import type { PanelPart } from './ChatDetails';
 import { ApprovalCard, ChangesLine, ChoiceCard, DelegationCard, FileChips, MomentsContext, replyFiles, NoticeCard, SessionsCard, StartedByLine, SteerLine, TaskList, TitleFaces, chatPeople, redoTarget } from './ChatMoments';
 import { ScheduleSheet } from './ScheduleSheet';
@@ -274,6 +273,8 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
   // Phone boards P27/P5: inside the Girru phone app the details are a drawer from the right, closed at the start.
   const phone = isPhoneShell();
   const [pane, setPane] = useState<PaneName | null>(phone ? null : 'details');
+  // Phone board P40: ⋯ › New meeting opens the meeting form.
+  const [meetingRequestN, setMeetingRequestN] = useState(0);
   const [codeExpanded,setCodeExpanded]=useState(false);
   useEffect(()=>{if(embeddedCode)setPane(null);},[embeddedCode]);
   const [focusPart, setFocusPart] = useState<{ id: PanelPart; n: number } | null>(null);
@@ -428,8 +429,9 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
     ];
     // Phone board P18: no windows, Code, avatar or folder picker on the phone; Add to board moves here from the title bar.
     if (!phone) return all;
+    const meetingItem: MenuItem[] = owner && mode === 'live' ? [{ label: 'New meeting', icon: 'users', run: () => setMeetingRequestN(n => n + 1) }] : [];
     const kept = all.filter(i => i === 'sep' || !PHONE_OFF.test(i.label));
-    return canBoard ? [...kept.slice(0, -2), { label: 'Add to board', icon: 'board', run: () => openCardForm() }, ...kept.slice(-2)] : kept;
+    return [...meetingItem, ...(canBoard ? [...kept.slice(0, -2), { label: 'Add to board', icon: 'board' as const, run: () => openCardForm() }, ...kept.slice(-2)] : kept)];
   };
   useEffect(() => {
     if (!active) return;
@@ -509,8 +511,8 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
       <button type="button" className="tool" aria-pressed={pane !== null} aria-label={pane !== null ? 'Hide the side panel' : 'Show the side panel'} title={pane !== null ? 'Hide the side panel (⌥⌘I)' : 'Show the side panel (⌥⌘I)'}
         onClick={() => setPane(p => p === null ? 'details' : null)}><UiIcon name="inspector" size={15}/></button>
     </span>, titleSlot)}
-    {phone && mode === 'live' && client && <PhoneMeetingBar client={client} controller={controller} active={active}/>}
-    {!phone && !embeddedCode && mode === 'live' && client && client.getSnapshot().user?.role === 'owner' && <Meetings key={s.activeId ?? 'new'} client={client} controller={controller} active={active} onMeetingChanged={setMeetingMeta} callTarget={meetingStage} onCallChanged={setMeetingCall} onOpenCard={onOpenCard}/>}
+    {/* Phone boards P40–P45: the same meeting page on the phone (owner's decision, 11 November). */}
+    {!embeddedCode && mode === 'live' && client && client.getSnapshot().user?.role === 'owner' && <Meetings key={s.activeId ?? 'new'} client={client} controller={controller} active={active} onMeetingChanged={setMeetingMeta} callTarget={meetingStage} onCallChanged={setMeetingCall} onOpenCard={onOpenCard} newRequest={meetingRequestN}/>}
     <MeetingPanels active={meetingCall} onStage={setMeetingStage}>
     {mode === 'live' && avatarOn && !meetingMeta && <ChatAvatar turns={s.turns} agentId={convAgentId ?? s.agentId ?? ''} agentName={nameOf(convAgentId ?? s.agentId)} onClose={toggleAvatar}/>}
     {outsideNotice && <div className="outside-notice" role="status"><UiIcon name="shield" size={16}/>
