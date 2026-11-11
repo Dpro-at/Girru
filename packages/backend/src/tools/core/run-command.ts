@@ -46,7 +46,7 @@ export function splitCommand(command: string): string[] | null {
 const NUM = /^-\d{1,6}$|^-n\d{1,6}$|^--max-count=\d{1,6}$/;
 const FLAGS: Record<string, string[]> = {
   ls: ['-l', '-a', '-la', '-al', '-lh', '-lah', '-R', '-1', '-A'], cat: [], wc: ['-l', '-w', '-c'], pwd: [], date: [], whoami: [],
-  head: ['#n'], tail: ['#n'], grep: ['-n', '-i', '-r', '-R', '-l', '-c', '-w', '-v', '-E', '-F', '-I', '-rn', '-rin', '-ri'], rg: ['-n', '-i', '-l', '-c', '-w', '-F', '--hidden'],
+  head: ['#n'], tail: ['#n'], grep: ['-n', '-i', '-r', '-l', '-c', '-w', '-v', '-E', '-F', '-I', '-rn', '-rin', '-ri'], rg: ['-n', '-i', '-l', '-c', '-w', '-F', '--hidden'],
 };
 const GIT_FLAGS: Record<string, string[]> = {
   status: ['-s', '--short', '-b', '--branch', '-sb', '--porcelain'],
@@ -82,12 +82,22 @@ function checkFlags(args: string[], allowed: string[]): string[] | null {
   return rest;
 }
 
+/** Security review: settings in the project's own git config that make git start other programs. When any is there,
+ *  git commands wait for the owner's Run (an agent could have written it). */
+const RISKY_GIT_CONFIG = /^(filter\.|merge\..*\.driver|diff\..*\.(textconv|command)|diff\.external|core\.(sshcommand|gitproxy|askpass|editor|pager|fsmonitor|hookspath|alternaterefscommand)|credential\.|remote\..*\.(uploadpack|receivepack|proxy)|uploadpack\.|include\.|includeif\.|protocol\.|url\.|http\..*proxy|gpg\.|sequence\.editor|submodule\..*\.update)/i;
+export function gitConfigIsPlain(lines: string[]): boolean {
+  return lines.every(l => !RISKY_GIT_CONFIG.test(l.split('=')[0].trim()));
+}
+function localGitConfig(cwd: string): string[] | null {
+  try { const r = spawnSync('git', ['config', '--local', '--list'], {cwd, encoding: 'utf8', timeout: 5000, env: {...minimalChildEnv(), GIT_CONFIG_NOSYSTEM: '1'}, windowsHide: true}); return r.status === 0 ? r.stdout.split(/\r?\n/).filter(Boolean) : null; } catch { return null; }
+}
+
 function gitRemotes(cwd: string): string[] {
   try { const r = spawnSync('git', ['remote'], {cwd, encoding: 'utf8', timeout: 5000, env: minimalChildEnv(), windowsHide: true}); return r.status === 0 ? r.stdout.split(/\r?\n/).map(x => x.trim()).filter(Boolean) : []; } catch { return []; }
 }
 
 /** The allowlist: the words to start without a shell, or null when the command needs the owner's Run. */
-export function allowedCommand(command: string, cwd: string, remotes: (cwd: string) => string[] = gitRemotes): string[] | null {
+export function allowedCommand(command: string, cwd: string, remotes: (cwd: string) => string[] = gitRemotes, localConfig: (cwd: string) => string[] | null = localGitConfig): string[] | null {
   const words = splitCommand(command);
   if (!words) return null;
   const [cmd, ...args] = words;
@@ -105,13 +115,15 @@ export function allowedCommand(command: string, cwd: string, remotes: (cwd: stri
   const rest = checkFlags(gitArgs, GIT_FLAGS[sub]);
   if (!rest) return null;
   if (sub === 'stash' ? !(rest.length === 1 && rest[0] === 'list') : sub === 'remote' || sub === 'branch' || sub === 'tag' ? rest.length > 0 : false) return null;
-  if (sub === 'grep') { if (!rest.length || !rest.slice(1).every(p => insideFolder(p, cwd))) return null; }
+  if (sub === 'grep') { if (!rest.length || !rest.slice(1).every(p => GIT_WORD.test(p) && !p.includes('..') && insideFolder(p, cwd))) return null; }
   else if (!rest.every(w => GIT_WORD.test(w) && !w.includes('..') && !w.includes('//') && insideFolder(w, cwd))) return null;
   // Network commands: only the project's own remotes by name, never an address.
   if ((sub === 'fetch' || sub === 'pull' || sub === 'ls-remote') && rest.length && !remotes(cwd).includes(rest[0])) return null;
+  const config = localConfig(cwd);
+  if (!config || !gitConfigIsPlain(config)) return null;
   // Hooks, file monitors, pagers and external diff programs never run from an agent's git command.
-  const noDiffTools = ['diff', 'show', 'log'].includes(sub) ? ['--no-ext-diff', '--no-textconv'] : [];
-  return ['git', '-c', `core.hooksPath=${os.devNull}`, '-c', 'core.fsmonitor=false', '-c', 'protocol.ext.allow=never', '-c', 'core.pager=cat', sub, ...noDiffTools, ...gitArgs];
+  const noDiffTools = ['diff', 'show', 'log'].includes(sub) ? ['--no-ext-diff', '--no-textconv'] : sub === 'blame' || sub === 'grep' ? ['--no-textconv'] : [];
+  return ['git', '-c', `core.hooksPath=${os.devNull}`, '-c', 'core.fsmonitor=false', '-c', 'protocol.ext.allow=never', '-c', 'core.pager=cat', '-c', 'diff.external=', '-c', 'core.gitProxy=', sub, ...noDiffTools, ...gitArgs];
 }
 
 /** True when the command needs the owner's Run (not on the allowlist). */
@@ -152,7 +164,7 @@ export function runShell(command: string | string[], cwd: string, timeout: numbe
     const direct = Array.isArray(command);
     const file = direct ? command[0] : (win ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh');
     const args = direct ? command.slice(1) : (win ? ['/d', '/s', '/c', command] : ['-c', command]);
-    const env = {...minimalChildEnv(), GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1'};
+    const env = {...minimalChildEnv(), GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_ATTR_NOSYSTEM: '1', GIT_LITERAL_PATHSPECS: '1'};
     let child;
     try { child = spawn(file, args, {cwd, env, windowsHide: true, windowsVerbatimArguments: win && !direct, detached: !win, shell: false}); }
     catch (e) { resolve({code: null, out: String((e as Error).message), timedOut: false, ms: 0}); return; }
