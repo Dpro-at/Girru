@@ -69,10 +69,14 @@ export async function settingsRead(ctx: CommandContext, body: Body) {
   if (s === 'account') {
     const sessions = await get(ctx, '/api/auth/sessions');
     const v = await ownerInject(ctx.ownerId, 'GET', '/api/auth/verification');
+    // The session marked current is the one this phone's request runs in: name it after this phone.
+    const phones = await ownerInject(ctx.ownerId, 'GET', '/api/phone').catch(() => null);
+    const mine = phones && phones.status === 200 && record(phones.body) ? list(phones.body.devices).find(d => d.id === ctx.deviceId) : undefined;
+    const phoneName = str(mine?.name, 120);
     return {
       section: s,
       twoStep: v.status === 200 && record(v.body) ? v.body.enabled === true : null,
-      sessions: list(record(sessions) ? sessions.sessions : []).slice(0, 50).map(d => ({ id: str(d.id, 128), label: str(d.label, 120), current: d.current === true, lastSeenAt: typeof d.lastSeenAt === 'number' ? d.lastSeenAt : null })),
+      sessions: list(record(sessions) ? sessions.sessions : []).slice(0, 50).map(d => ({ id: str(d.id, 128), label: d.current === true && phoneName ? phoneName : str(d.label, 120), current: d.current === true, lastSeenAt: typeof d.lastSeenAt === 'number' ? d.lastSeenAt : null })),
     };
   }
   if (s === 'replies') {
@@ -107,7 +111,11 @@ export async function settingsRead(ctx: CommandContext, body: Body) {
   if (s === 'computers') {
     const b = await get(ctx, '/api/computers');
     const devices = record(b) && Array.isArray(b.devices) ? b.devices : record(b) && record(b.configuration) && record(b.configuration.membership) ? b.configuration.membership.devices : [];
-    return { section: s, computers: list(devices).slice(0, 50).map(d => ({ id: str(d.id, 128), name: str(d.name, 120) })) };
+    // The computer this phone is paired with is `self` in the answer; it comes first, marked.
+    const me = record(b) && record(b.self) ? b.self : null;
+    const others = list(devices).filter(d => !me || d.id !== me.id);
+    const rows = [...(me ? [{ id: str(me.id, 128), name: str(me.name, 120), thisPhonesComputer: true }] : []), ...others.slice(0, 50).map(d => ({ id: str(d.id, 128), name: str(d.name, 120), thisPhonesComputer: false }))];
+    return { section: s, computers: rows };
   }
   const b = await get(ctx, '/api/phone');
   return {

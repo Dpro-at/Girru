@@ -100,5 +100,5 @@ test('approval rules without account verification say so instead of failing', as
 test('computers reads the top-level devices list', async () => {
   const view = await run({ type: 'settings.read', section: 'computers' }).catch((e) => ({ code: e.code }));
   if (view.code) assert.ok(['unavailable', 'not_found'].includes(view.code), view.code);
-  else for (const c of view.computers) assert.deepEqual(Object.keys(c).sort(), ['id', 'name']);
+  else for (const c of view.computers) assert.deepEqual(Object.keys(c).sort(), ['id', 'name', 'thisPhonesComputer']);
 });

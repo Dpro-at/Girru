@@ -307,7 +307,7 @@ private struct AccountScreen: View {
                             }
                         }
                         Spacer()
-                        if s["current"] as? Bool == true { Text("This one").font(.footnote).foregroundStyle(Theme.secondaryText) }
+                        if s["current"] as? Bool == true { Text("This phone").font(.footnote).foregroundStyle(Theme.secondaryText) }
                         else if let id = text(s["id"]) {
                             Button("Sign out", role: .destructive) { Task { await data.change("account", ["signOut": id], faceID: "Sign a device out") } }
                                 .buttonStyle(.borderless)
@@ -339,7 +339,9 @@ private struct ReadOnlyScreen: View {
                     Text("Approval rules need two-step sign-in on your account. Turn it on in Girru on your computer.").foregroundStyle(Theme.secondaryText)
                 } else if items.isEmpty { Text("Nothing here yet").foregroundStyle(Theme.secondaryText) }
                 ForEach(items.indices, id: \.self) { i in
-                    LabeledContent(text(items[i]["name"]) ?? "—") { Text(text(items[i]["state"]) ?? "") }
+                    LabeledContent(text(items[i]["name"]) ?? "—") {
+                        Text(items[i]["thisPhonesComputer"] as? Bool == true ? "This phone's computer" : (text(items[i]["state"]) ?? ""))
+                    }
                 }
             } footer: { Text("Change these in Girru on your computer.") }
             if let p = data.problem { Section { Text(p).foregroundStyle(Theme.waiting) } }
