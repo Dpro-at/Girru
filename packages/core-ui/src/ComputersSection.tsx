@@ -117,7 +117,7 @@ export function ComputersSection({client, active, sidebarSlot, onOpenChat, onApp
   if (!view) main = <div className="dk-empty"><p role="status">Reading your computers…</p></div>;
   // Right after Girru starts it reconnects to the account by itself: say so, never offer to add a computer that is already added.
   else if (account === undefined || account?.configured && !!account.mapping && !account.connected && !(account as {resumeRefused?: boolean}).resumeRefused || account?.connected && account.view?.deviceStatus === 'approved' && !usable) main = <div className="dk-empty computers-empty" role="status"><UiIcon name="screen" size={28}/><b>{account?.connected ? 'Getting your computers ready…' : 'Connecting to your account…'}</b><p>This takes a few seconds after Girru starts.</p></div>;
-  else if (!usable || account?.view?.deviceStatus === 'pending') main = <div className="computers-main"><AddThisComputer client={client} status={account}/></div>;
+  else if (!usable || account?.view?.deviceStatus === 'pending') main = <div className="computers-main"><AddThisComputer client={client} status={account} knownName={(self ? nameOf(self.id, self.name) : accountSelf ? nameOf(accountSelf.id, accountSelf.label) : '').trim() || undefined}/></div>;
   else {
     const name = isSelf ? nameOf(self?.id ?? '', self?.name ?? 'This computer') : device ? nameOf(device.id, device.name) : 'Computer';
     // CP12 A: one short line: on or off, and the project it works on.
