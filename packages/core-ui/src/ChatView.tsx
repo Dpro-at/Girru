@@ -359,8 +359,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
   useEffect(() => { panes?.setProject(folderProject); }, [panes, folderProject]);
   const paneButtons: { name: PaneName; icon: UiIconName; label: string }[] = [
     { name: 'details', icon: 'info', label: 'Details' },
-    // Changes and Files read project files, which the phone may not ask for: Details only there.
-    ...(panes && !phone ? [{ name: 'changes' as const, icon: 'diff' as const, label: 'Changes' }, { name: 'files' as const, icon: 'folder' as const, label: 'Files' }] : []),
+    ...(panes ? [{ name: 'changes' as const, icon: 'diff' as const, label: 'Changes' }, { name: 'files' as const, icon: 'folder' as const, label: 'Files' }] : []),
   ];
   const previewFile=s.attachments.find(f=>f.name===attachmentPreview);
   // CHAT-BUILD-01 follow-up (CH5): ⋯ "More for this chat" — the rest of the chat's actions live here.
@@ -393,9 +392,10 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
       'sep',
       { label: 'Delete…', icon: 'trash', danger: true, shortcut: '⌥⌘⌫', run: () => setChatSheet('delete') },
     ];
-    // Phone board P18: only what the phone may change on the computer (rename, pin, move). Export, boards, memory,
-    // folders, windows and delete stay on the computer, whose list refuses them from a phone.
-    return phone ? all.filter(i => i !== 'sep' && PHONE_MENU.test(i.label)) : all;
+    // Phone board P18: no windows, Code, avatar or folder picker on the phone; Add to board moves here from the title bar.
+    if (!phone) return all;
+    const kept = all.filter(i => i === 'sep' || !PHONE_OFF.test(i.label));
+    return canBoard ? [...kept.slice(0, -2), { label: 'Add to board', icon: 'board', run: () => openCardForm() }, ...kept.slice(-2)] : kept;
   };
   useEffect(() => {
     if (!active) return;
@@ -431,7 +431,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
     {/* CH1: the chat's tools sit in the window's title bar (Terminal · Add to board · ⋯ · side panel); no second bar. */}
     {active && titleSlot && createPortal(<span className="chat-title-tools" role="toolbar" aria-label="This chat">
       {!phone && pane === null && s.activeId && s.turns.length > 0 && <TitleFaces names={chatPeople(s.turns, convAgentId, nameOf)} onOpen={() => openPart('team')}/>}
-      {!phone && client && s.activeId && s.threadPhase !== 'loading' && <ExportMenu key={s.activeId} client={client} conversationId={s.activeId} disabled={running} openKey={exportKey} bare/>}
+      {client && s.activeId && s.threadPhase !== 'loading' && <ExportMenu key={s.activeId} client={client} conversationId={s.activeId} disabled={running} openKey={exportKey} bare/>}
       {terminal && owner && <button type="button" className="tool" aria-pressed={termOpen} aria-label="Terminal" title={termOpen ? 'Hide the terminal (⌃`)' : 'Terminal (⌃`)'} onClick={() => { if (phone) { setTermOpen(true); setMaximized(true); } else setTermOpen(v => !v); }}><UiIcon name="terminal" size={15}/></button>}
       {onOpenCode && !phone && <button type="button" className="tool" aria-label="Open in Code" title="Open this project in Code" onClick={()=>void openChatCode()}><UiIcon name="code" size={15}/></button>}
       {canBoard && !phone && <button type="button" className="tool chat-to-board" onClick={() => cardForm ? setCardForm(null) : openCardForm()} aria-pressed={!!cardForm} aria-label="Add to board" title="Add to board (⌘B)">
@@ -564,7 +564,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
   </div></MomentsContext.Provider>;
 }
 
-const PHONE_MENU = /^(Rename|Pin|Unpin|Move to |Move out of the project)/;
+const PHONE_OFF = /^(Open in a new window|Open in Code|Continue in another folder|Show the agent as an avatar|Hide the avatar)/;
 const TERMINAL_APPS = [{ id: 'subscription:claude', label: 'Claude Code' }, { id: 'subscription:codex', label: 'Codex' }, { id: 'subscription:gemini', label: 'Google Gemini' }] as const;
 type TerminalApp = (typeof TERMINAL_APPS)[number];
 
