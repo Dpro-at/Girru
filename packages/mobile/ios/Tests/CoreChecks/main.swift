@@ -577,6 +577,13 @@ func checkBridge() throws {
     fails(BridgeError.invalidField("request"), "number is not a boolean") {
         _ = try BridgeMessageParser.parse(["type": "push.permission", "request": NSNumber(value: 1)])
     }
+    // Tasks › Board: open a chat in the Chat tab (phone board P48); only a real chat id passes.
+    check(try BridgeMessageParser.parse(["type": "chat.open", "id": "chat-12345678"]) == .openChat(id: "chat-12345678"), "chat.open")
+    fails(BridgeError.invalidField("id"), "chat.open with a script") { _ = try BridgeMessageParser.parse(["type": "chat.open", "id": "x';alert(1)//"]) }
+    fails(BridgeError.invalidField("id"), "chat.open short id") { _ = try BridgeMessageParser.parse(["type": "chat.open", "id": "abc"]) }
+    fails(BridgeError.invalidField("id"), "chat.open missing id") { _ = try BridgeMessageParser.parse(["type": "chat.open"]) }
+    fails(BridgeError.unexpectedField("x"), "chat.open extra field") { _ = try BridgeMessageParser.parse(["type": "chat.open", "id": "chat-12345678", "x": 1]) }
+    check(!BridgeGate.allows(.openChat(id: "chat-12345678"), unlocked: false), "chat.open refused while locked")
 
     // Bridge gate: origin and lock state.
     check(BridgeGate.allowsOrigin(scheme: "girru-app", host: "computer", isMainFrame: true), "core-ui origin")

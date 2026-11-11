@@ -124,6 +124,38 @@ const PROPOSAL_DECIDE = new RegExp(`^/api/memory/proposals/${ID}/(?:approve|reje
 const MEETINGS = /^\/api\/meetings(?:$|[/?])/;
 
 /**
+ * Phone boards P46–P51 (owner's approval, 11 November): the task board on the phone.
+ * Cards, their page, checklist, comments, people and sub-tasks; Continue (it runs a model,
+ * the page asks for Face ID first). Board settings, columns, labels, schedules, sorting
+ * and archived lists stay on the computer.
+ */
+const BOARD_KINDS: Record<string, Method[]> = {
+  board: ['GET'],
+  overview: ['GET'],
+  cards: ['POST'],
+  card: ['PUT'],
+  checklist: ['GET', 'POST'],
+  check: ['PUT'],
+  comments: ['GET', 'POST'],
+  task: ['GET'],
+  'tp-page': ['GET'],
+  'tp-activity': ['GET'],
+  'tp-diff': ['GET'],
+  'tp-links': ['GET', 'PUT'],
+  'tp-people': ['PUT'],
+  'tp-release': ['PUT'],
+  'tp-subtasks': ['POST'],
+  'tp-follow': ['PUT'],
+  'tp-schedule': ['GET'],
+};
+const CARD_CHAT = new RegExp(`^/api/boards/${ID}/cards/${ID}/chat$`);
+let boardContract: { boardPath(p: string): { kind: string } | null } | null = null;
+async function boardRoutes() {
+  boardContract ??= await import(`${CORE_UI}src/board-contract.js`);
+  return boardContract!;
+}
+
+/**
  * The phone's own list: only what the chat page needs (the owner's rule: the
  * chat is the desktop page itself; tasks, approvals and team are the phone's own
  * screens on their own commands). Anything not named here is refused before the
@@ -141,6 +173,10 @@ export async function phoneMayCall(method: string, target: string): Promise<bool
   if (method === 'POST' && PROPOSAL_DECIDE.test(target)) return true;
   // The owner's decision: the terminal opens on the phone too, behind the phone's own biometric check
   // (the app asks for it before it opens or joins a terminal). Its stream goes through api.stream.
+  if (method === 'GET' && CARD_CHAT.test(target)) return true;
+  if (method === 'POST' && target === '/api/chat/task-continue') return true;
+  const board = target.startsWith('/api/boards/') ? (await boardRoutes()).boardPath(target)?.kind : undefined;
+  if (board) return (BOARD_KINDS[board] ?? []).includes(method as Method);
   const term = (await terminalRoutes()).terminalPath(target)?.kind;
   if (term) return (TERMINAL_KINDS[term] ?? []).includes(method as Method);
   const { conversationPath } = await conversationContract();

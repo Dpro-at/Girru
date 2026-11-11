@@ -7,7 +7,8 @@ import {ReportsPage} from './ReportsPage';
 import {BrowserWorkspace} from './BrowserWorkspace';
 import {useBrowserApp} from './browser-app';
 import {PersonalityLibrary} from './PersonalityLibrary';
-import {isPhoneShell} from './phone-terminal-keys';
+import {isPhoneShell, openPhoneChat, phonePage} from './phone-terminal-keys';
+import {PhoneBoard} from './PhoneBoard';
 import {WorkspaceModes,editorBounds,useNabuRuntime} from './WorkspaceModes';
 import {StoreTradingView} from './StoreTradingView';
 import {footerToolItem} from './AppsWorkspace';
@@ -150,6 +151,8 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
   // Phone boards P27–P29: inside the Girru phone app only the chat page shows; the chat list is a drawer, closed at the start.
   const phone = isPhoneShell();
   const [rail, setRail] = useState(!phone);
+  // Phone: the Tasks › Board view asks the Chat tab to show a task's chat by setting #chat=<id>.
+  useEffect(() => { if (!phone || !chat) return; const go = () => { const id = chatFromLink(window.location.hash); if (!id) return; try { window.history.replaceState(null, '', window.location.pathname + window.location.search); } catch { /* keep going */ } setPage('chat'); void chat.open(id); }; window.addEventListener('hashchange', go); return () => window.removeEventListener('hashchange', go); }, [phone, chat]);
   useEffect(() => { if (phone) setRail(false); }, [phone, chatState?.activeId]);
   // With the phone keyboard up the page keeps its place: its height follows the visible part, and it never scrolls (no sideways slide).
   useEffect(() => {
@@ -254,6 +257,10 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
     browser:{available:owner&&browser.available,current:page==='browser',run:go('browser'),parent:'store'},terminal:entry('terminal',owner,openTerminal,undefined,'store'),code:entry('code',owner&&(nativeEditor||codeMissing),nativeEditor?openCode:openCodeInStore,undefined,'store'),skills:entry('skills',owner,go('skills'),undefined,'library'),personalities:entry('personalities',owner,go('personalities'),undefined,'library'),specialties:entry('specialties',owner,go('specialties'),undefined,'library')};
 
   const sidebarShown = rail && (page === 'chat' || ownSidebar);
+  // Phone board P46: the Tasks tab's own web view shows only the task board; a chat opens in the Chat tab.
+  if (phone && phonePage() === 'board') return <div className="shell app-shell phone-board-shell" data-theme={theme} data-section="board" data-phone lang="en" dir="ltr">
+    <main id="content" className="page-area">{board && <PhoneBoard controller={board} onOpenChat={id => void openPhoneChat(id)}/>}</main>
+  </div>;
   return <ComputerDevicesProvider key={user.id} client={client} enabled={owner && mode==='live'}><div className="shell app-shell" data-theme={theme} data-rail={sidebarShown ? 'open' : 'closed'} data-section={page} data-phone={phone || undefined} lang="en" dir="ltr">
     <header className="titlebar">
       {browser.problem&&<span role="alert">{browser.problem}</span>}{!phone&&<WorkspaceModes onModeChange={mode=>{if(mode==='code')setPage('code');else if(page==='code')setPage('chat');}}/>}

@@ -193,9 +193,11 @@ fields are refused):
 | `{type: "auth.request", reason}` | `{ok}`, after a fresh Face ID / passcode check |
 | `{type: "qr.scan"}` | `{text}` or `{cancelled: true}` |
 | `{type: "push.permission", request?: true}` | `{status}`: `granted`, `denied` or `not-asked` |
+| `{type: "chat.open", id}` | `{ok}`; the app switches to Chat and that chat opens (from Tasks › Board) |
 
 `window.girruShell = {platform: "ios", bridge: 1}` is set before the page
-loads, so core-ui can choose the phone layout.
+loads, so core-ui can choose the phone layout. The Tasks tab's Board view adds
+`page: "board"`, and core-ui then shows only the task board.
 
 ## Device test checklist
 

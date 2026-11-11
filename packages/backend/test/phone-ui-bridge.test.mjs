@@ -71,6 +71,10 @@ test('the phone list is exactly the chat page (pinned)', async () => {
     // The owner's decision (11 November): the desktop side panel, export, delete, Add to board and Remember.
     ['DELETE', '/api/chat/conversations/abcdefgh1'], ['GET', '/api/chat/conversations/abcdefgh1/export'], ['GET', '/api/chat/conversations/abcdefgh1/export?tools=1'],
     ['GET', '/api/chat/conversations/abcdefgh1/cards'], ['POST', '/api/chat/conversations/abcdefgh1/cards'], ['GET', '/api/boards'], ['GET', '/api/boards/board-1'],
+    ['POST', '/api/boards/board-1/cards'], ['PUT', '/api/boards/board-1/cards/card-1'], ['GET', '/api/boards/board-1/cards/card-1/page'],
+    ['GET', '/api/boards/board-1/cards/card-1/activity'], ['POST', '/api/boards/board-1/cards/card-1/checklist'], ['PUT', '/api/boards/board-1/cards/card-1/checklist/item-1'],
+    ['POST', '/api/boards/board-1/cards/card-1/comments'], ['POST', '/api/boards/board-1/cards/card-1/subtasks'], ['GET', '/api/boards/board-1/cards/card-1/chat'],
+    ['POST', '/api/chat/task-continue'],
     ['GET', '/api/chat/conversations/abcdefgh1/memories'], ['POST', '/api/chat/conversations/abcdefgh1/memories'],
     ['GET', '/api/memory/proposals/prop-1'], ['POST', '/api/memory/proposals/prop-1/approve'], ['POST', '/api/memory/proposals/prop-1/reject'],
     ['GET', '/api/chat/projects'], ['GET', `/api/chat/projects/${PID}/changes`], ['GET', `/api/chat/projects/${PID}/tree`],
@@ -90,6 +94,8 @@ test('the phone list is exactly the chat page (pinned)', async () => {
     ['GET', '/api/credentials'], ['GET', '/api/backups'], ['GET', '/api/audit'], ['GET', '/api/extensions'], ['POST', '/api/mcp/servers'],
     ['DELETE', '/api/meetings/m-1'], ['PATCH', '/api/meetings/m-1'], ['GET', '/api/specialty-templates'],
     ['POST', `/api/chat/projects/${PID}/tree`], ['DELETE', `/api/chat/projects/${PID}`], ['POST', '/api/memory/proposals/prop-1/edit'], ['POST', '/api/boards'],
+    ['PUT', '/api/boards/board-1'], ['POST', '/api/boards/board-1/columns'], ['PUT', '/api/boards/board-1/columns/col-1'], ['POST', '/api/boards/board-1/labels'],
+    ['PUT', '/api/boards/board-1/cards/card-1/schedule'], ['POST', '/api/boards/board-1/cards/card-1/task-sort'], ['POST', '/api/boards/sync-departments'], ['DELETE', '/api/boards/board-1/cards/card-1'],
     ['GET', '/api/runs'], ['GET', '/api/approvals'], ['POST', '/api/approvals/0b8a1c4e-0000-4000-8000-000000000001/approve'], ['GET', '/api/approvals?status=all&limit=100'], ['GET', '/api/health'], ['GET', '/api/memory/proposals'], ['GET', '/health'], ['GET', '/api/../api/phone/devices'],
   ];
   for (const [m, p] of no) assert.equal(await B.phoneMayCall(m, p), false, `${m} ${p}`);

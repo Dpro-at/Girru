@@ -59,3 +59,17 @@ export function withCtrl(data: string): string {
 export function pastedLines(text: string): string[] {
   return text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n');
 }
+
+/** Which page this phone web view shows: 'board' for Tasks › Board (phone board P46), otherwise the chat. */
+export function phonePage(w: unknown = typeof window === 'undefined' ? undefined : window): 'chat' | 'board' {
+  const shell = (w as { girruShell?: { page?: unknown } } | undefined)?.girruShell;
+  return isPhoneShell(w) && shell?.page === 'board' ? 'board' : 'chat';
+}
+
+/** From the board: show a chat in the app's Chat tab (iOS bridge `chat.open`). Returns false where the app cannot. */
+export async function openPhoneChat(id: string, w: unknown = typeof window === 'undefined' ? undefined : window): Promise<boolean> {
+  if (!isPhoneShell(w) || !/^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$/.test(id)) return false;
+  const ios = (w as { webkit?: { messageHandlers?: { girru?: { postMessage?: (m: unknown) => unknown } } } }).webkit?.messageHandlers?.girru;
+  if (typeof ios?.postMessage !== 'function') return false;
+  try { const r = await ios.postMessage({ type: 'chat.open', id }) as { ok?: unknown } | null; return !!r && r.ok === true; } catch { return false; }
+}

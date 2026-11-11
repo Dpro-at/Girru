@@ -11,6 +11,8 @@ struct WebHostView: UIViewRepresentable {
     let computer: PairedComputer?
     let bridge: WebBridge
     var source: CoreUISource = UnavailableCoreUISource()
+    /// Which computer page this view shows: nil = the chat, "board" = Tasks › Board (phone board P46).
+    var page: String? = nil
 
     static var fallbackPage: URL? { Bundle.main.url(forResource: "NotPaired", withExtension: "html") }
 
@@ -30,7 +32,8 @@ struct WebHostView: UIViewRepresentable {
         let content = WKUserContentController()
         content.addScriptMessageHandler(WeakReplyHandler(context.coordinator), contentWorld: .page, name: "girru")
         // Lets core-ui pick the phone layout and know the bridge exists.
-        content.addUserScript(WKUserScript(source: "window.girruShell = Object.freeze({ platform: 'ios', bridge: 1 });",
+        let pagePart = page == "board" ? ", page: 'board'" : ""
+        content.addUserScript(WKUserScript(source: "window.girruShell = Object.freeze({ platform: 'ios', bridge: 1\(pagePart) });",
                                            injectionTime: .atDocumentStart, forMainFrameOnly: true))
         config.userContentController = content
 
@@ -43,7 +46,7 @@ struct WebHostView: UIViewRepresentable {
         web.isInspectable = true
         #endif
         context.coordinator.load(in: web)
-        context.coordinator.watchTerminal(web)
+        if page == nil { context.coordinator.watchTerminal(web); context.coordinator.watchChatLinks(web) }
         return web
     }
 
@@ -74,7 +77,20 @@ struct WebHostView: UIViewRepresentable {
             }
         }
 
-        deinit { if let terminalWatch { NotificationCenter.default.removeObserver(terminalWatch) } }
+        private var chatWatch: NSObjectProtocol?
+
+        /// A chat opened from Tasks › Board: the chat page opens it from `#chat=<id>`.
+        func watchChatLinks(_ web: WKWebView) {
+            chatWatch = NotificationCenter.default.addObserver(forName: .girruOpenChat, object: nil, queue: .main) { [weak web, weak self] note in
+                guard let web, self?.policy.paired == true, let id = note.object as? String, BridgeMessageParser.isChatId(id) else { return }
+                web.evaluateJavaScript("location.hash = 'chat=\(id)'")
+            }
+        }
+
+        deinit {
+            if let terminalWatch { NotificationCenter.default.removeObserver(terminalWatch) }
+            if let chatWatch { NotificationCenter.default.removeObserver(chatWatch) }
+        }
 
         /// Phone board P42: the meeting page may use the microphone and camera, only the paired page in
         /// the main frame and only while the app is unlocked. iOS asks the person once on first use.
@@ -183,6 +199,10 @@ final class WebBridge: ObservableObject {
             return text.map { ["text": $0] } ?? ["cancelled": true]
         case .pushPermission(let ask):
             return ["status": await push.refresh(ask: ask)]
+        case .openChat(let id):
+            // MainTabs switches to Chat; the chat view opens the conversation.
+            NotificationCenter.default.post(name: .girruOpenChat, object: id)
+            return ["ok": true]
         }
     }
 

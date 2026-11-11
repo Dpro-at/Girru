@@ -24,6 +24,7 @@ import type { LinksState } from './task-links';
 import { LatestHandoffCard, LinkedGroup, LinkedList, handoffEvents } from './BoardTaskLinks';
 import type { MemoryTarget } from './BoardTaskLinks';
 import type { TaskLinks } from './task-links-contract.js';
+import { isPhoneShell, phoneConfirm } from './phone-terminal-keys';
 
 const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map(w => w.slice(0, 1).toUpperCase()).join('') || '?';
 const when = (iso: string) => { const d = new Date(iso); if (Number.isNaN(d.getTime())) return iso; const today = new Date().toDateString() === d.toDateString(); return today ? `Today ${d.toTimeString().slice(0, 5)}` : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); };
@@ -319,7 +320,7 @@ function TaskSide({ card, controller, busy, page, onOpenChat, linked, linksMissi
     <ComputerCardPanel client={controller.client} cardId={card.id} boardId={s.boardId ?? ''} cardVersion={card.version} title={card.title} sessionId={card.conversationId} onOpenChat={onOpenChat}/>
     {!card.taskFile?.finished && !toSort && <div className="tp-continue">
       <span className="tp-split"><button type="button" className="primary" disabled={busy || !!card.taskFile?.problem} title={card.taskFile?.problem ? 'Fix the task’s line in the file first' : 'A new chat that goes on with this task and writes back what it did'}
-        onClick={() => void controller.continueTask(agent || undefined, model || undefined).then(id => { if (id) onOpenChat?.(id); })}><UiIcon name="play" size={13}/>Continue</button>
+        onClick={() => void phoneConfirm('Start the task').then(ok => ok ? controller.continueTask(agent || undefined, model || undefined) : null).then(id => { if (id) onOpenChat?.(id); })}><UiIcon name="play" size={13}/>Continue</button>
         <button type="button" className="tp-split-more" aria-label="Who continues and with which app" title="Who continues and with which app" aria-expanded={more} onClick={() => setMore(!more)}><UiIcon name="chevron" size={12}/></button></span>
       {more ? <span className="tp-runs"><select aria-label="Agent who continues" value={agent} disabled={busy} onChange={e => setAgent(e.target.value)}>{!agent && <option value="">Main agent</option>}{s.agents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
         <select aria-label="App it uses" value={model} disabled={busy} onChange={e => { setPicked(true); setModel(e.target.value); }}>{APPS.map(a => <option key={a.model} value={a.model}>{a.name}</option>)}</select></span>
@@ -343,7 +344,7 @@ function TaskSide({ card, controller, busy, page, onOpenChat, linked, linksMissi
         <input autoFocus aria-label="Release" placeholder="e.g. Nabu" maxLength={60} value={release} disabled={busy || !page} onChange={e => setRelease(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') { setOpen(null); void controller.setRelease(release); } }} onBlur={() => { if ((release.trim() || null) !== (page?.release ?? null)) void controller.setRelease(release); }}/></Prop>
       <Prop icon="refresh" label="Repeats" tip="How often it runs by itself: never, every hour, every day, every week" value={sched ? <><span className="tp-repeat-word">{repeatWords(sched)}</span><small>{sched.paused ? 'paused' : `next ${nextWords(sched.nextRun)}`}</small></> : 'Never'} empty={!sched} open={open === 'repeat'} onToggle={() => toggle('repeat')}>
-        <RepeatEditor controller={controller} busy={busy} current={sched} onDone={() => setOpen(null)}/></Prop>
+        {isPhoneShell() ? <small className="fine-print">Set how often it repeats on the computer.</small> : <RepeatEditor controller={controller} busy={busy} current={sched} onDone={() => setOpen(null)}/>}</Prop>
     </Group>
     <Group title="People" side={<small>{people.length || ''}</small>}>
       <ul className="tp-people">{people.map(p => <li key={`${p.kind}:${p.id}`}><Face name={p.name} agent={p.kind === 'agent'} size={22}/><span className="tp-person">{p.name}</span>
@@ -388,6 +389,6 @@ function TaskSide({ card, controller, busy, page, onOpenChat, linked, linksMissi
     </Group>
     <div className="tp-follow"><span className="tp-faces">{people.slice(0, 6).map(p => <Face key={`${p.kind}:${p.id}`} name={p.name} agent={p.kind === 'agent'} size={22}/>)}</span>
       <button type="button" aria-pressed={!!page?.following} disabled={busy || !page} onClick={() => void controller.setFollow(!page?.following)}><UiIcon name="eye" size={13}/>{page?.following ? 'Following' : 'Follow'}</button>
-      <span className="tp-menu"><Tool icon="more" label="More: archive" onClick={() => setMenu(!menu)}/>{menu && <span role="menu"><button role="menuitem" type="button" disabled={busy} onClick={() => { setMenu(false); void controller.archiveCard(); }}><UiIcon name="archive" size={13}/>Archive this task</button></span>}</span></div>
+      <span className="tp-menu"><Tool icon="more" label="More: archive" onClick={() => setMenu(!menu)}/>{menu && <span role="menu"><button role="menuitem" type="button" disabled={busy} onClick={() => { setMenu(false); void phoneConfirm('Archive the task').then(ok => { if (ok) void controller.archiveCard(); }); }}><UiIcon name="archive" size={13}/>Archive this task</button></span>}</span></div>
   </aside>;
 }

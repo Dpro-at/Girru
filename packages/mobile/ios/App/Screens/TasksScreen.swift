@@ -3,14 +3,18 @@ import SwiftUI
 /// Phone board Tasks: what waits for the owner, what runs, what comes next.
 /// The terminal button opens the computer's terminal after Face ID / Touch ID
 /// (the owner's decision).
-struct TasksScreen: View {
-    enum Show: String, CaseIterable { case now = "Now", scheduled = "Scheduled", done = "Done" }
+struct TasksScreen<Board: View>: View {
+    /// Phone board P46: Board (the computer's task board page) comes first.
+    enum Show: String, CaseIterable { case board = "Board", now = "Now", scheduled = "Scheduled", done = "Done" }
 
     let openChat: () -> Void
     let openApprovals: () -> Void
     let openTerminal: () -> Void
+    /// The computer's task board page in its own web view (made once, kept while the tab lives).
+    @ViewBuilder let board: () -> Board
     @EnvironmentObject private var data: PhoneData
-    @State private var show: Show = .now
+    @State private var show: Show = .board
+    @State private var boardMade = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -20,11 +24,14 @@ struct TasksScreen: View {
                         .frame(width: 44, height: 44)
                 }
                 .accessibilityLabel("Terminal")
-                Button(action: openChat) {
-                    Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(.white)
-                        .frame(width: 44, height: 44).background(Theme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                // On Board the page has its own New task button (phone board P46).
+                if show != .board {
+                    Button(action: openChat) {
+                        Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(.white)
+                            .frame(width: 44, height: 44).background(Theme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .accessibilityLabel("New task")
                 }
-                .accessibilityLabel("New task")
             }
             Picker("Show", selection: $show) {
                 ForEach(Show.allCases, id: \.self) { Text($0.rawValue).tag($0) }
@@ -32,21 +39,37 @@ struct TasksScreen: View {
             .pickerStyle(.segmented)
             .padding(.horizontal, 16)
             .padding(.bottom, 12)
-            ProblemLine(text: data.problem)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    switch show {
-                    case .now: now
-                    case .scheduled: scheduled
-                    case .done: done
-                    }
+            ZStack {
+                // Made on first use and kept, so switching back keeps the board where it was.
+                if boardMade {
+                    board()
+                        .opacity(show == .board ? 1 : 0)
+                        .allowsHitTesting(show == .board)
+                        .accessibilityHidden(show != .board)
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 24)
+                if show != .board {
+                    VStack(spacing: 0) {
+                        ProblemLine(text: data.problem)
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 8) {
+                                switch show {
+                                case .board: EmptyView()
+                                case .now: now
+                                case .scheduled: scheduled
+                                case .done: done
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 24)
+                        }
+                        .refreshable { await load() }
+                    }
+                    .background(Theme.background)
+                }
             }
-            .refreshable { await load() }
         }
         .background(Theme.background)
+        .onChange(of: show, initial: true) { _, value in if value == .board { boardMade = true } }
         .task(id: show) {
             while !Task.isCancelled {
                 await load()
@@ -57,6 +80,7 @@ struct TasksScreen: View {
 
     private func load() async {
         switch show {
+        case .board: return
         case .now:
             await data.loadTasks()
             await data.loadSchedules()

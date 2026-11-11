@@ -631,8 +631,14 @@ and, by the owner's decision, the terminal
 **The phone opens or joins a terminal only after its own biometric check**
 (Face ID, Touch ID, fingerprint or the phone's passcode), every time after a
 lock; opening and closing are audited by the terminal itself, and keystrokes
-from a phone get one audit row per terminal a minute. Tasks, approvals and the
-team are the phone's own screens and use their own commands above. **Never**
+from a phone get one audit row per terminal a minute. **The task board** (Tasks ›
+Board, by the owner's decision): boards and cards (read), a new card, a card's
+edits and moves, its page, activity, checklist, comments, people, release,
+sub-tasks and follow, and Continue (`/api/chat/task-continue`, which runs a
+model: the page asks for the phone's biometric check first, as it does before
+archiving). Board settings, columns, labels, schedules, sorting and archived
+lists stay on the computer. Approvals and the team are the phone's own screens
+and use their own commands above; Tasks › Now, Scheduled and Done too. **Never**
 on the phone, whatever the desktop gate allows: phones and the relay
 (`/api/phone/*`), files and folders of projects, project variables, credentials, keys and
 secrets, sign-in, users, roles, two-step sign-in and security settings,

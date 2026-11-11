@@ -27,7 +27,13 @@ struct MainTabs: View {
             .tabItem { Label("Chat", systemImage: "message") }
             .tag(Place.chat)
 
-            TasksScreen(openChat: { place = .chat }, openApprovals: { place = .approvals }, openTerminal: openTerminal)
+            TasksScreen(openChat: { place = .chat }, openApprovals: { place = .approvals }, openTerminal: openTerminal, board: {
+                WebHostView(computer: computer, bridge: bridge, source: SessionCoreUISource(send: { [model] body, stream in
+                    try await model.send(body, stream: stream)
+                }, terminal: data.terminal, confirm: { [model] reason in
+                    await model.lock.confirmSensitive(reason: reason) != nil
+                }), page: "board")
+            })
                 .tabItem { Label("Tasks", systemImage: "chart.bar.doc.horizontal") }
                 .tag(Place.tasks)
 
@@ -44,6 +50,7 @@ struct MainTabs: View {
         .environmentObject(data)
         // Locking forgets every terminal: the next use asks for the check again.
         .onChange(of: lock.state) { _, state in if state != .unlocked { data.terminal.forget() } }
+        .onReceive(NotificationCenter.default.publisher(for: .girruOpenChat)) { _ in place = .chat }
         // The badge stays current while the app is open; nothing is read while it is locked.
         .task {
             while !Task.isCancelled {
@@ -69,6 +76,8 @@ extension MainTabs {
 extension Notification.Name {
     /// Asks the chat page to open its terminal (WebHostView sets #terminal).
     static let girruOpenTerminal = Notification.Name("dev.girru.app.openTerminal")
+    /// Tasks › Board asks for a chat (object: its id): the Chat tab shows it.
+    static let girruOpenChat = Notification.Name("dev.girru.app.openChat")
 }
 
 /// An agent's round picture: its colour and the person mark from the boards.

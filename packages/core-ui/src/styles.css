@@ -4180,3 +4180,55 @@ html:has(.app-shell[data-phone]), body:has(.app-shell[data-phone]) { overflow:hi
 
 /* Phone call: your own tile sits at the top corner so it never covers the speaker's caption at the bottom. */
 .app-shell[data-phone] .meeting-self { inset-block-end:auto; inset-block-start:8px; }
+
+/* Phone boards P46–P50: Tasks › Board inside the phone app (its own web view, no title bar or sidebar). */
+.phone-board-shell { display:flex; flex-direction:column; block-size:var(--phone-vh, 100dvh); background:var(--canvas); }
+.phone-board-shell > .page-area { flex:1; min-block-size:0; display:flex; flex-direction:column; overflow:hidden; }
+.phone-board { flex:1; min-block-size:0; display:flex; flex-direction:column; font-size:16px; }
+.phone-board-task { overflow:auto; }
+.phone-board-task .tp { block-size:auto; min-block-size:100%; }
+.phone-board-bar { flex:none; display:flex; align-items:center; gap:2px; padding:4px 8px 6px 14px; }
+.phone-board-bar .tool { inline-size:40px; block-size:40px; }
+.phone-board-name { flex:1; min-inline-size:0; display:flex; align-items:center; gap:8px; block-size:40px; padding:0; border:0; background:none; color:var(--text); font:inherit; font-size:17px; text-align:start; }
+.phone-board-name b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.phone-board-name .board-swatch { inline-size:12px; block-size:12px; border-radius:4px; flex:none; }
+.phone-board-new { background:var(--accent) !important; color:var(--on-accent) !important; border-radius:12px; }
+.phone-board-search { flex:none; display:flex; align-items:center; gap:8px; margin:0 14px 8px; padding:0 12px; block-size:42px; border:1px solid var(--border); border-radius:12px; background:var(--surface); color:var(--muted); }
+.phone-board-search input { flex:1; min-inline-size:0; border:0; background:none; font-size:16px; color:var(--text); outline:none; }
+.phone-board-columns { flex:none; display:flex; gap:8px; padding:0 14px 10px; overflow-x:auto; scrollbar-width:none; }
+.phone-board-columns::-webkit-scrollbar { display:none; }
+.phone-board-columns button { flex:none; display:inline-flex; align-items:center; gap:6px; block-size:34px; padding:0 12px; border-radius:17px; border:1px solid var(--border); background:var(--surface); color:var(--text); font:inherit; font-size:15px; }
+.phone-board-columns button span { font-size:13px; opacity:.7; }
+.phone-board-columns button[aria-selected="true"], .phone-board-columns button[aria-checked="true"] { background:var(--text); color:var(--canvas); border-color:var(--text); font-weight:600; }
+.phone-board-cards { flex:1; min-block-size:0; overflow-y:auto; margin:0; padding:0 14px 16px; list-style:none; display:flex; flex-direction:column; gap:10px; touch-action:pan-y; }
+.phone-card { inline-size:100%; display:flex; flex-direction:column; gap:7px; padding:12px 14px; border:1px solid var(--border); border-radius:14px; background:var(--surface); color:var(--text); font:inherit; text-align:start; -webkit-touch-callout:none; user-select:none; }
+.phone-card b { font-size:16px; line-height:1.35; }
+.phone-card-dep { align-self:flex-start; font-size:12px; font-weight:600; color:var(--accent); text-transform:capitalize; }
+.phone-card-note { font-size:13px; color:var(--warning, #A15C00); }
+.phone-card-meta { display:flex; flex-wrap:wrap; gap:4px 12px; font-size:13px; color:var(--muted); }
+.phone-card-meta [data-overdue] { color:var(--danger, #C42B2B); font-weight:600; }
+.phone-card[data-priority="urgent"], .phone-card[data-priority="high"] { border-inline-start:3px solid var(--danger, #C42B2B); }
+.phone-board-empty, .phone-board-hint { font-size:14px; color:var(--muted); padding:6px 4px; }
+.phone-board-calendar { flex:1; min-block-size:0; overflow:auto; padding:0 8px 16px; }
+.phone-board-menu { display:flex; flex-direction:column; }
+.phone-board-menu .phone-board-columns { padding:4px 0 12px; }
+.phone-board-label { font-size:13px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.3px; }
+.phone-board-menu > button { display:flex; align-items:center; gap:12px; min-block-size:52px; padding:6px 2px; border:0; border-top:1px solid var(--border); background:none; color:var(--text); font:inherit; font-size:16px; text-align:start; }
+.phone-board-menu > button > span { flex:1; display:flex; flex-direction:column; gap:2px; }
+.phone-board-menu > button small { font-size:13px; color:var(--muted); }
+.phone-board-menu > button.danger { color:var(--danger, #C42B2B); }
+.phone-board-form { display:flex; flex-direction:column; gap:14px; }
+.phone-board-form label { display:flex; flex-direction:column; gap:6px; font-size:14px; color:var(--muted); }
+.phone-board-form :is(input, select, textarea) { font-size:16px; min-block-size:44px; }
+.phone-board-two { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; }
+.phone-board-list { display:flex; flex-direction:column; border:1px solid var(--border); border-radius:14px; overflow:hidden; }
+.phone-board-list button { display:flex; align-items:center; gap:12px; min-block-size:50px; padding:0 14px; border:0; border-bottom:1px solid var(--border); background:var(--surface); color:var(--text); font:inherit; font-size:16px; text-align:start; }
+.phone-board-list button:last-child { border-bottom:0; }
+.phone-board-list button > span:nth-child(2) { flex:1; }
+.phone-board-list .board-swatch { inline-size:14px; block-size:14px; border-radius:4px; }
+.phone-board-name { justify-content:flex-start; }
+.phone-board-name > svg { transform:rotate(90deg); flex:none; }
+.phone-card { align-items:flex-start; justify-content:flex-start; }
+.phone-card b, .phone-card-meta { align-self:stretch; text-align:start; }
+.phone-board > .board-notice { margin:0 14px 8px; font-size:14px; color:var(--muted); }
+.phone-board-menu > button, .phone-board-list button { justify-content:flex-start; }

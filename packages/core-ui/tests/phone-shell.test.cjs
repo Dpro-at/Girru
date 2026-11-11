@@ -54,3 +54,17 @@ test('meetings on the phone ask the app for Face ID and cap a spoken turn', asyn
   assert.equal(PHONE_TURN_MS, 40_000);
   assert.ok(PHONE_AUDIO_CHARS + 1024 <= 256 * 1024, 'a capped turn fits the phone request');
 });
+
+test('Tasks › Board: the board view and a chat opened from it', async () => {
+  const { phonePage, openPhoneChat } = require('../src/phone-terminal-keys.ts');
+  assert.equal(phonePage(undefined), 'chat');
+  assert.equal(phonePage({ girruShell: { platform: 'ios', bridge: 1 } }), 'chat');
+  assert.equal(phonePage({ girruShell: { platform: 'ios', bridge: 1, page: 'board' } }), 'board');
+  assert.equal(phonePage({ girruShell: { platform: 'ios', bridge: 1, page: 'settings' } }), 'chat', 'only known pages');
+  const sent = [];
+  const ios = { girruShell: { platform: 'ios', bridge: 1, page: 'board' }, webkit: { messageHandlers: { girru: { postMessage: async (m) => { sent.push(m); return { ok: true }; } } } } };
+  assert.equal(await openPhoneChat('chat-12345678', ios), true);
+  assert.equal(await openPhoneChat('../bad', ios), false, 'a bad id never reaches the app');
+  assert.equal(await openPhoneChat('chat-12345678', undefined), false);
+  assert.deepEqual(sent, [{ type: 'chat.open', id: 'chat-12345678' }]);
+});

@@ -13,6 +13,9 @@ public enum BridgeRequest: Equatable, Sendable {
     case scanQR
     /// { type: "push.permission", request?: Bool } → { status: String }
     case pushPermission(request: Bool)
+    /// { type: "chat.open", id: String } → { ok: Bool }
+    /// From Tasks › Board (phone board P48): show this chat in the Chat tab.
+    case openChat(id: String)
 }
 
 public enum BridgeError: Error, Equatable {
@@ -24,6 +27,14 @@ public enum BridgeError: Error, Equatable {
 
 public enum BridgeMessageParser {
     public static let maxReasonLength = 120
+
+    /// A chat id as core-ui's `#chat=<id>` link accepts it (chat-actions.tsx › chatFromLink).
+    public static func isChatId(_ id: String) -> Bool {
+        let scalars = Array(id.unicodeScalars)
+        guard (8...64).contains(scalars.count), let first = scalars.first, first.isASCII,
+              CharacterSet.alphanumerics.contains(first) else { return false }
+        return scalars.allSatisfy { $0.isASCII && (CharacterSet.alphanumerics.contains($0) || $0 == "_" || $0 == "-") }
+    }
 
     public static func parse(_ body: Any) throws -> BridgeRequest {
         guard let dict = body as? [String: Any] else { throw BridgeError.notAnObject }
@@ -60,6 +71,10 @@ public enum BridgeMessageParser {
                 throw BridgeError.invalidField("request")
             }
             return .pushPermission(request: number.boolValue)
+        case "chat.open":
+            try onlyKeys(["id"])
+            guard let id = dict["id"] as? String, isChatId(id) else { throw BridgeError.invalidField("id") }
+            return .openChat(id: id)
         default:
             throw BridgeError.unknownType
         }
