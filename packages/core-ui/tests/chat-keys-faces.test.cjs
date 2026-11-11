@@ -60,7 +60,7 @@ test('title-bar faces: at most three, the tooltip names everyone, a click opens 
   assert.match(html, /aria-label="Team: Nora, Sam, Lia, Kai"/);
   assert.equal(renderToStaticMarkup(React.createElement(TitleFaces, { names: [], onOpen: () => {} })), '');
   const view = src('ChatView.tsx');
-  assert.match(view, /\{pane === null && s\.activeId && s\.turns\.length > 0 && <TitleFaces names=\{chatPeople\(s\.turns, convAgentId, nameOf\)\} onOpen=\{\(\) => openPart\('team'\)\}\/>\}/, 'only with the side panel hidden');
+  assert.match(view, /\{!phone && pane === null && s\.activeId && s\.turns\.length > 0 && <TitleFaces names=\{chatPeople\(s\.turns, convAgentId, nameOf\)\} onOpen=\{\(\) => openPart\('team'\)\}\/>\}/, 'only with the side panel hidden, and not on the phone (its details are a drawer)');
   assert.ok(view.indexOf('<TitleFaces') < view.indexOf('<ExportMenu'), 'before the tools');
   assert.match(view, /const openPart = \(id: PanelPart\) => \{ setPane\('details'\); setFocusPart\(f => \(\{ id, n: \(f\?\.n \?\? 0\) \+ 1 \}\)\); \};/);
 });

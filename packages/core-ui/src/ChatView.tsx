@@ -8,6 +8,8 @@ import { MeetingPanels } from './MeetingPanels';
 import { Meetings } from './Meetings';
 import type { MeetingRecord } from './meetings-contract.js';
 import { ChatDetails, DetailsRail } from './ChatDetails';
+import { isPhoneShell } from './phone-terminal-keys';
+import { PhoneMeetingBar } from './Meetings';
 import type { PanelPart } from './ChatDetails';
 import { ApprovalCard, ChangesLine, ChoiceCard, DelegationCard, FileChips, MomentsContext, replyFiles, NoticeCard, SessionsCard, StartedByLine, SteerLine, TaskList, TitleFaces, chatPeople, redoTarget } from './ChatMoments';
 import { ScheduleSheet } from './ScheduleSheet';
@@ -266,7 +268,9 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
 
   const project = controller.activeProject();
   // CHAT-BUILD-01 stage 4 (CH8): the side panel opens on Details; hidden, it is a thin rail. The terminal is its own panel under the chat.
-  const [pane, setPane] = useState<PaneName | null>('details');
+  // Phone boards P27/P5: inside the Girru phone app the details are a drawer from the right, closed at the start.
+  const phone = isPhoneShell();
+  const [pane, setPane] = useState<PaneName | null>(phone ? null : 'details');
   const [codeExpanded,setCodeExpanded]=useState(false);
   useEffect(()=>{if(embeddedCode)setPane(null);},[embeddedCode]);
   const [focusPart, setFocusPart] = useState<{ id: PanelPart; n: number } | null>(null);
@@ -405,7 +409,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
   const moreItems = (): MenuItem[] => {
     if (!s.activeId || !activeConv) return [];
     const id = s.activeId;
-    return [
+    const all: MenuItem[] = [
       { label: 'Rename', icon: 'pencil', run: () => setChatSheet('rename') },
       { label: activeConv.pinned ? 'Unpin' : 'Pin', icon: 'pin', shortcut: '⌘P', run: () => void controller.pin(id, !activeConv.pinned) },
       ...(s.projects.length ? ['sep' as const, ...[{ id: '', name: 'No project' }, ...s.projects].map(p => ({ label: p.id ? `Move to ${p.name}` : 'Move out of the project', icon: 'folder' as const, checked: (activeConv.projectId ?? '') === p.id, run: () => void controller.moveToProject(id, p.id) }))] : []),
@@ -419,6 +423,10 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
       'sep',
       { label: 'Delete…', icon: 'trash', danger: true, shortcut: '⌥⌘⌫', run: () => setChatSheet('delete') },
     ];
+    // Phone board P18: no windows, Code, avatar or folder picker on the phone; Add to board moves here from the title bar.
+    if (!phone) return all;
+    const kept = all.filter(i => i === 'sep' || !PHONE_OFF.test(i.label));
+    return canBoard ? [...kept.slice(0, -2), { label: 'Add to board', icon: 'board', run: () => openCardForm() }, ...kept.slice(-2)] : kept;
   };
   useEffect(() => {
     if (!active) return;
@@ -487,18 +495,19 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
     {embeddedCode&&<div className="code-chat-heading"><strong>{activeConv?.title||'Chat'}</strong><button type="button" className="tool" aria-label={codeExpanded?'Narrow chat':'Expand chat'} aria-expanded={codeExpanded} title={codeExpanded?'Narrow chat':'Expand chat'} onClick={()=>setCodeExpanded(v=>!v)}><UiIcon name="expand" size={14}/></button></div>}
     {/* CH1: the chat's tools sit in the window's title bar (Terminal · Add to board · ⋯ · side panel); no second bar. */}
     {active && titleSlot && createPortal(<span className="chat-title-tools" role="toolbar" aria-label="This chat"><ComputerExecutionBadge sessionId={s.activeId}/>{client&&s.activeId&&owner&&<ComputerTaskRequest client={client} conversationId={s.activeId}/>}
-      {pane === null && s.activeId && s.turns.length > 0 && <TitleFaces names={chatPeople(s.turns, convAgentId, nameOf)} onOpen={() => openPart('team')}/>}
+      {!phone && pane === null && s.activeId && s.turns.length > 0 && <TitleFaces names={chatPeople(s.turns, convAgentId, nameOf)} onOpen={() => openPart('team')}/>}
       {client && s.activeId && s.threadPhase !== 'loading' && <ExportMenu key={s.activeId} client={client} conversationId={s.activeId} disabled={running} openKey={exportKey} bare/>}
-      {terminal && owner && <button type="button" className="tool" aria-pressed={termOpen} aria-label="Terminal" title={termOpen ? 'Hide the terminal (⌃`)' : 'Terminal (⌃`)'} onClick={() => setTermOpen(v => !v)}><UiIcon name="terminal" size={15}/></button>}
-      {onOpenCode && <button type="button" className="tool" aria-label="Open in Code" title="Open this project in Code" onClick={()=>void openChatCode()}><UiIcon name="code" size={15}/></button>}
-      {canBoard && <button type="button" className="tool chat-to-board" onClick={() => cardForm ? setCardForm(null) : openCardForm()} aria-pressed={!!cardForm} aria-label="Add to board" title="Add to board (⌘B)">
+      {terminal && owner && <button type="button" className="tool" aria-pressed={termOpen} aria-label="Terminal" title={termOpen ? 'Hide the terminal (⌃`)' : 'Terminal (⌃`)'} onClick={() => { if (phone) { setTermOpen(true); setMaximized(true); } else setTermOpen(v => !v); }}><UiIcon name="terminal" size={15}/></button>}
+      {onOpenCode && !phone && <button type="button" className="tool" aria-label="Open in Code" title="Open this project in Code" onClick={()=>void openChatCode()}><UiIcon name="code" size={15}/></button>}
+      {canBoard && !phone && <button type="button" className="tool chat-to-board" onClick={() => cardForm ? setCardForm(null) : openCardForm()} aria-pressed={!!cardForm} aria-label="Add to board" title="Add to board (⌘B)">
         <UiIcon name="board" size={15}/></button>}
       {s.activeId && activeConv && <button type="button" className="tool chat-more" aria-label="More for this chat" title="Rename · Pin · Move to project · Export · Remember the whole chat · Delete…" aria-haspopup="menu"
         onClick={e => moreMenu.at(e, moreItems())}><UiIcon name="more" size={15}/></button>}
       <button type="button" className="tool" aria-pressed={pane !== null} aria-label={pane !== null ? 'Hide the side panel' : 'Show the side panel'} title={pane !== null ? 'Hide the side panel (⌥⌘I)' : 'Show the side panel (⌥⌘I)'}
         onClick={() => setPane(p => p === null ? 'details' : null)}><UiIcon name="inspector" size={15}/></button>
     </span>, titleSlot)}
-    {!embeddedCode && mode === 'live' && client && client.getSnapshot().user?.role === 'owner' && <Meetings key={s.activeId ?? 'new'} client={client} controller={controller} active={active} onMeetingChanged={setMeetingMeta} callTarget={meetingStage} onCallChanged={setMeetingCall} onOpenCard={onOpenCard}/>}
+    {phone && mode === 'live' && client && <PhoneMeetingBar client={client} controller={controller} active={active}/>}
+    {!phone && !embeddedCode && mode === 'live' && client && client.getSnapshot().user?.role === 'owner' && <Meetings key={s.activeId ?? 'new'} client={client} controller={controller} active={active} onMeetingChanged={setMeetingMeta} callTarget={meetingStage} onCallChanged={setMeetingCall} onOpenCard={onOpenCard}/>}
     <MeetingPanels active={meetingCall} onStage={setMeetingStage}>
     {mode === 'live' && avatarOn && !meetingMeta && <ChatAvatar turns={s.turns} agentId={convAgentId ?? s.agentId ?? ''} agentName={nameOf(convAgentId ?? s.agentId)} onClose={toggleAvatar}/>}
     {outsideNotice && <div className="outside-notice" role="status"><UiIcon name="shield" size={16}/>
@@ -605,7 +614,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
             : <button type="submit" className="round-button" disabled={(!s.draft.trim() && !s.attachments.length) || s.access === 'denied'} aria-label={busy ? 'Queue the message' : 'Send'}><UiIcon name="arrow-up" size={15}/></button>}
         </div>
       </form>
-      {client && owner && mode === 'live' && !meetingMeta && <ChatVoice client={client} controller={controller} active={active}/>}
+      {client && owner && mode === 'live' && !meetingMeta && !phone && <ChatVoice client={client} controller={controller} active={active}/>}
     </div>
     </MeetingPanels>
     {terminal && termOpen && <section className="chat-terminal" aria-label="Terminal"><TerminalPane tabs={terminal.tabs} prefs={terminal.prefs} projectId={folderProject} maximized={maximized} onToggleMax={() => setMaximized(v => !v)} onClose={() => { setMaximized(false); setTermOpen(false); }}/></section>}
@@ -617,7 +626,8 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
       onOpenPane={(p, file) => { if (p === 'terminal') setTermOpen(true); else { setPane(p); if (p === 'files' && file) void panes?.openFile(file); } }} onStop={() => void controller.stopAll()}
       onSchedule={() => setScheduleOpen(true)} onAddFolder={() => project && setProjectSheet({ id: project.id })} onChooseFolder={!s.activeId || !s.turns.length ? () => setProjectSheet({ id: null }) : undefined} onOpenMemory={onOpenMemoryPage} onContinue={() => setChatSheet('continue')} focusPart={focusPart}
       switcher={<PaneSwitch items={paneButtons} pane={pane} onPane={setPane}/>}/>
-    : pane === null && !embeddedCode && <DetailsRail controller={controller} client={client} onOpen={openPart}/>}
+    : pane === null && !embeddedCode && !phone && <DetailsRail controller={controller} client={client} onOpen={openPart}/>}
+  {phone && pane !== null && <button type="button" className="phone-scrim" aria-label="Close the details" onClick={() => setPane(null)}/>}
   {scheduleOpen && client && s.activeId && <ScheduleSheet client={client} chatId={s.activeId} onClose={() => setScheduleOpen(false)}/>}
   {panes && (pane === 'changes' || pane === 'files') && <aside className="chat-panel chat-pane" aria-label={pane === 'changes' ? 'Changes' : 'Files'} onKeyDown={e => { if (e.key === 'Escape') setPane(null); }}><PaneSwitch items={paneButtons} pane={pane} onPane={setPane}/>
     {pane === 'changes' ? <ChangesPane panes={panes} client={client} folder={project?.folder ?? null}/> : <FilesPane panes={panes} onOpenCode={onOpenCode&&project?.folder?file=>onOpenCode(project.folder!,file):undefined}/>}
@@ -627,6 +637,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
   </div></MomentsContext.Provider></MarkdownActionsContext.Provider>;
 }
 
+const PHONE_OFF = /^(Open in a new window|Open in Code|Continue in another folder|Show the agent as an avatar|Hide the avatar)/;
 const TERMINAL_APPS = [{ id: 'subscription:claude', label: 'Claude Code' }, { id: 'subscription:codex', label: 'Codex' }, { id: 'subscription:gemini', label: 'Google Gemini' }] as const;
 type TerminalApp = (typeof TERMINAL_APPS)[number];
 

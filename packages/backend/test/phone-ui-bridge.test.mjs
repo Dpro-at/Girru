@@ -44,6 +44,7 @@ B.bindPhoneApi(app);
 test.after(async () => { B.bindPhoneApi(null); await app.close(); });
 
 const TID = '0b8a1c4e-0000-4000-8000-000000000001';
+const PID = '0b8a1c4e-0000-4000-8000-0000000000aa';
 let n = 0;
 const ctx = (frames = []) => ({ deviceId: `dev-${++n}`, ownerId: 'ui-owner', now: () => Date.now(), push: (f) => { frames.push(f); return true; } });
 const code = async (p) => { try { await p; return null; } catch (e) { return e.code; } };
@@ -60,6 +61,15 @@ test('the phone list is exactly the chat page (pinned)', async () => {
     ['GET', '/api/chat/conversations/abcdefgh1/schedule'], ['POST', '/api/chat/conversations/abcdefgh1/stop'],
     ['GET', '/api/chat/sidebar'], ['PUT', '/api/chat/sidebar'], ['GET', '/api/chat/panel'], ['PUT', '/api/chat/panel'],
     ['GET', '/api/chat/last'], ['GET', '/api/chat/settings'], ['GET', '/api/approvals?status=pending&limit=100'],
+    // Phone board P29: the open chat's meetings, read only.
+    ['GET', '/api/meetings?conversationId=abcdefgh1'],
+    // The owner's decision (11 November): the desktop side panel, export, delete, Add to board and Remember.
+    ['DELETE', '/api/chat/conversations/abcdefgh1'], ['GET', '/api/chat/conversations/abcdefgh1/export'], ['GET', '/api/chat/conversations/abcdefgh1/export?tools=1'],
+    ['GET', '/api/chat/conversations/abcdefgh1/cards'], ['POST', '/api/chat/conversations/abcdefgh1/cards'], ['GET', '/api/boards'], ['GET', '/api/boards/board-1'],
+    ['GET', '/api/chat/conversations/abcdefgh1/memories'], ['POST', '/api/chat/conversations/abcdefgh1/memories'],
+    ['GET', '/api/memory/proposals/prop-1'], ['POST', '/api/memory/proposals/prop-1/approve'], ['POST', '/api/memory/proposals/prop-1/reject'],
+    ['GET', '/api/chat/projects'], ['GET', `/api/chat/projects/${PID}/changes`], ['GET', `/api/chat/projects/${PID}/tree`],
+    ['GET', `/api/chat/projects/${PID}/file?path=a.txt`], ['GET', `/api/chat/projects/${PID}/diff?path=a`], ['GET', `/api/chat/projects/${PID}/git`],
     // The owner's decision: the terminal too (the app asks for its biometric check first).
     ['GET', '/api/terminal'], ['GET', '/api/terminal/prefs'], ['PUT', '/api/terminal/prefs'], ['POST', '/api/terminal/sessions'],
     ['POST', `/api/terminal/sessions/${TID}/input`], ['POST', `/api/terminal/sessions/${TID}/resize`], ['DELETE', `/api/terminal/sessions/${TID}`],
@@ -68,12 +78,14 @@ test('the phone list is exactly the chat page (pinned)', async () => {
   const no = [
     ['GET', '/api/phone/devices'], ['POST', '/api/phone/pairing'], ['DELETE', '/api/phone/devices'], ['PUT', '/api/phone/settings'],
     ['GET', '/api/terminal/sessions'], ['GET', `/api/terminal/sessions/${TID}/stream`], ['POST', '/api/terminal/sessions/not-an-id/input'], ['DELETE', '/api/terminal/sessions'],
-    ['GET', '/api/chat/projects/abcdefgh1/file?path=a.txt'], ['GET', '/api/chat/projects/abcdefgh1/tree'], ['GET', '/api/chat/projects/abcdefgh1/diff?path=a'],
     ['GET', '/api/chat/projects/abcdefgh1/variables'], ['PUT', '/api/chat/projects/abcdefgh1/variables/API_KEY'], ['GET', '/api/chat/project-folders'],
-    ['DELETE', '/api/chat/conversations/abcdefgh1'], ['POST', '/api/chat/transcribe'], ['POST', '/api/chat/conversations/abcdefgh1/images'],
+    ['POST', '/api/chat/transcribe'], ['POST', '/api/chat/conversations/abcdefgh1/images'],
     ['GET', '/api/chat/runs/run-abcdefgh/events'], ['PUT', '/api/chat/settings'],
     ['POST', '/api/auth/login'], ['POST', '/api/auth/logout'], ['GET', '/api/users'], ['PUT', '/api/agents/main'], ['POST', '/api/agents/name-suggestion'],
     ['GET', '/api/credentials'], ['GET', '/api/backups'], ['GET', '/api/audit'], ['GET', '/api/extensions'], ['POST', '/api/mcp/servers'],
+    ['GET', '/api/meetings'], ['POST', '/api/meetings'], ['GET', '/api/meetings/departments'], ['GET', '/api/meetings?conversationId=abcdefgh1&x=1'],
+    ['POST', '/api/meetings/abcdefgh1/turns'], ['POST', '/api/meetings/abcdefgh1/state'], ['GET', '/api/specialty-templates'],
+    ['POST', `/api/chat/projects/${PID}/tree`], ['DELETE', `/api/chat/projects/${PID}`], ['POST', '/api/memory/proposals/prop-1/edit'], ['POST', '/api/boards'],
     ['GET', '/api/runs'], ['GET', '/api/approvals'], ['POST', '/api/approvals/0b8a1c4e-0000-4000-8000-000000000001/approve'], ['GET', '/api/approvals?status=all&limit=100'], ['GET', '/api/health'], ['GET', '/api/memory/proposals'], ['GET', '/health'], ['GET', '/api/../api/phone/devices'],
   ];
   for (const [m, p] of no) assert.equal(await B.phoneMayCall(m, p), false, `${m} ${p}`);

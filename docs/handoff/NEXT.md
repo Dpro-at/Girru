@@ -5,7 +5,7 @@ branch below and report back as described at the end. Background,
 decisions and the build guide: [`packages/mobile/BUILDING.md`](../../packages/mobile/BUILDING.md).
 What the build Mac found and built so far: [`RESULT.md`](RESULT.md). The
 owner's feature list and the typed-code proposal: [`PHONE_FEATURES.md`](PHONE_FEATURES.md).
-Phone design boards (P1–P23, D1–D8): the owner's "Girru phone app" design
+Phone design boards (P1–P32, D1–D9): the owner's "Girru phone app" design
 canvas (ask the owner for the link).
 
 - **Branch:** `phone/app`. Pull before you start: Part 1 below was added on the main computer.
@@ -15,6 +15,34 @@ canvas (ask the owner for the link).
   desktop, so a chat change is written once, on the computer, and the phone
   shows it without an app update. Only native parts (lock, pairing, push,
   widget, share, permissions) live in the apps.
+
+## Test round 3 (11 November 2026): the chat page fitted to the phone
+
+Branch: `phone/chat-fit` (based on `phone/app` at `804678dd`). Pull it, then
+run the shared checks, the builds and the simulator test as in round 2. The
+chat page now follows boards P27–P29 (canvas row "Phone chat at 402 pt"):
+
+- **One column at 402 pt.** The chat list is a drawer from the left, the
+  details a drawer from the right, both closed when the chat opens; a tap
+  outside closes them. Check with the owner's real chats: the conversation
+  must be readable (round 2: `.chat-column` was 0 px).
+- **Header:** Chats · title · Terminal · ⋯ · Details, no overlap. No
+  Commands button, no desktop voice row, no sidebar footer.
+- **Composer:** one row, Send inside the box at the end.
+- **Keyboard:** with the keyboard up the page must not slide sideways and Send
+  must stay visible (the page height follows the visible part of the screen).
+- **Terminal:** the terminal button (Face ID first) opens it as its own full
+  page; Back returns to the same chat with its messages (round 2: empty chat).
+- **Meetings:** no "The meeting could not be updated" notice. A chat with a
+  meeting shows a small bar above the conversation; tap it for a read-only
+  sheet. No "Reload specialties" notice.
+- **Side panel:** Details, Changes and Files work; ⋯ has Rename, Pin, Move,
+  Export, Add to board, Remember the whole chat and Delete (owner's decision).
+  Choosing a folder on the computer is not on the phone yet.
+- Still open from round 2: the key row (^C, Ctrl, Tab) and the terminal
+  dropping after about two minutes. Report them again if they still fail.
+
+Expected checks: core-ui phone tests 19, backend `test/phone-*.test.mjs` 43.
 
 ## Test round 2 (4 November 2026): what changed since the Task 5 report
 

@@ -105,3 +105,40 @@ export function Meetings({ client, controller, onMeetingChanged, onOpenCard, cal
  {review && meeting && <ReviewMeeting key={meeting.id} client={client} meeting={meeting} onChanged={update} onClose={() => setReview(false)} onOpenCard={onOpenCard}/>}
  </div>;
 }
+
+const stateWords = (m: MeetingRecord) => m.state === 'completed' ? 'Finished' : m.state === 'review' ? 'Reviewing decisions' : m.state === 'paused' ? 'Paused' : 'Live';
+/**
+ * Phone boards P27/P29: the open chat's meeting, read only. A small bar above the
+ * conversation when there is one; tap for who is in and what is decided so far.
+ * Starting, steering and reviewing a meeting stay on the computer (the phone's
+ * list allows only GET /api/meetings?conversationId=…). A failed read shows nothing.
+ */
+export function PhoneMeetingBar({ client, controller, active = true }: { client: SessionClient; controller: ConversationsController; active?: boolean }) {
+ const chat = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
+ const [meeting, setMeeting] = useState<MeetingRecord | null>(null), [open, setOpen] = useState(false);
+ useEffect(() => {
+  setMeeting(null); setOpen(false);
+  const id = chat.activeId; if (!id || !active) return;
+  let live = true;
+  const read = () => { if (document.visibilityState === 'hidden') return; void meetingRequest(client, 'GET', ROOT + '?conversationId=' + encodeURIComponent(id)).then(r => { if (live) setMeeting(r.meetings?.[0] ?? null); }, () => { if (live) setMeeting(null); }); };
+  read(); const timer = setInterval(read, 5000);
+  return () => { live = false; clearInterval(timer); };
+ }, [client, chat.activeId, active, chat.meetingRevision]);
+ if (!meeting) return null;
+ const decided = meeting.decisions.filter(d => d.enabled);
+ return <>
+  <button type="button" className="phone-meeting-bar" data-state={meeting.state} aria-label={`Meeting in this chat: ${meeting.title}, ${stateWords(meeting)}. Open`} onClick={() => setOpen(true)}>
+   <span className="phone-meeting-dot" aria-hidden="true"/>
+   <span className="phone-meeting-text"><b dir="auto">Meeting · {meeting.title}</b> · {stateWords(meeting).toLowerCase()} · {meeting.count.toLocaleString()} present</span>
+   <span className="phone-meeting-open">Open<UiIcon name="arrow-right" size={13}/></span>
+  </button>
+  {open && <Sheet title={meeting.title} onClose={() => setOpen(false)} actions={<button type="button" className="primary" onClick={() => setOpen(false)}>Back to the chat</button>}>
+   <div className="phone-meeting-sheet">
+    <p className="meeting-fine">{stateWords(meeting)} · {meeting.count.toLocaleString()} present{meeting.coordinator ? ` · ${meeting.coordinator.name} leads` : ''}{meeting.speaker ? ` · ${meeting.speaker.name} is speaking` : ''}</p>
+    {meeting.objective && <p dir="auto">{meeting.objective}</p>}
+    {decided.length > 0 && <><b>Decided so far</b><ul>{decided.map(d => <li key={d.id} dir="auto">{d.title}</li>)}</ul></>}
+    <p className="meeting-fine">Start a meeting or review its decisions on your computer.</p>
+   </div>
+  </Sheet>}
+ </>;
+}
