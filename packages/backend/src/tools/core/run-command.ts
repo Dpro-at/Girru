@@ -165,6 +165,8 @@ function readParams(params: unknown): {command: string; timeout: number} | null 
   return {command: p.command, timeout: Math.min(t, MAX_TIMEOUT)};
 }
 
+/** Review fix: only Girru's own styling reaches the Terminal; control characters from a command or its output are dropped. */
+export const plainText = (s: string) => s.replace(/\r\n/g, '\n').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
 const text = (s: string, error?: string): ToolResult => ({content: [{type: 'text', text: s}], ...(error ? {error} : {})});
 
 /** Runs words directly (no shell) or, for a command the owner approved, a whole line through the system shell. */
@@ -206,7 +208,7 @@ async function execute(params: unknown, context: ToolExecutionContext | undefine
   // CP15: every command and its output also show in Girru's Terminal, in the "Agent commands" tab.
   try {
     const owner = context?.accessOwnerId ?? context?.userId;
-    if (owner) { const {terminalManager} = await import('../../api/routes/terminal.js'); terminalManager.appendLog(owner, `\x1b[2m${new Date().toLocaleTimeString()} · ${path.basename(cwd)}${ownerApproved ? ' · run by the owner' : ''}\x1b[0m\n$ ${plan.command}\n${r.out.slice(0, 16_000)}${r.out.endsWith('\n') || !r.out ? '' : '\n'}\x1b[2m${r.timedOut ? 'stopped (time limit)' : `exit ${r.code ?? '?'}`}\x1b[0m\n\n`); }
+    if (owner) { const {terminalManager} = await import('../../api/routes/terminal.js'); const out = plainText(r.out.slice(0, 16_000)); terminalManager.appendLog(owner, `\x1b[2m${new Date().toLocaleTimeString()} · ${plainText(path.basename(cwd))}${ownerApproved ? ' · run by the owner' : ''}\x1b[0m\n$ ${plainText(plan.command)}\n${out}${out.endsWith('\n') || !out ? '' : '\n'}\x1b[2m${r.timedOut ? 'stopped (time limit)' : `exit ${r.code ?? '?'}`}\x1b[0m\n\n`); }
   } catch { /* the Terminal is optional */ }
   const head = r.timedOut ? `Stopped after ${Math.round(plan.timeout / 1000)} s.` : `Exit code ${r.code ?? 'unknown'} · ${r.ms} ms.`;
   return text(`${head}\n${r.out || '(no output)'}`, r.timedOut ? 'timeout' : r.code === 0 ? undefined : 'nonzero_exit');

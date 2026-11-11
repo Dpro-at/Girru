@@ -58,3 +58,8 @@ test('CP15: the Agent commands tab in the Terminal is read-only, owner-scoped an
   t.stop('owner', tabs[0].id);
   assert.equal(t.list('owner').length, 0);
 });
+
+test('review fix: control characters from a command or its output never reach the Terminal', async () => {
+  const {plainText} = await import('../src/tools/core/run-command.ts');
+  assert.equal(plainText('ok\x1b[2J\x9b31m\x07\rdone\r\nnext\tx'), 'ok[2J31mdone\nnext\tx');
+});
