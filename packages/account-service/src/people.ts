@@ -77,7 +77,8 @@ export class People {
     const now=this.now();
     return this.store.all<DeviceRow>("SELECT * FROM devices WHERE account_id=? AND status='approved' ORDER BY registered_at,id LIMIT 64",accountId).map(d=>{
       const seen=this.presence.get(d.id);
-      return {deviceId:d.id,publicKey:d.public_key,label:d.label,osFamily:d.os_family,presence:seen&&seen.at+RETENTION.presenceMs>now?'online':'unknown'};
+      /* viaGoogle: added by a Google sign-in alone, not yet compared by its owner; the other person's app shows it and does not send to it by default. */
+      return {deviceId:d.id,publicKey:d.public_key,label:d.label,osFamily:d.os_family,viaGoogle:d.approved_via==='google',presence:seen&&seen.at+RETENTION.presenceMs>now?'online':'unknown'};
     });
   }
   private purge(){this.store.run("DELETE FROM people_links WHERE status='pending' AND expires_at<=?",this.now());}
@@ -126,7 +127,7 @@ export class People {
         exact(payload,['publicId']);
         const id=typeof payload.publicId==='string'?payload.publicId.toUpperCase():'';
         if(!PUBLIC_ID.test(id))throw Error('account_input_invalid');
-        this.ensureProfile(me);
+        this.limitFind(me);this.ensureProfile(me);
         const target=this.found(id,me);if(!target)throw Error('account_people_unavailable');
         const rows=this.between(me,target.account_id);
         if(rows.some(r=>r.status==='blocked'))throw Error('account_people_unavailable');

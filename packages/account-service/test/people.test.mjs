@@ -83,7 +83,7 @@ test('linked people see only each other\'s approved computers (public keys), not
   const sara1=list.people[0];
   assert.equal(sara1.person.nickname,'sara.dev');
   assert.equal(sara1.computers.length,1,'the pending laptop is not shared');
-  assert.deepEqual(Object.keys(sara1.computers[0]).sort(),['deviceId','label','osFamily','presence','publicKey']);
+  assert.deepEqual(Object.keys(sara1.computers[0]).sort(),['deviceId','label','osFamily','presence','publicKey','viaGoogle']);
   assert.equal(request(sara,'people.list').people[0].person.publicId,mine.publicId);
   assert.equal(request(ali,'people.list').people.length,0);
 });
