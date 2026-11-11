@@ -198,7 +198,7 @@ function message(x) {
   return { id: str(x.id, 64), role: x.role, content: x.content.slice(0, 1000000), parts,
     status: ['complete', 'stopped', 'error'].includes(x.status) ? x.status : 'complete',
     runId: validRunId(x.runId) ? x.runId : null, durationMs: num(x.durationMs) ?? null, createdAt: str(x.createdAt, 40),
-    ...(['run_interrupted', 'model_unavailable', 'local_model_missing', 'lmstudio_not_running', 'subscription_org_blocked'].includes(x.code) ? { code: x.code } : {}),
+    ...(['run_interrupted', 'model_unavailable', 'local_model_missing', 'lmstudio_not_running', 'subscription_org_blocked', 'usage_limit'].includes(x.code) ? { code: x.code } : {}),
     ...(agentId(x.agentId) ? { agentId: x.agentId } : {}),
     ...(record(x.changes) && num(x.changes.files) ? { changes: { files: num(x.changes.files), undone: x.changes.undone === true, ...(Number.isSafeInteger(x.changes.added) && x.changes.added >= 0 && Number.isSafeInteger(x.changes.removed) && x.changes.removed >= 0 ? { added: x.changes.added, removed: x.changes.removed } : {}) } } : record(x.changes) && x.changes.unavailable === true ? { changes: { files: 0, undone: false, unavailable: true } } : {}) };
 }
@@ -342,7 +342,7 @@ export function projectRunEvent(x) {
   return e && num(x.at) !== undefined ? { ...e, at: num(x.at) } : e;
 }
 /** Typed reasons a run may end with (CHAT-PRO-02 G: LM Studio not running). */
-const END_CODES = ['model_unavailable', 'local_model_missing', 'lmstudio_not_running', 'subscription_org_blocked'];
+const END_CODES = ['model_unavailable', 'local_model_missing', 'lmstudio_not_running', 'subscription_org_blocked', 'usage_limit'];
 /** Notices a running turn may show (CHAT-BUILD-01); never part of the answer. */
 const NOTICE_CODES = ['rate_limited', 'claude_key_missing', 'local_model_slow', 'injection', 'summarized', 'plan_limit', 'images_not_seen', 'not_signed_in'];
 function projectEvent(x) {
