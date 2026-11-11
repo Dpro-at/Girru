@@ -4149,7 +4149,8 @@ html:has(.app-shell[data-phone]), body:has(.app-shell[data-phone]) { overflow:hi
 /* Phone board P27: the composer keeps one row under the message — + · mode · who answers · model, Send at the end.
    The pills show their icon only (their names stay in aria-label and in the menu they open). */
 .app-shell[data-phone] .chat-dock, .app-shell[data-phone] .chat-layout[data-empty] .chat-dock { padding-inline:8px !important; }
-.app-shell[data-phone] .chat-composer { margin-inline:0; max-inline-size:none; inline-size:auto; overflow:hidden; }
+.app-shell[data-phone] .chat-composer { margin-inline:0; max-inline-size:none !important; inline-size:100% !important; box-sizing:border-box; align-self:stretch; justify-self:stretch; overflow:hidden; }
+.app-shell[data-phone] .chat-dock > :not(.chat-composer) { max-inline-size:100%; min-inline-size:0; overflow-wrap:anywhere; }
 .app-shell[data-phone] .chat-composer-row > * { flex-shrink:0; }
 .app-shell[data-phone] .chat-composer-row > .composer-chip { flex-shrink:1; min-inline-size:0; max-inline-size:150px; overflow:hidden; }
 .app-shell[data-phone] .chat-composer-row > .composer-chip button { max-inline-size:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
