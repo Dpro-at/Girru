@@ -134,7 +134,7 @@ export function allowedCommand(command: string, cwd: string, remotes: (cwd: stri
   if (!config || !gitConfigIsPlain(config)) return null;
   // Hooks, file monitors, pagers and external diff programs never run from an agent's git command.
   const noDiffTools = ['diff', 'show', 'log'].includes(sub) ? ['--no-ext-diff', '--no-textconv'] : sub === 'blame' || sub === 'grep' ? ['--no-textconv'] : [];
-  return ['git', '-c', `core.hooksPath=${os.devNull}`, '-c', 'core.fsmonitor=false', '-c', 'protocol.ext.allow=never', '-c', 'core.pager=cat', '-c', 'diff.external=', '-c', 'core.gitProxy=', '-c', 'pull.rebase=false', '-c', 'submodule.recurse=false', '-c', 'fetch.recurseSubmodules=false', '-c', 'diff.ignoreSubmodules=all', '-c', 'status.submoduleSummary=false', sub, ...noDiffTools, ...(sub === 'pull' ? ['--no-rebase', '--no-recurse-submodules'] : sub === 'fetch' ? ['--no-recurse-submodules'] : sub === 'status' || sub === 'diff' ? ['--ignore-submodules=all'] : []), ...gitArgs];
+  return ['git', '-c', `core.hooksPath=${os.devNull}`, '-c', 'core.fsmonitor=false', '-c', 'protocol.ext.allow=never', '-c', 'core.pager=cat', '-c', 'diff.external=', '-c', 'core.gitProxy=', '-c', 'pull.rebase=false', '-c', 'submodule.recurse=false', '-c', 'fetch.recurseSubmodules=false', '-c', 'diff.ignoreSubmodules=all', '-c', 'status.submoduleSummary=false', sub, ...noDiffTools, ...(sub === 'pull' ? ['--no-rebase', '--no-recurse-submodules', '--no-progress'] : sub === 'fetch' ? ['--no-recurse-submodules', '--no-progress'] : sub === 'status' || sub === 'diff' ? ['--ignore-submodules=all'] : []), ...gitArgs];
 }
 
 /** Security review: allowed commands that only read (no fetch, pull or ls-remote): these run even in "Ask me". */
