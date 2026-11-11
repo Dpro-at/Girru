@@ -577,3 +577,24 @@ real setting was changed.
 | 3. Account | **Fixed:** the session shows "Last used 1 min, 33 sec ago" (`set2-02`). Its name is still "Unknown device" |
 | 4. Chat page retry after a failed load | **Not tested:** making the load fail needs the relay cut for a moment, which here would mean changing the Mac's network settings. The page loaded normally on the first launch of this build |
 | 5. This phone's title | **Fixed:** one line, "Mohameds-MacBook-Pro" (`set2-01`) |
+
+### Retest: phone settings (98ccdf02)
+
+`origin/phone/settings` at `98ccdf02` "Phone Settings: the paired computer in
+Computers, this phone's name in Account" (contains `main` `bb5cd88d`, with
+#197 and #198). The MacBook's Girru runs from it directly (backend phone tests
+50/50, run by the MacBook session). iPhone build from `98ccdf02`: **BUILD
+SUCCEEDED** with no change; CoreChecks **375 passed, 0 failed**. Screenshots
+`result/set3-*.png`. No real setting was changed.
+
+| Check | Result |
+|---|---|
+| Computers | **Fixed:** "Mohamed's MacBook Pro · This phone's computer" first, then "Mohamed's Mac Mini" and "Alarade" (`set3-01`) |
+| Account | **Not fixed:** the session is still "Unknown device · Last used 1 min, 36 sec ago", with no "This phone" tag (`set3-02`). The change renames only a session marked `current`, and this one is not. It is most likely Girru's own sign-in on the MacBook (the phone does not sign in; it uses its pairing), so naming it after the phone would be wrong too. Suggest: name the desktop session after its computer (for example "Girru on Mohamed's MacBook Pro"), and show the phone, if at all, under Phones |
+| Approval rules | still the two-step sign-in message (`set3-03`) |
+| This phone | title on one line (`set3-04`) |
+| Permissions | a change asks Face ID ("Change what Main Agent may do"); cancelled, "Send messages" stays Ask (`set3-05`) |
+| Chat page | loaded by itself on first launch |
+
+Small: the same computer is "Mohameds-MacBook-Pro" (its host name) under This
+phone and "Mohamed's MacBook Pro" under Computers.
