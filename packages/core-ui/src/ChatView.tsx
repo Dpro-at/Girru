@@ -5,7 +5,7 @@ import { useOutsideProjects } from './outside-projects';
 import {CodeChatResize} from './CodeChatResize';
 import { DepartmentBadge } from './DepartmentBadge';
 import { MeetingPanels } from './MeetingPanels';
-import { Meetings } from './Meetings';
+import { Meetings, readableMeetingSummary } from './Meetings';
 import type { MeetingRecord } from './meetings-contract.js';
 import { ChatDetails, DetailsRail } from './ChatDetails';
 import { isPhoneShell } from './phone-terminal-keys';
@@ -1005,7 +1005,7 @@ function useQuiet(turn: Turn, live: boolean): [boolean, number] {
 }
 
 function PartView({ part, live = false, last = false }: { part: Part; live?: boolean; last?: boolean }) {
-  if (part.kind === 'text') return part.text ? <div className="chat-prose turn-text md-host"><Markdown text={part.text}/></div> : null;
+  if (part.kind === 'text') return part.text ? <div className="chat-prose turn-text md-host"><Markdown text={readableMeetingSummary(part.text) ?? part.text}/></div> : null;
   if (part.kind === 'reasoning') return part.text.trim() ? <Thinking part={part} live={live && last && part.endedAt === undefined}/> : null;
   if (part.kind === 'steer') return <SteerLine part={part}/>;
   if (part.kind === 'notice') return <NoticeCard part={part}/>;

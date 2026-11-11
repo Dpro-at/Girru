@@ -24,3 +24,10 @@ test('completed initial rounds hide empty controls; chosen participants remain r
  assert.match(render({automatic:true,busy:true}),/Stop automatic turns/);
  assert.doesNotMatch(render({automatic:true,busy:true}),/disabled/);
 });
+test('the chat shows a meeting summary reply as text, not JSON',()=>{const {readableMeetingSummary}=require('../src/Meetings.tsx');
+ const out=readableMeetingSummary('{"summary":"Keep Basic, raise Pro.","decisions":[{"title":"Raise Pro by 10%","assigneeName":"Omar"},{"title":"  "}]}');
+ assert.equal(out,'Keep Basic, raise Pro.\n\n**Proposed decisions** (review them before anything is created)\n- Raise Pro by 10% (Omar)');
+ assert.match(readableMeetingSummary('```json\n{"summary":"Nothing decided.","decisions":[]}\n```'),/^Nothing decided\.\n\n_No decisions were proposed\._$/);
+ assert.equal(readableMeetingSummary('Plain words about the {"summary"} key'),null);
+ assert.equal(readableMeetingSummary('{"summary":1,"decisions":[]}'),null);
+ assert.equal(readableMeetingSummary('{"summary":"x"'),null);});

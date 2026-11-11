@@ -15,6 +15,18 @@ export async function meetingRequest(client: SessionClient, method: 'GET' | 'POS
  if (response.status >= 400) { const b = response.body as { error?: string; code?: string }; throw Error(b?.error ?? ({ meeting_conflict: 'The meeting changed. Reload and try again.', forbidden: 'Meetings are available to the owner.', not_found: 'Meeting not found.' }[b?.code ?? ''] ?? 'The meeting could not be updated. Try again.')); }
  return response.body;
 }
+/**
+ * A meeting summary reply is JSON for the review sheet ({summary, decisions}); the chat shows it as
+ * readable text: the summary and the proposed decisions. Anything else is left as it is.
+ */
+export function readableMeetingSummary(text: string): string | null {
+ const raw = text.trim(); if (!/^(?:```(?:json)?\s*)?\{/i.test(raw) || !raw.includes('"summary"')) return null;
+ let v: unknown; try { v = JSON.parse(raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')); } catch { return null; }
+ const o = v as { summary?: unknown; decisions?: unknown };
+ if (!o || typeof o !== 'object' || typeof o.summary !== 'string' || !Array.isArray(o.decisions)) return null;
+ const items = o.decisions.flatMap(d => { const x = d as { title?: unknown; assigneeName?: unknown }; return x && typeof x.title === 'string' && x.title.trim() ? [`- ${x.title.trim()}${typeof x.assigneeName === 'string' && x.assigneeName.trim() ? ` (${x.assigneeName.trim()})` : ''}`] : []; });
+ return `${o.summary.trim()}\n\n${items.length ? `**Proposed decisions** (review them before anything is created)\n${items.join('\n')}` : '_No decisions were proposed._'}`;
+}
 type Department = { name: string; total: number; heads: number };
 // iOS keeps its keyboard bar over the tab bar when a focused field is removed with its sheet; let go of the field first.
 const dropFocus = () => { const el = document.activeElement; if (el instanceof HTMLElement && el !== document.body) el.blur(); };
