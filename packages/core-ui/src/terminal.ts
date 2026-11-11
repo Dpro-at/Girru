@@ -3,7 +3,7 @@ import type { TerminalFrame, TerminalPrefs } from './terminal-contract.js';
 import { DEFAULT_TERMINAL_PREFS, terminalPrefOk, terminalPrefs } from './terminal-contract.js';
 
 export type TerminalPhase = 'idle' | 'starting' | 'open' | 'stopping' | 'exited' | 'off' | 'error';
-export type TerminalState = Readonly<{ phase: TerminalPhase; id: string | null; cwd: string; shell: string; message?: string; projectId: string | null; command?: string; exitCode?: number; signal?: number; droppedOutput?: boolean; /** CP15: the read-only Agent commands tab. */ readOnly?: boolean }>;
+export type TerminalState = Readonly<{ phase: TerminalPhase; id: string | null; cwd: string; shell: string; message?: string; code?: string; projectId: string | null; command?: string; exitCode?: number; signal?: number; droppedOutput?: boolean; /** CP15: the read-only Agent commands tab. */ readOnly?: boolean }>;
 
 const record = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
 /** Output kept for redrawing the screen when the pane opens again. */
@@ -53,13 +53,13 @@ export class TerminalController {
   async open(projectId: string | null, size: { cols: number; rows: number }, command?: string) {
     if (this.#state.phase === 'starting' || this.#state.phase === 'open') return;
     this.#replay = ''; this.#pending = ''; this.#outputSeq = 0;
-    this.publish({ phase: 'starting', message: undefined, projectId, id: null, command, exitCode: undefined, signal: undefined, droppedOutput: false });
+    this.publish({ phase: 'starting', message: undefined, code: undefined, projectId, id: null, command, exitCode: undefined, signal: undefined, droppedOutput: false });
     try {
       const r = await this.client.request({ method: 'POST', path: '/api/terminal/sessions', body: { cols: size.cols, rows: size.rows, ...(projectId ? { projectId } : {}), ...(command !== undefined ? { command } : {}) } } as never);
       if (r.status !== 201 || !record(r.body) || typeof r.body.id !== 'string') {
         const code = record(r.body) ? r.body.code : undefined;
         this.publish(code === 'disabled' ? { phase: 'off', message: 'The terminal is turned off on this server.' }
-          : { phase: 'error', message: code === 'limit' ? 'Too many terminals are open. Close one first.' : code === 'not_loopback' ? 'The terminal works only on this computer.' : code === 'not_found' ? 'The project folder was not found.' : 'The terminal could not start.' });
+          : { phase: 'error', code: typeof code === 'string' ? code : undefined, message: code === 'limit' ? 'Too many terminals are open. Close one first.' : code === 'not_loopback' ? 'The terminal works only on this computer.' : code === 'not_found' ? 'The project folder was not found.' : 'The terminal could not start.' });
         return;
       }
       this.publish({ phase: 'open', id: r.body.id, cwd: String(r.body.cwd ?? ''), shell: String(r.body.shell ?? '') });

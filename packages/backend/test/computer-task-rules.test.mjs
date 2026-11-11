@@ -123,3 +123,25 @@ test('CP13: Same as never makes this computer accept more tasks than before', as
   const stricter = stricterTaskRules({rule: 'auto', atOnce: 4, tool: 'subscription:claude'}, {rule: 'refuse', atOnce: 1});
   assert.equal(stricter.rule, 'refuse'); assert.equal(stricter.atOnce, 1); assert.equal(stricter.tool, 'subscription:claude');
 });
+test('code scanning: request-chosen ids are map keys; the saved value is a plain object with own entries only', async () => {
+  const {taskRules, applyTaskRulesChange} = await import('../src/devices/task-rules.ts');
+  const {computerLook, applyComputerLookChange} = await import('../src/api/routes/computer-look.ts');
+  const before = Object.getOwnPropertyNames(Object.prototype).sort().join(',');
+  // A method-like id is an ordinary saved key, never an inherited one.
+  const rules = applyTaskRulesChange(taskRules({projects: {p1: 'ask'}}), {project: {id: 'toString', rule: 'refuse'}});
+  assert.deepEqual(Object.keys(rules.projects), ['p1', 'toString']);
+  assert.equal(Object.hasOwn(rules.projects, 'toString'), true);
+  assert.equal(Object.getPrototypeOf(rules.projects), Object.prototype);
+  assert.equal(applyTaskRulesChange(rules, {project: {id: 'toString', rule: null}}).projects.toString, Object.prototype.toString, 'removing leaves only the inherited method');
+  for (const id of ['__proto__', 'constructor', 'prototype']) assert.throws(() => applyTaskRulesChange(rules, {project: {id, rule: 'auto'}}), /computer_task_rules_invalid/);
+
+  const look = applyComputerLookChange(computerLook(undefined), {deviceId: 'hasOwnProperty', icon: 'macbook', name: ' Studio '});
+  assert.deepEqual(look, {icons: {hasOwnProperty: 'macbook'}, names: {hasOwnProperty: 'Studio'}, notices: true});
+  assert.deepEqual(applyComputerLookChange(look, {deviceId: 'hasOwnProperty', name: ''}).names, {});
+  for (const deviceId of ['__proto__', 'constructor', 'prototype', 'bad id', undefined]) assert.equal(applyComputerLookChange(look, {deviceId, icon: 'imac'}), null);
+  // A full list refuses a new computer instead of dropping it, even when the id names an inherited method.
+  const full = computerLook({icons: Object.fromEntries(Array.from({length: 64}, (_, i) => ['d' + i, 'imac']))});
+  assert.equal(applyComputerLookChange(full, {deviceId: 'toString', icon: 'imac'}), null);
+  assert.equal(applyComputerLookChange(full, {deviceId: 'd3', icon: 'linux'}).icons.d3, 'linux');
+  assert.equal(Object.getOwnPropertyNames(Object.prototype).sort().join(','), before);
+});

@@ -71,7 +71,15 @@ export function bindPhoneApi(app: FastifyInstance | null): void { api = app; }
 /** Conversation request kinds (conversation-contract.js › conversationPath) and the methods the phone may use. */
 const CHAT_KINDS: Record<string, Method[]> = {
   list: ['GET', 'POST'],
-  one: ['GET', 'PATCH'],
+  // The owner's decision (11 November): the phone's side panel is the desktop one, with Changes and Files, and deleting a chat.
+  one: ['GET', 'PATCH', 'DELETE'],
+  projects: ['GET'],
+  'project-changes': ['GET'],
+  'project-git': ['GET'],
+  'project-pr': ['GET'],
+  'project-diff': ['GET'],
+  'project-tree': ['GET'],
+  'project-file': ['GET'],
   messages: ['GET'],
   runs: ['POST'],
   stop: ['POST'],
@@ -98,6 +106,16 @@ const TERMINAL_KINDS: Record<string, Method[]> = {
 const APPROVALS_READ = /^\/api\/approvals\?status=pending&limit=(?:[1-9]\d?|100)$/;
 const STEER = /^\/api\/chat\/runs\/[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}\/steer$/;
 const AGENT = /^\/api\/agents\/[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+/** The open chat's meetings, read only (phone board P29): starting, steering and reviewing stay on the computer. */
+/** Owner's decision (11 November): export, Add to board and Remember work from the phone too. The desktop gate still checks each body. */
+const ID = '[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}';
+const CHAT_EXPORT = new RegExp(`^/api/chat/conversations/${ID}/export(?:\\?tools=1)?$`);
+const CHAT_CARDS = new RegExp(`^/api/chat/conversations/${ID}/cards$`);
+const BOARDS_READ = new RegExp(`^/api/boards(?:/${ID})?$`);
+const CHAT_MEMORIES = new RegExp(`^/api/chat/conversations/${ID}/memories$`);
+const PROPOSAL = new RegExp(`^/api/memory/proposals/${ID}$`);
+const PROPOSAL_DECIDE = new RegExp(`^/api/memory/proposals/${ID}/(?:approve|reject)$`);
+const MEETINGS_READ = /^\/api\/meetings\?conversationId=[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 
 /**
  * The phone's own list: only what the chat page needs (the owner's rule: the
@@ -111,6 +129,10 @@ export async function phoneMayCall(method: string, target: string): Promise<bool
   if (method === 'POST' && STEER.test(target)) return true;
   // The page's approvals badge reads the pending count; deciding stays on the phone's own Approvals screen.
   if (method === 'GET' && APPROVALS_READ.test(target)) return true;
+  if (method === 'GET' && MEETINGS_READ.test(target)) return true;
+  if (method === 'GET' && (CHAT_EXPORT.test(target) || BOARDS_READ.test(target) || PROPOSAL.test(target))) return true;
+  if ((method === 'GET' || method === 'POST') && (CHAT_CARDS.test(target) || CHAT_MEMORIES.test(target))) return true;
+  if (method === 'POST' && PROPOSAL_DECIDE.test(target)) return true;
   // The owner's decision: the terminal opens on the phone too, behind the phone's own biometric check
   // (the app asks for it before it opens or joins a terminal). Its stream goes through api.stream.
   const term = (await terminalRoutes()).terminalPath(target)?.kind;

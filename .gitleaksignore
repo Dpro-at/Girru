@@ -117,3 +117,11 @@ fc96fa78b1cf028380f1f6c68157f8fb56521254:packages/mobile/ios/Sources/GirruCore/P
 
 # Synthetic secret-redaction test input; the test verifies masking, not external authentication.
 608f96f08f067c5b80508398386c7a66f0307d01:packages/backend/test/agent-file-library.test.mjs:generic-api-key:95
+# Synthetic secret-detection fixture: "sk-live-" prefix, sequential digits and alphabet, written to a temp project to prove it stays behind.
+82a4d6be3903b656cca910e132bbe830b0c412af:packages/backend/test/device-coop.test.mjs:generic-api-key:66
+# Synthetic secret-detection fixture: "sk-live-" prefix, sequential digits and alphabet, written to a temp project to prove it stays behind.
+a536b729febec9294239b27b5cb2590eea637fb5:packages/backend/test/device-coop.test.mjs:generic-api-key:66
+# Source code, not a credential: the variable assignment receiptKey=verificationKey matched the generic detector.
+08fb58e3fd82d33e99861b070784b185378f5eee:packages/backend/src/memory/encryption/rotation-copy.ts:generic-api-key:17
+# Source code, not a credential: the variable assignment receiptKey=verificationKey matched the generic detector.
+2f632ed4ae052845e7e03393d0556fad2e255f16:packages/backend/src/memory/encryption/rotation-copy.ts:generic-api-key:17

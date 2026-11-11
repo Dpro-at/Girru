@@ -19,7 +19,7 @@ import { getDatabase } from '../../db/index.js';
 import { dbDriver } from '../../db/pg/config.js';
 import { all, num, one, sql, type Step } from '../../repositories/sql-steps.js';
 import { existsSync, readdirSync, statSync, unlinkSync, readFileSync, mkdirSync } from 'fs';
-import { resolve, join } from 'path';
+import { resolve, join, sep } from 'path';
 import { dataPath, mainDatabasePath } from '../../config/data-root.js';
 import { getUserIdFromRequest } from '../../auth/jwt.js';
 import { validateTableName } from '../../db/sql-utils.js';
@@ -28,6 +28,15 @@ import { handleError } from '../error-handler.js';
 /** A backup file name: one plain segment ending in `.db` (no paths, no `..`). */
 export function isSafeBackupName(filename: unknown): filename is string {
   return typeof filename === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,200}\.db$/.test(filename) && !filename.includes('..');
+}
+
+/** The full path of a named backup, or null: a safe name whose resolved path stays directly inside the backup folder. */
+export function backupFilePath(backupDir: string, filename: unknown): string | null {
+  if (!isSafeBackupName(filename)) return null;
+  const root = resolve(backupDir), candidate = resolve(root, filename);
+  // Checked here, next to the use, so the containment does not depend on the name rule alone.
+  if (!candidate.startsWith(root + sep) || candidate.slice(root.length + 1).includes(sep)) return null;
+  return candidate;
 }
 
 /** Routes that only exist for the SQLite file (refused with 501 on PostgreSQL). */
@@ -281,12 +290,12 @@ export async function databaseRoutes(fastify: FastifyInstance) {
       getUserIdFromRequest(request);
 
       const { filename } = request.params;
-      if (!isSafeBackupName(filename)) {
+      const backupPath = backupFilePath(backupDir, filename);
+      if (!backupPath) {
         return reply.status(404).send({
           error: 'Backup not found',
         });
       }
-      const backupPath = join(backupDir, filename);
 
       if (!existsSync(backupPath)) {
         return reply.status(404).send({
@@ -325,12 +334,12 @@ export async function databaseRoutes(fastify: FastifyInstance) {
       getUserIdFromRequest(request);
 
       const { filename } = request.params;
-      if (!isSafeBackupName(filename)) {
+      const backupPath = backupFilePath(backupDir, filename);
+      if (!backupPath) {
         return reply.status(404).send({
           error: 'Backup not found',
         });
       }
-      const backupPath = join(backupDir, filename);
 
       if (!existsSync(backupPath)) {
         return reply.status(404).send({
@@ -339,7 +348,7 @@ export async function databaseRoutes(fastify: FastifyInstance) {
       }
 
       unlinkSync(backupPath);
-      console.log(`[Database API] ✅ Backup deleted: ${filename}`);
+      console.log(`[Database API] ✅ Backup deleted: ${filename.replace(/[\r\n]/g, '')}`);
 
       return {
         success: true,
@@ -408,7 +417,8 @@ export async function databaseRoutes(fastify: FastifyInstance) {
       getUserIdFromRequest(request);
 
       const { filename } = request.body;
-      if (!isSafeBackupName(filename) || !existsSync(join(backupDir, filename))) {
+      const backupPath = backupFilePath(backupDir, filename);
+      if (!backupPath || !existsSync(backupPath)) {
         return reply.status(404).send({
           error: 'Backup not found',
         });

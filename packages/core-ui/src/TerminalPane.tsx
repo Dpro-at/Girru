@@ -60,6 +60,12 @@ export function TerminalPane({ tabs, prefs, projectId, maximized, onToggleMax, o
     shown()?.send(ctrl.current && send.length === 1 ? withCtrl(send) : send);
     if (ctrl.current) { ctrl.current = false; setCtrlOn(false); }
   };
+  // Phone: the app answers "forbidden" when its Face ID check was cancelled; then the terminal page closes and the chat stays.
+  useEffect(() => {
+    if (!phone || !active) return;
+    const check = () => { const st = active.terminal.getSnapshot(); if (st.phase === 'error' && st.code === 'forbidden') closeTab(active.key); };
+    check(); return active.terminal.subscribe(check);
+  }, [phone, active?.key]);
   if (phone) {
     const s0 = active ? active.terminal.getSnapshot() : null;
     return <div className="pane terminal-pane phone-terminal" aria-label="Terminal" data-term-dark={pal.dark || undefined} data-keyboard={keyboard || undefined}

@@ -21,9 +21,13 @@ test('public witness URL and every DNS answer must be public; local test access 
  await assert.rejects(resolveWitnessDestination(new URL('http://127.0.0.1:1234/v1/device-anchor')));
 });
 test('pinned POST rejects redirects and oversized responses on disposable loopback',async()=>{
+ // The disposable loopback witness exists only under NODE_ENV=test (the runner does not always set it).
+ const env=process.env.NODE_ENV;process.env.NODE_ENV='test';
+ try{
  let mode='ok';const server=http.createServer((req,res)=>{assert.equal(req.method,'POST');if(mode==='redirect'){res.writeHead(302,{location:'http://169.254.169.254/'});res.end();}else if(mode==='large'){res.writeHead(200,{'content-type':'application/json'});res.end('x'.repeat(16001));}else{res.writeHead(200,{'content-type':'application/json'});res.end('{"ok":true}');}});
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  try{const url=witnessDestination(`http://127.0.0.1:${server.address().port}/v1/device-anchor`,true);assert.deepEqual(await postWitness(url,'{}'),{ok:true});mode='redirect';await assert.rejects(postWitness(url,'{}'));mode='large';await assert.rejects(postWitness(url,'{}'));await assert.rejects(postWitness(url,'x'.repeat(16001)));}finally{await new Promise(resolve=>server.close(resolve));}
+ }finally{if(env===undefined)delete process.env.NODE_ENV;else process.env.NODE_ENV=env;}
 });
 test('atomic writer acquisition never replaces an empty existing lock and release never removes replacement',()=>{
  const root=temp(),lock=path.join(root,'exclusive.lock');fs.mkdirSync(lock,{mode:0o700});assert.throws(()=>createPersistentWitnessStore(root));assert.deepEqual(fs.readdirSync(lock),[]);fs.rmdirSync(lock);
