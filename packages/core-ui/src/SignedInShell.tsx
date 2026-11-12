@@ -62,7 +62,7 @@ type Page = 'computers' | 'reports' | 'browser' | 'rules' | 'code' | 'trading' |
 const placeParent: Partial<Record<Page, 'library' | 'store' | 'settings'>> = { personalities: 'library', specialties: 'library', skills: 'library', rules: 'library', terminal: 'store' };
 const PARENT_LABEL: Record<'library' | 'store' | 'settings', string> = { library: 'Library', store: 'Store', settings: 'Settings' };
 /** Sections that own the sidebar with their own places (the chat list shows only in Chat). */
-const OWN_SIDEBAR: ReadonlyArray<Page> = ['computers', 'rules', 'memory', 'settings', 'agents', 'library', 'skills', 'mcp', 'terminal','specialties','personalities','board','runs','reports','approvals','apps','store','trading'];
+const OWN_SIDEBAR: ReadonlyArray<Page> = ['computers', 'rules', 'memory', 'settings', 'agents', 'library', 'skills', 'mcp', 'terminal','specialties','personalities','board','runs','reports','approvals','apps','store','trading','genvr'];
 const pages: ReadonlyArray<{ key: Page; label: string; icon: IconName | 'board' | 'book' | 'play' }> = [
   { key: 'chat', label: 'Chat', icon: 'message-circle' },
   { key: 'agents', label: 'Agents', icon: 'user' },

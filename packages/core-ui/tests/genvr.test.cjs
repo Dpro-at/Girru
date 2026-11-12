@@ -72,3 +72,7 @@ test('GV1b/GV1c: section pages save a local space and the market shows items wit
  for(const t of ['Players see it','Extra moves','Friendly fire','Match length','Players to start','Health','Back in','Score to win','Agents in this place','Allow remixing','Web browser','Replace thumbnail','Who may build','Body type'])assert.ok(src.includes(t),t);
  assert.doesNotMatch(src,/mixamo/i);
 });
+test('GV1: the shell shows the GenVR places sidebar (the page owns its sidebar)',()=>{
+ const src=require('node:fs').readFileSync(require('node:path').join(__dirname,'../src/SignedInShell.tsx'),'utf8');
+ const own=/const OWN_SIDEBAR[^=]*=\s*\[([^\]]*)\]/.exec(src);assert.ok(own);assert.match(own[1],/'genvr'/);
+});
