@@ -4,7 +4,7 @@
 // checked calls). Synthetic facts in a throwaway data folder. The owner accepts each waiting proposal,
 // as in the chat. The result is recorded ("memory limited" when it fails) and printed.
 // Run from packages/backend: node --import tsx scripts/memory-baseline/local-live.mjs [--model qwen3:4b] [--out f.json]
-import { backendDir, dataRoot, addUser, argValue, cleanup, ollamaHas, openDb, quietly, OLLAMA } from './env.mjs';
+import { backendDir, moduleUrl, dataRoot, addUser, argValue, cleanup, ollamaHas, openDb, quietly, OLLAMA } from './env.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -31,18 +31,18 @@ globalThis.fetch = async (url, init = {}) => {
 };
 
 const { db } = await openDb();
-const { getCredentialStorage } = await import(join(backendDir, 'src/credentials/storage.ts'));
+const { getCredentialStorage } = await import(moduleUrl(backendDir, 'src/credentials/storage.ts'));
 await quietly(() => getCredentialStorage().initialize());
-const { getOrchestrator } = await import(join(backendDir, 'src/multi-agent/index.ts'));
+const { getOrchestrator } = await import(moduleUrl(backendDir, 'src/multi-agent/index.ts'));
 await quietly(() => getOrchestrator().initialize(join(dataRoot, '.data', 'multi-agent', 'orchestrator.db')));
 const OWNER = 'live-owner';
 addUser(db, OWNER, 'owner');
 db.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').run(OWNER);
 db.prepare(`INSERT INTO agents_config (id, name, provider, model, is_primary, system_prompt) VALUES ('live-main', 'Rafid', 'ollama', ?, 1, 'You are Rafid. Keep answers short. Use your memory tools when asked to remember, recall, correct, hand off or propose.')`).run(MODEL);
-const { generateToken } = await import(join(backendDir, 'src/auth/jwt.ts'));
-const { buildServer } = await import(join(backendDir, 'src/api/app.ts'));
-const { createConversation } = await import(join(backendDir, 'src/repositories/chat-conversations.ts'));
-const { recordLocalConformance } = await import(join(backendDir, 'src/memory/local-conformance.ts'));
+const { generateToken } = await import(moduleUrl(backendDir, 'src/auth/jwt.ts'));
+const { buildServer } = await import(moduleUrl(backendDir, 'src/api/app.ts'));
+const { createConversation } = await import(moduleUrl(backendDir, 'src/repositories/chat-conversations.ts'));
+const { recordLocalConformance } = await import(moduleUrl(backendDir, 'src/memory/local-conformance.ts'));
 const app = await quietly(() => buildServer({ logger: false }));
 await quietly(() => app.ready());
 const auth = { authorization: `Bearer ${generateToken(OWNER, 1)}` };

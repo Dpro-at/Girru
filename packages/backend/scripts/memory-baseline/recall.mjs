@@ -9,7 +9,7 @@
 //   node --import tsx scripts/memory-baseline/recall.mjs --mode hash|ollama [--distractors 5000] [--out file.json] [--p9b]
 // P9b: --p9b searches with the reply recall of the quality engine instead
 // (memory/quality/recall.ts: intent, re-rank, "no reliable memory" = empty).
-import { backendDir, addUser, argValue, cleanup, ollamaHas, openDb, quietly } from './env.mjs';
+import { backendDir, moduleUrl, addUser, argValue, cleanup, ollamaHas, openDb, quietly } from './env.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { syntheticMemories } from './corpus.mjs';
@@ -33,9 +33,9 @@ const OTHER = 'other-user';
 const { db, closeDatabase } = await openDb();
 addUser(db, OWNER, 'owner');
 addUser(db, OTHER, 'user');
-const { getMemoryStorage } = await import(join(backendDir, 'src/memory/storage.ts'));
-const { getEmbeddingService } = await import(join(backendDir, 'src/memory/embedding.ts'));
-const D = await import(join(backendDir, 'src/memory/drawers.ts'));
+const { getMemoryStorage } = await import(moduleUrl(backendDir, 'src/memory/storage.ts'));
+const { getEmbeddingService } = await import(moduleUrl(backendDir, 'src/memory/embedding.ts'));
+const D = await import(moduleUrl(backendDir, 'src/memory/drawers.ts'));
 const storage = getMemoryStorage();
 await quietly(() => storage.initialize());
 const emb = getEmbeddingService();
@@ -80,7 +80,7 @@ for (const s of SET.stale) {
 const OPEN = D.selectDrawers({ audience: 'owner', project: 'alpha' });
 const timings = [];
 const bests = [];
-const engine = p9b ? await import(join(backendDir, 'src/memory/quality/recall.ts')) : null;
+const engine = p9b ? await import(moduleUrl(backendDir, 'src/memory/quality/recall.ts')) : null;
 async function search(q, limit = 50) {
   const t = performance.now();
   let res;
@@ -145,7 +145,7 @@ for (const s of SET.stale) {
 // (chat.ts subscription branch). How many hit targets are in that pack?
 let codingAppPack = null;
 try {
-  const { contextPack } = await import(join(backendDir, 'src/memory/context/pack.ts'));
+  const { contextPack } = await import(moduleUrl(backendDir, 'src/memory/context/pack.ts'));
   const pack = (await quietly(() => contextPack({ userId: OWNER, drawers: OPEN, persona: '', scopeFacts: null, handoff: null }))).text;
   const inPack = SET.hit.filter((h) => pack.includes(h.content.slice(0, 40))).length;
   codingAppPack = { chars: pack.length, targetsInPack: inPack, targets: SET.hit.length };

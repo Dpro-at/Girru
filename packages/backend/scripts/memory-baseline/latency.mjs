@@ -13,7 +13,7 @@
 // builds it).
 // P9b: --p9b times the reply recall of the quality engine instead (intent,
 // fetch of 24 candidates, local re-rank within 300 ms; memory/quality/recall.ts).
-import { backendDir, addUser, argValue, cleanup, ollamaHas, openDb, percentile, quietly } from './env.mjs';
+import { backendDir, moduleUrl, addUser, argValue, cleanup, ollamaHas, openDb, percentile, quietly } from './env.mjs';
 import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { rng, syntheticMemories } from './corpus.mjs';
@@ -34,11 +34,11 @@ process.env.OLLAMA_URL = 'http://127.0.0.1:11434';
 const OWNER = 'p0-owner';
 const { db, closeDatabase } = await openDb();
 addUser(db, OWNER, 'owner');
-const { getMemoryStorage } = await import(join(backendDir, 'src/memory/storage.ts'));
-const { hashEmbed, HASH_MODEL, HASH_DIMS } = await import(join(backendDir, 'src/memory/embedding.ts'));
-const { normalizeMemoryText } = await import(join(backendDir, 'src/memory/text-normalize.ts'));
-const { packVector } = await import(join(backendDir, 'src/memory/vectors.ts'));
-const D = await import(join(backendDir, 'src/memory/drawers.ts'));
+const { getMemoryStorage } = await import(moduleUrl(backendDir, 'src/memory/storage.ts'));
+const { hashEmbed, HASH_MODEL, HASH_DIMS } = await import(moduleUrl(backendDir, 'src/memory/embedding.ts'));
+const { normalizeMemoryText } = await import(moduleUrl(backendDir, 'src/memory/text-normalize.ts'));
+const { packVector } = await import(moduleUrl(backendDir, 'src/memory/vectors.ts'));
+const D = await import(moduleUrl(backendDir, 'src/memory/drawers.ts'));
 const storage = getMemoryStorage();
 await quietly(() => storage.initialize());
 
@@ -82,7 +82,7 @@ const SET = JSON.parse(readFileSync(join(backendDir, 'scripts/memory-baseline/re
 const queries = SET.hit.flatMap((h) => h.queries.map((q) => q.q)).slice(0, nQueries);
 const p9b = process.argv.includes('--p9b');
 if (p9b) process.env.GIRRU_STORE_P9B = '1';
-const engine = p9b ? await import(join(backendDir, 'src/memory/quality/recall.ts')) : null;
+const engine = p9b ? await import(moduleUrl(backendDir, 'src/memory/quality/recall.ts')) : null;
 let fellBack = 0;
 const recallOnce = async (q) => {
   if (!engine) return storage.search({ query: q, userId: OWNER, drawers: OPEN, limit: 5 });
@@ -106,7 +106,7 @@ for (const q of queries) {
 // Query embedding alone (semantic only): the part of the time that is not the scan.
 let embedMs = null;
 if (vectors === 'semantic') {
-  const { getEmbeddingService, clearEmbeddingCache } = await import(join(backendDir, 'src/memory/embedding.ts'));
+  const { getEmbeddingService, clearEmbeddingCache } = await import(moduleUrl(backendDir, 'src/memory/embedding.ts'));
   clearEmbeddingCache();
   const e = [];
   for (const q of queries.slice(0, 10)) { const t = performance.now(); await quietly(() => getEmbeddingService().embedQuery(`${q} ?`)); e.push(performance.now() - t); }
