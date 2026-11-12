@@ -74,6 +74,8 @@ interface Drawer {
   ann: AnnIndex | null;
   annDims: number;
   others: Set<number>;
+  /** Working-layer slots in the HNSW index: few, and boosted, so always re-scored. */
+  working: Set<number>;
   pendKeys: number[];
   pendVecs: Float32Array[];
 }
@@ -135,11 +137,14 @@ export function exactMax(): number {
   return process.env.GIRRU_RECALL_EXACT_MAX !== undefined && Number.isFinite(n) && n >= 0 ? n : 50_000;
 }
 
-/** A drawer with more memories than this gets an HNSW index (MEM-SPEED-01 step 3). */
+/** A drawer with more memories than this gets an HNSW index (MEM-SPEED-01 step 3; 20k measured best of 100k / 20k / 5k for p95 with exact results kept for the typical drawer). */
 export function annMin(): number {
   const n = Number(process.env.GIRRU_RECALL_ANN_MIN);
-  return process.env.GIRRU_RECALL_ANN_MIN !== undefined && Number.isFinite(n) && n >= 0 ? n : 100_000;
+  return process.env.GIRRU_RECALL_ANN_MIN !== undefined && Number.isFinite(n) && n >= 0 ? n : 20_000;
 }
+
+/** At most this many working-layer memories of one HNSW drawer are re-scored per search. */
+const WORKING_RESCORE = 2000;
 
 /** How many int8 candidates are re-scored with their full vector. */
 function rescoreCount(limit: number): number {
@@ -304,6 +309,7 @@ function annSlot(u: UserStore, d: Drawer, slot: number, from?: Float32Array): vo
   const v = from ?? u.vec[slot];
   if (!v || v.length !== d.annDims || u.replaced[slot]) { d.others.add(slot); return; }
   d.pendKeys.push(slot);
+  if (u.layer[slot] === 'working') d.working.add(slot);
   d.pendVecs.push(v instanceof Float32Array ? v : Float32Array.from(v));
   u.q8row[slot] = -2;
   const old = u.vec[slot];
@@ -319,7 +325,9 @@ function flushAnn(d: Drawer): void {
   const flat = new Float32Array(n * dims);
   for (let i = 0; i < n; i++) { keys[i] = BigInt(d.pendKeys[i]); flat.set(d.pendVecs[i], i * dims); }
   d.pendKeys = []; d.pendVecs = [];
-  d.ann.add(keys, flat, 0); // all cores
+  // All cores by default; GIRRU_RECALL_ANN_THREADS=1 builds the same graph every time (tests).
+  const t = Number(process.env.GIRRU_RECALL_ANN_THREADS);
+  d.ann.add(keys, flat, Number.isInteger(t) && t > 0 ? t : 0);
 }
 
 /** Move a drawer (exact or int8) to an HNSW index. False when usearch is not available here. */
@@ -391,6 +399,7 @@ function killSlot(u: UserStore, slot: number): void {
   u.slotOf.delete(u.ids[slot]);
   if (u.q8row[slot] === -2 && d.ann) { flushAnn(d); d.ann.remove(BigInt(slot)); }
   d.others.delete(slot);
+  d.working.delete(slot);
   u.vec[slot] = null; // free the vector now; the rest goes at compaction
   const b = u.slotBytes[slot];
   d.bytes -= b; u.bytes -= b; storeBytes -= b;
@@ -426,7 +435,7 @@ const yieldNow = () => new Promise<void>((r) => setImmediate(r));
 async function loadDrawer(u: UserStore, userId: string, kind: string, key: string): Promise<Drawer | null> {
   const db: any = getDatabase().getDb();
   const d: Drawer = { kind, key, slots: [], dead: 0, live: 0, sumLen: 0, bytes: 0, mode: 'exact', q8: new Int8Array(0), q8dims: 0, q8n: 0,
-    ann: null, annDims: 0, others: new Set(), pendKeys: [], pendVecs: [] };
+    ann: null, annDims: 0, others: new Set(), working: new Set(), pendKeys: [], pendVecs: [] };
   const first = db.prepare(`SELECT ${ROW_COLUMNS} FROM memories WHERE user_id = ? AND ${DRAWER_KIND_SQL} = ? AND ${DRAWER_KEY_SQL} = ?
     ORDER BY created_at ASC, id ASC LIMIT ${PAGE}`);
   const next = db.prepare(`SELECT ${ROW_COLUMNS} FROM memories WHERE user_id = ? AND ${DRAWER_KIND_SQL} = ? AND ${DRAWER_KEY_SQL} = ?
@@ -561,19 +570,24 @@ function cmpOrder(u: UserStore, a: number, b: number): number {
 }
 
 /** A min-heap of the best `k` (worst on top). */
-class TopK {
+export class TopK {
   private s: number[] = [];
   private sim: number[] = [];
+  private val: Array<number | null> = [];
   constructor(private k: number, private u: UserStore) {}
   /** True when a is worse than b. */
   private worse(a: number, b: number): boolean {
     if (this.sim[a] !== this.sim[b]) return this.sim[a] < this.sim[b];
     return cmpOrder(this.u, this.s[a], this.s[b]) > 0;
   }
-  push(slot: number, similarity: number): void {
+  /** Whether a hit with this score could enter (cheap check before work). */
+  admits(similarity: number): boolean {
+    return this.s.length < this.k || similarity >= this.sim[0];
+  }
+  push(slot: number, similarity: number, value: number | null = null): void {
     if (this.k <= 0) return;
     if (this.s.length < this.k) {
-      this.s.push(slot); this.sim.push(similarity);
+      this.s.push(slot); this.sim.push(similarity); this.val.push(value);
       let i = this.s.length - 1;
       while (i > 0) { const p = (i - 1) >> 1; if (!this.worse(i, p)) break; this.swap(i, p); i = p; }
       return;
@@ -581,7 +595,7 @@ class TopK {
     // Better than the worst kept?
     const better = similarity > this.sim[0] || (similarity === this.sim[0] && cmpOrder(this.u, slot, this.s[0]) < 0);
     if (!better) return;
-    this.s[0] = slot; this.sim[0] = similarity;
+    this.s[0] = slot; this.sim[0] = similarity; this.val[0] = value;
     let i = 0;
     for (;;) {
       const l = 2 * i + 1, r = l + 1;
@@ -595,12 +609,94 @@ class TopK {
   private swap(a: number, b: number): void {
     [this.s[a], this.s[b]] = [this.s[b], this.s[a]];
     [this.sim[a], this.sim[b]] = [this.sim[b], this.sim[a]];
+    [this.val[a], this.val[b]] = [this.val[b], this.val[a]];
   }
   /** Best first. */
-  sorted(): Array<{ slot: number; similarity: number }> {
+  sorted(): Array<{ slot: number; similarity: number; value: number | null }> {
     const idx = this.s.map((_, i) => i);
     idx.sort((a, b) => (this.worse(a, b) ? 1 : this.worse(b, a) ? -1 : 0));
-    return idx.map((i) => ({ slot: this.s[i], similarity: this.sim[i] }));
+    return idx.map((i) => ({ slot: this.s[i], similarity: this.sim[i], value: this.val[i] }));
+  }
+}
+
+/**
+ * One search's fixed inputs. The hot loops below are small top-level
+ * functions over this one shape, so V8 keeps them optimised from search to
+ * search (closures inside searchStore were thrown away and rebuilt every few
+ * searches: +120 ms on those).
+ */
+class Scan {
+  constructor(
+    readonly u: UserStore, readonly q: StoreQuery, readonly filtered: boolean, readonly total: number,
+    readonly qf: Float64Array, readonly qn: number, readonly qunit: Float64Array,
+    readonly model: string, readonly dims: number, readonly semantic: boolean,
+    readonly top: TopK, readonly approx: TopK,
+  ) {}
+}
+
+function lexAt(u: UserStore, s: number, total: number): number {
+  return u.mark[s] ? Math.min(1, u.acc[s] / total) : 0;
+}
+
+function passes(c: Scan, s: number): boolean {
+  const u = c.u;
+  return u.alive[s] === 1 && (c.filtered ? candidate(u, s, c.q) : u.replaced[s] === 0);
+}
+
+function dot8(a: Float64Array, block: Int8Array, at: number, dims: number): number {
+  let dot = 0;
+  for (let i = 0; i < dims; i++) dot += a[i] * block[at + i];
+  return dot;
+}
+
+function lexicalOnly(c: Scan, s: number): void {
+  let similarity = hybridScore(null, lexAt(c.u, s, c.total), c.semantic);
+  if (similarity >= MIN_RECALL_SCORE && c.u.layer[s] === 'working') similarity += WORKING_LAYER_BOOST;
+  if (similarity >= MIN_RECALL_SCORE) c.top.push(s, similarity, null);
+}
+
+/** The full-row path's score for a slot whose full vector (or none) is in RAM. */
+function scoreExact(c: Scan, s: number): void {
+  const u = c.u;
+  const lexical = lexAt(u, s, c.total);
+  const b = u.vec[s];
+  let vector: number | null = null;
+  if (b !== null && u.model[s] === c.model && b.length === c.dims && (c.semantic || lexical > 0)) {
+    let cos = 0;
+    if (c.qf.length === b.length && c.qf.length !== 0) {
+      const qf = c.qf;
+      let dot = 0;
+      for (let i = 0; i < qf.length; i++) dot += qf[i] * b[i];
+      const m = c.qn * Math.sqrt(u.sq[s]);
+      cos = m === 0 ? 0 : dot / m;
+    }
+    vector = vectorScore(cos, c.semantic);
+  }
+  let similarity = hybridScore(vector, lexical, c.semantic);
+  if (similarity >= MIN_RECALL_SCORE && u.layer[s] === 'working') similarity += WORKING_LAYER_BOOST;
+  if (similarity >= MIN_RECALL_SCORE) c.top.push(s, similarity, vector);
+}
+
+/** An exact or int8 drawer: every candidate slot. */
+function scanDrawer(c: Scan, d: Drawer): void {
+  const u = c.u;
+  const block = d.q8, dims = d.q8dims;
+  const q8ok = d.mode === 'i8' && dims === c.dims;
+  const slots = d.slots;
+  for (let j = 0; j < slots.length; j++) {
+    const s = slots[j];
+    if (!passes(c, s)) continue;
+    const row = u.q8row[s];
+    if (row < 0) { scoreExact(c, s); continue; }
+    const lexical = lexAt(u, s, c.total);
+    if (!(q8ok && u.model[s] === c.model && (c.semantic || lexical > 0))) {
+      // Not comparable with this query (or a hash cosine without a word in common): lexical part only, exact.
+      lexicalOnly(c, s);
+      continue;
+    }
+    let similarity = hybridScore(vectorScore(dot8(c.qunit, block, row * dims, dims) / 127, c.semantic), lexical, c.semantic);
+    if (u.layer[s] === 'working') similarity += WORKING_LAYER_BOOST;
+    c.approx.push(s, similarity);
   }
 }
 
@@ -645,7 +741,7 @@ export function searchStore(userId: string, open: OpenStore, q: StoreQuery, qv: 
       }
     }
   }
-  const lexOf = (s: number) => (u.mark[s] ? Math.min(1, u.acc[s] / total) : 0);
+  const lexOf = (s: number) => lexAt(u, s, total);
 
   // Query norm once (the same sum as the per-entry loop of entryCosine).
   const qvec = qv.vector;
@@ -653,53 +749,32 @@ export function searchStore(userId: string, open: OpenStore, q: StoreQuery, qv: 
   for (let i = 0; i < qvec.length; i++) na += qvec[i] * qvec[i];
   const qn = Math.sqrt(na);
   const qf = Float64Array.from(qvec);
-
-  const top = new TopK(q.limit, u);
-  const vectors = new Map<number, number | null>();
-  // int8 drawers: an approximate score picks candidates, re-scored below with the full vector.
-  const approx = new TopK(rescoreCount(q.limit), u);
   const qunit = new Float64Array(qf.length);
   for (let i = 0; i < qf.length; i++) qunit[i] = qn === 0 ? 0 : qf[i] / qn;
-  const exactScore = (s: number) => {
-    const lexical = lexOf(s);
-    const b = u.vec[s];
-    const comparable = b !== null && u.model[s] === qv.model && b.length === qv.dims;
-    let vector: number | null = null;
-    if (comparable && (qv.semantic || lexical > 0)) {
-      let cos = 0;
-      if (qf.length === b.length && qf.length !== 0) {
-        let dot = 0;
-        for (let i = 0; i < qf.length; i++) dot += qf[i] * b[i];
-        const m = qn * Math.sqrt(u.sq[s]);
-        cos = m === 0 ? 0 : dot / m;
-      }
-      vector = vectorScore(cos, qv.semantic);
-    }
-    let similarity = hybridScore(vector, lexical, qv.semantic);
-    if (similarity >= MIN_RECALL_SCORE && u.layer[s] === 'working') similarity += WORKING_LAYER_BOOST;
-    if (similarity >= MIN_RECALL_SCORE) { top.push(s, similarity); vectors.set(s, vector); }
-  };
-  const lexicalOnly = (s: number) => {
-    let similarity = hybridScore(null, lexOf(s), qv.semantic);
-    if (similarity >= MIN_RECALL_SCORE && u.layer[s] === 'working') similarity += WORKING_LAYER_BOOST;
-    if (similarity >= MIN_RECALL_SCORE) { top.push(s, similarity); vectors.set(s, null); }
-  };
+
+  const top = new TopK(q.limit, u);
+  // int8 drawers: an approximate score picks candidates, re-scored below with the full vector.
+  const approx = new TopK(rescoreCount(q.limit), u);
+  const c = new Scan(u, q, filtered, total, qf, qn, qunit, qv.model, qv.dims, qv.semantic, top, approx);
+
   // HNSW drawers: the nearest by vector, plus the best by words (both re-scored below), plus the rest exactly.
   const byWords = new TopK(rescoreCount(q.limit), u);
   const annDrawers = open.drawers.filter((d) => d.mode === 'ann');
+  const workingPicks: number[] = [];
   if (annDrawers.length) {
     const annSet = new Set(annDrawers);
     for (const s of touched) {
       const d = u.drawerOf[s];
       if (!annSet.has(d) || u.q8row[s] !== -2) continue; // others: scored with their drawer
       if (d.annDims === qv.dims && u.model[s] === qv.model) byWords.push(s, lexOf(s));
-      else lexicalOnly(s);
+      else lexicalOnly(c, s);
     }
     const qf32 = Float32Array.from(qvec);
     for (const d of annDrawers) {
-      for (const s of d.others) {
-        if (!u.alive[s] || (filtered && !candidate(u, s, q)) || (!filtered && u.replaced[s])) continue;
-        exactScore(s);
+      for (const s of d.others) if (passes(c, s)) scoreExact(c, s);
+      if (d.annDims === qv.dims) {
+        let n = 0;
+        for (const s of d.working) if (n++ < WORKING_RESCORE && passes(c, s) && u.model[s] === qv.model) workingPicks.push(s);
       }
       if (!d.ann || d.annDims !== qv.dims || !qv.semantic) continue; // a hash query: only rows with a word in common count
       flushAnn(d);
@@ -716,52 +791,11 @@ export function searchStore(userId: string, open: OpenStore, q: StoreQuery, qv: 
       }
     }
   }
-  for (const d of open.drawers) {
-    if (d.mode === 'ann') continue;
-    const block = d.q8, dims = d.q8dims;
-    const q8ok = d.mode === 'i8' && dims === qv.dims;
-    for (const s of d.slots) {
-      if (!u.alive[s] || (filtered && !candidate(u, s, q)) || (!filtered && u.replaced[s])) continue;
-      const lexical = lexOf(s);
-      const row = u.q8row[s];
-      if (row >= 0) {
-        if (!(q8ok && u.model[s] === qv.model && (qv.semantic || lexical > 0))) {
-          // Not comparable with this query (or a hash cosine without a word in common): lexical part only, exact.
-          let similarity = hybridScore(null, lexical, qv.semantic);
-          if (similarity >= MIN_RECALL_SCORE && u.layer[s] === 'working') similarity += WORKING_LAYER_BOOST;
-          if (similarity >= MIN_RECALL_SCORE) { top.push(s, similarity); vectors.set(s, null); }
-          continue;
-        }
-        let dot = 0;
-        const at = row * dims;
-        for (let i = 0; i < dims; i++) dot += qunit[i] * block[at + i];
-        let similarity = hybridScore(vectorScore(dot / 127, qv.semantic), lexical, qv.semantic);
-        if (u.layer[s] === 'working') similarity += WORKING_LAYER_BOOST;
-        approx.push(s, similarity);
-        continue;
-      }
-      const b = u.vec[s];
-      const comparable = b !== null && u.model[s] === qv.model && b.length === qv.dims;
-      let vector: number | null = null;
-      if (comparable && (qv.semantic || lexical > 0)) {
-        let cos = 0;
-        if (qf.length === b.length && qf.length !== 0) {
-          let dot = 0;
-          for (let i = 0; i < qf.length; i++) dot += qf[i] * b[i];
-          const m = qn * Math.sqrt(u.sq[s]);
-          cos = m === 0 ? 0 : dot / m;
-        }
-        vector = vectorScore(cos, qv.semantic);
-      }
-      let similarity = hybridScore(vector, lexical, qv.semantic);
-      if (similarity >= MIN_RECALL_SCORE && u.layer[s] === 'working') similarity += WORKING_LAYER_BOOST;
-      if (similarity >= MIN_RECALL_SCORE) { top.push(s, similarity); vectors.set(s, vector); }
-    }
-  }
+  for (const d of open.drawers) if (d.mode !== 'ann') scanDrawer(c, d);
   // Re-score the int8 and HNSW candidates with their full vectors (by primary key; the owner is checked).
   const pickedSet = new Set<number>();
   const picked: Array<{ slot: number }> = [];
-  for (const c of [...approx.sorted(), ...byWords.sorted()]) if (!pickedSet.has(c.slot)) { pickedSet.add(c.slot); picked.push(c); }
+  for (const c of [...approx.sorted(), ...byWords.sorted(), ...workingPicks.map((slot) => ({ slot }))]) if (!pickedSet.has(c.slot)) { pickedSet.add(c.slot); picked.push(c); }
   if (picked.length) {
     const db: any = getDatabase().getDb();
     for (let i = 0; i < picked.length; i += 500) {
@@ -776,7 +810,8 @@ export function searchStore(userId: string, open: OpenStore, q: StoreQuery, qv: 
         if (!b && r.embedding) b = Float64Array.from(JSON.parse(r.embedding) as number[]);
         const lexical = lexOf(s);
         let vector: number | null = null;
-        if (b && b.length === qv.dims && qf.length !== 0) {
+        // As the full-row path: a hash cosine counts only with a word in common.
+        if (b && b.length === qv.dims && qf.length !== 0 && u.model[s] === qv.model && (qv.semantic || lexical > 0)) {
           let dot = 0, sqb = 0;
           for (let k = 0; k < b.length; k++) { dot += qf[k] * b[k]; sqb += b[k] * b[k]; }
           const m = qn * Math.sqrt(sqb);
@@ -784,11 +819,11 @@ export function searchStore(userId: string, open: OpenStore, q: StoreQuery, qv: 
         }
         let similarity = hybridScore(vector, lexical, qv.semantic);
         if (similarity >= MIN_RECALL_SCORE && u.layer[s] === 'working') similarity += WORKING_LAYER_BOOST;
-        if (similarity >= MIN_RECALL_SCORE) { top.push(s, similarity); vectors.set(s, vector); }
+        if (similarity >= MIN_RECALL_SCORE) top.push(s, similarity, vector);
       }
     }
   }
-  const hits = top.sorted().map(({ slot, similarity }) => ({ id: u.ids[slot], similarity, vector: vectors.get(slot) ?? null, lexical: lexOf(slot) }));
+  const hits = top.sorted().map(({ slot, similarity, value }) => ({ id: u.ids[slot], similarity, vector: value, lexical: lexOf(slot) }));
   for (const s of touched) u.mark[s] = 0;
   return hits;
 }

@@ -120,6 +120,7 @@ const report = {
   dbMB: +(dbBytes / 1e6).toFixed(1), engine: p9b ? 'p9b quality recall' : 'storage.search', ...(p9b ? { fellBack } : {}), queries: times.length,
   searchMs: { p50: +percentile(times, 50).toFixed(1), p95: +percentile(times, 95).toFixed(1), max: +Math.max(...times).toFixed(1) },
   queryEmbedMs: embedMs, peakRssMB: Math.round(peakRss / 1e6),
+  ...(process.argv.includes('--per-query') ? { perQuery: queries.map((q, i) => [q, +times[i].toFixed(1)]) } : {}),
   index: { entries: store.entries, MB: Math.round(store.bytes / 1e6), drawers: store.drawers,
     exactMax: process.env.GIRRU_RECALL_EXACT_MAX ?? 'default', annMin: process.env.GIRRU_RECALL_ANN_MIN ?? 'default' },
 };
