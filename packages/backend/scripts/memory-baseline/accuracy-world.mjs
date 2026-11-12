@@ -102,6 +102,17 @@ const FACT = {
   },
 };
 
+/** What a correct answer must contain (any one of them, case-insensitive); answers are asked in English. */
+const city = (h) => h.match(/(Falkenstein|Frankfurt|Gravelines|Amsterdam|Vienna)/)[1];
+const REASON_KEY = [['window'], ['backup', 'lost data', 'lost'], ['licen'], ['time series', 'time-series', 'timeseries']];
+const BUG_KEY = [['10,000', '10000', '10 000'], ['safari'], ['cent']];
+const KEY = {
+  localdb: (v) => [v.localDb], serverdb: (v) => [v.newDb.split(' ')[0]], serverdb_old: (v) => [v.oldDb.split(' ')[0] === 'Microsoft' ? 'SQL Server' : v.oldDb.split(' ')[0]],
+  reason: (v) => [...REASON_KEY[REASON.indexOf(v.reason)], v.newDb.split(' ')[0]], host_plan: (v) => [city(v.planHost)], host: (v) => [city(v.host)],
+  deploy: (v) => [DAY.en[v.day]], client: (v) => [v.contact.split(' ')[0], v.client.split(' ')[0]], deadline: (v) => [v.deadline.split(' ').slice(0, 2).reverse().join(' '), v.deadline.split(' ').slice(0, 2).join(' ')],
+  tech: (v) => [v.tech], bug: (v) => BUG_KEY[BUG.indexOf(v.bug)],
+};
+
 /** Question texts: [lang]: (projectNameOrNull) => text. Null: the project is left out (the chat's project is open). */
 const Q = {
   localdb: {
@@ -237,7 +248,7 @@ export function buildWorld(seed = 31) {
     const add = (attr, drawer, createdAt, status = 'active') => {
       const id = `w-${p.slug}-${attr}`;
       const factLang = FACT[attr][lang] ? lang : 'en'; // client and deadline: the owner's own notes, in English
-      facts.push({ id, content: FACT[attr][factLang](p, v), drawer, createdAt, status, project: p.slug, attr, lang: factLang });
+      facts.push({ id, content: FACT[attr][factLang](p, v), drawer, createdAt, status, project: p.slug, attr, lang: factLang, key: KEY[attr](v) });
       return id;
     };
     add('localdb', projectDrawer, at(1, 5));
@@ -322,15 +333,17 @@ export function buildWorld(seed = 31) {
   // People (owner drawer): allergy and home city.
   WORLD_PEOPLE.forEach((name, i) => {
     const allergy = ALLERGY[i % ALLERGY.length], city = CITY[i % CITY.length];
-    facts.push({ id: `w-person-${i}-allergy`, content: `${name} is allergic to ${allergy}.`, drawer: 'owner', createdAt: at(2, 1 + i), status: 'active', project: null, attr: 'allergy', lang: 'en' });
-    facts.push({ id: `w-person-${i}-city`, content: `${name} lives in ${city} and prefers meetings there.`, drawer: 'owner', createdAt: at(2, 1 + i), status: 'active', project: null, attr: 'city', lang: 'en' });
+    facts.push({ id: `w-person-${i}-allergy`, content: `${name} is allergic to ${allergy}.`, drawer: 'owner', createdAt: at(2, 1 + i), status: 'active', project: null, attr: 'allergy', lang: 'en', key: [allergy] });
+    facts.push({ id: `w-person-${i}-city`, content: `${name} lives in ${city} and prefers meetings there.`, drawer: 'owner', createdAt: at(2, 1 + i), status: 'active', project: null, attr: 'city', lang: 'en', key: [city] });
     const first = name.split(' ')[0];
     const ask = (suffix, lang, k, q, attr) => questions.push({ id: `q-person-${i}-${suffix}`, kind: 'person', lang, project: WORLD_PROJECTS[(i + k) % 10].slug, q,
       target: `w-person-${i}-${attr}`, relevant: [`w-person-${i}-${attr}`], stale: [], temporal: false, crossLanguage: family(lang) !== 'en' });
-    ask('allergy-en', 'en', 0, `Is ${first} allergic to anything?`, 'allergy');
-    ask('allergy-ar', 'ar', 3, `هل عند ${first} حساسية من شيء؟`, 'allergy');
+    ask('allergy-en', 'en', 0, `What is ${first} allergic to?`, 'allergy');
+    ask('allergy-ar', 'ar', 3, `ممَّ يتحسس ${first}؟`, 'allergy');
     ask('city-de', 'de', 5, `Wo wohnt ${first}?`, 'city');
     ask('city-iq', 'iq', 7, `${first} وين ساكن؟`, 'city');
   });
+  const keyOf = new Map(facts.map((f) => [f.id, f.key]));
+  for (const q of questions) q.answer = q.target ? keyOf.get(q.target) : null;
   return { facts, questions };
 }

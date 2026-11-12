@@ -1243,6 +1243,160 @@
         "store": true,
         "mode": "B"
       }
+    },
+    {
+      "id": "rmwe3p515",
+      "date": "2026-11-12T22:09:43.097Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "6b918b4c",
+        "branch": "girru/memory-accuracy",
+        "memoryCodeChanged": false
+      },
+      "source": "accuracy.mjs --answer-model",
+      "kind": "answers",
+      "label": "End-to-end answers by qwen2.5:7b from B0 recall (today's memory format), 100k real embeddings",
+      "size": 100140,
+      "vectors": "real",
+      "queries": 320,
+      "searchMs": {
+        "p50": 578,
+        "p95": null
+      },
+      "quality": {
+        "noAnswerSaysUnknown": 0.967,
+        "answerableCorrect": 0.755,
+        "answerableSaidUnknown": 0.17,
+        "answerableWrong": 0.075,
+        "retrievedCorrect": 0.82
+      },
+      "byKind": {
+        "no-answer": {
+          "correct-unknown": 116,
+          "invented": 4
+        },
+        "direct": {
+          "correct": 29,
+          "said-unknown": 1
+        },
+        "context": {
+          "correct": 24,
+          "wrong": 6
+        },
+        "indirect": {
+          "correct": 12,
+          "said-unknown": 14,
+          "wrong": 4
+        },
+        "multi-hop": {
+          "said-unknown": 10,
+          "correct": 7,
+          "wrong": 3
+        },
+        "time-travel": {
+          "correct": 11,
+          "said-unknown": 8,
+          "wrong": 1
+        },
+        "topic-switch": {
+          "correct": 19,
+          "said-unknown": 1
+        },
+        "topic-return": {
+          "correct": 19,
+          "wrong": 1
+        },
+        "person": {
+          "correct": 30
+        }
+      },
+      "settings": {
+        "mode": "B0",
+        "variant": "P",
+        "model": "qwen2.5:7b"
+      }
+    },
+    {
+      "id": "rmwe3p541",
+      "date": "2026-11-12T22:09:43.201Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "6b918b4c",
+        "branch": "girru/memory-accuracy",
+        "memoryCodeChanged": false
+      },
+      "source": "accuracy.mjs --answer-model",
+      "kind": "answers",
+      "label": "End-to-end answers by qwen2.5:7b from B0 recall (with match strength), 100k real embeddings",
+      "size": 100140,
+      "vectors": "real",
+      "queries": 320,
+      "searchMs": {
+        "p50": 578,
+        "p95": null
+      },
+      "quality": {
+        "noAnswerSaysUnknown": 1,
+        "answerableCorrect": 0.665,
+        "answerableSaidUnknown": 0.27,
+        "answerableWrong": 0.065,
+        "retrievedCorrect": 0.744
+      },
+      "byKind": {
+        "no-answer": {
+          "correct-unknown": 120
+        },
+        "direct": {
+          "correct": 29,
+          "said-unknown": 1
+        },
+        "context": {
+          "correct": 27,
+          "wrong": 1,
+          "said-unknown": 2
+        },
+        "indirect": {
+          "said-unknown": 19,
+          "wrong": 8,
+          "correct": 3
+        },
+        "multi-hop": {
+          "said-unknown": 15,
+          "correct": 3,
+          "wrong": 2
+        },
+        "time-travel": {
+          "correct": 7,
+          "said-unknown": 13
+        },
+        "topic-switch": {
+          "correct": 17,
+          "said-unknown": 3
+        },
+        "topic-return": {
+          "correct": 17,
+          "wrong": 2,
+          "said-unknown": 1
+        },
+        "person": {
+          "correct": 30
+        }
+      },
+      "settings": {
+        "mode": "B0",
+        "variant": "S",
+        "model": "qwen2.5:7b"
+      }
     }
   ]
 }
