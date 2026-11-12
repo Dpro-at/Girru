@@ -203,7 +203,7 @@ function conversation(opener, distance, r) {
   return out;
 }
 
-const PEOPLE = ['Amira Saeed', 'Bernd Koller', 'Chiara Rossi', 'Dunya Hamid', 'Emil Strauss', 'Farah Naji', 'Georg Lindner', 'Huda Karim', 'Ivo Petrov', 'Jana Novak', 'Khalil Musa', 'Leonie Bauer', 'Mustafa Ali', 'Nadia Frei', 'Omar Haddad'];
+export const WORLD_PEOPLE = ['Amira Saeed', 'Bernd Koller', 'Chiara Rossi', 'Dunya Hamid', 'Emil Strauss', 'Farah Naji', 'Georg Lindner', 'Huda Karim', 'Ivo Petrov', 'Jana Novak', 'Khalil Musa', 'Leonie Bauer', 'Mustafa Ali', 'Nadia Frei', 'Omar Haddad'];
 const ALLERGY = ['penicillin', 'peanuts', 'shellfish', 'pollen', 'lactose'];
 const CITY = ['Graz', 'Linz', 'Erbil', 'Basra', 'Salzburg', 'Najaf', 'Innsbruck'];
 
@@ -320,7 +320,7 @@ export function buildWorld(seed = 31) {
     }
   });
   // People (owner drawer): allergy and home city.
-  PEOPLE.forEach((name, i) => {
+  WORLD_PEOPLE.forEach((name, i) => {
     const allergy = ALLERGY[i % ALLERGY.length], city = CITY[i % CITY.length];
     facts.push({ id: `w-person-${i}-allergy`, content: `${name} is allergic to ${allergy}.`, drawer: 'owner', createdAt: at(2, 1 + i), status: 'active', project: null, attr: 'allergy', lang: 'en' });
     facts.push({ id: `w-person-${i}-city`, content: `${name} lives in ${city} and prefers meetings there.`, drawer: 'owner', createdAt: at(2, 1 + i), status: 'active', project: null, attr: 'city', lang: 'en' });

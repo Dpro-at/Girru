@@ -965,6 +965,284 @@
         "store": true,
         "mode": "A"
       }
+    },
+    {
+      "id": "rmwe1zb18",
+      "date": "2026-11-12T21:21:38.204Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "b4de3851",
+        "branch": "girru/memory-accuracy",
+        "memoryCodeChanged": true
+      },
+      "source": "accuracy.mjs",
+      "kind": "accuracy",
+      "label": "Accuracy B0 (context query: entity names, no topic words), 1,280 questions, 100k real embeddings",
+      "size": 100140,
+      "vectors": "real",
+      "queries": 1280,
+      "searchMs": {
+        "p50": 81.5,
+        "p95": 97
+      },
+      "queryEmbedMs": {
+        "p50": 60.5,
+        "p95": 69.6
+      },
+      "coldMs": 2764,
+      "quality": {
+        "hitAt5": 0.835,
+        "hitAt1": 0.617,
+        "precisionAt5": 0.224,
+        "searchRecallAt5": 0.828,
+        "noAnswer": 0,
+        "temporal": 0.577,
+        "wrongProjectTop": 0.017,
+        "mixUp": 0,
+        "leaks": 0
+      },
+      "byKind": {
+        "all": {
+          "recallAt5": 0.835,
+          "hitAt1": 0.617,
+          "noAnswer": 0,
+          "mixUp": 0
+        },
+        "direct": {
+          "recallAt5": 0.889,
+          "hitAt1": 0.614,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "context": {
+          "recallAt5": 0.858,
+          "hitAt1": 0.692,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "cross-language": {
+          "recallAt5": 0.83,
+          "hitAt1": 0.578,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "temporal": {
+          "recallAt5": 0.804,
+          "hitAt1": 0.367,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "indirect": {
+          "recallAt5": 0.73,
+          "hitAt1": 0.51,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "indirect-near": {
+          "recallAt5": 0.73,
+          "hitAt1": 0.51,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "indirect-mid": {
+          "recallAt5": 0.73,
+          "hitAt1": 0.51,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "indirect-far": {
+          "recallAt5": 0.73,
+          "hitAt1": 0.51,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "no-answer": {
+          "recallAt5": null,
+          "hitAt1": null,
+          "noAnswer": 0,
+          "mixUp": null
+        },
+        "multi-hop": {
+          "recallAt5": 0.45,
+          "hitAt1": 0,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "time-travel": {
+          "recallAt5": 0.6,
+          "hitAt1": 0.1,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "topic-switch": {
+          "recallAt5": 1,
+          "hitAt1": 1,
+          "noAnswer": null,
+          "mixUp": 0
+        },
+        "topic-return": {
+          "recallAt5": 1,
+          "hitAt1": 1,
+          "noAnswer": null,
+          "mixUp": 0
+        },
+        "person": {
+          "recallAt5": 1,
+          "hitAt1": 0.85,
+          "noAnswer": null,
+          "mixUp": null
+        }
+      },
+      "settings": {
+        "p9": true,
+        "p9b": true,
+        "store": true,
+        "mode": "B0"
+      }
+    },
+    {
+      "id": "rmwe1zb3t",
+      "date": "2026-11-12T21:21:38.297Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "b4de3851",
+        "branch": "girru/memory-accuracy",
+        "memoryCodeChanged": true
+      },
+      "source": "accuracy.mjs",
+      "kind": "accuracy",
+      "label": "Accuracy B (context query: entity names + topic words), 1,280 questions, 100k real embeddings",
+      "size": 100140,
+      "vectors": "real",
+      "queries": 1280,
+      "searchMs": {
+        "p50": 84.8,
+        "p95": 100.8
+      },
+      "queryEmbedMs": {
+        "p50": 60.6,
+        "p95": 70.1
+      },
+      "coldMs": 2842.3,
+      "quality": {
+        "hitAt5": 0.793,
+        "hitAt1": 0.585,
+        "precisionAt5": 0.214,
+        "searchRecallAt5": 0.78,
+        "noAnswer": 0,
+        "temporal": 0.514,
+        "wrongProjectTop": 0.017,
+        "mixUp": 0,
+        "leaks": 0
+      },
+      "byKind": {
+        "all": {
+          "recallAt5": 0.793,
+          "hitAt1": 0.585,
+          "noAnswer": 0,
+          "mixUp": 0
+        },
+        "direct": {
+          "recallAt5": 0.889,
+          "hitAt1": 0.617,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "context": {
+          "recallAt5": 0.856,
+          "hitAt1": 0.694,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "cross-language": {
+          "recallAt5": 0.78,
+          "hitAt1": 0.544,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "temporal": {
+          "recallAt5": 0.754,
+          "hitAt1": 0.346,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "indirect": {
+          "recallAt5": 0.57,
+          "hitAt1": 0.38,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "indirect-near": {
+          "recallAt5": 0.57,
+          "hitAt1": 0.38,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "indirect-mid": {
+          "recallAt5": 0.57,
+          "hitAt1": 0.38,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "indirect-far": {
+          "recallAt5": 0.57,
+          "hitAt1": 0.38,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "no-answer": {
+          "recallAt5": null,
+          "hitAt1": null,
+          "noAnswer": 0,
+          "mixUp": null
+        },
+        "multi-hop": {
+          "recallAt5": 0.45,
+          "hitAt1": 0,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "time-travel": {
+          "recallAt5": 0.6,
+          "hitAt1": 0.1,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "topic-switch": {
+          "recallAt5": 1,
+          "hitAt1": 1,
+          "noAnswer": null,
+          "mixUp": 0
+        },
+        "topic-return": {
+          "recallAt5": 1,
+          "hitAt1": 1,
+          "noAnswer": null,
+          "mixUp": 0
+        },
+        "person": {
+          "recallAt5": 1,
+          "hitAt1": 0.85,
+          "noAnswer": null,
+          "mixUp": null
+        }
+      },
+      "settings": {
+        "p9": true,
+        "p9b": true,
+        "store": true,
+        "mode": "B"
+      }
     }
   ]
 }

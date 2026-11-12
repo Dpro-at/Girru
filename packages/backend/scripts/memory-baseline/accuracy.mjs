@@ -18,7 +18,7 @@ import { backendDir, moduleUrl, addUser, argValue, cleanup, ollamaHas, openDb, p
 import { existsSync, mkdirSync, openSync, readSync, writeSync, closeSync, statSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { syntheticMemories } from './corpus.mjs';
-import { buildWorld, DISTRACTOR_PROJECT_MAP } from './accuracy-world.mjs';
+import { buildWorld, DISTRACTOR_PROJECT_MAP, WORLD_PROJECTS, WORLD_PEOPLE } from './accuracy-world.mjs';
 
 const SEM_MODEL = 'qwen3-embedding:0.6b';
 const DIMS = 1024;
@@ -28,10 +28,15 @@ const out = argValue('out', null);
 const rowsOut = argValue('rows', null);
 const label = argValue('record', null);
 const limitQ = Number(argValue('questions', '0')) || Infinity;
-// --mode A: the last message only (what a chat recalls today). B (context query) comes with its builder.
+// --mode A: the last message only (what a chat recalled before MEM-ACC-02).
+// --mode B: the context query (src/memory/context/query.ts): entity of the conversation or the open project, its names, topic words.
 const mode = argValue('mode', 'A');
-if (mode !== 'A') { console.error(`mode ${mode} is not built yet`); process.exit(2); }
-const queryOf = (q) => q.q;
+if (!['A', 'B', 'B0'].includes(mode)) { console.error(`mode ${mode} is not built yet`); process.exit(2); }
+const { buildContextQuery } = await import(moduleUrl(backendDir, 'src/memory/context/query.ts'));
+const PROJECT_ENTITIES = new Map(WORLD_PROJECTS.map((p) => [p.slug, { names: [p.en, p.ar] }]));
+const KNOWN = [...PROJECT_ENTITIES.values(), ...WORLD_PEOPLE.map((n) => ({ names: [n, n.split(' ')[0]] }))];
+const queryOf = (q) => (mode === 'A' ? q.q
+  : buildContextQuery({ message: q.q, history: q.history || [], openProject: PROJECT_ENTITIES.get(q.project) || null, entities: KNOWN, topic: mode === 'B' }).query);
 if (!(await ollamaHas(SEM_MODEL))) { console.error(`${SEM_MODEL} is not available on the local Ollama; nothing measured`); process.exit(2); }
 if (!cacheDir) { console.error('--cache <folder> is required (distractor embeddings, outside the repo)'); process.exit(2); }
 process.env.MEMORY_EMBEDDINGS = 'ollama';
