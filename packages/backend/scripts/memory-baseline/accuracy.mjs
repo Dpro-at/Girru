@@ -35,6 +35,10 @@ if (!['A', 'B', 'B0'].includes(mode)) { console.error(`mode ${mode} is not built
 const { buildContextQuery } = await import(moduleUrl(backendDir, 'src/memory/context/query.ts'));
 const PROJECT_ENTITIES = new Map(WORLD_PROJECTS.map((p) => [p.slug, { names: [p.en, p.ar] }]));
 const KNOWN = [...PROJECT_ENTITIES.values(), ...WORLD_PEOPLE.map((n) => ({ names: [n, n.split(' ')[0]] }))];
+// The message with the known names taken out (Falcon, فالكون, لفالكون, Amira…).
+const escapeRe = (n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const NAME_RE = new RegExp(`(?:[لبوفك]|ال|لـ)?(?:${[...new Set(KNOWN.flatMap((e) => e.names))].sort((a, b) => b.length - a.length).map(escapeRe).join('|')})`, 'giu');
+const names_out = (t) => t.replace(NAME_RE, ' ').replace(/\s+/g, ' ').trim();
 const queryOf = (q) => (mode === 'A' ? q.q
   : buildContextQuery({ message: q.q, history: q.history || [], openProject: PROJECT_ENTITIES.get(q.project) || null, entities: KNOWN, topic: mode === 'B' }).query);
 if (!(await ollamaHas(SEM_MODEL))) { console.error(`${SEM_MODEL} is not available on the local Ollama; nothing measured`); process.exit(2); }
@@ -52,6 +56,7 @@ const { getEmbeddingService } = await import(moduleUrl(backendDir, 'src/memory/e
 const { packVector } = await import(moduleUrl(backendDir, 'src/memory/vectors.ts'));
 const D = await import(moduleUrl(backendDir, 'src/memory/drawers.ts'));
 const { qualityRecall } = await import(moduleUrl(backendDir, 'src/memory/quality/recall.ts'));
+const { lexicalTokens } = await import(moduleUrl(backendDir, 'src/memory/text-normalize.ts'));
 const storage = getMemoryStorage();
 await quietly(() => storage.initialize());
 const emb = getEmbeddingService();
@@ -145,7 +150,23 @@ for (const q of questions) {
   const tC = performance.now();
   const chat = await quietly(() => qualityRecall({ userId: OWNER, drawers, query, limit: 6, ask: false }));
   const chatMs = performance.now() - tC;
-  rows.push({ q, embedMs, search: { ids: raw.map((r) => r.memory.id), ms: searchMs }, chat: { ids: chat.items.map((it) => it.memory.id), reliable: chat.reliable, ms: chatMs, fellBack: chat.fellBack } });
+  // Diagnosis (no-answer): the top hit's score parts, and the share of the message's own words found in it.
+  const nameTokens = new Set(KNOWN.flatMap((e) => e.names.flatMap((n) => lexicalTokens(n))));
+  const ownAll = [...new Set(lexicalTokens(q.q))];
+  const own = ownAll.filter((w) => !nameTokens.has(w));
+  // The message without its names, embedded alone: how close its own meaning is to each chat item.
+  const bare = names_out(q.q);
+  const bv = (await quietly(() => emb.embedQuery(bare || q.q))).vector;
+  const vecOf = db.prepare('SELECT embedding_vec FROM memories WHERE id = ?');
+  const cosTo = (id) => { const b = vecOf.get(id)?.embedding_vec; if (!b) return 0; const f = new Float32Array(new Uint8Array(b).buffer); let d = 0, na = 0, nb = 0; for (let k = 0; k < f.length; k++) { d += bv[k] * f[k]; na += bv[k] * bv[k]; nb += f[k] * f[k]; } return d / Math.sqrt(na * nb); };
+  const coverage = (text) => { const t = new Set(lexicalTokens(text || '')); return own.length ? own.filter((w) => t.has(w)).length / own.length : 0; };
+  const top = raw[0];
+  const items = chat.items.slice(0, 5);
+  const bareCos = items.map((it) => cosTo(it.memory.id));
+  const bareCov = items.map((it) => coverage(it.memory.content));
+  const features = { bareCosMax: +Math.max(0, ...bareCos).toFixed(4), bareCovMax: +Math.max(0, ...bareCov).toFixed(3), targetBareCos: q.target ? +cosTo(q.target).toFixed(4) : null, best: +chat.best.toFixed(4), topSim: top ? +top.similarity.toFixed(4) : 0, topVec: top ? +(top.scoreBreakdown?.vectorScore ?? 0).toFixed(4) : 0,
+    topKw: top ? +(top.scoreBreakdown?.keywordScore ?? 0).toFixed(4) : 0, ownWords: own.length, coverage: top ? +coverage(top.memory.content).toFixed(3) : 0 };
+  rows.push({ q, embedMs, features, search: { ids: raw.map((r) => r.memory.id), ms: searchMs }, chat: { ids: chat.items.map((it) => it.memory.id), reliable: chat.reliable, ms: chatMs, fellBack: chat.fellBack } });
 }
 
 // 3b. Save, then ask at once (the app's own save path), and a memory written without a vector yet.
@@ -245,7 +266,7 @@ for (const path of ['search', 'chat']) {
 console.log('\n== save, then ask at once');
 for (const f of fresh) console.log(`${f.id.padEnd(9)} ${f.case.padEnd(14)} rank ${f.rank || 'not found'}${f.saveMs ? ` · save ${f.saveMs} ms` : ''} · ask ${f.askMs} ms`);
 if (out) writeFileSync(out, JSON.stringify(report, null, 2));
-if (rowsOut) writeFileSync(rowsOut, JSON.stringify(rows.map((r) => ({ id: r.q.id, kind: r.q.kind, lang: r.q.lang, q: r.q.q, target: r.q.target, search: r.search.ids.slice(0, 5), chat: r.chat.ids, reliable: r.chat.reliable })), null, 1));
+if (rowsOut) writeFileSync(rowsOut, JSON.stringify(rows.map((r) => ({ id: r.q.id, kind: r.q.kind, lang: r.q.lang, q: r.q.q, target: r.q.target, features: r.features, search: r.search.ids.slice(0, 5), chat: r.chat.ids, reliable: r.chat.reliable })), null, 1));
 if (label) {
   const { appendResult, searchSettings } = await import('./results.mjs');
   const c = report.chat.all, s = report.search.all;
