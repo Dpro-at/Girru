@@ -10,10 +10,13 @@ function validateInstalledClient(value, expectedClientId) {
   return { clientId: installed.client_id, clientSecret: installed.client_secret };
 }
 async function readInstalledClient(file, expectedClientId) {
+  // Windows has no O_NOFOLLOW: a link is refused by looking at the name first, and the opened file must be that same file.
+  const named = await fs.promises.lstat(file);
+  if (named.isSymbolicLink() || !named.isFile()) throw Error('device_google_installed_client_invalid');
   const handle = await fs.promises.open(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
   try {
     const stat = await handle.stat();
-    if (!stat.isFile() || stat.size > 16384) throw Error('device_google_installed_client_invalid');
+    if (!stat.isFile() || stat.size > 16384 || stat.ino !== named.ino || stat.dev !== named.dev) throw Error('device_google_installed_client_invalid');
     const bytes = Buffer.alloc(16385);
     let size = 0;
     while (size < bytes.length) {
