@@ -371,7 +371,7 @@ Measured on 12 November 2026 on generated test data: one owner, an owner chat wi
 | 3,000,000 | – | 109 / 127 ms | – | 3.9 min / – | 3.1 GB / – |
 | 10,000,000 | – | 266 / 575 ms | – | 27 min / – | 9.1 GB / – |
 
-Recall on the test set is the same as before (top 5: 0.958 same language, 0.714 across languages; no leaks). The rows above the old table ("Recall time") were measured with older code. Every run, with the machine and the code version, is in `docs/internal/memory-search-results.json`; the full report is `docs/internal/MEMORY_SEARCH_REPORT.md`.
+Recall on the test set is the same as before (top 5: 0.958 same language, 0.714 across languages; no leaks). The "Recall time" rows in the table above were measured earlier, with older code, on the development Mac. Every run, with the machine and the code version, is in `docs/internal/memory-search-results.json`; the full report is `docs/internal/MEMORY_SEARCH_REPORT.md`.
 
 Every installed provider passed the same memory scenario (save, recall, replace, handoff, propose, a refused wrong argument, and a last recall that returns the new fact) through each way it connects: subscriptions through their command-line tools, the `dpro-memory` MCP server, and a local model through Ollama. One small local model held to an 8k window is recorded as "memory limited": it missed one recall and invented nothing.
 
