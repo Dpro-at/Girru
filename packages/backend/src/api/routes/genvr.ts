@@ -5,6 +5,7 @@ import { actorOf } from '../../auth/auth-gate.js';
 import { requireAccount, ScopeError } from '../../repositories/scope.js';
 import { genvrMarketRoutes } from './genvr-market.js';
 import { genvrWorldRoutes } from './genvr-world.js';
+import { followWorldTitle } from '../../services/genvr-world.js';
 import { repositories } from '../../repositories/index.js';
 import { q, sql, one, run, type Step } from '../../repositories/sql-steps.js';
 import fs from 'node:fs';
@@ -59,6 +60,9 @@ export async function genvrRoutes(app:FastifyInstance,options:{marketFetch?:type
    if(!existing){const count=yield* one<{total:number}>('SELECT COUNT(*) AS total FROM genvr_projects WHERE user_id=?',owner);if((count?.total??0)>=1000)throw new TypeError();}
    if((existing?.revision??0)!==body.revision)throw Error('conflict');
    const next=body.revision+1;yield* run('INSERT INTO genvr_projects(user_id,id,title,document,revision) VALUES(?,?,?,?,?) ON CONFLICT(user_id,id) DO UPDATE SET title=excluded.title,document=excluded.document,revision=excluded.revision',owner,p.id,p.title,document,next);if(body.agents!==undefined){yield* run('DELETE FROM genvr_members WHERE user_id=? AND project_id=?',owner,p.id);for(const agent of body.agents){yield* run('INSERT INTO genvr_agent_looks(user_id,agent_id,avatar) VALUES(?,?,?) ON CONFLICT(user_id,agent_id) DO UPDATE SET avatar=excluded.avatar',owner,agent.id,agent.avatar);yield* run('INSERT INTO genvr_members(user_id,project_id,agent_id) VALUES(?,?,?)',owner,p.id,agent.id);}}return next;
-  });return {saved:true,revision};
+  });
+  // A renamed place: its Girru chat project and chat follow the new name now, not only when the place opens next.
+  await followWorldTitle(owner,p.id,p.title).catch(()=>undefined);
+  return {saved:true,revision};
  }catch(e){return error(reply,e);}});
 }
