@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useState, type ReactNode, useRef } from 'react';
 import type { Publication } from './connections-contract.js';
 import { UiIcon, type UiIconName } from './ui-icons';
 import realistic from '../assets/genvr/style-realistic.webp';
@@ -103,7 +103,9 @@ export function PublishedCards({published}: {published: Publication[]}) {
 export function SpaceInside({space, section, onOpen, onRename, children}: {space: SpaceRow; section: string; onOpen: () => void; onRename: (title: string) => Promise<void>; children?: ReactNode}) {
   const [name, setName] = useState(space.title), [notice, setNotice] = useState(''), [saving, setSaving] = useState(false);
   const current = SECTIONS.find(s => s.id === section && (s.id !== 'blocks' || space.style === 'voxel')) ?? SECTIONS[0];
-  const save = async () => { if (!name.trim() || name.trim() === space.title) return; setSaving(true); setNotice(''); try { await onRename(name.trim()); setNotice('Saved.'); } catch { setNotice('It could not be saved. Try again.'); } finally { setSaving(false); } };
+  // Enter and leaving the field both save: one save at a time, and a name already being saved is not sent again.
+  const sending = useRef('');
+  const save = async () => { const next = name.trim(); if (!next || next === space.title || next === sending.current) return; sending.current = next; setSaving(true); setNotice(''); try { await onRename(next); setNotice('Saved.'); } catch { setNotice('It could not be saved. Try again.'); } finally { sending.current = ''; setSaving(false); } };
   const field = (label: string, value: ReactNode) => <div className="genvr-field"><small>{label}</small><span>{value}</span></div>;
   return <div className="genvr-inside">
     <header className="genvr-inside-head"><h2>{current.name}</h2><button type="button" className="primary" title="Open this place in the Studio (⌘O)" onClick={onOpen}><UiIcon name="play" size={13}/>Open in Studio</button></header>

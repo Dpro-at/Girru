@@ -87,3 +87,7 @@ test('GV1 PC fixes: a space opens empty, the Studio never waits on an unanswered
  assert.match(page,/Close without saving/);assert.match(page,/current==='loading'\?'slow'/);assert.doesNotMatch(page,/current==='loading'\?'unavailable'/);
  assert.match(page,/if\(channel&&p!=='lab'\)\{leaveTo\.current=p;close\(\);return;\}/);
 });
+test('GV1: renaming saves once when Enter and leaving the field both fire',()=>{
+ const src=require('node:fs').readFileSync(require('node:path').join(__dirname,'../src/GenVRHome.tsx'),'utf8');
+ assert.match(src,/next === sending\.current\) return; sending\.current = next;/);
+});
