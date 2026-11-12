@@ -53,7 +53,7 @@ test('migration recognises only managed entries and exact current or historical 
  const {pinnedEntryArgs}=await import('../src/mcp-client/pinned-entry.ts');
  const old='4d209c9e8fc7028ed5dbcba8b0d38c59a299f433afc3bb69af7d3f75d80afbab';
  const vendor=path.join(genvrBundledRoot(),'package/dist/mcp.js');
- const cache=path.join(genvrRuntimesRoot(),'genvr/0.3.0-preview.18-1234abcd/package/dist/mcp.js');
+ const cache=path.join(genvrRuntimesRoot(),'genvr/0.3.0-preview.19-1234abcd/package/dist/mcp.js');
  const row=args=>({...bundled,args:JSON.stringify(args)});
  for(const file of [vendor,cache])for(const hash of [old,GENVR_PACKAGE_HASH])assert.equal(isManagedGenvrLaunch(row(pinnedEntryArgs(file,hash))),true);
  assert.equal(isManagedGenvrLaunch(row([vendor])),true);

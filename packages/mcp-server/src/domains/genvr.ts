@@ -16,9 +16,9 @@ const SCREENS=['landscape','portrait','any'] as const;
 const MOVES=['double-jump','wall-jump','dash'] as const;
 const LIMITS={durationSec:[30,1800],minPlayers:[1,50],health:[1,1000],respawnDelaySec:[0,60],scoreGoal:[1,1000]} as const;
 const newGame=()=>({match:{minPlayers:2,durationSec:300,countdownSec:5,resultsSec:10},score:{from:'kills'},win:{by:'highest_score'}});
-const OPS=['list','get','agents_available','rename','set_play','set_game','set_agents','market'] as const;
+const OPS=['list','get','create','agents_available','rename','set_play','set_game','set_agents','market'] as const;
 const FIELDS:Record<typeof OPS[number],string[]>={
- list:[],get:['space_id'],agents_available:[],rename:['space_id','title'],
+ list:[],get:['space_id'],create:['title','look','view','orientation','devices','size'],agents_available:[],rename:['space_id','title'],
  set_play:['space_id','view','moves','orientation','devices'],
  set_game:['space_id','on','teams','friendly_fire','match_minutes','players_to_start','health','back_in_seconds','score_to_win'],
  set_agents:['space_id','add','remove'],
@@ -27,12 +27,14 @@ const FIELDS:Record<typeof OPS[number],string[]>={
 
 export const workspaceGenvrDefinition={
  name:'genvr_spaces',title:'GenVR spaces and market',
- description:'GenVR places on this computer (My spaces) and the GenVR market, like the GenVR page. list and get read a place (look, size, how it is played, its game, the agents in it). rename, set_play (view 3d or 2d, extra moves for 2d, phone screen, devices), set_game (on/off, teams, friendly fire, match length, players to start, health, back in, score to win; the same limits as the page) and set_agents (add or take out agents) save the place at once. market searches items from GenVR creators (read only; paid items are bought on GenVR). Building inside a place and adding a free market item to it happen in the Studio: the agents in the place build there when the owner asks in the Studio chat (with the GenVR Studio tools connected, place_play also sets how the open place is played). Pictures, blocks, avatars, invite links, remixing and publishing are kept by GenVR for a published place and are not changed here. Making a new space is done on the GenVR page (Create and open).',
+ description:'GenVR places on this computer (My spaces) and the GenVR market, like the GenVR page. list and get read a place (look, size, how it is played, its game, the agents in it). rename, set_play (view 3d or 2d, extra moves for 2d, phone screen, devices), set_game (on/off, teams, friendly fire, match length, players to start, health, back in, score to win; the same limits as the page) and set_agents (add or take out agents) save the place at once. market searches items from GenVR creators (read only; paid items are bought on GenVR). Building inside a place and adding a free market item to it happen in the Studio: the agents in the place build there when the owner asks in the Studio chat (with the GenVR Studio tools connected, place_play also sets how the open place is played). Pictures, blocks, avatars, invite links, remixing and publishing are kept by GenVR for a published place and are not changed here. create makes a new private space like the create page of the GenVR page (look simple, realistic or voxel; view; phone screen; devices; size); it opens empty and is built in the Studio.',
  inputSchema:{type:'object',properties:{
   operation:{type:'string',enum:[...OPS]},
   space_id:{type:'string',maxLength:128},
   title:{type:'string',minLength:1,maxLength:60},
   view:{type:'string',enum:['3d','2d']},
+  look:{type:'string',enum:['simple','realistic','voxel'],description:'For create; default realistic'},
+  size:{type:'string',enum:['small','medium','large','huge','biggest'],description:'For create; default small (500 m, 30 players)'},
   moves:{type:'array',maxItems:3,items:{type:'string',enum:[...MOVES]},description:'Extra moves for a 2d place (replaces the list)'},
   orientation:{type:'string',enum:[...SCREENS],description:'Phone screen while playing'},
   devices:{type:'array',minItems:1,maxItems:4,items:{type:'string',enum:[...DEVICES]},description:'Made for (replaces the list; at least one)'},
@@ -83,6 +85,16 @@ export async function workspaceGenvrTool(args:Record<string,unknown>,backend:Bac
   const rows=((await backend.request('GET','/api/genvr/projects'))?.projects??[]) as any[];
   const spaces=rows.filter(r=>!r.lab).map(r=>({space_id:r.id,title:r.title,look:r.style,size:r.sizeTier,view:r.view==='side'?'2d':'3d',devices:r.devices,agents:r.agentCount}));
   return {message:spaces.length?`${spaces.length} space${spaces.length===1?'':'s'} on this computer. They are private until published on GenVR.`:'No spaces yet. A space is made on the GenVR page (Create and open).',data:{spaces}};
+ }
+ if(op==='create'){
+  const title=typeof args.title==='string'?args.title.trim():'';if(!title||title.length>60)bad('title must be 1 to 60 characters');
+  const looks:Record<string,string>={simple:'blocky',realistic:'realistic',voxel:'voxel'},sizes:Record<string,string>={small:'small',medium:'medium',large:'large',huge:'huge',biggest:'max'};
+  const look=looks[String(args.look??'realistic')],size=sizes[String(args.size??'small')];if(!look)bad('look must be simple, realistic or voxel');if(!size)bad('size must be small, medium, large, huge or biggest');
+  if(args.view!==undefined&&args.view!=='3d'&&args.view!=='2d')bad('view must be 3d or 2d');
+  const orientation=args.orientation??'landscape';if(!SCREENS.includes(orientation as any))bad(`orientation must be ${SCREENS.join(', ')}`);
+  const devices=args.devices===undefined?[...DEVICES]:list(args.devices,DEVICES,'devices');if(!devices.length)bad('choose at least one device');
+  const made=await backend.request('POST','/api/genvr/projects',{title,look,view:args.view==='2d'?'side':'free',orientation,devices,size});
+  return {message:`${title} is made: a private space on this computer. It opens empty; it is built in the Studio.`,data:summary(await load(made.id),await new Map((await roster()).map(a=>[a.id,a.name])))};
  }
  if(op==='agents_available'){const agents=(await roster()).map(a=>({id:a.id,name:a.name}));return {message:'Agents that can be added to a place.',data:{agents}};}
  if(op==='market'){

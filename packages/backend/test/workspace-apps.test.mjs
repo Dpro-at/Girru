@@ -43,9 +43,9 @@ test('GenVR runtime removal is separate from the preserved account connection',a
  const source={servers:async()=>[],account:async()=>({status:'connected'}),state:()=>'',genvr:()=>null};
  const item=async()=> (await listWorkspaceApps('apps-owner',source)).items.find(x=>x.id==='genvr');
  assert.equal((await item()).runtime,'missing');assert.equal((await item()).removable,false);
- source.genvr=()=>({source:'installed',version:'0.3.0-preview.18'});
+ source.genvr=()=>({source:'installed',version:'0.3.0-preview.19'});
  assert.equal((await item()).runtime,'installed');assert.equal((await item()).removable,true);assert.equal((await item()).state,'connected');
- source.genvr=()=>({source:'bundled',version:'0.3.0-preview.18'});
+ source.genvr=()=>({source:'bundled',version:'0.3.0-preview.19'});
  assert.equal((await item()).removable,false);
 });
 

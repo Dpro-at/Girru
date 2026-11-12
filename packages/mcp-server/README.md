@@ -24,7 +24,7 @@ The public definitions in `src/tools.ts` (and domain modules) and `publicToolCat
 | `workspace_reports` | Reports and prepared display results | `list`, `read`, `create`, `update`, `publish` |
 | `workspace_memory` | Scoped memory and prepared proposals | `search`, `read`, `versions`, `status`, `reviews`, `review`, `propose_add`, `propose_update` |
 | `workspace_devices` | Owned computer status, confirmed task requests and selected portable synchronization; target approvals remain required | `status`, `sync`, `join_requests`, `suggest_target`, `task_progress`, `work_result`, `task_rules`, `set_task_rules`, `rename_computer`, `request_task`, `cancel_task`, `select_sync` |
-| `genvr_spaces` | GenVR spaces on this computer (how they are played, their game, the agents in them) and the read-only GenVR market | `list`, `get`, `agents_available`, `rename`, `set_play`, `set_game`, `set_agents`, `market` |
+| `genvr_spaces` | GenVR spaces on this computer (how they are played, their game, the agents in them) and the read-only GenVR market | `list`, `get`, `create`, `agents_available`, `rename`, `set_play`, `set_game`, `set_agents`, `market` |
 | `meetings` | Department meetings | `list`, `read`, `departments`, `participants`, `create`, `draft` |
 | `workspace_settings` | Portable workspace settings | `export`, `preview`, `import` |
 | `trading_practice` | Local paper trading practice | `read`, `start`, `order`, `step`, `stop`, `end` |

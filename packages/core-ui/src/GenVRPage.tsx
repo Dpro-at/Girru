@@ -22,7 +22,7 @@ export function callLine(call:Call):string{const a=call.function.arguments;const
 export function GenVRPage({client,active,sidebarSlot}:{client:SessionClient;active:boolean;sidebarSlot?:HTMLElement|null}){
  /* GV1: the section's place in the sidebar, the space we are inside (its settings), and the create page. */
  const [genvrPlace,setGenvrPlace]=useState<GenVRPlace>('spaces'),[insideId,setInsideId]=useState(''),[section,setSection]=useState('basic'),[creating,setCreating]=useState(false);
- const createSpec=useRef<CreateSpec|undefined>(undefined);
+ const createSpec=useRef<CreateSpec|undefined>(undefined),openingLab=useRef(false);
  const frame=useRef<HTMLIFrameElement>(null),revisions=useRef(new Map<string,number>()),opening=useRef<string | undefined>(undefined);
  const selection=useRef<SpaceAgent[]|undefined>(undefined);
  const [mcp,setMcp]=useState('Preparing local MCP…');
@@ -52,7 +52,7 @@ export function GenVRPage({client,active,sidebarSlot}:{client:SessionClient;acti
  const [published,setPublished]=useState<Publication[]>([]);
  useEffect(()=>{if(!active||channel||client.getSnapshot().user?.role!=='owner')return;let disposed=false;void client.request({method:'GET',path:'/api/connections/genvr/publications'} as never).then(r=>{if(!disposed&&r.status===200)setPublished((r.body as {publications:Publication[]}).publications);}).catch(()=>{});return()=>{disposed=true;};},[client,active,channel,retry]);
  // GV1: with no space, the create page shows (the Studio no longer opens by itself).
- function open(id?:string,create?:CreateSpec){createSpec.current=create;selection.current=undefined;opening.current=id;place.current=null;opened.current='';shown.current={folder:'',answerer:''};setWorld(null);setAnswerer(null);setFolder('');setAsking(null);setUndo(null);setChatNote('');setNotice('');setStuck(false);leaveTo.current=null;setPhase('loading');setChannel(crypto.randomUUID());}
+ function open(id?:string,create?:CreateSpec,asLab=false){createSpec.current=create;openingLab.current=asLab;selection.current=undefined;opening.current=id;place.current=null;opened.current='';shown.current={folder:'',answerer:''};setWorld(null);setAnswerer(null);setFolder('');setAsking(null);setUndo(null);setChatNote('');setNotice('');setStuck(false);leaveTo.current=null;setPhase('loading');setChannel(crypto.randomUUID());}
  useEffect(()=>{
   if(!channel)return;let disposed=false;
   const send=(value:Record<string,unknown>)=>frame.current?.contentWindow?.postMessage({type:'dpro-genvr',channel,...value},window.location.origin);sendRef.current=send;
@@ -88,8 +88,9 @@ export function GenVRPage({client,active,sidebarSlot}:{client:SessionClient;acti
   };
   const receive=async(event:MessageEvent)=>{
    if(disposed||event.source!==frame.current?.contentWindow||event.origin!==window.location.origin||event.data?.type!=='dpro-genvr'||event.data.channel!==channel)return;
-   const data=event.data;if(data.operation==='ready'){let privateLibrary:string|undefined;if(client.getSnapshot().user?.role==='owner'){try{const t=await client.request({method:'POST',path:STUDIO_TICKET_PATH,body:{}} as never);if(t.status===200)privateLibrary=(t.body as {ticket:string}).ticket;}catch{/* library stays off */}}if(disposed)return;send({operation:'start',projectId:opening.current,storageNamespace:client.getSnapshot().user?.id,privateLibrary,chat:owner,...(createSpec.current?{create:createSpec.current}:{})});return;}if(data.operation==='mounted'){setPhase('ready');return;}
+   const data=event.data;if(data.operation==='ready'){let privateLibrary:string|undefined;if(client.getSnapshot().user?.role==='owner'){try{const t=await client.request({method:'POST',path:STUDIO_TICKET_PATH,body:{}} as never);if(t.status===200)privateLibrary=(t.body as {ticket:string}).ticket;}catch{/* library stays off */}}if(disposed)return;send({operation:'start',projectId:opening.current,storageNamespace:client.getSnapshot().user?.id,privateLibrary,chat:owner,...(createSpec.current?{create:createSpec.current}:{}),...(openingLab.current?{lab:true}:{})});return;}if(data.operation==='mounted'){setPhase('ready');return;}
    if(data.operation==='unavailable'){setPhase('unavailable');return;}
+   if(data.operation==='home'){const to=leaveTo.current;leaveTo.current=null;setChannel('');setPhase('idle');setStuck(false);setNotice('');setGenvrPlace(p=>to??(p==='lab'?'spaces':p));return;}
    if(data.operation==='closed'){if(data.ok){const to=leaveTo.current;leaveTo.current=null;setChannel('');setPhase('idle');setStuck(false);setGenvrPlace(p=>to??(p==='lab'?'spaces':p));}else{leaveTo.current=null;setNotice('The Studio could not save this space. Keep it open and try again, or close it without saving.');setStuck(true);}return;}
    if(data.operation==='context'){const world=owner?placeOf(data.context):null;if(!world)return;place.current=world;setWorld(world);void openWorld(world);return;}
    if(data.operation==='choose-answerer'){if(owner&&place.current){void loadAgents();setPicking(true);}return;}
@@ -146,7 +147,7 @@ export function GenVRPage({client,active,sidebarSlot}:{client:SessionClient;acti
  /** X and the sidebar always leave: a Studio that is not open yet has nothing to save. */
  const drop=()=>{const to=leaveTo.current;leaveTo.current=null;setStuck(false);setNotice('');setChannel('');setPhase('idle');setGenvrPlace(p=>to??(p==='lab'?'spaces':p));};
  const close=()=>{if(phase!=='ready'){drop();return;}setNotice('');setStuck(false);frame.current?.contentWindow?.postMessage({type:'dpro-genvr',channel,operation:'close'},window.location.origin);};
- const goPlace=(p:GenVRPlace)=>{setInsideId('');setCreating(false);if(channel&&p!=='lab'){leaveTo.current=p;close();return;}setGenvrPlace(p);if(p==='lab')open(lab?.id);};
+ const goPlace=(p:GenVRPlace)=>{setInsideId('');setCreating(false);if(channel&&p!=='lab'){leaveTo.current=p;close();return;}setGenvrPlace(p);if(p==='lab')open(lab?.id,undefined,true);};
  const studioTitle=world?.name??projects.find(p=>p.id===opening.current)?.title??createSpec.current?.title??'Studio';
  const nav=<GenVRSidebar place={genvrPlace} onPlace={goPlace} counts={{spaces:spaces.length,published:published.length}} inside={channel?null:inside} section={section} onSection={setSection} onBack={()=>setInsideId('')}/>;
  const mcpProblem=/could not|managed by/i.test(mcp);

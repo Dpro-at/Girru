@@ -15,7 +15,9 @@ window.addEventListener('message',async event=>{
    let projectId=data.projectId;if(data.create)projectId=await createFromSpec(data.create);
    const host=await studioHost(typeof data.privateLibrary==='string'&&/^[a-f0-9]{64}$/.test(data.privateLibrary)?data.privateLibrary:null);
    // A space opens as it is: the example film is only for the Studio opened without a space (Mohamed, 2026-11-12).
-   studio=mountStudio(document.getElementById('studio'),{filmExample:typeof projectId==='string'?false:'/film-examples/island-languages.genvrfilm',forceWebGL:true,initialProjectId:projectId,...host,...(data.chat===true?hostChat():{}),agents:id=>request('agents',id),catalog:{list:()=>request('catalog-list'),asset:id=>request('catalog-asset',id)},storage:{list:()=>request('list'),read:id=>request('read',id),write:project=>request('write',project)}});
+   studio=mountStudio(document.getElementById('studio'),{filmExample:typeof projectId==='string'||data.lab===true?false:'/film-examples/island-languages.genvrfilm',forceWebGL:true,
+    // Girru keeps the place list: My projects (after saving) goes back to it; Motion lab opens the lab itself.
+    onHome:()=>send({operation:'home'}),...(data.lab===true&&typeof projectId!=='string'?{openLab:true}:{}),initialProjectId:projectId,...host,...(data.chat===true?hostChat():{}),agents:id=>request('agents',id),catalog:{list:()=>request('catalog-list'),asset:id=>request('catalog-asset',id)},storage:{list:()=>request('list'),read:id=>request('read',id),write:project=>request('write',project)}});
    send({operation:'mounted'});
   }catch{send({operation:'unavailable'});}
  }

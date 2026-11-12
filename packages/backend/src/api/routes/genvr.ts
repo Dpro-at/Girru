@@ -7,6 +7,13 @@ import { genvrMarketRoutes } from './genvr-market.js';
 import { genvrWorldRoutes } from './genvr-world.js';
 import { repositories } from '../../repositories/index.js';
 import { q, sql, one, run, type Step } from '../../repositories/sql-steps.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
+import { genvrRuntime } from '../../config/genvr-runtime.js';
+/** The create page's choices (core-ui GenVRHome STYLES/SIZES/DEVICES without the later ones). */
+const CREATE_LOOKS=['blocky','realistic','voxel'],CREATE_SIZES=['small','medium','large','huge','max'],CREATE_DEVICES=['phone','tablet','computer','tv'];
 const validTeam=(team:unknown):team is {id:string;avatar:number}[]=>Array.isArray(team)&&team.length<=200&&new Set(team.map(a=>a?.id)).size===team.length&&team.every(a=>object(a)&&Object.keys(a).sort().join(',')==='avatar,id'&&id(a.id)&&Number.isInteger(a.avatar)&&a.avatar>=0&&a.avatar<8);
 const MAX=64*1024*1024;
 const id=(value:unknown):value is string=>typeof value==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(value);
@@ -26,6 +33,21 @@ export async function genvrRoutes(app:FastifyInstance,options:{marketFetch?:type
  app.get('/api/genvr/agents',async(request,reply)=>{try{const owner=user(request);if(q.dialect!=='sqlite')return reply.code(409).send({code:'unsupported_store'});const looks=await q.all<{agent_id:string;avatar:number}>('SELECT agent_id,avatar FROM genvr_agent_looks WHERE user_id=?',owner);return {agents:(await roster(request)).map(a=>({id:a.id,name:a.name,avatar:looks.find(l=>l.agent_id===a.id)?.avatar??null}))};}catch(e){return error(reply,e);}});
  app.get('/api/genvr/projects',async(request,reply)=>{try{const owner=user(request);if(q.dialect!=='sqlite')return reply.code(409).send({code:'unsupported_store'});/* GV1: the home cards and a place's settings show its look, size and how it is played; a motion lab is listed apart. */const rows=await q.all<any>("SELECT p.id,p.title,(SELECT COUNT(*) FROM genvr_members m WHERE m.user_id=p.user_id AND m.project_id=p.id) AS agentCount,json_extract(p.document,'$.world.style.base') AS style,json_extract(p.document,'$.world.sizeTier') AS sizeTier,json_extract(p.document,'$.play.view') AS view,json_extract(p.document,'$.play.orientation') AS orientation,json_extract(p.document,'$.play.devices') AS devices,json_type(p.document,'$.lab') IS NOT NULL AS lab FROM genvr_projects p WHERE p.user_id=? ORDER BY p.title,p.id LIMIT 1000",owner);return {projects:rows.map(r=>{let devices:string[]=[];try{const d=JSON.parse(r.devices??'[]');if(Array.isArray(d))devices=d.filter((x:unknown)=>typeof x==='string').slice(0,8);}catch{/* not set */}return {id:r.id,title:r.title,agentCount:r.agentCount,style:r.style??null,sizeTier:r.sizeTier??null,view:r.view??null,orientation:r.orientation??null,devices,lab:!!r.lab};})};}catch(e){return error(reply,e);}});
  app.get<{Params:{id:string}}>('/api/genvr/projects/:id',async(request,reply)=>{try{const owner=user(request);if(!id(request.params.id))throw new TypeError();if(q.dialect!=='sqlite')return reply.code(409).send({code:'unsupported_store'});const row=await q.one<{document:string;revision:number}>('SELECT document,revision FROM genvr_projects WHERE user_id=? AND id=?',owner,request.params.id);return row?{project:JSON.parse(row.document),revision:row.revision,agents:await team(owner,request.params.id)}:reply.code(404).send({code:'not_found'});}catch(e){return error(reply,e);}});
+ // GV1 for agents: make a space like the GenVR page's create page (genvr-host.js createFromSpec), with the
+ // installed SDK's own project maker. The maker is read from the verified runtime and checked against its manifest.
+ app.post('/api/genvr/projects',{config:{rateLimit:{max:20,timeWindow:'1 minute'}}},async(request,reply)=>{try{
+  const owner=user(request),b=request.body as Record<string,any>;if(q.dialect!=='sqlite')return reply.code(409).send({code:'unsupported_store'});
+  if(!object(b)||Object.keys(b).sort().join(',')!=='devices,look,orientation,size,title,view'||typeof b.title!=='string'||!b.title.trim()||b.title.trim().length>60||!CREATE_LOOKS.includes(b.look)||!CREATE_SIZES.includes(b.size)||!['free','side'].includes(b.view)||!['landscape','portrait','any'].includes(b.orientation)||!Array.isArray(b.devices)||!b.devices.length||b.devices.length>4||!b.devices.every((d:unknown)=>CREATE_DEVICES.includes(d as string)))throw new TypeError();
+  const runtime=genvrRuntime();if(!runtime)return reply.code(409).send({code:'genvr_unavailable'});
+  const file=path.join(runtime.packageDir,'dist','studio-project.js'),expected=(runtime.manifest.files as Record<string,string>)['dist/studio-project.js'];
+  if(!expected||createHash('sha256').update(fs.readFileSync(file)).digest('hex')!==expected)return reply.code(409).send({code:'genvr_unavailable'});
+  const {createStudioProject,readStudioProject}=await import(pathToFileURL(file).href);
+  const made=createStudioProject(b.look,'empty',{orientation:b.orientation,view:b.view,moves:[],devices:CREATE_DEVICES.filter(d=>b.devices.includes(d))});
+  const project=readStudioProject({...made,title:b.title.trim(),world:{...made.world,sizeTier:b.size}});
+  const document=JSON.stringify(project);if(Buffer.byteLength(document)>MAX||!id(project.id))throw new TypeError();
+  await sql().tx(function*():Step<void>{const count=yield* one<{total:number}>('SELECT COUNT(*) AS total FROM genvr_projects WHERE user_id=?',owner);if((count?.total??0)>=1000)throw new TypeError();yield* run('INSERT INTO genvr_projects(user_id,id,title,document,revision) VALUES(?,?,?,?,1)',owner,project.id,project.title,document);});
+  return {id:project.id,revision:1};
+ }catch(e){return error(reply,e);}});
  app.put<{Params:{id:string}}>('/api/genvr/projects/:id',{bodyLimit:MAX+65536},async(request,reply)=>{try{
   const owner=user(request),body=request.body;if(q.dialect!=='sqlite')return reply.code(409).send({code:'unsupported_store'});
   if(!id(request.params.id)||!object(body)||!['project,revision','agents,project,revision'].includes(Object.keys(body).sort().join(','))||!Number.isSafeInteger(body.revision)||body.revision<0||body.revision>=Number.MAX_SAFE_INTEGER)throw new TypeError();
