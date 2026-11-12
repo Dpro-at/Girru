@@ -32,6 +32,7 @@
  */
 
 import os from 'node:os';
+import { createRequire } from 'node:module';
 import { getDatabase } from '../db/index.js';
 import { sql, sqliteSteps } from '../repositories/sql-steps.js';
 import { lexicalTokens } from './text-normalize.js';
@@ -61,10 +62,35 @@ interface Drawer {
    * memories): unit vectors scalar-quantised to int8 (4x smaller); the best
    * candidates are re-scored with their full vectors read by id.
    */
-  mode: 'exact' | 'i8';
+  mode: 'exact' | 'i8' | 'ann';
   q8: Int8Array;
   q8dims: number;
   q8n: number;
+  /**
+   * 'ann' (a drawer past GIRRU_RECALL_ANN_MIN memories): an in-process HNSW
+   * index (usearch, int8, cosine) over its live vectors, keyed by slot. Slots
+   * not in it (no vector, another size, replaced) are in `others`.
+   */
+  ann: AnnIndex | null;
+  annDims: number;
+  others: Set<number>;
+  pendKeys: number[];
+  pendVecs: Float32Array[];
+}
+
+interface AnnIndex {
+  add(keys: BigUint64Array, vectors: Float32Array, threads?: number): void;
+  search(vector: Float32Array, k: number, threads: number): { keys: BigUint64Array; distances: Float32Array };
+  remove(keys: bigint): number | number[];
+  size(): number;
+}
+
+let annLib: { Index: new (cfg: object) => AnnIndex } | null | undefined;
+/** usearch (Apache-2.0, prebuilt for Windows, macOS and Linux); null when it does not load here. */
+function annIndexClass(): { Index: new (cfg: object) => AnnIndex } | null {
+  if (annLib !== undefined) return annLib;
+  try { annLib = createRequire(import.meta.url)('usearch'); } catch { annLib = null; }
+  return annLib ?? null;
 }
 
 interface UserStore {
@@ -109,6 +135,12 @@ export function exactMax(): number {
   return process.env.GIRRU_RECALL_EXACT_MAX !== undefined && Number.isFinite(n) && n >= 0 ? n : 50_000;
 }
 
+/** A drawer with more memories than this gets an HNSW index (MEM-SPEED-01 step 3). */
+export function annMin(): number {
+  const n = Number(process.env.GIRRU_RECALL_ANN_MIN);
+  return process.env.GIRRU_RECALL_ANN_MIN !== undefined && Number.isFinite(n) && n >= 0 ? n : 100_000;
+}
+
 /** How many int8 candidates are re-scored with their full vector. */
 function rescoreCount(limit: number): number {
   const n = Number(process.env.GIRRU_RECALL_RESCORE);
@@ -141,10 +173,11 @@ export function forgetRecallStore(userId?: string): void {
   dropUser(userId);
 }
 
-export function recallStoreStats(): { users: number; userIds: string[]; entries: number; bytes: number } {
+export function recallStoreStats(): { users: number; userIds: string[]; entries: number; bytes: number; drawers: Record<'exact' | 'i8' | 'ann', number> } {
   let entries = 0;
-  for (const u of users.values()) for (const d of u.drawers.values()) entries += d.slots.length - d.dead;
-  return { users: users.size, userIds: [...users.keys()], entries, bytes: storeBytes };
+  const drawers = { exact: 0, i8: 0, ann: 0 };
+  for (const u of users.values()) for (const d of u.drawers.values()) { entries += d.slots.length - d.dead; drawers[d.mode]++; }
+  return { users: users.size, userIds: [...users.keys()], entries, bytes: storeBytes, drawers };
 }
 
 function onChange(userId: unknown, id: unknown): null {
@@ -260,6 +293,62 @@ function addSlot(u: UserStore, d: Drawer, r: FullRow): void {
   u.slotBytes.push(bytes);
   d.bytes += bytes; u.bytes += bytes; storeBytes += bytes;
   if (d.mode === 'i8') quantizeSlot(u, d, slot);
+  else if (d.mode === 'ann') annSlot(u, d, slot);
+}
+
+/** An HNSW vector costs about its int8 bytes plus its graph links. */
+const annBytes = (dims: number) => dims + 256;
+
+/** Queue a slot's vector for its drawer's HNSW index (added in batches by flushAnn), or keep it in `others`. */
+function annSlot(u: UserStore, d: Drawer, slot: number, from?: Float32Array): void {
+  const v = from ?? u.vec[slot];
+  if (!v || v.length !== d.annDims || u.replaced[slot]) { d.others.add(slot); return; }
+  d.pendKeys.push(slot);
+  d.pendVecs.push(v instanceof Float32Array ? v : Float32Array.from(v));
+  u.q8row[slot] = -2;
+  const old = u.vec[slot];
+  u.vec[slot] = null;
+  const saved = (old ? old.byteLength : 0) - annBytes(d.annDims);
+  u.slotBytes[slot] -= saved; d.bytes -= saved; u.bytes -= saved; storeBytes -= saved;
+}
+
+function flushAnn(d: Drawer): void {
+  if (!d.ann || d.pendKeys.length === 0) return;
+  const n = d.pendKeys.length, dims = d.annDims;
+  const keys = new BigUint64Array(n);
+  const flat = new Float32Array(n * dims);
+  for (let i = 0; i < n; i++) { keys[i] = BigInt(d.pendKeys[i]); flat.set(d.pendVecs[i], i * dims); }
+  d.pendKeys = []; d.pendVecs = [];
+  d.ann.add(keys, flat, 0); // all cores
+}
+
+/** Move a drawer (exact or int8) to an HNSW index. False when usearch is not available here. */
+function toAnn(u: UserStore, d: Drawer): boolean {
+  const lib = annIndexClass();
+  if (!lib) return false;
+  let dims = d.q8dims;
+  if (!dims) for (const s of d.slots) { const v = u.vec[s]; if (u.alive[s] && v && v.length) { dims = v.length; break; } }
+  if (!dims) return false;
+  d.ann = new lib.Index({ dimensions: dims, metric: 'cos', quantization: 'i8', connectivity: 16, expansion_add: 128, expansion_search: 64 });
+  d.annDims = dims;
+  const wasI8 = d.mode === 'i8';
+  d.mode = 'ann';
+  for (const s of d.slots) {
+    if (!u.alive[s]) continue;
+    const row = u.q8row[s];
+    if (wasI8 && row >= 0) {
+      const v = new Float32Array(dims);
+      for (let i = 0; i < dims; i++) v[i] = d.q8[row * dims + i] / 127;
+      u.slotBytes[s] -= dims; d.bytes -= dims; u.bytes -= dims; storeBytes -= dims; // its int8 bytes
+      u.q8row[s] = -1;
+      annSlot(u, d, s, v); // counts the HNSW bytes in place of the int8 ones
+    } else {
+      annSlot(u, d, s);
+    }
+  }
+  d.q8 = new Int8Array(0); d.q8n = 0;
+  flushAnn(d);
+  return true;
 }
 
 /** Move a slot's vector into its drawer's int8 block (unit length, x127). */
@@ -284,8 +373,10 @@ function quantizeSlot(u: UserStore, d: Drawer, slot: number): void {
   u.slotBytes[slot] -= saved; d.bytes -= saved; u.bytes -= saved; storeBytes -= saved;
 }
 
-/** A drawer that grew past exactMax() switches to int8 vectors. */
+/** A drawer that grew past exactMax() switches to int8 vectors, past annMin() to an HNSW index. */
 function maybeQuantize(u: UserStore, d: Drawer): void {
+  if (d.mode === 'ann') { flushAnn(d); return; }
+  if (d.live > annMin() && toAnn(u, d)) return;
   if (d.mode !== 'exact' || d.live <= exactMax()) return;
   d.mode = 'i8';
   for (const s of d.slots) if (u.alive[s]) quantizeSlot(u, d, s);
@@ -298,6 +389,8 @@ function killSlot(u: UserStore, slot: number): void {
   d.dead++;
   if (!u.replaced[slot]) { d.live--; d.sumLen -= u.len[slot]; }
   u.slotOf.delete(u.ids[slot]);
+  if (u.q8row[slot] === -2 && d.ann) { flushAnn(d); d.ann.remove(BigInt(slot)); }
+  d.others.delete(slot);
   u.vec[slot] = null; // free the vector now; the rest goes at compaction
   const b = u.slotBytes[slot];
   d.bytes -= b; u.bytes -= b; storeBytes -= b;
@@ -332,7 +425,8 @@ const yieldNow = () => new Promise<void>((r) => setImmediate(r));
 /** Load one drawer of a user, in pages. False when the size cap does not allow it. */
 async function loadDrawer(u: UserStore, userId: string, kind: string, key: string): Promise<Drawer | null> {
   const db: any = getDatabase().getDb();
-  const d: Drawer = { kind, key, slots: [], dead: 0, live: 0, sumLen: 0, bytes: 0, mode: 'exact', q8: new Int8Array(0), q8dims: 0, q8n: 0 };
+  const d: Drawer = { kind, key, slots: [], dead: 0, live: 0, sumLen: 0, bytes: 0, mode: 'exact', q8: new Int8Array(0), q8dims: 0, q8n: 0,
+    ann: null, annDims: 0, others: new Set(), pendKeys: [], pendVecs: [] };
   const first = db.prepare(`SELECT ${ROW_COLUMNS} FROM memories WHERE user_id = ? AND ${DRAWER_KIND_SQL} = ? AND ${DRAWER_KEY_SQL} = ?
     ORDER BY created_at ASC, id ASC LIMIT ${PAGE}`);
   const next = db.prepare(`SELECT ${ROW_COLUMNS} FROM memories WHERE user_id = ? AND ${DRAWER_KIND_SQL} = ? AND ${DRAWER_KEY_SQL} = ?
@@ -566,7 +660,64 @@ export function searchStore(userId: string, open: OpenStore, q: StoreQuery, qv: 
   const approx = new TopK(rescoreCount(q.limit), u);
   const qunit = new Float64Array(qf.length);
   for (let i = 0; i < qf.length; i++) qunit[i] = qn === 0 ? 0 : qf[i] / qn;
+  const exactScore = (s: number) => {
+    const lexical = lexOf(s);
+    const b = u.vec[s];
+    const comparable = b !== null && u.model[s] === qv.model && b.length === qv.dims;
+    let vector: number | null = null;
+    if (comparable && (qv.semantic || lexical > 0)) {
+      let cos = 0;
+      if (qf.length === b.length && qf.length !== 0) {
+        let dot = 0;
+        for (let i = 0; i < qf.length; i++) dot += qf[i] * b[i];
+        const m = qn * Math.sqrt(u.sq[s]);
+        cos = m === 0 ? 0 : dot / m;
+      }
+      vector = vectorScore(cos, qv.semantic);
+    }
+    let similarity = hybridScore(vector, lexical, qv.semantic);
+    if (similarity >= MIN_RECALL_SCORE && u.layer[s] === 'working') similarity += WORKING_LAYER_BOOST;
+    if (similarity >= MIN_RECALL_SCORE) { top.push(s, similarity); vectors.set(s, vector); }
+  };
+  const lexicalOnly = (s: number) => {
+    let similarity = hybridScore(null, lexOf(s), qv.semantic);
+    if (similarity >= MIN_RECALL_SCORE && u.layer[s] === 'working') similarity += WORKING_LAYER_BOOST;
+    if (similarity >= MIN_RECALL_SCORE) { top.push(s, similarity); vectors.set(s, null); }
+  };
+  // HNSW drawers: the nearest by vector, plus the best by words (both re-scored below), plus the rest exactly.
+  const byWords = new TopK(rescoreCount(q.limit), u);
+  const annDrawers = open.drawers.filter((d) => d.mode === 'ann');
+  if (annDrawers.length) {
+    const annSet = new Set(annDrawers);
+    for (const s of touched) {
+      const d = u.drawerOf[s];
+      if (!annSet.has(d) || u.q8row[s] !== -2) continue; // others: scored with their drawer
+      if (d.annDims === qv.dims && u.model[s] === qv.model) byWords.push(s, lexOf(s));
+      else lexicalOnly(s);
+    }
+    const qf32 = Float32Array.from(qvec);
+    for (const d of annDrawers) {
+      for (const s of d.others) {
+        if (!u.alive[s] || (filtered && !candidate(u, s, q)) || (!filtered && u.replaced[s])) continue;
+        exactScore(s);
+      }
+      if (!d.ann || d.annDims !== qv.dims || !qv.semantic) continue; // a hash query: only rows with a word in common count
+      flushAnn(d);
+      const size = d.ann.size();
+      if (size === 0) continue;
+      const k = Math.min(size, rescoreCount(q.limit) * (filtered ? 4 : 1));
+      const res = d.ann.search(qf32, k, 1);
+      for (let i = 0; i < res.keys.length; i++) {
+        const s = Number(res.keys[i]);
+        if (!u.alive[s] || u.drawerOf[s] !== d || u.model[s] !== qv.model || (filtered && !candidate(u, s, q)) || u.replaced[s]) continue;
+        let similarity = hybridScore(vectorScore(1 - res.distances[i], qv.semantic), lexOf(s), qv.semantic);
+        if (u.layer[s] === 'working') similarity += WORKING_LAYER_BOOST;
+        approx.push(s, similarity);
+      }
+    }
+  }
   for (const d of open.drawers) {
+    if (d.mode === 'ann') continue;
     const block = d.q8, dims = d.q8dims;
     const q8ok = d.mode === 'i8' && dims === qv.dims;
     for (const s of d.slots) {
@@ -607,8 +758,10 @@ export function searchStore(userId: string, open: OpenStore, q: StoreQuery, qv: 
       if (similarity >= MIN_RECALL_SCORE) { top.push(s, similarity); vectors.set(s, vector); }
     }
   }
-  // Re-score the int8 candidates with their full vectors (by primary key; the owner is checked).
-  const picked = approx.sorted();
+  // Re-score the int8 and HNSW candidates with their full vectors (by primary key; the owner is checked).
+  const pickedSet = new Set<number>();
+  const picked: Array<{ slot: number }> = [];
+  for (const c of [...approx.sorted(), ...byWords.sorted()]) if (!pickedSet.has(c.slot)) { pickedSet.add(c.slot); picked.push(c); }
   if (picked.length) {
     const db: any = getDatabase().getDb();
     for (let i = 0; i < picked.length; i += 500) {

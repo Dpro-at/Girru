@@ -113,11 +113,15 @@ if (vectors === 'semantic') {
   embedMs = { p50: +percentile(e, 50).toFixed(1), p95: +percentile(e, 95).toFixed(1) };
 }
 
+const { recallStoreStats } = await import(moduleUrl(backendDir, 'src/memory/recall-store.ts'));
+const store = recallStoreStats();
 const report = {
   size, vectors, packed: packedVectors, p9: process.env.GIRRU_STORE_P9 === '1', coldMs, openedRows: opened, drawerSplit: drawerCount, avgChars: Math.round(chars / size), seedMs,
   dbMB: +(dbBytes / 1e6).toFixed(1), engine: p9b ? 'p9b quality recall' : 'storage.search', ...(p9b ? { fellBack } : {}), queries: times.length,
   searchMs: { p50: +percentile(times, 50).toFixed(1), p95: +percentile(times, 95).toFixed(1), max: +Math.max(...times).toFixed(1) },
   queryEmbedMs: embedMs, peakRssMB: Math.round(peakRss / 1e6),
+  index: { entries: store.entries, MB: Math.round(store.bytes / 1e6), drawers: store.drawers,
+    exactMax: process.env.GIRRU_RECALL_EXACT_MAX ?? 'default', annMin: process.env.GIRRU_RECALL_ANN_MIN ?? 'default' },
 };
 console.log(JSON.stringify(report));
 if (out) writeFileSync(out, JSON.stringify(report, null, 2));
