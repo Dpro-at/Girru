@@ -1681,7 +1681,6 @@ button.status-item:hover { background:var(--row-hover); color:var(--text); }
 .genvr-ask-actions{display:flex;align-items:center;gap:8px}.genvr-ask-actions .fine-print{margin-inline-start:auto}
 .genvr-undo{position:absolute;inset-inline-end:16px;inset-block-end:96px;display:flex;align-items:center;gap:10px;max-inline-size:calc(100% - 32px);padding:8px 10px 8px 14px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);box-shadow:0 6px 20px rgb(0 0 0/.2)}
 .genvr-undo>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.genvr-undo-close{border:0;background:none;color:var(--muted);font-size:16px;padding:0 4px}
-.genvr-chatbar{display:flex;align-items:center;gap:10px;min-block-size:40px;padding:4px 16px;border-block-start:1px solid var(--border);background:var(--surface)}.genvr-folder{margin-inline-start:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,monospace}.page-genvr{overflow:hidden}@media(max-width:768px){.genvr-toolbar{align-items:start;flex-direction:column}.genvr-frame{min-block-size:420px}}
 
 .genvr-library{padding:16px 24px;overflow:auto}.genvr-library-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-block-end:12px}.genvr-library-heading h3{font-size:13px;margin:0}.genvr-library-heading input{max-inline-size:260px}.genvr-world-list{padding:0;margin:0;list-style:none;border-block-start:1px solid var(--border)}.genvr-world-row{display:flex;inline-size:100%;justify-content:start;gap:12px;padding:14px 12px;background:transparent;border-block-end:1px solid var(--border);text-align:start;border-radius:0}.genvr-world-row strong{flex:1;font-weight:500}.genvr-world-row>span:first-child{color:var(--accent);font-size:20px}@media(max-width:768px){.genvr-library{padding:16px}.genvr-library-heading{align-items:start;flex-direction:column}}
 
@@ -4224,17 +4223,16 @@ html:has(.app-shell[data-phone]), body:has(.app-shell[data-phone]) { overflow:hi
 .genvr-where{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
 .genvr-where li{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:10px;background:var(--subtle)}.genvr-where li>span{flex:1;display:flex;flex-direction:column}.genvr-where small{color:var(--muted)}
 .genvr-where em{font-style:normal;font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--surface);color:var(--muted)}.genvr-where em[data-now=true]{color:var(--accent)}
-.genvr-market{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:20px;align-items:start}
-.genvr-market-main{display:flex;flex-direction:column;gap:12px;min-inline-size:0}
-.genvr-market-bar{display:flex;gap:8px;flex-wrap:wrap}.genvr-market-bar input{flex:1;min-inline-size:160px}
-.genvr-market-bar input,.genvr-market-bar select{block-size:30px;border-radius:7px;border:1px solid var(--border);background:var(--surface);color:var(--text);padding:0 8px;font:inherit}
-.genvr-items{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;outline:none}
-.genvr-item{display:flex;flex-direction:column;gap:4px;padding:8px;border-radius:10px;border:0;background:transparent;color:var(--text);text-align:left;font:inherit;cursor:pointer}
-.genvr-item:hover{background:var(--subtle)}.genvr-item[aria-selected=true]{background:var(--subtle);box-shadow:0 0 0 2px var(--accent)}
-.genvr-item b{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.genvr-item small{color:var(--muted);font-size:11.5px}
-.genvr-item-art{display:grid;place-items:center;aspect-ratio:4/3;border-radius:8px;background:var(--subtle);color:var(--accent)}.genvr-item-art.big{aspect-ratio:16/10}
-.genvr-inspector{position:sticky;top:0;display:flex;flex-direction:column;gap:10px;padding:12px;border:1px solid var(--border);border-radius:12px}
-.genvr-inspector h3{margin:0;font-size:15px}.genvr-inspector p{margin:0}
-.genvr-inspector dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0;font-size:12.5px}.genvr-inspector dt{color:var(--muted)}.genvr-inspector dd{margin:0}
 .genvr-menu{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:8px;overflow:hidden}.genvr-menu button{border:0;border-block-end:1px solid var(--border);background:var(--surface);color:var(--text);text-align:left;padding:7px 10px;font:inherit;cursor:pointer}.genvr-menu button:last-child{border:0}.genvr-menu button:hover{background:var(--subtle)}
-@media(max-width:900px){.genvr-market{grid-template-columns:1fr}.genvr-inspector{position:static}.genvr-numbers{grid-template-columns:1fr}}
+@media(max-width:900px){.genvr-numbers{grid-template-columns:1fr}}
+
+/* GV1d: the open place's own sidebar (who answers, its chat, agents, folder). GV1c v2: the market frame. */
+.genvr-side-group{display:flex;flex-direction:column;gap:6px;padding:10px 8px 4px}
+.genvr-side-group>small{font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+.genvr-side-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.genvr-side-list li{display:flex;align-items:center;gap:8px;font-size:13px}
+.genvr-market-stage{position:relative;display:flex;flex-direction:column;flex:1;min-block-size:520px}
+.genvr-market-stage .genvr-frame{flex:1;min-block-size:520px;border:0;border-radius:10px}
+.genvr-market-add{position:absolute;inset-block-start:16px;inset-inline-end:16px;z-index:2}
+.genvr-chat-place{display:flex;flex-direction:column;gap:4px;padding:6px 0}
+.genvr-chat-place-row{display:flex;align-items:center;gap:8px}.genvr-chat-place-row span{display:flex;flex-direction:column;flex:1;min-inline-size:0}.genvr-chat-place-row small{color:var(--muted);font-size:11.5px}

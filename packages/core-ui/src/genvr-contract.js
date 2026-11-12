@@ -9,9 +9,11 @@ const record=value=>!!value&&typeof value==='object'&&!Array.isArray(value);
 export function validStudioProject(value){return record(value)&&value.format==='genvr-studio'&&value.version===1&&genvrId(value.id)&&typeof value.title==='string'&&value.title.length>0&&value.title.length<=200&&record(value.world)&&record(value.play);}
 
 // GENVR-WORLD-01 P1 (board W1): the world's folder and project, who answers, and the Studio chat's model turn (owner only).
-export const GENVR_WORLD=/^\/api\/genvr\/worlds\/([a-zA-Z0-9_-]{1,100})\/(open|agent|turn)$/;
+export const GENVR_WORLD=/^\/api\/genvr\/worlds\/([a-zA-Z0-9_-]{1,100})\/(open|agent|turn|history)$/;
+/** GV1e: the GenVR place behind a Girru chat project (Chat's Details shows it). */
+export const GENVR_WORLD_OF_CHAT=/^\/api\/genvr\/worlds\/of-chat-project\/([A-Za-z0-9_-]{1,100})$/;
 export const WORLD_TURN_BYTES=2*1024*1024;
-export const worldRoute=path=>GENVR_WORLD.test(path);
+export const worldRoute=path=>GENVR_WORLD.test(path)||GENVR_WORLD_OF_CHAT.test(path);
 const TOOL_NAME=/^[a-z_]{1,64}$/;
 const agentKey=value=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(value);
 const callsOk=calls=>Array.isArray(calls)&&calls.length<=20&&calls.every(c=>record(c)&&Object.keys(c).join()==='function'&&record(c.function)&&Object.keys(c.function).sort().join()==='arguments,name'&&TOOL_NAME.test(c.function.name)&&record(c.function.arguments));
@@ -23,7 +25,9 @@ export function validWorldTurn(body){
  try{return new TextEncoder().encode(JSON.stringify(body)).length<=WORLD_TURN_BYTES;}catch{return false;}
 }
 function allowedWorld(method,path,body){
+ if(GENVR_WORLD_OF_CHAT.test(path))return method==='GET'&&body===undefined;
  const kind=GENVR_WORLD.exec(path)?.[2];
+ if(kind==='history')return method==='GET'&&body===undefined;
  if(kind==='open')return method==='POST'&&record(body)&&Object.keys(body).join()==='name'&&typeof body.name==='string'&&body.name.length<=200;
  if(kind==='agent')return method==='PUT'&&record(body)&&Object.keys(body).join()==='agentId'&&agentKey(body.agentId);
  return kind==='turn'&&method==='POST'&&validWorldTurn(body);
@@ -31,10 +35,12 @@ function allowedWorld(method,path,body){
 const answererOk=a=>record(a)&&agentKey(a.id)&&typeof a.name==='string'&&a.name.length<=60&&typeof a.detail==='string'&&a.detail.length<=60&&typeof a.color==='string'&&/^#[0-9a-fA-F]{6}$/.test(a.color);
 const answererOf=a=>({id:a.id,name:a.name,detail:a.detail,color:a.color});
 function worldResponse(path,status,body){
- const kind=GENVR_WORLD.exec(path)[2];
+ const kind=GENVR_WORLD_OF_CHAT.test(path)?'of-chat':GENVR_WORLD.exec(path)[2];
  if(status!==200)return record(body)&&['invalid_input','not_found','world_not_open','no_agent','model_unavailable','folder_unavailable','forbidden','unavailable'].includes(body.code)?{code:body.code,...(typeof body.message==='string'&&body.message.length<=300?{message:body.message}:{})}:null;
  if(!record(body))throw Error('protocol');
- if(kind==='open'){if(typeof body.folder!=='string'||body.folder.length>500||!(body.chatProjectId===null||agentKey(body.chatProjectId))||!(body.answerer===null||answererOk(body.answerer)))throw Error('protocol');return {folder:body.folder,chatProjectId:body.chatProjectId,answerer:body.answerer&&answererOf(body.answerer)};}
+ if(kind==='open'){if(typeof body.folder!=='string'||body.folder.length>500||!(body.chatProjectId===null||agentKey(body.chatProjectId))||!(body.answerer===null||answererOk(body.answerer))||(body.path!==undefined&&(typeof body.path!=='string'||body.path.length>1000))||!(body.conversationId===undefined||body.conversationId===null||agentKey(body.conversationId)))throw Error('protocol');return {folder:body.folder,chatProjectId:body.chatProjectId,answerer:body.answerer&&answererOf(body.answerer),...(typeof body.path==='string'?{path:body.path}:{}),...(typeof body.conversationId==='string'?{conversationId:body.conversationId}:{})};}
+ if(kind==='history'){if(!(body.conversationId===null||agentKey(body.conversationId))||!Array.isArray(body.messages)||body.messages.length>40||!body.messages.every(m=>record(m)&&(m.role==='user'||m.role==='assistant')&&typeof m.text==='string'&&m.text.length<=20000))throw Error('protocol');return {conversationId:body.conversationId,messages:body.messages.map(m=>({role:m.role,text:m.text}))};}
+ if(kind==='of-chat'){if(!genvrId(body.projectId)||typeof body.title!=='string'||body.title.length>200||typeof body.folder!=='string'||body.folder.length>500||typeof body.path!=='string'||body.path.length>1000||!(body.answerer===null||answererOk(body.answerer)))throw Error('protocol');return {projectId:body.projectId,title:body.title,folder:body.folder,path:body.path,answerer:body.answerer&&answererOf(body.answerer)};}
  if(kind==='agent'){if(!answererOk(body.answerer))throw Error('protocol');return {answerer:answererOf(body.answerer)};}
  if(typeof body.content!=='string'||body.content.length>200000||!callsOk(body.tool_calls)||!answererOk(body.answerer))throw Error('protocol');
  return {content:body.content,tool_calls:body.tool_calls.map(c=>({function:{name:c.function.name,arguments:c.function.arguments}})),answerer:answererOf(body.answerer)};

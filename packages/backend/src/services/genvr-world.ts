@@ -12,7 +12,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { q } from '../repositories/sql-steps.js';
-import { createProject, findProject } from '../repositories/chat-conversations.js';
+import { addAssistantMessage, addUserMessage, createConversation, createProject, findConversation, findProject, listConversationMessages } from '../repositories/chat-conversations.js';
+import { randomUUID } from 'node:crypto';
 import { DEFAULT_OLLAMA_MODEL } from '../llm/ollama.js';
 import { ollamaToolChat, type OllamaMessage } from '../llm/ollama-tool-chat.js';
 import { interactiveClaudeMessage } from '../llm/model-call.js';
@@ -47,11 +48,13 @@ export const shownFolder = (folder: string) => { const home = os.homedir(); retu
 
 let ready: Promise<void> | null = null;
 async function ensureTable() {
-  ready ??= q.run('CREATE TABLE IF NOT EXISTS genvr_worlds (user_id TEXT NOT NULL, project_id TEXT NOT NULL, folder TEXT NOT NULL, chat_project_id TEXT, agent_id TEXT, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(user_id,project_id))').then(() => undefined);
+  ready ??= q.run('CREATE TABLE IF NOT EXISTS genvr_worlds (user_id TEXT NOT NULL, project_id TEXT NOT NULL, folder TEXT NOT NULL, chat_project_id TEXT, agent_id TEXT, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(user_id,project_id))')
+    // GV1e: the one Girru chat of a world (older tables get the column once).
+    .then(() => q.run('ALTER TABLE genvr_worlds ADD COLUMN chat_conversation_id TEXT').catch(() => undefined)).then(() => undefined);
   try { await ready; } catch (error) { ready = null; throw error; }
 }
 
-interface WorldRow { folder: string; chat_project_id: string | null; agent_id: string | null }
+interface WorldRow { folder: string; chat_project_id: string | null; agent_id: string | null; chat_conversation_id?: string | null }
 interface AgentRow { id: string; name: string; model: string | null; provider: string | null; is_primary: number }
 
 export interface Answerer { id: string; name: string; detail: string; color: string }
@@ -80,7 +83,7 @@ async function primaryAgent(): Promise<AgentRow | undefined> {
 }
 async function worldRow(userId: string, projectId: string) {
   await ensureTable();
-  return q.one<WorldRow>('SELECT folder,chat_project_id,agent_id FROM genvr_worlds WHERE user_id=? AND project_id=?', userId, projectId);
+  return q.one<WorldRow>('SELECT folder,chat_project_id,agent_id,chat_conversation_id FROM genvr_worlds WHERE user_id=? AND project_id=?', userId, projectId);
 }
 async function worldTitle(userId: string, projectId: string) {
   return (await q.one<{ title: string }>('SELECT title FROM genvr_projects WHERE user_id=? AND id=?', userId, projectId).catch(() => undefined))?.title;
@@ -110,7 +113,7 @@ async function makeFolder(userId: string, name: string): Promise<string> {
  * A world was opened (or renamed, or its tab changed): its folder and Girru project exist from now on.
  * Rename keeps the folder and memory, as projects do.
  */
-export async function openWorld(userId: string, projectId: string, name: string): Promise<{ folder: string; chatProjectId: string | null; answerer: Answerer | null }> {
+export async function openWorld(userId: string, projectId: string, name: string): Promise<{ folder: string; path: string; chatProjectId: string | null; conversationId: string | null; answerer: Answerer | null }> {
   if (!WORLD_ID.test(projectId)) throw new WorldError(400, 'invalid_input');
   const title = (await worldTitle(userId, projectId)) ?? name.trim().slice(0, 200);
   if (!title) throw new WorldError(400, 'invalid_input');
@@ -127,7 +130,14 @@ export async function openWorld(userId: string, projectId: string, name: string)
     await q.run('UPDATE genvr_worlds SET chat_project_id=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND project_id=?', chatProjectId, userId, projectId);
   }
   const agent = (await agentRow(row.agent_id)) ?? (await primaryAgent());
-  return { folder: shownFolder(row.folder), chatProjectId, answerer: agent ? answererOf(agent) : null };
+  // GV1e: one Girru chat per world, in its project: the Studio chat and Girru Chat are the same conversation.
+  let conversationId = row.chat_conversation_id ?? null;
+  const conversation = conversationId ? await findConversation(userId, conversationId) : undefined;
+  if (!conversation || conversation.projectId !== chatProjectId) {
+    conversationId = (await createConversation(userId, { title: `${title} · Studio`.slice(0, 120), projectId: chatProjectId, agentId: agent?.id ?? null })).id;
+    await q.run('UPDATE genvr_worlds SET chat_conversation_id=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND project_id=?', conversationId, userId, projectId);
+  }
+  return { folder: shownFolder(row.folder), path: row.folder, chatProjectId, conversationId, answerer: agent ? answererOf(agent) : null };
 }
 
 /** The owner picked who answers in this world: remembered as the world's last agent. */
@@ -219,8 +229,46 @@ export interface TurnDeps {
   subscription?: (model: string, folder: string, prompt: string, signal: AbortSignal, agentId: string) => Promise<string>;
 }
 
-/** One model turn in a world, as the world's agent, with that agent's provider. */
+/** GV1e: the person's message and the agent's last reply of each Studio turn go into the world's Girru chat. */
+const pendingRuns = new Map<string, { runId: string; started: number }>();
 export async function worldTurn(userId: string, role: string, projectId: string, input: TurnInput, signal: AbortSignal, deps: TurnDeps = {}): Promise<TurnResult> {
+  const row = role === 'owner' && WORLD_ID.test(projectId) ? await worldRow(userId, projectId) : undefined;
+  const conversation = row?.chat_conversation_id && (await findConversation(userId, row.chat_conversation_id)) ? row.chat_conversation_id : null;
+  const key = `${userId}\u0000${projectId}`, last = input.messages.filter(m => m.role !== 'system').at(-1);
+  if (conversation && last?.role === 'user' && last.content.trim()) {
+    const runId = `genvr-${randomUUID()}`;
+    pendingRuns.set(key, { runId, started: Date.now() });
+    await addUserMessage(conversation, last.content.slice(0, 20_000), runId);
+  }
+  const reply = await answerTurn(userId, role, projectId, input, signal, deps);
+  const pending = pendingRuns.get(key);
+  if (conversation && pending && !reply.tool_calls.length) {
+    pendingRuns.delete(key);
+    await addAssistantMessage(conversation, { runId: pending.runId, content: reply.content.slice(0, 100_000), parts: [], status: 'complete', durationMs: Date.now() - pending.started, agentId: reply.answerer.id });
+  }
+  return reply;
+}
+
+/** GV1e: the world's chat as the Studio shows it again (the latest person and agent lines). */
+export async function worldHistory(userId: string, projectId: string): Promise<{ conversationId: string | null; messages: { role: 'user' | 'assistant'; text: string }[] }> {
+  if (!WORLD_ID.test(projectId)) throw new WorldError(400, 'invalid_input');
+  const id = (await worldRow(userId, projectId))?.chat_conversation_id ?? null;
+  if (!id || !(await findConversation(userId, id))) return { conversationId: null, messages: [] };
+  const rows = (await listConversationMessages(id)).filter(m => (m.role === 'user' || m.role === 'assistant') && m.content.trim()).slice(-40);
+  return { conversationId: id, messages: rows.map(m => ({ role: m.role as 'user' | 'assistant', text: m.content.slice(0, 20_000) })) };
+}
+
+/** GV1e: the world behind a Girru chat project, for Chat's Details (Places, who answers, agents). */
+export async function worldOfChatProject(userId: string, chatProjectId: string): Promise<{ projectId: string; title: string; folder: string; path: string; answerer: Answerer | null } | null> {
+  await ensureTable();
+  const row = await q.one<{ project_id: string; folder: string; agent_id: string | null }>('SELECT project_id,folder,agent_id FROM genvr_worlds WHERE user_id=? AND chat_project_id=?', userId, chatProjectId);
+  if (!row) return null;
+  const agent = (await agentRow(row.agent_id)) ?? (await primaryAgent());
+  return { projectId: row.project_id, title: (await worldTitle(userId, row.project_id)) ?? 'GenVR place', folder: shownFolder(row.folder), path: row.folder, answerer: agent ? answererOf(agent) : null };
+}
+
+/** One model turn in a world, as the world's agent, with that agent's provider. */
+async function answerTurn(userId: string, role: string, projectId: string, input: TurnInput, signal: AbortSignal, deps: TurnDeps = {}): Promise<TurnResult> {
   if (role !== 'owner') throw new WorldError(403, 'owner_required');
   if (!WORLD_ID.test(projectId)) throw new WorldError(400, 'invalid_input');
   const row = await worldRow(userId, projectId);

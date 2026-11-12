@@ -108,3 +108,23 @@ test('world turns reject a non-owner before opening any world or provider', asyn
   const { worldTurn } = await import('../src/services/genvr-world.ts');
   await assert.rejects(worldTurn('world-member', 'user', 'never-opened', turn, new AbortController().signal, deps), { status: 403, code: 'owner_required' });
 });
+test('GV1e: a world has one Girru chat; Studio turns are written into it and read back',async()=>{
+ const opened=(await worldApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/open',headers:owner,payload:{name:'Roof city'}})).json();
+ assert.ok(opened.conversationId);assert.ok(path.isAbsolute(opened.path));
+ const again=(await worldApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/open',headers:owner,payload:{name:'Roof city'}})).json();assert.equal(again.conversationId,opened.conversationId,'the same chat every time');
+ const session=db.prepare('SELECT project_id FROM chat_sessions WHERE id=?').get(opened.conversationId);assert.equal(session.project_id,opened.chatProjectId);
+ const agent=db.prepare("SELECT agent_id FROM genvr_worlds WHERE project_id='rooftop-city'").get().agent_id;db.prepare("UPDATE agents_config SET model='qwen3:4b' WHERE id=?").run(agent);
+ const before=db.prepare('SELECT COUNT(*) AS n FROM chat_messages WHERE session_id=?').get(opened.conversationId).n;
+ // A turn with tool calls keeps the run open; the answer after the tools closes it with the agent's text.
+ await worldApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/turn',headers:owner,payload:turn});
+ assert.equal(db.prepare('SELECT COUNT(*) AS n FROM chat_messages WHERE session_id=?').get(opened.conversationId).n,before+1,'the person line is kept at once');
+ const done={...deps,ollama:async opts=>({content:'The tree is in.',toolCalls:[],assistant:{role:'assistant',content:''},model:opts.model})};
+ const doneApp=Fastify();registerAuthGate(doneApp);await doneApp.register(genvrWorldRoutes,{deps:done});await doneApp.ready();
+ await doneApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/turn',headers:owner,payload:{messages:[...turn.messages,{role:'assistant',content:'Placing a tree.'},{role:'tool',content:'ok',tool_name:'place_item'}],tools}});
+ const history=(await worldApp.inject({url:'/api/genvr/worlds/rooftop-city/history',headers:owner})).json();
+ assert.deepEqual(history.messages.slice(-2),[{role:'user',text:'Put a tree here'},{role:'assistant',text:'The tree is in.'}]);
+ const world=(await worldApp.inject({url:'/api/genvr/worlds/of-chat-project/'+opened.chatProjectId,headers:owner})).json();assert.equal(world.projectId,'rooftop-city');assert.equal(world.path,opened.path);
+ assert.equal((await worldApp.inject({url:'/api/genvr/worlds/of-chat-project/none',headers:owner})).statusCode,404);
+ assert.equal((await worldApp.inject({url:'/api/genvr/worlds/rooftop-city/history',headers:member})).statusCode,403);
+ await doneApp.close();
+});
