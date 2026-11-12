@@ -4230,3 +4230,21 @@ html:has(.app-shell[data-phone]), body:has(.app-shell[data-phone]) { overflow:hi
 .genvr-market-stage .genvr-frame{flex:1;min-block-size:calc(100dvh - 150px);border:0;border-radius:10px}
 .genvr-market-add{position:absolute;inset-block-start:16px;inset-inline-end:16px;z-index:2}
 .genvr-who{position:absolute;inset-block-start:52px;inset-inline-end:16px;z-index:3;padding:8px;border-radius:10px;background:var(--surface);border:1px solid var(--border);box-shadow:0 8px 24px rgba(0,0,0,.3)}
+
+/* WIN-01: in the desktop app the top bar is the window's bar: drag it to move the window; its buttons stay
+   clickable. Mac: room on the left for the three window dots. Windows: room on the right for minimize,
+   maximize and close (drawn by the system in the bar's colours). */
+html[data-desktop] .titlebar { -webkit-app-region:drag; user-select:none; min-block-size:40px; }
+html[data-desktop] .titlebar :is(button,a,input,select,textarea,label,summary,[role=button],[role=tab],[role=menuitem],[contenteditable=true]),
+html[data-desktop] .first-run-shell :is(button,a,input,select,textarea,label,summary,[role=button],[role=tab],[contenteditable=true]),
+html[data-desktop] .first-run-account :is(button,a,input,select,textarea,label,summary,[role=button],[role=tab],[contenteditable=true]) { -webkit-app-region:no-drag; }
+html[data-desktop] :is(.first-run-shell,.first-run-account) { -webkit-app-region:drag; }
+html[data-desktop="mac"] .titlebar { padding-inline-start:80px; }
+html[data-desktop="win"] .titlebar { padding-inline-end:max(146px, calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%) + 8px)); }
+html[data-desktop="win"] .titlebar-app-menu { margin-inline-start:-4px; }
+
+/* The update button in the top bar: shown only when a new Girru is ready (or while it updates). */
+.titlebar-update { display:inline-flex; align-items:center; gap:6px; block-size:26px; min-block-size:26px; padding:0 10px; margin-inline-start:auto; border:0; border-radius:13px; background:var(--accent); color:var(--on-accent); font-size:12px; font-weight:600; white-space:nowrap; cursor:pointer; }
+.titlebar-update:hover { background:var(--accent-hover); }
+.titlebar-update[data-busy] { background:color-mix(in srgb,var(--text) 9%,transparent); color:var(--text-2, var(--muted)); font-weight:500; }
+.titlebar-update + .titlebar-tools.end { margin-inline-start:6px; }

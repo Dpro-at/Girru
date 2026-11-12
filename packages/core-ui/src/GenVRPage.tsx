@@ -183,7 +183,7 @@ export function GenVRPage({client,active,sidebarSlot,onOpenChat,request}:{client
  const nav=<GenVRSidebar place={genvrPlace} onPlace={goPlace} counts={{spaces:spaces.length,published:published.length}} inside={channel?null:inside} section={section} onSection={setSection} onBack={()=>setInsideId('')}/>;
  const mcpProblem=/could not|managed by/i.test(mcp);
  return <div className="genvr-page">{sidebarSlot&&active?createPortal(nav,sidebarSlot):null}
- {channel?<header className="genvr-toolbar genvr-toolbar-slim"><b>{studioTitle}</b><button type="button" className="tool" title="Save and close (⌘W)" aria-label="Save and close" onClick={close}><UiIcon name="close" size={15}/></button></header>:null}
+ {channel?<header className="genvr-toolbar genvr-toolbar-slim"><b>{studioTitle}</b></header>:null}
  {mcpProblem&&<p className="fine-print" role="status">{mcp}</p>}
  {notice&&<p role="alert" className="genvr-row-line">{notice}{stuck&&channel?<button type="button" className="link-button" onClick={drop}>Close without saving</button>:null}</p>}
  {!channel?<section className="genvr-library" aria-label="GenVR">

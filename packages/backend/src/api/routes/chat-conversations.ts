@@ -233,7 +233,10 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
   // CHAT-SECRETS-01: secrets go encrypted into the key store; the message keeps references only.
   const vaulted = await vaultSecretsInText(userId, c.id, b.message);
   const displayed = t.displayMessage === undefined ? vaulted : await vaultSecretsInText(userId, c.id, t.displayMessage);
-  const journal = { run_id: b.runId, user_id: userId, session_id: c.id, agent_id: b.agentId ?? null, started_at: Date.now() };
+  // The reply is stored with the agent who really writes it (also the chat's own agent), so its label stays right
+  // after the chat's agent changes later.
+  const writer = b.agentId ?? configured?.id ?? null;
+  const journal = { run_id: b.runId, user_id: userId, session_id: c.id, agent_id: writer, started_at: Date.now() };
   const reviewTools = await needsRecoveryReview(c.id);
   // CHAT-BUILD-01: approvals decided since the previous turn began come back into the chat as data.
   const approvedResults = reviewTools ? await recoveryApprovalResults(userId, c.id) : await approvalResultsSince(userId, c.id, prior.filter((m) => m.role === 'user').at(-1)?.createdAt).catch(() => '');
@@ -267,7 +270,7 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
   let userMessage: ConversationMessage, messages: ReturnType<typeof historyFor>, turns: HistoryTurn[], handoff: Awaited<ReturnType<typeof packHandoffText>> | null;
   try {
     userMessage = continuation ? { ...continuation, runId: b.runId, content: vaulted.text } : (await listConversationMessages(c.id)).find(m => m.runId === b.runId && m.role === 'user')!;
-    const named = namedReplies([...prior, { ...userMessage, content: vaulted.text }], team, replyAgent, c.agentId);
+    const named = namedReplies([...prior, { ...userMessage, content: vaulted.text }], team, writer ?? undefined, c.agentId ?? writer);
     // CHAT-GAPS-01: calls that waited on the owner show the decided result in the tool work record.
     const outcomes = await approvalOutcomes(userId, c.id, named).catch(() => undefined);
     messages = historyFor(named, HISTORY_CHARS, outcomes);
@@ -292,7 +295,7 @@ export async function startTurn(t: { userId: string; role: string; c: Conversati
   if(t.effectFence){const beforeTool=runContext.beforeTool.bind(runContext);runContext.beforeTool=async(name,params)=>{if(!await t.effectFence!()){chatRuns.get(b.runId)?.requestStop();throw Error('device_execution_fenced');}return beforeTool(name,params);};}
   if (t.canStart && !await t.canStart()) { await recoverStaleRun(b.runId).catch(() => false); return send(409, { code: 'group_paused' }); }
   chatRuns.start({
-    runId: b.runId, userId, sessionId: c.id, agentId: b.agentId ?? null,
+    runId: b.runId, userId, sessionId: c.id, agentId: writer,
     onFinished: async status=>{await t.onFinished?.(status);await continueDecidedReportApprovals(t.userId,c.id);await sessionRunFinished(c.id,t.runId,status);},
     // A failed checkpoint leaves the outcome unknown: close the row as interrupted (later turns ask before every tool).
     onUnstored: async () => { await recoverStaleRun(b.runId); },

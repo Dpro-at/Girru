@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {randomBytes} from 'node:crypto';
-// GENVR-WORLD-01 P1: a world's folder and Girru project, who answers, and the Studio chat's model turn. Temp data only.
+// GENVR-WORLD-01 P1: a world's folder and Girru project, and who answers. Temp data only.
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'girru-genvr-world-'));process.env.AGENT_PLAYER_DATA_DIR=root;process.env.DATABASE_PATH=path.join(root,'agent-player.db');process.env.JWT_SECRET=randomBytes(64).toString('hex');process.env.ENCRYPTION_KEY=randomBytes(32).toString('hex');
 process.env.GIRRU_GENVR_WORLDS=path.join(root,'genvr_Worlds');
 const {getDatabase,closeDatabase}=await import('../src/db/database.ts');const db=getDatabase();await db.initialize();
@@ -89,4 +89,10 @@ test('GV1e: the chat shows the agent who answers; the chat project and title fol
  await worldApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/open',headers:owner,payload:{name:'Cloud city'}});
  assert.equal(db.prepare('SELECT name FROM chat_projects WHERE id=?').get(opened.chatProjectId).name,'World · Cloud city');
  assert.equal(db.prepare('SELECT title FROM chat_sessions WHERE id=?').get(opened.conversationId).title,'Cloud city · Studio');
+ // Renamed while the Studio is open: saving the place renames its chat project and chat at once.
+ const revision=db.prepare("SELECT revision FROM genvr_projects WHERE id='rooftop-city'").get().revision;
+ const saved=await app.inject({method:'PUT',url:'/api/genvr/projects/rooftop-city',headers:owner,payload:{project:{...project,title:'Sky city'},revision}});
+ assert.equal(saved.statusCode,200,saved.body);
+ assert.equal(db.prepare('SELECT name FROM chat_projects WHERE id=?').get(opened.chatProjectId).name,'World · Sky city');
+ assert.equal(db.prepare('SELECT title FROM chat_sessions WHERE id=?').get(opened.conversationId).title,'Sky city · Studio');
 });

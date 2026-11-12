@@ -139,6 +139,9 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
   useEffect(() => { const s = { side: new ChatSearchController(client), palette: new ChatSearchController(client) }; setSearch(s); return () => { s.side.dispose(); s.palette.dispose(); }; }, [client]);
   const [board, setBoard] = useState<BoardController>();
   useEffect(() => { const b = new BoardController(client); setBoard(b); return () => b.dispose(); }, [client]);
+  // A place renamed or made in GenVR also renames its chat project and chat: coming back to Chat shows the new names at once.
+  const lastPage = useRef<Page>(page);
+  useEffect(() => { const from = lastPage.current; lastPage.current = page; if (page === 'chat' && from === 'genvr' && chat) void (async () => { await chat.loadProjects(); await chat.refreshList(); })().catch(() => undefined); }, [page, chat]);
   const chatState = useSyncExternalStore(
     chat ? chat.subscribe : noopSubscribe,
     chat ? chat.getSnapshot : nullSnapshot,
@@ -259,8 +262,11 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
     browser:{available:owner&&browser.available,current:page==='browser',run:go('browser'),parent:'store'},terminal:entry('terminal',owner,openTerminal,undefined,'store'),code:entry('code',owner&&(nativeEditor||codeMissing),nativeEditor?openCode:openCodeInStore,undefined,'store'),skills:entry('skills',owner,go('skills'),undefined,'library'),personalities:entry('personalities',owner,go('personalities'),undefined,'library'),specialties:entry('specialties',owner,go('specialties'),undefined,'library')};
 
   const sidebarShown = rail && (page === 'chat' || ownSidebar);
+  // WIN-01: on Windows the menu row is gone; the ☰ button at the left of the bar opens the same menu.
+  const appMenu = typeof document !== 'undefined' && document.documentElement.dataset.desktop === 'win' ? (window as unknown as { dproApp?: { openAppMenu?: (x: number, y: number) => Promise<unknown> } }).dproApp?.openAppMenu : undefined;
   return <ComputerDevicesProvider key={user.id} client={client} enabled={owner && mode==='live'}><div className="shell app-shell" data-theme={theme} data-rail={sidebarShown ? 'open' : 'closed'} data-section={page} data-phone={phone || undefined} lang="en" dir="ltr">
     <header className="titlebar">
+      {appMenu&&<button type="button" className="tool titlebar-app-menu" aria-label="Menu: File, Edit, View, Window, Help (Alt)" title="Menu (Alt)" onClick={e=>{const r=e.currentTarget.getBoundingClientRect();void appMenu(r.left,r.bottom);}}><UiIcon name="app-menu" size={16}/></button>}
       {browser.problem&&<span role="alert">{browser.problem}</span>}{!phone&&<WorkspaceModes onModeChange={mode=>{if(mode==='code')setPage('code');else if(page==='code')setPage('chat');}}/>}
       <div className="titlebar-tools">
         <button type="button" className="tool" aria-label={phone ? (rail ? 'Close the chat list' : 'Chats') : rail ? 'Hide the sidebar' : 'Show the sidebar'} title={phone ? undefined : rail ? 'Hide the sidebar (⌘\\)' : 'Show the sidebar (⌘\\)'} aria-pressed={rail} onClick={() => setRail(v => !v)}><UiIcon name="sidebar" size={14}/></button>
@@ -268,6 +274,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
       <p className="titlebar-title">{page === 'chat' && activeProject && <span className="titlebar-tile" aria-hidden="true"><UiIcon name="folder" size={12}/></span>}{pageTitle}{page === 'chat' && activeProject && <button type="button" className="titlebar-project" title={activeProject.folder ?? activeProject.name} aria-label={`${activeProject.name} · show its folder in Details`} onClick={() => setPlaceRequest(n => n + 1)}>{activeProject.name}</button>}</p>
       {/* CH1/SH1: Commands sits in the middle of the title bar; the theme lives in Settings › General and in Commands. */}
       {!phone&&<button type="button" className="titlebar-cmdk" onClick={() => {if(page==='code'&&window.dproApp?.nabu?.showCommands)void window.dproApp.nabu.showCommands();else setPalette(true);}} aria-label={page==='code'?'Code commands':'Search or run a command (⌘K)'}><UiIcon name="search" size={13}/>Commands<kbd>⌘K</kbd></button>}
+      {owner && mode === 'live' && <AppUpdateNotice onOpen={()=>openSettings('about')}/>}
       <div className="titlebar-tools end" ref={setTitleSlot}/>
     </header>
     <aside className="sidebar">
@@ -324,7 +331,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
     {!phone&&<ShellFooter controller={footer} settingsCurrent={page==='settings'} settingsAlert={backupFailed?'the last backup failed':undefined} onSettings={()=>backupFailed?openSettings('backups'):setPage('settings')} onCustomize={()=>openSettings('general')}
       status={mode === 'mock' ? <span className="status-item"><span className={`status-dot ${mode}`} aria-hidden="true"/>Offline practice — fictional data</span>
         : <span className="status-item status-dot-only" title="Connected · this installation" aria-label="Connected · this installation" role="img"><span className={`status-dot ${mode}`} aria-hidden="true"/></span>}
-      extra={<>{owner && mode === 'live' && <ComputersFooterStatus onOpen={() => setPage('computers')}/>}{owner && mode === 'live' && <AppUpdateNotice onOpen={()=>openSettings('about')}/>}{isDeveloperBuild(client) && <button className="status-item statusbar-button" onClick={() => client.selectMode('fixture')} title="Clears this local session; the server sign-in stays until you sign out">Leave to fixture</button>}{owner && mode === 'live' && <FooterHelperPill client={client}/>}</>}
+      extra={<>{owner && mode === 'live' && <ComputersFooterStatus onOpen={() => setPage('computers')}/>}{isDeveloperBuild(client) && <button className="status-item statusbar-button" onClick={() => client.selectMode('fixture')} title="Clears this local session; the server sign-in stays until you sign out">Leave to fixture</button>}{owner && mode === 'live' && <FooterHelperPill client={client}/>}</>}
       entries={footerEntries}/>}
     {owner && mode === 'live' && !phone && <NewPhoneNotice client={client} onSettings={() => openSettings('phone')}/>}
     {owner && mode === 'live' && !phone && page !== 'computers' && <ComputerJoinNotice client={client} enabled={owner && mode === 'live'} onOpen={() => setPage('computers')}/>}

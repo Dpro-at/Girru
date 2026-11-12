@@ -90,14 +90,55 @@ function createMainWindow() {
 }
 
 // Every window shows only the app's own origin; other links open in the normal browser.
+// WIN-01: one bar on Mac and Windows. Girru's own top bar is the window's bar; the system's window
+// buttons sit inside it (Mac: the three dots on the left; Windows: on the right, in the bar's colours).
+const BAR_HEIGHT = 40;
+// The window buttons stop 1 px above the bar's bottom line, so the line runs under them too.
+const BUTTONS_HEIGHT = BAR_HEIGHT - 1;
+function windowFrame() {
+  if (process.platform === 'darwin') return { titleBarStyle: 'hidden', trafficLightPosition: { x: 14, y: 13 } };
+  // The taskbar shows Girru's icon also when run from source (a packaged app has it in the program).
+  if (process.platform === 'win32') return { titleBarStyle: 'hidden', titleBarOverlay: { color: '#0F1114', symbolColor: '#D9E0E6', height: BUTTONS_HEIGHT }, icon: path.join(__dirname, '..', 'build', 'icon.ico') };
+  return {};
+}
+
+// Windows has no menu row now: pressing and releasing Alt alone opens the same menu under the top-left corner.
+function altOpensMenu(win) {
+  if (process.platform !== 'win32') return;
+  let altAlone = false;
+  win.webContents.on('before-input-event', (_event, input) => {
+    if (input.type === 'keyDown') altAlone = input.key === 'Alt' && !input.control && !input.shift && !input.meta && !input.isAutoRepeat;
+    else if (input.type === 'keyUp' && input.key === 'Alt' && altAlone) { altAlone = false; Menu.getApplicationMenu()?.popup({ window: win, x: 8, y: BAR_HEIGHT }); }
+  });
+}
+
+// The ☰ button at the left of the bar (Windows) opens the same menu as Alt.
+ipcMain.handle('dpro:app-menu', (event, at) => {
+  if (process.platform !== 'win32' || event.senderFrame !== event.sender.mainFrame) return null;
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || win === connectWindow) return null;
+  const x = Number.isFinite(at?.x) ? Math.max(0, Math.min(4000, Math.round(at.x))) : 8, y = Number.isFinite(at?.y) ? Math.max(0, Math.min(4000, Math.round(at.y))) : BAR_HEIGHT;
+  Menu.getApplicationMenu()?.popup({ window: win, x, y });
+  return null;
+});
+const HEX = /^#[0-9a-f]{6}$/i;
+// The page tells the window its bar colours (light or dark), so the Windows buttons match the bar.
+ipcMain.on('dpro:window-bar', (event, value) => {
+  if (process.platform !== 'win32' || !value || typeof value !== 'object' || !HEX.test(value.color) || !HEX.test(value.symbol)) return;
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || event.senderFrame !== event.sender.mainFrame || win === connectWindow) return;
+  try { win.setTitleBarOverlay({ color: value.color, symbolColor: value.symbol, height: BUTTONS_HEIGHT }); } catch { /* an older system without the overlay */ }
+});
+
 function createAppWindow() {
   const area = electron.screen.getPrimaryDisplay().workAreaSize;
   const win = new BrowserWindow({
     width: Math.min(1280, area.width), height: Math.min(860, area.height), minWidth: Math.min(800, area.width), minHeight: Math.min(600, area.height),
-    title: 'Girru', show: false, backgroundColor: '#111111',
+    title: 'Girru', show: false, backgroundColor: '#111111', ...windowFrame(),
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, webviewTag: false, spellcheck: true, preload: path.join(__dirname, 'preload.cjs') },
   });
   win.once('ready-to-show', () => win.show());
+  altOpensMenu(win);
   // Links to other sites open in the normal browser; the window stays on the app.
   win.webContents.setWindowOpenHandler(({ url }) => { openExternal(url); return { action: 'deny' }; });
   win.webContents.on('will-navigate', (event, url) => {
@@ -439,6 +480,13 @@ ipcMain.handle('dpro:app-info', event => {
 // MACAPP-01: updates of the installed app (Settings › About and updates). Only the main
 // window's own Girru page may ask; installing backs up first and replaces the app.
 let updater = null;
+let installerAfterQuit = null;
+// WIN-UPD-01: after Girru has closed, the checked installer runs silently into the same place and opens Girru again.
+app.on('will-quit', () => {
+  if (!installerAfterQuit || process.platform !== 'win32') return;
+  try { require('node:child_process').spawn(installerAfterQuit, ['/S', '--updated', '--force-run'], { detached: true, stdio: 'ignore', windowsHide: true }).unref(); }
+  catch (error) { log?.write(`The update installer did not start: ${error.message}`); }
+});
 let systemTray = null;
 const fromAppPage = event => !!mainWindow && !!appOrigin && event.sender === mainWindow.webContents && event.senderFrame === mainWindow.webContents.mainFrame;
 function startUpdater() {
@@ -447,6 +495,8 @@ function startUpdater() {
     currentVersion: app.getVersion(), settingsDir: settingsDir(),
     backUp: () => runtime ? runtime.backUp() : Promise.resolve({ ok: false, error: 'Girru is not running here' }),
     relaunch: () => { app.relaunch(); app.quit(); },
+    // WIN-UPD-01: Girru closes as usual (its engine stops, keys are put away), then the installer runs.
+    runInstaller: file => { installerAfterQuit = file; app.quit(); },
   });
   updater.cleanOld();
   updater.onChange(view => { if (mainWindow && appOrigin) mainWindow.webContents.send('dpro:app-update', view); });
@@ -459,7 +509,7 @@ ipcMain.handle('dpro:app-update-check', event => fromAppPage(event) && updater ?
 ipcMain.handle('dpro:app-update-install', async event => {
   if (!fromAppPage(event) || !updater || !updater.view().update) return null;
   const v = updater.view().update.version;
-  const answer = await dialog.showMessageBox(mainWindow, { type: 'question', message: `Back up and update to Girru ${v}?`, detail: 'Girru makes a backup of your data, puts the new version in place and starts again. Your saved workspace is kept; valid sign-in sessions are restored.', buttons: ['Cancel', 'Back up and update'], defaultId: 1, cancelId: 0 });
+  const answer = await dialog.showMessageBox(mainWindow, { type: 'question', message: `Back up and update to Girru ${v}?`, detail: process.platform === 'win32' ? 'Girru makes a backup of your data, closes, installs the new version in the same place and opens again. Your saved workspace is kept; valid sign-in sessions are restored.' : 'Girru makes a backup of your data, puts the new version in place and starts again. Your saved workspace is kept; valid sign-in sessions are restored.', buttons: ['Cancel', 'Back up and update'], defaultId: 1, cancelId: 0 });
   return answer.response === 1 ? updater.install() : updater.view();
 });
 ipcMain.handle('dpro:app-update-page', event => { if (fromAppPage(event) && updater?.view().update) void shell.openExternal(updater.view().update.page); return null; });

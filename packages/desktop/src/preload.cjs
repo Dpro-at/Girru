@@ -54,6 +54,8 @@ contextBridge.exposeInMainWorld('dproApp', {
   chooseProjectFolders: options => ipcRenderer.invoke('dpro:choose-project-folders', options),
   openChatWindow: id => ipcRenderer.invoke('dpro:open-chat-window', String(id)),
   setSetupWindow: compact => ipcRenderer.invoke('dpro:setup-window', compact === true),
+  // WIN-01: the app menu (File, Edit, View, Window, Help) under the bar's ☰ button on Windows.
+  openAppMenu: (x, y) => ipcRenderer.invoke('dpro:app-menu', { x: Number(x), y: Number(y) }),
   revealFolder: folder => ipcRenderer.invoke('dpro:reveal-folder', String(folder)),
   // CODE-OPEN-01: one file in Finder / Explorer (the fallback when Code is not installed).
   revealFile: file => ipcRenderer.invoke('dpro:reveal-file', String(file)),
@@ -85,3 +87,30 @@ ipcRenderer.on('dpro:code-footer', (_event, id) => {
   const button = Array.from(document.querySelectorAll('.shell-footer button[aria-label]')).find(b => b.getAttribute('aria-label') === name || b.getAttribute('aria-label')?.startsWith(name + ','));
   button?.click();
 });
+
+// WIN-01: the page knows it is the window's bar (Mac or Windows), so its top bar can be dragged and leaves
+// room for the window buttons. On Windows the buttons take the bar's colours, light or dark.
+const desktopKind = process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'win' : '';
+if (desktopKind) {
+  const mark = () => { if (document.documentElement) document.documentElement.dataset.desktop = desktopKind; };
+  mark();
+  window.addEventListener('DOMContentLoaded', () => {
+    mark();
+    if (desktopKind !== 'win') return;
+    const hex = value => { const m = /^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)$/.exec(value || ''); if (!m || (m[4] !== undefined && Number(m[4]) === 0)) return null; return '#' + [m[1], m[2], m[3]].map(n => Number(n).toString(16).padStart(2, '0')).join(''); };
+    let last = '', queued = false;
+    const send = () => {
+      queued = false;
+      const bar = document.querySelector('.titlebar');
+      const color = hex(getComputedStyle(bar || document.body).backgroundColor) || hex(getComputedStyle(document.body).backgroundColor);
+      const symbol = hex(getComputedStyle(bar || document.body).color);
+      if (!color || !symbol || color + symbol === last) return;
+      last = color + symbol;
+      ipcRenderer.send('dpro:window-bar', { color, symbol });
+    };
+    const later = () => { if (!queued) { queued = true; requestAnimationFrame(send); } };
+    new MutationObserver(later).observe(document.documentElement, { attributes: true, subtree: true, childList: true, attributeFilter: ['data-theme', 'class'] });
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', later);
+    later();
+  });
+}

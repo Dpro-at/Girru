@@ -64,6 +64,21 @@ use ad-hoc signing only; they are not notarized. Windows builds are unsigned.
 - **Windows:** On SmartScreen, choose **More info → Run anyway** for the Girru
   installer only if it came from the official Girru release page.
 
+### Updates
+
+The installed app looks for a new published Girru release once a day and never
+updates by itself. When one is ready, an **Update** button appears in the top bar.
+Pressing it asks once, then Girru downloads the release file for this computer from
+the official Girru releases on GitHub, checks it against the release's
+`SHA256SUMS-<platform>.txt`, and makes a backup of your data first.
+
+- **macOS:** the new Girru.app replaces the running one and Girru starts again.
+- **Windows:** Girru closes, the installer runs silently into the same folder and
+  opens Girru again.
+- **Linux, or a run from source:** the update page links to the release instead.
+
+Release files are checked by checksum only; the builds are not code-signed (see above).
+
 The installer does not report a fabricated percentage. When Girru launches, its
 Starting window names the current checks (“Checking the installation files…”,
 “Starting the local service…”, and “Looking for an existing workspace…”); the

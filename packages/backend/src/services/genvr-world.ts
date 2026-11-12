@@ -155,6 +155,19 @@ export async function worldHistory(userId: string, projectId: string): Promise<{
 }
 
 /** GV1e: the world behind a Girru chat project, for Chat's Details (Places, who answers, agents). */
+/** A place renamed in the Studio or its page: its chat project and its chat follow the new name at once. */
+export async function followWorldTitle(userId: string, projectId: string, title: string): Promise<void> {
+  const name = title.trim();
+  if (!name) return;
+  const row = await q.one<{ chat_project_id: string | null; chat_conversation_id: string | null }>('SELECT chat_project_id, chat_conversation_id FROM genvr_worlds WHERE user_id=? AND project_id=?', userId, projectId).catch(() => undefined);
+  if (!row) return;
+  if (row.chat_project_id) {
+    const project = await findProject(userId, row.chat_project_id);
+    if (project && project.name !== `World · ${name}`.slice(0, 80)) await patchProject(userId, project.id, { name: `World · ${name}`.slice(0, 80) });
+  }
+  if (row.chat_conversation_id) await q.run('UPDATE chat_sessions SET title=? WHERE id=? AND user_id=? AND project_id IS ?', `${name} · Studio`.slice(0, 120), row.chat_conversation_id, userId, row.chat_project_id);
+}
+
 export async function worldOfChatProject(userId: string, chatProjectId: string): Promise<{ projectId: string; title: string; folder: string; path: string; answerer: Answerer | null } | null> {
   await ensureTable();
   const row = await q.one<{ project_id: string; folder: string; agent_id: string | null }>('SELECT project_id,folder,agent_id FROM genvr_worlds WHERE user_id=? AND chat_project_id=?', userId, chatProjectId);

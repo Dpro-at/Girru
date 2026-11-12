@@ -54,3 +54,7 @@ button:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
 @keyframes progress { from { transform:translateX(0); } to { transform:translateX(185%); } }
 @media (max-width:560px) { .welcome { width:calc(100vw - 36px); } .welcome h1 { font-size:24px; } }
 @media (prefers-reduced-motion:reduce) { .progress-track span { animation:none; width:100%; } }
+
+/* WIN-01: the window has no system bar; these pages can be dragged anywhere, their controls stay clickable. */
+html[data-desktop] body { -webkit-app-region: drag; }
+html[data-desktop] :is(button, a, input, select, textarea, label, summary, [role=button], [contenteditable=true]) { -webkit-app-region: no-drag; }

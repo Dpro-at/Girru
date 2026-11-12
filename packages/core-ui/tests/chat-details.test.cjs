@@ -9,6 +9,8 @@ const CID = '3f0c2b6e-1d2a-4f4e-9b1a-6c7d8e9f0a1b';
 test('panel layout: known parts only, missing ones added; parts move one place at a time', () => {
   assert.deepEqual(DEFAULT_PANEL.order, ['place', 'team', 'results', 'memory', 'mcp']);
   assert.deepEqual(readPanel({ order: ['mcp', 'nope', 'mcp'], folded: ['team', 'x'] }), { order: ['mcp', 'place', 'team', 'results', 'memory'], folded: ['team'] });
+  assert.deepEqual(readPanel(null).folded, ['memory'], 'From memory starts folded until the person opens it');
+  assert.deepEqual(readPanel({ folded: [] }).folded, []);
   assert.deepEqual(movePart(['place', 'team'], 'team', -1), ['team', 'place']);
   assert.deepEqual(movePart(['place', 'team'], 'place', -1), ['place', 'team']);
 });

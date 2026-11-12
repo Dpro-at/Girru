@@ -367,7 +367,8 @@ test('team chat: another agent can write the next reply; it is stored per reply 
   assert.ok(msgs.some((m) => m.role === 'assistant' && m.content.startsWith('[Nora] Nora here')), 'the earlier reply is named');
   assert.match(msgs[0].content, /Several agents of the team answer/);
   const stored = (await call('r-owner', 'GET', `/api/chat/conversations/${c.id}/messages`)).json().messages.filter((m) => m.role === 'assistant');
-  assert.deepEqual(stored.map((m) => m.agentId), [null, 'team-b']);
+  // Every reply keeps the agent who wrote it, also the chat's own agent, so its label survives a later change of agent.
+  assert.deepEqual(stored.map((m) => m.agentId), ['team-a', 'team-b']);
   assert.equal((await call('r-owner', 'POST', `/api/chat/conversations/${c.id}/runs`, { runId: rid(), message: 'x', agentId: 'nobody' })).statusCode, 400);
   assert.equal((await call('r-other', 'POST', `/api/chat/conversations/${c.id}/runs`, { runId: rid(), message: 'x', agentId: 'team-b' })).statusCode, 404, 'not their conversation');
 });

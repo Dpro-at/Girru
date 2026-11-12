@@ -24,3 +24,20 @@ test('completed initial rounds hide empty controls; chosen participants remain r
  assert.match(render({automatic:true,busy:true}),/Stop automatic turns/);
  assert.doesNotMatch(render({automatic:true,busy:true}),/disabled/);
 });
+
+test('New meeting is in the chat ⋯ menu; the meeting bar shows only while a meeting is on', () => {
+  const fs = require('node:fs'), path = require('node:path');
+  const view = fs.readFileSync(path.join(__dirname, '../src/ChatView.tsx'), 'utf8'), meetings = fs.readFileSync(path.join(__dirname, '../src/Meetings.tsx'), 'utf8');
+  assert.ok(view.includes("{ label: 'New meeting…', icon: 'users', run: () => setMeetingCreate(n => n + 1) }"));
+  assert.ok(view.includes('createRequest={meetingCreate}'));
+  assert.ok(meetings.includes('{meeting && <div className="meeting-toolbar">'));
+  assert.ok(!meetings.includes('Discuss work with your departments') && !meetings.includes('<span>New meeting</span>'));
+});
+
+test('a meeting summary reply reads as text in the chat, not raw JSON; other replies stay as they are', () => {
+  const { meetingSummaryText } = require('../src/meeting-summary.ts');
+  const json = JSON.stringify({ summary: 'We agreed on the launch.', decisions: [{ title: 'Write the post', assigneeName: 'Jules', department: 'Sales', agentId: null }, { title: ' ' }] });
+  assert.equal(meetingSummaryText(json), '**Meeting summary**\n\nWe agreed on the launch.\n\n**Proposed decisions** (they wait for your approval)\n- Write the post — Jules · Sales');
+  assert.match(meetingSummaryText('```json\n' + JSON.stringify({ summary: 'Short.', decisions: [] }) + '\n```'), /No decisions proposed/);
+  for (const other of ['Hello', '{"summary":1,"decisions":[]}', '{"a":1}', '[1]', '{bad json']) assert.equal(meetingSummaryText(other), null);
+});

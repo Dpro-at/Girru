@@ -7,7 +7,8 @@ import type { SessionClient } from './session';
 export const OPEN_GENVR_EVENT = 'girru:open-genvr';
 type World = { projectId: string; title: string; answerer: { name: string } | null };
 
-export function GenVRChatPlace({ client, chatProjectId }: { client: SessionClient; chatProjectId: string }) {
+/** `projectName` only refreshes the row: a place renamed in GenVR renames its chat project, and the row follows. */
+export function GenVRChatPlace({ client, chatProjectId, projectName }: { client: SessionClient; chatProjectId: string; projectName?: string }) {
   const [world, setWorld] = useState<World | null>(null), [team, setTeam] = useState<string[]>([]);
   useEffect(() => {
     let gone = false; setWorld(null); setTeam([]);
@@ -23,7 +24,7 @@ export function GenVRChatPlace({ client, chatProjectId }: { client: SessionClien
       } catch { /* not a GenVR place */ }
     })();
     return () => { gone = true; };
-  }, [client, chatProjectId]);
+  }, [client, chatProjectId, projectName]);
   if (!world) return null;
   const open = () => window.dispatchEvent(new CustomEvent(OPEN_GENVR_EVENT, { detail: { placeId: world.projectId } }));
   // One row in the Details style (Mohamed): the place, who answers and the agents in it, and Open in Studio.
