@@ -48,7 +48,7 @@ export type ScopeTree = {
 };
 export type ScopeHit = { kind: 'department' | 'project' | 'people' | 'agent'; id: string; name: string; departmentId?: string; archived: boolean; memories: number };
 export type AgentScope = { id: string; name: string; department: string | null; template: { id: string; name: string } | null; exceptions: number };
-export type ExplorerItem = { id: string; type: string; preview: string; drawerId: string; topicKey: string | null; importance: number; layer: string; createdAt: string; sourceAgentId: string | null; source?: string | null; usedIn?: number; trust?: 'checked' | 'unchecked' | 'imported' | null; supersededBy?: string | null; validTo?: string | null };
+export type ExplorerItem = { id: string; type: string; preview: string; drawerId: string; topicKey: string | null; importance: number; layer: string; createdAt: string; sourceAgentId: string | null; source?: string | null; usedIn?: number; trust?: 'checked' | 'unchecked' | 'imported' | null; supersededBy?: string | null; validTo?: string | null; /** MEM-READ-01 MR1 */ title?: string; lines?: string };
 export type ExplorerPage = { scope: string; items: ExplorerItem[]; nextCursor: string | null; total: number; facets: { type: Record<string, number>; layer: Record<string, number>; drawer: Record<string, number>; source?: Record<string, number> } };
 export type PinnedFact = { id: string; scope: string; text: string; position: number; createdAt: string; updatedAt: string };
 export type AgentSample = { agentId: string; agentName: string; project: string | null; before: { read: AccessColumn[]; write: AccessColumn[] }; after: { read: AccessColumn[]; write: AccessColumn[] } };

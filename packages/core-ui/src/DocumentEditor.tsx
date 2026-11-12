@@ -42,9 +42,18 @@ export function DocumentEditor({title,files,onChange,onClose,maxLength=30000,inl
   <footer className="doc-status"><span>{text.trim()?text.trim().split(/\s+/).length:0} words · {lines.length} lines</span><span>UTF-8 · Markdown</span><span role="status">{message||notice||(file?.readOnly?'Read-only document':onSave?`${text.length.toLocaleString()} of ${maxLength.toLocaleString()} characters`:'Draft saved in this editor')}</span></footer>
  </dialog>;
 }
-export function MarkdownDocument({text}:{text:string}){
+/** Inline Markdown: **bold**, `code`, [text](link) shown as its text. `leaf` draws plain runs (e.g. lock chips for hidden keys). */
+type Leaf=(text:string,key:string)=>React.ReactNode;
+function inlineMarkdown(s:string,leaf:Leaf|undefined,key:string):React.ReactNode[]{
+ const out:React.ReactNode[]=[];const re=/(\*\*|__)(.+?)\1|`([^`]+)`|\[([^\]]+)\]\(([^)\s]+)\)/g;let last=0,m:RegExpExecArray|null,n=0;
+ const plain=(t:string)=>{if(t)out.push(leaf?leaf(t,key+'-t'+n++):t);};
+ while((m=re.exec(s))){plain(s.slice(last,m.index));if(m[2]!==undefined)out.push(<strong key={key+'-b'+n++}>{inlineMarkdown(m[2],leaf,key+'-b'+n)}</strong>);else if(m[3]!==undefined)out.push(<code key={key+'-c'+n++}>{m[3]}</code>);else out.push(<span key={key+'-l'+n++} className="doc-link" title={m[5]}>{inlineMarkdown(m[4],leaf,key+'-l'+n)}</span>);last=m.index+m[0].length;}
+ plain(s.slice(last));return out;
+}
+export function MarkdownDocument({text,leaf}:{text:string;leaf?:Leaf}){
  const out:React.ReactNode[]=[];const lines=text.split('\n');let code:string[]|null=null,start=0;
- for(let i=0;i<lines.length;i++){const line=lines[i];if(line.startsWith('```')){if(code){out.push(<pre key={'code'+start}><code>{code.join('\n')}</code></pre>);code=null;}else{code=[];start=i;}continue;}if(code){code.push(line);continue;}const heading=/^(#{1,4}) (.*)/.exec(line);if(heading){const level=heading[1].length;out.push(level===1?<h1 data-line={i} key={i}>{heading[2]}</h1>:level===2?<h2 data-line={i} key={i}>{heading[2]}</h2>:<h3 data-line={i} key={i}>{heading[2]}</h3>);}else if(/^[-*] /.test(line)){out.push(<p className="doc-preview-list" key={i}>{line.slice(2)}</p>);}else if(line.trim())out.push(<p key={i}>{line}</p>);}
+ const md=(t:string,k:string|number)=>inlineMarkdown(t,leaf,String(k));
+ for(let i=0;i<lines.length;i++){const line=lines[i];if(line.startsWith('```')){if(code){out.push(<pre key={'code'+start}><code>{code.join('\n')}</code></pre>);code=null;}else{code=[];start=i;}continue;}if(code){code.push(line);continue;}const heading=/^(#{1,4}) (.*)/.exec(line);if(heading){const level=heading[1].length;out.push(level===1?<h1 data-line={i} key={i}>{md(heading[2],i)}</h1>:level===2?<h2 data-line={i} key={i}>{md(heading[2],i)}</h2>:<h3 data-line={i} key={i}>{md(heading[2],i)}</h3>);}else if(/^\s*[-*] /.test(line)){out.push(<p className="doc-preview-list" key={i}>{md(line.replace(/^\s*[-*] /,''),i)}</p>);}else if(/^\s*\d+[.)] /.test(line)){out.push(<p className="doc-preview-list doc-preview-numbered" key={i}>{md(line.trim(),i)}</p>);}else if(line.trim())out.push(<p key={i}>{md(line,i)}</p>);}
  if(code)out.push(<pre key={'code'+start}><code>{code.join('\n')}</code></pre>);
  return <>{out}</>;
 }

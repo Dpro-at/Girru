@@ -396,6 +396,8 @@ function explorerItem(i) {
     importance: Math.min(10, Math.max(0, count(i.importance))), layer: clip(i.layer, 20), createdAt: when(i.createdAt), sourceAgentId: idOr(i.sourceAgentId, agentId),
     source: typeof i.source === 'string' && /^[a-z_-]{1,32}$/.test(i.source) ? i.source : null, usedIn: count(i.usedIn),
     trust: TRUST_WORDS.includes(i.trust) ? i.trust : null, supersededBy: plainId(i.supersededBy) ? i.supersededBy : null, validTo: whenOrNull(i.validTo),
+    // MEM-READ-01 MR1: the row's title and clean lines.
+    ...(typeof i.title === 'string' && i.title ? { title: clip(i.title, 120) } : {}), ...(typeof i.lines === 'string' && i.lines ? { lines: clip(i.lines, 300) } : {}),
   };
 }
 function fact(f) {

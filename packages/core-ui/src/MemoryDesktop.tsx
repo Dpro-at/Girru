@@ -32,6 +32,10 @@ import type { MenuItem } from './desktop-ui';
 import type { ProjectGroup } from './memory-desktop-contract.js';
 import { NeedsYou } from './MemoryNeeds';
 import { HiddenKeysController, KeyText, hiddenSummary } from './memory-hidden-keys';
+import { MarkdownDocument } from './DocumentEditor';
+
+/** MEM-READ-01 MR1: how a memory came ("Imported", "Saved by you", "Learned"), else its kind. */
+const FROM_WORD: Record<string, string> = { import: 'Imported', memory_file: 'Imported', conversation: 'Imported', owner: 'Saved by you', agent: 'Learned', learning: 'Learned', chat: 'From a chat', retention: 'Summary', outsider: 'From outside' };
 import { useStoreP3, useStoreP6, useStoreP8, useStoreP9, useStoreP9b } from './store-switches';
 import { MemoryTrustController } from './memory-trust';
 import { fileMenu } from './CodeOpen';
@@ -500,6 +504,9 @@ function MemoryList({ k, p9b = false, pinned, showPinned, onMenu, onPinnedMenu, 
   const { x } = k;
   const s = useStore(x)!;
   const trust = useStore(k.tr)?.trust;
+  const ss = useStore(k.sc);
+  // Under id keys a project drawer's key is an id: show the project's name.
+  const placeName = (drawer: string) => drawer.startsWith('project:') ? ss?.tree?.projects.find(p => p.slug === drawer.slice(8))?.name ?? drawerName(drawer) : drawerName(drawer);
   const bodyRef = useRef<HTMLDivElement>(null);
   const [anchor, setAnchor] = useState<string | null>(null);
   const groups = useMemo(() => {
@@ -550,8 +557,10 @@ function MemoryList({ k, p9b = false, pinned, showPinned, onMenu, onPinnedMenu, 
       {items.map(i => { const kind = kindOf(i); const checked = s.checked.includes(i.id); return <div key={i.id} data-id={i.id} className="dk-row" role="option" aria-selected={s.open === i.id || checked} data-checked={checked || undefined} data-replaced={i.supersededBy ? true : undefined}
         onClick={e => click(e, i)} onDoubleClick={() => { void x.openMemory(i.id).then(() => x.startEdit()); }} onContextMenu={e => { if (!checked && s.open !== i.id) void x.openMemory(i.id); onMenu(e, i); }}>
         <span className="dk-row-icon" title={kind.word}><UiIcon name={kind.icon} size={14}/></span>
-        <span className="dk-row-text"><span className="dk-row-main" dir="auto"><KeyText text={oneLine(i.preview)}/></span>
-          <span className="dk-row-sub">{i.supersededBy ? 'Not true any more · ' : ''}{kind.word} · {ago(i.createdAt)}{!i.drawerId.startsWith('project:') || placeScope(k.d.getSnapshot().place) === 'company' ? ` · ${drawerName(i.drawerId)}` : ''}{hiddenSummary(i.preview) ? <span className="dk-key-count"><UiIcon name="lock" size={10}/>{hiddenSummary(i.preview)}</span> : null}</span></span>
+        <span className="dk-row-text"><span className="dk-row-main dk-row-title" dir="auto"><KeyText text={i.title || oneLine(i.preview)}/></span>
+          {i.lines && <span className="dk-row-lines" dir="auto"><KeyText text={i.lines}/></span>}
+          <span className="dk-row-sub">{i.supersededBy ? 'Not true any more · ' : ''}{FROM_WORD[i.source ?? ''] ?? kind.word} · {ago(i.createdAt)}{!i.drawerId.startsWith('project:') || placeScope(k.d.getSnapshot().place) === 'company' ? ` · ${placeName(i.drawerId)}` : ''}{hiddenSummary(i.preview) ? <span className="dk-key-count"><UiIcon name="lock" size={10}/>{hiddenSummary(i.preview)}</span> : null}
+            {s.open !== i.id && <> · <button type="button" className="link-button dk-read-more" tabIndex={-1}>Read more</button></>}</span></span>
         {p9b && <TrustChip t={trust?.[i.id]}/>}
       </div>; })}
     </section>)}
@@ -577,7 +586,7 @@ function MemoryInspector({ k, item, p9b = false, onHistory, onTrash, onChecked }
       <label className="dk-field-inline">Importance<input type="range" min={1} max={10} value={s.draftImportance} onChange={e => x.editImportance(Number(e.target.value))}/><span>{s.draftImportance}</span></label>
       {!s.conflict && <div className="actions"><button type="button" onClick={() => x.cancelEdit()}>Cancel</button><button type="submit" className="primary" disabled={s.busy || !s.draft.trim()}>Save</button></div>}
       <p className="fine-print">Saved as a new version; History keeps the old one. {mod}↩ saves.</p>
-    </form> : <p className="dk-insp-text" dir="auto"><KeyText text={s.full ?? item.preview} reveal={id => k.hk.reveal(id)}/></p>}
+    </form> : <div className="dk-insp-text dk-insp-md" dir="auto"><MarkdownDocument text={s.full ?? item.preview} leaf={(t, key) => <KeyText key={key} text={t} reveal={id => k.hk.reveal(id)}/>}/></div>}
     {!s.editing && <div className="dk-insp-icons">
       <IconButton icon="pencil" label="Edit" shortcut="↩" onClick={() => x.startEdit()}/>
       <IconButton icon="pin" label="Pin for every agent" onClick={() => void d.pin(s.full ?? item.preview, item.drawerId)}/>
@@ -599,7 +608,7 @@ function MemoryInspector({ k, item, p9b = false, onHistory, onTrash, onChecked }
       {p3 && v?.trust && <><dt>Trust</dt><dd className="dk-trust" data-trust={v.trust}><UiIcon name={v.trust === 'checked' ? 'check' : v.trust === 'imported' ? 'download' : 'sparkle'} size={13}/>{TRUST_LABEL[v.trust]}
         {v.trust !== 'checked' && <button type="button" className="link-button" disabled={s.busy} onClick={() => void x.setChecked(item.id, true).then(ok => { if (ok) onChecked?.(item.id); })}>Mark as checked</button>}</dd></>}
       {p3 && v && v.replaces.length > 0 && <><dt>Valid</dt><dd>since {v.validFrom ? new Date(v.validFrom).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : 'it was saved'} · replaces an older fact <button type="button" className="link-button" onClick={() => { const older = v.replaces[0]; void (s.replaced ? x.openMemory(older) : x.showReplaced(true).then(() => x.openMemory(older))); }}>open</button></dd></>}
-      <dt>Where</dt><dd>{drawerName(item.drawerId)}</dd>
+      <dt>Where</dt><dd>{item.drawerId.startsWith('project:') ? ss.tree?.projects.find(p => p.slug === item.drawerId.slice(8))?.name ?? drawerName(item.drawerId) : drawerName(item.drawerId)}</dd>
       <dt>Kind</dt><dd><UiIcon name={kind.icon} size={13}/>{TYPE_LABEL[item.type] ?? item.type} · importance {item.importance}</dd>
       {p9b && <HowSureRows t={t} names={ss.agents}/>}
       <dt>Used</dt><dd>{det ? (det.usage.usedIn ? `in ${det.usage.usedIn} ${det.usage.usedIn === 1 ? 'reply' : 'replies'}${det.usage.lastUsedAt ? `, last ${ago(det.usage.lastUsedAt)}` : ''}` : 'not used in a reply yet') : '…'}</dd>

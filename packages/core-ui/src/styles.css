@@ -2310,6 +2310,20 @@ button.status-item:hover { background:var(--row-hover); color:var(--text); }
 .dk-swatch { display:inline-block; inline-size:11px; block-size:11px; border-radius:3px; box-shadow:inset 0 0 0 1px #0003; vertical-align:-1px; margin-inline-end:3px; }
 .dk-swatch-big { inline-size:36px; block-size:36px; border-radius:8px; }
 .dk-swatch-wrap, .dk-inline-swatch { white-space:nowrap; }
+/* MEM-READ-01 MR1: a memory row = title, two clean lines, then a quiet line; the inspector shows the text formatted. */
+.dk-row-title { font-weight:600; }
+.dk-row-lines { font-size:12.5px; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; color:var(--muted); line-height:1.4; white-space:normal; }
+.dk-read-more { font-size:inherit; padding:0; }
+.dk-row[aria-selected="true"] .dk-read-more { display:none; }
+.dk-insp-md { display:grid; gap:6px; line-height:1.5; }
+.dk-insp-md h1, .dk-insp-md h2, .dk-insp-md h3 { margin:6px 0 0; font-size:1.02em; font-weight:650; }
+.dk-insp-md h1 { font-size:1.12em; margin-top:0; }
+.dk-insp-md p { margin:0; }
+.dk-insp-md .doc-preview-list { padding-inline-start:14px; position:relative; }
+.dk-insp-md .doc-preview-list:not(.doc-preview-numbered)::before { content:'•'; position:absolute; inset-inline-start:2px; color:var(--muted); }
+.dk-insp-md pre { margin:0; padding:8px 10px; border-radius:6px; background:var(--secondary); overflow:auto; font-size:.92em; }
+.dk-insp-md code { font-size:.94em; }
+.dk-insp-md .doc-link { color:var(--accent); }
 /* MEM-READ-01 MR2: a hidden key is one lock chip; Show reveals it for the owner alone. */
 .dk-key-chip { display:inline-flex; align-items:center; gap:4px; padding:0 6px; margin:0 1px; border-radius:6px; font-size:.92em; line-height:1.5; white-space:nowrap; vertical-align:baseline; color:var(--muted); background:var(--secondary); }
 .dk-key-chip .link-button { font-size:inherit; padding:0 0 0 2px; }
