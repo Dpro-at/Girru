@@ -1,4 +1,5 @@
 import {ComputerTaskRequest} from './ComputerTaskRequest';
+import { GenVRChatPlace } from './GenVRChatPlace';
 import {ComputerExecutionBadge} from './ComputerDevices';
 import { ChatVoice } from './ChatVoice';
 import { useOutsideProjects } from './outside-projects';
@@ -627,7 +628,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
   {pane === 'details' ? <ChatDetails controller={controller} client={client} recall={recallCtl} onSettings={onAddConnector} onSignIn={onSetUpModel} onClose={() => setPane(null)}
       memoryCard={s.activeId ? <>{recallCtl && <HandoffCard c={recallCtl} agentId={convAgentId || s.agentId || s.agents[0]?.id || ''} agentName={convAgentName}/>}{memCtl && <ChatMemoryCard controller={memCtl} onOpen={onOpenMemory}/>}</> : undefined}
       resultsExtra={withRunNotes(project?.folder && s.git?.branch ? <GitHubCard git={s.git} pr={owner && client ? { client, projectId: project.id } : undefined} onRefresh={() => void controller.refreshGit()}/> : undefined, p8 && owner && client && s.runId ? <ChatRunNotes client={client} runId={s.runId}/> : undefined)}
-      placeExtra={client && owner && project?.folder ? <details className="details-more"><summary>Coding sessions in this folder</summary><CodingSessions key={project.id + ':' + project.folder} client={client} controller={controller} folder={project.folder}/></details> : undefined}
+      placeExtra={client && owner && project ? <>{<GenVRChatPlace key={project.id} client={client} chatProjectId={project.id}/>}{project.folder ? <details className="details-more"><summary>Coding sessions in this folder</summary><CodingSessions key={project.id + ':' + project.folder} client={client} controller={controller} folder={project.folder}/></details> : null}</> : undefined}
       onOpenPane={(p, file) => { if (p === 'terminal') setTermOpen(true); else { setPane(p); if (p === 'files' && file) void panes?.openFile(file); } }} onStop={() => void controller.stopAll()}
       onSchedule={() => setScheduleOpen(true)} onAddFolder={() => project && setProjectSheet({ id: project.id })} onChooseFolder={!s.activeId || !s.turns.length ? () => setProjectSheet({ id: null }) : undefined} onOpenMemory={onOpenMemoryPage} onContinue={() => setChatSheet('continue')} focusPart={focusPart}
       switcher={<PaneSwitch items={paneButtons} pane={pane} onPane={setPane}/>}/>

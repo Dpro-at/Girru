@@ -17,7 +17,7 @@ window.addEventListener('message',async event=>{
    // A space opens as it is: the example film is only for the Studio opened without a space (Mohamed, 2026-11-12).
    studio=mountStudio(document.getElementById('studio'),{filmExample:typeof projectId==='string'||data.lab===true?false:'/film-examples/island-languages.genvrfilm',forceWebGL:true,
     // Girru keeps the place list: My projects (after saving) goes back to it; Motion lab opens the lab itself.
-    onHome:()=>send({operation:'home'}),...(data.lab===true&&typeof projectId!=='string'?{openLab:true}:{}),initialProjectId:projectId,...host,...(data.chat===true?hostChat():{}),agents:id=>request('agents',id),catalog:{list:()=>request('catalog-list'),asset:id=>request('catalog-asset',id)},storage:{list:()=>request('list'),read:id=>request('read',id),write:project=>request('write',project)}});
+    onHome:()=>send({operation:'home'}),desktopLayout:true,...(typeof data.placeItem==='string'&&/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(data.placeItem)&&typeof projectId==='string'?{placeItem:data.placeItem}:{}),...(data.lab===true&&typeof projectId!=='string'?{openLab:true}:{}),initialProjectId:projectId,...host,...(data.chat===true?hostChat():{}),agents:id=>request('agents',id),catalog:{list:()=>request('catalog-list'),asset:id=>request('catalog-asset',id)},storage:{list:()=>request('list'),read:id=>request('read',id),write:project=>request('write',project)}});
    send({operation:'mounted'});
   }catch{send({operation:'unavailable'});}
  }
@@ -29,7 +29,7 @@ window.addEventListener('message',async event=>{
  // Board W1: Girru's own chat. The parent streams the answer, sends what the chat shows, and asks to undo
  // (the Studio's own Ctrl/Cmd+Z on the Build and Items tabs, sent from an element so its key handler reads it).
  if(data.operation==='model-delta'&&typeof data.id==='string'&&typeof data.delta==='string'&&data.delta.length<=65536){models.get(data.id)?.onDelta(data.delta);}
- if(data.operation==='chat-info'&&studio?.setChat&&data.info&&typeof data.info==='object'&&JSON.stringify(data.info).length<=4096){try{studio.setChat(data.info);}catch{/* an older Studio without the chat option */}}
+ if(data.operation==='chat-info'&&studio?.setChat&&data.info&&typeof data.info==='object'&&JSON.stringify(data.info).length<=1000000){try{studio.setChat(data.info);}catch{/* an older Studio without the chat option */}}
  if(data.operation==='undo'&&Number.isInteger(data.count)&&data.count>0&&data.count<=50){for(let i=0;i<data.count;i++)document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'z',code:'KeyZ',ctrlKey:!/Mac/.test(navigator.platform),metaKey:/Mac/.test(navigator.platform),bubbles:true,cancelable:true}));}
  if(data.operation==='close'){try{send({operation:'closed',ok:await studio?.dispose()===true});}catch{send({operation:'closed',ok:false});}}
 });
@@ -42,7 +42,8 @@ const PLACE_TABS=['build','items','avatar','filming','lab'];
 function hostChat(){
  return {
   onContext:context=>{if(!context||typeof context!=='object'||typeof context.projectId!=='string'||typeof context.name!=='string')return;send({operation:'context',context:{projectId:context.projectId.slice(0,100),name:context.name.slice(0,200),tab:PLACE_TABS.includes(context.tab)?context.tab:'build',look:String(context.look??'').slice(0,40),kind:String(context.kind??'').slice(0,40)}});},
-  chat:{chooseAnswerer:()=>send({operation:'choose-answerer'})},
+  // GV1e: the Studio chat is the place's Girru chat: Open in Chat goes to Girru Chat; earlier lines come with chat-info.
+  chat:{chooseAnswerer:()=>send({operation:'choose-answerer'}),openChat:()=>send({operation:'open-chat'})},
   model:(messages,onDelta,signal,_onQueue,tools)=>new Promise((resolve,reject)=>{
    const value={messages,tools:Array.isArray(tools)?tools:[]};let text;try{text=JSON.stringify(value);}catch{reject(Error('This conversation cannot be sent to Girru.'));return;}
    if(text.length>MODEL_BYTES){reject(Error('This conversation is too long for Girru. Start a new chat.'));return;}

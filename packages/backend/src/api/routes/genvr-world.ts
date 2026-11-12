@@ -4,7 +4,7 @@
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { authorizeActiveRole } from '../../auth/route-guards.js';
-import { chooseWorldAgent, openWorld, parseTurn, TURN_LIMITS, WorldError, worldTurn, type TurnDeps } from '../../services/genvr-world.js';
+import { chooseWorldAgent, openWorld, parseTurn, TURN_LIMITS, WorldError, worldHistory, worldOfChatProject, worldTurn, type TurnDeps } from '../../services/genvr-world.js';
 import { safeConsole, safeErrorFields } from '../../services/safe-error-log.js';
 
 const OWNER_ONLY = ['owner'] as const;
@@ -32,6 +32,12 @@ export async function genvrWorldRoutes(app: FastifyInstance, options: { deps?: T
     const body = request.body;
     if (!record(body) || Object.keys(body).join() !== 'agentId' || typeof body.agentId !== 'string') throw new WorldError(400, 'invalid_input');
     return { answerer: await chooseWorldAgent(owner, request.params.id, body.agentId) };
+  }));
+  app.get('/api/genvr/worlds/:id/history', { config }, asOwner(async (owner, request) => worldHistory(owner, request.params.id)));
+  app.get('/api/genvr/worlds/of-chat-project/:id', { config }, asOwner(async (owner, request, reply) => {
+    if (!/^[A-Za-z0-9_-]{1,100}$/.test(request.params.id)) throw new WorldError(400, 'invalid_input');
+    const world = await worldOfChatProject(owner, request.params.id);
+    return world ?? reply.code(404).send({ code: 'not_found' });
   }));
   app.post('/api/genvr/worlds/:id/turn', { config, bodyLimit: TURN_LIMITS.bytes + 65536 }, asOwner(async (owner, request, reply) => {
     const input = parseTurn(request.body);

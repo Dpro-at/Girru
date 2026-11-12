@@ -33,6 +33,7 @@ import { TaskBoard } from './TaskBoard';
 import { RunsDestination } from './RunsDestination';
 import type { RunsPlace } from './RunsDestination';
 import { GenVRPage } from './GenVRPage';
+import { OPEN_GENVR_EVENT } from './GenVRChatPlace';
 import { GENVR_RUNTIME } from './genvr-contract';
 import type {SettingsTab} from './AppSettings';
 import { AppSettings } from './AppSettings';
@@ -107,6 +108,8 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
   // CP11c: a system notice when a sent task finishes or another computer needs Allow.
   useComputerNotices(client.getSnapshot().user?.role === 'owner' && client.getSnapshot().mode === 'live', () => setPage('computers'), client);
   const [genvrOpened,setGenvrOpened]=useState(false);
+  // GV1e: Chat's Open in Studio and the GenVR page's Open in Chat.
+  const [genvrRequest,setGenvrRequest]=useState<{placeId:string;n:number}|null>(null);
   const genvrOpenSeq=useRef(0);
   useEffect(()=>{genvrOpenSeq.current++;return()=>{genvrOpenSeq.current++;};},[page,state.user?.id,state.user?.role]);
   // CODE-STORE-01: Code comes from the Store; while the desktop app has none, every way to Code opens its Store page.
@@ -183,6 +186,8 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
     if(seq!==genvrOpenSeq.current)return;
     setStoreRequest(r=>({updates:false,item:'girru:genvr',n:(r?.n??0)+1}));setPage('store');
   };
+  const openGenvrRef=useRef(openGenvr);openGenvrRef.current=openGenvr;
+  useEffect(()=>{const on=(event:Event)=>{const id=(event as CustomEvent<{placeId?:unknown}>).detail?.placeId;if(typeof id!=='string'||!/^[a-zA-Z0-9_-]{1,100}$/.test(id))return;setGenvrRequest(r=>({placeId:id,n:(r?.n??0)+1}));void openGenvrRef.current();};window.addEventListener(OPEN_GENVR_EVENT,on);return()=>window.removeEventListener(OPEN_GENVR_EVENT,on);},[]);
   const openStore=(updates=false,local?:'claude-code'|'codex',mine=false)=>{setStoreRequest(r=>({updates,local,mine,n:(r?.n??0)+1}));setPage('store');};
   // SA6: Apps is Store › My apps now; every way that opened Apps opens it.
   const openMyApps=()=>openStore(false,undefined,true);
@@ -310,7 +315,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
       <section className="page page-store" hidden={page!=='store'}><StoreWorkspace client={client} active={page==='store'} sidebarSlot={slot} request={storeRequest} canBrowser={browser.available&&owner} canCode={nativeEditor&&owner} codeMissing={codeMissing&&owner} onOpenApp={id=>{if(id==='browser')setPage('browser');else if(id==='code')void (nativeEditor?openCode():openCodeInStore());else if(id==='terminal')openTerminal();else if(id==='genvr')void openGenvr();else if(id==='channels')openSettings('channels');else setPage(id);}} onAccounts={()=>openSettings('accounts')} footerItem={owner?id=>footerToolItem(footerPrefsNow,id,x=>footer.toggle(x)):undefined} onPermissions={()=>{if(user.role!=='owner'){setPage('agents');return;}setApprovalsPlace(r=>({place:'perms',n:(r?.n??0)+1}));setPage('approvals');}}/></section>
       {user.role==='owner'&&<section className="page page-trading" hidden={page!=='trading'}><StoreTradingView client={client} active={page==='trading'} sidebarSlot={slot} onBack={openMyApps} onOpenStore={()=>{setStoreRequest(r=>({updates:false,item:'store:trading',n:(r?.n??0)+1}));setPage('store');}} onPermissions={()=>{setApprovalsPlace(r=>({place:'perms',n:(r?.n??0)+1}));setPage('approvals');}}/></section>}
       {user.role==='owner'&&mode==='live'&&<section className="page page-computers" hidden={page!=='computers'}><ComputersSection client={client} active={page==='computers'} sidebarSlot={slot} onOpenChat={id=>{void chat?.open(id);setPage('chat');}} onApprovals={()=>setPage('approvals')} onSettings={()=>openSettings('computers')} onUpdates={()=>openSettings('about')}/></section>}
-      <section className="page page-genvr" hidden={page !== 'genvr'}>{genvrOpened&&<GenVRPage key={user.id} client={client} active={page === 'genvr'} sidebarSlot={slot}/>}</section>
+      <section className="page page-genvr" hidden={page !== 'genvr'}>{genvrOpened&&<GenVRPage key={user.id} client={client} active={page === 'genvr'} sidebarSlot={slot} request={genvrRequest} onOpenChat={id=>{void (async()=>{await chat?.loadProjects();await chat?.refreshList();await chat?.open(id);})();setPage('chat');}}/>}</section>
       {page === 'settings' && <section className="page page-settings"><AppSettings onOpenDeviceChat={id=>{void chat?.open(id);setPage('chat');}} key={settingsVisit} mcpOpenId={mcpOpen} onOpenChannelsStore={()=>{setStoreRequest(r=>({updates:false,item:'store:agent-connect',n:(r?.n??0)+1}));setPage('store');}} onOpenStore={local=>openStore(false,local)} initialTab={settingsTab} initialMemoryPane={memoryPane} sidebarSlot={slot} active signedIn client={client} preference={appearance.preference} onTheme={appearance.setPreference} onAccount={() => openSettings('account')} onAgents={() => setPage('agents')} onOpenMemory={() => setPage('memory')} onOpenChat={() => setPage('chat')} onOpenApps={openMyApps} onOpenTool={tool => setPage(tool)} onOpenGenvr={()=>void openGenvr()} onApprovals={() => setPage('approvals')} onBoard={() => setPage('board')} onAgent={id => { setAgentFocus(f => ({ id, n: (f?.n ?? 0) + 1 })); setPage('agents'); }}/></section>}
       </>}
     </main>

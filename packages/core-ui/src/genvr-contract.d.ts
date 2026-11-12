@@ -15,6 +15,7 @@ export const STUDIO_TICKET_PATH:'/api/genvr/studio-library-ticket';
 
 /** GENVR-WORLD-01 P1: world folder/project, who answers, and the Studio chat's model turn. */
 export const GENVR_WORLD:RegExp;
+export const GENVR_WORLD_OF_CHAT:RegExp;
 export const WORLD_TURN_BYTES:number;
 export function worldRoute(path:string):boolean;
 export function validWorldTurn(body:unknown):boolean;
