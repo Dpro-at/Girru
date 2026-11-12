@@ -62,10 +62,10 @@ test('real SessionClient and TradingBotController complete owner TOTP review bef
 });
 
 test('real saved-bot SELECT runs inside the same read snapshot and query-only request writes nothing',async()=>{
- const f=await person();await provision(f);const original=db.prepare,observed=[];
- db.prepare=function(sql,...args){if(sql.startsWith('SELECT b.*,a.currency,a.mode FROM paper_bots b JOIN paper_accounts'))observed.push(this.inTransaction);return original.call(this,sql,...args);};
- const before=original.call(db,'SELECT total_changes() n').get().n;db.pragma('query_only=ON');
- try{const response=await call(f,'GET',base);assert.equal(response.statusCode,200,response.body);assert.deepEqual(observed,[true]);assert.equal(original.call(db,'SELECT total_changes() n').get().n,before);}finally{db.pragma('query_only=OFF');db.prepare=original;}
+ const f=await person();await provision(f);const original=Object.getPrototypeOf(db).prepare,observed=[];
+ Object.getPrototypeOf(db).prepare=function(sql,...args){if(sql.startsWith('SELECT b.*,a.currency,a.mode FROM paper_bots b JOIN paper_accounts'))observed.push(this.inTransaction);return original.call(this,sql,...args);};
+ const before=db.prepare('SELECT total_changes() n').get().n;db.pragma('query_only=ON');
+ try{const response=await call(f,'GET',base);assert.equal(response.statusCode,200,response.body);assert.deepEqual(observed,[true]);assert.equal(db.prepare('SELECT total_changes() n').get().n,before);}finally{db.pragma('query_only=OFF');Object.getPrototypeOf(db).prepare=original;}
 });
 
 test('missing or broken review tables and a flooded list do not block owner stop',async()=>{const f=await person(),flow=await reviewed(f),applied=await call(f,'POST',base+'/reviews/'+flow.stage.id+'/apply',{receipt:flow.proof.receipt});assert.equal(applied.statusCode,200);const botId=applied.json().botId;for(let i=0;i<100;i++)await call(f,'GET',base);assert.equal((await call(f,'GET',base)).statusCode,429);db.exec('ALTER TABLE paper_bot_activation_reviews RENAME TO fixture_saved_reviews');try{assert.equal((await call(f,'POST',base+'/'+botId+'/stop',{})).statusCode,200);assert.equal((await call(f,'POST',base+'/'+botId+'/revoke',{})).statusCode,200);}finally{db.exec('ALTER TABLE fixture_saved_reviews RENAME TO paper_bot_activation_reviews');}});

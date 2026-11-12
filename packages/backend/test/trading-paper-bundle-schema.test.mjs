@@ -13,8 +13,8 @@ test('atomic exact idempotent schema-only setup creates no account grant or inst
  const schema=paper(),version=db.pragma('schema_version',{simple:true});assert.deepEqual(prepare(db),result);assert.deepEqual(paper(),schema);assert.equal(db.pragma('schema_version',{simple:true}),version);assert.equal(db.prepare('SELECT count(*) n FROM users').get().n,users);assert.deepEqual(inspect(db),result);clear();
 });
 test('actual DDL before injected later failure rolls back completely',()=>{
- const original=db.exec;let writes=0;db.exec=function(sql){if(sql.includes('CREATE TABLE IF NOT EXISTS paper_bots'))throw Error('fixture failure');writes++;return original.call(this,sql);};
- try{assert.deepEqual(prepare(db),{ok:false,reason:'unavailable'});assert.ok(writes>2);assert.deepEqual(paper(),[]);assert.equal(db.inTransaction,false);}finally{db.exec=original;}assert.equal(prepare(db).ok,true);clear();
+ const original=Object.getPrototypeOf(db).exec;let writes=0;Object.getPrototypeOf(db).exec=function(sql){if(sql.includes('CREATE TABLE IF NOT EXISTS paper_bots'))throw Error('fixture failure');writes++;return original.call(this,sql);};
+ try{assert.deepEqual(prepare(db),{ok:false,reason:'unavailable'});assert.ok(writes>2);assert.deepEqual(paper(),[]);assert.equal(db.inTransaction,false);}finally{Object.getPrototypeOf(db).exec=original;}assert.equal(prepare(db).ok,true);clear();
 });
 test('internal helper joins caller rollback and public wrapper refuses caller transaction',()=>{
  assert.throws(()=>inside(db));db.transaction(()=>{assert.deepEqual(prepare(db),{ok:false,reason:'unavailable'});assert.deepEqual(paper(),[]);}).immediate();
