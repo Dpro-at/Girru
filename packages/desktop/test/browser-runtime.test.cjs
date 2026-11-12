@@ -23,7 +23,7 @@ test('desktop Browser rejects oversized connection files and refuses redirects',
  for(const url of ['http://127.0.0.1:0','http://127.0.0.1:99999','https://external.example']){await fs.writeFile(file,JSON.stringify({...value,url}));await assert.rejects(browser.command({action:'state'}),/Invalid browser connection/);}
 });
 
-test('closing waits for the owned launcher so reopen cannot attach to its dying connection',async t=>{
+test('closing waits for the owned launcher so reopen cannot attach to its dying connection',{skip:process.platform==='win32'&&'POSIX signals: Windows stops the launcher at once'},async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'girru-browser-close-')),profile=path.join(root,'profile');
  await fs.mkdir(path.join(root,'runtime/scripts'),{recursive:true});
  await fs.writeFile(path.join(root,'runtime/package.json'),JSON.stringify({name:'@girru/browser'}));

@@ -53,6 +53,8 @@ function createBrowserRuntime({root,bundled,runtimesDir,node,profile}) {
     })().finally(() => { starting = undefined; });
     return starting;
   }
-  return {connectionFile, status, open, command, async close() { const owned=child;if(!owned||owned.exitCode!==null)return;await new Promise(resolve=>{const deadline=setTimeout(()=>{owned.kill('SIGKILL');resolve();},4500);owned.once('exit',()=>{clearTimeout(deadline);resolve();});owned.kill('SIGTERM');}); }};
+  return {connectionFile, status, open, command, async close() { const owned=child;if(!owned||owned.exitCode!==null)return;await new Promise(resolve=>{const deadline=setTimeout(()=>{owned.kill('SIGKILL');resolve();},4500);owned.once('exit',()=>{clearTimeout(deadline);resolve();});owned.kill('SIGTERM');});
+    // Windows stops the launcher at once (no SIGTERM handler runs), so its connection file is removed here.
+    if(process.platform==='win32')await fs.rm(connectionFile,{force:true}).catch(()=>{}); }};
 }
 module.exports = {createBrowserRuntime};

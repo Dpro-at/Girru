@@ -20,32 +20,32 @@ function fixture(t){
 }
 async function enroll(f){const store=f.open(),initial=f.empty();f.db.set('profile',initial);await store.enrollOwner('profile',async()=>true);await store.enrollProfilePresenceRoot('profile',initial,async()=>true);return {store,initial};}
 const admission=()=>({purpose:'memory-profile-presence-mutation',operationId:'actual-operation',isCurrent:()=>true});
-test('unknown-next pending survives restart and blocks ordinary reads even if database unchanged',async t=>{
+test('unknown-next pending survives restart and blocks ordinary reads even if database unchanged',{skip:process.platform==='win32'&&'POSIX-only path (directory fsync, uid, links); Girru takes its Windows path there'},async t=>{
  const f=fixture(t),{store,initial}=await enroll(f),pending=await store.prepareProfilePresence('profile',initial,admission());
  assert.equal(pending.purpose,'memory-profile-presence');await assert.rejects(()=>store.captureProfilePresence('profile'));
  await store.close();const reopened=f.open();await assert.rejects(()=>reopened.captureProfilePresence('profile'));
  const held=await reopened.capturePendingProfilePresence('profile');assert.equal(held.id,pending.id);assert.equal(held.operationId,'actual-operation');assert.equal('next' in held,false);
 });
-test('commit binds actual twenty-table digest and advances native generation once',async t=>{
+test('commit binds actual twenty-table digest and advances native generation once',{skip:process.platform==='win32'&&'POSIX-only path (directory fsync, uid, links); Girru takes its Windows path there'},async t=>{
  const f=fixture(t),{store,initial}=await enroll(f),pending=await store.prepareProfilePresence('profile',initial,admission()),next={...initial,sha256:'c'.repeat(64),generation:2};
  await assert.rejects(()=>pending.commit(next));f.db.set('profile',next);await pending.commit(next);
  assert.deepEqual((await store.captureProfilePresence('profile')).anchor,next);await assert.rejects(()=>pending.commit(next));
 });
-test('missing typed admission refuses before pending and preserves readable root',async t=>{
+test('missing typed admission refuses before pending and preserves readable root',{skip:process.platform==='win32'&&'POSIX-only path (directory fsync, uid, links); Girru takes its Windows path there'},async t=>{
  const f=fixture(t),{store,initial}=await enroll(f);await assert.rejects(()=>store.prepareProfilePresence('profile',initial,null));assert.deepEqual((await store.captureProfilePresence('profile')).anchor,initial);
 });
-test('revoked initiating operation cannot commit or clear its persisted pending',async t=>{
+test('revoked initiating operation cannot commit or clear its persisted pending',{skip:process.platform==='win32'&&'POSIX-only path (directory fsync, uid, links); Girru takes its Windows path there'},async t=>{
  const f=fixture(t),{store,initial}=await enroll(f);let current=true;const pending=await store.prepareProfilePresence('profile',initial,{...admission(),isCurrent:()=>current}),next={...initial,sha256:'d'.repeat(64),generation:2};f.db.set('profile',next);current=false;
  assert.equal(pending.isCurrent(),false);await assert.rejects(()=>pending.commit(next));assert.equal((await store.capturePendingProfilePresence('profile')).id,pending.id);
 });
-test('restoring an older protected presence file cannot roll back its independent witness',async t=>{
+test('restoring an older protected presence file cannot roll back its independent witness',{skip:process.platform==='win32'&&'POSIX-only path (directory fsync, uid, links); Girru takes its Windows path there'},async t=>{
  const f=fixture(t),{store,initial}=await enroll(f),file=path.join(f.directory,'memory-profile-presence-roots.json'),old=fs.readFileSync(file),pending=await store.prepareProfilePresence('profile',initial,admission()),next={...initial,sha256:'e'.repeat(64),generation:2};
  f.db.set('profile',next);await pending.commit(next);await store.close();fs.writeFileSync(file,old,{mode:0o600});await assert.rejects(()=>f.open().captureProfilePresence('profile'));
 });
-test('a failed witness CAS leaves no automatically recoverable profile',async t=>{
+test('a failed witness CAS leaves no automatically recoverable profile',{skip:process.platform==='win32'&&'POSIX-only path (directory fsync, uid, links); Girru takes its Windows path there'},async t=>{
  const f=fixture(t),{store,initial}=await enroll(f);f.failWitness();await assert.rejects(()=>store.prepareProfilePresence('profile',initial,admission()));await assert.rejects(()=>store.captureProfilePresence('profile'));await assert.rejects(()=>f.open().captureProfilePresence('profile'));
 });
-test('an admitted pending write can commit its own exact authenticated forget descendant',async t=>{
+test('an admitted pending write can commit its own exact authenticated forget descendant',{skip:process.platform==='win32'&&'POSIX-only path (directory fsync, uid, links); Girru takes its Windows path there'},async t=>{
  const f=fixture(t),{store,initial}=await enroll(f),pending=await store.prepareProfilePresence('profile',initial,admission()),authority={...f.authority(),forgetSequence:1,forgetMac:'f'.repeat(64)},next={...initial,...authority,sha256:'9'.repeat(64),generation:2};
  f.moveAuthority(authority);f.db.set('profile',next);assert.equal(pending.isCurrent(),true);await pending.commit(next);assert.deepEqual((await store.captureProfilePresence('profile')).anchor,next);
 });
