@@ -330,6 +330,9 @@ if (report.answers) {
   const a = report.answers;
   console.log(`\n== answers by ${a.model} (${a.questions} questions, p50 ${a.msP50} ms each)`);
   for (const k of ['noAnswer', 'answerable', 'answerableRetrieved']) console.log(`${k.padEnd(20)} P ${JSON.stringify(a[k].P)}  S ${JSON.stringify(a[k].S)}`);
+  // Wrong-answer rate: a confident wrong answer (or an invented one) among all answers given.
+  const rate = (o, bad) => { const n = Object.values(o).reduce((x, y) => x + y, 0); return n ? `${((bad.reduce((x, k) => x + (o[k] || 0), 0) / n) * 100).toFixed(1)}%` : '-'; };
+  console.log(`wrong-answer rate    answerable ${rate(a.answerable.P, ['wrong'])} · no-answer invented ${rate(a.noAnswer.P, ['invented'])}`);
   for (const [k, v] of Object.entries(a.byKind)) console.log(`  ${k.padEnd(18)} P ${JSON.stringify(v.P)}  S ${JSON.stringify(v.S)}`);
 }
 console.log('\n== save, then ask at once');

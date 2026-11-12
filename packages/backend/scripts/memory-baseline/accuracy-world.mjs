@@ -187,7 +187,7 @@ const INDIRECT = [
   { attr: 'bug', lang: 'ar', q: 'ذكّرني بالمشكلة التي كانت تزعج العملاء.' },
   { attr: 'bug', lang: 'en', q: 'What was that annoying problem users kept hitting?' },
   { attr: 'client', lang: 'iq', q: 'منو چان الشخص اللي نتواصل وياه بالشركة؟' },
-  { attr: 'deadline', lang: 'en', q: 'How much time do we have left before we have to ship?' },
+  { attr: 'deadline', lang: 'en', q: 'When do we have to ship it at the latest?' }, // answerable without today's date
   { attr: 'deadline', lang: 'ar', q: 'متى يجب أن نسلّم؟' },
   { attr: 'deploy', lang: 'iq', q: 'شوكت عادةً ننزّل التحديثات؟' },
 ];
@@ -351,7 +351,9 @@ export function buildWorld(seed = 31) {
     ask('city-de', 'de', 5, `Wo wohnt ${first}?`, 'city');
     ask('city-iq', 'iq', 7, `${first} وين ساكن؟`, 'city');
   });
-  const keyOf = new Map(facts.map((f) => [f.id, withForms(f.key)]));
+  // "What became of the planned move?": that it was cancelled is the answer too.
+  const CANCELLED = ['cancel', 'called off', 'abgesagt', 'abgeblasen', 'storniert', 'أُلغي', 'ألغي', 'الغي', 'لغينا', 'إلغاء', 'الغاء', 'ملغ'];
+  const keyOf = new Map(facts.map((f) => [f.id, [...withForms(f.key), ...(f.attr === 'host' ? CANCELLED : [])]]));
   for (const q of questions) q.answer = q.target ? keyOf.get(q.target) : null;
   return { facts, questions };
 }
