@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { q } from '../repositories/sql-steps.js';
-import { addAssistantMessage, addUserMessage, createConversation, createProject, findConversation, findProject, listConversationMessages } from '../repositories/chat-conversations.js';
+import { addAssistantMessage, addUserMessage, createConversation, createProject, findConversation, findProject, listConversationMessages, patchProject } from '../repositories/chat-conversations.js';
 import { randomUUID } from 'node:crypto';
 import { DEFAULT_OLLAMA_MODEL } from '../llm/ollama.js';
 import { ollamaToolChat, type OllamaMessage } from '../llm/ollama-tool-chat.js';
@@ -124,7 +124,10 @@ export async function openWorld(userId: string, projectId: string, name: string)
     row = { folder, chat_project_id: null, agent_id: row?.agent_id ?? null };
   }
   let chatProjectId = row.chat_project_id;
-  if (!chatProjectId || !(await findProject(userId, chatProjectId))) {
+  const chatProject = chatProjectId ? await findProject(userId, chatProjectId) : undefined;
+  // A renamed place: its chat project follows the new name (the folder stays where its files are).
+  if (chatProject && chatProject.name !== `World · ${title}`.slice(0, 80)) await patchProject(userId, chatProject.id, { name: `World · ${title}`.slice(0, 80) }).catch(() => undefined);
+  if (!chatProjectId || !chatProject) {
     const project = await createProject(userId, { name: `World · ${title}`.slice(0, 80), folder: row.folder });
     chatProjectId = project.id;
     await q.run('UPDATE genvr_worlds SET chat_project_id=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND project_id=?', chatProjectId, userId, projectId);
@@ -240,7 +243,18 @@ export async function worldTurn(userId: string, role: string, projectId: string,
     pendingRuns.set(key, { runId, started: Date.now() });
     await addUserMessage(conversation, last.content.slice(0, 20_000), runId);
   }
-  const reply = await answerTurn(userId, role, projectId, input, signal, deps);
+  let reply: TurnResult;
+  try { reply = await answerTurn(userId, role, projectId, input, signal, deps); }
+  catch (error) {
+    // The failed reply stays in the place's Girru chat with its reason, as in Girru Chat.
+    const failed = pendingRuns.get(key);
+    if (conversation && failed && !signal.aborted) {
+      pendingRuns.delete(key);
+      const text = error instanceof WorldError && error.message !== error.code ? error.message : 'The agent could not answer. Try again or pick another agent.';
+      await addAssistantMessage(conversation, { runId: failed.runId, content: text, parts: [], status: 'error', durationMs: Date.now() - failed.started, errorCode: 'model_unavailable' }).catch(() => undefined);
+    }
+    throw error;
+  }
   const pending = pendingRuns.get(key);
   if (conversation && pending && !reply.tool_calls.length) {
     pendingRuns.delete(key);

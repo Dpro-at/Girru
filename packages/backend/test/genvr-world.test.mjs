@@ -128,3 +128,17 @@ test('GV1e: a world has one Girru chat; Studio turns are written into it and rea
  assert.equal((await worldApp.inject({url:'/api/genvr/worlds/rooftop-city/history',headers:member})).statusCode,403);
  await doneApp.close();
 });
+test('GV1e: a failed turn stays in the place chat with its reason; the chat project follows a rename; the log names the reason',async()=>{
+ const opened=(await worldApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/open',headers:owner,payload:{name:'Roof city'}})).json();
+ const failing={...deps,ollama:async()=>{throw new Error('usage limit reached for token sk-ant-api03-'+'x'.repeat(40));}};
+ const lines=[];const log=console.log;console.log=(...a)=>{lines.push(a.join(' '));};
+ const failApp=Fastify();registerAuthGate(failApp);await failApp.register(genvrWorldRoutes,{deps:failing});await failApp.ready();
+ try{const r=await failApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/turn',headers:owner,payload:{messages:[{role:'user',content:'Add a lamp'}],tools}});assert.equal(r.statusCode,502);}
+ finally{console.log=log;await failApp.close();}
+ const last=db.prepare("SELECT role,status,content FROM chat_messages WHERE session_id=? ORDER BY id DESC LIMIT 2").all(opened.conversationId);
+ assert.equal(last[0].role,'assistant');assert.equal(last[0].status,'error');assert.equal(last[1].content,'Add a lamp');
+ const logged=lines.find(l=>l.includes('[GenVR world] failed'));assert.ok(logged);assert.match(logged,/usage limit reached/);assert.doesNotMatch(logged,/sk-ant-api03-x{20}/,'secrets are taken out');
+ db.prepare("UPDATE genvr_projects SET title='Sky city' WHERE id='rooftop-city'").run();
+ await worldApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/open',headers:owner,payload:{name:'Sky city'}});
+ assert.equal(db.prepare('SELECT name FROM chat_projects WHERE id=?').get(opened.chatProjectId).name,'World · Sky city');
+});

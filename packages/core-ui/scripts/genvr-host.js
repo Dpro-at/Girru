@@ -39,11 +39,13 @@ send({operation:'ready'});
 // conversation and the tool list, and gives back text and tool calls.
 const models=new Map(),MODEL_BYTES=2*1024*1024,MODEL_MS=10*60*1000;
 const PLACE_TABS=['build','items','avatar','filming','lab'];
+/** The folder button opens the folder only where Girru can show it (the desktop app). */
+function canOpenFolder(){try{return typeof parent.dproApp?.revealFolder==='function';}catch{return false;}}
 function hostChat(){
  return {
   onContext:context=>{if(!context||typeof context!=='object'||typeof context.projectId!=='string'||typeof context.name!=='string')return;send({operation:'context',context:{projectId:context.projectId.slice(0,100),name:context.name.slice(0,200),tab:PLACE_TABS.includes(context.tab)?context.tab:'build',look:String(context.look??'').slice(0,40),kind:String(context.kind??'').slice(0,40)}});},
   // GV1e: the Studio chat is the place's Girru chat: Open in Chat goes to Girru Chat; earlier lines come with chat-info.
-  chat:{chooseAnswerer:()=>send({operation:'choose-answerer'}),openChat:()=>send({operation:'open-chat'})},
+  chat:{chooseAnswerer:()=>send({operation:'choose-answerer'}),openChat:()=>send({operation:'open-chat'}),...(window.parent&&canOpenFolder()?{openFolder:()=>send({operation:'open-folder'})}:{})},
   model:(messages,onDelta,signal,_onQueue,tools)=>new Promise((resolve,reject)=>{
    const value={messages,tools:Array.isArray(tools)?tools:[]};let text;try{text=JSON.stringify(value);}catch{reject(Error('This conversation cannot be sent to Girru.'));return;}
    if(text.length>MODEL_BYTES){reject(Error('This conversation is too long for Girru. Start a new chat.'));return;}
