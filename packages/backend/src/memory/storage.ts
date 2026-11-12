@@ -605,8 +605,9 @@ export class MemoryStorage implements IMemoryStorage {
     if (q.model === this.embeddingService.targetModel()) {
       const stale = staleIn(query.userId, open, sq, q.model, LAZY_REEMBED_PER_SEARCH);
       const fakes = stale.map((r) => ({ id: r.id, userId: query.userId, content: r.content } as Memory));
-      if (fakes.length && await this.reembedStale(fakes, q.model) > 0) {
-        open = await openStore(query.userId, query.drawers!);
+      if (fakes.length) {
+        await this.reembedStale(fakes, q.model);
+        open = await openStore(query.userId, query.drawers!); // new vectors, and a forget meanwhile
         if (!open) return null;
       }
     }

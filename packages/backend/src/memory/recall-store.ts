@@ -56,6 +56,15 @@ interface Drawer {
   live: number;
   sumLen: number;
   bytes: number;
+  /**
+   * 'exact': full vectors in RAM. 'i8' (a drawer past GIRRU_RECALL_EXACT_MAX
+   * memories): unit vectors scalar-quantised to int8 (4x smaller); the best
+   * candidates are re-scored with their full vectors read by id.
+   */
+  mode: 'exact' | 'i8';
+  q8: Int8Array;
+  q8dims: number;
+  q8n: number;
 }
 
 interface UserStore {
@@ -80,6 +89,8 @@ interface UserStore {
   sq: number[];
   len: number[];
   slotBytes: number[];
+  /** Row of the slot in its drawer's int8 block, or -1. */
+  q8row: number[];
   terms: Map<string, Posting>;
   /** Per-search scratch, reused: BM25 sums by slot and which slots were touched. */
   acc: Float64Array;
@@ -91,6 +102,18 @@ const users = new Map<string, UserStore>();
 let storeBytes = 0;
 let seenDataVersion: number | null = null;
 let captureDb: unknown = null;
+
+/** A drawer with more memories than this keeps int8 vectors (MEM-SPEED-01 step 2). */
+export function exactMax(): number {
+  const n = Number(process.env.GIRRU_RECALL_EXACT_MAX);
+  return process.env.GIRRU_RECALL_EXACT_MAX !== undefined && Number.isFinite(n) && n >= 0 ? n : 50_000;
+}
+
+/** How many int8 candidates are re-scored with their full vector. */
+function rescoreCount(limit: number): number {
+  const n = Number(process.env.GIRRU_RECALL_RESCORE);
+  return Math.max(limit, process.env.GIRRU_RECALL_RESCORE !== undefined && Number.isFinite(n) && n > 0 ? n : 200);
+}
 
 export function storeCapBytes(): number {
   const mb = Number(process.env.GIRRU_RECALL_INDEX_MB);
@@ -173,7 +196,7 @@ function newUser(now: number): UserStore {
   return {
     drawers: new Map(), lastUsed: now, changed: new Set(), slotOf: new Map(),
     ids: [], drawerOf: [], type: [], layerRaw: [], layer: [], importance: [], replaced: new Uint8Array(1024), alive: new Uint8Array(1024),
-    created: [], model: [], vec: [], sq: [], len: [], slotBytes: [], terms: new Map(), acc: new Float64Array(1024), mark: new Uint8Array(1024), bytes: 0,
+    created: [], model: [], vec: [], sq: [], len: [], slotBytes: [], q8row: [], terms: new Map(), acc: new Float64Array(1024), mark: new Uint8Array(1024), bytes: 0,
   };
 }
 
@@ -229,13 +252,43 @@ function addSlot(u: UserStore, d: Drawer, r: FullRow): void {
   u.replaced[slot] = replaced ? 1 : 0; u.alive[slot] = 1;
   u.created.push(r.created_at);
   u.model.push(r.has_json ? (r.embedding_model || LEGACY_HASH_MODEL) : undefined);
-  u.vec.push(vec); u.sq.push(sq); u.len.push(tokens.length);
+  u.vec.push(vec); u.sq.push(sq); u.len.push(tokens.length); u.q8row.push(-1);
   u.slotOf.set(r.id, slot);
   d.slots.push(slot);
   if (!replaced) { d.live++; d.sumLen += tokens.length; }
   const bytes = 200 + r.id.length * 2 + (vec ? vec.byteLength : 0) + counts.size * 8;
   u.slotBytes.push(bytes);
   d.bytes += bytes; u.bytes += bytes; storeBytes += bytes;
+  if (d.mode === 'i8') quantizeSlot(u, d, slot);
+}
+
+/** Move a slot's vector into its drawer's int8 block (unit length, x127). */
+function quantizeSlot(u: UserStore, d: Drawer, slot: number): void {
+  const v = u.vec[slot];
+  if (!v || v.length === 0) return;
+  if (d.q8dims === 0) d.q8dims = v.length;
+  if (v.length !== d.q8dims) return; // another model's size: kept in full
+  if ((d.q8n + 1) * d.q8dims > d.q8.length) {
+    const b = new Int8Array(Math.max(d.q8dims * 1024, d.q8.length * 2));
+    b.set(d.q8); d.q8 = b;
+  }
+  const norm = Math.sqrt(u.sq[slot]);
+  const at = d.q8n * d.q8dims;
+  for (let i = 0; i < v.length; i++) {
+    const x = norm === 0 ? 0 : Math.round((v[i] / norm) * 127);
+    d.q8[at + i] = x > 127 ? 127 : x < -127 ? -127 : x;
+  }
+  u.q8row[slot] = d.q8n++;
+  u.vec[slot] = null;
+  const saved = v.byteLength - v.length;
+  u.slotBytes[slot] -= saved; d.bytes -= saved; u.bytes -= saved; storeBytes -= saved;
+}
+
+/** A drawer that grew past exactMax() switches to int8 vectors. */
+function maybeQuantize(u: UserStore, d: Drawer): void {
+  if (d.mode !== 'exact' || d.live <= exactMax()) return;
+  d.mode = 'i8';
+  for (const s of d.slots) if (u.alive[s]) quantizeSlot(u, d, s);
 }
 
 function killSlot(u: UserStore, slot: number): void {
@@ -252,6 +305,12 @@ function killSlot(u: UserStore, slot: number): void {
 
 /** Drop dead slots from posting lists and drawer lists once many have died. */
 function compact(u: UserStore): void {
+  // Slot arrays never shrink: past twice the live slots the store starts again (next search rebuilds it),
+  // so churn can not hold memory the size cap does not count.
+  if (u.ids.length > 4096 && u.ids.length > 2 * u.slotOf.size) {
+    for (const [id, x] of users) if (x === u) dropUser(id);
+    return;
+  }
   let dead = 0;
   for (const d of u.drawers.values()) dead += d.dead;
   if (dead < 1024 || dead * 4 < u.slotOf.size) return;
@@ -273,7 +332,7 @@ const yieldNow = () => new Promise<void>((r) => setImmediate(r));
 /** Load one drawer of a user, in pages. False when the size cap does not allow it. */
 async function loadDrawer(u: UserStore, userId: string, kind: string, key: string): Promise<Drawer | null> {
   const db: any = getDatabase().getDb();
-  const d: Drawer = { kind, key, slots: [], dead: 0, live: 0, sumLen: 0, bytes: 0 };
+  const d: Drawer = { kind, key, slots: [], dead: 0, live: 0, sumLen: 0, bytes: 0, mode: 'exact', q8: new Int8Array(0), q8dims: 0, q8n: 0 };
   const first = db.prepare(`SELECT ${ROW_COLUMNS} FROM memories WHERE user_id = ? AND ${DRAWER_KIND_SQL} = ? AND ${DRAWER_KEY_SQL} = ?
     ORDER BY created_at ASC, id ASC LIMIT ${PAGE}`);
   const next = db.prepare(`SELECT ${ROW_COLUMNS} FROM memories WHERE user_id = ? AND ${DRAWER_KIND_SQL} = ? AND ${DRAWER_KEY_SQL} = ?
@@ -282,6 +341,7 @@ async function loadDrawer(u: UserStore, userId: string, kind: string, key: strin
   let rows = first.all(userId, kind, key) as FullRow[];
   while (rows.length) {
     for (const r of rows) addSlot(u, d, r);
+    maybeQuantize(u, d);
     if (storeBytes > cap) {
       for (const s of d.slots) killSlot(u, s);
       compact(u);
@@ -312,7 +372,7 @@ function applyChanges(u: UserStore, userId: string): void {
     for (const r of rows) {
       if (r.user_id !== userId) continue;
       const d = u.drawers.get(drawerId(r.dk, r.dkey));
-      if (d) addSlot(u, d, r); // a drawer not loaded yet reads it when it is first searched
+      if (d) { addSlot(u, d, r); maybeQuantize(u, d); } // a drawer not loaded yet reads it when it is first searched
     }
   }
   compact(u);
@@ -330,6 +390,8 @@ export interface StoreQuery {
 
 export interface StoreHit { id: string; similarity: number; vector: number | null; lexical: number }
 
+export interface OpenStore { drawers: Drawer[]; store: UserStore }
+
 interface QueryVector { vector: number[]; model: string; dims: number; semantic: boolean }
 
 /**
@@ -337,7 +399,7 @@ interface QueryVector { vector: number[]; model: string; dims: number; semantic:
  * this store cannot serve the search (not the main SQLite connection, or past
  * the size cap): the caller uses the P9 path.
  */
-export async function openStore(userId: string, drawers: DrawerRef[]): Promise<{ drawers: Drawer[] } | null> {
+export async function openStore(userId: string, drawers: DrawerRef[]): Promise<OpenStore | null> {
   if (!ready()) return null;
   const now = Date.now();
   for (const [id, x] of users) if (now - x.lastUsed > IDLE_MS) dropUser(id);
@@ -345,6 +407,7 @@ export async function openStore(userId: string, drawers: DrawerRef[]): Promise<{
   if (!u) { u = newUser(now); users.set(userId, u); }
   u.lastUsed = now;
   applyChanges(u, userId);
+  if (users.get(userId) !== u) { u = newUser(now); users.set(userId, u); } // dropped by compact: start again
 
   // The SQL filters at drawer level: an archived project and an agent's own notes are never searched.
   const db: any = getDatabase().getDb();
@@ -365,16 +428,17 @@ export async function openStore(userId: string, drawers: DrawerRef[]): Promise<{
       d = loaded;
       u.drawers.set(id, d);
       applyChanges(u, userId); // writes made while it loaded
+      if (users.get(userId) !== u) return null; // dropped by compact meanwhile: the P9 path this time
     }
     out.push(d);
   }
-  return { drawers: out };
+  return { drawers: out, store: u };
 }
 
 /** Rows whose vector is not of `model`, among the candidates, oldest first (lazy re-embed). */
-export function staleIn(userId: string, open: { drawers: Drawer[] }, q: StoreQuery, model: string, max: number): Array<{ id: string; content: string }> {
+export function staleIn(userId: string, open: OpenStore, q: StoreQuery, model: string, max: number): Array<{ id: string; content: string }> {
   const u = users.get(userId);
-  if (!u) return [];
+  if (!u || u !== open.store) return [];
   const found: number[] = [];
   for (const d of open.drawers) for (const s of d.slots) if (u.alive[s] && u.model[s] !== model && candidate(u, s, q)) found.push(s);
   found.sort((a, b) => cmpOrder(u, a, b));
@@ -447,8 +511,9 @@ class TopK {
 }
 
 /** Score the open drawers; the best `limit` hits, best first (same numbers and order as the full-row path). */
-export function searchStore(userId: string, open: { drawers: Drawer[] }, q: StoreQuery, qv: QueryVector): StoreHit[] {
-  const u = users.get(userId)!;
+export function searchStore(userId: string, open: OpenStore, q: StoreQuery, qv: QueryVector): StoreHit[] {
+  const u = users.get(userId);
+  if (!u || u !== open.store) return []; // forgotten (or dropped) since openStore
   const filtered = q.type !== undefined || q.layer !== undefined || q.minImportance !== undefined;
   const inOpen = new Set(open.drawers);
 
@@ -497,10 +562,33 @@ export function searchStore(userId: string, open: { drawers: Drawer[] }, q: Stor
 
   const top = new TopK(q.limit, u);
   const vectors = new Map<number, number | null>();
+  // int8 drawers: an approximate score picks candidates, re-scored below with the full vector.
+  const approx = new TopK(rescoreCount(q.limit), u);
+  const qunit = new Float64Array(qf.length);
+  for (let i = 0; i < qf.length; i++) qunit[i] = qn === 0 ? 0 : qf[i] / qn;
   for (const d of open.drawers) {
+    const block = d.q8, dims = d.q8dims;
+    const q8ok = d.mode === 'i8' && dims === qv.dims;
     for (const s of d.slots) {
       if (!u.alive[s] || (filtered && !candidate(u, s, q)) || (!filtered && u.replaced[s])) continue;
       const lexical = lexOf(s);
+      const row = u.q8row[s];
+      if (row >= 0) {
+        if (!(q8ok && u.model[s] === qv.model && (qv.semantic || lexical > 0))) {
+          // Not comparable with this query (or a hash cosine without a word in common): lexical part only, exact.
+          let similarity = hybridScore(null, lexical, qv.semantic);
+          if (similarity >= MIN_RECALL_SCORE && u.layer[s] === 'working') similarity += WORKING_LAYER_BOOST;
+          if (similarity >= MIN_RECALL_SCORE) { top.push(s, similarity); vectors.set(s, null); }
+          continue;
+        }
+        let dot = 0;
+        const at = row * dims;
+        for (let i = 0; i < dims; i++) dot += qunit[i] * block[at + i];
+        let similarity = hybridScore(vectorScore(dot / 127, qv.semantic), lexical, qv.semantic);
+        if (u.layer[s] === 'working') similarity += WORKING_LAYER_BOOST;
+        approx.push(s, similarity);
+        continue;
+      }
       const b = u.vec[s];
       const comparable = b !== null && u.model[s] === qv.model && b.length === qv.dims;
       let vector: number | null = null;
@@ -517,6 +605,34 @@ export function searchStore(userId: string, open: { drawers: Drawer[] }, q: Stor
       let similarity = hybridScore(vector, lexical, qv.semantic);
       if (similarity >= MIN_RECALL_SCORE && u.layer[s] === 'working') similarity += WORKING_LAYER_BOOST;
       if (similarity >= MIN_RECALL_SCORE) { top.push(s, similarity); vectors.set(s, vector); }
+    }
+  }
+  // Re-score the int8 candidates with their full vectors (by primary key; the owner is checked).
+  const picked = approx.sorted();
+  if (picked.length) {
+    const db: any = getDatabase().getDb();
+    for (let i = 0; i < picked.length; i += 500) {
+      const chunk = picked.slice(i, i + 500);
+      const rows = db.prepare(`SELECT id, user_id, embedding_vec, CASE WHEN embedding_vec IS NULL THEN embedding END AS embedding
+        FROM memories WHERE id IN (${chunk.map(() => '?').join(', ')})`).all(...chunk.map((c) => u.ids[c.slot])) as Array<{ id: string; user_id: string; embedding_vec: unknown; embedding: string | null }>;
+      const byId = new Map(rows.filter((r) => r.user_id === userId).map((r) => [r.id, r]));
+      for (const { slot: s } of chunk) {
+        const r = byId.get(u.ids[s]);
+        if (!r) continue;
+        let b: Vec | null = packed(r.embedding_vec);
+        if (!b && r.embedding) b = Float64Array.from(JSON.parse(r.embedding) as number[]);
+        const lexical = lexOf(s);
+        let vector: number | null = null;
+        if (b && b.length === qv.dims && qf.length !== 0) {
+          let dot = 0, sqb = 0;
+          for (let k = 0; k < b.length; k++) { dot += qf[k] * b[k]; sqb += b[k] * b[k]; }
+          const m = qn * Math.sqrt(sqb);
+          vector = vectorScore(m === 0 ? 0 : dot / m, qv.semantic);
+        }
+        let similarity = hybridScore(vector, lexical, qv.semantic);
+        if (similarity >= MIN_RECALL_SCORE && u.layer[s] === 'working') similarity += WORKING_LAYER_BOOST;
+        if (similarity >= MIN_RECALL_SCORE) { top.push(s, similarity); vectors.set(s, vector); }
+      }
     }
   }
   const hits = top.sorted().map(({ slot, similarity }) => ({ id: u.ids[slot], similarity, vector: vectors.get(slot) ?? null, lexical: lexOf(slot) }));
