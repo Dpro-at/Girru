@@ -201,7 +201,7 @@ function xlsx(z: Map<string, () => Buffer>): OfficeResult {
   const rels = relations(z, book);
   const ssPath = [...rels.values()].find(r => r.type === 'sharedStrings')?.target ?? 'xl/sharedStrings.xml';
   const ss = z.get(ssPath);
-  if (ss) { let cur = '', inSi = false, inT = false, inRPh = false; for (const t of xmlTokens(ss().toString('utf8'))) { if ('text' in t) { if (inSi && inT && !inRPh) cur += t.text; } else if (t.tag === 'si') { inSi = true; cur = ''; } else if (t.tag === '/si') { inSi = false; shared.push(cur); } else if (t.tag === 't') inT = !t.self; else if (t.tag === '/t') inT = false; else if (t.tag === 'rPh') inRPh = true; else if (t.tag === '/rPh') inRPh = false; } }
+  if (ss) { let cur = '', inSi = false, inT = false, inRPh = false; for (const t of xmlTokens(ss().toString('utf8'))) { if ('text' in t) { if (inSi && inT && !inRPh && cur.length < MAX_ROW_CHARS) cur += t.text; } else if (t.tag === 'si') { inSi = true; cur = ''; } else if (t.tag === '/si') { inSi = false; shared.push(cur); } else if (t.tag === 't') inT = !t.self; else if (t.tag === '/t') inT = false; else if (t.tag === 'rPh') inRPh = true; else if (t.tag === '/rPh') inRPh = false; } }
   // Styles: which cell style is a date or a percentage.
   const stylesPath = [...rels.values()].find(r => r.type === 'styles')?.target ?? 'xl/styles.xml';
   const custom = new Map<number, string>(); const xfFmt: number[] = []; let inXfs = false;
@@ -243,10 +243,10 @@ function xlsx(z: Map<string, () => Buffer>): OfficeResult {
       else if (t.tag === 't') inT = !t.self; else if (t.tag === '/t') inT = false;
       else if (t.tag === '/c') {
         const raw = val.trim(); let shown = raw;
-        if (type === 's') shown = shared[Number(raw)] ?? '';
+        if (type === 's') shown = (shared[Number(raw)] ?? '').slice(0, MAX_ROW_CHARS);
         else if (type === 'b') shown = raw === '1' ? 'TRUE' : raw === '0' ? 'FALSE' : raw;
         else if (type === 'n' && raw) { const k = style >= 0 ? kindOfStyle(style) : null; const num = Number(raw); if (k === 'date') shown = excelDate(num, d1904); else if (k === 'percent' && Number.isFinite(num)) shown = `${+(num * 100).toFixed(4)}%`; }
-        row.push(shown); col++;
+        if (row.join('').length < MAX_ROW_CHARS) row.push(shown.slice(0, MAX_ROW_CHARS)); col++;
       }
       else if (t.tag === 'row') { row = []; col = 0; }
       else if (t.tag === '/row') { while (row.length && !row.at(-1)) row.pop(); if (row.some(Boolean)) { if (rows.length >= MAX_ROWS) { limited = true; break; } rows.push(row.join(' | ').slice(0, MAX_ROW_CHARS)); } row = []; col = 0; }
@@ -284,7 +284,9 @@ function openDocument(z: Map<string, () => Buffer>, kind: 'odt' | 'ods' | 'odp')
   const part = z.get('content.xml'); if (!part) return { ok: false, reason: 'no content in it' };
   const sections: Section[] = []; let lines: string[] = [], line = '', cell = '', row: string[] = [], depthP = 0, inCell = false, label = '', heading = 0, repeatCell = 1, repeatRow = 1, hiddenSheets = 0;
   const flush = () => { if (lines.length) sections.push({ label: label || (kind === 'odt' ? 'document' : 'part'), text: (label ? `## ${label.replace(/^\w+ /, '')}\n` : '') + lines.join('\n') }); lines = []; };
-  const pushCell = (v: string) => { for (let k = 0; k < Math.min(repeatCell, 200) && row.length < 200; k++) row.push(v); };
+  // Each cell is cut first and a row stops growing at MAX_ROW_CHARS, so a repeated cell cannot blow up.
+  let rowChars = 0;
+  const pushCell = (v: string) => { const c = v.slice(0, MAX_ROW_CHARS); for (let k = 0; k < Math.min(repeatCell, 200) && row.length < 200 && rowChars < MAX_ROW_CHARS; k++) { row.push(c); rowChars += c.length + 3; } };
   for (const t of xmlTokens(part().toString('utf8'))) {
     if ('text' in t) { if (depthP) { if (inCell) cell += t.text; else line += t.text; } continue; }
     const n = t.tag;
@@ -294,10 +296,10 @@ function openDocument(z: Map<string, () => Buffer>, kind: 'odt' | 'ods' | 'odp')
     else if (n === '/text:p' || n === '/text:h') { depthP = Math.max(0, depthP - 1); if (!inCell) { const s = line.trim(); if (s) lines.push(heading ? `${'#'.repeat(Math.min(heading, 4))} ${s}` : s); line = ''; heading = 0; } else cell += ' '; }
     else if (n === 'text:tab' || n === 'text:line-break') { if (inCell) cell += ' '; else line += ' '; }
     else if (n === 'text:s') { const c = Math.min(Number(attr(t.attrs, 'text:c') ?? 1) || 1, 20); if (inCell) cell += ' '.repeat(c); else line += ' '.repeat(c); }
-    else if (n === 'table:table-row') { row = []; repeatRow = Math.max(1, Number(attr(t.attrs, 'table:number-rows-repeated') ?? 1) || 1); }
+    else if (n === 'table:table-row') { row = []; rowChars = 0; repeatRow = Math.max(1, Number(attr(t.attrs, 'table:number-rows-repeated') ?? 1) || 1); }
     else if (n === 'table:table-cell' || n === 'table:covered-table-cell') { repeatCell = Math.max(1, Number(attr(t.attrs, 'table:number-columns-repeated') ?? 1) || 1); if (t.self) pushCell(''); else { inCell = true; cell = ''; } }
     else if (n === '/table:table-cell' || n === '/table:covered-table-cell') { inCell = false; pushCell(cell.replace(/\s+/g, ' ').trim()); }
-    else if (n === '/table:table-row') { while (row.length && !row.at(-1)) row.pop(); if (row.some(Boolean)) for (let k = 0; k < Math.min(repeatRow, 50) && lines.length < MAX_ROWS; k++) lines.push(row.join(' | ').slice(0, MAX_ROW_CHARS)); row = []; }
+    else if (n === '/table:table-row') { while (row.length && !row.at(-1)) row.pop(); if (row.some(Boolean)) { const line1 = row.join(' | ').slice(0, MAX_ROW_CHARS); for (let k = 0; k < Math.min(repeatRow, 50) && lines.length < MAX_ROWS; k++) lines.push(line1); } row = []; rowChars = 0; }
   }
   flush();
   if (!sections.length) return { ok: false, reason: 'no text in it' };
