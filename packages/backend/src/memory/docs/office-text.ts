@@ -112,7 +112,7 @@ function* xmlTokens(xml: string): Generator<{ tag: string; attrs: string; self: 
     i = gt + 1;
   }
 }
-const attr = (attrs: string, name: string) => { const m = new RegExp(`(?:^|\\s)${name.replace(/[:.]/g, '\\$&')}="([^"]*)"`).exec(attrs); return m ? unescapeXml(m[1]) : null; };
+const attr = (attrs: string, name: string) => { const m = new RegExp(`(?:^|\\s)${name.replace(/[\\^$.*+?()[\]{}|:-]/g, '\\$&')}="([^"]*)"`).exec(attrs); return m ? unescapeXml(m[1]) : null; };
 
 // ---------------------------------------------------------------- formats
 

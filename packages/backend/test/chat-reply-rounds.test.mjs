@@ -225,10 +225,10 @@ test('meeting invitations call only current attendees once, coordinate first, an
   const out=await group(c,text,key);assert.equal(out.statusCode,202,out.body);assert.equal(out.json().replyRound.total,3);await done(c);
   const rows=(await call('r-owner','GET',`/api/chat/conversations/${c.id}/messages`)).json().messages;
   assert.deepEqual(rows.filter(m=>m.role==='assistant').slice(-3).map(m=>m.agentId),['r-agent','r-charlie','r-hayden']);/* only the replies to this message: an unrelated background model call on a slow runner is not a reply */assert.equal(bodies.slice(first).filter(b=>JSON.stringify(b.messages??b).includes(text)).length,3);
-  const retry=await group(c,text,key);assert.equal(retry.json().replayed,true);assert.equal(bodies.length,first+3);
+  const retry=await group(c,text,key);assert.equal(retry.json().replayed,true);/* a replayed request makes no new reply call */assert.equal(bodies.slice(first).filter(b=>JSON.stringify(b.messages??b).includes(text)).length,3);
  }
  for(const [text,expected] of [['قسم التسويق شنو رايكم؟','r-hayden'],['رايكم يا قسم التسويق؟','r-hayden'],['مدير قسم التطوير جاهز؟','r-charlie'],['هيدن كيفك؟','r-hayden']]){
-  const first=bodies.length;script.push(answer('One attendee answers'));const out=await group(c,text);assert.equal(out.statusCode,202,out.body);assert.equal(out.json().replyRound.total,1);await done(c);assert.equal(bodies.length,first+1);
+  const first=bodies.length;script.push(answer('One attendee answers'));const out=await group(c,text);assert.equal(out.statusCode,202,out.body);assert.equal(out.json().replyRound.total,1);await done(c);assert.equal(bodies.slice(first).filter(b=>JSON.stringify(b.messages??b).includes(text)).length,1);
   assert.equal((await R.listConversationMessages(c.id)).filter(m=>m.role==='assistant').at(-1).agentId,expected);
  }
  const first=bodies.length,key=rid();script.push(answer('Only coordinator'));assert.equal((await group(c,'لخص الخطة',key)).statusCode,202);await ended(key);assert.equal(bodies.length,first+1);assert.equal((await R.listConversationMessages(c.id)).filter(m=>m.role==='assistant').at(-1).agentId??'r-agent','r-agent');
