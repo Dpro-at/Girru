@@ -4,7 +4,7 @@
  *
  *   build/icon.png   1024 px (Linux, and the dock icon when run from source)
  *   build/icon.icns  macOS, 16–1024 px with the 2× sizes
- *   build/icon.ico   Windows, 16–256 px
+ *   build/icon.ico   Windows, 16–256 px: the same tile without the macOS margin (WIN-01)
  *
  * The icon is the logo on the rounded macOS tile: an 824 px tile on a 1024 px
  * picture (100 px clear edge), rounded-square corners, a soft shadow below and
@@ -174,19 +174,43 @@ function ico(pngs, sizes) {
   return Buffer.concat([header, ...dir, ...sizes.map(s => pngs[s])]);
 }
 
+/** WIN-01: Windows draws icons edge to edge, so its icon is the tile without the macOS margin (the tile and its shadow). */
+const WINDOWS_CROP = { x: 88, y: 88, span: 848 };
+/** Area-average a square part of the 1024 px premultiplied picture down to `size`. */
+function shrink(pixels, crop, size) {
+  const out = new Float32Array(size * size * 4); const step = crop.span / size;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const x0 = crop.x + x * step, x1 = x0 + step, y0 = crop.y + y * step, y1 = y0 + step; const sum = [0, 0, 0, 0]; let area = 0;
+      for (let yy = Math.floor(y0); yy < Math.ceil(y1); yy++) {
+        const wy = Math.min(y1, yy + 1) - Math.max(y0, yy);
+        for (let xx = Math.floor(x0); xx < Math.ceil(x1); xx++) {
+          const w = wy * (Math.min(x1, xx + 1) - Math.max(x0, xx)); area += w;
+          for (let c = 0; c < 4; c++) sum[c] += pixels[(yy * SIZE + xx) * 4 + c] * w;
+        }
+      }
+      for (let c = 0; c < 4; c++) out[(y * size + x) * 4 + c] = sum[c] / area;
+    }
+  }
+  return out;
+}
+
 function main(argv) {
   const outIndex = argv.indexOf('--out');
   const out = outIndex >= 0 ? path.resolve(argv[outIndex + 1]) : path.join(__dirname, '..', 'build');
   fs.mkdirSync(out, { recursive: true });
   const pngs = {};
-  let pixels = draw();
+  const full = draw();
+  let pixels = full;
   for (let size = SIZE; size >= 16; size /= 2) {
     pngs[size] = png(pixels, size);
     if (size > 16) pixels = halve(pixels, size);
   }
   fs.writeFileSync(path.join(out, 'icon.png'), pngs[1024]);
   fs.writeFileSync(path.join(out, 'icon.icns'), icns(pngs));
-  fs.writeFileSync(path.join(out, 'icon.ico'), ico(pngs, [16, 32, 64, 128, 256]));
+  const windows = {};
+  for (const size of [16, 32, 64, 128, 256]) windows[size] = png(shrink(full, WINDOWS_CROP, size), size);
+  fs.writeFileSync(path.join(out, 'icon.ico'), ico(windows, [16, 32, 64, 128, 256]));
   return out;
 }
 

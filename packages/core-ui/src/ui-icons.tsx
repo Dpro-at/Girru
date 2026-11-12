@@ -9,6 +9,8 @@ const shapes = {
   'device-tv': <><rect x="2" y="5" width="20" height="14" rx="2"/><path d="m7 22 2-3M17 22l-2-3M9 2l3 3 3-3"/></>,
   'device-landscape': <><rect x="2" y="7" width="20" height="10" rx="2"/><path d="M5 10v4"/></>,
   'devices': <><rect x="2" y="4" width="15" height="11" rx="1.5"/><path d="M6 19h6M9 15v4"/><rect x="16" y="10" width="6" height="12" rx="1"/></>,
+  // WIN-01: the app menu (File, Edit, View…) at the left of the bar on Windows.
+  'app-menu': <path d="M4 7h16M4 12h16M4 17h16"/>,
   play: <path d="M8 5l11 7-11 7z"/>,
   pause: <><path d="M8 5v14M16 5v14"/></>,
   hourglass: <><path d="M7 3h10M7 21h10M8 3c0 5 8 5 8 9s-8 4-8 9M16 3c0 5-8 5-8 9"/></>,

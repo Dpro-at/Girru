@@ -4230,3 +4230,15 @@ html:has(.app-shell[data-phone]), body:has(.app-shell[data-phone]) { overflow:hi
 .genvr-market-stage .genvr-frame{flex:1;min-block-size:calc(100dvh - 150px);border:0;border-radius:10px}
 .genvr-market-add{position:absolute;inset-block-start:16px;inset-inline-end:16px;z-index:2}
 .genvr-who{position:absolute;inset-block-start:52px;inset-inline-end:16px;z-index:3;padding:8px;border-radius:10px;background:var(--surface);border:1px solid var(--border);box-shadow:0 8px 24px rgba(0,0,0,.3)}
+
+/* WIN-01: in the desktop app the top bar is the window's bar: drag it to move the window; its buttons stay
+   clickable. Mac: room on the left for the three window dots. Windows: room on the right for minimize,
+   maximize and close (drawn by the system in the bar's colours). */
+html[data-desktop] .titlebar { -webkit-app-region:drag; user-select:none; min-block-size:40px; }
+html[data-desktop] .titlebar :is(button,a,input,select,textarea,label,summary,[role=button],[role=tab],[role=menuitem],[contenteditable=true]),
+html[data-desktop] .first-run-shell :is(button,a,input,select,textarea,label,summary,[role=button],[role=tab],[contenteditable=true]),
+html[data-desktop] .first-run-account :is(button,a,input,select,textarea,label,summary,[role=button],[role=tab],[contenteditable=true]) { -webkit-app-region:no-drag; }
+html[data-desktop] :is(.first-run-shell,.first-run-account) { -webkit-app-region:drag; }
+html[data-desktop="mac"] .titlebar { padding-inline-start:80px; }
+html[data-desktop="win"] .titlebar { padding-inline-end:max(146px, calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%) + 8px)); }
+html[data-desktop="win"] .titlebar-app-menu { margin-inline-start:-4px; }

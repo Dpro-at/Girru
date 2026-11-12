@@ -262,8 +262,11 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
     browser:{available:owner&&browser.available,current:page==='browser',run:go('browser'),parent:'store'},terminal:entry('terminal',owner,openTerminal,undefined,'store'),code:entry('code',owner&&(nativeEditor||codeMissing),nativeEditor?openCode:openCodeInStore,undefined,'store'),skills:entry('skills',owner,go('skills'),undefined,'library'),personalities:entry('personalities',owner,go('personalities'),undefined,'library'),specialties:entry('specialties',owner,go('specialties'),undefined,'library')};
 
   const sidebarShown = rail && (page === 'chat' || ownSidebar);
+  // WIN-01: on Windows the menu row is gone; the ☰ button at the left of the bar opens the same menu.
+  const appMenu = typeof document !== 'undefined' && document.documentElement.dataset.desktop === 'win' ? (window as unknown as { dproApp?: { openAppMenu?: (x: number, y: number) => Promise<unknown> } }).dproApp?.openAppMenu : undefined;
   return <ComputerDevicesProvider key={user.id} client={client} enabled={owner && mode==='live'}><div className="shell app-shell" data-theme={theme} data-rail={sidebarShown ? 'open' : 'closed'} data-section={page} data-phone={phone || undefined} lang="en" dir="ltr">
     <header className="titlebar">
+      {appMenu&&<button type="button" className="tool titlebar-app-menu" aria-label="Menu: File, Edit, View, Window, Help (Alt)" title="Menu (Alt)" onClick={e=>{const r=e.currentTarget.getBoundingClientRect();void appMenu(r.left,r.bottom);}}><UiIcon name="app-menu" size={16}/></button>}
       {browser.problem&&<span role="alert">{browser.problem}</span>}{!phone&&<WorkspaceModes onModeChange={mode=>{if(mode==='code')setPage('code');else if(page==='code')setPage('chat');}}/>}
       <div className="titlebar-tools">
         <button type="button" className="tool" aria-label={phone ? (rail ? 'Close the chat list' : 'Chats') : rail ? 'Hide the sidebar' : 'Show the sidebar'} title={phone ? undefined : rail ? 'Hide the sidebar (⌘\\)' : 'Show the sidebar (⌘\\)'} aria-pressed={rail} onClick={() => setRail(v => !v)}><UiIcon name="sidebar" size={14}/></button>
