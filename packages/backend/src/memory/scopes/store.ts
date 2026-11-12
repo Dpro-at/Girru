@@ -44,6 +44,10 @@ export interface ProjectScope {
   trashedAt: string | null;
   /** MEM-UX-02: the group of projects it belongs to, else null. */
   groupId: string | null;
+  /** MEM-READ-01 MR3: found in downloaded code (Go module folder, node_modules…); listed under "Not projects". */
+  notProject: boolean;
+  /** Why it is not a project ("Go library"), when notProject. */
+  notProjectReason: string | null;
 }
 
 /**
@@ -52,7 +56,10 @@ export interface ProjectScope {
  */
 export const NOT_ARCHIVED_SQL = `NOT EXISTS (SELECT 1 FROM memory_project_scopes ps
   WHERE ps.owner_id = memories.user_id AND memories.drawer_kind = 'project'
-    AND ps.slug = memories.drawer_key AND ps.archived_at IS NOT NULL)`;
+    AND ps.slug = memories.drawer_key AND ps.archived_at IS NOT NULL)
+  AND NOT EXISTS (SELECT 1 FROM memory_project_kinds pk
+  WHERE pk.owner_id = memories.user_id AND memories.drawer_kind = 'project'
+    AND pk.slug = memories.drawer_key AND pk.kind = 'library')`;
 
 export const normName = (name: string): string => name.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
 
@@ -141,8 +148,9 @@ export function* listProjectsStep(ownerId: string): Step<ProjectScope[]> {
   const drawers = yield* all<{ key: string }>("SELECT DISTINCT drawer_key AS key FROM memories WHERE user_id = ? AND drawer_kind = 'project'", ownerId);
   const rows = yield* all<ScopeRow>('SELECT slug, name, department_id, pinned, archived_at, merged_into, trashed_at FROM memory_project_scopes WHERE owner_id = ?', ownerId);
   const groups = new Map((yield* all<{ slug: string; group_id: string }>('SELECT slug, group_id FROM memory_project_group_members WHERE owner_id = ?', ownerId)).map((g) => [g.slug, g.group_id]));
+  const libraries = new Map((yield* all<{ slug: string; reason: string }>("SELECT slug, reason FROM memory_project_kinds WHERE owner_id = ? AND kind = 'library'", ownerId)).map((k) => [k.slug, k.reason]));
   const bySlug = new Map<string, ProjectScope>();
-  const base = (slug: string): ProjectScope => ({ slug, name: slug, departmentId: GENERAL_DEPARTMENT, pinned: false, archived: false, archivedAt: null, mergedInto: null, chatProjectId: null, trashedAt: null, groupId: groups.get(slug) ?? null });
+  const base = (slug: string): ProjectScope => ({ slug, name: slug, departmentId: GENERAL_DEPARTMENT, pinned: false, archived: false, archivedAt: null, mergedInto: null, chatProjectId: null, trashedAt: null, groupId: groups.get(slug) ?? null, notProject: libraries.has(slug), notProjectReason: libraries.get(slug) || (libraries.has(slug) ? 'Downloaded code' : null) });
   for (const d of drawers) if (d.key && isValidDrawerKey('project', d.key)) bySlug.set(d.key, base(d.key));
   for (const r of rows) {
     const p = bySlug.get(r.slug) ?? base(r.slug);
@@ -176,6 +184,7 @@ export function* projectStep(ownerId: string, slug: string): Step<ProjectScope |
   const row = yield* one<ScopeRow>('SELECT slug, name, department_id, pinned, archived_at, merged_into, trashed_at FROM memory_project_scopes WHERE owner_id = ? AND slug = ?', ownerId, slug);
   const group = yield* one<{ group_id: string }>('SELECT group_id FROM memory_project_group_members WHERE owner_id = ? AND slug = ?', ownerId, slug);
   const has = yield* one("SELECT 1 AS x FROM memories WHERE user_id = ? AND drawer_kind = 'project' AND drawer_key = ? LIMIT 1", ownerId, slug);
+  const library = yield* one<{ reason: string }>("SELECT reason FROM memory_project_kinds WHERE owner_id = ? AND slug = ? AND kind = 'library'", ownerId, slug);
   if (!chat && !row && !has) return null;
   return {
     slug,
@@ -188,6 +197,8 @@ export function* projectStep(ownerId: string, slug: string): Step<ProjectScope |
     chatProjectId: chat?.id ?? null,
     trashedAt: row?.trashed_at ?? null,
     groupId: group?.group_id ?? null,
+    notProject: !!library,
+    notProjectReason: library ? library.reason || 'Downloaded code' : null,
   };
 }
 
@@ -209,7 +220,7 @@ export function* upsertProjectRowStep(ownerId: string, slug: string, set: Partia
 // ---------------------------------------------------------------------------
 
 export async function archivedProjects(ownerId: string): Promise<Set<string>> {
-  const rows = await sql().read(all<{ slug: string }>('SELECT slug FROM memory_project_scopes WHERE owner_id = ? AND archived_at IS NOT NULL', ownerId));
+  const rows = await sql().read(all<{ slug: string }>("SELECT slug FROM memory_project_scopes WHERE owner_id = ? AND archived_at IS NOT NULL UNION SELECT slug FROM memory_project_kinds WHERE owner_id = ? AND kind = 'library'", ownerId, ownerId));
   return new Set(rows.map((r) => r.slug));
 }
 

@@ -1,5 +1,6 @@
 import { discoveryFs, isolatedReadRegularFile } from '../services/discovery-fs.js';
 import { outsideFile } from '../memory/project-trust.js';
+import { isLibraryPath, libraryDirName } from '../memory/import/library-folders.js';
 import { publicKeyInfo } from '../services/ssh-keys.js';
 /**
  * "Found on this computer" (DISCOVER-01, board M17): one scan finds what coding
@@ -208,6 +209,7 @@ async function projectNotes(home: string, known: string[], allowed: { allow: str
       if (e.isSymbolicLink()) continue;
       if (e.isDirectory()) {
         const toolDir = slash.endsWith('/.claude') && (e.name === 'commands' || e.name === 'agents');
+        if (libraryDirName(e.name, dir)) continue;
         if (!WALK_SKIP.has(e.name) && (!e.name.startsWith('.') || e.name === '.github' || e.name === '.cursor' || e.name === '.claude') || toolDir) await walk(p, depth + 1);
         continue;
       }
@@ -217,7 +219,7 @@ async function projectNotes(home: string, known: string[], allowed: { allow: str
       const isTool = !!tool && /\.md$/i.test(e.name);
       if ((!isNote || !kinds.notes) && (!isTool || !kinds.tools) || seen.has(p)) continue;
       seen.add(p);
-      if (NOT_OURS.test(p.split(path.sep).join('/'))) { leftOut++; continue; }
+      if (NOT_OURS.test(p.split(path.sep).join('/')) || isLibraryPath(p)) { leftOut++; continue; }
       const root = await rootOf(isTool ? path.dirname(path.dirname(dir)) : dir);
       if (root === home) continue;
       const t = await readText(p, MAX_NOTE); if (!t) continue;
@@ -717,6 +719,8 @@ export async function automaticNoteSource(userId: string, id: string, home = os.
   try { document = await readProjectDocument(userId, id); } catch { return false; }
   if (!document) return false;
   const entry = document.entry, sourceId = itemId('note', path.relative(home, entry.file));
+  // MR3: notes inside downloaded code (Go module folder, node_modules…) never make a project.
+  if (isLibraryPath(entry.file)) return false;
   const saved = (await rows(userId)).get(sourceId);
   if (saved?.state === 'ignored' || saved?.state === 'kept') return false;
   const exclusions = await P.allowedFolders(userId);

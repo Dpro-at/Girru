@@ -19,6 +19,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { readRegularFile } from '../../services/read-regular-file.js';
+import { libraryDirName } from '../import/library-folders.js';
 
 export const MAX_FILES = 500;
 export const MAX_ENTRIES = 20_000;
@@ -68,7 +69,7 @@ export async function scanRoot(rootInput: string): Promise<ScanResult> {
       if (it.isSymbolicLink() || skippedName(it.name)) continue;
       const full = path.join(dir, it.name);
       if (it.isDirectory()) {
-        if (SKIP_DIRS.test(it.name)) continue;
+        if (SKIP_DIRS.test(it.name) || libraryDirName(it.name, dir)) continue;
         if (depth >= MAX_DEPTH) { limited = true; continue; }
         await walk(full, depth + 1);
         continue;

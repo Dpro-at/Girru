@@ -30,6 +30,7 @@
  *   POST /api/memory/scopes/projects/:slug/preview { action, target?, departmentId? } -> { action, project, target?, department?, effects, previewHash }
  *   POST /api/memory/scopes/projects/:slug/apply   { action, target?, departmentId?, expectedPreviewHash, confirm: true } -> { action, project, effects, result }
  *   GET  /api/memory/scopes/projects/:slug/export  -> { project, files: [{ name, content }] }
+ *   POST /api/memory/scopes/projects/:slug/kind    { kind: 'project' | 'library' } -> { slug, kind, before }  ("It's a project" / "Not a project", MEM-READ-01 MR3)
  * Access by inheritance
  *   GET  /api/memory/access                        -> { version, rules, templates }
  *   POST /api/memory/access/preview                { changes } -> { previewHash, version, agentsAffected, projectsAffected, ... }
@@ -50,6 +51,7 @@ import type { Actor } from '../../repositories/actor.js';
 import { requestMeta } from '../../repositories/audit.js';
 import { actorOrReply, requireOwner } from '../../repositories/scope.js';
 import { resolveFileAgent } from '../../memory/memory-files.js';
+import { classifyLibraryProjects, setProjectKind } from '../../memory/scopes/project-kinds.js';
 import { provenanceJobStatus, setChecked } from '../../memory/validity.js';
 import { vectorJobStatus } from '../../memory/vectors.js';
 import { storeP3Enabled } from '../../services/store-p3.js';
@@ -133,7 +135,17 @@ export async function memoryScopeRoutes(fastify: FastifyInstance) {
   // ---- tree, search, agents, explorer ----
   route('GET', '/api/memory/scopes/tree', async (owner, request) => {
     const fresh = q(request).fresh;
-    return scopeTree(owner.userId!, { fresh: fresh === '1' || fresh === 'true' });
+    // MR3: projects found in downloaded code move to "Not projects" on their own (once).
+    const marked = await classifyLibraryProjects(owner.userId!).catch(() => 0);
+    if (marked) invalidateScopeTree(owner.userId!);
+    return scopeTree(owner.userId!, { fresh: marked > 0 || fresh === '1' || fresh === 'true' });
+  });
+  route('POST', '/api/memory/scopes/projects/:slug/kind', async (owner, request) => {
+    const slug = (request.params as { slug: string }).slug;
+    const out = await setProjectKind(owner.userId!, slug, body(request).kind, owner.userId!);
+    invalidateScopeTree(owner.userId!);
+    audit(request, owner, 'memory_scope.project_kind', 'memory_project', slug, { kind: out.kind, before: out.before });
+    return out;
   });
   route('GET', '/api/memory/scopes/search', async (owner, request) => {
     const x = q(request);
