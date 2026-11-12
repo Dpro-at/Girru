@@ -488,6 +488,8 @@ export interface StoreQuery {
   type?: string;
   layer?: string;
   minImportance?: number;
+  /** MEM-HIST-01: replaced facts are candidates too. */
+  includeReplaced?: boolean;
   limit: number;
 }
 
@@ -554,7 +556,7 @@ export function staleIn(userId: string, open: OpenStore, q: StoreQuery, model: s
 }
 
 function candidate(u: UserStore, s: number, q: StoreQuery): boolean {
-  if (u.replaced[s]) return false;
+  if (u.replaced[s] && !q.includeReplaced) return false;
   if (q.type !== undefined && u.type[s] !== q.type) return false;
   if (q.layer !== undefined && u.layerRaw[s] !== q.layer) return false;
   if (q.minImportance !== undefined && !(u.importance[s] >= q.minImportance)) return false;
@@ -704,7 +706,7 @@ function scanDrawer(c: Scan, d: Drawer): void {
 export function searchStore(userId: string, open: OpenStore, q: StoreQuery, qv: QueryVector): StoreHit[] {
   const u = users.get(userId);
   if (!u || u !== open.store) return []; // forgotten (or dropped) since openStore
-  const filtered = q.type !== undefined || q.layer !== undefined || q.minImportance !== undefined;
+  const filtered = q.type !== undefined || q.layer !== undefined || q.minImportance !== undefined || !!q.includeReplaced;
   const inOpen = new Set(open.drawers);
 
   // BM25 statistics over the candidates (bm25FromCounts).

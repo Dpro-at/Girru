@@ -589,7 +589,7 @@ export async function executeChatTurn(reply: AgentReply, input: ChatTurnInput): 
       resolvedSystemPrompt = admittedPack.text;
       // MEM-ACC-02: the recall query carries the names of what the conversation is about (no model).
       const recallQuery = await chatRecallQuery({ ownerId: userId, message: messageText(lastUser?.content), history: messages.slice(0, -1).slice(-60).map((m) => messageText(m.content)).filter(Boolean), openProjectSlug: drawers.find((d) => d.kind === 'project')?.key ?? null });
-      recall = await consumeAdmittedMemory({userId,agentId:agentConfig?.id??'',drawers,project:drawers.find(d=>d.kind==='project')?.key??null,delegatedFrom:[],audience:channelTurn?'outsider':'owner',runId:input.runId??currentChatRun()?.runId},()=>messageRecall({userId,drawers,query:recallQuery.query,parts:recallQuery.parts,pack:admittedPack,agentId:agentConfig?.id??null}));
+      recall = await consumeAdmittedMemory({userId,agentId:agentConfig?.id??'',drawers,project:drawers.find(d=>d.kind==='project')?.key??null,delegatedFrom:[],audience:channelTurn?'outsider':'owner',runId:input.runId??currentChatRun()?.runId},()=>messageRecall({userId,drawers,query:recallQuery.query,parts:recallQuery.parts,focus:recallQuery.focus,pack:admittedPack,agentId:agentConfig?.id??null}));
       observeAdmittedContext(recall.items);
     } catch (err) {
       taintRunAdmission('incomplete-memory-context');

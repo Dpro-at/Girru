@@ -70,14 +70,15 @@ export async function contextEntities(ownerId: string, openProjectSlug: string |
  * entity the conversation is about. GIRRU_RECALL_CONTEXT=0 keeps the last message alone. Any
  * failure falls back to the last message.
  */
-export async function chatRecallQuery(input: { ownerId: string; message: string; history: readonly string[]; openProjectSlug: string | null }): Promise<{ query: string; parts: string[] }> {
-  if (process.env.GIRRU_RECALL_CONTEXT === '0' || !input.message.trim()) return { query: input.message, parts: [] };
+export async function chatRecallQuery(input: { ownerId: string; message: string; history: readonly string[]; openProjectSlug: string | null }): Promise<{ query: string; parts: string[]; focus: { names: string[]; others: string[] } | null }> {
+  if (process.env.GIRRU_RECALL_CONTEXT === '0' || !input.message.trim()) return { query: input.message, parts: [], focus: null };
   try {
     const { entities, openProject } = await contextEntities(input.ownerId, input.openProjectSlug);
     const q = buildContextQuery({ message: input.message, history: input.history, entities, openProject, topic: false });
     // MEM-ACC-03: the head of a question with a relative clause is searched too (multi-hop).
-    return { query: q.query, parts: process.env.GIRRU_RECALL_PARTS === '0' ? [] : q.parts };
+    // MEM-ACC-04: memories that name only another project or person rank lower (GIRRU_RECALL_FOCUS=0: off).
+    return { query: q.query, parts: process.env.GIRRU_RECALL_PARTS === '0' ? [] : q.parts, focus: process.env.GIRRU_RECALL_FOCUS === '0' ? null : q.focus };
   } catch {
-    return { query: input.message, parts: [] };
+    return { query: input.message, parts: [], focus: null };
   }
 }

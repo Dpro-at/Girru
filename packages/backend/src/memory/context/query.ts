@@ -45,6 +45,11 @@ export interface ContextQuery {
    * context, so the answer is searched for and not only the clause that points to it (multi-hop).
    */
   parts: string[];
+  /**
+   * MEM-ACC-04: the names of the entity the conversation is about (focus) and of the other known
+   * entities, so recall can rank a memory that names only another project or person lower.
+   */
+  focus: { names: string[]; others: string[] } | null;
   /** The entity the context came from, or null. */
   entity: KnownEntity | null;
   /** How it was chosen. */
@@ -77,6 +82,15 @@ function mentions(text: string, entity: KnownEntity): boolean {
     // A whole word, or an Arabic name with a one-letter prefix (لـ / بـ / و / ف / ك / ال).
     return t.includes(` ${n} `) || new RegExp(` (?:[لبوفك]|ال)${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} `, 'u').test(t);
   });
+}
+
+/** One matcher for many names (whole words, Arabic one-letter prefixes), as `mentions` does for one entity. */
+export function nameMatcher(names: readonly string[]): (text: string) => boolean {
+  const list = [...new Set(names.map((n) => norm(n).replace(/[^\p{L}\p{N}]+/gu, ' ').trim()).filter((n) => n.length >= 3))]
+    .sort((a, b) => b.length - a.length).map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  if (list.length === 0) return () => false;
+  const re = new RegExp(` (?:[لبوفك]|ال)?(?:${list.join('|')}) `, 'u');
+  return (text: string) => re.test(` ${norm(text).replace(/[^\p{L}\p{N}]+/gu, ' ')} `);
 }
 
 function latestMention(texts: readonly string[], entities: readonly KnownEntity[]): { entity: KnownEntity; index: number } | null {
@@ -128,8 +142,9 @@ export function buildContextQuery(input: ContextQueryInput): ContextQuery {
     }
   }
   const head = questionHead(message);
-  if (!entity) return { query: message, parts: head ? [head] : [], entity: null, source, topic };
+  if (!entity) return { query: message, parts: head ? [head] : [], focus: null, entity: null, source, topic };
   const names = entity.names.filter((n, k, all) => all.indexOf(n) === k).slice(0, 3);
   const context = [names.join(' / '), ...(topic.length ? [topic.join(' ')] : [])].join(': ');
-  return { query: `${message}\n(${context})`, parts: head ? [`${head}\n(${context})`] : [], entity, source, topic };
+  const others = entities.filter((e) => e !== entity && !e.names.some((n) => entity!.names.includes(n))).flatMap((e) => e.names);
+  return { query: `${message}\n(${context})`, parts: head ? [`${head}\n(${context})`] : [], focus: { names: [...entity.names], others }, entity, source, topic };
 }

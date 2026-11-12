@@ -26,6 +26,20 @@ const PATTERNS: ReadonlyArray<[RecallIntent, RegExp]> = [
   ['person', /\b(who|whom|whose)\b|من (هو|هي|هم)|منو|مين|\b(wer|wem|wessen)\b/iu],
 ];
 
+/**
+ * MEM-HIST-01: does the message ask what WAS true (a month or year, "before the switch", "used to",
+ * "originally", "چانت", "قبل التغيير", "früher", "vorher")? Then recall also reads replaced facts,
+ * labelled as no longer current. Rules only.
+ */
+const MONTH = /\b(in|im|during|before|since|bis|seit)\s+(january|february|march|april|may|june|july|august|september|october|november|december|januar|februar|märz|maerz|april|mai|juni|juli|august|september|oktober|november|dezember)\b|\b(19|20)\d{2}\b/iu;
+const AR_MONTH = /(ب|في |قبل |بشهر |في شهر )(كانون|شباط|آذار|اذار|نيسان|أيار|ايار|حزيران|تموز|آب|اب|أيلول|ايلول|تشرين|يناير|فبراير|مارس|أبريل|ابريل|مايو|يونيو|يوليو|أغسطس|اغسطس|سبتمبر|أكتوبر|اكتوبر|نوفمبر|ديسمبر)/u;
+const PAST_STATE = /\b(before (the|we|it)|used to|originally|at first|at the time|back then|previous(ly)?|old (one|plan|server|setup|database|version)|was (the|it|our)|were (the|we|our)|did we (use|have|plan))\b|قبل (التغيير|التبديل|الانتقال|النقل)|سابقاً|سابقا|في البداية|بالبداية|چان|چانت|چنا|كان |كانت |\b(früher|vorher|ursprünglich|damals|bevor)\b/iu;
+
+export function asksAboutThePast(query: string): boolean {
+  const q = String(query ?? '').slice(0, 2000);
+  return MONTH.test(q) || AR_MONTH.test(q) || PAST_STATE.test(q);
+}
+
 export function classifyIntent(query: string): RecallIntent {
   const q = String(query ?? '').slice(0, 2000);
   for (const [intent, re] of PATTERNS) if (re.test(q)) return intent;

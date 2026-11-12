@@ -178,7 +178,7 @@ function asOf(m: { createdAt?: Date | string; drawer?: { kind: string; key?: str
   return parts.length ? ` (${parts.join(' · ')})` : '';
 }
 
-async function messageRecallCurrent(input: { userId: string; drawers: readonly DrawerRef[]; query: string; parts?: readonly string[]; pack: ContextPack; agentId?: string | null }): Promise<MessageRecall> {
+async function messageRecallCurrent(input: { userId: string; drawers: readonly DrawerRef[]; query: string; parts?: readonly string[]; focus?: { names: readonly string[]; others: readonly string[] } | null; pack: ContextPack; agentId?: string | null }): Promise<MessageRecall> {
   const selected=selectedMemoryExecution();if(selected)return selected.recall(input);
   const query = input.query.trim().slice(0, 2000);
   if (!query || input.drawers.length === 0) return { text: '', items: [], hit: false };
@@ -240,9 +240,9 @@ export const ALREADY_ASKED = '[Memory: nothing reliable is stored about this, an
  * A "no reliable memory" answer is not cached, so the next turn says
  * "already asked" instead of asking again.
  */
-async function engineRecall(input: { userId: string; drawers: readonly DrawerRef[]; parts?: readonly string[]; pack: ContextPack; agentId?: string | null }, key: string, query: string, docHits: readonly DocHit[] = []): Promise<MessageRecall> {
+async function engineRecall(input: { userId: string; drawers: readonly DrawerRef[]; parts?: readonly string[]; focus?: { names: readonly string[]; others: readonly string[] } | null; pack: ContextPack; agentId?: string | null }, key: string, query: string, docHits: readonly DocHit[] = []): Promise<MessageRecall> {
   // KNOW-INDEX-01: a document that answers it means the owner need not be asked (MD8 asks only when nothing is known).
-  const r = await qualityRecall({ userId: input.userId, drawers: input.drawers, query, parts: input.parts, agentId: input.agentId ?? null, limit: MAX_RECALL, skip: new Set(input.pack.ids), ask: docHits.length === 0 });
+  const r = await qualityRecall({ userId: input.userId, drawers: input.drawers, query, parts: input.parts, focus: input.focus, agentId: input.agentId ?? null, limit: MAX_RECALL, skip: new Set(input.pack.ids), ask: docHits.length === 0 });
   if (!r.reliable && docHits.length) {
     const docPart = documentBlock(docHits, 0);
     const out = { text: docPart.text, items: docPart.items };
@@ -260,7 +260,8 @@ async function engineRecall(input: { userId: string; drawers: readonly DrawerRef
   const line = (x: (typeof r.items)[number]) => {
     const when = storeP2Enabled() ? asOf(x.memory) : '';
     // MD3: the confidence goes inside the same brackets as the date (one short word).
-    const conf = `confidence ${x.band}`;
+    // MEM-HIST-01: a replaced fact (recalled for a question about the past) says so, so it is never taken as current.
+    const conf = `${(x.memory.status as string) === 'replaced' ? 'replaced, no longer current · ' : ''}confidence ${x.band}`;
     return `- ${oneLine(x.memory.content, RECALL_CHARS)}${when ? `${when.slice(0, -1)} · ${conf})` : ` (${conf})`}`;
   };
   // A hard size budget: lines are added best first until ENGINE_RECALL_CHARS (at least one line), so a

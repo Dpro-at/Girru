@@ -104,6 +104,14 @@ const FACT = {
 
 /** What a correct answer must contain (any one of them, case-insensitive); answers are asked in English. */
 const city = (h) => h.match(/(Falkenstein|Frankfurt|Gravelines|Amsterdam|Vienna)/)[1];
+/** The same value as a model may write it in Arabic or German (an answer counts when any form is in it). */
+const FORMS = {
+  Falkenstein: ['فالكنشتاين', 'فالكنستاين'], Frankfurt: ['فرانكفورت'], Gravelines: ['غرافلين', 'جرافلين'], Amsterdam: ['أمستردام', 'امستردام'],
+  Vienna: ['Wien', 'فيينا', 'own server', 'eigenen Server', 'office server'],
+  Monday: ['Montag', 'الاثنين', 'الإثنين'], Tuesday: ['Dienstag', 'الثلاثاء'], Wednesday: ['Mittwoch', 'الأربعاء', 'الاربعاء'], Thursday: ['Donnerstag', 'الخميس'],
+  Ingrid: ['إنغريد', 'انغريد'], Haider: ['حيدر'], Lukas: ['لوكاس'], Rana: ['رنا'], Theo: ['ثيو', 'تيو'], Dalia: ['داليا'], Martin: ['مارتن'], Sami: ['سامي', 'سами'], Clara: ['كلارا'], Yasir: ['ياسر'],
+};
+const withForms = (keys) => keys.flatMap((k) => [k, ...(FORMS[k] || [])]);
 const REASON_KEY = [['window'], ['backup', 'lost data', 'lost'], ['licen'], ['time series', 'time-series', 'timeseries']];
 const BUG_KEY = [['10,000', '10000', '10 000'], ['safari'], ['cent']];
 const KEY = {
@@ -343,7 +351,7 @@ export function buildWorld(seed = 31) {
     ask('city-de', 'de', 5, `Wo wohnt ${first}?`, 'city');
     ask('city-iq', 'iq', 7, `${first} وين ساكن؟`, 'city');
   });
-  const keyOf = new Map(facts.map((f) => [f.id, f.key]));
+  const keyOf = new Map(facts.map((f) => [f.id, withForms(f.key)]));
   for (const q of questions) q.answer = q.target ? keyOf.get(q.target) : null;
   return { facts, questions };
 }
