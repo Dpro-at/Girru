@@ -166,8 +166,8 @@ against the previous run).
   the run (575 -> ~150-280 ms): the 50 GB database was not in the OS cache for the re-score reads.
 
 - **Recall test results (before / after):** `recall.mjs --mode ollama` (5,000 distractors, real
-  model): hit@5 same language 0.958 / 0.958, cross-language 0.714 / 0.714, MRR 0.958 / 0.641
-  unchanged, leaks 0 / 0, stale unchanged; identical with the store forced exact, int8 and HNSW.
+  model): before / after the same: hit@5 same language 0.958, cross-language 0.714; MRR 0.958 and
+  0.641; leaks 0; stale unchanged; identical with the store forced exact, int8 and HNSW.
   `multilingual-recall.test.mjs`: all 7 tests pass (with and without P9), including the Ollama
   recall@3 thresholds. `store-p9-index.test.mjs`: 6/6 in every mode (default, int8 forced, HNSW
   forced) and with `GIRRU_RECALL_STORE=0`. New `recall-store.test.mjs` 5/5: top-k heap = full
