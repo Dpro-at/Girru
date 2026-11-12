@@ -729,6 +729,103 @@
         "rescore": "default",
         "indexMB": "default"
       }
+    },
+    {
+      "id": "rmwe1iix6",
+      "date": "2026-11-12T21:08:35.274Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "9073f025",
+        "branch": "girru/memory-accuracy",
+        "memoryCodeChanged": false
+      },
+      "source": "accuracy.mjs",
+      "kind": "accuracy",
+      "label": "Accuracy baseline A (last message only), 100k real embeddings",
+      "size": 100140,
+      "vectors": "real",
+      "queries": 1040,
+      "searchMs": {
+        "p50": 74.1,
+        "p95": 92.8
+      },
+      "queryEmbedMs": {
+        "p50": 55.8,
+        "p95": 66.8
+      },
+      "coldMs": 3623.8,
+      "quality": {
+        "hitAt5": 0.501,
+        "hitAt1": 0.372,
+        "precisionAt5": 0.155,
+        "searchRecallAt5": 0.488,
+        "noAnswer": 0.008,
+        "temporal": 0.35,
+        "wrongProjectTop": 0.039,
+        "leaks": 0
+      },
+      "byKind": {
+        "all": {
+          "recallAt5": 0.501,
+          "hitAt1": 0.372,
+          "noAnswer": 0.008
+        },
+        "direct": {
+          "recallAt5": 0.75,
+          "hitAt1": 0.547,
+          "noAnswer": null
+        },
+        "context": {
+          "recallAt5": 0.333,
+          "hitAt1": 0.247,
+          "noAnswer": null
+        },
+        "cross-language": {
+          "recallAt5": 0.419,
+          "hitAt1": 0.287,
+          "noAnswer": null
+        },
+        "temporal": {
+          "recallAt5": 0.475,
+          "hitAt1": 0.26,
+          "noAnswer": null
+        },
+        "indirect": {
+          "recallAt5": 0.03,
+          "hitAt1": 0.02,
+          "noAnswer": null
+        },
+        "no-answer": {
+          "recallAt5": null,
+          "hitAt1": null,
+          "noAnswer": 0.008
+        },
+        "multi-hop": {
+          "recallAt5": 0,
+          "hitAt1": 0,
+          "noAnswer": null
+        },
+        "time-travel": {
+          "recallAt5": 0.55,
+          "hitAt1": 0.25,
+          "noAnswer": null
+        },
+        "person": {
+          "recallAt5": 0.95,
+          "hitAt1": 0.817,
+          "noAnswer": null
+        }
+      },
+      "settings": {
+        "p9": true,
+        "p9b": true,
+        "store": true
+      }
     }
   ]
 }
