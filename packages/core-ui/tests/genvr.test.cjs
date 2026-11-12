@@ -112,7 +112,7 @@ test('GV1d/GV1e/GV1c v2: the open place in the sidebar, one Girru chat, the mark
  assert.match(host,/openFolder:\(\)=>send\(\{operation:'open-folder'\}\)/);
  // GV1e: the Studio chat gets the place's earlier lines and Open in Chat; Chat shows the place with Open in Studio.
  assert.match(page,/\/api\/genvr\/worlds\/\$\{world\.projectId\}\/history/);assert.match(host,/openChat:\(\)=>send\(\{operation:'open-chat'\}\)/);
- assert.match(view,/<GenVRChatPlace key=\{project\.id\} client=\{client\} chatProjectId=\{project\.id\}\/>/);
+ assert.match(view,/<GenVRChatPlace key=\{project\.id\} client=\{client\} chatProjectId=\{project\.id\} projectName=\{project\.name\}\/>/);
  assert.match(shell,/window\.addEventListener\(OPEN_GENVR_EVENT,on\)/);assert.match(shell,/onOpenChat=\{id=>\{void \(async\(\)=>\{await chat\?\.loadProjects\(\);await chat\?\.refreshList\(\);await chat\?\.open\(id\);\}\)\(\);setPage\('chat'\);\}\}/);
  // GV1c v2: the market is the SDK's mountMarket in its own frame; Add opens the place with the item ready.
  assert.match(market,/sdk\.mountMarket\(/);assert.match(assets,/\/genvr\/market\.html/);assert.match(page,/open\(sp\.id,undefined,false,item\)/);
