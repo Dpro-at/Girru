@@ -26,7 +26,7 @@ async function fixture(t){
  CREATE TABLE memory_access_scope_rules(id TEXT,owner_id TEXT,scope_kind TEXT,scope_id TEXT,agent_id TEXT,drawer_kind TEXT,read_mode TEXT,write_mode TEXT,ends_at TEXT,reason TEXT,created_by TEXT,created_at TEXT);
  CREATE TABLE memory_role_templates(id TEXT,owner_id TEXT,name TEXT,norm_name TEXT,memory_read TEXT,memory_write TEXT,scope_read TEXT,scope_write TEXT);
  CREATE TABLE memory_agent_roles(owner_id TEXT,agent_id TEXT,template_id TEXT);
- CREATE TABLE memory_project_scopes(owner_id TEXT,slug TEXT,department_id TEXT,archived_at TEXT);`);
+ CREATE TABLE memory_project_scopes(owner_id TEXT,slug TEXT,department_id TEXT,archived_at TEXT);CREATE TABLE memory_project_kinds(owner_id TEXT,slug TEXT,kind TEXT);`);
  db.prepare('INSERT INTO users VALUES(?,?,?,?)').run(scope.ownerId,'owner','active',1);
  db.prepare('INSERT INTO agents_config VALUES(?)').run('synthetic-graph-agent');
  db.prepare('INSERT INTO agent_permissions VALUES(?,?,?,?,?,?)').run('synthetic-graph-agent','["project"]','[]',0,'{}',1);
