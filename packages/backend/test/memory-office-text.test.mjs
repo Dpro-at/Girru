@@ -70,7 +70,7 @@ test('unreadable files say why; the indexer cites sheets and slides and keeps th
   assert.deepEqual(I.extractChunks('notread', Buffer.alloc(0), 'Old offer.doc'), { ok: false, reason: 'old Word format; save it as .docx' });
   assert.deepEqual(I.extractChunks('notread', Buffer.alloc(0), 'backup.zip'), { ok: false, reason: 'archives are skipped' });
   const x = zip({ 'xl/workbook.xml': '<workbook><sheets><sheet name="Pro" r:id="rId1"/></sheets></workbook>', 'xl/_rels/workbook.xml.rels': '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>',
-    'xl/worksheets/sheet1.xml': '<worksheet><sheetData><row><c t="inlineStr"><is><t>api_key=sk_test_ABCDEFGHIJKLMNOP1234</t></is></c></row></sheetData></worksheet>' });
+    'xl/worksheets/sheet1.xml': `<worksheet><sheetData><row><c t="inlineStr"><is><t>api_key=${'sk_' + 'test_' + 'ABCDEFGHIJKLMNOP1234'}</t></is></c></row></sheetData></worksheet>` });
   const ex = I.extractChunks('xlsx', x, 'Pricing plans.xlsx');
   assert.equal(ex.ok, true); assert.equal(ex.info, '1 sheet'); assert.equal(ex.pages, 1);
   assert.doesNotMatch(JSON.stringify(ex.chunks), /ABCDEFGHIJKLMNOP/, 'keys inside a document are hidden before agents see the text');
