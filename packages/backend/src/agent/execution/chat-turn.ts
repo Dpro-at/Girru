@@ -61,6 +61,7 @@ import { resolveLocalModel, listLocalModels } from '../../llm/local-models.js';
 import { lmStudioApiUrl, lmStudioModelName, lmStudioNotRunningMessage } from '../../llm/lmstudio.js';
 import { executeLocalTurn } from '../../agent/execution/local-turn.js';
 import { contextPack, messageRecall, type ContextPack, type MessageRecall } from '../../memory/context/pack.js';
+import { chatRecallQuery } from '../../memory/context/entities.js';
 import { budgetHistory, type BudgetedHistory, type HistoryTurn } from '../../memory/context/summaries.js';
 import { saveTrace, setTraceTtft } from '../../memory/context/trace.js';
 import { contextBudget, estimateTokens, keepAliveValue } from '../../memory/context/budget.js';
@@ -586,7 +587,9 @@ export async function executeChatTurn(reply: AgentReply, input: ChatTurnInput): 
       const admittedPack=pack;
       observeAdmittedContext(admittedPack.items);
       resolvedSystemPrompt = admittedPack.text;
-      recall = await consumeAdmittedMemory({userId,agentId:agentConfig?.id??'',drawers,project:drawers.find(d=>d.kind==='project')?.key??null,delegatedFrom:[],audience:channelTurn?'outsider':'owner',runId:input.runId??currentChatRun()?.runId},()=>messageRecall({userId,drawers,query:messageText(lastUser?.content),pack:admittedPack,agentId:agentConfig?.id??null}));
+      // MEM-ACC-02: the recall query carries the names of what the conversation is about (no model).
+      const recallQuery = await chatRecallQuery({ ownerId: userId, message: messageText(lastUser?.content), history: messages.slice(0, -1).slice(-60).map((m) => messageText(m.content)).filter(Boolean), openProjectSlug: drawers.find((d) => d.kind === 'project')?.key ?? null });
+      recall = await consumeAdmittedMemory({userId,agentId:agentConfig?.id??'',drawers,project:drawers.find(d=>d.kind==='project')?.key??null,delegatedFrom:[],audience:channelTurn?'outsider':'owner',runId:input.runId??currentChatRun()?.runId},()=>messageRecall({userId,drawers,query:recallQuery,pack:admittedPack,agentId:agentConfig?.id??null}));
       observeAdmittedContext(recall.items);
     } catch (err) {
       taintRunAdmission('incomplete-memory-context');
