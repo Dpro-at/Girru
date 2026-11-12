@@ -32,7 +32,7 @@ import type { MenuItem } from './desktop-ui';
 import type { ProjectGroup } from './memory-desktop-contract.js';
 import { NeedsYou } from './MemoryNeeds';
 import { HiddenKeysController, KeyText, hiddenSummary } from './memory-hidden-keys';
-import { MarkdownDocument } from './DocumentEditor';
+import { DocumentEditor, MarkdownDocument } from './DocumentEditor';
 
 /** MEM-READ-01 MR1: how a memory came ("Imported", "Saved by you", "Learned"), else its kind. */
 /** MR1: the inspector shows the title on top and the text without an imported file name or the repeated title. */
@@ -584,6 +584,25 @@ function MemoryList({ k, p9b = false, pinned, showPinned, onMenu, onPinnedMenu, 
 }
 
 // ---------------------------------------------------------------- inspector
+/**
+ * MEM-READ-01 MR4: Edit opens Girru's shared document editor as a sheet (Text / Side by side / Preview,
+ * find, undo, ⌘S, Esc). Importance sits in its bottom bar; "changed while you edit" stays a notice on top.
+ * Hidden keys are lock chips in the preview; their references cannot reveal a value here.
+ */
+function MemoryEditSheet({ k, item, onSaved }: { k: K; item: ExplorerItem; onSaved: () => void }) {
+  const { x } = k;
+  const s = useStore(x)!; const ss = useStore(k.sc);
+  const where = item.drawerId.startsWith('project:') ? ss?.tree?.projects.find(p => p.slug === item.drawerId.slice(8))?.name ?? drawerName(item.drawerId) : drawerName(item.drawerId);
+  const save = (force = false) => { if (!s.busy && s.draft.trim()) void x.saveEdit(force).then(ok => { if (ok) onSaved(); }); };
+  return <DocumentEditor title={`${item.title || 'Memory'} · Edit`} note={where} maxLength={50000}
+    files={[{ id: item.id, name: item.title || 'Memory', content: s.draft }]} onChange={(_, t) => x.editDraft(t)} onClose={() => x.cancelEdit()} onSave={() => save()}
+    message={s.busy ? 'Saving…' : s.notice ?? 'Saved as a new version; History keeps the old one. ⌘S saves · Esc closes'}
+    leaf={(t, key) => <KeyText key={key} text={t}/>}
+    banner={s.conflict ? <div className="dk-ask" role="alert"><p><b>This memory changed while you were editing.</b> Nothing was overwritten. Saved meanwhile:</p><p className="dk-insp-text" dir="auto">{s.conflict.content}</p>
+      <div className="actions"><button type="button" className="primary" disabled={s.busy} onClick={() => save(true)}>Save mine as the newest</button><button type="button" disabled={s.busy} onClick={() => void x.keepTheirs()}>Keep theirs</button></div></div> : undefined}
+    footer={<label className="doc-importance">Importance<input type="range" min={1} max={10} value={s.draftImportance} onChange={e => x.editImportance(Number(e.target.value))}/><b>{s.draftImportance}</b></label>}/>;
+}
+
 function MemoryInspector({ k, item, p9b = false, onHistory, onTrash, onChecked }: { k: K; item: ExplorerItem; p9b?: boolean; onHistory: () => void; onTrash: () => void; onChecked?: (id: string) => void }) {
   const { x, d, mv, sc, tr } = k;
   const s = useStore(x)!; const ss = useStore(sc)!; const ts = useStore(tr)!;
@@ -594,13 +613,8 @@ function MemoryInspector({ k, item, p9b = false, onHistory, onTrash, onChecked }
   const by = item.sourceAgentId ? ss.agents[item.sourceAgentId] ?? 'An agent' : SOURCE_LABEL[item.source ?? ''] ?? kind.word;
   const before = { content: s.full ?? item.preview, importance: item.importance };
   return <div className="dk-insp">
-    {s.editing ? <form className="dk-edit" onSubmit={e => { e.preventDefault(); void x.saveEdit().then(ok => { if (ok) { d.edited(item.id, before); tr.forgetTrust(item.id); } }); }}>
-      <textarea aria-label="Memory text" dir="auto" rows={6} value={s.draft} maxLength={50000} autoFocus onChange={e => x.editDraft(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void x.saveEdit().then(ok => { if (ok) d.edited(item.id, before); }); } if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); x.cancelEdit(); } }}/>
-      <label className="dk-field-inline">Importance<input type="range" min={1} max={10} value={s.draftImportance} onChange={e => x.editImportance(Number(e.target.value))}/><span>{s.draftImportance}</span></label>
-      {!s.conflict && <div className="actions"><button type="button" onClick={() => x.cancelEdit()}>Cancel</button><button type="submit" className="primary" disabled={s.busy || !s.draft.trim()}>Save</button></div>}
-      <p className="fine-print">Saved as a new version; History keeps the old one. {mod}↩ saves.</p>
-    </form> : <div className="dk-insp-text dk-insp-md" dir="auto">{(() => { const r = readableBody(s.full ?? item.preview, item.title); return <>
+    {s.editing && <MemoryEditSheet k={k} item={item} onSaved={() => { d.edited(item.id, before); tr.forgetTrust(item.id); }}/>}
+    {<div className="dk-insp-text dk-insp-md" dir="auto">{(() => { const r = readableBody(s.full ?? item.preview, item.title); return <>
       {r.heading && <h1>{r.heading}</h1>}
       <MarkdownDocument text={r.body} leaf={(t, key) => <KeyText key={key} text={t} reveal={id => k.hk.reveal(id)}/>}/></>; })()}</div>}
     {!s.editing && <div className="dk-insp-icons">
@@ -614,7 +628,7 @@ function MemoryInspector({ k, item, p9b = false, onHistory, onTrash, onChecked }
       ])}/>}
     </div>}
     {p9b && <ContextMenu menu={insMenu.menu} onClose={insMenu.close}/>}
-    {s.conflict && <div className="dk-ask" role="alert"><p><b>This memory changed while you were editing.</b> Nothing was overwritten. Saved meanwhile:</p><p className="dk-insp-text" dir="auto">{s.conflict.content}</p>
+    {s.conflict && !s.editing && <div className="dk-ask" role="alert"><p><b>This memory changed while you were editing.</b> Nothing was overwritten. Saved meanwhile:</p><p className="dk-insp-text" dir="auto">{s.conflict.content}</p>
       <div className="actions"><button type="button" className="primary" disabled={s.busy} onClick={() => void x.saveEdit(true).then(ok => { if (ok) d.edited(item.id, before); })}>Save mine as the newest</button><button type="button" disabled={s.busy} onClick={() => void x.keepTheirs()}>Keep theirs</button></div>
       <p className="fine-print">Saving yours makes a new version; theirs stays in History.</p></div>}
     {p3 && v?.validTo && <div className="dk-ask dk-replaced"><p><UiIcon name="history" size={13}/> Not true any more since {new Date(v.validTo).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}. Agents no longer get it.</p>

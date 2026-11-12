@@ -5,6 +5,7 @@
  */
 
 import { actorOf } from '../../auth/auth-gate.js';
+import { hideKeysInText, recordHiddenKeys } from '../../memory/hidden-keys.js';
 import type { FastifyInstance } from 'fastify';
 import { v4 as uuidv4 } from 'uuid';
 import { getMemoryStorage } from '../../memory/storage.js';
@@ -219,6 +220,14 @@ export async function memoryRoutes(fastify: FastifyInstance,options:{skipLegacyI
       return reply.code(400).send({ error: 'Invalid metadata' });
     }
 
+    // MEM-READ-01 MR2: keys in what the owner remembers are hidden (key store + lock chip).
+    let hiddenNew: Array<{ id: string; type: string }> = [];
+    const keyOwner = actorOf(request)?.userId ?? null;
+    if (keyOwner) {
+      const h = await hideKeysInText(keyOwner, body.content, drawer ? (drawer.key ? `${drawer.kind}:${drawer.key}` : drawer.kind) : 'memory').catch(() => null);
+      if (h) { body.content = h.text; hiddenNew = h.hidden; }
+    }
+
     // Determine memory layer based on importance (same logic as memory_save tool)
     const importance = body.importance || 5;
     let memoryLayer: MultiTierLayer = 'working';
@@ -262,6 +271,7 @@ export async function memoryRoutes(fastify: FastifyInstance,options:{skipLegacyI
         ? await memoryRepo.createOrUpdateTopic(actorOf(request), draft, 'api')
         : { memory: await memoryRepo.create(actorOf(request), draft, 'api'), updated: false };
     } catch (err) { return memoryError(reply, err); }
+    if (hiddenNew.length && keyOwner) await recordHiddenKeys(keyOwner, result.memory.id, drawer ? (drawer.key ? `${drawer.kind}:${drawer.key}` : drawer.kind) : 'memory', hiddenNew).catch(() => undefined);
 
     return {
       success: true,
@@ -286,6 +296,13 @@ export async function memoryRoutes(fastify: FastifyInstance,options:{skipLegacyI
         return reply.code(400).send({ error: picked.error });
       }
       const { updates } = picked;
+      // MEM-READ-01 MR2: a key typed into a memory is hidden (key store + lock chip), never stored in plain text.
+      let hiddenNow: Array<{ id: string; type: string }> = [];
+      const keyOwner = actorOf(request)?.userId ?? null;
+      if (typeof updates.content === 'string' && keyOwner) {
+        const h = await hideKeysInText(keyOwner, updates.content, 'memory').catch(() => null);
+        if (h) { updates.content = h.text; hiddenNow = h.hidden; }
+      }
       // CORE-MEM-TOPIC: `topicKey` sets the key; null or '' clears it.
       const rawTopic = isPlainObject(request.body) ? request.body.topicKey : undefined;
       let topicKey: string | null | undefined;
@@ -309,6 +326,7 @@ export async function memoryRoutes(fastify: FastifyInstance,options:{skipLegacyI
       try {
         // CORE-05: baseline + new version, actor = the caller.
         const updated = await memoryRepo.update(actorOf(request), id, updates, 'api', rawVersion as number | undefined);
+        if (hiddenNow.length && keyOwner) await recordHiddenKeys(keyOwner, id, 'memory', hiddenNow).catch(() => undefined);
 
         return {
           success: true,

@@ -35,3 +35,14 @@ test('inspector: the title on top, the imported file name and the repeated title
   assert.deepEqual(readableBody('# Own heading\ntext', 'Own heading'), { heading: null, body: '# Own heading\ntext' });
   assert.deepEqual(readableBody('Plain fact here.', 'Plain fact here'), { heading: 'Plain fact here', body: '' });
 });
+
+test('MR4: the shared editor shows the notice on top, importance in its bottom bar and lock chips in the preview', () => {
+  const { DocumentEditor } = require('../src/DocumentEditor.tsx');
+  const html = renderToStaticMarkup(React.createElement(DocumentEditor, { title: 'VPS · Edit', note: 'grenzer', files: [{ id: 'm1', name: 'VPS', content: '**SSH login:** [SECRET:password:k3j9x0a1bq]' }], onChange: () => {}, onClose: () => {}, onSave: () => {},
+    banner: React.createElement('p', null, 'This memory changed while you were editing.'), footer: React.createElement('label', { className: 'doc-importance' }, 'Importance'),
+    leaf: (t, key) => React.createElement(KeyText, { key, text: t }) }));
+  assert.match(html, /doc-banner[^>]*><p>This memory changed while you were editing/);
+  assert.match(html, /doc-status"><label class="doc-importance">Importance/);
+  assert.match(html, /doc-preview[\s\S]*dk-key-chip/);
+  assert.match(html, />Save</);
+});

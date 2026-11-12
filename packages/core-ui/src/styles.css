@@ -2324,6 +2324,11 @@ button.status-item:hover { background:var(--row-hover); color:var(--text); }
 .dk-insp-md pre { margin:0; padding:8px 10px; border-radius:6px; background:var(--secondary); overflow:auto; font-size:.92em; }
 .dk-insp-md code { font-size:.94em; }
 .dk-insp-md .doc-link { color:var(--accent); }
+/* MEM-READ-01 MR4: the shared editor carries a notice on top and importance in its bottom bar. */
+.doc-banner { padding:8px 16px 0; }
+.doc-banner .dk-ask { margin:0; }
+.doc-status .doc-importance, .doc-importance { display:inline-flex; flex-direction:row; white-space:nowrap; align-items:center; gap:6px; margin-inline-end:auto; }
+.doc-importance input { inline-size:110px; }
 /* MEM-READ-01 MR2: a hidden key is one lock chip; Show reveals it for the owner alone. */
 .dk-key-chip { display:inline-flex; align-items:center; gap:4px; padding:0 6px; margin:0 1px; border-radius:6px; font-size:.92em; line-height:1.5; white-space:nowrap; vertical-align:baseline; color:var(--muted); background:var(--secondary); }
 .dk-key-chip .link-button { font-size:inherit; padding:0 0 0 2px; }
