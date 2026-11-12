@@ -55,6 +55,8 @@ The public definitions in `src/tools.ts` (and domain modules) and `publicToolCat
 
 `workspace_memory` accepts exactly one explicit `scope`: `owner`, `experience`, `project:<current-project-key>`, `task:<id>` or `people:<id>`. It never assumes that the working directory authorizes a project, and does not offer an all-project search. Use the current drawer key shown by Girru; stale aliases are refused rather than silently widening a search.
 
+Passwords, logins, API keys and tokens found in memory are hidden by Girru: memory text carries only a `[SECRET:<type>:<id>]` reference and the value is never returned.
+
 `not_projects` (scope `owner`) lists only the library folders (downloaded code such as the Go module folder or `node_modules`) that Girru keeps out of the projects; it never lists the owner's other projects. `mark_project` (scope `owner`, `slug`, `kind` `project` or `library`) is the owner's "It's a project" / "Not a project" choice and is used only on the owner's explicit instruction.
 
 - `search`: `scope`, `query` (1–200 characters), optional `limit` (1–50) and cursor returned by the backend. Searches saved text through the scoped explorer, without semantic embeddings or a model call.

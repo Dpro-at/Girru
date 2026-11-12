@@ -71,6 +71,11 @@ memories are not loaded into replies. `workspace_memory` operation
 - **Learnings**: save what you learn to the right project (`memory_save` or,
   from a coding app, `memory_propose`), one fact at a time, never a secret. A
   lesson about another project belongs to that project, not the one you are in.
+- **Hidden keys**: Girru hides passwords, SSH logins, API keys and tokens it
+  finds in memory; you see `[SECRET:<type>:<id>]` (the owner sees a lock chip).
+  Never ask for the value or try to rebuild it. Keep the reference as it is
+  when you edit a memory. A key the owner moved to Connections can be used
+  through its reference in a tool call, only with the owner's approval.
 - **Handoffs**: before you stop, leave a handoff (done / left / next /
   questions) so the next agent of any brand continues from it.
 

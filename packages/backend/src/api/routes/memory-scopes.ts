@@ -30,6 +30,9 @@
  *   POST /api/memory/scopes/projects/:slug/preview { action, target?, departmentId? } -> { action, project, target?, department?, effects, previewHash }
  *   POST /api/memory/scopes/projects/:slug/apply   { action, target?, departmentId?, expectedPreviewHash, confirm: true } -> { action, project, effects, result }
  *   GET  /api/memory/scopes/projects/:slug/export  -> { project, files: [{ name, content }] }
+ *   GET  /api/memory/scopes/hidden-keys            -> { total, drawers: [{ drawer, count, memories, kinds }] } keys hidden since the owner last answered (MR2; runs the one-time pass first)
+ *   POST /api/memory/scopes/hidden-keys/answer     { answer: 'keep' | 'move', drawer? } -> { answered, moved }  Keep hidden here / Move to Connections
+ *   POST /api/memory/scopes/hidden-keys/:id/reveal -> { value }  the owner's Show (audited; never cached)
  *   POST /api/memory/scopes/projects/:slug/kind    { kind: 'project' | 'library' } -> { slug, kind, before }  ("It's a project" / "Not a project", MEM-READ-01 MR3)
  * Access by inheritance
  *   GET  /api/memory/access                        -> { version, rules, templates }
@@ -52,6 +55,7 @@ import { requestMeta } from '../../repositories/audit.js';
 import { actorOrReply, requireOwner } from '../../repositories/scope.js';
 import { resolveFileAgent } from '../../memory/memory-files.js';
 import { classifyLibraryProjects, setProjectKind } from '../../memory/scopes/project-kinds.js';
+import { answerHiddenKeys, hiddenKeysReport, hideKeysOnce, revealKey } from '../../memory/hidden-keys.js';
 import { provenanceJobStatus, setChecked } from '../../memory/validity.js';
 import { vectorJobStatus } from '../../memory/vectors.js';
 import { storeP3Enabled } from '../../services/store-p3.js';
@@ -139,6 +143,28 @@ export async function memoryScopeRoutes(fastify: FastifyInstance) {
     const marked = await classifyLibraryProjects(owner.userId!).catch(() => 0);
     if (marked) invalidateScopeTree(owner.userId!);
     return scopeTree(owner.userId!, { fresh: marked > 0 || fresh === '1' || fresh === 'true' });
+  });
+  // ---- hidden keys (MEM-READ-01 MR2) ----
+  route('GET', '/api/memory/scopes/hidden-keys', async (owner) => {
+    await hideKeysOnce(owner.userId!).catch(() => undefined);
+    const r = await hiddenKeysReport(owner.userId!);
+    return { total: r.total, drawers: r.drawers };
+  });
+  route('POST', '/api/memory/scopes/hidden-keys/answer', async (owner, request) => {
+    const b = body(request);
+    if (b.answer !== 'keep' && b.answer !== 'move') throw new ScopeInputError('answer must be keep or move');
+    if (b.drawer !== undefined && (typeof b.drawer !== 'string' || b.drawer.length > 200)) throw new ScopeInputError('Invalid drawer');
+    const out = await answerHiddenKeys(owner.userId!, b.answer, b.drawer as string | undefined);
+    audit(request, owner, 'memory.hidden_keys_answer', 'memory_hidden_keys', String(b.drawer ?? 'all'), { answer: b.answer, answered: out.answered, moved: out.moved });
+    return out;
+  });
+  route('POST', '/api/memory/scopes/hidden-keys/:id/reveal', async (owner, request, reply) => {
+    const id = (request.params as { id: string }).id;
+    const value = await revealKey(owner.userId!, id);
+    if (value === null) return reply.code(404).send({ error: 'Not found', code: 'not_found' });
+    audit(request, owner, 'memory.hidden_key_reveal', 'memory_hidden_keys', id, {});
+    reply.header('Cache-Control', 'no-store');
+    return { value };
   });
   route('POST', '/api/memory/scopes/projects/:slug/kind', async (owner, request) => {
     const slug = (request.params as { slug: string }).slug;

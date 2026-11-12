@@ -10,6 +10,7 @@
 
 import type { Tool, ToolResult, ToolExecutionContext } from '../types.js';
 import { toolMemoryUser, toolOwnerTurn } from './scope.js';
+import { hideKeysInText, recordHiddenKeys } from '../../memory/hidden-keys.js';
 import { one, sql } from '../../repositories/sql-steps.js';
 import type { AgentChangeResult } from '../../memory/learning.js';
 import { repositories } from '../../repositories/index.js';
@@ -83,10 +84,14 @@ later memory_save with that topic_key updates this memory.`,
     if (params.topic_key !== undefined && params.topic_key !== null && typeof params.topic_key !== 'string') {
       return text('Error: topic_key must be text', undefined, 'Invalid topic key');
     }
+    // MEM-READ-01 MR2: keys in the new text are hidden (key store + lock chip), never stored in plain text.
+    const user = toolMemoryUser(context)!;
+    const hidden = typeof params.content === 'string' ? await hideKeysInText(user, params.content, 'memory').catch(() => null) : null;
+    if (hidden?.hidden.length) await recordHiddenKeys(user, params.id, 'memory', hidden.hidden).catch(() => undefined);
     const result = await change(context, {
       memoryId: params.id, op: 'update',
       updates: {
-        content: params.content as string | undefined,
+        content: (hidden?.text ?? params.content) as string | undefined,
         importance: typeof params.importance === 'number' ? params.importance : undefined,
         ...(params.topic_key !== undefined ? { topicKey: params.topic_key as string | null } : {}),
       },

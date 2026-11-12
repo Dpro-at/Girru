@@ -2310,6 +2310,12 @@ button.status-item:hover { background:var(--row-hover); color:var(--text); }
 .dk-swatch { display:inline-block; inline-size:11px; block-size:11px; border-radius:3px; box-shadow:inset 0 0 0 1px #0003; vertical-align:-1px; margin-inline-end:3px; }
 .dk-swatch-big { inline-size:36px; block-size:36px; border-radius:8px; }
 .dk-swatch-wrap, .dk-inline-swatch { white-space:nowrap; }
+/* MEM-READ-01 MR2: a hidden key is one lock chip; Show reveals it for the owner alone. */
+.dk-key-chip { display:inline-flex; align-items:center; gap:4px; padding:0 6px; margin:0 1px; border-radius:6px; font-size:.92em; line-height:1.5; white-space:nowrap; vertical-align:baseline; color:var(--muted); background:var(--secondary); }
+.dk-key-chip .link-button { font-size:inherit; padding:0 0 0 2px; }
+.dk-key-chip code { font-size:.95em; color:var(--text); user-select:all; }
+.dk-key-shown { background:var(--subtle); }
+.dk-key-count { display:inline-flex; align-items:center; gap:3px; margin-inline-start:8px; color:var(--muted); }
 .dk-swatch-wrap { display:inline-flex; align-items:center; gap:2px; margin-inline-end:8px; }
 /* inspector */
 .dk-inspector { border-inline-start:1px solid var(--border); overflow:auto; min-block-size:0; background:var(--surface); }

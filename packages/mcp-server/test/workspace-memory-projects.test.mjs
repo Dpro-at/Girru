@@ -24,3 +24,11 @@ test('mark_project is the owner choice; bad input never reaches the backend',asy
  for(const bad of [{operation:'mark_project',scope:'project:grenzer',slug:'grenzer',kind:'project'},{operation:'mark_project',scope:'owner',slug:'../x',kind:'project'},{operation:'mark_project',scope:'owner',slug:'grenzer',kind:'maybe'}]){
   calls.length=0;const r=await callTool('workspace_memory',bad,{backend});assert.equal(r.isError,true);assert.equal(calls.length,0);}
 });
+
+test('hidden keys come back as references only',async()=>{
+ const ref='[SECRET:stripe_key:aa11bb22cc]';
+ const backend={async request(method,path){if(path==='/api/auth/me')return {user:{id:'owner',role:'owner',status:'active'}};
+  if(path==='/api/memory/scopes/memories/m1')return {memory:{id:'m1',drawerId:'project:grenzer',type:'fact',content:'STRIPE='+ref,importance:6}};throw Error('Unexpected '+path);}};
+ const out=await callTool('workspace_memory',{operation:'read',scope:'project:grenzer',id:'m1'},{backend});
+ assert.notEqual(out.isError,true,out.content[0].text);assert.equal(out.structuredContent.memory.content,'STRIPE='+ref);
+});
