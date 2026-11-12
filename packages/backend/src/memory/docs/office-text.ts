@@ -116,71 +116,162 @@ const attr = (attrs: string, name: string) => { const m = new RegExp(`(?:^|\\s)$
 
 // ---------------------------------------------------------------- formats
 
-/** Word: paragraphs, headings as "#", lists as "-", tables as rows with " | ". */
-function docx(z: Map<string, () => Buffer>): OfficeResult {
-  const part = z.get('word/document.xml'); if (!part) return { ok: false, reason: 'no document text' };
-  const lines: string[] = []; let line = '', heading = 0, list = false, inCell = false, row: string[] = [], tables = 0, cell = '';
-  for (const t of xmlTokens(part().toString('utf8'))) {
-    if ('text' in t) { if (inCell) cell += t.text; else line += t.text; continue; }
+/** Relationship id -> part path for one part's .rels (targets are relative to that part's folder). */
+function relations(z: Map<string, () => Buffer>, partPath: string): Map<string, { target: string; type: string }> {
+  const dir = partPath.includes('/') ? partPath.slice(0, partPath.lastIndexOf('/')) : '';
+  const relsPath = `${dir ? `${dir}/` : ''}_rels/${partPath.slice(dir ? dir.length + 1 : 0)}.rels`;
+  const out = new Map<string, { target: string; type: string }>();
+  const rels = z.get(relsPath); if (!rels) return out;
+  for (const t of xmlTokens(rels().toString('utf8'))) {
+    if (!('tag' in t) || t.tag !== 'Relationship' || attr(t.attrs, 'TargetMode') === 'External') continue;
+    const id = attr(t.attrs, 'Id'), to = attr(t.attrs, 'Target');
+    if (!id || !to) continue;
+    // Resolve "../x", "./x" and "/x" against the part's folder, never outside the package.
+    const parts = (to.startsWith('/') ? to.slice(1) : `${dir ? `${dir}/` : ''}${to}`).split('/');
+    const norm: string[] = []; for (const p of parts) { if (p === '..') norm.pop(); else if (p && p !== '.') norm.push(p); }
+    out.set(id, { target: norm.join('/'), type: (attr(t.attrs, 'Type') ?? '').split('/').at(-1) ?? '' });
+  }
+  return out;
+}
+
+/** The text of one WordprocessingML part: paragraphs, headings as "#", lists as "-", tables as rows with " | ". */
+function wordLines(xml: string, count?: { tables: number }): string[] {
+  const lines: string[] = []; let line = '', heading = 0, list = false, inCell = 0, row: string[] = [], cell = '', inText = false, inDel = false;
+  for (const t of xmlTokens(xml)) {
+    if ('text' in t) { if (!inText || inDel) continue; if (inCell) cell += t.text; else line += t.text; continue; }
     const n = t.tag;
-    if (n === 'w:t' || n === '/w:t') continue;
-    if (n === 'w:pStyle') { const v = attr(t.attrs, 'w:val') ?? ''; const h = /^(?:Heading|berschrift|Titre|Title)(\d?)/i.exec(v); if (h) heading = Number(h[1] || 1); if (/List/i.test(v)) list = true; }
+    if (n === 'w:t' || n === 'w:delText') { inText = !t.self && n === 'w:t'; continue; }
+    if (n === '/w:t' || n === '/w:delText') { inText = false; continue; }
+    if (n === 'w:del') inDel = !t.self; else if (n === '/w:del') inDel = false; // deleted tracked changes are not the text
+    else if (n === 'w:pStyle') { const v = attr(t.attrs, 'w:val') ?? ''; const h = /^(?:Heading|berschrift|Titre|Title)(\d?)/i.exec(v); if (h) heading = Number(h[1] || 1); if (/List/i.test(v)) list = true; }
     else if (n === 'w:numPr') list = true;
     else if (n === 'w:tab') { if (inCell) cell += ' '; else line += '\t'; }
     else if (n === 'w:br' || n === 'w:cr') { if (inCell) cell += ' '; else line += '\n'; }
-    else if (n === 'w:tbl') tables++;
-    else if (n === 'w:tc') { inCell = true; cell = ''; }
-    else if (n === '/w:tc') { inCell = false; row.push(cell.trim()); }
-    else if (n === '/w:tr') { if (row.some(Boolean)) lines.push(row.join(' | ')); row = []; }
+    else if (n === 'w:noBreakHyphen') { if (inCell) cell += '-'; else line += '-'; }
+    else if (n === 'w:tbl') { if (count) count.tables++; }
+    else if (n === 'w:tc') { if (!inCell) cell = ''; inCell++; }
+    else if (n === '/w:tc') { inCell = Math.max(0, inCell - 1); if (!inCell) row.push(cell.replace(/\s+/g, ' ').trim()); }
+    else if (n === '/w:tr' && !inCell) { if (row.some(Boolean)) lines.push(row.join(' | ').slice(0, MAX_ROW_CHARS)); row = []; }
     else if (n === '/w:p' && !inCell) { const s = line.trim(); if (s) lines.push(heading ? `${'#'.repeat(Math.min(heading, 4))} ${s}` : list ? `- ${s}` : s); line = ''; heading = 0; list = false; }
     else if (n === '/w:p' && inCell) cell += ' ';
   }
+  return lines;
+}
+
+/** Word: the body, then footnotes and endnotes, and the headers/footers once each (they repeat on every page). */
+function docx(z: Map<string, () => Buffer>): OfficeResult {
+  const main = [...relations(z, '').values()].find(r => r.type === 'officeDocument')?.target ?? 'word/document.xml';
+  const part = z.get(main) ?? z.get('word/document.xml'); if (!part) return { ok: false, reason: 'no document text' };
+  const count = { tables: 0 };
+  const sections: Section[] = [];
+  const body = wordLines(part().toString('utf8'), count);
+  if (body.length) sections.push({ label: 'document', text: body.join('\n') });
+  const rels = [...relations(z, main).values()];
+  const notes: string[] = [];
+  for (const kind of ['footnotes', 'endnotes']) for (const r of rels.filter(x => x.type === kind)) notes.push(...wordLines(z.get(r.target)?.().toString('utf8') ?? '').filter(l => !/^\d+$/.test(l)));
+  if (notes.length) sections.push({ label: 'notes', text: `## Notes\n${notes.join('\n')}` });
+  const hf = new Set<string>();
+  for (const r of rels.filter(x => x.type === 'header' || x.type === 'footer')) for (const l of wordLines(z.get(r.target)?.().toString('utf8') ?? '')) if (!/^(?:page\s*)?\d+(?:\s*(?:of|\/)\s*\d+)?$/i.test(l)) hf.add(l);
+  if (hf.size) sections.push({ label: 'headers and footers', text: `## Headers and footers\n${[...hf].join('\n')}` });
+  if (!sections.length) return { ok: false, reason: 'no text in it' };
   const pages = Number(/<Pages>(\d+)<\/Pages>/.exec(z.get('docProps/app.xml')?.().toString('utf8') ?? '')?.[1] ?? 0);
-  const text = lines.join('\n');
-  if (!text.trim()) return { ok: false, reason: 'no text in it' };
-  return { ok: true, sections: [{ label: 'document', text }], count: pages || 1, info: [pages ? `${pages} ${pages === 1 ? 'page' : 'pages'}` : null, tables ? `${tables} ${tables === 1 ? 'table' : 'tables'}` : null].filter(Boolean).join(', ') || 'text' };
+  const tables = count.tables;
+  return { ok: true, sections, count: pages || 1, info: [pages ? `${pages} ${pages === 1 ? 'page' : 'pages'}` : null, tables ? `${tables} ${tables === 1 ? 'table' : 'tables'}` : null, notes.length ? 'notes' : null].filter(Boolean).join(', ') || 'text' };
 }
 
-/** Excel: each sheet as a table (shared strings, inline strings, numbers), up to MAX_ROWS rows per sheet. */
+/** Excel serial day -> ISO date (1900 system; the 1904 system when the workbook says so). */
+function excelDate(serial: number, d1904: boolean): string {
+  if (!Number.isFinite(serial)) return String(serial);
+  const ms = Math.round((serial + (d1904 ? 1462 : 0) - 25569) * 86400000);
+  const d = new Date(ms); if (Number.isNaN(d.getTime())) return String(serial);
+  const iso = d.toISOString();
+  return serial % 1 ? iso.slice(0, 16).replace('T', ' ') : iso.slice(0, 10);
+}
+const BUILTIN_DATE = new Set([14, 15, 16, 17, 18, 19, 20, 21, 22, 45, 46, 47]);
+const BUILTIN_PERCENT = new Set([9, 10]);
+
+/**
+ * Excel: each tab in the workbook's own order (not the file names), followed through the relationships;
+ * chart sheets have no cells and are left out; hidden tabs are marked. Cells: shared and inline strings
+ * (rich text runs joined), formula strings, booleans, errors, numbers; dates and percentages as the sheet shows them.
+ */
 function xlsx(z: Map<string, () => Buffer>): OfficeResult {
+  const book = [...relations(z, '').values()].find(r => r.type === 'officeDocument')?.target ?? 'xl/workbook.xml';
   const shared: string[] = [];
-  const ss = z.get('xl/sharedStrings.xml');
-  if (ss) { let cur = '', inSi = false; for (const t of xmlTokens(ss().toString('utf8'))) { if ('text' in t) { if (inSi) cur += t.text; } else if (t.tag === 'si') { inSi = true; cur = ''; } else if (t.tag === '/si') { inSi = false; shared.push(cur); } } }
-  const book = z.get('xl/workbook.xml')?.().toString('utf8') ?? '';
-  const rels = z.get('xl/_rels/workbook.xml.rels')?.().toString('utf8') ?? '';
-  // Relationship id -> target, read once (no pattern is ever built from the file's own text).
-  const relTargets = new Map<string, string>();
-  for (const t of xmlTokens(rels)) if ('tag' in t && t.tag === 'Relationship') { const id = attr(t.attrs, 'Id'), to = attr(t.attrs, 'Target'); if (id && to) relTargets.set(id, to); }
-  const target = (rid: string) => relTargets.get(rid);
-  const sheetTags = [...xmlTokens(book)].filter((t): t is { tag: string; attrs: string; self: boolean } => 'tag' in t && t.tag === 'sheet');
-  const sheets = sheetTags.map((t, i) => ({ name: attr(t.attrs, 'name') ?? `Sheet ${i + 1}`, path: (() => { const to = target(attr(t.attrs, 'r:id') ?? ''); return to ? (to.startsWith('/') ? to.slice(1) : `xl/${to.replace(/^\.\//, '')}`) : `xl/worksheets/sheet${i + 1}.xml`; })() }));
-  const sections: Section[] = []; let limited = false;
-  for (const sh of sheets.slice(0, 50)) {
-    const part = z.get(sh.path); if (!part) continue;
-    const rows: string[] = []; let row: string[] = [], val = '', type = '', inV = false, inIs = false;
-    for (const t of xmlTokens(part().toString('utf8'))) {
-      if ('text' in t) { if (inV || inIs) val += t.text; continue; }
-      if (t.tag === 'c') { type = attr(t.attrs, 't') ?? ''; val = ''; if (t.self) row.push(''); }
-      else if (t.tag === 'v') inV = true; else if (t.tag === '/v') inV = false;
-      else if (t.tag === 'is') inIs = true; else if (t.tag === '/is') inIs = false;
-      else if (t.tag === '/c') row.push(type === 's' ? shared[Number(val)] ?? '' : val.trim());
-      else if (t.tag === '/row') { if (row.some(Boolean)) { if (rows.length >= MAX_ROWS) { limited = true; break; } rows.push(row.join(' | ').slice(0, MAX_ROW_CHARS)); } row = []; }
-    }
-    if (rows.length) sections.push({ label: `sheet ${sh.name}`, text: `## ${sh.name}\n${rows.join('\n')}` });
+  const rels = relations(z, book);
+  const ssPath = [...rels.values()].find(r => r.type === 'sharedStrings')?.target ?? 'xl/sharedStrings.xml';
+  const ss = z.get(ssPath);
+  if (ss) { let cur = '', inSi = false, inT = false, inRPh = false; for (const t of xmlTokens(ss().toString('utf8'))) { if ('text' in t) { if (inSi && inT && !inRPh) cur += t.text; } else if (t.tag === 'si') { inSi = true; cur = ''; } else if (t.tag === '/si') { inSi = false; shared.push(cur); } else if (t.tag === 't') inT = !t.self; else if (t.tag === '/t') inT = false; else if (t.tag === 'rPh') inRPh = true; else if (t.tag === '/rPh') inRPh = false; } }
+  // Styles: which cell style is a date or a percentage.
+  const stylesPath = [...rels.values()].find(r => r.type === 'styles')?.target ?? 'xl/styles.xml';
+  const custom = new Map<number, string>(); const xfFmt: number[] = []; let inXfs = false;
+  for (const t of xmlTokens(z.get(stylesPath)?.().toString('utf8') ?? '')) {
+    if (!('tag' in t)) continue;
+    if (t.tag === 'numFmt') custom.set(Number(attr(t.attrs, 'numFmtId')), attr(t.attrs, 'formatCode') ?? '');
+    else if (t.tag === 'cellXfs') inXfs = !t.self; else if (t.tag === '/cellXfs') inXfs = false;
+    else if (t.tag === 'xf' && inXfs) xfFmt.push(Number(attr(t.attrs, 'numFmtId') ?? 0));
   }
-  if (!sections.length) return { ok: false, reason: 'no cells with text' };
-  return { ok: true, sections, count: sections.length, info: `${sections.length} ${sections.length === 1 ? 'sheet' : 'sheets'}${limited ? `, first ${MAX_ROWS} rows each` : ''}` };
+  const kindOfStyle = (s: number): 'date' | 'percent' | null => {
+    const id = xfFmt[s]; if (id === undefined) return null;
+    if (BUILTIN_DATE.has(id)) return 'date'; if (BUILTIN_PERCENT.has(id)) return 'percent';
+    const code = (custom.get(id) ?? '').replace(/"[^"]*"|\[[^\]]*\]|\\./g, '');
+    if (/%/.test(code)) return 'percent';
+    return /[dmyhs]/i.test(code) && !/^[#0.,\s]*$/.test(code) ? 'date' : null;
+  };
+  const bookXml = z.get(book)?.().toString('utf8') ?? '';
+  const d1904 = /<workbookPr\b[^>]*date1904="(?:1|true)"/.test(bookXml.slice(0, 20000));
+  const tabs = [...xmlTokens(bookXml)].filter((t): t is { tag: string; attrs: string; self: boolean } => 'tag' in t && t.tag === 'sheet');
+  const sections: Section[] = []; let limited = false, charts = 0, hidden = 0;
+  for (const [i, tab] of tabs.slice(0, 50).entries()) {
+    const name = attr(tab.attrs, 'name') ?? `Sheet ${i + 1}`;
+    const rel = rels.get(attr(tab.attrs, 'r:id') ?? '');
+    if (rel?.type === 'chartsheet' || rel?.target.includes('chartsheets/')) { charts++; continue; }
+    const part = z.get(rel?.target ?? `xl/worksheets/sheet${i + 1}.xml`); if (!part) continue;
+    const isHidden = (attr(tab.attrs, 'state') ?? 'visible') !== 'visible'; if (isHidden) hidden++;
+    const rows: string[] = []; let row: string[] = [], val = '', type = '', style = -1, inV = false, inIs = false, inT = false, col = 0;
+    const colOf = (ref: string | null) => { const m = /^([A-Z]+)/.exec(ref ?? ''); if (!m) return -1; let n = 0; for (const ch of m[1]) n = n * 26 + ch.charCodeAt(0) - 64; return n - 1; };
+    for (const t of xmlTokens(part().toString('utf8'))) {
+      if ('text' in t) { if (inV || (inIs && inT)) val += t.text; continue; }
+      if (t.tag === 'c') {
+        type = attr(t.attrs, 't') ?? 'n'; style = Number(attr(t.attrs, 's') ?? -1); val = '';
+        const at = colOf(attr(t.attrs, 'r'));
+        while (at > col && row.length < at && row.length < 200) { row.push(''); col++; } // empty cells between keep the columns in place
+        if (t.self) { row.push(''); col++; }
+      }
+      else if (t.tag === 'v') inV = !t.self; else if (t.tag === '/v') inV = false;
+      else if (t.tag === 'is') inIs = true; else if (t.tag === '/is') inIs = false;
+      else if (t.tag === 't') inT = !t.self; else if (t.tag === '/t') inT = false;
+      else if (t.tag === '/c') {
+        const raw = val.trim(); let shown = raw;
+        if (type === 's') shown = shared[Number(raw)] ?? '';
+        else if (type === 'b') shown = raw === '1' ? 'TRUE' : raw === '0' ? 'FALSE' : raw;
+        else if (type === 'n' && raw) { const k = style >= 0 ? kindOfStyle(style) : null; const num = Number(raw); if (k === 'date') shown = excelDate(num, d1904); else if (k === 'percent' && Number.isFinite(num)) shown = `${+(num * 100).toFixed(4)}%`; }
+        row.push(shown); col++;
+      }
+      else if (t.tag === 'row') { row = []; col = 0; }
+      else if (t.tag === '/row') { while (row.length && !row.at(-1)) row.pop(); if (row.some(Boolean)) { if (rows.length >= MAX_ROWS) { limited = true; break; } rows.push(row.join(' | ').slice(0, MAX_ROW_CHARS)); } row = []; col = 0; }
+    }
+    if (rows.length) sections.push({ label: `sheet ${name}`, text: `## ${name}${isHidden ? ' (hidden)' : ''}\n${rows.join('\n')}` });
+  }
+  if (!sections.length) return { ok: false, reason: charts ? 'only charts, no cells' : 'no cells with text' };
+  return { ok: true, sections, count: sections.length, info: `${sections.length} ${sections.length === 1 ? 'sheet' : 'sheets'}${hidden ? `, ${hidden} hidden` : ''}${limited ? `, first ${MAX_ROWS} rows each` : ''}` };
 }
 
-/** PowerPoint: the text of each slide and its notes. */
+/** PowerPoint: slides in the presentation's own order (not the file numbers), each with its notes found through the slide's relationships. */
 function pptx(z: Map<string, () => Buffer>): OfficeResult {
-  const num = (s: string) => Number(/(\d+)\.xml$/.exec(s)?.[1] ?? 0);
-  const textOf = (b: Buffer) => { const paras: string[] = []; let cur = ''; for (const t of xmlTokens(b.toString('utf8'))) { if ('text' in t) cur += t.text; else if (t.tag === '/a:p') { if (cur.trim()) paras.push(cur.trim()); cur = ''; } else if (t.tag === 'a:br') cur += ' '; } return paras; };
-  const slides = [...z.keys()].filter((k) => /^ppt\/slides\/slide\d+\.xml$/.test(k)).sort((a, b) => num(a) - num(b)).slice(0, MAX_SLIDES);
+  const textOf = (b: Buffer) => { const paras: string[] = []; let cur = '', inT = false; for (const t of xmlTokens(b.toString('utf8'))) { if ('text' in t) { if (inT) cur += t.text; } else if (t.tag === 'a:t') inT = !t.self; else if (t.tag === '/a:t') inT = false; else if (t.tag === '/a:p') { if (cur.trim()) paras.push(cur.trim()); cur = ''; } else if (t.tag === 'a:br') cur += ' '; } return paras; };
+  const pres = [...relations(z, '').values()].find(r => r.type === 'officeDocument')?.target ?? 'ppt/presentation.xml';
+  const presRels = relations(z, pres);
+  let slides = [...xmlTokens(z.get(pres)?.().toString('utf8') ?? '')].filter((t): t is { tag: string; attrs: string; self: boolean } => 'tag' in t && t.tag === 'p:sldId')
+    .map(t => presRels.get(attr(t.attrs, 'r:id') ?? '')?.target).filter((x): x is string => !!x && z.has(x));
+  if (!slides.length) { const num = (s: string) => Number(/(\d+)\.xml$/.exec(s)?.[1] ?? 0); slides = [...z.keys()].filter(k => /^ppt\/slides\/slide\d+\.xml$/.test(k)).sort((a, b) => num(a) - num(b)); }
+  slides = slides.slice(0, MAX_SLIDES);
   let notes = 0; const sections: Section[] = [];
-  for (const s of slides) {
-    const n = num(s), body = textOf(z.get(s)!());
-    const note = z.get(`ppt/notesSlides/notesSlide${n}.xml`); const noteText = note ? textOf(note()).filter((p) => !/^\d+$/.test(p)) : [];
+  for (const [i, s] of slides.entries()) {
+    const n = i + 1, body = textOf(z.get(s)!());
+    const notePath = [...relations(z, s).values()].find(r => r.type === 'notesSlide')?.target ?? `ppt/notesSlides/notesSlide${/(\d+)\.xml$/.exec(s)?.[1] ?? 0}.xml`;
+    const note = notePath ? z.get(notePath) : undefined;
+    const noteText = note ? textOf(note()).filter((p) => !/^\d+$/.test(p)) : [];
     if (noteText.length) notes++;
     if (body.length || noteText.length) sections.push({ label: `slide ${n}`, text: `## Slide ${n}\n${body.join('\n')}${noteText.length ? `\nNotes: ${noteText.join(' ')}` : ''}` });
   }
@@ -188,28 +279,30 @@ function pptx(z: Map<string, () => Buffer>): OfficeResult {
   return { ok: true, sections, count: slides.length, info: `${slides.length} ${slides.length === 1 ? 'slide' : 'slides'}${notes ? ' with notes' : ''}` };
 }
 
-/** OpenDocument (.odt .ods .odp): content.xml paragraphs, table rows, pages. */
+/** OpenDocument (.odt .ods .odp): content.xml paragraphs, table rows (repeated cells and rows counted), pages. */
 function openDocument(z: Map<string, () => Buffer>, kind: 'odt' | 'ods' | 'odp'): OfficeResult {
   const part = z.get('content.xml'); if (!part) return { ok: false, reason: 'no content in it' };
-  const sections: Section[] = []; let lines: string[] = [], line = '', cell = '', row: string[] = [], depthP = 0, inCell = false, label = '', heading = 0;
+  const sections: Section[] = []; let lines: string[] = [], line = '', cell = '', row: string[] = [], depthP = 0, inCell = false, label = '', heading = 0, repeatCell = 1, repeatRow = 1, hiddenSheets = 0;
   const flush = () => { if (lines.length) sections.push({ label: label || (kind === 'odt' ? 'document' : 'part'), text: (label ? `## ${label.replace(/^\w+ /, '')}\n` : '') + lines.join('\n') }); lines = []; };
+  const pushCell = (v: string) => { for (let k = 0; k < Math.min(repeatCell, 200) && row.length < 200; k++) row.push(v); };
   for (const t of xmlTokens(part().toString('utf8'))) {
     if ('text' in t) { if (depthP) { if (inCell) cell += t.text; else line += t.text; } continue; }
     const n = t.tag;
-    if (n === 'table:table' && kind === 'ods') { flush(); label = `sheet ${attr(t.attrs, 'table:name') ?? sections.length + 1}`; }
+    if (n === 'table:table' && kind === 'ods') { flush(); const name = attr(t.attrs, 'table:name') ?? String(sections.length + 1); label = `sheet ${name}`; if (attr(t.attrs, 'table:display') === 'false') hiddenSheets++; }
     else if (n === 'draw:page' && kind === 'odp') { flush(); label = `slide ${sections.length + 1}`; }
     else if ((n === 'text:p' || n === 'text:h') && !t.self) { depthP++; if (n === 'text:h') heading = Number(attr(t.attrs, 'text:outline-level') ?? 1); }
     else if (n === '/text:p' || n === '/text:h') { depthP = Math.max(0, depthP - 1); if (!inCell) { const s = line.trim(); if (s) lines.push(heading ? `${'#'.repeat(Math.min(heading, 4))} ${s}` : s); line = ''; heading = 0; } else cell += ' '; }
-    else if (n === 'text:tab' || n === 'text:s' || n === 'text:line-break') { if (inCell) cell += ' '; else line += ' '; }
-    else if (n === 'table:table-cell' && !t.self) { inCell = true; cell = ''; }
-    else if (n === 'table:table-cell' && t.self) row.push('');
-    else if (n === '/table:table-cell') { inCell = false; row.push(cell.trim()); }
-    else if (n === '/table:table-row') { while (row.length && !row.at(-1)) row.pop(); if (row.some(Boolean) && lines.length < MAX_ROWS) lines.push(row.join(' | ').slice(0, MAX_ROW_CHARS)); row = []; }
+    else if (n === 'text:tab' || n === 'text:line-break') { if (inCell) cell += ' '; else line += ' '; }
+    else if (n === 'text:s') { const c = Math.min(Number(attr(t.attrs, 'text:c') ?? 1) || 1, 20); if (inCell) cell += ' '.repeat(c); else line += ' '.repeat(c); }
+    else if (n === 'table:table-row') { row = []; repeatRow = Math.max(1, Number(attr(t.attrs, 'table:number-rows-repeated') ?? 1) || 1); }
+    else if (n === 'table:table-cell' || n === 'table:covered-table-cell') { repeatCell = Math.max(1, Number(attr(t.attrs, 'table:number-columns-repeated') ?? 1) || 1); if (t.self) pushCell(''); else { inCell = true; cell = ''; } }
+    else if (n === '/table:table-cell' || n === '/table:covered-table-cell') { inCell = false; pushCell(cell.replace(/\s+/g, ' ').trim()); }
+    else if (n === '/table:table-row') { while (row.length && !row.at(-1)) row.pop(); if (row.some(Boolean)) for (let k = 0; k < Math.min(repeatRow, 50) && lines.length < MAX_ROWS; k++) lines.push(row.join(' | ').slice(0, MAX_ROW_CHARS)); row = []; }
   }
   flush();
   if (!sections.length) return { ok: false, reason: 'no text in it' };
   const word = kind === 'ods' ? 'sheet' : kind === 'odp' ? 'slide' : 'part';
-  return { ok: true, sections, count: sections.length, info: kind === 'odt' ? 'text' : `${sections.length} ${word}${sections.length === 1 ? '' : 's'}` };
+  return { ok: true, sections, count: sections.length, info: kind === 'odt' ? 'text' : `${sections.length} ${word}${sections.length === 1 ? '' : 's'}${hiddenSheets ? `, ${hiddenSheets} hidden` : ''}` };
 }
 
 /** CSV: the columns and the first CSV_ROWS rows (quoted fields understood). */
