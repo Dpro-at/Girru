@@ -228,6 +228,9 @@ function xlsx(z: Map<string, () => Buffer>): OfficeResult {
     if (rel?.type === 'chartsheet' || rel?.target.includes('chartsheets/')) { charts++; continue; }
     const part = z.get(rel?.target ?? `xl/worksheets/sheet${i + 1}.xml`); if (!part) continue;
     const isHidden = (attr(tab.attrs, 'state') ?? 'visible') !== 'visible'; if (isHidden) hidden++;
+    // A row keeps a running length and at most 200 cells (no re-joining while it grows).
+    let rowChars = 0;
+    const room = () => row.length < 200 && rowChars < MAX_ROW_CHARS;
     const rows: string[] = []; let row: string[] = [], val = '', type = '', style = -1, inV = false, inIs = false, inT = false, col = 0;
     const colOf = (ref: string | null) => { const m = /^([A-Z]+)/.exec(ref ?? ''); if (!m) return -1; let n = 0; for (const ch of m[1]) n = n * 26 + ch.charCodeAt(0) - 64; return n - 1; };
     for (const t of xmlTokens(part().toString('utf8'))) {
@@ -235,8 +238,8 @@ function xlsx(z: Map<string, () => Buffer>): OfficeResult {
       if (t.tag === 'c') {
         type = attr(t.attrs, 't') ?? 'n'; style = Number(attr(t.attrs, 's') ?? -1); val = '';
         const at = colOf(attr(t.attrs, 'r'));
-        while (at > col && row.length < at && row.length < 200) { row.push(''); col++; } // empty cells between keep the columns in place
-        if (t.self) { row.push(''); col++; }
+        while (at > col && row.length < at && room()) { row.push(''); rowChars += 3; col++; } // empty cells between keep the columns in place
+        if (t.self) { if (room()) { row.push(''); rowChars += 3; } col++; }
       }
       else if (t.tag === 'v') inV = !t.self; else if (t.tag === '/v') inV = false;
       else if (t.tag === 'is') inIs = true; else if (t.tag === '/is') inIs = false;
@@ -246,10 +249,10 @@ function xlsx(z: Map<string, () => Buffer>): OfficeResult {
         if (type === 's') shown = (shared[Number(raw)] ?? '').slice(0, MAX_ROW_CHARS);
         else if (type === 'b') shown = raw === '1' ? 'TRUE' : raw === '0' ? 'FALSE' : raw;
         else if (type === 'n' && raw) { const k = style >= 0 ? kindOfStyle(style) : null; const num = Number(raw); if (k === 'date') shown = excelDate(num, d1904); else if (k === 'percent' && Number.isFinite(num)) shown = `${+(num * 100).toFixed(4)}%`; }
-        if (row.join('').length < MAX_ROW_CHARS) row.push(shown.slice(0, MAX_ROW_CHARS)); col++;
+        if (room()) { const c = shown.slice(0, MAX_ROW_CHARS); row.push(c); rowChars += c.length + 3; } col++;
       }
-      else if (t.tag === 'row') { row = []; col = 0; }
-      else if (t.tag === '/row') { while (row.length && !row.at(-1)) row.pop(); if (row.some(Boolean)) { if (rows.length >= MAX_ROWS) { limited = true; break; } rows.push(row.join(' | ').slice(0, MAX_ROW_CHARS)); } row = []; col = 0; }
+      else if (t.tag === 'row') { row = []; col = 0; rowChars = 0; }
+      else if (t.tag === '/row') { while (row.length && !row.at(-1)) row.pop(); if (row.some(Boolean)) { if (rows.length >= MAX_ROWS) { limited = true; break; } rows.push(row.join(' | ').slice(0, MAX_ROW_CHARS)); } row = []; col = 0; rowChars = 0; }
     }
     if (rows.length) sections.push({ label: `sheet ${name}`, text: `## ${name}${isHidden ? ' (hidden)' : ''}\n${rows.join('\n')}` });
   }

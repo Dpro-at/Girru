@@ -122,3 +122,12 @@ test('Word footnotes and headers once; PowerPoint order from the presentation; O
   const ods = zip({ 'content.xml': '<office:spreadsheet><table:table table:name="T"><table:table-row table:number-rows-repeated="2"><table:table-cell table:number-columns-repeated="2"><text:p>x</text:p></table:table-cell><table:table-cell table:number-columns-repeated="1000"/></table:table-row><table:table-row table:number-rows-repeated="1048000"><table:table-cell table:number-columns-repeated="1024"/></table:table-row></table:table></office:spreadsheet>' });
   assert.equal(O.officeText('ods', ods).sections[0].text, '## T\nx | x\nx | x');
 });
+
+test('a row of countless empty cells stays bounded and fast', () => {
+  const cells = '<c/>'.repeat(200000) + '<c r="A1" t="inlineStr"><is><t>end</t></is></c>';
+  const x = zip({ 'xl/workbook.xml': '<workbook><sheets><sheet name="S" r:id="r1"/></sheets></workbook>', 'xl/_rels/workbook.xml.rels': '<Relationships><Relationship Id="r1" Target="worksheets/sheet1.xml"/></Relationships>',
+    'xl/worksheets/sheet1.xml': `<worksheet><sheetData><row>${cells}</row><row><c t="inlineStr"><is><t>next</t></is></c></row></sheetData></worksheet>` });
+  const t0 = Date.now(); const r = O.officeText('xlsx', x);
+  assert.ok(Date.now() - t0 < 2000, `${Date.now() - t0} ms`);
+  assert.equal(r.ok, true); assert.ok(r.sections[0].text.length < 5000);
+});
