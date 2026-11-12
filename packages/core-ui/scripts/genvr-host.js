@@ -31,7 +31,6 @@ window.addEventListener('message',async event=>{
  if(data.operation==='chat-delta'&&typeof data.id==='string'&&typeof data.delta==='string'&&data.delta.length<=65536){try{chats.get(data.id)?.events.onDelta(data.delta);}catch{}}
  if(data.operation==='chat-tool'&&typeof data.id==='string'&&typeof data.name==='string'){try{chats.get(data.id)?.events.onTool?.(data.name.slice(0,64),data.ok===true,String(data.result??'').slice(0,2000));}catch{}}
  if(data.operation==='chat-end'&&typeof data.id==='string'){const work=chats.get(data.id);if(work){if(data.ok)work.resolve();else work.reject(Error(typeof data.error==='string'?data.error.slice(0,300):'Girru could not answer.'));}}
- if(data.operation==='model-delta'&&typeof data.id==='string'&&typeof data.delta==='string'&&data.delta.length<=65536){models.get(data.id)?.onDelta(data.delta);}
  if(data.operation==='chat-info'&&studio?.setChat&&data.info&&typeof data.info==='object'&&JSON.stringify(data.info).length<=1000000){try{studio.setChat(data.info);}catch{/* an older Studio without the chat option */}}
  if(data.operation==='undo'&&Number.isInteger(data.count)&&data.count>0&&data.count<=50){for(let i=0;i<data.count;i++)document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'z',code:'KeyZ',ctrlKey:!/Mac/.test(navigator.platform),metaKey:/Mac/.test(navigator.platform),bubbles:true,cancelable:true}));}
  if(data.operation==='close'){try{send({operation:'closed',ok:await studio?.dispose()===true});}catch{send({operation:'closed',ok:false});}}
@@ -40,7 +39,6 @@ send({operation:'ready'});
 
 // Board W1: Girru answers the Studio chat. Tools still run in the Studio; Girru only gets the
 // conversation and the tool list, and gives back text and tool calls.
-const models=new Map(),MODEL_BYTES=2*1024*1024,MODEL_MS=10*60*1000;
 const PLACE_TABS=['build','items','avatar','filming','lab'];
 /** The folder button opens the folder only where Girru can show it (the desktop app). */
 function canOpenFolder(){try{return typeof parent.dproApp?.revealFolder==='function';}catch{return false;}}
@@ -65,15 +63,6 @@ function hostChat(){
   chat:{chooseAnswerer:()=>send({operation:'choose-answerer'}),openChat:()=>send({operation:'open-chat'}),send:sendToGirru,...(window.parent&&canOpenFolder()?{openFolder:()=>send({operation:'open-folder'})}:{})},
  };
 }
-// The final answer of a model request: {content, tool_calls}, checked before the Studio sees it.
-window.addEventListener('message',event=>{
- if(event.source!==parent||event.origin!==location.origin||event.data?.type!=='dpro-genvr'||event.data.channel!==channel||event.data.operation!=='model-result')return;
- const data=event.data,work=typeof data.id==='string'?models.get(data.id):undefined;if(!work)return;
- if(!data.ok){work.reject(Error(typeof data.error==='string'?data.error.slice(0,300):'Girru could not answer.'));return;}
- const v=data.value;const calls=Array.isArray(v?.tool_calls)?v.tool_calls:[];
- if(!v||typeof v.content!=='string'||v.content.length>200000||calls.length>20||!calls.every(c=>c&&typeof c==='object'&&c.function&&typeof c.function.name==='string'&&/^[a-z_]{1,64}$/.test(c.function.name))){work.reject(Error('Girru sent an answer the Studio cannot read.'));return;}
- work.resolve({content:v.content,tool_calls:calls.map(c=>({function:{name:c.function.name,arguments:c.function.arguments&&typeof c.function.arguments==='object'&&!Array.isArray(c.function.arguments)?c.function.arguments:{}}}))});
-});
 
 // Adapt the SDK's platform exit link to this local host without navigating away.
 document.addEventListener('click',event=>{

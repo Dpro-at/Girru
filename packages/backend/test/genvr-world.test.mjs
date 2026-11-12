@@ -7,7 +7,7 @@ db.prepare("INSERT INTO users(id,email,username,password_hash,role,status) VALUE
 db.prepare("INSERT INTO users(id,email,username,password_hash,role,status) VALUES('world-member','m@example.invalid','world-member','fixture','user','active')").run();
 const {default:Fastify}=await import('fastify');const {registerAuthGate}=await import('../src/auth/auth-gate.ts');const {generateToken}=await import('../src/auth/jwt.ts');
 const {genvrRoutes}=await import('../src/api/routes/genvr.ts');const {genvrWorldRoutes}=await import('../src/api/routes/genvr-world.ts');
-const {worldFolderName,protocolReply,parseTurn,modelLabel,withoutThinking}=await import('../src/services/genvr-world.ts');
+const {worldFolderName,modelLabel}=await import('../src/services/genvr-world.ts');
 const seen=[];
 const deps={ollama:async opts=>{seen.push(opts);return {content:'Placing a tree.',toolCalls:[{id:'call-0',tool:'place_item',arguments:{itemId:'oak'}},{id:'call-1',tool:'share_studio',arguments:{}},{id:'call-2',tool:'not_offered',arguments:{}}],assistant:{role:'assistant',content:''},model:opts.model};},
  subscription:async(model,folder,prompt)=>{seen.push({model,folder,prompt});return JSON.stringify({type:'tools',text:'Two steps.',calls:[{name:'get_world_summary',arguments:{}},{name:'share_studio',arguments:{}}]});}};
@@ -66,99 +66,27 @@ test('the last agent chosen in a world answers there',async()=>{
  assert.equal((await worldApp.inject({method:'PUT',url:'/api/genvr/worlds/never-opened/agent',headers:owner,payload:{agentId:pick.id}})).statusCode,404);
 });
 
-test('a turn answers as the world agent; owner-only and unknown tools never reach the Studio',async()=>{
- const agent=db.prepare("SELECT agent_id FROM genvr_worlds WHERE project_id='rooftop-city'").get().agent_id;
- db.prepare("UPDATE agents_config SET model='qwen3:4b' WHERE id=?").run(agent);
- const r=await worldApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/turn',headers:owner,payload:turn});assert.equal(r.statusCode,200);
- const b=r.json();assert.equal(b.content,'Placing a tree.');assert.deepEqual(b.tool_calls,[{function:{name:'place_item',arguments:{itemId:'oak'}}}]);assert.equal(b.answerer.id,agent);
- const call=seen.at(-1);assert.equal(call.model,'qwen3:4b');assert.ok(!call.tools.some(t=>t.name==='share_studio'));assert.match(call.systemPrompt,/Roof city/);assert.match(call.systemPrompt,/You build worlds\./);assert.ok(call.messages.every(m=>m.role!=='system'));
- assert.equal((await worldApp.inject({method:'POST',url:'/api/genvr/worlds/never-opened/turn',headers:owner,payload:turn})).statusCode,409);
- assert.equal((await worldApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/turn',headers:member,payload:turn})).statusCode,403);
- for(const payload of [{messages:[],tools},{messages:turn.messages,tools,extra:1},{messages:[{role:'boss',content:'x'}],tools},{messages:turn.messages,tools:[{type:'function',function:{name:'Bad-Name',description:'',parameters:{}}}]}])
-  assert.equal((await worldApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/turn',headers:owner,payload})).statusCode,400);
-});
-
-test('a coding-app agent answers through the GenVR tool protocol in the world folder',async()=>{
- const agent=db.prepare("SELECT agent_id,folder FROM genvr_worlds WHERE project_id='rooftop-city'").get();
- db.prepare("UPDATE agents_config SET model='subscription:claude' WHERE id=?").run(agent.agent_id);
- const before=process.env.DPRO_SUBSCRIPTION_CHAT;process.env.DPRO_SUBSCRIPTION_CHAT='1';
- try{
-  const b=(await worldApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/turn',headers:owner,payload:turn})).json();
-  assert.equal(b.content,'Two steps.');assert.deepEqual(b.tool_calls,[{function:{name:'get_world_summary',arguments:{}}}]);assert.equal(b.answerer.detail,'Claude Code');
-  const call=seen.at(-1);assert.equal(call.folder,agent.folder);assert.match(call.prompt,/GenVR tool protocol/);assert.doesNotMatch(call.prompt,/"share_studio"/);
- }finally{if(before===undefined)delete process.env.DPRO_SUBSCRIPTION_CHAT;else process.env.DPRO_SUBSCRIPTION_CHAT=before;}
- delete process.env.DPRO_SUBSCRIPTION_CHAT;
- const off=await worldApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/turn',headers:owner,payload:turn});assert.equal(off.statusCode,409);assert.equal(off.json().code,'model_unavailable');
-});
-
-test('protocol replies: plain text is an answer, only offered tools come back',()=>{
- const offered=new Set(['place_item']);
- assert.deepEqual(protocolReply('Hello there',offered),{content:'Hello there',tool_calls:[]});
- assert.deepEqual(protocolReply('```json\n{"type":"answer","text":"Done"}\n```',offered),{content:'Done',tool_calls:[]});
- assert.deepEqual(protocolReply('{"type":"tools","text":"Go","calls":[{"name":"place_item","arguments":{"itemId":"oak"}},{"name":"rm_rf","arguments":{}}]}',offered).tool_calls,[{function:{name:'place_item',arguments:{itemId:'oak'}}}]);
- assert.throws(()=>parseTurn({messages:[{role:'user',content:'x'},{role:'assistant',content:'y'}],tools:[]}));
-});
-
-test('a thinking model\'s reasoning never reaches the chat',()=>{
- assert.equal(withoutThinking('<think>plan</think> Hello'),'Hello');assert.equal(withoutThinking('long reasoning </think> I placed it.'),'I placed it.');assert.equal(withoutThinking('Plain'),'Plain');
-});
-
-
-test('world turns reject a non-owner before opening any world or provider', async () => {
-  const { worldTurn } = await import('../src/services/genvr-world.ts');
-  await assert.rejects(worldTurn('world-member', 'user', 'never-opened', turn, new AbortController().signal, deps), { status: 403, code: 'owner_required' });
-});
-test('GV1e: a world has one Girru chat; Studio turns are written into it and read back',async()=>{
+test('GV1e: a world has one Girru chat in its project; its latest lines and the world behind it are read back',async()=>{
  const opened=(await worldApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/open',headers:owner,payload:{name:'Roof city'}})).json();
  assert.ok(opened.conversationId);assert.ok(path.isAbsolute(opened.path));
  const again=(await worldApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/open',headers:owner,payload:{name:'Roof city'}})).json();assert.equal(again.conversationId,opened.conversationId,'the same chat every time');
- const session=db.prepare('SELECT project_id FROM chat_sessions WHERE id=?').get(opened.conversationId);assert.equal(session.project_id,opened.chatProjectId);
- const agent=db.prepare("SELECT agent_id FROM genvr_worlds WHERE project_id='rooftop-city'").get().agent_id;db.prepare("UPDATE agents_config SET model='qwen3:4b' WHERE id=?").run(agent);
- const before=db.prepare('SELECT COUNT(*) AS n FROM chat_messages WHERE session_id=?').get(opened.conversationId).n;
- // A turn with tool calls keeps the run open; the answer after the tools closes it with the agent's text.
- await worldApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/turn',headers:owner,payload:turn});
- assert.equal(db.prepare('SELECT COUNT(*) AS n FROM chat_messages WHERE session_id=?').get(opened.conversationId).n,before+1,'the person line is kept at once');
- const done={...deps,ollama:async opts=>({content:'The tree is in.',toolCalls:[],assistant:{role:'assistant',content:''},model:opts.model})};
- const doneApp=Fastify();registerAuthGate(doneApp);await doneApp.register(genvrWorldRoutes,{deps:done});await doneApp.ready();
- await doneApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/turn',headers:owner,payload:{messages:[...turn.messages,{role:'assistant',content:'Placing a tree.'},{role:'tool',content:'ok',tool_name:'place_item'}],tools}});
+ assert.equal(db.prepare('SELECT project_id FROM chat_sessions WHERE id=?').get(opened.conversationId).project_id,opened.chatProjectId);
+ // The Studio chat is a Girru chat run: its lines are ordinary chat messages of this conversation.
+ db.prepare("INSERT INTO chat_messages (id, session_id, role, content, run_id, status) VALUES ('m-1', ?, 'user', 'Put a tree here', 'run-genvr-1', 'complete')").run(opened.conversationId);
+ db.prepare("INSERT INTO chat_messages (id, session_id, role, content, run_id, status) VALUES ('m-2', ?, 'assistant', 'The tree is in.', 'run-genvr-1', 'complete')").run(opened.conversationId);
  const history=(await worldApp.inject({url:'/api/genvr/worlds/rooftop-city/history',headers:owner})).json();
  assert.deepEqual(history.messages.slice(-2),[{role:'user',text:'Put a tree here'},{role:'assistant',text:'The tree is in.'}]);
  const world=(await worldApp.inject({url:'/api/genvr/worlds/of-chat-project/'+opened.chatProjectId,headers:owner})).json();assert.equal(world.projectId,'rooftop-city');assert.equal(world.path,opened.path);
  assert.equal((await worldApp.inject({url:'/api/genvr/worlds/of-chat-project/none',headers:owner})).statusCode,404);
  assert.equal((await worldApp.inject({url:'/api/genvr/worlds/rooftop-city/history',headers:member})).statusCode,403);
- await doneApp.close();
+ assert.equal((await worldApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/turn',headers:owner,payload:{}})).statusCode,404,'the old turn route is gone');
 });
-test('GV1e: a failed turn stays in the place chat with its reason; the chat project follows a rename; the log names the reason',async()=>{
+test('GV1e: the chat shows the agent who answers; the chat project and title follow a rename',async()=>{
  const opened=(await worldApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/open',headers:owner,payload:{name:'Roof city'}})).json();
- const failing={...deps,ollama:async()=>{throw new Error('usage limit reached for token sk-ant-api03-'+'x'.repeat(40));}};
- const lines=[];const log=console.log;console.log=(...a)=>{lines.push(a.join(' '));};
- const failApp=Fastify();registerAuthGate(failApp);await failApp.register(genvrWorldRoutes,{deps:failing});await failApp.ready();
- try{const r=await failApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/turn',headers:owner,payload:{messages:[{role:'user',content:'Add a lamp'}],tools}});assert.equal(r.statusCode,409);assert.match(r.json().message,/usage limit/);}
- finally{console.log=log;await failApp.close();}
- const last=db.prepare("SELECT role,status,content FROM chat_messages WHERE session_id=? ORDER BY id DESC LIMIT 2").all(opened.conversationId);
- assert.equal(last[0].role,'assistant');assert.equal(last[0].status,'error');assert.equal(last[1].content,'Add a lamp');
- const logged=lines.find(l=>l.includes('[GenVR world] failed'));assert.ok(logged);assert.match(logged,/usage limit reached/);assert.doesNotMatch(logged,/sk-ant-api03-x{20}/,'secrets are taken out');
- db.prepare("UPDATE genvr_projects SET title='Sky city' WHERE id='rooftop-city'").run();
- await worldApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/open',headers:owner,payload:{name:'Sky city'}});
- assert.equal(db.prepare('SELECT name FROM chat_projects WHERE id=?').get(opened.chatProjectId).name,'World · Sky city');
-});
-test('GV1e fixes: tools fit a coding-app prompt, failures say why in plain words, the chat shows the agent and follows a rename',async()=>{
- const {toolText}=await import('../src/services/genvr-world.ts');
- const many=Array.from({length:150},(_,i)=>({name:'tool_'+i,description:'Does thing '+i+'. '+'More words. '.repeat(40),input_schema:{type:'object',properties:{a:{type:'string',description:'x'.repeat(400)},b:{type:'number'}}}}));
- const full=toolText(many.slice(0,2),1e9);assert.match(full,/More words/);
- const small=toolText(many,86000);assert.ok(small.length<=86000);assert.match(small,/"tool_149"/);assert.match(small,/"arguments":\{"a":"string","b":"number"\}/);assert.doesNotMatch(small,/More words/);
- assert.ok(toolText(many,500).length<=500);
- const opened=(await worldApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/open',headers:owner,payload:{name:'Sky city'}})).json();
- const sub=db.prepare("SELECT id FROM agents_config WHERE id!=? LIMIT 1").get(db.prepare("SELECT agent_id FROM genvr_worlds WHERE project_id='rooftop-city'").get().agent_id);
- if(sub){await worldApp.inject({method:'PUT',url:'/api/genvr/worlds/rooftop-city/agent',headers:owner,payload:{agentId:sub.id}});assert.equal(db.prepare('SELECT agent_id FROM chat_sessions WHERE id=?').get(opened.conversationId).agent_id,sub.id,'Girru Chat shows the agent that answers');}
- const tooBig={...deps,ollama:async()=>{throw new Error('agent_context_too_large');}};
- const lines=[];const log=console.log;console.log=(...a)=>{lines.push(a.join(' '));};
- const a2=Fastify();registerAuthGate(a2);await a2.register(genvrWorldRoutes,{deps:tooBig});await a2.ready();
- let r;try{r=await a2.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/turn',headers:owner,payload:{messages:[{role:'user',content:'Build a bridge'}],tools}});}finally{console.log=log;await a2.close();}
- assert.equal(r.statusCode,409);assert.match(r.json().message,/too long for/);assert.ok(lines.some(l=>l.includes('agent_context_too_large')),'the raw reason stays in the log');
- const last=db.prepare("SELECT status,content,parts,agent_id FROM chat_messages WHERE session_id=? ORDER BY id DESC LIMIT 1").get(opened.conversationId);
- assert.equal(last.status,'error');assert.match(last.content,/too long for/);assert.match(last.parts,/too long for/);assert.ok(last.agent_id);
+ const other=db.prepare("SELECT id FROM agents_config WHERE id!=? LIMIT 1").get(db.prepare("SELECT agent_id FROM genvr_worlds WHERE project_id='rooftop-city'").get().agent_id??'');
+ if(other){await worldApp.inject({method:'PUT',url:'/api/genvr/worlds/rooftop-city/agent',headers:owner,payload:{agentId:other.id}});assert.equal(db.prepare('SELECT agent_id FROM chat_sessions WHERE id=?').get(opened.conversationId).agent_id,other.id);}
  db.prepare("UPDATE genvr_projects SET title='Cloud city' WHERE id='rooftop-city'").run();
  await worldApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/open',headers:owner,payload:{name:'Cloud city'}});
+ assert.equal(db.prepare('SELECT name FROM chat_projects WHERE id=?').get(opened.chatProjectId).name,'World · Cloud city');
  assert.equal(db.prepare('SELECT title FROM chat_sessions WHERE id=?').get(opened.conversationId).title,'Cloud city · Studio');
 });

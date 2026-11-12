@@ -39,7 +39,6 @@ const { CHAT_VOICE_PATH, allowedChatVoice, chatVoiceResponse } = require('../src
 const { createStudioHost } = require('./genvr-studio-host.cjs');
 const { allowedGenVR, genvrRoute, genvrResponse, GENVR_BYTES, STUDIO_TICKET_PATH, GENVR_WORLD, GENVR_RUNTIME } = require('../src/genvr-contract.js');
 // GENVR-WORLD-01: one agent turn in a GenVR world may run a coding app; it gets the chat's own deadline window.
-const WORLD_TURN_MS = 300_000;
 const { allowedChannel, channelRoute, channelResponse } = require('../src/agent-connect-contract.js');
 const { allowedPersonality, personalityRoute, personalityResponse } = require('../src/personality-contract.js');
 const { allowedHire, hireRoute, hireResponse } = require('../src/hire-contract.js');
@@ -509,7 +508,6 @@ function createApplicationServer({ browserController = null, packageRoot = root,
       // A run reader ends cleanly after RUN_STREAM_MS; the page re-attaches with after=<seq>.
       if (runEvents || termStream) clearTimeout(timer);
       if (audio) { clearTimeout(timer); timer = setTimeout(() => { send(504); upstream?.destroy(); }, AUDIO_TIMEOUT_MS); }
-      if (req.method === 'POST' && GENVR_WORLD.exec(raw)?.[2] === 'turn') { clearTimeout(timer); timer = setTimeout(() => { send(504); upstream?.destroy(); }, WORLD_TURN_MS); }
       upstream = http.request({ hostname: HOST, port, path: raw, method: req.method, headers, agent: false, maxHeaderSize: 16384 }, response => {
         const fail = () => { response.destroy(); send(502); };
         const status = response.statusCode;
