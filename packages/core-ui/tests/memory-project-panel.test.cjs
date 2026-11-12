@@ -58,3 +58,12 @@ test('MR6: documents (Key files first) and summaries pass both projections', () 
   assert.equal(s.summaries.length, 1);
   assert.deepEqual(s.summaries[0].sources, ['Claude Code', 'Grenzer agent']);
 });
+
+test('MR8: each file says how it was read', () => {
+  const { readLine } = require('../src/MemoryProjectWork.tsx');
+  const d = (x) => ({ path: 'x', updatedAt: '', status: 'ok', reason: null, pages: null, bytes: 1, ...x });
+  assert.equal(readLine(d({ reason: '3 sheets', pages: 3 })), 'Read · 3 sheets');
+  assert.equal(readLine(d({ pages: 12 })), 'Read · 12 pages');
+  assert.equal(readLine(d({ status: 'unreadable', reason: 'old Word format; save it as .docx' })), 'Not read · old Word format; save it as .docx');
+  assert.equal(readLine(d({ status: 'unreadable', reason: 'encoding' })), 'Not read · not UTF-8 text');
+});

@@ -2337,7 +2337,9 @@ button.status-item:hover { background:var(--row-hover); color:var(--text); }
 .dk-work-sessions { list-style:none; margin:4px 0 0; padding:0 0 0 12px; display:grid; gap:6px; border-inline-start:2px solid var(--border); }
 .dk-work-sessions p { margin:0; font-size:12.5px; }
 .dk-doc-list { list-style:none; margin:0; padding:0; display:grid; gap:2px; }
-.dk-doc { display:grid; grid-template-columns:20px minmax(0,1fr) auto; gap:4px 8px; align-items:start; padding:6px 12px; }
+.dk-doc-type { font-size:9.5px; font-weight:700; letter-spacing:.02em; padding:2px 0; border-radius:4px; text-align:center; background:var(--secondary); color:var(--muted); }
+.dk-doc-type[data-unread] { opacity:.6; }
+.dk-doc { display:grid; grid-template-columns:34px minmax(0,1fr) auto; gap:4px 8px; align-items:start; padding:6px 12px; }
 .dk-docs { display:grid; gap:8px; padding-block-end:8px; border-block-end:1px solid var(--border); margin-block-end:8px; }
 /* MEM-READ-01 MR7: the project's side panel — a status line, then parts you fold. */
 .dk-status-line { font-variant-numeric:tabular-nums; }

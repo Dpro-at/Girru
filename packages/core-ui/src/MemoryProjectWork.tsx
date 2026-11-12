@@ -23,9 +23,19 @@ export function WorkStands({ sc, slug }: { sc: MemoryScopesController; slug: str
   </section>;
 }
 
+/** MR8: the file's type as a short badge (PDF, DOC, XLS, PPT, CSV, MD …). */
+const TYPE_BADGE: Record<string, string> = { pdf: 'PDF', docx: 'DOC', doc: 'DOC', odt: 'DOC', rtf: 'DOC', xlsx: 'XLS', xls: 'XLS', ods: 'XLS', pptx: 'PPT', ppt: 'PPT', odp: 'PPT', csv: 'CSV', md: 'MD', markdown: 'MD', txt: 'TXT', html: 'HTML', htm: 'HTML', json: 'JSON', yaml: 'YAML', yml: 'YAML', zip: 'ZIP', mdc: 'MD' };
+const PLAIN_REASON: Record<string, string> = { encoding: 'not UTF-8 text', binary: 'not a text file' };
+/** How Girru read it: "Read · 3 sheets", "Read · 12 pages", or "Not read · why". */
+export function readLine(d: ProjectDocument): string {
+  if (d.status === 'unreadable') return `Not read · ${PLAIN_REASON[d.reason ?? ''] ?? d.reason ?? 'unreadable'}`;
+  if (d.reason) return `Read · ${d.reason}`;
+  return d.pages ? `Read · ${d.pages} ${d.pages === 1 ? 'page' : 'pages'}` : 'Read';
+}
 function DocRow({ d }: { d: ProjectDocument }) {
-  return <li className="dk-doc"><UiIcon name="file" size={14}/><span className="dk-row-text"><span className="dk-row-main">{d.path}</span>
-    <span className="dk-row-sub">{d.purpose ?? (d.status === 'unreadable' ? `Not read · ${d.reason ?? 'unreadable'}` : d.pages ? `Read · ${d.pages} ${d.pages === 1 ? 'page' : 'pages'}` : 'Read')}</span></span>
+  const ext = (/\.([a-z0-9]+)$/i.exec(d.path)?.[1] ?? '').toLowerCase();
+  return <li className="dk-doc"><span className="dk-doc-type" data-unread={d.status === 'unreadable' || undefined}>{TYPE_BADGE[ext] ?? (ext.slice(0, 4).toUpperCase() || 'FILE')}</span><span className="dk-row-text"><span className="dk-row-main">{d.path}</span>
+    <span className="dk-row-sub">{d.purpose ?? readLine(d)}</span></span>
     <span className="fine-print">{ago(d.updatedAt)}</span></li>;
 }
 
