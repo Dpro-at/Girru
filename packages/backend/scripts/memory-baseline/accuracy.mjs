@@ -15,7 +15,7 @@
 // The distractor embeddings are cached in --cache (generated text only, no private data), so a
 // second run does not embed them again.
 import { backendDir, moduleUrl, addUser, argValue, cleanup, ollamaHas, openDb, percentile, quietly } from './env.mjs';
-import { existsSync, mkdirSync, openSync, readSync, writeSync, closeSync, statSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, openSync, readSync, writeSync, closeSync, fstatSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { syntheticMemories } from './corpus.mjs';
 import { buildWorld, DISTRACTOR_PROJECT_MAP, WORLD_PROJECTS, WORLD_PEOPLE } from './accuracy-world.mjs';
@@ -82,9 +82,10 @@ const t0 = Date.now();
 mkdirSync(cacheDir, { recursive: true });
 const cacheFile = join(cacheDir, `distractors-23-${SEM_MODEL.replace(/[^a-z0-9.]/gi, '_')}.f32`);
 const rowBytes = DIMS * 4;
-let cached = existsSync(cacheFile) ? Math.floor(statSync(cacheFile).size / rowBytes) : 0;
-const fdR = cached ? openSync(cacheFile, 'r') : null;
-const fdW = openSync(cacheFile, 'a');
+// Opened once (read + append) and sized from that descriptor, so no other file can be swapped in between.
+const fd = openSync(cacheFile, 'a+');
+let cached = Math.floor(fstatSync(fd).size / rowBytes);
+const fdR = fd, fdW = fd;
 let embeddedNow = 0;
 const BATCH = 128;
 let batch = [];
@@ -118,8 +119,7 @@ for (const m of syntheticMemories(nDistractors, 23)) {
   if (batch.length >= BATCH) await flush();
 }
 if (batch.length) await flush();
-if (fdR !== null) closeSync(fdR);
-closeSync(fdW);
+closeSync(fd);
 const distractorMs = Date.now() - t0;
 
 // 2. The world's facts, embedded by the same model; replaced facts keep status 'replaced' (as Girru marks them).
