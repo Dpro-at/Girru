@@ -39,6 +39,13 @@ async function change(context: ToolExecutionContext | undefined, input: Paramete
   }
 }
 
+/** MEM-VER-01: the version the agent read ("v3", "3" or 3); undefined when not given; null when malformed. */
+function versionParam(v: unknown): number | undefined | null {
+  if (v === undefined || v === null || v === '') return undefined;
+  const n = typeof v === 'number' ? v : Number(String(v).trim().replace(/^v/i, ''));
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
 function text(t: string, data?: Record<string, unknown>, error?: string): ToolResult {
   return { content: [{ type: 'text', text: t }], ...(data ? { data } : {}), ...(error ? { error } : {}) };
 }
@@ -71,10 +78,11 @@ later memory_save with that topic_key updates this memory.`,
       importance: { type: 'number', description: 'New importance 1-10' },
       reason: { type: 'string', description: 'Why the memory changes (kept in the history)' },
       topic_key: { type: 'string', description: 'Stable topic key, e.g. "favorite-editor" ("" removes it)' },
+      version: { type: 'string', description: 'The version memory_search showed (e.g. "v3"); the edit is refused if the memory changed since' },
     },
     required: ['id'],
   },
-  async execute(params: { id?: unknown; content?: unknown; importance?: unknown; reason?: unknown; topic_key?: unknown }, context?: ToolExecutionContext): Promise<ToolResult> {
+  async execute(params: { id?: unknown; content?: unknown; importance?: unknown; reason?: unknown; topic_key?: unknown; version?: unknown }, context?: ToolExecutionContext): Promise<ToolResult> {
     if (!toolMemoryUser(context)) return text('Error: no user for this memory', undefined, 'No user for this memory');
     if (typeof params.id !== 'string' || !params.id) return text('Error: id is required', undefined, 'id is required');
     if (params.content !== undefined && (typeof params.content !== 'string' || !params.content.trim())) {
@@ -83,8 +91,10 @@ later memory_save with that topic_key updates this memory.`,
     if (params.topic_key !== undefined && params.topic_key !== null && typeof params.topic_key !== 'string') {
       return text('Error: topic_key must be text', undefined, 'Invalid topic key');
     }
+    const version = versionParam(params.version);
+    if (version === null) return text('Error: version must look like "v3"', undefined, 'Invalid version');
     const result = await change(context, {
-      memoryId: params.id, op: 'update',
+      memoryId: params.id, op: 'update', ...(version !== undefined ? { expectedVersion: version } : {}),
       updates: {
         content: params.content as string | undefined,
         importance: typeof params.importance === 'number' ? params.importance : undefined,
@@ -107,14 +117,17 @@ To erase something completely because the owner said "forget this", use memory_f
     properties: {
       id: { type: 'string', description: 'Memory id' },
       reason: { type: 'string', description: 'Why the memory is deleted (kept in the history)' },
+      version: { type: 'string', description: 'The version memory_search showed (e.g. "v3"); the delete is refused if the memory changed since' },
     },
     required: ['id'],
   },
-  async execute(params: { id?: unknown; reason?: unknown }, context?: ToolExecutionContext): Promise<ToolResult> {
+  async execute(params: { id?: unknown; reason?: unknown; version?: unknown }, context?: ToolExecutionContext): Promise<ToolResult> {
     if (!toolMemoryUser(context)) return text('Error: no user for this memory', undefined, 'No user for this memory');
     if (typeof params.id !== 'string' || !params.id) return text('Error: id is required', undefined, 'id is required');
+    const version = versionParam(params.version);
+    if (version === null) return text('Error: version must look like "v3"', undefined, 'Invalid version');
     const result = await change(context, {
-      memoryId: params.id, op: 'delete',
+      memoryId: params.id, op: 'delete', ...(version !== undefined ? { expectedVersion: version } : {}),
       reason: typeof params.reason === 'string' ? params.reason : null,
     });
     return answer(result, 'delete', params.id);

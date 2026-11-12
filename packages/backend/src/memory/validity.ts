@@ -114,6 +114,16 @@ export async function setChecked(userId: string, id: string, checked: boolean): 
 }
 
 /** The version an editor must have seen to save over a memory (its last version, 0 before any). */
+/** MEM-VER-01: the current version of several memories at once (0: never edited since it was saved). */
+export function* currentVersionsStep(memoryIds: readonly string[]): Step<Map<string, number>> {
+  const out = new Map<string, number>(memoryIds.map((id) => [id, 0]));
+  if (memoryIds.length === 0) return out;
+  const rows = yield* all<{ memory_id: string; v: number | null }>(
+    `SELECT memory_id, MAX(version) AS v FROM memory_versions WHERE memory_id IN (${memoryIds.map(() => '?').join(', ')}) GROUP BY memory_id`, ...memoryIds);
+  for (const r of rows) out.set(r.memory_id, Number(r.v ?? 0));
+  return out;
+}
+
 export function* currentVersionStep(memoryId: string): Step<number> {
   const r = yield* one<{ v: number | null }>('SELECT MAX(version) AS v FROM memory_versions WHERE memory_id = ?', memoryId);
   return Number(r?.v ?? 0);
