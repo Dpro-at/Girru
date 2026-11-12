@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CreateSpace, GenVRSidebar, PublishedCards, SpaceCards, SpaceInside, type CreateSpec, type GenVRPlace, type SpaceRow } from './GenVRHome';
 import { UiIcon } from './ui-icons';
+import { PlaceSection, type SpaceStore } from './GenVRSections';
+import { GenVRMarket, type MarketItem } from './GenVRMarket';
 import { WhoButton, type Who } from './ChatComposerControls';
 import type { SpaceAgent } from './GenVRTeam';
 import type { Publication } from './connections-contract.js';
@@ -133,6 +135,13 @@ export function GenVRPage({client,active,sidebarSlot}:{client:SessionClient;acti
  },[client,channel]);
  const spaces=projects.filter(p=>!p.lab),lab=projects.find(p=>p.lab),inside=spaces.find(p=>p.id===insideId)??null;
  async function rename(id:string,title:string){const r=await client.request({method:'GET',path:`${GENVR_PATH}/${id}`} as never);const b=r.body as {project?:Record<string,unknown>;revision?:number};if(r.status!==200||!b.project||typeof b.revision!=='number')throw Error();const w=await client.request({method:'PUT',path:`${GENVR_PATH}/${id}`,body:{project:{...b.project,title},revision:b.revision}} as never);if(w.status!==200)throw Error();setProjects(list=>list.map(p=>p.id===id?{...p,title}:p));}
+ /* GV1b sections: one place's settings are read and saved here; GV1c: the market list. */
+ const store=useMemo<SpaceStore|null>(()=>!insideId?null:{
+  load:async()=>{const r=await client.request({method:'GET',path:`${GENVR_PATH}/${insideId}`} as never);const b=r.body as {project?:Record<string,any>;revision?:number;agents?:{id:string;avatar:number}[]};if(r.status!==200||!b.project||typeof b.revision!=='number')throw Error();return {project:b.project,revision:b.revision,agents:Array.isArray(b.agents)?b.agents:[]};},
+  save:async(project,revision,agents)=>{const w=await client.request({method:'PUT',path:`${GENVR_PATH}/${insideId}`,body:{project,revision,...(agents?{agents}:{})}} as never);if(w.status===409)throw Error('conflict');const next=(w.body as {revision?:number})?.revision;if(w.status!==200||typeof next!=='number')throw Error();revisions.current.set(insideId,next);return next;},
+  roster:async()=>{const r=await client.request({method:'GET',path:GENVR_AGENTS} as never);const rows=(r.body as {agents?:{id:string;name:string;avatar:number|null}[]})?.agents;if(r.status!==200||!Array.isArray(rows))throw Error();return rows;},
+ },[client,insideId]);
+ const loadMarket=useCallback(async()=>{const items:MarketItem[]=[],ids=new Set<string>();let after:string|null=null;for(let page=0;page<3;page++){const r=await client.request({method:'GET',path:'/api/genvr/market'+(after?'?after='+after:'')} as never);if(r.status!==200)throw Error();const b=r.body as {items:MarketItem[];next:string|null};for(const item of b.items)if(!ids.has(item.manifest.id)){ids.add(item.manifest.id);items.push(item);}if(!b.next||b.next===after)break;after=b.next;}return items;},[client]);
  const goPlace=(p:GenVRPlace)=>{setInsideId('');setCreating(false);setGenvrPlace(p);if(p==='lab')open(lab?.id);};
  const nav=<GenVRSidebar place={genvrPlace} onPlace={goPlace} counts={{spaces:spaces.length,published:published.length}} inside={channel?null:inside} section={section} onSection={setSection} onBack={()=>setInsideId('')}/>;
  const mcpProblem=/could not|managed by/i.test(mcp);
@@ -143,9 +152,9 @@ export function GenVRPage({client,active,sidebarSlot}:{client:SessionClient;acti
  {!channel?<section className="genvr-library" aria-label="GenVR">
  {listing==='loading'?<p role="status">Loading your spaces…</p>:listing==='error'?<div role="alert"><p>Your spaces could not be loaded.</p><button type="button" onClick={()=>setRetry(value=>value+1)}>Try again</button></div>
   :genvrPlace==='published'?<PublishedCards published={published}/>
-  :genvrPlace==='market'?<div className="dk-empty"><p>The market gets its own page next. Until then, add market items from the Studio’s Items tab.</p></div>
+  :genvrPlace==='market'?<GenVRMarket load={loadMarket} spaces={spaces} onAdd={id=>open(id)}/>
   :genvrPlace==='lab'?<p role="status">Opening the Motion lab…</p>
-  :inside?<SpaceInside key={inside.id} space={inside} section={section} onOpen={()=>open(inside.id)} onRename={title=>rename(inside.id,title)}/>
+  :inside?<SpaceInside key={inside.id} space={inside} section={section} onOpen={()=>open(inside.id)} onRename={title=>rename(inside.id,title)}>{store&&section!=='basic'?<PlaceSection key={section} section={section} store={store} published={published.some(p=>p.title===inside.title)} onChanged={patch=>setProjects(list=>list.map(p=>p.id===inside.id?{...p,...patch}:p))}/>:null}</SpaceInside>
   :creating||spaces.length===0?<CreateSpace first={spaces.length===0} onCreate={spec=>{setCreating(false);open(undefined,spec);}}/>
   :<SpaceCards spaces={spaces} onInside={id=>{setSection('basic');setInsideId(id);}} onOpen={id=>open(id)} onNew={()=>setCreating(true)}/>}
  </section>:<>{phase==='loading'&&<p role="status">Opening GenVR Studio…</p>}{phase==='unavailable'&&<p role="alert">GenVR is unavailable in this build. Your saved spaces remain in your workspace.</p>}<div className="genvr-stage"><iframe ref={frame} title="GenVR Studio" className="genvr-frame" src={`/genvr/studio.html#${channel}`} sandbox="allow-scripts allow-same-origin allow-downloads allow-pointer-lock"/>

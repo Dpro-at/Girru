@@ -17,7 +17,7 @@ test('GV1: GenVR opens on its places and never opens the Studio by itself',()=>{
  const H=require('../src/GenVRHome.tsx');
  const cards=renderToStaticMarkup(React.createElement(H.SpaceCards,{spaces:[{id:'a',title:'Lake garden',style:'realistic'}],onInside(){},onOpen(){},onNew(){}}));assert.match(cards,/Lake garden/);assert.match(cards,/New space/);assert.match(cards,/style-realistic\.webp/);
  const side=renderToStaticMarkup(React.createElement(H.GenVRSidebar,{place:'spaces',onPlace(){},counts:{spaces:1,published:0}}));for(const t of ['My spaces','On GenVR','Market','Motion lab'])assert.match(side,new RegExp(t));
- const inner=renderToStaticMarkup(React.createElement(H.GenVRSidebar,{place:'spaces',onPlace(){},counts:{spaces:1,published:0},inside:{id:'a',title:'Lake garden'},section:'basic'}));for(const t of ['Basic info','Pictures','How it is played','Game','Blocks','Avatars','Collaborators','Access and publishing','Where it is available'])assert.match(inner,new RegExp(t));
+ const inner=renderToStaticMarkup(React.createElement(H.GenVRSidebar,{place:'spaces',onPlace(){},counts:{spaces:1,published:0},inside:{id:'a',title:'Lake garden',style:'voxel'},section:'basic'}));for(const t of ['Basic info','Pictures','How it is played','Game','Blocks','Avatars','Collaborators','Access and publishing','Where it is available'])assert.match(inner,new RegExp(t));
  const place=renderToStaticMarkup(React.createElement(H.SpaceInside,{space:{id:'a',title:'Lake garden',style:'voxel',sizeTier:'medium'},section:'basic',onOpen(){},onRename:async()=>{}}));assert.match(place,/Open in Studio/);assert.match(place,/Medium · 1 km × 1 km · up to 50 players/);assert.match(place,/Voxel/);
  const create=renderToStaticMarkup(React.createElement(H.CreateSpace,{first:true,onCreate(){}}));for(const t of ['Make your first space','My first space','Realistic','2D side view','TV with a controller','Either way','Biggest','8 km × 8 km · 100 players','Create and open'])assert.match(create,new RegExp(t));
 });
@@ -55,4 +55,20 @@ test('local runtime availability has a minimal program-only contract',()=>{
  assert.deepEqual(genvrResponse(GENVR_RUNTIME,200,{state:'installed',version:'0.3.0-preview.17',job:'private',account:'private'}),{state:'installed',version:'0.3.0-preview.17'});
  assert.deepEqual(genvrResponse(GENVR_RUNTIME,200,{state:'missing',version:null}),{state:'missing',version:null});
  assert.throws(()=>genvrResponse(GENVR_RUNTIME,200,{state:'installed',version:'invalid'}));
+});
+
+test('GV1b/GV1c: section pages save a local space and the market shows items with Add to a place',async()=>{
+ const React=require('../node_modules/react'),{renderToStaticMarkup}=require('../node_modules/react-dom/server');
+ const S=require('../src/GenVRSections.tsx'),M=require('../src/GenVRMarket.tsx'),H=require('../src/GenVRHome.tsx');
+ assert.deepEqual(S.newGame().match,{minPlayers:2,durationSec:300,countdownSec:5,resultsSec:10});assert.equal(S.newGame().win.by,'highest_score');
+ // Blocks shows only for Voxel places, as in the package.
+ const voxel=renderToStaticMarkup(React.createElement(H.GenVRSidebar,{place:'spaces',onPlace(){},counts:{spaces:1,published:0},inside:{id:'a',title:'Cube island',style:'voxel'},section:'basic'}));assert.match(voxel,/Blocks/);
+ const real=renderToStaticMarkup(React.createElement(H.GenVRSidebar,{place:'spaces',onPlace(){},counts:{spaces:1,published:0},inside:{id:'a',title:'Lake garden',style:'realistic'},section:'basic'}));assert.doesNotMatch(real,/>Blocks</);
+ const store={load:async()=>({project:{},revision:1,agents:[]}),save:async()=>2,roster:async()=>[]};
+ assert.match(renderToStaticMarkup(React.createElement(S.PlaceSection,{section:'play',store,published:false,onChanged(){}})),/Loading/);
+ assert.equal(M.priceLine({type:'free'}),'Free');assert.equal(M.priceLine({type:'paid',coins:25}),'25 coins');
+ assert.match(renderToStaticMarkup(React.createElement(M.GenVRMarket,{load:async()=>[],spaces:[],onAdd(){}})),/Loading the market/);
+ const src=require('node:fs').readFileSync(require('node:path').join(__dirname,'../src/GenVRSections.tsx'),'utf8');
+ for(const t of ['Players see it','Extra moves','Friendly fire','Match length','Players to start','Health','Back in','Score to win','Agents in this place','Allow remixing','Web browser','Replace thumbnail','Who may build','Body type'])assert.ok(src.includes(t),t);
+ assert.doesNotMatch(src,/mixamo/i);
 });

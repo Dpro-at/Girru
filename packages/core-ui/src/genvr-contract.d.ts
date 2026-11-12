@@ -20,3 +20,4 @@ export function worldRoute(path:string):boolean;
 export function validWorldTurn(body:unknown):boolean;
 export const WORLD_READ_TOOLS:ReadonlySet<string>;
 export function changesWorld(name:string):boolean;
+export const GENVR_PUBLISH_PAGE: string;

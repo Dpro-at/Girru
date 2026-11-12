@@ -33,14 +33,14 @@ export const SIZES: {id: string; name: string; side: string; players: number; ic
   {id: 'huge', name: 'Huge', side: '4 km', players: 100, icon: 'M3 3h18v18H3z'},
   {id: 'max', name: 'Biggest', side: '8 km', players: 100, icon: 'M2 2h20v20H2zM6 6h12v12H6z'},
 ];
-const DEVICES: {id: string; name: string; icon: string; later?: boolean}[] = [
+export const DEVICES: {id: string; name: string; icon: string; later?: boolean}[] = [
   {id: 'phone', name: 'Phone', icon: 'M8 3h8a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM11 18h2'},
   {id: 'tablet', name: 'Tablet', icon: 'M6 3h12a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM11 18h2'},
   {id: 'computer', name: 'Computer', icon: 'M3 5h18v11H3zM8 20h8M12 16v4'},
   {id: 'tv', name: 'TV with a controller', icon: 'M3 6h18v11H3zM8 21h8M9 3l3 3 3-3'},
   {id: 'vr', name: 'VR headset', icon: 'M3 9h18v7h-6l-2-2h-2l-2 2H3zM7 12h.01M17 12h.01', later: true},
 ];
-const SCREENS: {id: CreateSpec['orientation']; name: string; icon: string}[] = [
+export const SCREENS: {id: CreateSpec['orientation']; name: string; icon: string}[] = [
   {id: 'landscape', name: 'Landscape', icon: 'M3 7h18v10H3z'},
   {id: 'portrait', name: 'Portrait', icon: 'M7 3h10v18H7z'},
   {id: 'any', name: 'Either way', icon: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7'},
@@ -72,7 +72,7 @@ export function GenVRSidebar({place, onPlace, counts, inside, section, onSection
   if (inside) return <nav className="dk-sidebar genvr-places" aria-label={`${inside.title} settings`}>
     <button type="button" className="nav-item dk-place genvr-back" onClick={onBack}><UiIcon name="arrow-left" size={13}/><span className="dk-place-name">My spaces</span></button>
     <div className="genvr-inside-name"><img src={pictureOf(inside.style)} alt=""/><b>{inside.title}</b></div>
-    {SECTIONS.map(s => <button key={s.id} type="button" className="nav-item dk-place" aria-current={section === s.id ? 'page' : undefined} onClick={() => onSection?.(s.id)}><Glyph d={s.icon} size={15}/><span className="dk-place-name">{s.name}</span></button>)}
+    {SECTIONS.filter(s => s.id !== 'blocks' || inside.style === 'voxel').map(s => <button key={s.id} type="button" className="nav-item dk-place" aria-current={section === s.id ? 'page' : undefined} onClick={() => onSection?.(s.id)}><Glyph d={s.icon} size={15}/><span className="dk-place-name">{s.name}</span></button>)}
   </nav>;
   const row = (id: GenVRPlace, name: string, icon: UiIconName, count?: number) => <button type="button" className="nav-item dk-place" aria-current={place === id ? 'page' : undefined} onClick={() => onPlace(id)}><UiIcon name={icon} size={15}/><span className="dk-place-name">{name}</span>{count ? <span className="dk-count">{count}</span> : null}</button>;
   return <nav className="dk-sidebar genvr-places" aria-label="GenVR">
@@ -100,9 +100,9 @@ export function PublishedCards({published}: {published: Publication[]}) {
 }
 
 /** GV1b: inside a place. The chosen section in the middle, Open in Studio on top. */
-export function SpaceInside({space, section, onOpen, onRename}: {space: SpaceRow; section: string; onOpen: () => void; onRename: (title: string) => Promise<void>}) {
+export function SpaceInside({space, section, onOpen, onRename, children}: {space: SpaceRow; section: string; onOpen: () => void; onRename: (title: string) => Promise<void>; children?: ReactNode}) {
   const [name, setName] = useState(space.title), [notice, setNotice] = useState(''), [saving, setSaving] = useState(false);
-  const current = SECTIONS.find(s => s.id === section) ?? SECTIONS[0];
+  const current = SECTIONS.find(s => s.id === section && (s.id !== 'blocks' || space.style === 'voxel')) ?? SECTIONS[0];
   const save = async () => { if (!name.trim() || name.trim() === space.title) return; setSaving(true); setNotice(''); try { await onRename(name.trim()); setNotice('Saved.'); } catch { setNotice('It could not be saved. Try again.'); } finally { setSaving(false); } };
   const field = (label: string, value: ReactNode) => <div className="genvr-field"><small>{label}</small><span>{value}</span></div>;
   return <div className="genvr-inside">
@@ -113,10 +113,9 @@ export function SpaceInside({space, section, onOpen, onRename}: {space: SpaceRow
       {field('Look', styleName(space.style))}
       {field('Size', sizeLine(space.sizeTier))}
       {notice && <p role="status" className="fine-print">{notice}</p>}
-    </> : current.id === 'play' ? <>
-      {field('How it is played', playLine(space))}
-      <p className="fine-print">Change it in the Studio’s Place settings.</p>
-    </> : <p className="fine-print">{current.name} is set in the Studio’s Place settings. Open the place to change it.</p>}
+    </> : children ?? <>
+      {current.id === 'play' && field('How it is played', playLine(space))}
+    </>}
     <span className="genvr-inside-foot fine-print">Changes save by themselves · My spaces in the sidebar goes back</span>
   </div>;
 }

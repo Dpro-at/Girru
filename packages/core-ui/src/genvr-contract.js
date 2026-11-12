@@ -67,3 +67,6 @@ export function genvrResponse(path,status,body){
  if(body.agents!==undefined&&!validGenVRTeam(body.agents))throw Error('protocol');
  return {project:body.project,revision:body.revision,agents:body.agents??[]};
 }
+
+/** GV1b Access and publishing: the GenVR page where the owner publishes a place (a user-opened link, never a transport target). */
+export const GENVR_PUBLISH_PAGE='https://genvr.net';
