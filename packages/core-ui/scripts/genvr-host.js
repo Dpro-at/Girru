@@ -14,8 +14,9 @@ window.addEventListener('message',async event=>{
    // GV1 B: Girru's create page made the choices; the package makes the space, Girru saves it, the Studio opens on it.
    let projectId=data.projectId;if(data.create)projectId=await createFromSpec(data.create);
    const host=await studioHost(typeof data.privateLibrary==='string'&&/^[a-f0-9]{64}$/.test(data.privateLibrary)?data.privateLibrary:null);
-   studio=mountStudio(document.getElementById('studio'),{filmExample:'/film-examples/island-languages.genvrfilm',forceWebGL:true,initialProjectId:projectId,...host,...(data.chat===true?hostChat():{}),agents:id=>request('agents',id),catalog:{list:()=>request('catalog-list'),asset:id=>request('catalog-asset',id)},storage:{list:()=>request('list'),read:id=>request('read',id),write:project=>request('write',project)}});
-   send({operation:'mounted'});if(sdk.STUDIO_HOST_VERSION!==1&&typeof projectId==='string')openExisting(projectId);
+   // A space opens as it is: the example film is only for the Studio opened without a space (Mohamed, 2026-11-12).
+   studio=mountStudio(document.getElementById('studio'),{filmExample:typeof projectId==='string'?false:'/film-examples/island-languages.genvrfilm',forceWebGL:true,initialProjectId:projectId,...host,...(data.chat===true?hostChat():{}),agents:id=>request('agents',id),catalog:{list:()=>request('catalog-list'),asset:id=>request('catalog-asset',id)},storage:{list:()=>request('list'),read:id=>request('read',id),write:project=>request('write',project)}});
+   send({operation:'mounted'});
   }catch{send({operation:'unavailable'});}
  }
  if(data.operation==='notify'&&studio&&data.notification&&typeof data.notification==='object'){
@@ -95,10 +96,6 @@ async function isolateBrowserCache(account){
 }
 
 // Compatibility for the frozen SDK until the reviewed host API version is consumed.
-function openExisting(id){
- const choose=()=>{const select=document.querySelector('select[aria-label="Open project"]');if(!(select instanceof HTMLSelectElement)||!Array.from(select.options).some(option=>option.value===id))return false;select.value=id;select.dispatchEvent(new Event('change',{bubbles:true}));return true;};
- if(choose())return;const observer=new MutationObserver(()=>{if(choose()){observer.disconnect();clearTimeout(timer);}});observer.observe(document.getElementById('studio'),{childList:true,subtree:true});const timer=setTimeout(()=>{observer.disconnect();send({operation:'open-failed'});},10000);
-}
 
 // Live bridge (live MCP + local voice) and, for the owner, the private library.
 // The token is injected into this frame's shell by the local application server.

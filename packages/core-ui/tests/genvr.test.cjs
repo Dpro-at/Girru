@@ -76,3 +76,14 @@ test('GV1: the shell shows the GenVR places sidebar (the page owns its sidebar)'
  const src=require('node:fs').readFileSync(require('node:path').join(__dirname,'../src/SignedInShell.tsx'),'utf8');
  const own=/const OWN_SIDEBAR[^=]*=\s*\[([^\]]*)\]/.exec(src);assert.ok(own);assert.match(own[1],/'genvr'/);
 });
+test('GV1 PC fixes: a space opens empty, the Studio never waits on an unanswered request, and it can always be left',()=>{
+ const read=f=>require('node:fs').readFileSync(require('node:path').join(__dirname,f),'utf8');
+ const host=read('../scripts/genvr-host.js'),page=read('../src/GenVRPage.tsx');
+ assert.match(host,/filmExample:typeof projectId==='string'\?false:/);
+ assert.match(page,/operation==='agents'&&!genvrId\(data\.value\)\)\{send\(\{id:data\.id,response:true,ok:true,value:\[\]\}\)/);
+ assert.match(page,/if\(!request\)\{send\(\{id:data\.id,response:true,ok:false\}\);return;\}/);
+ assert.doesNotMatch(host,/openExisting|STUDIO_HOST_VERSION/);assert.doesNotMatch(page,/open-failed/);
+ assert.match(page,/<iframe key=\{channel\}/);assert.match(page,/if\(phase!=='ready'\)\{drop\(\);return;\}/);
+ assert.match(page,/Close without saving/);assert.match(page,/current==='loading'\?'slow'/);assert.doesNotMatch(page,/current==='loading'\?'unavailable'/);
+ assert.match(page,/if\(channel&&p!=='lab'\)\{leaveTo\.current=p;close\(\);return;\}/);
+});
