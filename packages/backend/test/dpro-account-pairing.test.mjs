@@ -26,7 +26,7 @@ test('the account authenticator code adds a third computer, and the first comput
  assert.deepEqual(await c.request('join-with-code',{code:now(),confirmed:true}),{joined:true});
  assert.equal((await c.request('status')).view.deviceStatus,'approved');
  const cid=(await c.request('status')).view.deviceId;let item;await until(async()=>{item=((await a.request('status')).pairing?.addedWithCode??[]).find(x=>x.deviceId===cid);return !!item;});
- const cCheck=(await c.request('status')).pairing?.thisComputerCheck;assert.equal(item.checkCode,cCheck,'both computers show the same 12-character check code');
+ let cCheck;await until(async()=>(cCheck=(await c.request('status')).pairing?.thisComputerCheck));/* the joined computer learns its check code a moment later on a slow runner */assert.equal(item.checkCode,cCheck,'both computers show the same 12-character check code');
  await assert.rejects(()=>a.request('keep-added',{deviceId:cid,publicKey:item.publicKey,checkCode:'0'.repeat(12),confirmed:true}),/comparison_changed/);
  assert.deepEqual(await a.request('keep-added',{deviceId:cid,publicKey:item.publicKey,checkCode:item.checkCode,confirmed:true}),{kept:true},'only Keep with the compared code pins a computer added with the code');
  await until(async()=>!((await a.request('status')).pairing?.addedWithCode??[]).some(x=>x.deviceId===cid));
