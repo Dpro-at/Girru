@@ -69,3 +69,8 @@ test('the ask runs as a job for its owner only', async () => {
   let r; for (let i = 0; i < 50 && (r = A.askJob(OWNER, id)).state === 'running'; i++) await new Promise(res => setTimeout(res, 10));
   assert.deepEqual(r, { state: 'done', text: 'line\nmore', note: 'ok', agentId: 'grenzer-agent' });
 });
+
+test('a small model\'s shared indent and blank edges are undone', () => {
+  assert.equal(A.fitToOriginal('   # VPS\n   **Server:** x\n   SSH port: 2222\n   ', '# VPS\n**Server:** x'), '# VPS\n**Server:** x\nSSH port: 2222');
+  assert.equal(A.fitToOriginal('- a\n  - b', '- a\n  - c'), '- a\n  - b');
+});

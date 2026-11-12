@@ -48,6 +48,16 @@ export function parseAnswer(answer: string): { text: string; note: string } | nu
   return { text: m[1], note: note.slice(0, 300) };
 }
 
+/** Undo what small models add around a document: a shared indent the original did not have, and blank edges. */
+export function fitToOriginal(answer: string, original: string): string {
+  const indentOf = (t: string) => { const ls = t.split('\n').filter(l => l.trim()); return ls.length ? Math.min(...ls.map(l => /^[ \t]*/.exec(l)![0].length)) : 0; };
+  let lines = answer.replace(/\r\n?/g, '\n').split('\n');
+  const extra = indentOf(answer) - indentOf(original);
+  if (extra > 0) lines = lines.map(l => l.slice(Math.min(extra, /^[ \t]*/.exec(l)![0].length)));
+  const out = lines.map(l => l.replace(/[ \t]+$/, '')).join('\n').replace(/^\n+|\n+$/g, '');
+  return original.endsWith('\n') ? out + '\n' : out;
+}
+
 type Target = { id: string; name: string; model: string | null; provider: string | null; temperature: number | null; max_tokens: number | null };
 
 /** One quick, tool-free answer with the agent's own model. */
@@ -107,7 +117,7 @@ export async function askAgentToEdit(ownerId: string, input: AskInput, deps: { a
   });
   const parsed = parseAnswer(String(answer ?? ''));
   if (!parsed) throw new AskAgentError(502, 'bad_answer', 'The agent did not answer with a document. Ask again.');
-  let text = parsed.text.replace(/\[KEEP:(\d+)\]/g, (m, i) => kept[Number(i)] ?? m);
+  let text = fitToOriginal(parsed.text, safe).replace(/\[KEEP:(\d+)\]/g, (m, i) => kept[Number(i)] ?? m);
   // A key the agent writes in clear is hidden at once (it shows as a lock chip).
   text = (await hideKeysInText(ownerId, text, 'memory').catch(() => ({ text: redactImportText(text).text }))).text;
   return { text: text.slice(0, MAX_TEXT), note: redactImportText(parsed.note).text, agentId: target.id };
