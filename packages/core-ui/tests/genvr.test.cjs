@@ -97,3 +97,8 @@ test('GV1: the Studio hands My projects back to Girru and Motion lab opens the l
  assert.match(host,/onHome:\(\)=>send\(\{operation:'home'\}\)/);assert.match(host,/data\.lab===true&&typeof projectId!=='string'\?\{openLab:true\}/);
  assert.match(page,/if\(data\.operation==='home'\)\{/);assert.match(page,/if\(p==='lab'\)open\(lab\?\.id,undefined,true\);/);
 });
+test('Store: the "add it in the coding app" line is only for coding-app items, not for GenVR waiting on a version',()=>{
+ const src=require('node:fs').readFileSync(require('node:path').join(__dirname,'../src/StoreView.tsx'),'utf8');
+ assert.match(src,/item\.state==='elsewhere'&&\(item\.source==='codex'\|\|item\.source==='claude-code'\?/);
+ assert.match(src,/The Store has no version of it for this Girru yet\./);
+});

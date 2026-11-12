@@ -10,6 +10,7 @@
  * until paid apps open (STORE-PAID-01).
  */
 import { parseStoreIndex, type StoreIndex } from './store-index.js';
+import { PIN as GENVR_PIN } from '../config/genvr-runtime-path.cjs';
 
 /** The repository's files on GitHub; GIRRU_STORE_URL points a test run at its own copy (https, or http on 127.0.0.1). */
 export function storeBase(): string {
@@ -18,6 +19,8 @@ export function storeBase(): string {
 }
 export const STORE_INDEX_URL = 'https://raw.githubusercontent.com/Dpro-at/girru-store/main/index.json';
 const MAX_AGE_MS = 6 * 3_600_000;
+const PIN_RECHECK_MS = 120_000;
+let pinRecheckAt = -Infinity;
 const MAX_BYTES = 2 * 1024 * 1024;
 const ID = /^(?=[a-z0-9-]{1,64}$)[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -158,7 +161,11 @@ export async function readStoreRepo(options: { now?: Date; fetch?: Fetch; fresh?
   if ((process.env.GIRRU_STORE_REPO ?? '').trim().toLowerCase() === 'off') return { index: null, asOf: null, fresh: true };
   const now = options.now ?? new Date();
   const cached = await readCache();
-  if (cached && !options.fresh && now.getTime() - Date.parse(cached.fetchedAt) < MAX_AGE_MS) return { index: cached.index, packages: cached.packages, runtimes: cached.runtimes, asOf: cached.fetchedAt, fresh: true };
+  // A cached GenVR entry for another version than this Girru pins is looked up again (at most every two
+  // minutes): after an update, the Store would otherwise offer nothing until the cache grows old.
+  const otherGenvr = !!cached?.runtimes?.['girru:genvr'] && cached.runtimes['girru:genvr'].version !== GENVR_PIN.version && now.getTime() - pinRecheckAt >= PIN_RECHECK_MS;
+  if (otherGenvr) pinRecheckAt = now.getTime();
+  if (cached && !options.fresh && !otherGenvr && now.getTime() - Date.parse(cached.fetchedAt) < MAX_AGE_MS) return { index: cached.index, packages: cached.packages, runtimes: cached.runtimes, asOf: cached.fetchedAt, fresh: true };
   try {
     const get = options.fetch ?? (globalThis.fetch as unknown as Fetch);
     const res = await get(`${storeBase()}/index.json`, { signal: AbortSignal.timeout(8000), headers: { Accept: 'application/json', 'User-Agent': 'Girru' } });

@@ -85,3 +85,22 @@ test('skills and specialties that come with Girru show as installed; others wait
   assert.equal(by('girru:frontend-developer')?.state, 'included');
   assert.equal(by('store:not-in-girru')?.state, 'elsewhere');
 });
+
+test('a cached GenVR for another version than Girru pins is looked up again at once, at most every two minutes', async () => {
+  const { PIN } = await import(join(backendDir, 'src/config/genvr-runtime-path.cjs'));
+  const runtime = (version) => ({ version, protocolVersion: 1, archives: { 'darwin-arm64': { url: `https://github.com/Dpro-at/genvr-world-sdk/releases/download/v${version}/3d-world-sdk-${version}.tgz`, sha256: 'a'.repeat(64), size: 1000 } } });
+  const repo = (version) => ({ ...REPO, items: [item('genvr', { category: 'worlds', runtime: runtime(version) })] });
+  const t0 = new Date('2026-11-12T08:00:00Z');
+  calls = 0; await readStoreRepo({ now: t0, fetch: github(repo('0.3.0-preview.1')), fresh: true });
+  const later = (min) => new Date(t0.getTime() + min * 60_000);
+  const r = await readStoreRepo({ now: later(10), fetch: github(repo(PIN.version)) });
+  assert.equal(calls, 2, 'the old GenVR entry is read again although the copy is young');
+  assert.equal(r.runtimes['girru:genvr'].version, PIN.version);
+  const same = await readStoreRepo({ now: later(11), fetch: github(repo(PIN.version)) });
+  assert.equal(calls, 2, 'a matching entry stays cached');assert.equal(same.runtimes['girru:genvr'].version, PIN.version);
+  await readStoreRepo({ now: later(12), fetch: github(repo('0.3.0-preview.2')), fresh: true });
+  await readStoreRepo({ now: later(13), fetch: github(repo('0.3.0-preview.2')) });
+  assert.equal(calls, 4, 'a store that still lists another version is asked again after two minutes');
+  await readStoreRepo({ now: later(13.5), fetch: github(repo('0.3.0-preview.2')) });
+  assert.equal(calls, 4, 'but not more often');
+});
