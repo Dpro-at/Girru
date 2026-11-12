@@ -191,6 +191,11 @@ test('source boundary: only injected session transport may network; no browser s
       assert.deepEqual(source.match(/https:\/\/[^']+/g), ['https://girru.dev/app']);
       source = source.replace(/https:\/\/[^']+/g, 'app-page');
     }
+    if (name === 'genvr-contract.js') {
+      // GV1b: the GenVR page where the owner publishes a place (a user-opened link, never a transport target).
+      assert.deepEqual(source.match(/https:\/\/[^']+/g), ['https://genvr.net']);
+      source = source.replace(/https:\/\/[^']+/g, 'publish-page');
+    }
     if (name === 'office-content.ts') {
       // OOXML relationship namespace names: identifiers compared as text, never fetched.
       assert.deepEqual([...new Set(source.match(/https?:\/\/[^']+/g))].sort(), ['http://purl.oclc.org/ooxml/officeDocument/relationships', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships']);

@@ -27,7 +27,7 @@ test('task rule changes accept only known shapes', () => {
 });
 
 test('computer pictures and names: known pictures, short plain names (CP9c)', () => {
-  assert.deepEqual(computerLook({icons: {a: 'imac', b: 'toaster'}, names: {a: 'Office PC', c: '', d: 'x'.repeat(65)}}), {icons: {a: 'imac'}, names: {a: 'Office PC'}, notices: true});
+  assert.deepEqual(computerLook({icons: {a: 'imac', b: 'toaster'}, names: {a: 'Office PC', c: '', d: 'x'.repeat(65)}}), {icons: {a: 'imac'}, names: {a: 'Office PC'}, notices: true, groups: []});
   assert.equal(computerLookChangeOk({deviceId: 'a', icon: 'linux'}), true);
   assert.equal(computerLookChangeOk({deviceId: 'a', name: ''}), true, 'an empty name goes back to the account name');
   assert.equal(computerLookChangeOk({deviceId: 'a', icon: 'toaster'}), false);
@@ -136,7 +136,7 @@ test('code scanning: request-chosen ids are map keys; the saved value is a plain
   for (const id of ['__proto__', 'constructor', 'prototype']) assert.throws(() => applyTaskRulesChange(rules, {project: {id, rule: 'auto'}}), /computer_task_rules_invalid/);
 
   const look = applyComputerLookChange(computerLook(undefined), {deviceId: 'hasOwnProperty', icon: 'macbook', name: ' Studio '});
-  assert.deepEqual(look, {icons: {hasOwnProperty: 'macbook'}, names: {hasOwnProperty: 'Studio'}, notices: true});
+  assert.deepEqual(look, {icons: {hasOwnProperty: 'macbook'}, names: {hasOwnProperty: 'Studio'}, notices: true, groups: []});
   assert.deepEqual(applyComputerLookChange(look, {deviceId: 'hasOwnProperty', name: ''}).names, {});
   for (const deviceId of ['__proto__', 'constructor', 'prototype', 'bad id', undefined]) assert.equal(applyComputerLookChange(look, {deviceId, icon: 'imac'}), null);
   // A full list refuses a new computer instead of dropping it, even when the id names an inherited method.
@@ -144,4 +144,25 @@ test('code scanning: request-chosen ids are map keys; the saved value is a plain
   assert.equal(applyComputerLookChange(full, {deviceId: 'toString', icon: 'imac'}), null);
   assert.equal(applyComputerLookChange(full, {deviceId: 'd3', icon: 'linux'}).icons.d3, 'linux');
   assert.equal(Object.getOwnPropertyNames(Object.prototype).sort().join(','), before);
+});
+
+test('CP17 E: the owner’s computer groups: create, rename, move (one group per computer), delete keeps the computers', async () => {
+  const {computerLook, applyComputerGroupChange, computerLookChangeOk} = await import('../src/api/routes/computer-look.ts');
+  let n = 0; const id = () => 'g' + (++n);
+  let look = computerLook(undefined);
+  look = applyComputerGroupChange(look, {action: 'create', name: 'Office'}, id);
+  look = applyComputerGroupChange(look, {action: 'create', name: 'Home'}, id);
+  assert.deepEqual(look.groups.map(g => g.name), ['Office', 'Home']);
+  look = applyComputerGroupChange(look, {action: 'move', id: 'g1', deviceId: 'pc1'}, id);
+  look = applyComputerGroupChange(look, {action: 'move', id: 'g2', deviceId: 'pc1'}, id);
+  assert.deepEqual(look.groups.map(g => g.members), [[], ['pc1']], 'a computer is in one group at a time');
+  look = applyComputerGroupChange(look, {action: 'rename', id: 'g2', name: 'House'}, id);
+  assert.equal(look.groups[1].name, 'House');
+  look = applyComputerGroupChange(look, {action: 'delete', id: 'g2'}, id);
+  assert.deepEqual(look.groups.map(g => g.id), ['g1']);
+  assert.equal(applyComputerGroupChange(look, {action: 'rename', id: 'nope', name: 'x'}, id), null);
+  assert.equal(computerLookChangeOk({group: {action: 'create', name: ''}}), false);
+  assert.equal(computerLookChangeOk({group: {action: 'move', id: null, deviceId: 'pc1'}}), true);
+  assert.equal(computerLookChangeOk({group: {action: 'move', id: '__proto__', deviceId: 'pc1'}}), false);
+  assert.deepEqual(computerLook({groups: [{id: 'a', name: 'A', members: ['x', 'x', 'y']}, {id: 'b', name: 'B', members: ['y']}]}).groups.map(g => g.members), [['x', 'y'], []]);
 });

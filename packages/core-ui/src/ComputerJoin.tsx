@@ -138,7 +138,7 @@ export function AddThisComputer({client, status, knownName}: {client: SessionCli
     <SetupRoad at={1}/>
     <h2>{knownName ? 'Sign in again' : 'Add this computer to your account'}</h2>
     <p>{knownName ? <>Sign in with Google to put <b>{knownName}</b> back in your account.</> : 'Sign in with the same Google account you use for Girru on your other computer.'}</p>
-    {!knownName && <label className="phone-field"><span>Give this computer a name</span><input value={name} maxLength={64} placeholder="Office PC" onChange={e => setName(e.target.value)}/></label>}
+    {/* Mohamed, 2026-11-11: never ask for a name here; the computer registers with its own name (renamed later in Computers). */}
     {verify ? <div className="computer-join-code"><label className="phone-field"><span>Code from your authenticator app</span><input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))}/></label><button type="button" className="primary" disabled={busy || code.length !== 6} onClick={() => void finish(current.current, {...verify, code: code.trim()})}>Continue</button></div>
       : <button type="button" className="primary" disabled={busy || !!flow || status === null || status?.desktopAvailable === false} onClick={() => void start()}>{flow ? 'Waiting for Google…' : 'Continue with Google'}</button>}
     {(status === null || status?.desktopAvailable === false) && <p role="status">Open the Girru app on this computer to add it. A browser window can’t keep the computer’s key safe.</p>}

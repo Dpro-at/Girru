@@ -12,7 +12,8 @@ under the existing TLS host without removing the prefix. The service checks the
 canonical public Host and refuses a public listener. The example uses
 `relay.girru.net`; confirm that actual host and proxy before using it.
 
-The database holds account identity, device public keys, session hashes,
+The database holds account identity, device public keys, a public ID with an
+optional nickname and links between people (CP17), session hashes,
 revocation and bounded security metadata. It is not a work-content store.
 Tasks, files, memories, configuration blobs, private keys and Google tokens must
 not appear in its database, backups, request logs or error reporting.

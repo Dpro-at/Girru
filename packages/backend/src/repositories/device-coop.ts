@@ -60,19 +60,32 @@ export class DeviceCoopRepository {
         yield* run('INSERT INTO computer_counters(local_device_id,next_sequence) VALUES(?,?)', local, n); return n; }); }
     async store(direction: 'in' | 'out', e: Envelope): Promise<boolean> { const local = this.localId; return this.writeTx(function* () { yield* lockName('computer-delivery:' + local + ':' + direction + ':' + e.eventId); const old = yield* one<{
         envelope_json: string;
-    }>('SELECT envelope_json FROM computer_delivery WHERE local_device_id=? AND direction=? AND event_id=?', local, direction, e.eventId); const encoded = canonical(e); if (old) {
+    }>('SELECT envelope_json,payload_hash,acknowledged FROM computer_delivery WHERE local_device_id=? AND direction=? AND event_id=?', local, direction, e.eventId); const encoded = canonical(e); if (old) {
+        // A handled incoming message keeps only its fingerprint (its body was dropped): a repeat is still refused as a duplicate.
+        if (direction === 'in' && Number((old as {acknowledged?: number}).acknowledged) === 1) { if ((old as {payload_hash?: string}).payload_hash !== e.fingerprint) throw Error('computer_event_changed'); return false; }
         if (old.envelope_json !== encoded)
             throw Error('computer_event_changed');
         return false;
     } const count = yield* one<{
         n: number;
-    }>("SELECT COUNT(*) AS n FROM computer_delivery d WHERE d.local_device_id=? AND NOT (d.direction='out' AND d.acknowledged=1) AND NOT EXISTS(SELECT 1 FROM computer_peers p WHERE p.local_device_id=d.local_device_id AND p.peer_id=d.peer_id AND p.revoked=1)", local); /* CP13: messages of forgotten computers and confirmed sends never fill the inbox. */ if (Number(count?.n) >= 20000)
+    }>("SELECT COUNT(*) AS n FROM computer_delivery d WHERE d.local_device_id=? AND d.acknowledged=0 AND NOT EXISTS(SELECT 1 FROM computer_peers p WHERE p.local_device_id=d.local_device_id AND p.peer_id=d.peer_id AND p.revoked=1)", local); /* CP13: messages of forgotten computers and confirmed sends never fill the inbox. */ if (Number(count?.n) >= 20000)
         throw Error('computer_delivery_capacity'); yield* run('INSERT INTO computer_delivery(local_device_id,peer_id,direction,event_id,request_id,payload_hash,envelope_json) VALUES(?,?,?,?,?,?,?)', local, direction === 'in' ? e.sender : e.target, direction, e.eventId, e.requestId, e.fingerprint, encoded); return true; }); }
     pending() { return this.runner.read(all<{
         event_id: string;
         peer_id: string;
         envelope_json: string;
     }>("SELECT event_id,peer_id,envelope_json FROM computer_delivery WHERE local_device_id=? AND direction='out' AND acknowledged=0 ORDER BY event_id", this.localId)); }
+    /** An incoming message that was handled: kept to refuse a replay, not counted as waiting. */
+    async markHandled(peer: string, eventId: string) {
+        const local = this.localId;
+        await this.writeTx(function* () {
+            // Review fix: a handled message keeps only what refuses a replay (event id and fingerprint); its body is dropped,
+            // and at most 50000 handled ones are kept, so the inbox can never grow without bound.
+            yield* run("UPDATE computer_delivery SET acknowledged=1,envelope_json=? WHERE local_device_id=? AND peer_id=? AND event_id=? AND direction='in'", '{}', local, peer, eventId);
+            const n = yield* one<{ n: number }>("SELECT COUNT(*) AS n FROM computer_delivery WHERE local_device_id=? AND direction='in' AND acknowledged=1", local);
+            if (Number(n?.n) > 50000) yield* run("DELETE FROM computer_delivery WHERE local_device_id=? AND direction='in' AND acknowledged=1 AND event_id IN (SELECT event_id FROM computer_delivery WHERE local_device_id=? AND direction='in' AND acknowledged=1 ORDER BY event_id LIMIT 1000)", local, local);
+        });
+    }
     async acknowledge(peer: string, eventId: string) { await this.writeStep(run("UPDATE computer_delivery SET acknowledged=1 WHERE local_device_id=? AND peer_id=? AND event_id=? AND direction='out'", this.localId, peer, eventId)); }
     attempt(task: string) { return this.runner.read(one<ComputerAttempt>('SELECT * FROM computer_attempts WHERE local_device_id=? AND task_id=?', this.localId, task)); }
     attempts() { return this.runner.read(all<ComputerAttempt>('SELECT * FROM computer_attempts WHERE local_device_id=? ORDER BY task_id LIMIT 500', this.localId)); }

@@ -39,6 +39,8 @@ export class ComputerTransport {
   this.connector=new RelayConnector({identity:membership.identity,url,onFrame:f=>this.enqueue(f,this.relayRoute()),onState:s=>{if(s!=='connected')this.clearRoute('relay');this.state?.(s);}});
  }
  private controlPeers=new Map<string,string>();
+ /** CP17: a linked person was removed: the relay stops letting that computer reach this one. */
+ unpinControlPeer(device:string){if(this.controlPeers.delete(device))void this.refreshPeers().catch(()=>{this.error='computer_control_allow_refresh_failed';});}
  pinControlPeer(publicKey:string){const key=peerKey(publicKey),device=deviceIdOf(key);if(this.controlPeers.size>=64&&!this.controlPeers.has(device))throw Error('computer_control_capacity');this.controlPeers.set(device,publicKey);void this.refreshPeers().catch(()=>{this.error='computer_control_allow_refresh_failed';});return device;}
  private controlReceiver:((peer:string,body:Record<string,unknown>)=>Promise<void>)|null=null;
  onControl(receiver:(peer:string,body:Record<string,unknown>)=>Promise<void>){this.controlReceiver=receiver;}
