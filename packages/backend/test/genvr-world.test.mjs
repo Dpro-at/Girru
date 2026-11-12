@@ -133,7 +133,7 @@ test('GV1e: a failed turn stays in the place chat with its reason; the chat proj
  const failing={...deps,ollama:async()=>{throw new Error('usage limit reached for token sk-ant-api03-'+'x'.repeat(40));}};
  const lines=[];const log=console.log;console.log=(...a)=>{lines.push(a.join(' '));};
  const failApp=Fastify();registerAuthGate(failApp);await failApp.register(genvrWorldRoutes,{deps:failing});await failApp.ready();
- try{const r=await failApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/turn',headers:owner,payload:{messages:[{role:'user',content:'Add a lamp'}],tools}});assert.equal(r.statusCode,502);}
+ try{const r=await failApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/turn',headers:owner,payload:{messages:[{role:'user',content:'Add a lamp'}],tools}});assert.equal(r.statusCode,409);assert.match(r.json().message,/usage limit/);}
  finally{console.log=log;await failApp.close();}
  const last=db.prepare("SELECT role,status,content FROM chat_messages WHERE session_id=? ORDER BY id DESC LIMIT 2").all(opened.conversationId);
  assert.equal(last[0].role,'assistant');assert.equal(last[0].status,'error');assert.equal(last[1].content,'Add a lamp');
@@ -141,4 +141,24 @@ test('GV1e: a failed turn stays in the place chat with its reason; the chat proj
  db.prepare("UPDATE genvr_projects SET title='Sky city' WHERE id='rooftop-city'").run();
  await worldApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/open',headers:owner,payload:{name:'Sky city'}});
  assert.equal(db.prepare('SELECT name FROM chat_projects WHERE id=?').get(opened.chatProjectId).name,'World · Sky city');
+});
+test('GV1e fixes: tools fit a coding-app prompt, failures say why in plain words, the chat shows the agent and follows a rename',async()=>{
+ const {toolText}=await import('../src/services/genvr-world.ts');
+ const many=Array.from({length:150},(_,i)=>({name:'tool_'+i,description:'Does thing '+i+'. '+'More words. '.repeat(40),input_schema:{type:'object',properties:{a:{type:'string',description:'x'.repeat(400)},b:{type:'number'}}}}));
+ const full=toolText(many.slice(0,2),1e9);assert.match(full,/More words/);
+ const small=toolText(many,86000);assert.ok(small.length<=86000);assert.match(small,/"tool_149"/);assert.match(small,/"arguments":\{"a":"string","b":"number"\}/);assert.doesNotMatch(small,/More words/);
+ assert.ok(toolText(many,500).length<=500);
+ const opened=(await worldApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/open',headers:owner,payload:{name:'Sky city'}})).json();
+ const sub=db.prepare("SELECT id FROM agents_config WHERE id!=? LIMIT 1").get(db.prepare("SELECT agent_id FROM genvr_worlds WHERE project_id='rooftop-city'").get().agent_id);
+ if(sub){await worldApp.inject({method:'PUT',url:'/api/genvr/worlds/rooftop-city/agent',headers:owner,payload:{agentId:sub.id}});assert.equal(db.prepare('SELECT agent_id FROM chat_sessions WHERE id=?').get(opened.conversationId).agent_id,sub.id,'Girru Chat shows the agent that answers');}
+ const tooBig={...deps,ollama:async()=>{throw new Error('agent_context_too_large');}};
+ const lines=[];const log=console.log;console.log=(...a)=>{lines.push(a.join(' '));};
+ const a2=Fastify();registerAuthGate(a2);await a2.register(genvrWorldRoutes,{deps:tooBig});await a2.ready();
+ let r;try{r=await a2.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/turn',headers:owner,payload:{messages:[{role:'user',content:'Build a bridge'}],tools}});}finally{console.log=log;await a2.close();}
+ assert.equal(r.statusCode,409);assert.match(r.json().message,/too long for/);assert.ok(lines.some(l=>l.includes('agent_context_too_large')),'the raw reason stays in the log');
+ const last=db.prepare("SELECT status,content,parts,agent_id FROM chat_messages WHERE session_id=? ORDER BY id DESC LIMIT 1").get(opened.conversationId);
+ assert.equal(last.status,'error');assert.match(last.content,/too long for/);assert.match(last.parts,/too long for/);assert.ok(last.agent_id);
+ db.prepare("UPDATE genvr_projects SET title='Cloud city' WHERE id='rooftop-city'").run();
+ await worldApp.inject({method:'POST',url:'/api/genvr/worlds/rooftop-city/open',headers:owner,payload:{name:'Cloud city'}});
+ assert.equal(db.prepare('SELECT title FROM chat_sessions WHERE id=?').get(opened.conversationId).title,'Cloud city · Studio');
 });

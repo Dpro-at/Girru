@@ -20,7 +20,7 @@ import { interactiveClaudeMessage } from '../llm/model-call.js';
 import { resolveProviderApiKey } from '../credentials/authority.js';
 import { runSubscription, subscriptionEnabled, subscriptionModel } from './subscription-chat.js';
 import { subscriptionAgentContext, subscriptionReplyPrompt } from './subscription-agent-context.js';
-import { asProtocol, type ToolDef } from '../tools/tool-doors.js';
+import { asProtocol, shortLine, type ToolDef } from '../tools/tool-doors.js';
 
 export class WorldError extends Error {
   constructor(readonly status: number, readonly code: string, message = code) { super(message); }
@@ -136,6 +136,7 @@ export async function openWorld(userId: string, projectId: string, name: string)
   // GV1e: one Girru chat per world, in its project: the Studio chat and Girru Chat are the same conversation.
   let conversationId = row.chat_conversation_id ?? null;
   const conversation = conversationId ? await findConversation(userId, conversationId) : undefined;
+  if (conversation && conversation.projectId === chatProjectId && conversation.title !== `${title} · Studio`.slice(0, 120)) await q.run('UPDATE chat_sessions SET title=? WHERE id=? AND user_id=?', `${title} · Studio`.slice(0, 120), conversation.id, userId).catch(() => undefined);
   if (!conversation || conversation.projectId !== chatProjectId) {
     conversationId = (await createConversation(userId, { title: `${title} · Studio`.slice(0, 120), projectId: chatProjectId, agentId: agent?.id ?? null })).id;
     await q.run('UPDATE genvr_worlds SET chat_conversation_id=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND project_id=?', conversationId, userId, projectId);
@@ -150,6 +151,9 @@ export async function chooseWorldAgent(userId: string, projectId: string, agentI
   if (!agent) throw new WorldError(400, 'invalid_input');
   if (!(await worldRow(userId, projectId))) throw new WorldError(404, 'not_found');
   await q.run('UPDATE genvr_worlds SET agent_id=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND project_id=?', agent.id, userId, projectId);
+  // GV1e: the place's Girru chat shows the same agent as the Studio.
+  const conversation = (await worldRow(userId, projectId))?.chat_conversation_id;
+  if (conversation) await q.run('UPDATE chat_sessions SET agent_id=? WHERE id=? AND user_id=?', agent.id, conversation, userId).catch(() => undefined);
   return answererOf(agent);
 }
 
@@ -232,6 +236,15 @@ export interface TurnDeps {
   subscription?: (model: string, folder: string, prompt: string, signal: AbortSignal, agentId: string) => Promise<string>;
 }
 
+/** A failed turn in plain words: the reason a person can act on (the raw reason stays in the log). */
+async function plainFailure(error: unknown, agentId: string | null | undefined): Promise<unknown> {
+  if (error instanceof WorldError || !(error instanceof Error)) return error;
+  const name = ((await agentRow(agentId)) ?? (await primaryAgent()))?.name ?? 'The agent';
+  if (error.message === 'agent_context_too_large') return Object.assign(new WorldError(409, 'model_unavailable', `This conversation is too long for ${name}. Start a new chat in the Studio, or pick another agent.`), { cause: error });
+  if (/usage limit|rate limit|quota|too many requests/i.test(error.message)) return Object.assign(new WorldError(409, 'model_unavailable', `${name} has reached its plan's usage limit for now. Try again later, or pick another agent.`), { cause: error });
+  return error;
+}
+
 /** GV1e: the person's message and the agent's last reply of each Studio turn go into the world's Girru chat. */
 const pendingRuns = new Map<string, { runId: string; started: number }>();
 export async function worldTurn(userId: string, role: string, projectId: string, input: TurnInput, signal: AbortSignal, deps: TurnDeps = {}): Promise<TurnResult> {
@@ -244,14 +257,15 @@ export async function worldTurn(userId: string, role: string, projectId: string,
     await addUserMessage(conversation, last.content.slice(0, 20_000), runId);
   }
   let reply: TurnResult;
-  try { reply = await answerTurn(userId, role, projectId, input, signal, deps); }
+  try { reply = await answerTurn(userId, role, projectId, input, signal, deps).catch(async error => { throw await plainFailure(error, row?.agent_id); }); }
   catch (error) {
     // The failed reply stays in the place's Girru chat with its reason, as in Girru Chat.
     const failed = pendingRuns.get(key);
     if (conversation && failed && !signal.aborted) {
       pendingRuns.delete(key);
       const text = error instanceof WorldError && error.message !== error.code ? error.message : 'The agent could not answer. Try again or pick another agent.';
-      await addAssistantMessage(conversation, { runId: failed.runId, content: text, parts: [], status: 'error', durationMs: Date.now() - failed.started, errorCode: 'model_unavailable' }).catch(() => undefined);
+      const who = (await agentRow(row?.agent_id)) ?? (await primaryAgent());
+      await addAssistantMessage(conversation, { runId: failed.runId, content: text, parts: [{ kind: 'text', text }], status: 'error', durationMs: Date.now() - failed.started, errorCode: 'model_unavailable', agentId: who?.id ?? null }).catch(() => undefined);
     }
     throw error;
   }
@@ -281,6 +295,17 @@ export async function worldOfChatProject(userId: string, chatProjectId: string):
   return { projectId: row.project_id, title: (await worldTitle(userId, row.project_id)) ?? 'GenVR place', folder: shownFolder(row.folder), path: row.folder, answerer: agent ? answererOf(agent) : null };
 }
 
+/** Coding-app agents read one prompt with a size limit: the Studio guide and the tools are kept within it. */
+const CONTEXT_BUDGET = 86_000, GUIDE_LIMIT = 40_000;
+/** The tools in full when they fit; else each tool's name, first line and argument names; else the names only. */
+export function toolText(defs: readonly ToolDef[], budget: number): string {
+  const full = asProtocol(defs);
+  if (full.length <= budget) return full;
+  const compact = JSON.stringify(defs.map(d => ({ name: d.name, description: shortLine(d.description, 140), arguments: Object.fromEntries(Object.entries(((d.input_schema as { properties?: Record<string, { type?: unknown }> })?.properties) ?? {}).slice(0, 24).map(([key, value]) => [key, typeof value?.type === 'string' ? value.type : 'value'])) })));
+  if (compact.length <= budget) return compact;
+  return JSON.stringify(defs.map(d => d.name)).slice(0, Math.max(0, budget));
+}
+
 /** One model turn in a world, as the world's agent, with that agent's provider. */
 async function answerTurn(userId: string, role: string, projectId: string, input: TurnInput, signal: AbortSignal, deps: TurnDeps = {}): Promise<TurnResult> {
   if (role !== 'owner') throw new WorldError(403, 'owner_required');
@@ -302,7 +327,8 @@ async function answerTurn(userId: string, role: string, projectId: string, input
 
   if (subscriptionModel(model)) {
     if (role !== 'owner' || !subscriptionEnabled()) throw new WorldError(409, 'model_unavailable', `${answerer.detail} is not available here. Pick another agent for this world.`);
-    const prompt = subscriptionReplyPrompt(`${system}\n\n${PROTOCOL}\nAvailable tools:\n${asProtocol(defs)}`, conversationText(input.messages));
+    const head = `${system.length > GUIDE_LIMIT ? `${system.slice(0, GUIDE_LIMIT)}\n[The Studio guide is shortened for size.]` : system}\n\n${PROTOCOL}\nAvailable tools:\n`;
+    const prompt = subscriptionReplyPrompt(head + toolText(defs, CONTEXT_BUDGET - head.length), conversationText(input.messages));
     const run = deps.subscription ?? ((m, f, p, s) => runSubscription(m, f, p, s, { appToolsOnly: true }));
     const text = await run(model, row.folder, prompt, signal, agent.id);
     const reply = protocolReply(withoutThinking(text), offered);
