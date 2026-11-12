@@ -637,6 +637,98 @@
         "rescore": "default",
         "indexMB": "default"
       }
+    },
+    {
+      "id": "mac-m6-100000",
+      "date": "2026-11-12T21:30:00Z",
+      "machine": {
+        "cpu": "Apple M6 (Mac Mini)",
+        "threads": null,
+        "ramGB": 32,
+        "os": "darwin arm64"
+      },
+      "git": {
+        "commit": "05905476",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs --record \"Mac: final\" (run by the mac girru session; copied here)",
+      "label": "Mac: final",
+      "size": 100000,
+      "vectors": "semantic",
+      "jsonStub": true,
+      "openedRows": 46731,
+      "queries": 20,
+      "searchMs": {
+        "p50": 34.2,
+        "p95": 46.9,
+        "max": null
+      },
+      "queryEmbedMs": {
+        "p50": 17.2,
+        "p95": null
+      },
+      "coldMs": 2600,
+      "peakRssMB": 561,
+      "indexMB": 124,
+      "drawers": null,
+      "dbMB": null,
+      "settings": {
+        "p9": true,
+        "store": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "mac-m6-1000000",
+      "date": "2026-11-12T21:30:00Z",
+      "machine": {
+        "cpu": "Apple M6 (Mac Mini)",
+        "threads": null,
+        "ramGB": 32,
+        "os": "darwin arm64"
+      },
+      "git": {
+        "commit": "05905476",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs --record \"Mac: final\" (run by the mac girru session; copied here)",
+      "label": "Mac: final",
+      "size": 1000000,
+      "vectors": "semantic",
+      "jsonStub": true,
+      "openedRows": 464930,
+      "queries": 20,
+      "searchMs": {
+        "p50": 36.3,
+        "p95": 48.5,
+        "max": 50.3
+      },
+      "queryEmbedMs": {
+        "p50": 17.3,
+        "p95": null
+      },
+      "coldMs": 50100,
+      "peakRssMB": 1500,
+      "indexMB": 765,
+      "drawers": {
+        "exact": 0,
+        "i8": 0,
+        "ann": 3
+      },
+      "dbMB": 5000,
+      "settings": {
+        "p9": true,
+        "store": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
     }
   ]
 }
