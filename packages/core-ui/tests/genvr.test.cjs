@@ -52,7 +52,7 @@ test('local runtime availability has a minimal program-only contract',()=>{
  assert.equal(allowedRequest('GET',GENVR_RUNTIME),true);
  assert.equal(allowedGenVR('POST',GENVR_RUNTIME,{}),false);
  assert.equal(allowedGenVR('GET',GENVR_RUNTIME+'?owner=other'),false);
- assert.deepEqual(genvrResponse(GENVR_RUNTIME,200,{state:'installed',version:'0.3.0-preview.18',job:'private',account:'private'}),{state:'installed',version:'0.3.0-preview.18'});
+ assert.deepEqual(genvrResponse(GENVR_RUNTIME,200,{state:'installed',version:'0.3.0-preview.19',job:'private',account:'private'}),{state:'installed',version:'0.3.0-preview.19'});
  assert.deepEqual(genvrResponse(GENVR_RUNTIME,200,{state:'missing',version:null}),{state:'missing',version:null});
  assert.throws(()=>genvrResponse(GENVR_RUNTIME,200,{state:'installed',version:'invalid'}));
 });
@@ -79,7 +79,7 @@ test('GV1: the shell shows the GenVR places sidebar (the page owns its sidebar)'
 test('GV1 PC fixes: a space opens empty, the Studio never waits on an unanswered request, and it can always be left',()=>{
  const read=f=>require('node:fs').readFileSync(require('node:path').join(__dirname,f),'utf8');
  const host=read('../scripts/genvr-host.js'),page=read('../src/GenVRPage.tsx');
- assert.match(host,/filmExample:typeof projectId==='string'\?false:/);
+ assert.ok(host.includes("filmExample:typeof projectId==='string'||data.lab===true?false:"));
  assert.match(page,/operation==='agents'&&!genvrId\(data\.value\)\)\{send\(\{id:data\.id,response:true,ok:true,value:\[\]\}\)/);
  assert.match(page,/if\(!request\)\{send\(\{id:data\.id,response:true,ok:false\}\);return;\}/);
  assert.doesNotMatch(host,/openExisting|STUDIO_HOST_VERSION/);assert.doesNotMatch(page,/open-failed/);
@@ -90,4 +90,10 @@ test('GV1 PC fixes: a space opens empty, the Studio never waits on an unanswered
 test('GV1: renaming saves once when Enter and leaving the field both fire',()=>{
  const src=require('node:fs').readFileSync(require('node:path').join(__dirname,'../src/GenVRHome.tsx'),'utf8');
  assert.match(src,/next === sending\.current\) return; sending\.current = next;/);
+});
+test('GV1: the Studio hands My projects back to Girru and Motion lab opens the lab itself',()=>{
+ const read=f=>require('node:fs').readFileSync(require('node:path').join(__dirname,f),'utf8');
+ const host=read('../scripts/genvr-host.js'),page=read('../src/GenVRPage.tsx');
+ assert.match(host,/onHome:\(\)=>send\(\{operation:'home'\}\)/);assert.match(host,/data\.lab===true&&typeof projectId!=='string'\?\{openLab:true\}/);
+ assert.match(page,/if\(data\.operation==='home'\)\{/);assert.match(page,/if\(p==='lab'\)open\(lab\?\.id,undefined,true\);/);
 });

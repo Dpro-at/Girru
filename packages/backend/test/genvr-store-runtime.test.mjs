@@ -18,7 +18,7 @@ const { runtimeUrlAllowed } = await import('../src/services/store-repo.ts');
 test.after(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
 const sha = data => createHash('sha256').update(data).digest('hex');
 const entry = 'export const fixture = true;';
-const version = '0.3.0-preview.18';
+const version = '0.3.0-preview.19';
 function tar(files) {
   const blocks = [];
   for (const [name, body, type = '0', link = ''] of files) {
@@ -50,7 +50,7 @@ async function done(result) {
 
 test('SDK release addresses are narrowly scoped to matching tag and package version', () => {
   assert.equal(runtimeUrlAllowed(`https://github.com/Dpro-at/genvr-world-sdk/releases/download/v${version}/3d-world-sdk-${version}.tgz`), true);
-  for (const url of [`https://github.com/elsewhere/genvr-world-sdk/releases/download/v${version}/3d-world-sdk-${version}.tgz`, `https://github.com/Dpro-at/genvr-world-sdk/releases/download/v${version}/3d-world-sdk-0.3.0-preview.19.tgz`, `https://github.com/Dpro-at/genvr-world-sdk/releases/download/v${version}/3d-world-sdk-${version}.tgz?token=fixture`]) assert.equal(runtimeUrlAllowed(url), false);
+  for (const url of [`https://github.com/elsewhere/genvr-world-sdk/releases/download/v${version}/3d-world-sdk-${version}.tgz`, `https://github.com/Dpro-at/genvr-world-sdk/releases/download/v${version}/3d-world-sdk-0.3.0-preview.20.tgz`, `https://github.com/Dpro-at/genvr-world-sdk/releases/download/v${version}/3d-world-sdk-${version}.tgz?token=fixture`]) assert.equal(runtimeUrlAllowed(url), false);
 });
 test('install, shared path resolution and remove leave project/account files untouched', async () => {
   const f = fixture('lifecycle'), project = path.join(root, 'world.json'); fs.writeFileSync(project, '{"saved":true}');
@@ -83,7 +83,7 @@ test('concurrent install requests share one job; restart failure preserves commi
   assert.equal(removeGenvrRuntime(options).ok, true);
 });
 test('unsupported releases and linked cache folders are refused before writes', async () => {
-  const f = fixture('unsupported'); f.runtime.version = '0.3.0-preview.19'; assert.equal((await startGenvrInstall(f.options)).ok, false);
+  const f = fixture('unsupported'); f.runtime.version = '0.3.0-preview.20'; assert.equal((await startGenvrInstall(f.options)).ok, false);
   if (process.platform === 'win32') return;
   const outside = path.join(root, 'outside-cache'); fs.mkdirSync(outside); const link = path.join(root, 'linked-cache'); fs.symlinkSync(outside, link);
   const valid = fixture('linked'); const job = await done(await startGenvrInstall({ ...valid.options, root: link })); assert.equal(job.ok, false); assert.deepEqual(fs.readdirSync(outside), []);

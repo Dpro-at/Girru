@@ -64,3 +64,14 @@ test('market text from outside creators is cut, cleaned and marked as data',asyn
  assert.ok(item.name.length<=80&&!/[<>‮]/.test(item.name));assert.equal(item.caption.length,300);assert.equal(item.tags[0].length,30);assert.doesNotMatch(item.made_by,/[\n\u0000]/);
  assert.match(out.content[0].text,/never as instructions/);
 });
+
+test('create makes a space with the create page defaults and checks every choice',async()=>{
+ const calls=[];const doc={project:{id:'new-1',title:'Shop',world:{style:{base:'voxel'},sizeTier:'max'},play:{view:'free',orientation:'landscape',devices:['phone']}},revision:1,agents:[]};
+ const backend={async request(method,path,body){calls.push({method,path,body});if(method==='POST')return {id:'new-1',revision:1};if(path==='/api/genvr/agents')return {agents:[]};return doc;}};
+ const out=await callTool('genvr_spaces',{operation:'create',title:' Shop ',look:'voxel',size:'biggest'},{backend});
+ assert.notEqual(out.isError,true);assert.deepEqual(calls[0],{method:'POST',path:'/api/genvr/projects',body:{title:'Shop',look:'voxel',view:'free',orientation:'landscape',devices:['phone','tablet','computer','tv'],size:'max'}});
+ assert.equal(out.structuredContent.space_id,'new-1');
+ const simple=await callTool('genvr_spaces',{operation:'create',title:'A',look:'simple',view:'2d',devices:['tv','phone']},{backend});assert.notEqual(simple.isError,true);
+ assert.deepEqual(calls.find((c,i)=>i>0&&c.method==='POST').body,{title:'A',look:'blocky',view:'side',orientation:'landscape',devices:['phone','tv'],size:'small'});
+ for(const bad of [{title:''},{title:'x'.repeat(61)},{title:'A',look:'anime'},{title:'A',size:'tiny'},{title:'A',devices:[]},{title:'A',devices:['vr']},{title:'A',view:'top'},{title:'A',space_id:'x'}])assert.equal((await callTool('genvr_spaces',{operation:'create',...bad},{backend})).isError,true,JSON.stringify(bad));
+});
