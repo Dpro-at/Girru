@@ -1,10 +1,10 @@
 /**
- * GENVR-WORLD-01 P1 (board W1): the world's folder and project, who answers, and one model turn.
- * Owner only: the chat inside the Studio is the owner's own chat.
+ * GENVR-WORLD-01 (board W1, GV1e): a world's folder, project and Girru chat, who answers, the chat's
+ * latest lines and the world behind a chat project. Owner only. The Studio chat itself is a Girru chat run.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { authorizeActiveRole } from '../../auth/route-guards.js';
-import { chooseWorldAgent, openWorld, parseTurn, TURN_LIMITS, WorldError, worldHistory, worldOfChatProject, worldTurn, type TurnDeps } from '../../services/genvr-world.js';
+import { chooseWorldAgent, openWorld, WorldError, worldHistory, worldOfChatProject } from '../../services/genvr-world.js';
 import { safeConsole, safeErrorFields } from '../../services/safe-error-log.js';
 import { redactSecrets } from '../../services/secret-redact.js';
 
@@ -12,7 +12,7 @@ const OWNER_ONLY = ['owner'] as const;
 type Req = FastifyRequest<{ Params: { id: string } }>;
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
-export async function genvrWorldRoutes(app: FastifyInstance, options: { deps?: TurnDeps } = {}) {
+export async function genvrWorldRoutes(app: FastifyInstance) {
   const config = { access: 'owner' as const };
   const asOwner = (fn: (ownerId: string, request: Req, reply: FastifyReply) => Promise<unknown>) => async (request: Req, reply: FastifyReply) => {
     const ownerId = authorizeActiveRole(request, reply, OWNER_ONLY);
@@ -43,12 +43,5 @@ export async function genvrWorldRoutes(app: FastifyInstance, options: { deps?: T
     if (!/^[A-Za-z0-9_-]{1,100}$/.test(request.params.id)) throw new WorldError(400, 'invalid_input');
     const world = await worldOfChatProject(owner, request.params.id);
     return world ?? reply.code(404).send({ code: 'not_found' });
-  }));
-  app.post('/api/genvr/worlds/:id/turn', { config, bodyLimit: TURN_LIMITS.bytes + 65536 }, asOwner(async (owner, request, reply) => {
-    const input = parseTurn(request.body);
-    // The page closed, the Studio stopped or the bridge timed out: stop the model too (a local model queues turns).
-    const abort = new AbortController();
-    reply.raw.once('close', () => { if (!reply.raw.writableEnded) abort.abort(); });
-    return worldTurn(owner, 'owner', request.params.id, input, abort.signal, options.deps);
   }));
 }
