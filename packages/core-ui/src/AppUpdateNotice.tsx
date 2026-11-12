@@ -10,7 +10,8 @@ export function updateNoticeText(view:AppUpdateView|null):string|null {
  return view.error?'Update needs attention':`Girru ${view.update.version} is available`;
 }
 /** A quiet owner command in the top bar (Mohamed): "Update" when a new version is ready, a short line while it
- *  updates. Installing stays in the existing update screen, which it opens. */
+ *  updates. Pressing Update starts it at once (the app asks once: back up and update); where this computer can't
+ *  update from inside Girru, or while it is busy or needs attention, it opens the update screen instead. */
 export function AppUpdateNotice({onOpen,bridge=appUpdateBridge()}:{onOpen:()=>void;bridge?:Bridge|null}) {
  const [view,setView]=useState<AppUpdateView|null>(null);
  useEffect(()=>{
@@ -24,5 +25,5 @@ export function AppUpdateNotice({onOpen,bridge=appUpdateBridge()}:{onOpen:()=>vo
  const text=updateNoticeText(view);
  if(!text)return null;
  const label=view?.busy?text:view?.error?'Update needs attention':'Update';
- return <button type="button" className="titlebar-update" data-busy={view?.busy?true:undefined} onClick={onOpen} title={`${text}. See what is new and update Girru`} aria-label={`${text}. See what is new and update Girru`}><UiIcon name="download" size={13}/><span role="status">{label}</span></button>;
+ return <button type="button" className="titlebar-update" data-busy={view?.busy?true:undefined} onClick={()=>{if(view?.update?.canInstall&&!view.busy&&!view.error&&bridge)void bridge.install().catch(()=>onOpen());else onOpen();}} title={`${text}. See what is new and update Girru`} aria-label={`${text}. See what is new and update Girru`}><UiIcon name="download" size={13}/><span role="status">{label}</span></button>;
 }

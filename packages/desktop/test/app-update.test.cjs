@@ -113,3 +113,43 @@ test('P3: a version that started fine lets the replaced one go; without the swit
  assert.equal(off.u.previous(),null,'switch off: no restore offered');
  off.u.cleanOld();assert.ok(!fs.readdirSync(off.apps).some(n=>n.startsWith('.Girru.app.old-')),'removed on the next start, as before');
 });
+
+// WIN-UPD-01: on Windows the release's installer is downloaded and checked, a backup is made,
+// then Girru closes and the installer runs silently into the same place and opens Girru again.
+function windows({bytes=Buffer.from('MZ installer of 1.4.0'),sumOk=true,backup={ok:true,id:'x'},execName='Girru.exe',runner=true}={}){
+ const W='win-x64',dir=fs.mkdtempSync(path.join(os.tmpdir(),'ap-app-update-win-'));
+ const wrel=v=>({tag_name:`v${v}`,draft:false,prerelease:false,published_at:'2026-11-12T10:00:00Z',html_url:`https://github.com/Dpro-at/Girru/releases/tag/v${v}`,body:'New',
+  assets:[{name:`Girru-${v}-${W}.exe`,browser_download_url:`https://github.com/Dpro-at/Girru/releases/download/v${v}/Girru-${v}-${W}.exe`},{name:`SHA256SUMS-${W}.txt`,browser_download_url:`https://github.com/Dpro-at/Girru/releases/download/v${v}/SHA256SUMS-${W}.txt`}]});
+ const sum=createHash('sha256').update(sumOk?bytes:Buffer.from('other')).digest('hex'),calls=[],ran=[];
+ const u=createUpdater({currentVersion:'1.4.1',settingsDir:dir,platform:'win32',arch:'x64',execPath:`C:\\Users\\me\\AppData\\Local\\Programs\\Girru\\${execName}`,
+  fetchRelease:async()=>wrel('1.4.4'),
+  download:async(url,opts={})=>{calls.push(url.endsWith('.txt')?'sums':'exe');if(!opts.file)return `${sum}  Girru-1.4.4-${W}.exe\n`;fs.writeFileSync(opts.file,bytes);return createHash('sha256').update(bytes).digest('hex');},
+  backUp:async()=>{calls.push('backup');return backup;},relaunch:()=>calls.push('relaunch'),...(runner?{runInstaller:file=>{ran.push(file);calls.push('run');}}:{})});
+ return {u,dir,calls,ran};
+}
+
+test('Windows: the installer is checked, a backup is made, then it runs after Girru closes',async()=>{
+ const w=windows();await w.u.check();
+ assert.equal(w.u.view().update.canInstall,true);
+ await w.u.install();
+ assert.deepEqual(w.calls,['sums','exe','backup','run']);
+ assert.equal(w.ran.length,1);assert.equal(path.basename(w.ran[0]),'Girru-1.4.4-win-x64.exe');assert.ok(fs.existsSync(w.ran[0]),'kept until it has run');
+ assert.equal(w.u.view().busy,'installing');
+ w.u.cleanOld();assert.equal(fs.existsSync(w.ran[0]),false,'the next start removes it');
+});
+
+test('Windows: a bad checksum, a failed backup or a file that is not a program runs nothing',async()=>{
+ for(const opts of [{sumOk:false},{backup:{ok:false,error:'disk full'}},{bytes:Buffer.from('not a program')}]){
+  const w=windows(opts);await w.u.check();await w.u.install();
+  assert.equal(w.ran.length,0,JSON.stringify(opts));assert.match(w.u.view().error,/Girru is unchanged/);assert.equal(w.u.view().busy,null);
+ }
+ const dev=windows({execName:'electron.exe'});await dev.u.check();assert.equal(dev.u.view().update.canInstall,false,'a run from source shows the release page');
+ const old=windows({runner:false});await old.u.check();assert.equal(old.u.view().update.canInstall,false);
+});
+
+test('Windows: the installer runs only after Girru has closed, silently, and opens Girru again',()=>{
+ const main=fs.readFileSync(path.join(__dirname,'../src/main.cjs'),'utf8');
+ assert.ok(main.includes("runInstaller: file => { installerAfterQuit = file; app.quit(); },"));
+ assert.ok(main.includes("app.on('will-quit', () => {\n  if (!installerAfterQuit || process.platform !== 'win32') return;"));
+ assert.ok(main.includes("spawn(installerAfterQuit, ['/S', '--updated', '--force-run'], { detached: true, stdio: 'ignore', windowsHide: true }).unref()"));
+});

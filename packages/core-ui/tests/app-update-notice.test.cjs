@@ -19,4 +19,5 @@ test('the top bar shows an Update button only when a new Girru is ready (Mohamed
  assert.ok(shell.includes("{owner && mode === 'live' && <AppUpdateNotice onOpen={()=>openSettings('about')}/>}\n      <div className=\"titlebar-tools end\" ref={setTitleSlot}/>"));
  assert.equal(shell.split('<AppUpdateNotice').length,2,'one place only');
  assert.ok(notice.includes("view?.error?'Update needs attention':'Update'"));
+ assert.ok(notice.includes("if(view?.update?.canInstall&&!view.busy&&!view.error&&bridge)void bridge.install()"),'Update starts the update at once');
 });

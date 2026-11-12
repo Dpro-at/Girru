@@ -480,6 +480,13 @@ ipcMain.handle('dpro:app-info', event => {
 // MACAPP-01: updates of the installed app (Settings › About and updates). Only the main
 // window's own Girru page may ask; installing backs up first and replaces the app.
 let updater = null;
+let installerAfterQuit = null;
+// WIN-UPD-01: after Girru has closed, the checked installer runs silently into the same place and opens Girru again.
+app.on('will-quit', () => {
+  if (!installerAfterQuit || process.platform !== 'win32') return;
+  try { require('node:child_process').spawn(installerAfterQuit, ['/S', '--updated', '--force-run'], { detached: true, stdio: 'ignore', windowsHide: true }).unref(); }
+  catch (error) { log?.write(`The update installer did not start: ${error.message}`); }
+});
 let systemTray = null;
 const fromAppPage = event => !!mainWindow && !!appOrigin && event.sender === mainWindow.webContents && event.senderFrame === mainWindow.webContents.mainFrame;
 function startUpdater() {
@@ -488,6 +495,8 @@ function startUpdater() {
     currentVersion: app.getVersion(), settingsDir: settingsDir(),
     backUp: () => runtime ? runtime.backUp() : Promise.resolve({ ok: false, error: 'Girru is not running here' }),
     relaunch: () => { app.relaunch(); app.quit(); },
+    // WIN-UPD-01: Girru closes as usual (its engine stops, keys are put away), then the installer runs.
+    runInstaller: file => { installerAfterQuit = file; app.quit(); },
   });
   updater.cleanOld();
   updater.onChange(view => { if (mainWindow && appOrigin) mainWindow.webContents.send('dpro:app-update', view); });
@@ -500,7 +509,7 @@ ipcMain.handle('dpro:app-update-check', event => fromAppPage(event) && updater ?
 ipcMain.handle('dpro:app-update-install', async event => {
   if (!fromAppPage(event) || !updater || !updater.view().update) return null;
   const v = updater.view().update.version;
-  const answer = await dialog.showMessageBox(mainWindow, { type: 'question', message: `Back up and update to Girru ${v}?`, detail: 'Girru makes a backup of your data, puts the new version in place and starts again. Your saved workspace is kept; valid sign-in sessions are restored.', buttons: ['Cancel', 'Back up and update'], defaultId: 1, cancelId: 0 });
+  const answer = await dialog.showMessageBox(mainWindow, { type: 'question', message: `Back up and update to Girru ${v}?`, detail: process.platform === 'win32' ? 'Girru makes a backup of your data, closes, installs the new version in the same place and opens again. Your saved workspace is kept; valid sign-in sessions are restored.' : 'Girru makes a backup of your data, puts the new version in place and starts again. Your saved workspace is kept; valid sign-in sessions are restored.', buttons: ['Cancel', 'Back up and update'], defaultId: 1, cancelId: 0 });
   return answer.response === 1 ? updater.install() : updater.view();
 });
 ipcMain.handle('dpro:app-update-page', event => { if (fromAppPage(event) && updater?.view().update) void shell.openExternal(updater.view().update.page); return null; });

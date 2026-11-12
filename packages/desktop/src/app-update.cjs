@@ -10,7 +10,9 @@
  *   3. the new Girru.app is unpacked (ditto) and checked (same app id, the new version);
  *   4. it replaces the running app (the old one is kept beside it until the next start)
  *      and Girru starts again.
- * macOS zip only for now; other systems show the release page.
+ * Windows (WIN-UPD-01): the release's installer (.exe) is downloaded and checked the
+ * same way, the same backup is made, then Girru closes and the installer runs silently
+ * into the same place and starts Girru again. Linux shows the release page.
  */
 const fs = require('node:fs');
 const os = require('node:os');
@@ -49,7 +51,8 @@ function readRelease(body, current, platform = platformId()) {
   if (!/^\d+\.\d+\.\d+$/.test(version)) return { available: false };
   const assets = Array.isArray(body.assets) ? body.assets : [];
   const url = name => { const a = assets.find(x => x && x.name === name); return a && typeof a.browser_download_url === 'string' && a.browser_download_url.startsWith(DOWNLOAD_PREFIX) ? a.browser_download_url : null; };
-  const zipName = `Girru-${version}-${platform}.zip`;
+  // macOS: the app in a zip; Windows: the installer.
+  const zipName = `Girru-${version}-${platform}.${platform.startsWith('win-') ? 'exe' : 'zip'}`;
   return {
     available: newer(version, current),
     version,
@@ -141,8 +144,11 @@ function validPrevious(p) {
     backupFolder: typeof p.backupFolder === 'string' && path.isAbsolute(p.backupFolder) ? p.backupFolder : null, at: typeof p.at === 'string' ? p.at : null };
 }
 
-function createUpdater({ currentVersion, settingsDir, backUp, relaunch, fetchRelease = () => get(LATEST, { json: true }), download = get, now = () => Date.now(), platform = process.platform, arch = process.arch, execPath = process.execPath, unpack = (zip, dir) => run('/usr/bin/ditto', ['-x', '-k', zip, dir]), readApp = appInfo, keepPrevious = !/^(0|false|no|off)$/i.test(String(process.env.GIRRU_STORE_P3 || '').trim()) }) {
+function createUpdater({ currentVersion, settingsDir, backUp, relaunch, runInstaller = null, fetchRelease = () => get(LATEST, { json: true }), download = get, now = () => Date.now(), platform = process.platform, arch = process.arch, execPath = process.execPath, unpack = (zip, dir) => run('/usr/bin/ditto', ['-x', '-k', zip, dir]), readApp = appInfo, keepPrevious = !/^(0|false|no|off)$/i.test(String(process.env.GIRRU_STORE_P3 || '').trim()) }) {
   const stateFile = path.join(settingsDir, 'app-update.json');
+  // Windows: the installer is kept here until it has run (the next start removes it).
+  const installers = path.join(settingsDir, 'updates');
+  const windowsApp = platform === 'win32' && typeof runInstaller === 'function' && /(^|[\\/])girru\.exe$/i.test(String(execPath));
   let state = { version: currentVersion, checkedAt: null, release: null, busy: null, error: null, previous: null };
   // Only when it last looked is kept on disk; what GitHub offers (and where to download it) is asked again after a restart.
   // STORE-MAP-01 P3 (FD4a): also the version this one replaced, until this one has started once.
@@ -156,7 +162,7 @@ function createUpdater({ currentVersion, settingsDir, backUp, relaunch, fetchRel
   const view = () => ({
     version: state.version, checkedAt: state.checkedAt, busy: state.busy, error: state.error,
     update: state.release && state.release.available && newer(state.release.version, state.version)
-      ? { version: state.release.version, publishedAt: state.release.publishedAt, notes: state.release.notes, page: state.release.page, canInstall: platform === 'darwin' && !!state.release.zip && !!state.release.sums && !!currentAppPath(execPath) }
+      ? { version: state.release.version, publishedAt: state.release.publishedAt, notes: state.release.notes, page: state.release.page, canInstall: !!state.release.zip && !!state.release.sums && ((platform === 'darwin' && !!currentAppPath(execPath)) || windowsApp) }
       : null,
   });
 
@@ -184,14 +190,23 @@ function createUpdater({ currentVersion, settingsDir, backUp, relaunch, fetchRel
       set({ busy: 'downloading', error: null });
       const sums = await download(r.sums, { maxBytes: 64 * 1024 });
       const expected = sumFor(sums, r.zipName);
-      if (!expected) throw new Error('the release has no checksum for this Mac');
-      const zip = path.join(work, r.zipName);
+      if (!expected) throw new Error('the release has no checksum for this computer');
+      if (platform === 'win32') fs.mkdirSync(installers, { recursive: true, mode: 0o700 });
+      const zip = path.join(platform === 'win32' ? installers : work, r.zipName);
       const actual = await download(r.zip, { file: zip });
-      if (actual !== expected) throw new Error('the download does not match its checksum');
+      if (actual !== expected) { fs.rmSync(zip, { force: true }); throw new Error('the download does not match its checksum'); }
       set({ busy: 'backing-up' });
       const backup = await backUp();
       if (!backup || backup.ok !== true) throw new Error(`the backup before updating failed${backup && backup.error ? ` (${backup.error})` : ''}`);
       set({ busy: 'installing' });
+      if (platform === 'win32') {
+        // A Windows program starts with "MZ"; anything else is not run.
+        const head = Buffer.alloc(2); const fd = fs.openSync(zip, 'r'); try { fs.readSync(fd, head, 0, 2, 0); } finally { fs.closeSync(fd); }
+        if (head.toString('latin1') !== 'MZ') throw new Error('the download is not a Windows installer');
+        set({ busy: 'installing', release: null, previous: null });
+        runInstaller(zip);
+        return view();
+      }
       const unpacked = path.join(work, 'app');
       fs.mkdirSync(unpacked);
       await unpack(zip, unpacked);
@@ -221,6 +236,8 @@ function createUpdater({ currentVersion, settingsDir, backUp, relaunch, fetchRel
    * version this one replaced stays until this one has started once (startedFine).
    */
   function cleanOld() {
+    // Windows: an installer that already ran is no longer needed.
+    if (platform === 'win32') { try { fs.rmSync(installers, { recursive: true, force: true }); } catch { /* in use or gone */ } return; }
     const current = currentAppPath(execPath);
     if (!current) return;
     const keep = keepPrevious && state.previous ? state.previous.app : null;
