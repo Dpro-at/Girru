@@ -2313,7 +2313,7 @@ button.status-item:hover { background:var(--row-hover); color:var(--text); }
 /* MEM-READ-01 MR1: a memory row = title, two clean lines, then a quiet line; the inspector shows the text formatted. */
 .dk-row-title { font-weight:600; }
 .dk-row-lines { font-size:12.5px; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; color:var(--muted); line-height:1.4; white-space:normal; }
-.dk-read-more { font-size:inherit; padding:0; }
+.app-shell :is(.page-column, .page-ui) button.dk-read-more, .app-shell .dk-read-more, .dk-read-more:hover { font-size:inherit; padding:0; border:0; background:none; box-shadow:none; min-block-size:0; color:var(--accent); }
 .dk-row[aria-selected="true"] .dk-read-more { display:none; }
 .dk-insp-md { display:grid; gap:6px; line-height:1.5; }
 .dk-insp-md h1, .dk-insp-md h2, .dk-insp-md h3 { margin:6px 0 0; font-size:1.02em; font-weight:650; }

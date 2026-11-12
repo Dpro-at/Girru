@@ -35,6 +35,20 @@ import { HiddenKeysController, KeyText, hiddenSummary } from './memory-hidden-ke
 import { MarkdownDocument } from './DocumentEditor';
 
 /** MEM-READ-01 MR1: how a memory came ("Imported", "Saved by you", "Learned"), else its kind. */
+/** MR1: the inspector shows the title on top and the text without an imported file name or the repeated title. */
+export function readableBody(text: string, title?: string): { heading: string | null; body: string } {
+  const t = text.trim();
+  if (/^\s{0,3}#{1,3}\s/.test(t) || !title) return { heading: null, body: t };
+  const noFile = t.replace(/^(?:[a-z0-9]+[-_.][a-z0-9._-]*|[a-z0-9]+(?:[-_][a-z0-9]+)+)\s*:\s+/i, '');
+  const plainStart = noFile.replace(/\*\*|__|`/g, '');
+  if (plainStart.startsWith(title)) {
+    // Drop the title (as written, with its Markdown marks) and the " — " after it.
+    let i = 0, seen = 0; while (i < noFile.length && seen < title.length) { if (!/[*_`]/.test(noFile[i]) || noFile[i] === title[seen]) seen++; i++; }
+    const body = noFile.slice(i).replace(/^\s*(?:—|-|:)\s*/, '');
+    return { heading: title, body: /^[\s.!?…]*$/.test(body) ? '' : body };
+  }
+  return { heading: title, body: t };
+}
 const FROM_WORD: Record<string, string> = { import: 'Imported', memory_file: 'Imported', conversation: 'Imported', owner: 'Saved by you', agent: 'Learned', learning: 'Learned', chat: 'From a chat', retention: 'Summary', outsider: 'From outside' };
 import { useStoreP3, useStoreP6, useStoreP8, useStoreP9, useStoreP9b } from './store-switches';
 import { MemoryTrustController } from './memory-trust';
@@ -586,7 +600,9 @@ function MemoryInspector({ k, item, p9b = false, onHistory, onTrash, onChecked }
       <label className="dk-field-inline">Importance<input type="range" min={1} max={10} value={s.draftImportance} onChange={e => x.editImportance(Number(e.target.value))}/><span>{s.draftImportance}</span></label>
       {!s.conflict && <div className="actions"><button type="button" onClick={() => x.cancelEdit()}>Cancel</button><button type="submit" className="primary" disabled={s.busy || !s.draft.trim()}>Save</button></div>}
       <p className="fine-print">Saved as a new version; History keeps the old one. {mod}↩ saves.</p>
-    </form> : <div className="dk-insp-text dk-insp-md" dir="auto"><MarkdownDocument text={s.full ?? item.preview} leaf={(t, key) => <KeyText key={key} text={t} reveal={id => k.hk.reveal(id)}/>}/></div>}
+    </form> : <div className="dk-insp-text dk-insp-md" dir="auto">{(() => { const r = readableBody(s.full ?? item.preview, item.title); return <>
+      {r.heading && <h1>{r.heading}</h1>}
+      <MarkdownDocument text={r.body} leaf={(t, key) => <KeyText key={key} text={t} reveal={id => k.hk.reveal(id)}/>}/></>; })()}</div>}
     {!s.editing && <div className="dk-insp-icons">
       <IconButton icon="pencil" label="Edit" shortcut="↩" onClick={() => x.startEdit()}/>
       <IconButton icon="pin" label="Pin for every agent" onClick={() => void d.pin(s.full ?? item.preview, item.drawerId)}/>

@@ -28,3 +28,10 @@ test('Markdown is formatted (no ** marks) and hidden keys are lock chips inside 
   // Without a leaf it still renders (the shared editor's preview).
   assert.match(renderToStaticMarkup(React.createElement(MarkdownDocument, { text: 'a **b** c' })), /a <strong>b<\/strong> c/);
 });
+
+test('inspector: the title on top, the imported file name and the repeated title gone', () => {
+  const { readableBody } = require('../src/MemoryDesktop.tsx');
+  assert.deepEqual(readableBody('project-vps-ssh: VPS SSH access — **VPS:** Hostinger\n## Deploy', 'VPS SSH access'), { heading: 'VPS SSH access', body: '**VPS:** Hostinger\n## Deploy' });
+  assert.deepEqual(readableBody('# Own heading\ntext', 'Own heading'), { heading: null, body: '# Own heading\ntext' });
+  assert.deepEqual(readableBody('Plain fact here.', 'Plain fact here'), { heading: 'Plain fact here', body: '' });
+});
