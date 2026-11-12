@@ -34,7 +34,7 @@ const answerSample = Number(argValue('answer-sample', '240'));
 // --mode A: the last message only (what a chat recalled before MEM-ACC-02).
 // --mode B: the context query (src/memory/context/query.ts): entity of the conversation or the open project, its names, topic words.
 const mode = argValue('mode', 'A');
-if (!['A', 'B', 'B0'].includes(mode)) { console.error(`mode ${mode} is not built yet`); process.exit(2); }
+if (!['A', 'B', 'B0', 'C'].includes(mode)) { console.error(`mode ${mode} is not built yet`); process.exit(2); }
 const { buildContextQuery } = await import(moduleUrl(backendDir, 'src/memory/context/query.ts'));
 const PROJECT_ENTITIES = new Map(WORLD_PROJECTS.map((p) => [p.slug, { names: [p.en, p.ar] }]));
 const KNOWN = [...PROJECT_ENTITIES.values(), ...WORLD_PEOPLE.map((n) => ({ names: [n, n.split(' ')[0]] }))];
@@ -42,6 +42,8 @@ const KNOWN = [...PROJECT_ENTITIES.values(), ...WORLD_PEOPLE.map((n) => ({ names
 const escapeRe = (n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const NAME_RE = new RegExp(`(?:[لبوفك]|ال|لـ)?(?:${[...new Set(KNOWN.flatMap((e) => e.names))].sort((a, b) => b.length - a.length).map(escapeRe).join('|')})`, 'giu');
 const names_out = (t) => t.replace(NAME_RE, ' ').replace(/\s+/g, ' ').trim();
+// C: the B0 query plus the head of a question with a relative clause as an extra query (multi-hop).
+const partsOf = (q) => (mode === 'C' ? buildContextQuery({ message: q.q, history: q.history || [], openProject: PROJECT_ENTITIES.get(q.project) || null, entities: KNOWN, topic: false }).parts : []);
 const queryOf = (q) => (mode === 'A' ? q.q
   : buildContextQuery({ message: q.q, history: q.history || [], openProject: PROJECT_ENTITIES.get(q.project) || null, entities: KNOWN, topic: mode === 'B' }).query);
 if (!(await ollamaHas(SEM_MODEL))) { console.error(`${SEM_MODEL} is not available on the local Ollama; nothing measured`); process.exit(2); }
@@ -151,7 +153,7 @@ for (const q of questions) {
   const raw = await quietly(() => storage.search({ query, userId: OWNER, drawers, limit: 10 }));
   const searchMs = performance.now() - tS;
   const tC = performance.now();
-  const chat = await quietly(() => qualityRecall({ userId: OWNER, drawers, query, limit: 6, ask: false }));
+  const chat = await quietly(() => qualityRecall({ userId: OWNER, drawers, query, parts: partsOf(q), limit: 6, ask: false }));
   const chatMs = performance.now() - tC;
   // Diagnosis (no-answer): the top hit's score parts, and the share of the message's own words found in it.
   const nameTokens = new Set(KNOWN.flatMap((e) => e.names.flatMap((n) => lexicalTokens(n))));
@@ -224,7 +226,7 @@ if (answerModel) {
       ...(variant === 'S' ? ['A partial or weak match is only about a related topic: use it only when it states the answer itself.'] : []),
       'Reply with JSON only: {"known": true or false, "answer": "a short answer, or empty"}. known is false when the recalled memory does not contain the answer.',
       'Write the answer in English with Latin letters only, even when the question is in Arabic or German; keep names, dates and product names exactly as the memory writes them.'].join('\n');
-    const convo = (row.q.history || []).slice(-4).map((h) => `Owner: ${h}`).join('\n');
+    const convo = (row.q.history || []).map((h) => `Owner: ${h}`).join('\n'); // the whole conversation, as a chat sends it
     const user = `${memory}\n\n${convo ? `Conversation so far:\n${convo}\n\n` : ''}Question: ${row.q.q}`;
     const t = performance.now();
     const res = await fetch('http://127.0.0.1:11434/api/chat', { method: 'POST', body: JSON.stringify({ model: answerModel, stream: false, format: 'json', options: { temperature: 0 },

@@ -1397,6 +1397,174 @@
         "variant": "S",
         "model": "qwen2.5:7b"
       }
+    },
+    {
+      "id": "rmwe4omc8",
+      "date": "2026-11-12T22:37:18.488Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "e1a77279",
+        "branch": "girru/memory-accuracy",
+        "memoryCodeChanged": true
+      },
+      "source": "accuracy.mjs",
+      "kind": "accuracy",
+      "label": "Accuracy C (B0 + question head as an extra query), 1,280 questions, 100k real embeddings",
+      "size": 100140,
+      "vectors": "real",
+      "queries": 1280,
+      "searchMs": {
+        "p50": 75.9,
+        "p95": 92.7
+      },
+      "queryEmbedMs": {
+        "p50": 56.6,
+        "p95": 63.6
+      },
+      "coldMs": 2284.4,
+      "quality": {
+        "hitAt5": 0.848,
+        "hitAt1": 0.628,
+        "multiHopBoth": 1,
+        "noAnswerSaysUnknown": 0.958,
+        "answerableCorrect": 0.755,
+        "mixUp": 0,
+        "leaks": 0
+      },
+      "byKind": {
+        "all": {
+          "recallAt5": 0.848,
+          "hitAt1": 0.628,
+          "ms": {
+            "p50": 75.9,
+            "p95": 92.7
+          }
+        },
+        "direct": {
+          "recallAt5": 0.892,
+          "hitAt1": 0.614,
+          "ms": {
+            "p50": 76.6,
+            "p95": 85.6
+          }
+        },
+        "context": {
+          "recallAt5": 0.858,
+          "hitAt1": 0.697,
+          "ms": {
+            "p50": 76.4,
+            "p95": 85.5
+          }
+        },
+        "cross-language": {
+          "recallAt5": 0.841,
+          "hitAt1": 0.581,
+          "ms": {
+            "p50": 75.8,
+            "p95": 87.3
+          }
+        },
+        "temporal": {
+          "recallAt5": 0.804,
+          "hitAt1": 0.371,
+          "ms": {
+            "p50": 75.8,
+            "p95": 86
+          }
+        },
+        "indirect": {
+          "recallAt5": 0.74,
+          "hitAt1": 0.52,
+          "ms": {
+            "p50": 26.1,
+            "p95": 151.8
+          }
+        },
+        "indirect-near": {
+          "recallAt5": 0.74,
+          "hitAt1": 0.52,
+          "ms": {
+            "p50": 78.8,
+            "p95": 158.3
+          }
+        },
+        "indirect-mid": {
+          "recallAt5": 0.74,
+          "hitAt1": 0.52,
+          "ms": {
+            "p50": 21.6,
+            "p95": 43.2
+          }
+        },
+        "indirect-far": {
+          "recallAt5": 0.74,
+          "hitAt1": 0.52,
+          "ms": {
+            "p50": 24.6,
+            "p95": 45.4
+          }
+        },
+        "no-answer": {
+          "recallAt5": null,
+          "hitAt1": null,
+          "ms": {
+            "p50": 76.6,
+            "p95": 151.3
+          }
+        },
+        "multi-hop": {
+          "recallAt5": 1,
+          "hitAt1": 0.6,
+          "ms": {
+            "p50": 154,
+            "p95": 170.4
+          }
+        },
+        "time-travel": {
+          "recallAt5": 0.6,
+          "hitAt1": 0.1,
+          "ms": {
+            "p50": 76.1,
+            "p95": 87.6
+          }
+        },
+        "topic-switch": {
+          "recallAt5": 1,
+          "hitAt1": 1,
+          "ms": {
+            "p50": 74.3,
+            "p95": 79.7
+          }
+        },
+        "topic-return": {
+          "recallAt5": 1,
+          "hitAt1": 1,
+          "ms": {
+            "p50": 17.4,
+            "p95": 72.9
+          }
+        },
+        "person": {
+          "recallAt5": 1,
+          "hitAt1": 0.767,
+          "ms": {
+            "p50": 75.2,
+            "p95": 82.2
+          }
+        }
+      },
+      "settings": {
+        "p9": true,
+        "p9b": true,
+        "store": true,
+        "mode": "C",
+        "answerModel": "qwen2.5:7b"
+      }
     }
   ]
 }

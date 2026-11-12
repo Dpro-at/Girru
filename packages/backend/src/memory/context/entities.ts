@@ -70,12 +70,14 @@ export async function contextEntities(ownerId: string, openProjectSlug: string |
  * entity the conversation is about. GIRRU_RECALL_CONTEXT=0 keeps the last message alone. Any
  * failure falls back to the last message.
  */
-export async function chatRecallQuery(input: { ownerId: string; message: string; history: readonly string[]; openProjectSlug: string | null }): Promise<string> {
-  if (process.env.GIRRU_RECALL_CONTEXT === '0' || !input.message.trim()) return input.message;
+export async function chatRecallQuery(input: { ownerId: string; message: string; history: readonly string[]; openProjectSlug: string | null }): Promise<{ query: string; parts: string[] }> {
+  if (process.env.GIRRU_RECALL_CONTEXT === '0' || !input.message.trim()) return { query: input.message, parts: [] };
   try {
     const { entities, openProject } = await contextEntities(input.ownerId, input.openProjectSlug);
-    return buildContextQuery({ message: input.message, history: input.history, entities, openProject, topic: false }).query;
+    const q = buildContextQuery({ message: input.message, history: input.history, entities, openProject, topic: false });
+    // MEM-ACC-03: the head of a question with a relative clause is searched too (multi-hop).
+    return { query: q.query, parts: process.env.GIRRU_RECALL_PARTS === '0' ? [] : q.parts };
   } catch {
-    return input.message;
+    return { query: input.message, parts: [] };
   }
 }

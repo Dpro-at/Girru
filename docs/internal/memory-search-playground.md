@@ -57,6 +57,7 @@ GIRRU_STORE_P9=1 node --max-old-space-size=32768 --import tsx scripts/memory-bas
 | `GIRRU_RECALL_INDEX_MB` | ¼ of RAM | the index size cap; past it search falls back to the P9 path |
 | `GIRRU_RECALL_ANN_THREADS` | all cores | `1`: the same HNSW graph on every run (tests) |
 | `GIRRU_RECALL_CONTEXT` | on | `0`: a chat recalls with the last message alone (before MEM-ACC-02) |
+| `GIRRU_RECALL_PARTS` | on | `0`: no extra search for the head of a question with a relative clause (MEM-ACC-03) |
 
 ## Accuracy test (MEM-ACC-01)
 

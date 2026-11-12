@@ -39,6 +39,12 @@ export interface ContextQueryInput {
 
 export interface ContextQuery {
   query: string;
+  /**
+   * Extra queries for a question with a relative clause ("the contact at the client of the project
+   * whose server runs on X"): its head ("the contact at the client of the project") with the same
+   * context, so the answer is searched for and not only the clause that points to it (multi-hop).
+   */
+  parts: string[];
   /** The entity the context came from, or null. */
   entity: KnownEntity | null;
   /** How it was chosen. */
@@ -47,6 +53,17 @@ export interface ContextQuery {
 }
 
 export const MAX_TOPIC_WORDS = 4;
+/** Words that open a relative clause (English, Arabic, Iraqi, German). */
+const CLAUSE = /\s(?:whose|which|where|الذي|التي|اللي|الي|dessen|deren)\s/iu;
+
+/** The head of a question with a relative clause, when both sides say something (two content words each). */
+export function questionHead(message: string): string | null {
+  const m = CLAUSE.exec(message);
+  if (!m) return null;
+  const head = message.slice(0, m.index).trim();
+  const rest = message.slice(m.index + m[0].length).trim();
+  return lexicalTokens(head).length >= 2 && lexicalTokens(rest).length >= 2 ? head : null;
+}
 /** How far back the conversation is read for the latest mention. */
 export const MAX_HISTORY = 60;
 
@@ -110,8 +127,9 @@ export function buildContextQuery(input: ContextQueryInput): ContextQuery {
       entity = input.openProject; source = 'open-project';
     }
   }
-  if (!entity) return { query: message, entity: null, source, topic };
+  const head = questionHead(message);
+  if (!entity) return { query: message, parts: head ? [head] : [], entity: null, source, topic };
   const names = entity.names.filter((n, k, all) => all.indexOf(n) === k).slice(0, 3);
   const context = [names.join(' / '), ...(topic.length ? [topic.join(' ')] : [])].join(': ');
-  return { query: `${message}\n(${context})`, entity, source, topic };
+  return { query: `${message}\n(${context})`, parts: head ? [`${head}\n(${context})`] : [], entity, source, topic };
 }

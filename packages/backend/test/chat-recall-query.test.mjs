@@ -51,14 +51,17 @@ test('names come from the owner\'s scopes and graph aliases, never another owner
 });
 
 test('the conversation or the open project goes into the query; the switch turns it off', async () => {
-  const q1 = await E.chatRecallQuery({ ownerId: 'q-owner', message: 'Why did we change it?', history: ['We talked about Harbor and its server.', 'ok'], openProjectSlug: 'falcon' });
+  const { query: q1 } = await E.chatRecallQuery({ ownerId: 'q-owner', message: 'Why did we change it?', history: ['We talked about Harbor and its server.', 'ok'], openProjectSlug: 'falcon' });
   assert.match(q1, /^Why did we change it\?\n\(Harbor/);
-  const q2 = await E.chatRecallQuery({ ownerId: 'q-owner', message: 'متى الموعد النهائي؟', history: [], openProjectSlug: 'falcon' });
+  const { query: q2 } = await E.chatRecallQuery({ ownerId: 'q-owner', message: 'متى الموعد النهائي؟', history: [], openProjectSlug: 'falcon' });
   assert.match(q2, /Falcon/);
   assert.match(q2, /فالكون/);
   process.env.GIRRU_RECALL_CONTEXT = '0';
-  assert.equal(await E.chatRecallQuery({ ownerId: 'q-owner', message: 'Why did we change it?', history: ['Harbor'], openProjectSlug: 'falcon' }), 'Why did we change it?');
+  assert.equal((await E.chatRecallQuery({ ownerId: 'q-owner', message: 'Why did we change it?', history: ['Harbor'], openProjectSlug: 'falcon' })).query, 'Why did we change it?');
   delete process.env.GIRRU_RECALL_CONTEXT;
+  const multi = await E.chatRecallQuery({ ownerId: 'q-owner', message: 'Who is our contact at the client of the project whose server runs on ClickHouse?', history: [], openProjectSlug: 'falcon' });
+  assert.equal(multi.parts.length, 1, 'the head of a question with a relative clause is searched too');
+  assert.match(multi.parts[0], /^Who is our contact at the client of the project\n\(Falcon/);
 });
 
 test('forget drops the cached names (a removed scope is gone at once)', async () => {
