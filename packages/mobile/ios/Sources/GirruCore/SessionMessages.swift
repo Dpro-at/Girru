@@ -63,6 +63,23 @@ public enum CommandBody {
 
     public static func teamList(ref: String? = nil) throws -> String { try make("team.list", ref: ref) }
 
+    /// Phone Settings (boards P33–P39). Sections: general, account, replies, permissions,
+    /// approval-rules, computers, phones.
+    public static let settingsSections: Set<String> = ["general", "account", "replies", "permissions", "approval-rules", "computers", "phones"]
+
+    public static func settingsRead(section: String, ref: String? = nil) throws -> String {
+        guard settingsSections.contains(section) else { throw ProtocolError.badFormat }
+        return try make("settings.read", ["section": section], ref: ref)
+    }
+
+    /// `confirmed` only right after a fresh Face ID check (AppLock.confirmSensitive).
+    public static func settingsChange(section: String, change: [String: Any], confirmed: Bool = false, ref: String? = nil) throws -> String {
+        guard settingsSections.contains(section), !change.isEmpty else { throw ProtocolError.badFormat }
+        var f: [String: Any] = ["section": section, "change": change]
+        if confirmed { f["confirmed"] = true }
+        return try make("settings.change", f, ref: ref)
+    }
+
     /// One file of the computer's chat page (PROTOCOL.md "The computer's pages on the phone").
     public static func uiGet(path: String, part: Int, ref: String) throws -> String {
         var f: [String: Any] = ["path": path]
@@ -174,6 +191,12 @@ public enum CommandFailure {
             return "This is no longer on your computer."
         case "expired", "unknown_device", "revoked":
             return "Your computer no longer accepts this phone. Pair again."
+        case "confirmation_required", "risky_confirmation_required":
+            return "This change needs Face ID first. Try again."
+        case "on_the_computer":
+            return "Change this in Girru on your computer."
+        case "changed":
+            return "This changed on your computer meanwhile. The latest values are shown; choose again."
         default:
             // internal_error and anything unexpected.
             return "Something went wrong on your computer. Try again."

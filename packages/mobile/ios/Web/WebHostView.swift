@@ -74,6 +74,36 @@ struct WebHostView: UIViewRepresentable {
 
         deinit { if let terminalWatch { NotificationCenter.default.removeObserver(terminalWatch) } }
 
+        /// Failed loads in a row; the page is tried again with a growing pause until it loads.
+        private var failedLoads = 0
+
+        /// The chat page could not load (for example the session dropped while it opened): try again
+        /// after 2, 4, 8, 16, then every 30 seconds, while this phone is still paired and nothing else loaded.
+        private func retryLater(_ web: WKWebView, after error: Error) {
+            guard policy.paired, (error as NSError).code != NSURLErrorCancelled else { return }
+            failedLoads += 1
+            let seconds = min(30.0, pow(2.0, Double(min(failedLoads, 5))))
+            Task { @MainActor [weak self, weak web] in
+                try? await Task.sleep(for: .seconds(seconds))
+                guard let self, let web, self.policy.paired, !web.isLoading else { return }
+                let shown = web.url?.absoluteString ?? ""
+                guard shown.isEmpty || shown == "about:blank" || self.failedLoads > 0 else { return }
+                self.load(in: web)
+            }
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            retryLater(webView, after: error)
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            retryLater(webView, after: error)
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            failedLoads = 0
+        }
+
         func load(in web: WKWebView) {
             if policy.paired {
                 web.load(URLRequest(url: CoreUIOrigin.startURL))
@@ -169,6 +199,9 @@ final class WebBridge: ObservableObject {
             return text.map { ["text": $0] } ?? ["cancelled": true]
         case .pushPermission(let ask):
             return ["status": await push.refresh(ask: ask)]
+        case .openSettings:
+            NotificationCenter.default.post(name: .girruOpenSettings, object: nil)
+            return ["ok": true]
         }
     }
 

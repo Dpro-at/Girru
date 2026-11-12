@@ -42,3 +42,17 @@ test('outside the app nothing changes', () => {
   assert.equal(localSessionKeep('computer', 'http://computer'), null);
   assert.equal(localSessionKeep('127.0.0.1', 'http://127.0.0.1:42522').load(), 'dpro-remembered-session');
 });
+
+test('the chat drawer gear asks the phone app to open its Settings, and only inside the app', () => {
+  const { openPhoneSettings } = require('../src/phone-terminal-keys.ts');
+  const sent = [];
+  const ios = { girruShell: { platform: 'ios', bridge: 1 }, webkit: { messageHandlers: { girru: { postMessage: (m) => { sent.push(m); return Promise.resolve({ ok: true }); } } } } };
+  assert.equal(openPhoneSettings(ios), true);
+  assert.deepEqual(sent, [{ type: 'settings.open' }]);
+  const out = [];
+  const android = { girruShell: { platform: 'android', bridge: 1 }, girruNative: { postMessage: (m) => out.push(JSON.parse(m)) } };
+  assert.equal(openPhoneSettings(android), true);
+  assert.deepEqual(out, [{ method: 'settings.open', id: 'settings-open', args: {} }]);
+  assert.equal(openPhoneSettings({ webkit: ios.webkit }), false, 'no app shell, no message');
+  assert.equal(openPhoneSettings(undefined), false);
+});

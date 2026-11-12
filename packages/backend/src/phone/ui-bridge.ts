@@ -242,6 +242,22 @@ async function ownerHeaders(ownerId: string): Promise<Record<string, string>> {
   return { authorization: `Bearer ${generateToken(ownerId, user.token_version ?? 1, '60s')}`, ...(launch ? { [LAUNCH_HEADER]: launch } : {}) };
 }
 
+/**
+ * One request to the computer's own API as the owner, for the phone's native screens
+ * (settings.ts). The route list is fixed there; nothing from the phone picks the path.
+ */
+export async function ownerInject(ownerId: string, method: Method, url: string, payload?: unknown): Promise<{ status: number; body: unknown }> {
+  if (!api) throw new CommandError('ui_unavailable');
+  const res = await api.inject({
+    method, url,
+    headers: { ...(await ownerHeaders(ownerId)), accept: 'application/json', ...(payload !== undefined ? { 'content-type': 'application/json' } : {}) },
+    ...(payload !== undefined ? { payload: JSON.stringify(payload) } : {}),
+  });
+  let body: unknown = null;
+  try { body = res.body === '' ? null : JSON.parse(res.body); } catch { body = null; }
+  return { status: res.statusCode, body };
+}
+
 export async function apiCall(ctx: CommandContext, body: Body) {
   only(body, ['method', 'path', 'body']);
   const method = body.method, target = body.path;

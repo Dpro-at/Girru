@@ -583,6 +583,21 @@ this phone), `approval.pending {id}`, `approval.detail {id}`, `approval.decide`,
 `verification_required` for an approval: the phone sends the owner to the
 computer and nothing runs.
 
+### Phone Settings (`settings.read`, `settings.change`)
+
+The phone's own Settings screens (native, boards P33–P39) ask with two commands:
+`settings.read {section}` and `settings.change {section, change, confirmed?}`.
+Sections: `general`, `account`, `replies`, `permissions`, `approval-rules`,
+`computers`, `phones`. The computer answers each with a small reviewed view and
+makes each change through its own fixed route as the owner; the phone never
+names a path. Changes to `permissions`, signing a session out (`account`) and
+forgetting a phone (`phones`) need `confirmed: true`, which the app sends only
+right after a fresh Face ID check (`confirmation_required` otherwise); allowing
+money, installs or deleting also needs `change.risky: true`
+(`risky_confirmation_required`). `approval-rules` and `computers` are read only
+on the phone (`on_the_computer`). The `confirmed` flag is the app's word, not a
+proof: a key that only Face ID can use is future work.
+
 ### The computer's pages on the phone (`ui.get`, `api.call`, `api.stream`)
 
 The phone shows the computer's own chat page (the same built core-ui the

@@ -7,7 +7,7 @@ import {ReportsPage} from './ReportsPage';
 import {BrowserWorkspace} from './BrowserWorkspace';
 import {useBrowserApp} from './browser-app';
 import {PersonalityLibrary} from './PersonalityLibrary';
-import {isPhoneShell} from './phone-terminal-keys';
+import {isPhoneShell,openPhoneSettings} from './phone-terminal-keys';
 import {WorkspaceModes,editorBounds,useNabuRuntime} from './WorkspaceModes';
 import {StoreTradingView} from './StoreTradingView';
 import {footerToolItem} from './AppsWorkspace';
@@ -285,6 +285,8 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
         </summary><div><button onClick={() => openSettings('account')}>Account</button><button onClick={() => client.cancel()}>Sign out on this device</button></div></details>
         {owner && mode === 'live' && <SidebarPhoneButton client={client} onSettings={() => openSettings('phone')}/>}
       </div>}
+      {/* Phone board P33: the app's own Settings open from the gear at the foot of the chat drawer. */}
+      {phone&&<div className="sidebar-footer phone-drawer-foot"><button type="button" className="phone-settings-button" onClick={()=>{if(openPhoneSettings())setRail(false);}}><UiIcon name="gear" size={18}/><span>Settings</span></button></div>}
     </aside>
     {phone && sidebarShown && <button type="button" className="phone-scrim" aria-label="Close the chat list" onClick={() => setRail(false)}/>}
     <main id="content" className="page-area">

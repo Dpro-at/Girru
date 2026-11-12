@@ -4168,6 +4168,10 @@ html:has(.app-shell[data-phone]), body:has(.app-shell[data-phone]) { overflow:hi
 .app-shell[data-phone] .chat-thread :is(.reply-meta, .turn-time, .turn-chip, small, [class*="chat-card"], [class*="card-"]) { font-size:14px !important; }
 .app-shell[data-phone] .chat-thread [class*="chat-card"] :is(small, span, p, div, li) { font-size:14px !important; }
 .app-shell[data-phone] .chat-screen textarea { font-size:16px !important; }
+
+/* Phone board P33: the Settings gear at the foot of the chat drawer. */
+.app-shell[data-phone] .phone-drawer-foot { display:flex; padding:8px 10px calc(8px + env(safe-area-inset-bottom)); border-block-start:1px solid var(--border); }
+.app-shell[data-phone] .phone-settings-button { display:flex; align-items:center; gap:10px; inline-size:100%; min-block-size:44px; padding:0 10px; border:0; border-radius:10px; background:transparent; color:var(--text); font:inherit; font-size:16px; text-align:start; }
 /* GV1 / GV1b: GenVR home cards, inside a place, and the create page. */
 .genvr-toolbar-slim{display:flex;align-items:center;justify-content:space-between;min-block-size:36px;padding:2px 12px}
 .genvr-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}

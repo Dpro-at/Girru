@@ -11,6 +11,7 @@ struct MainTabs: View {
     @EnvironmentObject private var lock: AppLock
     @StateObject private var data: PhoneData
     @State private var place: Place = .chat
+    @State private var settingsOpen = false
 
     init(computer: PairedComputer, model: AppModel) {
         self.computer = computer
@@ -42,6 +43,12 @@ struct MainTabs: View {
         }
         .tint(Theme.accent)
         .environmentObject(data)
+        // Phone Settings (board P33): from the gear at the foot of the chat drawer, or Team's gear.
+        .onReceive(NotificationCenter.default.publisher(for: .girruOpenSettings)) { _ in settingsOpen = true }
+        .sheet(isPresented: $settingsOpen) {
+            SettingsScreen(computer: computer, close: { settingsOpen = false })
+                .environmentObject(model)
+        }
         // Locking forgets every terminal: the next use asks for the check again.
         .onChange(of: lock.state) { _, state in if state != .unlocked { data.terminal.forget() } }
         // The badge stays current while the app is open; nothing is read while it is locked.
@@ -69,6 +76,8 @@ extension MainTabs {
 extension Notification.Name {
     /// Asks the chat page to open its terminal (WebHostView sets #terminal).
     static let girruOpenTerminal = Notification.Name("dev.girru.app.openTerminal")
+    /// Opens the app's Settings (the chat page's drawer gear, or Team's gear).
+    static let girruOpenSettings = Notification.Name("dev.girru.app.openSettings")
 }
 
 /// An agent's round picture: its colour and the person mark from the boards.
