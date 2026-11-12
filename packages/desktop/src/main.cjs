@@ -93,10 +93,12 @@ function createMainWindow() {
 // WIN-01: one bar on Mac and Windows. Girru's own top bar is the window's bar; the system's window
 // buttons sit inside it (Mac: the three dots on the left; Windows: on the right, in the bar's colours).
 const BAR_HEIGHT = 40;
+// The window buttons stop 1 px above the bar's bottom line, so the line runs under them too.
+const BUTTONS_HEIGHT = BAR_HEIGHT - 1;
 function windowFrame() {
   if (process.platform === 'darwin') return { titleBarStyle: 'hidden', trafficLightPosition: { x: 14, y: 13 } };
   // The taskbar shows Girru's icon also when run from source (a packaged app has it in the program).
-  if (process.platform === 'win32') return { titleBarStyle: 'hidden', titleBarOverlay: { color: '#0F1114', symbolColor: '#D9E0E6', height: BAR_HEIGHT }, icon: path.join(__dirname, '..', 'build', 'icon.ico') };
+  if (process.platform === 'win32') return { titleBarStyle: 'hidden', titleBarOverlay: { color: '#0F1114', symbolColor: '#D9E0E6', height: BUTTONS_HEIGHT }, icon: path.join(__dirname, '..', 'build', 'icon.ico') };
   return {};
 }
 
@@ -125,7 +127,7 @@ ipcMain.on('dpro:window-bar', (event, value) => {
   if (process.platform !== 'win32' || !value || typeof value !== 'object' || !HEX.test(value.color) || !HEX.test(value.symbol)) return;
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win || event.senderFrame !== event.sender.mainFrame || win === connectWindow) return;
-  try { win.setTitleBarOverlay({ color: value.color, symbolColor: value.symbol, height: BAR_HEIGHT }); } catch { /* an older system without the overlay */ }
+  try { win.setTitleBarOverlay({ color: value.color, symbolColor: value.symbol, height: BUTTONS_HEIGHT }); } catch { /* an older system without the overlay */ }
 });
 
 function createAppWindow() {
