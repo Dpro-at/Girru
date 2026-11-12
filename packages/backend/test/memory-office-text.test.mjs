@@ -75,3 +75,13 @@ test('unreadable files say why; the indexer cites sheets and slides and keeps th
   assert.equal(ex.ok, true); assert.equal(ex.info, '1 sheet'); assert.equal(ex.pages, 1);
   assert.doesNotMatch(JSON.stringify(ex.chunks), /ABCDEFGHIJKLMNOP/, 'keys inside a document are hidden before agents see the text');
 });
+
+test('hostile input stays fast and bounded', () => {
+  const t0 = Date.now();
+  O.htmlText('<'.repeat(300000)); O.htmlText('<script>'.repeat(50000)); O.htmlText('<!--'.repeat(100000));
+  O.officeText('json', Buffer.from('<'.repeat(300000)));
+  assert.ok(Date.now() - t0 < 2000, `took ${Date.now() - t0} ms`);
+  // A part that unpacks past the budget is refused, not read.
+  const bomb = zip({ 'word/document.xml': '<w:p><w:t>' + 'a'.repeat(40 * 1024 * 1024) + '</w:t></w:p>' });
+  assert.deepEqual(O.officeText('docx', bomb), { ok: false, reason: 'too big' });
+});

@@ -25,6 +25,9 @@ export const NOT_READ_EXT: Record<string, string> = {
 export const MAX_ROWS = 5000;
 export const CSV_ROWS = 200;
 const MAX_ENTRY = 30 * 1024 * 1024; // one XML part, unpacked
+const MAX_UNPACKED = 60 * 1024 * 1024; // all parts of one file together (a zip bomb stops here)
+const MAX_SLIDES = 500;
+const MAX_ROW_CHARS = 4000;
 const MAX_TEXT = 2_000_000;
 
 export interface Section { label: string; text: string }
@@ -40,6 +43,7 @@ export function zipEntries(buf: Buffer): Map<string, () => Buffer> {
   if (eocd < 0) throw Error('not_zip');
   const count = buf.readUInt16LE(eocd + 10), size = buf.readUInt32LE(eocd + 12), offset = buf.readUInt32LE(eocd + 16);
   if (offset + size > buf.length || count > 20000) throw Error('not_zip');
+  let unpacked = 0; // one running budget for every part of this file
   let p = offset;
   for (let n = 0; n < count; n++) {
     if (p + 46 > buf.length || buf.readUInt32LE(p) !== 0x02014b50) throw Error('not_zip');
@@ -54,9 +58,15 @@ export function zipEntries(buf: Buffer): Map<string, () => Buffer> {
       const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
       if (usize > MAX_ENTRY || start + csize > buf.length) throw Error('too_big');
       const raw = buf.subarray(start, start + csize);
-      if (method === 0) return Buffer.from(raw);
-      if (method === 8) return inflateRawSync(raw, { maxOutputLength: MAX_ENTRY });
-      throw Error('unsupported');
+      const room = Math.min(MAX_ENTRY, MAX_UNPACKED - unpacked);
+      if (room <= 0) throw Error('too_big');
+      let out: Buffer;
+      if (method === 0) out = Buffer.from(raw);
+      else if (method === 8) { try { out = inflateRawSync(raw, { maxOutputLength: room }); } catch (e) { throw Error((e as { code?: string }).code === 'ERR_BUFFER_TOO_LARGE' ? 'too_big' : 'not_zip'); } }
+      else throw Error('unsupported');
+      unpacked += out.length;
+      if (unpacked > MAX_UNPACKED) throw Error('too_big');
+      return out;
     });
   }
   return out;
@@ -72,14 +82,34 @@ export function unescapeXml(s: string): string {
   });
 }
 
-/** Walk tags in order: (name, attrs, selfClosing) for opening tags, ('/name') for closing, and text runs. */
+/**
+ * Walk tags in order: (name, attrs, selfClosing) for opening tags, ('/name') for closing, and text runs.
+ * Linear: each step finds the next '<' and its end with indexOf, so a hostile file cannot make it slow;
+ * an unterminated construct is the end of the input.
+ */
 function* xmlTokens(xml: string): Generator<{ tag: string; attrs: string; self: boolean } | { text: string }> {
-  const re = /<(\/?)([A-Za-z_][\w:.-]*)([^>]*?)(\/?)>|<!\[CDATA\[([\s\S]*?)\]\]>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|([^<]+)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(xml))) {
-    if (m[2]) yield { tag: (m[1] ? '/' : '') + m[2], attrs: m[3] ?? '', self: m[4] === '/' };
-    else if (m[5] !== undefined) yield { text: m[5] };
-    else if (m[6] !== undefined) yield { text: unescapeXml(m[6]) };
+  let i = 0;
+  const n = xml.length;
+  while (i < n) {
+    const lt = xml.indexOf('<', i);
+    if (lt < 0) { yield { text: unescapeXml(xml.slice(i)) }; return; }
+    if (lt > i) yield { text: unescapeXml(xml.slice(i, lt)) };
+    if (xml.startsWith('<!--', lt)) { const e = xml.indexOf('-->', lt + 4); if (e < 0) return; i = e + 3; continue; }
+    if (xml.startsWith('<![CDATA[', lt)) { const e = xml.indexOf(']]>', lt + 9); if (e < 0) return; yield { text: xml.slice(lt + 9, e) }; i = e + 3; continue; }
+    if (xml.startsWith('<?', lt) || xml.startsWith('<!', lt)) { const e = xml.indexOf('>', lt + 2); if (e < 0) return; i = e + 1; continue; }
+    const gt = xml.indexOf('>', lt + 1);
+    if (gt < 0) return;
+    const inner = xml.slice(lt + 1, gt);
+    const close = inner.startsWith('/');
+    const body = close ? inner.slice(1) : inner;
+    let k = 0; while (k < body.length && /[\w:.-]/.test(body[k])) k++;
+    const name = body.slice(0, k);
+    if (name && /^[A-Za-z_]/.test(name)) {
+      const rest = body.slice(k);
+      const self = !close && rest.endsWith('/');
+      yield { tag: (close ? '/' : '') + name, attrs: self ? rest.slice(0, -1) : rest, self };
+    }
+    i = gt + 1;
   }
 }
 const attr = (attrs: string, name: string) => { const m = new RegExp(`(?:^|\\s)${name.replace(/[:.]/g, '\\$&')}="([^"]*)"`).exec(attrs); return m ? unescapeXml(m[1]) : null; };
@@ -118,8 +148,12 @@ function xlsx(z: Map<string, () => Buffer>): OfficeResult {
   if (ss) { let cur = '', inSi = false; for (const t of xmlTokens(ss().toString('utf8'))) { if ('text' in t) { if (inSi) cur += t.text; } else if (t.tag === 'si') { inSi = true; cur = ''; } else if (t.tag === '/si') { inSi = false; shared.push(cur); } } }
   const book = z.get('xl/workbook.xml')?.().toString('utf8') ?? '';
   const rels = z.get('xl/_rels/workbook.xml.rels')?.().toString('utf8') ?? '';
-  const target = (rid: string) => /Target="([^"]+)"/.exec(new RegExp(`<Relationship[^>]*Id="${rid}"[^>]*>`).exec(rels)?.[0] ?? '')?.[1];
-  const sheets = [...book.matchAll(/<sheet\b([^>]*)\/?>/g)].map((m, i) => ({ name: attr(m[1], 'name') ?? `Sheet ${i + 1}`, path: (() => { const t = target(attr(m[1], 'r:id') ?? ''); return t ? (t.startsWith('/') ? t.slice(1) : `xl/${t.replace(/^\.\//, '')}`) : `xl/worksheets/sheet${i + 1}.xml`; })() }));
+  // Relationship id -> target, read once (no pattern is ever built from the file's own text).
+  const relTargets = new Map<string, string>();
+  for (const t of xmlTokens(rels)) if ('tag' in t && t.tag === 'Relationship') { const id = attr(t.attrs, 'Id'), to = attr(t.attrs, 'Target'); if (id && to) relTargets.set(id, to); }
+  const target = (rid: string) => relTargets.get(rid);
+  const sheetTags = [...xmlTokens(book)].filter((t): t is { tag: string; attrs: string; self: boolean } => 'tag' in t && t.tag === 'sheet');
+  const sheets = sheetTags.map((t, i) => ({ name: attr(t.attrs, 'name') ?? `Sheet ${i + 1}`, path: (() => { const to = target(attr(t.attrs, 'r:id') ?? ''); return to ? (to.startsWith('/') ? to.slice(1) : `xl/${to.replace(/^\.\//, '')}`) : `xl/worksheets/sheet${i + 1}.xml`; })() }));
   const sections: Section[] = []; let limited = false;
   for (const sh of sheets.slice(0, 50)) {
     const part = z.get(sh.path); if (!part) continue;
@@ -130,7 +164,7 @@ function xlsx(z: Map<string, () => Buffer>): OfficeResult {
       else if (t.tag === 'v') inV = true; else if (t.tag === '/v') inV = false;
       else if (t.tag === 'is') inIs = true; else if (t.tag === '/is') inIs = false;
       else if (t.tag === '/c') row.push(type === 's' ? shared[Number(val)] ?? '' : val.trim());
-      else if (t.tag === '/row') { if (row.some(Boolean)) { if (rows.length >= MAX_ROWS) { limited = true; break; } rows.push(row.join(' | ')); } row = []; }
+      else if (t.tag === '/row') { if (row.some(Boolean)) { if (rows.length >= MAX_ROWS) { limited = true; break; } rows.push(row.join(' | ').slice(0, MAX_ROW_CHARS)); } row = []; }
     }
     if (rows.length) sections.push({ label: `sheet ${sh.name}`, text: `## ${sh.name}\n${rows.join('\n')}` });
   }
@@ -142,7 +176,7 @@ function xlsx(z: Map<string, () => Buffer>): OfficeResult {
 function pptx(z: Map<string, () => Buffer>): OfficeResult {
   const num = (s: string) => Number(/(\d+)\.xml$/.exec(s)?.[1] ?? 0);
   const textOf = (b: Buffer) => { const paras: string[] = []; let cur = ''; for (const t of xmlTokens(b.toString('utf8'))) { if ('text' in t) cur += t.text; else if (t.tag === '/a:p') { if (cur.trim()) paras.push(cur.trim()); cur = ''; } else if (t.tag === 'a:br') cur += ' '; } return paras; };
-  const slides = [...z.keys()].filter((k) => /^ppt\/slides\/slide\d+\.xml$/.test(k)).sort((a, b) => num(a) - num(b));
+  const slides = [...z.keys()].filter((k) => /^ppt\/slides\/slide\d+\.xml$/.test(k)).sort((a, b) => num(a) - num(b)).slice(0, MAX_SLIDES);
   let notes = 0; const sections: Section[] = [];
   for (const s of slides) {
     const n = num(s), body = textOf(z.get(s)!());
@@ -170,7 +204,7 @@ function openDocument(z: Map<string, () => Buffer>, kind: 'odt' | 'ods' | 'odp')
     else if (n === 'table:table-cell' && !t.self) { inCell = true; cell = ''; }
     else if (n === 'table:table-cell' && t.self) row.push('');
     else if (n === '/table:table-cell') { inCell = false; row.push(cell.trim()); }
-    else if (n === '/table:table-row') { while (row.length && !row.at(-1)) row.pop(); if (row.some(Boolean) && lines.length < MAX_ROWS) lines.push(row.join(' | ')); row = []; }
+    else if (n === '/table:table-row') { while (row.length && !row.at(-1)) row.pop(); if (row.some(Boolean) && lines.length < MAX_ROWS) lines.push(row.join(' | ').slice(0, MAX_ROW_CHARS)); row = []; }
   }
   flush();
   if (!sections.length) return { ok: false, reason: 'no text in it' };
@@ -217,11 +251,35 @@ export function rtfText(src: string): string {
 }
 
 /** HTML: visible text; headings as "#", list items as "-"; scripts and styles dropped. */
+/** Drop script/style/noscript/template blocks and comments with indexOf (linear, also on unterminated input). */
+function stripBlocks(src: string): string {
+  const lower = src.toLowerCase(); let out = '', i = 0;
+  while (i < src.length) {
+    const lt = src.indexOf('<', i);
+    if (lt < 0) { out += src.slice(i); break; }
+    out += src.slice(i, lt);
+    if (src.startsWith('<!--', lt)) { const e = src.indexOf('-->', lt + 4); if (e < 0) break; i = e + 3; out += ' '; continue; }
+    const m = /^<(script|style|noscript|template)\b/.exec(lower.slice(lt, lt + 12));
+    if (m) { const e = lower.indexOf(`</${m[1]}`, lt + 1); if (e < 0) break; const gt = lower.indexOf('>', e); i = gt < 0 ? src.length : gt + 1; out += ' '; continue; }
+    out += '<'; i = lt + 1;
+  }
+  return out;
+}
+
 export function htmlText(src: string): string {
-  return unescapeXml(src.replace(/<(script|style|noscript|template)[\s\S]*?<\/\1>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<h([1-4])[^>]*>/gi, (_m, n) => `\n${'#'.repeat(Number(n))} `).replace(/<li[^>]*>/gi, '\n- ')
-    .replace(/<(?:br|\/p|\/div|\/h[1-6]|\/li|\/tr|\/table|\/section|\/article)\b[^>]*>/gi, '\n').replace(/<\/t[dh]>/gi, ' | ').replace(/<[^>]+>/g, ''))
-    .replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{2,}/g, '\n').trim();
+  // The linear tokenizer, not regular expressions over the whole input.
+  let out = '';
+  const BREAK = new Set(['br', '/p', '/div', '/h1', '/h2', '/h3', '/h4', '/h5', '/h6', '/li', '/tr', '/table', '/section', '/article']);
+  for (const t of xmlTokens(stripBlocks(src))) {
+    if ('text' in t) { out += t.text; continue; }
+    const tag = t.tag.toLowerCase();
+    const h = /^h([1-4])$/.exec(tag);
+    if (h) out += `\n${'#'.repeat(Number(h[1]))} `;
+    else if (tag === 'li') out += '\n- ';
+    else if (tag === '/td' || tag === '/th') out += ' | ';
+    else if (BREAK.has(tag)) out += '\n';
+  }
+  return out.replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{2,}/g, '\n').trim();
 }
 
 /** Read one file's bytes of a known office/text kind. */
