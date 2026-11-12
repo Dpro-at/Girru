@@ -31,3 +31,22 @@ test('the editor offers Ask an agent (⌘J) only where it may write; the route p
   assert.equal(allowedRequest('POST', '/api/memory/scopes/ask-agent', { agentId: 'grenzer-agent', request: 'Add the port', text: A, drawer: 'project:grenzer' }), true);
   assert.equal(allowedRequest('POST', '/api/memory/scopes/ask-agent', { agentId: 'grenzer-agent', request: 'x', text: A, save: true }), false);
 });
+
+test('the editor starts an ask and reads the job until the proposal is there; errors are plain words', async () => {
+  const { memoryPagesRoute, memoryPagesResponse } = require('../src/memory-pages-contract.js');
+  const { MemoryScopesController } = require('../src/memory-scopes.ts');
+  const job = '0b1a19c0-b9d6-4844-8cde-872abdaa4e0c'; let reads = 0;
+  const routes = {
+    'POST /api/memory/scopes/ask-agent': (b) => b.agentId === 'cloud' ? [409, { error: 'x', code: 'stays_local' }] : [200, { jobId: job }],
+    [`GET /api/memory/scopes/ask-agent/${job}`]: () => [200, ++reads < 2 ? { state: 'running' } : { state: 'done', text: B, note: 'Added the port.', agentId: 'grenzer-agent' }],
+  };
+  const client = { request: async r => {
+    assert.ok(allowedRequest(r.method, r.path, r.body), `${r.method} ${r.path}`);
+    const [status, out] = routes[`${r.method} ${r.path}`](r.body);
+    const once = x => memoryPagesRoute(r.path) ? memoryPagesResponse(r.path, status, x) : x;
+    return { status, body: once(once(out)) };
+  } };
+  const c = new MemoryScopesController(client);
+  assert.deepEqual(await c.askAgent('grenzer-agent', 'Add the port', A, 'project:grenzer'), { text: B, note: 'Added the port.' });
+  assert.deepEqual(await c.askAgent('cloud', 'Add the port', A, 'project:grenzer'), { error: 'This place stays on this computer. Ask an agent that uses a local model.' });
+});

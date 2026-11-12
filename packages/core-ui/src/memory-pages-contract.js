@@ -172,6 +172,7 @@ export function memoryPagesPath(path) {
   const raw = q < 0 ? '' : path.slice(q + 1);
   const with_ = (route, rules, extra = {}) => { const params = rules ? query(raw, rules) : (raw === '' ? {} : null); return params ? { route, params, ...extra } : null; };
   let m;
+  if ((m = /^\/api\/memory\/scopes\/ask-agent\/([0-9a-f-]{36})$/.exec(base))) return with_('ask-agent-job', null, { id: m[1] });
   switch (base) {
     case '/api/memory/scopes/tree': return with_('tree', QUERIES.tree);
     case '/api/memory/scopes/search': return with_('search', QUERIES.search);
@@ -201,6 +202,7 @@ export function memoryPagesPath(path) {
     case '/api/memory/scopes/projects': return with_('project-create', null);
     case '/api/memory/scopes/hidden-keys': return with_('hidden-keys', null);
     case '/api/memory/scopes/ask-agent': return with_('ask-agent', null);
+
     case '/api/memory/scopes/hidden-keys/answer': return with_('hidden-keys-answer', null);
     case '/api/memory/scopes/jobs': return with_('jobs', null);
   }
@@ -285,6 +287,7 @@ export function allowedMemoryPages(method, path, body) {
     case 'project-adopt': return method === 'POST' && record(body) && onlyKeys(body, ['projectId']) && plainId(body.projectId);
     case 'project-kind': return method === 'POST' && record(body) && onlyKeys(body, ['kind']) && (body.kind === 'project' || body.kind === 'library');
     case 'hidden-keys': return method === 'GET' && body === undefined;
+    case 'ask-agent-job': return method === 'GET' && body === undefined;
     case 'ask-agent': return method === 'POST' && record(body) && onlyKeys(body, ['agentId', 'request', 'text', 'drawer']) && agentId(body.agentId) && text(body.request, 500) && typeof body.text === 'string' && body.text.length <= 50000 && (body.drawer === undefined || validDrawerId(body.drawer));
     case 'hidden-keys-answer': return method === 'POST' && record(body) && onlyKeys(body, ['answer', 'drawer']) && (body.answer === 'keep' || body.answer === 'move') && (body.drawer === undefined || (typeof body.drawer === 'string' && body.drawer.length <= 200));
     case 'hidden-key-reveal': return method === 'POST' && body === undefined;
@@ -584,7 +587,9 @@ function codingHandoff(h) {
 }
 
 const CODES = {
-  scopes: ['invalid_scope', 'not_found', 'preview_hash_required', 'confirm_required', 'preview_changed', 'name_taken', 'no_change', 'too_many', 'target_archived'],
+  scopes: ['invalid_scope', 'not_found', 'preview_hash_required', 'confirm_required', 'preview_changed', 'name_taken', 'no_change', 'too_many', 'target_archived',
+    // MR3 / MR5
+    'chat_project', 'invalid_agent', 'invalid_request', 'invalid_text', 'stays_local', 'model_unavailable', 'busy', 'bad_answer'],
   doctor: ['confirm_required', 'report_hash_required', 'report_changed', 'invalid_kinds'],
   handoff: ['invalid_handoff', 'not_found'],
   decide: ['already_decided', 'stale', 'review_changed', 'review_hash_required'],
@@ -636,7 +641,13 @@ export function memoryPagesResponse(path, status, body) {
       const kinds = k => Object.fromEntries(['login', 'password', 'key', 'token'].filter(w => record(k) && Number.isSafeInteger(k[w]) && k[w] > 0).map(w => [w, k[w]]));
       return { total: count(body.total), drawers: (Array.isArray(body.drawers) ? body.drawers : []).slice(0, 200).filter(d => record(d) && typeof d.drawer === 'string' && d.drawer.length <= 200).map(d => ({ drawer: d.drawer, count: count(d.count), memories: count(d.memories), kinds: kinds(d.kinds) })) };
     }
-    case 'ask-agent': if (typeof body.text !== 'string' || body.text.length > 50000) fail(); return { text: body.text, note: clip(body.note, 300), agentId: idOr(body.agentId, agentId) };
+    case 'ask-agent': if (typeof body.jobId !== 'string' || !/^[0-9a-f-]{36}$/.test(body.jobId)) fail(); return { jobId: body.jobId };
+    case 'ask-agent-job': {
+      if (body.state === 'running') return { state: 'running' };
+      if (body.state === 'error') return { state: 'error', code: clip(body.code, 40), error: clip(body.error, 300) };
+      if (body.state !== 'done' || typeof body.text !== 'string' || body.text.length > 50000) fail();
+      return { state: 'done', text: body.text, note: clip(body.note, 300) };
+    }
     case 'hidden-keys-answer': return { answered: count(body.answered), moved: count(body.moved) };
     case 'hidden-key-reveal': if (typeof body.value !== 'string' || body.value.length > 20000) fail(); return { value: body.value };
     case 'project-kind': if (!slug(body.slug) || !['project', 'library'].includes(body.kind)) fail(); return { slug: body.slug, kind: body.kind, before: ['project', 'library'].includes(body.before) ? body.before : null };

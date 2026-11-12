@@ -35,6 +35,13 @@ const WEEK = 7 * 86_400_000;
 const recentIn = (items: readonly { createdAt: string }[], now: number) => items.filter(i => now - Date.parse(`${i.createdAt}Z`) < WEEK).length;
 const record = (x: unknown): x is Record<string, any> => !!x && typeof x === 'object' && !Array.isArray(x);
 
+/** MR5: plain words for why an ask did not start. */
+const ASK_ERRORS: Record<string, string> = {
+  stays_local: 'This place stays on this computer. Ask an agent that uses a local model.',
+  model_unavailable: 'This agent has no model it can use now.', busy: 'Three asks are already running. Wait for one to finish.',
+  invalid_request: 'Say what should change in one line.', not_found: 'That agent is not there any more.',
+};
+
 export class MemoryScopesController extends Store<ScopeState> {
   #ticket = 0;
   constructor(client: Requester, private readonly now = () => Date.now()) {
@@ -74,9 +81,18 @@ export class MemoryScopesController extends Store<ScopeState> {
   async askAgent(agentId: string, request: string, text: string, drawer?: string): Promise<{ text: string; note: string } | { error: string }> {
     try {
       const r = await this.req('POST', '/api/memory/scopes/ask-agent', { agentId, request, text, ...(drawer ? { drawer } : {}) });
-      if (r.status === 200) { const b = r.body as { text: string; note: string }; return { text: b.text, note: b.note }; }
-      const e = r.body as { error?: string } | null;
-      return { error: e?.error ?? 'The agent could not answer. Try again.' };
+      if (r.status !== 200) return { error: ASK_ERRORS[(r.body as { code?: string } | null)?.code ?? ''] ?? 'The agent could not answer. Try again.' };
+      // A model can take minutes: read the job until its answer is there (at most 5 minutes).
+      const id = (r.body as { jobId: string }).jobId;
+      for (let i = 0; i < 200; i++) {
+        await new Promise(res => setTimeout(res, i < 5 ? 600 : 1500));
+        const j = await this.req('GET', `/api/memory/scopes/ask-agent/${encodeURIComponent(id)}`);
+        if (j.status !== 200) return { error: 'The agent could not answer. Try again.' };
+        const b = j.body as { state: string; text?: string; note?: string; error?: string };
+        if (b.state === 'done') return { text: b.text ?? '', note: b.note ?? '' };
+        if (b.state === 'error') return { error: b.error ?? 'The agent could not answer. Try again.' };
+      }
+      return { error: 'The agent took too long. Try again.' };
     } catch { return { error: 'The agent could not answer (no connection).' }; }
   }
 

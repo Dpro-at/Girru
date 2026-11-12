@@ -30,7 +30,8 @@
  *   POST /api/memory/scopes/projects/:slug/preview { action, target?, departmentId? } -> { action, project, target?, department?, effects, previewHash }
  *   POST /api/memory/scopes/projects/:slug/apply   { action, target?, departmentId?, expectedPreviewHash, confirm: true } -> { action, project, effects, result }
  *   GET  /api/memory/scopes/projects/:slug/export  -> { project, files: [{ name, content }] }
- *   POST /api/memory/scopes/ask-agent              { agentId, request, text, drawer? } -> { text, note, agentId }  Ask an agent in the shared editor (MR5; proposal only, nothing saved)
+ *   POST /api/memory/scopes/ask-agent              { agentId, request, text, drawer? } -> { jobId }  Ask an agent in the shared editor (MR5; proposal only, nothing saved)
+ *   GET  /api/memory/scopes/ask-agent/:jobId       -> { state: running | done (text, note) | error (code, error) }
  *   GET  /api/memory/scopes/hidden-keys            -> { total, drawers: [{ drawer, count, memories, kinds }] } keys hidden since the owner last answered (MR2; runs the one-time pass first)
  *   POST /api/memory/scopes/hidden-keys/answer     { answer: 'keep' | 'move', drawer? } -> { answered, moved }  Keep hidden here / Move to Connections
  *   POST /api/memory/scopes/hidden-keys/:id/reveal -> { value }  the owner's Show (audited; never cached)
@@ -57,7 +58,7 @@ import { actorOrReply, requireOwner } from '../../repositories/scope.js';
 import { resolveFileAgent } from '../../memory/memory-files.js';
 import { classifyLibraryProjects, setProjectKind } from '../../memory/scopes/project-kinds.js';
 import { answerHiddenKeys, hiddenKeysReport, hideKeysOnce, revealKey } from '../../memory/hidden-keys.js';
-import { AskAgentError, askAgentToEdit } from '../../memory/ask-agent.js';
+import { AskAgentError, askJob, startAskJob } from '../../memory/ask-agent.js';
 import { provenanceJobStatus, setChecked } from '../../memory/validity.js';
 import { vectorJobStatus } from '../../memory/vectors.js';
 import { storeP3Enabled } from '../../services/store-p3.js';
@@ -150,13 +151,19 @@ export async function memoryScopeRoutes(fastify: FastifyInstance) {
   route('POST', '/api/memory/scopes/ask-agent', async (owner, request, reply) => {
     const b = body(request);
     try {
-      const out = await askAgentToEdit(owner.userId!, { agentId: b.agentId, request: b.request, text: b.text, drawer: b.drawer });
-      audit(request, owner, 'memory.ask_agent', 'agents_config', out.agentId, { chars: typeof b.text === 'string' ? b.text.length : 0 });
-      return out;
+      const jobId = startAskJob(owner.userId!, { agentId: b.agentId, request: b.request, text: b.text, drawer: b.drawer });
+      audit(request, owner, 'memory.ask_agent', 'agents_config', String(b.agentId ?? ''), { chars: typeof b.text === 'string' ? b.text.length : 0 });
+      return { jobId };
     } catch (err) {
       if (err instanceof AskAgentError) return reply.code(err.status).send({ error: err.message, code: err.code });
       throw err;
     }
+  });
+  route('GET', '/api/memory/scopes/ask-agent/:id', async (owner, request, reply) => {
+    const out = askJob(owner.userId!, (request.params as { id: string }).id);
+    if (!out) return reply.code(404).send({ error: 'Not found', code: 'not_found' });
+    reply.header('Cache-Control', 'no-store');
+    return out;
   });
 
   // ---- hidden keys (MEM-READ-01 MR2) ----

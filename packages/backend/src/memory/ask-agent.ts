@@ -12,6 +12,7 @@
  * A place the owner keeps on this computer is never sent to a model off it.
  */
 
+import { randomUUID } from 'node:crypto';
 import { one, sql } from '../repositories/sql-steps.js';
 import { redactImportText } from './import/redact.js';
 import { hideKeysInText } from './hidden-keys.js';
@@ -39,15 +40,17 @@ export function askPrompt(request: string, text: string): string {
 
 /** The new document and the note from a model's answer; null when it did not follow the shape. */
 export function parseAnswer(answer: string): { text: string; note: string } | null {
-  const m = /<document>\n?([\s\S]*?)\n?<\/document>/.exec(answer);
-  if (!m) return null;
+  // The last block: a model that reasons in text may quote the tags before its answer.
+  const all = [...answer.matchAll(/<document>\n?([\s\S]*?)\n?<\/document>/g)];
+  const m = all.at(-1);
+  if (!m || m.index === undefined) return null;
   const note = /(?:^|\n)\s*Note:\s*(.+)/.exec(answer.slice(m.index + m[0].length))?.[1]?.trim() ?? '';
   return { text: m[1], note: note.slice(0, 300) };
 }
 
 type Target = { id: string; name: string; model: string | null; provider: string | null; temperature: number | null; max_tokens: number | null };
 
-/** One quick, tool-free answer with the agent's own model. `call` is replaceable for tests. */
+/** One quick, tool-free answer with the agent's own model. */
 export async function agentAnswer(target: Target, prompt: string, signal: AbortSignal): Promise<string> {
   const { subscriptionModel, runSubscription, chatWorkspace } = await import('../services/subscription-chat.js');
   const model = target.model || process.env.DEFAULT_MODEL || '';
@@ -55,7 +58,7 @@ export async function agentAnswer(target: Target, prompt: string, signal: AbortS
   if (target.provider === 'ollama' || target.provider === 'local' || !target.provider) {
     const { ollamaToolChat } = await import('../llm/ollama-tool-chat.js');
     const { resolveLocalModel } = await import('../llm/local-models.js');
-    const result = await ollamaToolChat({ model: await resolveLocalModel(model), messages: [{ role: 'user', content: prompt }], tools: [], temperature: target.temperature ?? 0.2, maxTokens: Math.min(target.max_tokens || 4096, 8192), timeoutMs: CALL_MS, signal });
+    const result = await ollamaToolChat({ model: await resolveLocalModel(model), messages: [{ role: 'user', content: prompt }], tools: [], temperature: target.temperature ?? 0.2, maxTokens: Math.min(target.max_tokens || 4096, 8192), timeoutMs: CALL_MS, signal, think: false });
     return result.content;
   }
   if (target.provider === 'claude') {
@@ -79,14 +82,18 @@ export async function askAgentToEdit(ownerId: string, input: AskInput, deps: { a
   const target = await sql().read(one<Target>('SELECT id, name, model, provider, temperature, max_tokens FROM agents_config WHERE id = ?', input.agentId));
   if (!target) throw new AskAgentError(404, 'not_found', 'Agent not found');
 
-  // A place kept on this computer never goes to a model off it.
-  if (typeof input.drawer === 'string' && input.drawer) {
-    let drawer: DrawerRef | null = null; try { drawer = parseDrawerId(input.drawer); } catch { drawer = null; }
-    if (drawer) {
-      const { cloudSafeDrawers, providerIsLocal } = await import('./stays-local.js');
-      const { subscriptionModel } = await import('../services/subscription-chat.js');
-      const local = !subscriptionModel(target.model ?? '') && providerIsLocal(target.provider, target.model);
-      if (!local && (await cloudSafeDrawers(ownerId, [drawer])).withheld.length) throw new AskAgentError(409, 'stays_local', 'This place stays on this computer; ask an agent that uses a local model.');
+  // A place kept on this computer never goes to a model off it. Fails closed: a model off this computer
+  // needs a known place that may leave (no place given, or one that does not parse, is refused while any place stays local).
+  {
+    const { cloudSafeDrawers, providerIsLocal } = await import('./stays-local.js');
+    const { localOnlyPlaces } = await import('./place-settings.js');
+    const { subscriptionModel } = await import('../services/subscription-chat.js');
+    const local = !subscriptionModel(target.model ?? '') && providerIsLocal(target.provider, target.model);
+    if (!local) {
+      let drawer: DrawerRef | null = null;
+      if (typeof input.drawer === 'string' && input.drawer) { try { drawer = parseDrawerId(input.drawer); } catch { drawer = null; } }
+      const stays = drawer ? (await cloudSafeDrawers(ownerId, [drawer])).withheld.length > 0 : (await localOnlyPlaces(ownerId)).size > 0;
+      if (stays) throw new AskAgentError(409, 'stays_local', 'This place stays on this computer; ask an agent that uses a local model.');
     }
   }
 
@@ -104,4 +111,34 @@ export async function askAgentToEdit(ownerId: string, input: AskInput, deps: { a
   // A key the agent writes in clear is hidden at once (it shows as a lock chip).
   text = (await hideKeysInText(ownerId, text, 'memory').catch(() => ({ text: redactImportText(text).text }))).text;
   return { text: text.slice(0, MAX_TEXT), note: redactImportText(parsed.note).text, agentId: target.id };
+}
+
+// ---------------------------------------------------------------------------
+// A model can take minutes; the browser's requests end after seconds. The owner's ask is a short job:
+// start returns an id at once, the editor reads it until the answer is there (kept 10 minutes).
+// ---------------------------------------------------------------------------
+type Job = { owner: string; at: number; done?: { text: string; note: string; agentId: string }; error?: { status: number; code: string; message: string } };
+const jobs = new Map<string, Job>();
+const JOB_MS = 10 * 60_000;
+
+export function startAskJob(ownerId: string, input: AskInput, deps: { answer?: typeof agentAnswer } = {}): string {
+  const now = Date.now();
+  for (const [k, j] of jobs) if (now - j.at > JOB_MS) jobs.delete(k);
+  if ([...jobs.values()].filter(j => j.owner === ownerId && !j.done && !j.error).length >= 3) throw new AskAgentError(429, 'busy', 'Three asks are already running. Wait for one to finish.');
+  const id = randomUUID();
+  const job: Job = { owner: ownerId, at: now };
+  jobs.set(id, job);
+  void askAgentToEdit(ownerId, input, deps).then(
+    (done) => { job.done = done; },
+    (e) => { job.error = e instanceof AskAgentError ? { status: e.status, code: e.code, message: e.message } : { status: 502, code: 'model_unavailable', message: 'The agent could not answer. Try again.' }; });
+  return id;
+}
+
+/** The job's state for its owner only; null when unknown (or someone else's). */
+export function askJob(ownerId: string, id: string): { state: 'running' } | { state: 'done'; text: string; note: string; agentId: string } | { state: 'error'; code: string; error: string } | null {
+  const j = jobs.get(id);
+  if (!j || j.owner !== ownerId) return null;
+  if (j.done) return { state: 'done', ...j.done };
+  if (j.error) return { state: 'error', code: j.error.code, error: j.error.message };
+  return { state: 'running' };
 }

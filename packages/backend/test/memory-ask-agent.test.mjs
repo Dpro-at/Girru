@@ -61,3 +61,11 @@ test('bad input, unknown agent, and an answer without a document are refused', a
   await assert.rejects(A.askAgentToEdit(OWNER, { agentId: 'grenzer-agent', request: 'x', text: 'x' }, { answer }), /did not answer with a document/);
   assert.deepEqual(A.parseAnswer('<document>\na\nb\n</document>\nNote: done'), { text: 'a\nb', note: 'done' });
 });
+
+test('the ask runs as a job for its owner only', async () => {
+  const answer = async (_t, prompt) => `thinking <document>\nnot this\n</document> then\n<document>\n${/<document>\n([\s\S]*?)\n<\/document>/.exec(prompt)[1]}\nmore\n</document>\nNote: ok`;
+  const id = A.startAskJob(OWNER, { agentId: 'grenzer-agent', request: 'add more', text: 'line' }, { answer });
+  assert.equal(A.askJob('someone-else', id), null);
+  let r; for (let i = 0; i < 50 && (r = A.askJob(OWNER, id)).state === 'running'; i++) await new Promise(res => setTimeout(res, 10));
+  assert.deepEqual(r, { state: 'done', text: 'line\nmore', note: 'ok', agentId: 'grenzer-agent' });
+});
