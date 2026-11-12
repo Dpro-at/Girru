@@ -1,11 +1,11 @@
 {
   "package": "3d-world-sdk",
-  "version": "0.3.0-preview.20",
-  "distribution": "https://github.com/Dpro-at/genvr-world-sdk/releases/download/v0.3.0-preview.20/3d-world-sdk-0.3.0-preview.20.tgz",
-  "sha256": "ebd1ee2a85238f41e27578d9ba2aa41d39453e3aa02d28fbe3d16a64b7ca56f8",
-  "size": 181643499,
+  "version": "0.3.0-preview.21",
+  "distribution": "https://github.com/Dpro-at/genvr-world-sdk/releases/download/v0.3.0-preview.21/3d-world-sdk-0.3.0-preview.21.tgz",
+  "sha256": "20ccb0400924cb0dd5000dc0e955b4371bf5fa045db2bb48d4a83f842e6ddef6",
+  "size": 181643524,
   "license": "AGPL-3.0-only",
-  "source": "https://github.com/Dpro-at/genvr-world-sdk/releases/download/v0.3.0-preview.20/3d-world-sdk-0.3.0-preview.20-source.tgz",
-  "sourceSha256": "c846292c79d66473e65bb24439c0f3b7f40bd35544dd5332092c80f9e37ac868",
-  "prepare": "node scripts/prepare-genvr.cjs /absolute/path/to/3d-world-sdk-0.3.0-preview.20.tgz"
+  "source": "https://github.com/Dpro-at/genvr-world-sdk/releases/download/v0.3.0-preview.21/3d-world-sdk-0.3.0-preview.21-source.tgz",
+  "sourceSha256": "1113f346a2d976d49ee6e82c80ee539801d1679891565b110c6a63c40caf600f",
+  "prepare": "node scripts/prepare-genvr.cjs /absolute/path/to/3d-world-sdk-0.3.0-preview.21.tgz"
 }

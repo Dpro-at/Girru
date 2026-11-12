@@ -6,6 +6,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { authorizeActiveRole } from '../../auth/route-guards.js';
 import { chooseWorldAgent, openWorld, parseTurn, TURN_LIMITS, WorldError, worldHistory, worldOfChatProject, worldTurn, type TurnDeps } from '../../services/genvr-world.js';
 import { safeConsole, safeErrorFields } from '../../services/safe-error-log.js';
+import { redactSecrets } from '../../services/secret-redact.js';
 
 const OWNER_ONLY = ['owner'] as const;
 type Req = FastifyRequest<{ Params: { id: string } }>;
@@ -19,7 +20,9 @@ export async function genvrWorldRoutes(app: FastifyInstance, options: { deps?: T
     try { return await fn(ownerId, request, reply); }
     catch (error) {
       if (error instanceof WorldError) return reply.code(error.status).send({ code: error.code, ...(error.message !== error.code ? { message: error.message } : {}) });
-      safeConsole.log('[GenVR world] failed', safeErrorFields(error));
+      // The reason, with secrets taken out, so a failed turn can be understood from the log.
+      const reason = error instanceof Error ? redactSecrets(error.message).text.replace(/\s+/g, ' ').slice(0, 300) : '';
+      safeConsole.log('[GenVR world] failed', { ...safeErrorFields(error), ...(reason ? { reason } : {}) });
       return reply.code(502).send({ code: 'model_unavailable', message: 'The agent could not answer. Try again or pick another agent.' });
     }
   };

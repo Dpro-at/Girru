@@ -52,7 +52,7 @@ test('local runtime availability has a minimal program-only contract',()=>{
  assert.equal(allowedRequest('GET',GENVR_RUNTIME),true);
  assert.equal(allowedGenVR('POST',GENVR_RUNTIME,{}),false);
  assert.equal(allowedGenVR('GET',GENVR_RUNTIME+'?owner=other'),false);
- assert.deepEqual(genvrResponse(GENVR_RUNTIME,200,{state:'installed',version:'0.3.0-preview.20',job:'private',account:'private'}),{state:'installed',version:'0.3.0-preview.20'});
+ assert.deepEqual(genvrResponse(GENVR_RUNTIME,200,{state:'installed',version:'0.3.0-preview.21',job:'private',account:'private'}),{state:'installed',version:'0.3.0-preview.21'});
  assert.deepEqual(genvrResponse(GENVR_RUNTIME,200,{state:'missing',version:null}),{state:'missing',version:null});
  assert.throws(()=>genvrResponse(GENVR_RUNTIME,200,{state:'installed',version:'invalid'}));
 });
@@ -103,10 +103,13 @@ test('Store: the "add it in the coding app" line is only for coding-app items, n
 test('GV1d/GV1e/GV1c v2: the open place in the sidebar, one Girru chat, the market from the Studio Items',()=>{
  const read=f=>require('node:fs').readFileSync(require('node:path').join(__dirname,f),'utf8');
  const page=read('../src/GenVRPage.tsx'),host=read('../scripts/genvr-host.js'),market=read('../scripts/genvr-market-host.js'),assets=read('../scripts/genvr-assets.cjs'),view=read('../src/ChatView.tsx'),shell=read('../src/SignedInShell.tsx'),css=read('../src/styles.css');
- // GV1d: no bar under the Studio; who answers, its chat, agents and the folder are in the sidebar.
- assert.doesNotMatch(page,/genvr-chatbar/);assert.doesNotMatch(css,/\.genvr-chatbar/);
- for(const part of ['Answers here','Agents in this place','Folder','Open in Chat'])assert.ok(page.includes(part),part);
- assert.match(page,/revealFolder\(folderPath\)/);
+ // GV1d (Mohamed): no bar under the Studio and no extra left sidebar; the Studio chat header holds
+ // who answers (picker shown over the Studio), the agents in this place, Open in Chat and the folder button.
+ assert.doesNotMatch(page,/genvr-chatbar|studioNav|genvr-side-group/);assert.doesNotMatch(css,/\.genvr-chatbar|\.genvr-side-group/);
+ assert.match(page,/inside=\{channel\?null:inside\}/);assert.match(page,/\{picking&&who\?<div className="genvr-who"/);
+ assert.match(page,/\.\.\.\(next\.team\?\.length\?\{team:next\.team\}:\{\}\)/);
+ assert.match(page,/if\(data\.operation==='open-folder'\)\{if\(folderPathRef\.current&&canRevealFolder\(\)\)revealFolder\(folderPathRef\.current\);return;\}/);
+ assert.match(host,/openFolder:\(\)=>send\(\{operation:'open-folder'\}\)/);
  // GV1e: the Studio chat gets the place's earlier lines and Open in Chat; Chat shows the place with Open in Studio.
  assert.match(page,/\/api\/genvr\/worlds\/\$\{world\.projectId\}\/history/);assert.match(host,/openChat:\(\)=>send\(\{operation:'open-chat'\}\)/);
  assert.match(view,/<GenVRChatPlace key=\{project\.id\} client=\{client\} chatProjectId=\{project\.id\}\/>/);
@@ -124,4 +127,8 @@ test('GV1e contract: history and the place behind a chat pass the app server wit
  const opened=genvrResponse('/api/genvr/worlds/lake-1/open',200,{folder:'~/Girru/genvr_Worlds/Lake',path:'/Users/x/Girru/genvr_Worlds/Lake',chatProjectId:'p1',conversationId:'c1',answerer:null,secret:'no'});
  assert.deepEqual(opened,{folder:'~/Girru/genvr_Worlds/Lake',chatProjectId:'p1',answerer:null,path:'/Users/x/Girru/genvr_Worlds/Lake',conversationId:'c1'});
  assert.deepEqual(genvrResponse('/api/genvr/worlds/of-chat-project/p1',200,{projectId:'lake-1',title:'Lake',folder:'~/L',path:'/L',answerer:null,x:1}),{projectId:'lake-1',title:'Lake',folder:'~/L',path:'/L',answerer:null});
+});
+test('menus near the top open downward (the who-answers picker over the Studio)',()=>{
+ const src=require('node:fs').readFileSync(require('node:path').join(__dirname,'../src/ChatComposerControls.tsx'),'utf8');
+ assert.match(src,/above < 240 && below > above\s*\? \{ position: 'absolute', left, top: r\.bottom - h\.top \+ 6/);
 });

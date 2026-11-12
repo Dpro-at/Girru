@@ -4226,13 +4226,10 @@ html:has(.app-shell[data-phone]), body:has(.app-shell[data-phone]) { overflow:hi
 .genvr-menu{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:8px;overflow:hidden}.genvr-menu button{border:0;border-block-end:1px solid var(--border);background:var(--surface);color:var(--text);text-align:left;padding:7px 10px;font:inherit;cursor:pointer}.genvr-menu button:last-child{border:0}.genvr-menu button:hover{background:var(--subtle)}
 @media(max-width:900px){.genvr-numbers{grid-template-columns:1fr}}
 
-/* GV1d: the open place's own sidebar (who answers, its chat, agents, folder). GV1c v2: the market frame. */
-.genvr-side-group{display:flex;flex-direction:column;gap:6px;padding:10px 8px 4px}
-.genvr-side-group>small{font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
-.genvr-side-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
-.genvr-side-list li{display:flex;align-items:center;gap:8px;font-size:13px}
-.genvr-market-stage{position:relative;display:flex;flex-direction:column;flex:1;min-block-size:520px}
-.genvr-market-stage .genvr-frame{flex:1;min-block-size:520px;border:0;border-radius:10px}
+/* GV1c v2: the market frame. */
+.genvr-market-stage{position:relative;display:flex;flex-direction:column;flex:1;min-block-size:calc(100dvh - 150px)}
+.genvr-market-stage .genvr-frame{flex:1;min-block-size:calc(100dvh - 150px);border:0;border-radius:10px}
 .genvr-market-add{position:absolute;inset-block-start:16px;inset-inline-end:16px;z-index:2}
 .genvr-chat-place{display:flex;flex-direction:column;gap:4px;padding:6px 0}
 .genvr-chat-place-row{display:flex;align-items:center;gap:8px}.genvr-chat-place-row span{display:flex;flex-direction:column;flex:1;min-inline-size:0}.genvr-chat-place-row small{color:var(--muted);font-size:11.5px}
+.genvr-who{position:absolute;inset-block-start:52px;inset-inline-end:16px;z-index:3;padding:8px;border-radius:10px;background:var(--surface);border:1px solid var(--border);box-shadow:0 8px 24px rgba(0,0,0,.3)}

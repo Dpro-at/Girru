@@ -75,3 +75,16 @@ test('create makes a space with the create page defaults and checks every choice
  assert.deepEqual(calls.find((c,i)=>i>0&&c.method==='POST').body,{title:'A',look:'blocky',view:'side',orientation:'landscape',devices:['phone','tv'],size:'small'});
  for(const bad of [{title:''},{title:'x'.repeat(61)},{title:'A',look:'anime'},{title:'A',size:'tiny'},{title:'A',devices:[]},{title:'A',devices:['vr']},{title:'A',view:'top'},{title:'A',space_id:'x'}])assert.equal((await callTool('genvr_spaces',{operation:'create',...bad},{backend})).isError,true,JSON.stringify(bad));
 });
+
+test('set_answerer and chat use the place chat routes and explain a place never opened',async()=>{
+ const calls=[];const backend={async request(method,path,body){calls.push({method,path,body});
+  if(path==='/api/genvr/worlds/space-1/history')return {conversationId:'c1',messages:[{role:'user',text:'Hi'},{role:'assistant',text:'Hello'}]};
+  if(path==='/api/genvr/worlds/space-1/agent')return {answerer:{id:'sara',name:'Sara',detail:'qwen',color:'#123456'}};
+  if(path.startsWith('/api/genvr/worlds/never/'))throw new BackendError('not found',404);
+  throw new BackendError('x',500);}};
+ const chat=await callTool('genvr_spaces',{operation:'chat',space_id:'space-1'},{backend});assert.equal(chat.structuredContent.conversation_id,'c1');assert.equal(chat.structuredContent.messages.length,2);
+ const who=await callTool('genvr_spaces',{operation:'set_answerer',space_id:'space-1',agent_id:'sara'},{backend});
+ assert.deepEqual(calls.at(-1),{method:'PUT',path:'/api/genvr/worlds/space-1/agent',body:{agentId:'sara'}});assert.deepEqual(who.structuredContent.answerer,{id:'sara',name:'Sara',model:'qwen'});
+ const never=await callTool('genvr_spaces',{operation:'set_answerer',space_id:'never',agent_id:'sara'},{backend});assert.equal(never.isError,true);assert.match(never.content[0].text,/Open this place once in the Studio/);
+ for(const args of [{operation:'set_answerer',space_id:'space-1'},{operation:'set_answerer',space_id:'space-1',agent_id:'../x'},{operation:'chat',space_id:'space-1',agent_id:'sara'}])assert.equal((await callTool('genvr_spaces',args,{backend})).isError,true,JSON.stringify(args));
+});
