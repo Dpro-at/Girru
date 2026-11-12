@@ -98,7 +98,7 @@ export function HiddenKeysQuestion({ c, onConnections, nameOf }: { c: HiddenKeys
   useEffect(() => { void c.load(); }, [c]);
   if (!s.drawers.length) return s.done ? <p className="dk-inline-ok" role="status">{s.done}</p> : null;
   const q = s.drawers[0];
-  const where = nameOf?.(q.drawer) ?? (q.drawer.startsWith('project:') ? drawerName(q.drawer).replace(/^Projects? · /, '') : drawerName(q.drawer));
+  const where = q.drawer === 'memory' ? 'your memories' : nameOf?.(q.drawer) ?? (q.drawer.startsWith('project:') ? drawerName(q.drawer).replace(/^Projects? · /, '') : drawerName(q.drawer));
   return <article className="dk-question" aria-label="Hidden keys">
     <h3><UiIcon name="lock" size={15}/>{q.count} {q.count === 1 ? 'key or login was' : 'keys and logins were'} hidden in {where}</h3>
     <p>Found in {q.memories || q.count} {(q.memories || q.count) === 1 ? 'memory' : 'memories'}: {kindsLine(q.kinds)}. They are no longer shown or given to agents. Move them to Connections so agents can use them only with your approval.</p>

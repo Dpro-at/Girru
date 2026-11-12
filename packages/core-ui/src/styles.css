@@ -2329,6 +2329,12 @@ button.status-item:hover { background:var(--row-hover); color:var(--text); }
 .doc-banner .dk-ask { margin:0; }
 .doc-status .doc-importance, .doc-importance { display:inline-flex; flex-direction:row; white-space:nowrap; align-items:center; gap:6px; margin-inline-end:auto; }
 .doc-importance input { inline-size:110px; }
+/* MEM-READ-01 MR9: Night work. */
+.mem-night { display:grid; gap:8px; }
+.mem-night-hours > span:last-child { display:inline-flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.mem-night-hours label { display:inline-flex; align-items:center; gap:6px; }
+.mem-night-steps { margin:0; padding-inline-start:20px; display:grid; gap:4px; }
+.mem-night-report { margin:0; padding-inline-start:18px; display:grid; gap:2px; }
 /* MEM-READ-01 MR6: Where the work stands; Key files. */
 .dk-work-row { display:grid; gap:2px; padding:8px 12px; }
 .dk-work-row .dk-row-title { display:flex; align-items:center; gap:6px; margin:0; font-size:13px; }
