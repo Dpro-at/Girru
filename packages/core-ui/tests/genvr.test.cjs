@@ -52,7 +52,7 @@ test('local runtime availability has a minimal program-only contract',()=>{
  assert.equal(allowedRequest('GET',GENVR_RUNTIME),true);
  assert.equal(allowedGenVR('POST',GENVR_RUNTIME,{}),false);
  assert.equal(allowedGenVR('GET',GENVR_RUNTIME+'?owner=other'),false);
- assert.deepEqual(genvrResponse(GENVR_RUNTIME,200,{state:'installed',version:'0.3.0-preview.19',job:'private',account:'private'}),{state:'installed',version:'0.3.0-preview.19'});
+ assert.deepEqual(genvrResponse(GENVR_RUNTIME,200,{state:'installed',version:'0.3.0-preview.20',job:'private',account:'private'}),{state:'installed',version:'0.3.0-preview.20'});
  assert.deepEqual(genvrResponse(GENVR_RUNTIME,200,{state:'missing',version:null}),{state:'missing',version:null});
  assert.throws(()=>genvrResponse(GENVR_RUNTIME,200,{state:'installed',version:'invalid'}));
 });
@@ -94,7 +94,7 @@ test('GV1: renaming saves once when Enter and leaving the field both fire',()=>{
 test('GV1: the Studio hands My projects back to Girru and Motion lab opens the lab itself',()=>{
  const read=f=>require('node:fs').readFileSync(require('node:path').join(__dirname,f),'utf8');
  const host=read('../scripts/genvr-host.js'),page=read('../src/GenVRPage.tsx');
- assert.match(host,/onHome:\(\)=>send\(\{operation:'home'\}\)/);assert.match(host,/data\.lab===true&&typeof projectId!=='string'\?\{openLab:true\}/);
+ assert.match(host,/onHome:\(\)=>send\(\{operation:'home'\}\)/);assert.ok(host.includes('desktopLayout:true'),'the full editor also in a narrow Girru window');assert.match(host,/data\.lab===true&&typeof projectId!=='string'\?\{openLab:true\}/);
  assert.match(page,/if\(data\.operation==='home'\)\{/);assert.match(page,/if\(p==='lab'\)open\(lab\?\.id,undefined,true\);/);
 });
 test('Store: the "add it in the coding app" line is only for coding-app items, not for GenVR waiting on a version',()=>{
