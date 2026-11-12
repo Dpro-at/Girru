@@ -26,6 +26,7 @@ import { all, sql } from '../repositories/sql-steps.js';
 import { lexicalTokens } from './text-normalize.js';
 import { termCounts } from './hybrid.js';
 import { LEGACY_HASH_MODEL } from './embedding.js';
+import { forgetRecallStore, recallStoreStats } from './recall-store.js';
 
 export interface IndexEntry {
   id: string;
@@ -112,6 +113,7 @@ function sweepIdle(now: number): void {
 
 /** Drop a user's whole index (forget, trash, a model change). */
 export function forgetRecallIndex(userId?: string): void {
+  forgetRecallStore(userId); // MEM-SPEED-01: the store kept in step by id
   if (userId === undefined) {
     users.clear();
     totalBytes = 0;
@@ -124,7 +126,9 @@ export function forgetRecallIndex(userId?: string): void {
 export function recallIndexStats(): { users: number; entries: number; bytes: number } {
   let entries = 0;
   for (const u of users.values()) entries += u.entries.size;
-  return { users: users.size, entries, bytes: totalBytes };
+  const store = recallStoreStats();
+  const all = new Set([...users.keys(), ...store.userIds]);
+  return { users: all.size, entries: entries + store.entries, bytes: totalBytes + store.bytes };
 }
 
 /**

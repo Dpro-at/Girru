@@ -5,7 +5,7 @@
 // Run from packages/backend:
 //   node --import tsx scripts/memory-baseline/explain.mjs [--size 100000] [--p9]
 // --p9 adds the P9 drawer indexes first (memory/indexes.ts), to compare plans.
-import { backendDir, addUser, argValue, cleanup, openDb, quietly } from './env.mjs';
+import { backendDir, moduleUrl, addUser, argValue, cleanup, openDb, quietly } from './env.mjs';
 import { join } from 'node:path';
 import { syntheticMemories } from './corpus.mjs';
 
@@ -13,10 +13,10 @@ const size = Number(argValue('size', '100000'));
 const OWNER = 'p9-owner';
 const { db, closeDatabase } = await openDb();
 addUser(db, OWNER, 'owner');
-const { getMemoryStorage, NOT_AGENT_NOTES_SQL } = await import(join(backendDir, 'src/memory/storage.ts'));
-const D = await import(join(backendDir, 'src/memory/drawers.ts'));
-const { NOT_ARCHIVED_SQL } = await import(join(backendDir, 'src/memory/scopes/store.ts'));
-const { NOT_REPLACED_SQL } = await import(join(backendDir, 'src/memory/validity.ts'));
+const { getMemoryStorage, NOT_AGENT_NOTES_SQL } = await import(moduleUrl(backendDir, 'src/memory/storage.ts'));
+const D = await import(moduleUrl(backendDir, 'src/memory/drawers.ts'));
+const { NOT_ARCHIVED_SQL } = await import(moduleUrl(backendDir, 'src/memory/scopes/store.ts'));
+const { NOT_REPLACED_SQL } = await import(moduleUrl(backendDir, 'src/memory/validity.ts'));
 await quietly(() => getMemoryStorage().initialize());
 
 const insert = db.prepare(`INSERT INTO memories (id, user_id, type, content, memory_layer, status, metadata,
@@ -32,7 +32,7 @@ for (const m of syntheticMemories(size, 23)) {
 }
 if (batch.length) flush();
 if (process.argv.includes('--p9')) {
-  const { P9_MEMORY_INDEXES } = await import(join(backendDir, 'src/memory/indexes.ts'));
+  const { P9_MEMORY_INDEXES } = await import(moduleUrl(backendDir, 'src/memory/indexes.ts'));
   for (const ddl of P9_MEMORY_INDEXES) db.exec(ddl);
 }
 db.exec?.('ANALYZE');

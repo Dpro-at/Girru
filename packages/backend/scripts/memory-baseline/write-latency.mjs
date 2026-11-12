@@ -5,7 +5,7 @@
 // apart (enrichMs) after the saves.
 // Run from packages/backend:
 //   node --import tsx scripts/memory-baseline/write-latency.mjs [--p9b] [--size 2000] [--saves 200] [--out f.json]
-import { backendDir, addUser, argValue, cleanup, openDb, percentile, quietly } from './env.mjs';
+import { backendDir, moduleUrl, addUser, argValue, cleanup, openDb, percentile, quietly } from './env.mjs';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { syntheticMemories } from './corpus.mjs';
@@ -19,9 +19,9 @@ const out = argValue('out', null);
 const OWNER = 'p0-owner';
 const { db, closeDatabase } = await openDb();
 addUser(db, OWNER, 'owner');
-const L = await import(join(backendDir, 'src/memory/learning.ts'));
-const PL = await import(join(backendDir, 'src/memory/quality/pipeline.ts'));
-const { getMemoryStorage } = await import(join(backendDir, 'src/memory/storage.ts'));
+const L = await import(moduleUrl(backendDir, 'src/memory/learning.ts'));
+const PL = await import(moduleUrl(backendDir, 'src/memory/quality/pipeline.ts'));
+const { getMemoryStorage } = await import(moduleUrl(backendDir, 'src/memory/storage.ts'));
 await quietly(() => getMemoryStorage().initialize());
 const insert = db.prepare(`INSERT INTO memories (id, user_id, type, content, memory_layer, status, metadata, importance_score, created_at, access_count, drawer_kind, drawer_key)
   VALUES (?, ?, 'fact', ?, 'factual', 'active', '{}', 0.5, ?, 0, 'owner', '')`);

@@ -17,7 +17,7 @@
 // available), and reply recall time p50/p95.
 // Run from packages/backend:
 //   node --import tsx scripts/memory-baseline/agent-eval.mjs --mode hash|ollama [--p9b] [--distractors 5000] [--out f.json]
-import { backendDir, addUser, argValue, cleanup, ollamaHas, openDb, percentile, quietly, realFetch, OLLAMA } from './env.mjs';
+import { backendDir, moduleUrl, addUser, argValue, cleanup, ollamaHas, openDb, percentile, quietly, realFetch, OLLAMA } from './env.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { syntheticMemories } from './corpus.mjs';
@@ -38,11 +38,11 @@ const OTHER = 'other-user';
 const { db, closeDatabase } = await openDb();
 addUser(db, OWNER, 'owner');
 addUser(db, OTHER, 'user');
-const { getMemoryStorage } = await import(join(backendDir, 'src/memory/storage.ts'));
-const { getEmbeddingService } = await import(join(backendDir, 'src/memory/embedding.ts'));
-const D = await import(join(backendDir, 'src/memory/drawers.ts'));
-const P = await import(join(backendDir, 'src/memory/context/pack.ts'));
-const PL = await import(join(backendDir, 'src/memory/quality/pipeline.ts'));
+const { getMemoryStorage } = await import(moduleUrl(backendDir, 'src/memory/storage.ts'));
+const { getEmbeddingService } = await import(moduleUrl(backendDir, 'src/memory/embedding.ts'));
+const D = await import(moduleUrl(backendDir, 'src/memory/drawers.ts'));
+const P = await import(moduleUrl(backendDir, 'src/memory/context/pack.ts'));
+const PL = await import(moduleUrl(backendDir, 'src/memory/quality/pipeline.ts'));
 const storage = getMemoryStorage();
 await quietly(() => storage.initialize());
 const emb = getEmbeddingService();
