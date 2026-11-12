@@ -4242,3 +4242,9 @@ html[data-desktop] :is(.first-run-shell,.first-run-account) { -webkit-app-region
 html[data-desktop="mac"] .titlebar { padding-inline-start:80px; }
 html[data-desktop="win"] .titlebar { padding-inline-end:max(146px, calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%) + 8px)); }
 html[data-desktop="win"] .titlebar-app-menu { margin-inline-start:-4px; }
+
+/* The update button in the top bar: shown only when a new Girru is ready (or while it updates). */
+.titlebar-update { display:inline-flex; align-items:center; gap:6px; block-size:26px; min-block-size:26px; padding:0 10px; margin-inline-start:auto; border:0; border-radius:13px; background:var(--accent); color:var(--on-accent); font-size:12px; font-weight:600; white-space:nowrap; cursor:pointer; }
+.titlebar-update:hover { background:var(--accent-hover); }
+.titlebar-update[data-busy] { background:color-mix(in srgb,var(--text) 9%,transparent); color:var(--text-2, var(--muted)); font-weight:500; }
+.titlebar-update + .titlebar-tools.end { margin-inline-start:6px; }

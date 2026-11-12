@@ -274,6 +274,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
       <p className="titlebar-title">{page === 'chat' && activeProject && <span className="titlebar-tile" aria-hidden="true"><UiIcon name="folder" size={12}/></span>}{pageTitle}{page === 'chat' && activeProject && <button type="button" className="titlebar-project" title={activeProject.folder ?? activeProject.name} aria-label={`${activeProject.name} · show its folder in Details`} onClick={() => setPlaceRequest(n => n + 1)}>{activeProject.name}</button>}</p>
       {/* CH1/SH1: Commands sits in the middle of the title bar; the theme lives in Settings › General and in Commands. */}
       {!phone&&<button type="button" className="titlebar-cmdk" onClick={() => {if(page==='code'&&window.dproApp?.nabu?.showCommands)void window.dproApp.nabu.showCommands();else setPalette(true);}} aria-label={page==='code'?'Code commands':'Search or run a command (⌘K)'}><UiIcon name="search" size={13}/>Commands<kbd>⌘K</kbd></button>}
+      {owner && mode === 'live' && <AppUpdateNotice onOpen={()=>openSettings('about')}/>}
       <div className="titlebar-tools end" ref={setTitleSlot}/>
     </header>
     <aside className="sidebar">
@@ -330,7 +331,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
     {!phone&&<ShellFooter controller={footer} settingsCurrent={page==='settings'} settingsAlert={backupFailed?'the last backup failed':undefined} onSettings={()=>backupFailed?openSettings('backups'):setPage('settings')} onCustomize={()=>openSettings('general')}
       status={mode === 'mock' ? <span className="status-item"><span className={`status-dot ${mode}`} aria-hidden="true"/>Offline practice — fictional data</span>
         : <span className="status-item status-dot-only" title="Connected · this installation" aria-label="Connected · this installation" role="img"><span className={`status-dot ${mode}`} aria-hidden="true"/></span>}
-      extra={<>{owner && mode === 'live' && <ComputersFooterStatus onOpen={() => setPage('computers')}/>}{owner && mode === 'live' && <AppUpdateNotice onOpen={()=>openSettings('about')}/>}{isDeveloperBuild(client) && <button className="status-item statusbar-button" onClick={() => client.selectMode('fixture')} title="Clears this local session; the server sign-in stays until you sign out">Leave to fixture</button>}{owner && mode === 'live' && <FooterHelperPill client={client}/>}</>}
+      extra={<>{owner && mode === 'live' && <ComputersFooterStatus onOpen={() => setPage('computers')}/>}{isDeveloperBuild(client) && <button className="status-item statusbar-button" onClick={() => client.selectMode('fixture')} title="Clears this local session; the server sign-in stays until you sign out">Leave to fixture</button>}{owner && mode === 'live' && <FooterHelperPill client={client}/>}</>}
       entries={footerEntries}/>}
     {owner && mode === 'live' && !phone && <NewPhoneNotice client={client} onSettings={() => openSettings('phone')}/>}
     {owner && mode === 'live' && !phone && page !== 'computers' && <ComputerJoinNotice client={client} enabled={owner && mode === 'live'} onOpen={() => setPage('computers')}/>}
