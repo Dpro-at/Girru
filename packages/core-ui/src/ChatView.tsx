@@ -416,7 +416,6 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
     const all: MenuItem[] = [
       { label: 'Rename', icon: 'pencil', run: () => setChatSheet('rename') },
       { label: activeConv.pinned ? 'Unpin' : 'Pin', icon: 'pin', shortcut: '⌘P', run: () => void controller.pin(id, !activeConv.pinned) },
-      ...(s.projects.length ? ['sep' as const, ...[{ id: '', name: 'No project' }, ...s.projects].map(p => ({ label: p.id ? `Move to ${p.name}` : 'Move out of the project', icon: 'folder' as const, checked: (activeConv.projectId ?? '') === p.id, run: () => void controller.moveToProject(id, p.id) }))] : []),
       'sep',
       { label: 'Open in a new window', icon: 'open', shortcut: '⌘O', run: () => openChatWindow(id) },
       ...(onOpenCode ? [{label:'Open in Code',icon:'code' as const,run:()=>void openChatCode()}] : []),
@@ -505,7 +504,7 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
       {onOpenCode && !phone && <button type="button" className="tool" aria-label="Open in Code" title="Open this project in Code" onClick={()=>void openChatCode()}><UiIcon name="code" size={15}/></button>}
       {canBoard && !phone && <button type="button" className="tool chat-to-board" onClick={() => cardForm ? setCardForm(null) : openCardForm()} aria-pressed={!!cardForm} aria-label="Add to board" title="Add to board (⌘B)">
         <UiIcon name="board" size={15}/></button>}
-      {s.activeId && activeConv && <button type="button" className="tool chat-more" aria-label="More for this chat" title="Rename · Pin · Move to project · Export · Remember the whole chat · Delete…" aria-haspopup="menu"
+      {s.activeId && activeConv && <button type="button" className="tool chat-more" aria-label="More for this chat" title="Rename · Pin · Export · Remember the whole chat · Delete…" aria-haspopup="menu"
         onClick={e => moreMenu.at(e, moreItems())}><UiIcon name="more" size={15}/></button>}
       <button type="button" className="tool" aria-pressed={pane !== null} aria-label={pane !== null ? 'Hide the side panel' : 'Show the side panel'} title={pane !== null ? 'Hide the side panel (⌥⌘I)' : 'Show the side panel (⌥⌘I)'}
         onClick={() => setPane(p => p === null ? 'details' : null)}><UiIcon name="inspector" size={15}/></button>
