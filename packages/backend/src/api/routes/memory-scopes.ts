@@ -30,6 +30,7 @@
  *   POST /api/memory/scopes/projects/:slug/preview { action, target?, departmentId? } -> { action, project, target?, department?, effects, previewHash }
  *   POST /api/memory/scopes/projects/:slug/apply   { action, target?, departmentId?, expectedPreviewHash, confirm: true } -> { action, project, effects, result }
  *   GET  /api/memory/scopes/projects/:slug/export  -> { project, files: [{ name, content }] }
+ *   POST /api/memory/scopes/ask-agent              { agentId, request, text, drawer? } -> { text, note, agentId }  Ask an agent in the shared editor (MR5; proposal only, nothing saved)
  *   GET  /api/memory/scopes/hidden-keys            -> { total, drawers: [{ drawer, count, memories, kinds }] } keys hidden since the owner last answered (MR2; runs the one-time pass first)
  *   POST /api/memory/scopes/hidden-keys/answer     { answer: 'keep' | 'move', drawer? } -> { answered, moved }  Keep hidden here / Move to Connections
  *   POST /api/memory/scopes/hidden-keys/:id/reveal -> { value }  the owner's Show (audited; never cached)
@@ -56,6 +57,7 @@ import { actorOrReply, requireOwner } from '../../repositories/scope.js';
 import { resolveFileAgent } from '../../memory/memory-files.js';
 import { classifyLibraryProjects, setProjectKind } from '../../memory/scopes/project-kinds.js';
 import { answerHiddenKeys, hiddenKeysReport, hideKeysOnce, revealKey } from '../../memory/hidden-keys.js';
+import { AskAgentError, askAgentToEdit } from '../../memory/ask-agent.js';
 import { provenanceJobStatus, setChecked } from '../../memory/validity.js';
 import { vectorJobStatus } from '../../memory/vectors.js';
 import { storeP3Enabled } from '../../services/store-p3.js';
@@ -144,6 +146,19 @@ export async function memoryScopeRoutes(fastify: FastifyInstance) {
     if (marked) invalidateScopeTree(owner.userId!);
     return scopeTree(owner.userId!, { fresh: marked > 0 || fresh === '1' || fresh === 'true' });
   });
+  // ---- Ask an agent in the shared editor (MEM-READ-01 MR5): a proposal only; the owner's Save is the only write ----
+  route('POST', '/api/memory/scopes/ask-agent', async (owner, request, reply) => {
+    const b = body(request);
+    try {
+      const out = await askAgentToEdit(owner.userId!, { agentId: b.agentId, request: b.request, text: b.text, drawer: b.drawer });
+      audit(request, owner, 'memory.ask_agent', 'agents_config', out.agentId, { chars: typeof b.text === 'string' ? b.text.length : 0 });
+      return out;
+    } catch (err) {
+      if (err instanceof AskAgentError) return reply.code(err.status).send({ error: err.message, code: err.code });
+      throw err;
+    }
+  });
+
   // ---- hidden keys (MEM-READ-01 MR2) ----
   route('GET', '/api/memory/scopes/hidden-keys', async (owner) => {
     await hideKeysOnce(owner.userId!).catch(() => undefined);

@@ -70,6 +70,16 @@ export class MemoryScopesController extends Store<ScopeState> {
     } catch { return false; }
   }
 
+  /** MEM-READ-01 MR5: Ask an agent to change a document. A proposal only; nothing is saved. */
+  async askAgent(agentId: string, request: string, text: string, drawer?: string): Promise<{ text: string; note: string } | { error: string }> {
+    try {
+      const r = await this.req('POST', '/api/memory/scopes/ask-agent', { agentId, request, text, ...(drawer ? { drawer } : {}) });
+      if (r.status === 200) { const b = r.body as { text: string; note: string }; return { text: b.text, note: b.note }; }
+      const e = r.body as { error?: string } | null;
+      return { error: e?.error ?? 'The agent could not answer. Try again.' };
+    } catch { return { error: 'The agent could not answer (no connection).' }; }
+  }
+
   async loadAgents() {
     const a = await this.read<{ agents: Array<{ id: string; name?: string }> }>('/api/agents');
     if (!a) return;

@@ -598,6 +598,7 @@ function MemoryEditSheet({ k, item, onSaved }: { k: K; item: ExplorerItem; onSav
     files={[{ id: item.id, name: item.title || 'Memory', content: s.draft }]} onChange={(_, t) => x.editDraft(t)} onClose={() => x.cancelEdit()} onSave={() => save()}
     message={s.busy ? 'Saving…' : s.notice ?? 'Saved as a new version; History keeps the old one. ⌘S saves · Esc closes'}
     leaf={(t, key) => <KeyText key={key} text={t}/>}
+    ask={Object.keys(ss?.agents ?? {}).length ? { agents: Object.entries(ss!.agents).map(([id, name]) => ({ id, name })), run: (agentId, request, text) => k.sc.askAgent(agentId, request, text, item.drawerId) } : undefined}
     banner={s.conflict ? <div className="dk-ask" role="alert"><p><b>This memory changed while you were editing.</b> Nothing was overwritten. Saved meanwhile:</p><p className="dk-insp-text" dir="auto">{s.conflict.content}</p>
       <div className="actions"><button type="button" className="primary" disabled={s.busy} onClick={() => save(true)}>Save mine as the newest</button><button type="button" disabled={s.busy} onClick={() => void x.keepTheirs()}>Keep theirs</button></div></div> : undefined}
     footer={<label className="doc-importance">Importance<input type="range" min={1} max={10} value={s.draftImportance} onChange={e => x.editImportance(Number(e.target.value))}/><b>{s.draftImportance}</b></label>}/>;

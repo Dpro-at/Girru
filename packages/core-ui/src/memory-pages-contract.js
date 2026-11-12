@@ -21,6 +21,7 @@
 //   GET    /api/memory/scopes/hidden-keys                keys hidden since the owner last answered (MR2)
 //   POST   /api/memory/scopes/hidden-keys/answer         { answer: 'keep' | 'move', drawer? }
 //   POST   /api/memory/scopes/hidden-keys/:id/reveal     the owner's Show (one value)
+//   POST   /api/memory/scopes/ask-agent                  { agentId, request, text, drawer? } Ask an agent (MR5), a proposal only
 //   Access by inheritance
 //   GET    /api/memory/access
 //   POST   /api/memory/access/preview                    { changes }
@@ -199,6 +200,7 @@ export function memoryPagesPath(path) {
     case '/api/handoffs/coding-apps': return with_('coding-handoffs', QUERIES.codingHandoffs);
     case '/api/memory/scopes/projects': return with_('project-create', null);
     case '/api/memory/scopes/hidden-keys': return with_('hidden-keys', null);
+    case '/api/memory/scopes/ask-agent': return with_('ask-agent', null);
     case '/api/memory/scopes/hidden-keys/answer': return with_('hidden-keys-answer', null);
     case '/api/memory/scopes/jobs': return with_('jobs', null);
   }
@@ -283,6 +285,7 @@ export function allowedMemoryPages(method, path, body) {
     case 'project-adopt': return method === 'POST' && record(body) && onlyKeys(body, ['projectId']) && plainId(body.projectId);
     case 'project-kind': return method === 'POST' && record(body) && onlyKeys(body, ['kind']) && (body.kind === 'project' || body.kind === 'library');
     case 'hidden-keys': return method === 'GET' && body === undefined;
+    case 'ask-agent': return method === 'POST' && record(body) && onlyKeys(body, ['agentId', 'request', 'text', 'drawer']) && agentId(body.agentId) && text(body.request, 500) && typeof body.text === 'string' && body.text.length <= 50000 && (body.drawer === undefined || validDrawerId(body.drawer));
     case 'hidden-keys-answer': return method === 'POST' && record(body) && onlyKeys(body, ['answer', 'drawer']) && (body.answer === 'keep' || body.answer === 'move') && (body.drawer === undefined || (typeof body.drawer === 'string' && body.drawer.length <= 200));
     case 'hidden-key-reveal': return method === 'POST' && body === undefined;
     case 'project-preview': return method === 'POST' && projectAction(body, false);
@@ -633,6 +636,7 @@ export function memoryPagesResponse(path, status, body) {
       const kinds = k => Object.fromEntries(['login', 'password', 'key', 'token'].filter(w => record(k) && Number.isSafeInteger(k[w]) && k[w] > 0).map(w => [w, k[w]]));
       return { total: count(body.total), drawers: (Array.isArray(body.drawers) ? body.drawers : []).slice(0, 200).filter(d => record(d) && typeof d.drawer === 'string' && d.drawer.length <= 200).map(d => ({ drawer: d.drawer, count: count(d.count), memories: count(d.memories), kinds: kinds(d.kinds) })) };
     }
+    case 'ask-agent': if (typeof body.text !== 'string' || body.text.length > 50000) fail(); return { text: body.text, note: clip(body.note, 300), agentId: idOr(body.agentId, agentId) };
     case 'hidden-keys-answer': return { answered: count(body.answered), moved: count(body.moved) };
     case 'hidden-key-reveal': if (typeof body.value !== 'string' || body.value.length > 20000) fail(); return { value: body.value };
     case 'project-kind': if (!slug(body.slug) || !['project', 'library'].includes(body.kind)) fail(); return { slug: body.slug, kind: body.kind, before: ['project', 'library'].includes(body.before) ? body.before : null };

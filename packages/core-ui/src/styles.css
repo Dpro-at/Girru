@@ -2329,6 +2329,24 @@ button.status-item:hover { background:var(--row-hover); color:var(--text); }
 .doc-banner .dk-ask { margin:0; }
 .doc-status .doc-importance, .doc-importance { display:inline-flex; flex-direction:row; white-space:nowrap; align-items:center; gap:6px; margin-inline-end:auto; }
 .doc-importance input { inline-size:110px; }
+/* MEM-READ-01 MR5: Ask an agent inside the shared editor. */
+.doc-ask-button { display:inline-flex; align-items:center; gap:6px; }
+.doc-ask { display:grid; gap:8px; padding:10px 16px; border-block-end:1px solid var(--border); background:var(--surface); }
+.doc-ask-row { display:flex; align-items:center; gap:8px; }
+.doc-ask-agent { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+.doc-ask-input { flex:1; min-inline-size:0; }
+.doc-ask-head { display:flex; align-items:center; gap:8px; margin:0; }
+.doc-ask-head b { margin-inline-end:auto; }
+.doc-ask-proposal ul { list-style:none; margin:0; padding:0; display:grid; gap:6px; max-block-size:220px; overflow:auto; }
+.doc-ask-proposal li { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 10px; padding:6px 8px; border-radius:8px; background:var(--secondary); }
+.doc-ask-proposal li[data-state="discarded"], .doc-ask-proposal li[data-state="gone"] { opacity:.6; }
+.doc-ask-label { font-weight:600; }
+.doc-ask-diff { grid-column:1; display:grid; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; }
+.doc-ask-diff del { color:var(--danger); text-decoration:line-through; }
+.doc-ask-diff ins { color:#2f9e5b; text-decoration:none; }
+.doc-ask-diff del::before { content:'− '; } .doc-ask-diff ins::before { content:'+ '; }
+.doc-ask-actions { grid-column:2; grid-row:1 / span 2; display:flex; gap:6px; align-items:start; }
+.doc-ask-note { margin:0; }
 /* MEM-READ-01 MR2: a hidden key is one lock chip; Show reveals it for the owner alone. */
 .dk-key-chip { display:inline-flex; align-items:center; gap:4px; padding:0 6px; margin:0 1px; border-radius:6px; font-size:.92em; line-height:1.5; white-space:nowrap; vertical-align:baseline; color:var(--muted); background:var(--secondary); }
 .dk-key-chip .link-button { font-size:inherit; padding:0 0 0 2px; }
