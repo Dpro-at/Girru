@@ -1,4 +1,4 @@
-// MEM-READ-01 MR3: workspace_memory projects / mark_project. Library folders come back apart as notProjects.
+// MEM-READ-01 MR3: workspace_memory not_projects / mark_project. Only the library list is ever returned.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {callTool} from '../src/tools.ts';
@@ -10,11 +10,12 @@ function fixture(){const calls=[];return {calls,backend:{async request(method,pa
  if(method==='POST'&&path==='/api/memory/scopes/projects/bubbletea-v1-3-10/kind')return {slug:'bubbletea-v1-3-10',kind:body.kind,before:'library'};
  throw Error('Unexpected '+method+' '+path);}}};}
 
-test('projects lists the owner projects with library folders apart',async()=>{
- const {backend}=fixture();const out=await callTool('workspace_memory',{operation:'projects',scope:'owner'},{backend});
+test('not_projects lists only library folders, never the owner other projects',async()=>{
+ const {backend}=fixture();const out=await callTool('workspace_memory',{operation:'not_projects',scope:'owner'},{backend});
  assert.notEqual(out.isError,true,out.content[0].text);
- assert.deepEqual(out.structuredContent.projects.map(x=>x.slug),['grenzer']);
- assert.deepEqual(out.structuredContent.notProjects,[{slug:'bubbletea-v1-3-10',name:'bubbletea-v1-3-10',memories:3,reason:'Go library'}]);
+ assert.deepEqual(out.structuredContent.notProjects,[{slug:'bubbletea-v1-3-10',reason:'Go library'}]);
+ assert.equal(out.structuredContent.total,1);
+ assert.doesNotMatch(JSON.stringify(out),/grenzer/);
 });
 test('mark_project is the owner choice; bad input never reaches the backend',async()=>{
  const {backend,calls}=fixture();const out=await callTool('workspace_memory',{operation:'mark_project',scope:'owner',slug:'bubbletea-v1-3-10',kind:'project'},{backend});

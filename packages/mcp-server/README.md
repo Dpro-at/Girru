@@ -22,7 +22,7 @@ The public definitions in `src/tools.ts` (and domain modules) and `publicToolCat
 | `workspace_control` | Owner-approved workspace control | `options`, `preview`, `request`, `status`, `history` |
 | `workspace_drafts` | Owner review drafts | `context`, `prepare`, `list`, `read` |
 | `workspace_reports` | Reports and prepared display results | `list`, `read`, `create`, `update`, `publish` |
-| `workspace_memory` | Scoped memory and prepared proposals | `search`, `read`, `versions`, `status`, `reviews`, `review`, `propose_add`, `propose_update`, `projects`, `mark_project` |
+| `workspace_memory` | Scoped memory and prepared proposals | `search`, `read`, `versions`, `status`, `reviews`, `review`, `propose_add`, `propose_update`, `not_projects`, `mark_project` |
 | `workspace_devices` | Owned computer status, confirmed task requests and selected portable synchronization; target approvals remain required | `status`, `sync`, `join_requests`, `suggest_target`, `task_progress`, `work_result`, `task_rules`, `set_task_rules`, `rename_computer`, `request_task`, `cancel_task`, `select_sync` |
 | `genvr_spaces` | GenVR spaces on this computer (how they are played, their game, the agents in them) and the read-only GenVR market | `list`, `get`, `create`, `agents_available`, `rename`, `set_play`, `set_game`, `set_agents`, `set_answerer`, `chat`, `market` |
 | `meetings` | Department meetings | `list`, `read`, `departments`, `participants`, `create`, `draft` |
@@ -55,7 +55,7 @@ The public definitions in `src/tools.ts` (and domain modules) and `publicToolCat
 
 `workspace_memory` accepts exactly one explicit `scope`: `owner`, `experience`, `project:<current-project-key>`, `task:<id>` or `people:<id>`. It never assumes that the working directory authorizes a project, and does not offer an all-project search. Use the current drawer key shown by Girru; stale aliases are refused rather than silently widening a search.
 
-`projects` (scope `owner`) lists the owner's projects; library folders (downloaded code such as the Go module folder or `node_modules`) are never projects and come back apart as `notProjects`. `mark_project` (scope `owner`, `slug`, `kind` `project` or `library`) is the owner's "It's a project" / "Not a project" choice and is used only on the owner's explicit instruction.
+`not_projects` (scope `owner`) lists only the library folders (downloaded code such as the Go module folder or `node_modules`) that Girru keeps out of the projects; it never lists the owner's other projects. `mark_project` (scope `owner`, `slug`, `kind` `project` or `library`) is the owner's "It's a project" / "Not a project" choice and is used only on the owner's explicit instruction.
 
 - `search`: `scope`, `query` (1–200 characters), optional `limit` (1–50) and cursor returned by the backend. Searches saved text through the scoped explorer, without semantic embeddings or a model call.
 - `read`: `scope`, `id`. Returns a bounded text view of one memory in that drawer.
