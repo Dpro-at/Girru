@@ -19,6 +19,8 @@ export async function genvrWorldRoutes(app: FastifyInstance, options: { deps?: T
     if (ownerId === null) return reply;
     try { return await fn(ownerId, request, reply); }
     catch (error) {
+      // A failure shown in plain words keeps its raw reason in the log.
+      if (error instanceof WorldError && error.cause instanceof Error) safeConsole.log('[GenVR world] failed', { ...safeErrorFields(error.cause), reason: redactSecrets(error.cause.message).text.replace(/\s+/g, ' ').slice(0, 300) });
       if (error instanceof WorldError) return reply.code(error.status).send({ code: error.code, ...(error.message !== error.code ? { message: error.message } : {}) });
       // The reason, with secrets taken out, so a failed turn can be understood from the log.
       const reason = error instanceof Error ? redactSecrets(error.message).text.replace(/\s+/g, ' ').slice(0, 300) : '';
