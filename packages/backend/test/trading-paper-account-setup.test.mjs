@@ -32,8 +32,8 @@ test('actual reviewed installation creates account policy and profile once with 
 });
 test('third insert and actual journal write faults roll back every account/profile/policy effect',async()=>{
  const f=await owner();for(const prefix of ['INSERT INTO main.paper_execution_profiles','INSERT INTO main.paper_account_setups']){
-  const p=input(f),original=db.prepare;let injected=0;db.prepare=function(sql,...args){const statement=original.call(this,sql,...args);if(sql.startsWith(prefix))return {run(...values){statement.run(...values);injected++;throw Error('Owned fixture failure after real write');}};return statement;};
-  try{assert.equal(provision(f,p).ok,false);}finally{db.prepare=original;}
+  const p=input(f),original=Object.getPrototypeOf(db).prepare;let injected=0;Object.getPrototypeOf(db).prepare=function(sql,...args){const statement=original.call(this,sql,...args);if(sql.startsWith(prefix))return {run(...values){statement.run(...values);injected++;throw Error('Owned fixture failure after real write');}};return statement;};
+  try{assert.equal(provision(f,p).ok,false);}finally{Object.getPrototypeOf(db).prepare=original;}
   assert.equal(injected,1);assert.equal(snapshot(p.accountId).account,undefined);assert.equal(snapshot(p.accountId).profile,undefined);assert.deepEqual(snapshot(p.accountId).policies,[]);assert.equal(db.prepare('SELECT count(*) n FROM paper_account_setups WHERE account_id=?').get(p.accountId).n,0);
  }
 });

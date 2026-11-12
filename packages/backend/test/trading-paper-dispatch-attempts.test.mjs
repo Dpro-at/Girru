@@ -63,8 +63,8 @@ test('exact schema guards reject TEMP shadows/unexpected trigger and corrupt cou
 });
 test('real SQL trigger abort after counter update and post-insert failure roll back every claim effect',()=>{
  const f=provision();for(const mode of ['trigger','after-insert']){
-  const original=db.prepare;let injected=0;db.prepare=function(sql,...args){const statement=original.call(this,sql,...args);if(sql.startsWith('INSERT INTO main.paper_dispatch_attempts '))return {run(...values){injected++;if(mode==='trigger'){db.exec("CREATE TEMP TRIGGER owned_dispatch_abort BEFORE INSERT ON main.paper_dispatch_attempts BEGIN SELECT RAISE(ABORT,'owned fixture failure'); END");return statement.run(...values);}statement.run(...values);throw Error('Owned post-insert failure');}};return statement;};
-  try{assert.equal(journal.claimPaperDispatchAttempt(db,f.ownerId,claim(f),now).ok,false);}finally{db.prepare=original;}
+  const original=Object.getPrototypeOf(db).prepare;let injected=0;Object.getPrototypeOf(db).prepare=function(sql,...args){const statement=original.call(this,sql,...args);if(sql.startsWith('INSERT INTO main.paper_dispatch_attempts '))return {run(...values){injected++;if(mode==='trigger'){db.exec("CREATE TEMP TRIGGER owned_dispatch_abort BEFORE INSERT ON main.paper_dispatch_attempts BEGIN SELECT RAISE(ABORT,'owned fixture failure'); END");return statement.run(...values);}statement.run(...values);throw Error('Owned post-insert failure');}};return statement;};
+  try{assert.equal(journal.claimPaperDispatchAttempt(db,f.ownerId,claim(f),now).ok,false);}finally{Object.getPrototypeOf(db).prepare=original;}
   assert.equal(injected,1);assert.equal(read(f).attemptCount,0);assert.equal(read(f).lastClaimAt,null);assert.deepEqual(read(f).attempts,[]);assert.equal(db.prepare("SELECT count(*) n FROM sqlite_temp_master WHERE name='owned_dispatch_abort'").get().n,0);
  }
 });

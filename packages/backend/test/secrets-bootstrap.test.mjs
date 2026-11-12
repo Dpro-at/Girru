@@ -138,14 +138,28 @@ test('a secrets file readable by others is set back to 0600', { skip: process.pl
   assert.ok(out.lines.some((l) => l.includes('0600')));
 });
 
-test('server entry loads env + secrets before any other import', () => {
-  const src = readFileSync(join(backendDir, 'src/api/server.ts'), 'utf-8');
-  const firstImport = src.split('\n').find((l) => /^import\s/.test(l));
-  assert.equal(firstImport.trim(), "import '../config/load-env.js';");
+// ENC-01: the native ownership plan (three encryption start-up modules that import no store, settings or
+// database) comes first; then settings and secrets load, before any application store or the server opens.
+const ENC_STARTUP_IMPORTS = [
+  "import {receiveNativeStartupPlan} from '../memory/encryption/native-startup-handshake.js';",
+  "import {reserveNativeStartupExclusions} from '../memory/encryption/native-startup-exclusion.js';",
+  "import {bindNativeProcessStartup} from '../memory/encryption/native-process-startup.js';",
+];
+
+test('server entry loads env + secrets before any application import', () => {
+  const src = readFileSync(join(backendDir, 'src/api/server.ts'), 'utf-8').replace(/^\s*\/\/.*$/gm, '');
+  const env = src.indexOf("await import('../config/load-env.js');");
+  assert.ok(env > 0, 'settings are loaded');
+  for (const m of src.matchAll(/await import\('([^']+)'\)/g)) if (m[1] !== '../config/load-env.js') assert.ok(m.index > env, `${m[1]} loads after the settings`);
 });
 
-test('server entry: load-env is its only static import; the server loads after it (a pending restore is in place before any store opens)', () => {
+test('server entry: only the encryption start-up modules are static imports; the server loads after the settings (a pending restore is in place before any store opens)', () => {
   const src = readFileSync(join(backendDir, 'src/api/server.ts'), 'utf-8').replace(/^\s*\/\/.*$/gm, '');
-  assert.deepEqual(src.match(/^import\s[^\n]*$/gm), ["import '../config/load-env.js';"]);
+  assert.deepEqual(src.match(/^import\s[^\n]*$/gm), ENC_STARTUP_IMPORTS);
   assert.match(src, /^await import\('\.\/server-main\.js'\);$/m);
+  // Those start-up modules reach no store, settings or database when imported.
+  for (const name of ['native-startup-handshake', 'native-startup-exclusion', 'native-process-startup']) {
+    const mod = readFileSync(join(backendDir, `src/memory/encryption/${name}.ts`), 'utf-8');
+    for (const line of mod.match(/^import\s[^\n]*$/gm) ?? []) assert.doesNotMatch(line, /config\/|repositories\/|\/db\/|database/, `${name}: ${line}`);
+  }
 });

@@ -34,7 +34,7 @@ test('streamed responses cannot exceed the reviewed size even without Content-Le
 test('lying length, short body, altered digest and missing real stream refuse before file writes',async()=>{
  const r=review('abc');
  for(const res of [
-  {...response(r.bytes),headers:{get:()=>String(r.bytes.length+1)}},
+  {...response(r.bytes),headers:{get:name=>name.toLowerCase()==='content-length'?String(r.bytes.length+1):null}}, // only the length lies (no compression header)
   {...response(Buffer.from('ab'))},
   {...response(Buffer.from('abd'))},
   {...response(r.bytes),body:null},

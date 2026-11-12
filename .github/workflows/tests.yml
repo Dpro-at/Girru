@@ -19,6 +19,19 @@ jobs:
     name: Type-check and test suites
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # A throwaway PostgreSQL for the memory-encryption driver tests (loopback only, test database name).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: girru
+          POSTGRES_PASSWORD: girru-ci-only
+          POSTGRES_DB: girru_enc_final_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U girru -d girru_enc_final_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 20
     env:
       PUPPETEER_SKIP_DOWNLOAD: 'true'
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
@@ -61,7 +74,25 @@ jobs:
         run: |
           sudo install -d -m 755 -o "$(id -u)" -g "$(id -g)" /srv/girru /srv/girru/scratch
           export TMPDIR=/srv/girru/scratch
-          node --import tsx --import ../../scripts/test-temp-root.mjs --test --test-concurrency=4 --test-timeout=120000 $(ls test/*.test.mjs | grep -v '/lmstudio\.test\.mjs$')
+          # Memory-encryption tests need their own synthetic root (scripts/enc-test-root.mjs) and run below;
+          # the account tests start three Girru processes each and run one file at a time below.
+          ENC=$(grep -lE "fixtures/memory-encryption|DPRO_ENC_TEST_ROOT" test/*.test.mjs)
+          ACCOUNT=$(grep -l "fixtures/dpro-harness" test/*.test.mjs)
+          node --import tsx --import ../../scripts/test-temp-root.mjs --test --test-concurrency=4 --test-timeout=120000 $(ls test/*.test.mjs | grep -v '/lmstudio\.test\.mjs$' | grep -vxF -e "$ENC" -e "$ACCOUNT")
+
+      - name: Backend memory-encryption tests (SQLite and PostgreSQL)
+        working-directory: packages/backend
+        env:
+          DPRO_ENC_PG_URL: postgres://girru:girru-ci-only@127.0.0.1:5432/girru_enc_final_ci
+        run: |
+          export TMPDIR=/srv/girru/scratch
+          node --import tsx --import ../../scripts/test-temp-root.mjs --import ../../scripts/enc-test-root.mjs --test --test-concurrency=2 --test-timeout=120000 $(grep -lE "fixtures/memory-encryption|DPRO_ENC_TEST_ROOT" test/*.test.mjs)
+
+      - name: Backend account tests (one file at a time)
+        working-directory: packages/backend
+        run: |
+          export TMPDIR=/srv/girru/scratch
+          node --import tsx --import ../../scripts/test-temp-root.mjs --test --test-concurrency=1 --test-timeout=180000 $(grep -l "fixtures/dpro-harness" test/*.test.mjs)
 
   desktop-portability:
     name: Desktop portability (${{ matrix.os }})

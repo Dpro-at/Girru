@@ -124,9 +124,9 @@ test('closing plugin during awaited startup destroys only owned timers and retai
 });
 
 test('GET control and validated journal share one read snapshot with no writes and expired runtime is never ready',async()=>{
- const f=await authorized(),app=await at(f,()=>server()),original=db.prepare,reads=[];const before=db.prepare('SELECT total_changes() n').get().n;
- db.prepare=function(statement){if(/FROM (?:main\.)?(cron_jobs|paper_dispatch_definitions)\b/.test(statement))reads.push({statement,inTransaction:db.inTransaction});return original.call(this,statement);};let response;
- try{response=await at(f,()=>call(app,f,'GET',url(f)));}finally{db.prepare=original;}
+ const f=await authorized(),app=await at(f,()=>server()),original=Object.getPrototypeOf(db).prepare,reads=[];const before=db.prepare('SELECT total_changes() n').get().n;
+ Object.getPrototypeOf(db).prepare=function(statement){if(/FROM (?:main\.)?(cron_jobs|paper_dispatch_definitions)\b/.test(statement))reads.push({statement,inTransaction:db.inTransaction});return original.call(this,statement);};let response;
+ try{response=await at(f,()=>call(app,f,'GET',url(f)));}finally{Object.getPrototypeOf(db).prepare=original;}
  assert.equal(response.statusCode,200,response.body);assert.equal(reads.some(r=>r.statement.includes('cron_jobs')),true);assert.equal(reads.some(r=>r.statement.includes('paper_dispatch_definitions')),true);assert.equal(reads.every(r=>r.inTransaction),true);assert.equal(db.prepare('SELECT total_changes() n').get().n,before);
  const expired=await withClock(f.input.expiresAt,()=>call(app,f,'GET',url(f)));assert.equal(expired.statusCode,200,expired.body);assert.equal(expired.json().control.savedEnabled,false);assert.equal(expired.json().dispatch.state,'unavailable');assert.equal(expired.json().available,false);assert.equal(attempts(f),0);
 });
