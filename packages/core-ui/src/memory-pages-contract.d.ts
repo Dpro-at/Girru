@@ -34,13 +34,16 @@ export type HandoffKind = 'conversation' | 'task';
 export type ConflictDecision = 'keep_new' | 'keep_old' | 'keep_both';
 export type Health = 'ok' | 'attention' | 'problem';
 export type ScopeCounts = { memories: number; pendingReviews: number; conflicts: number; pinnedFacts: number; lastMemoryAt: string | null; health: Health; reasons: string[] };
-export type TreeProject = ScopeCounts & { slug: string; name: string; departmentId: string; pinned: boolean; archived: boolean; archivedAt: string | null; mergedInto: string | null; trashedAt?: string; groupId?: string };
+export type TreeProject = ScopeCounts & { slug: string; name: string; departmentId: string; pinned: boolean; archived: boolean; archivedAt: string | null; mergedInto: string | null; trashedAt?: string; groupId?: string; chatProject?: boolean; notProject?: boolean; notProjectReason?: string | null };
 export type ProjectRef = Omit<TreeProject, keyof ScopeCounts> & Partial<ScopeCounts>;
 export type TreeDepartment = ScopeCounts & { id: string; name: string; isDefault: boolean; projects: number; archivedProjects: number };
 export type ScopeTree = {
   generatedAt: string; cached: boolean;
   company: ScopeCounts & { drawers: Record<string, number>; departments: number; projects: number; archivedProjects: number };
-  departments: TreeDepartment[]; projects: TreeProject[]; people: Array<ScopeCounts & { key: string }>;
+  departments: TreeDepartment[]; projects: TreeProject[];
+  /** MEM-READ-01 MR3: projects found in downloaded code (split off `projects` by the client). */
+  notProjects?: TreeProject[];
+  people: Array<ScopeCounts & { key: string }>;
   agents: { total: number; withTemplate: number; withExceptions: number };
 };
 export type ScopeHit = { kind: 'department' | 'project' | 'people' | 'agent'; id: string; name: string; departmentId?: string; archived: boolean; memories: number };

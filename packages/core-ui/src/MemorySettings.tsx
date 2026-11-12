@@ -153,6 +153,15 @@ function ProjectsPane({ client, scopes, disc }: { client: SessionClient; scopes:
     setToast({ id: Date.now(), text: outside ? `${name} is on Outside projects` : `${name} is trusted`, undo: true });
   }
   const outsideList = (trust?.getSnapshot().view?.projects ?? []).filter(v => v.outside);
+  // MR3: library folders (Go module folder, node_modules…) are never projects; one can come back.
+  const notProjects = ss?.tree?.notProjects ?? [];
+  const [showAllLibs, setShowAllLibs] = useState(false);
+  async function setKind(slug: string, name: string, kind: 'project' | 'library') {
+    if (!(await scopes.setProjectKind(slug, kind))) { setToast({ id: Date.now(), text: 'Not changed. Try again.', undo: false }); return; }
+    undo.current = async () => { await scopes.setProjectKind(slug, kind === 'project' ? 'library' : 'project'); };
+    setToast({ id: Date.now(), text: kind === 'project' ? `${name} is a project again` : `${name} moved to Not projects`, undo: true });
+  }
+  const libName = (p: { slug: string; name: string }) => p.name !== p.slug ? p.name : (/^(.*?)-v\d+-\d+-\d+/.exec(p.slug)?.[1] || p.slug);
   const projects = (ss?.tree?.projects ?? []).filter(p => !p.archived && !p.mergedInto && !trust?.isOutside(trustIdOf(p)));
   const groups: readonly ProjectGroup[] = Array.isArray(dk?.groups) ? dk!.groups as readonly ProjectGroup[] : [];
   const roots = ds?.view?.roots ?? [];
@@ -164,6 +173,7 @@ function ProjectsPane({ client, scopes, disc }: { client: SessionClient; scopes:
       ...(rs.some(r => r.group) ? [{ label: 'Separate…', icon: 'diff' as const, run: () => { const r = rs.find(x => x.group); if (r) void disc.separate(r.id); } }] : []),
       ...(rs.length ? [{ label: 'Merge with another folder…', icon: 'folder' as const, run: () => disc.startMerge([rs[0].id], p.name) }] : []),
       ...(trustIdOf(p) ? ['sep' as const, { label: 'Put on Outside projects', icon: 'shield' as const, run: () => void setOutside(trustIdOf(p)!, p.name, true) }] : []),
+      ...(!p.chatProject ? ['sep' as const, { label: 'Not a project', icon: 'archive' as const, run: () => void setKind(p.slug, p.name, 'library') }] : []),
     ])}>
       <Tile name={p.name}/><span className="mem-project-name"><b>{p.name}</b><span className="fine-print">{p.memories} memories</span></span>
       <span className="mem-project-folders">{rs.length ? rs.flatMap(r => r.group ? r.group.members.map(m => <span key={m.id} className="fine-print dk-path" title={m.path}>{m.path} · joined by you</span>) : [<span key={r.id} className="fine-print dk-path" title={r.path ?? ''}>{r.path ?? r.name} · {r.path ? 'this computer' : 'older computer · no folder here'}</span>]) : <span className="fine-print">no folder found yet</span>}</span>
@@ -183,7 +193,16 @@ function ProjectsPane({ client, scopes, disc }: { client: SessionClient; scopes:
     {groups.map(g => <section key={g.id} className="mem-group"><h4><Tile name={g.name}/>{g.name}{g.label ? <span className="fine-print"> · {g.label}</span> : null}</h4><ul className="mem-projects">{projects.filter(p => g.projects.includes(p.slug)).map(row)}</ul></section>)}
     <section className="mem-group">{groups.length > 0 && <h4>Not in a group</h4>}<ul className="mem-projects">{projects.filter(p => !grouped.has(p.slug)).map(row)}</ul></section>
     {dk?.groups === 'missing' && <p className="fine-print">Groups of projects arrive with the next backend update.</p>}
-    <p className="fine-print">Right-click a project: Move to group · Merge with another folder · Separate · Put on Outside projects.</p>
+    <p className="fine-print">Right-click a project: Move to group · Merge with another folder · Separate · Put on Outside projects · Not a project.</p>
+    {notProjects.length > 0 && <section className="mem-group not-projects-group" aria-label="Not projects">
+      <h4><UiIcon name="archive" size={14}/>Not projects<span className="fine-print"> · {notProjects.length} library {notProjects.length === 1 ? 'folder' : 'folders'}</span></h4>
+      <p className="fine-print">Code that was downloaded for other projects (the Go module folder, node_modules and the like). Girru reads nothing from them and keeps no memory for them.</p>
+      <ul className="mem-projects">{(showAllLibs ? notProjects : notProjects.slice(0, 8)).map(p => <li key={p.slug} className="mem-project" onContextMenu={e => menu.at(e, [{ label: "It's a project", icon: 'check', run: () => void setKind(p.slug, libName(p), 'project') }])}>
+        <Tile name={libName(p)}/><span className="mem-project-name"><b>{libName(p)}</b><span className="fine-print">{p.notProjectReason ?? 'Downloaded code'}</span></span>
+        <span className="outside-actions"><button type="button" onClick={() => void setKind(p.slug, libName(p), 'project')}>It's a project</button></span>
+      </li>)}</ul>
+      {notProjects.length > 8 && <button type="button" className="link-button" onClick={() => setShowAllLibs(v => !v)}>{showAllLibs ? 'Show fewer' : `Show all ${notProjects.length}`}</button>}
+    </section>}
     {trust && !trust.getSnapshot().off && <section className="mem-group outside-group" aria-label="Outside projects">
       <h4><UiIcon name="shield" size={14}/>Outside projects</h4>
       <p className="fine-print">Someone else’s repositories. Their files are read as data only and rank below your memory; they never become rules or pinned facts, coding apps get no memory there, and tasks from their task file wait for you once.</p>

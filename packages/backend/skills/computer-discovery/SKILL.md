@@ -37,6 +37,14 @@ Each part of Girru asks for its own kinds (`kinds`): memory sources use
 `memory`, `note`, `design`, `database`; Skills use `skill`, `tool`; MCP
 connections use `mcp`; Terminal uses `ssh`.
 
+Library folders are never projects: code a package manager downloaded (the Go
+module folder `pkg/mod`, `node_modules`, `vendor`, `Pods`, `site-packages`, …)
+is skipped on its own. Projects that were made from such folders before are
+listed apart under Settings › Memory › Projects › Not projects and their
+memories are not loaded into replies. `workspace_memory` operation `projects`
+shows them as `notProjects`; only when the owner says so, `mark_project`
+(`kind: "project"`) brings one back, or `kind: "library"` moves one there.
+
 ## How to work
 
 1. `discovery` action `list` (filter by `state: "new"` or `"changed"`, by

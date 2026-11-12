@@ -50,12 +50,24 @@ export class MemoryScopesController extends Store<ScopeState> {
     try {
       const r = await this.req('GET', '/api/memory/scopes/tree' + (fresh ? '?fresh=1' : ''));
       if (r.status !== 200) { this.publish({ phase: 'error', notice: r.status === 401 || r.status === 403 ? 'Only the owner can open the memory here.' : 'Memory could not be loaded.' }); return; }
-      const tree = r.body as ScopeTree;
+      const raw = r.body as ScopeTree;
+      // MR3: library folders are never projects. They leave every project list and wait under Settings › Memory › Projects › Not projects.
+      const tree: ScopeTree = { ...raw, projects: raw.projects.filter(p => !p.notProject), notProjects: raw.projects.filter(p => p.notProject) };
       const open = first ? tree.departments.filter(d => d.projects > 0).slice(0, 1).map(d => d.id) : [...this.getSnapshot().open];
       this.publish({ phase: 'ready', tree, open });
       if (!Object.keys(this.getSnapshot().agents).length) void this.loadAgents();
       await this.loadScope();
     } catch { this.publish({ phase: 'error', notice: 'Memory could not be loaded (no connection).' }); }
+  }
+
+  /** MR3: "It's a project" (kind 'project') or "Not a project" (kind 'library'). True when saved; the tree reloads. */
+  async setProjectKind(slug: string, kind: 'project' | 'library'): Promise<boolean> {
+    try {
+      const r = await this.req('POST', `/api/memory/scopes/projects/${encodeURIComponent(slug)}/kind`, { kind });
+      if (r.status !== 200) return false;
+      await this.load(true);
+      return true;
+    } catch { return false; }
   }
 
   async loadAgents() {

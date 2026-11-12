@@ -17,6 +17,7 @@
 //   POST   /api/memory/scopes/projects/:slug/preview     { action, target?, departmentId? }
 //   POST   /api/memory/scopes/projects/:slug/apply       { action, target?, departmentId?, expectedPreviewHash, confirm: true }
 //   GET    /api/memory/scopes/projects/:slug/export
+//   POST   /api/memory/scopes/projects/:slug/kind        { kind: 'project' | 'library' }  (MEM-READ-01 MR3)
 //   Access by inheritance
 //   GET    /api/memory/access
 //   POST   /api/memory/access/preview                    { changes }
@@ -197,7 +198,7 @@ export function memoryPagesPath(path) {
     case '/api/memory/scopes/jobs': return with_('jobs', null);
   }
   if ((m = /^\/api\/memory\/scopes\/pinned\/([^/]+)$/.exec(base)) && plainId(m[1])) return with_('pinned-fact', null, { id: m[1] });
-  if ((m = /^\/api\/memory\/scopes\/projects\/([^/]+)\/(preview|apply|export|deleted-memory|adopt)$/.exec(base)) && slug(m[1])) return with_(`project-${m[2]}`, null, { id: m[1] });
+  if ((m = /^\/api\/memory\/scopes\/projects\/([^/]+)\/(preview|apply|export|deleted-memory|adopt|kind)$/.exec(base)) && slug(m[1])) return with_(`project-${m[2]}`, null, { id: m[1] });
   if ((m = /^\/api\/memory\/access\/effective\/([^/]+)$/.exec(base)) && agentId(m[1])) return with_('effective', QUERIES.effective, { id: m[1] });
   if ((m = /^\/api\/memory\/graph\/entities\/([^/]+)$/.exec(base)) && plainId(m[1])) return with_('entity', null, { id: m[1] });
   if ((m = /^\/api\/memory\/graph\/links\/([^/]+)\/(approve|reject)$/.exec(base)) && plainId(m[1])) return with_(`link-${m[2]}`, null, { id: m[1] });
@@ -274,6 +275,7 @@ export function allowedMemoryPages(method, path, body) {
     case 'project-create': return method === 'POST' && record(body) && onlyKeys(body, ['name']) && text(body.name, 80) && body.name.trim().length > 0;
     case 'project-deleted-memory': case 'jobs': return get;
     case 'project-adopt': return method === 'POST' && record(body) && onlyKeys(body, ['projectId']) && plainId(body.projectId);
+    case 'project-kind': return method === 'POST' && record(body) && onlyKeys(body, ['kind']) && (body.kind === 'project' || body.kind === 'library');
     case 'project-preview': return method === 'POST' && projectAction(body, false);
     case 'project-apply': return method === 'POST' && projectAction(body, true);
     case 'access-preview': return method === 'POST' && record(body) && onlyKeys(body, ['changes']) && changes(body.changes);
@@ -352,6 +354,10 @@ function project(p) {
     archivedAt: whenOrNull(p.archivedAt), mergedInto: idOr(p.mergedInto, slug), ...(record(p) && 'memories' in p ? counts(p) : {}),
     // MEM-TRASH-01 / groups: a project in the Trash, and its group.
     ...(whenOrNull(p.trashedAt) ? { trashedAt: whenOrNull(p.trashedAt) } : {}), ...(typeof p.groupId === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(p.groupId) ? { groupId: p.groupId } : {}),
+    // A chat project is always a project (its internal id stays out).
+    ...((typeof p.chatProjectId === 'string' && p.chatProjectId) || p.chatProject === true ? { chatProject: true } : {}),
+    // MEM-READ-01 MR3: found in downloaded code, listed under Not projects.
+    ...(p.notProject === true ? { notProject: true, notProjectReason: clip(p.notProjectReason, 40) || 'Downloaded code' } : {}),
   };
 }
 function tree(b) {
@@ -612,6 +618,7 @@ export function memoryPagesResponse(path, status, body) {
     case 'project-create': return { project: record(body.project) && plainId(body.project.key) ? { key: body.project.key, name: clip(body.project.name, 80) } : fail() };
     case 'project-deleted-memory': return { memory: record(body.memory) && plainId(body.memory.key) ? { key: body.memory.key, name: clip(body.memory.name, 80), memories: count(body.memory.memories) } : null };
     case 'project-adopt': return { moved: count(body.moved) };
+    case 'project-kind': if (!slug(body.slug) || !['project', 'library'].includes(body.kind)) fail(); return { slug: body.slug, kind: body.kind, before: ['project', 'library'].includes(body.before) ? body.before : null };
     case 'jobs': return { jobs: list(body.jobs, 10).filter(j => record(j) && ['sources', 'vectors'].includes(j.id)).map(j => ({ id: j.id, done: count(j.done), total: count(j.total) })) };
     case 'access': return { version: count(body.version), rules: list(body.rules, 5000).map(rule), templates: list(body.templates, 200).map(template) };
     case 'access-preview': return accessPreview(body);
