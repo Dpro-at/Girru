@@ -26,3 +26,8 @@ test('the Studio frame host bridges the real chat with checked messages only',()
  assert.ok(host.includes("operation:'chat-send'"));assert.ok(host.includes("data.operation==='chat-delta'"));assert.match(host,/studio\.setChat\(data\.info\)/);
  assert.ok(!host.includes('model-result')&&!host.includes('model-delta'));
 });
+
+test('coming back to Chat from GenVR reloads the chat projects and list (a renamed place shows its new name)',()=>{
+ const shell=fs.readFileSync(path.join(__dirname,'../src/SignedInShell.tsx'),'utf8');
+ assert.ok(shell.includes("if (page === 'chat' && from === 'genvr' && chat) void (async () => { await chat.loadProjects(); await chat.refreshList(); })()"));
+});

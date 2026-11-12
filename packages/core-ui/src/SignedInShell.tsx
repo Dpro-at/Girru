@@ -139,6 +139,9 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
   useEffect(() => { const s = { side: new ChatSearchController(client), palette: new ChatSearchController(client) }; setSearch(s); return () => { s.side.dispose(); s.palette.dispose(); }; }, [client]);
   const [board, setBoard] = useState<BoardController>();
   useEffect(() => { const b = new BoardController(client); setBoard(b); return () => b.dispose(); }, [client]);
+  // A place renamed or made in GenVR also renames its chat project and chat: coming back to Chat shows the new names at once.
+  const lastPage = useRef<Page>(page);
+  useEffect(() => { const from = lastPage.current; lastPage.current = page; if (page === 'chat' && from === 'genvr' && chat) void (async () => { await chat.loadProjects(); await chat.refreshList(); })().catch(() => undefined); }, [page, chat]);
   const chatState = useSyncExternalStore(
     chat ? chat.subscribe : noopSubscribe,
     chat ? chat.getSnapshot : nullSnapshot,
