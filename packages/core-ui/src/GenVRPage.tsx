@@ -45,18 +45,20 @@ export function GenVRPage({client,active,sidebarSlot,onOpenChat,request}:{client
  /* GV1d/GV1e: the open place's folder on disk, its Girru chat and the agents in it (shown in the sidebar). */
  const [folderPath,setFolderPath]=useState(''),[conversation,setConversation]=useState(''),[team,setTeam]=useState<{id:string;name:string}[]>([]);
  const [agents,setAgents]=useState<(Who&{primary?:boolean})[]>([]),[picking,setPicking]=useState(false),[asking,setAsking]=useState<Asking|null>(null),[undo,setUndo]=useState<{count:number;text:string}|null>(null),[chatNote,setChatNote]=useState('');
- const showChat=useCallback((next:{folder?:string;answerer?:Answerer|null;history?:{role:'user'|'assistant';text:string}[];team?:string[]})=>{sendRef.current({operation:'chat-info',info:{...(next.folder?{folder:next.folder}:{}),...(next.team?.length?{team:next.team}:{}),...(next.answerer?{answerer:{name:next.answerer.name,detail:next.answerer.detail,color:next.answerer.color}}:{}),...(next.history?.length?{history:next.history}:{})}});},[]);
+ // What the Studio chat shows is kept here: each update adds to it (a history refresh keeps who answers and the rest).
+ const chatInfo=useRef<Record<string,unknown>>({});
+ const showChat=useCallback((next:{folder?:string;answerer?:Answerer|null;history?:{role:'user'|'assistant';text:string}[];team?:string[]})=>{chatInfo.current={...chatInfo.current,...(next.folder?{folder:next.folder}:{}),...(next.team?.length?{team:next.team}:{}),...(next.answerer?{answerer:{name:next.answerer.name,detail:next.answerer.detail,color:next.answerer.color}}:{}),...(next.history?{history:next.history}:{})};sendRef.current({operation:'chat-info',info:chatInfo.current});},[]);
  const loadAgents=useCallback(async()=>{if(agents.length)return;try{const r=await client.request({method:'GET',path:'/api/agents'} as never);const rows=(r.body as {agents?:{id:string;name?:string;isPrimary?:boolean;description?:string}[]})?.agents;if(r.status===200&&Array.isArray(rows))setAgents(rows.filter(a=>genvrId(a.id)&&a.id!=='small-local-agent').map(a=>({id:a.id,name:a.name??a.id,primary:a.isPrimary===true,...(typeof a.description==='string'&&a.description.split(/[.\n]/)[0].trim().length<=64?{note:a.description.split(/[.\n]/)[0].trim()}:{})})));}catch{/* the picker stays closed */}},[client,agents.length]);
  async function chooseAgent(id:string){
   const world=place.current;const agentId=id||agents.find(a=>a.primary)?.id;if(!world||!agentId)return;
   try{const r=await client.request({method:'PUT',path:`/api/genvr/worlds/${world.projectId}/agent`,body:{agentId}} as never);const next=(r.body as {answerer?:Answerer})?.answerer;if(r.status!==200||!next)throw Error();shown.current.answerer=next.id;setAnswerer(next);showChat({folder,answerer:next});setChatNote('');}
   catch{setChatNote('Could not change who answers. Try again.');}
  }
- const conversationRef=useRef(''),onOpenChatRef=useRef(onOpenChat),folderPathRef=useRef('');conversationRef.current=conversation;onOpenChatRef.current=onOpenChat;folderPathRef.current=folderPath;
+ const conversationRef=useRef(''),onOpenChatRef=useRef(onOpenChat),folderPathRef=useRef(''),chatRuns=useRef(new Map<string,AbortController>());conversationRef.current=conversation;onOpenChatRef.current=onOpenChat;folderPathRef.current=folderPath;
  const [published,setPublished]=useState<Publication[]>([]);
  useEffect(()=>{if(!active||channel||client.getSnapshot().user?.role!=='owner')return;let disposed=false;void client.request({method:'GET',path:'/api/connections/genvr/publications'} as never).then(r=>{if(!disposed&&r.status===200)setPublished((r.body as {publications:Publication[]}).publications);}).catch(()=>{});return()=>{disposed=true;};},[client,active,channel,retry]);
  // GV1: with no space, the create page shows (the Studio no longer opens by itself).
- function open(id?:string,create?:CreateSpec,asLab=false,placeItem?:string){createSpec.current=create;openingLab.current=asLab;placing.current=id?placeItem:undefined;setFolderPath('');setConversation('');setTeam([]);selection.current=undefined;opening.current=id;place.current=null;opened.current='';shown.current={folder:'',answerer:''};setWorld(null);setAnswerer(null);setFolder('');setAsking(null);setUndo(null);setChatNote('');setNotice('');setStuck(false);leaveTo.current=null;setPhase('loading');setChannel(crypto.randomUUID());}
+ function open(id?:string,create?:CreateSpec,asLab=false,placeItem?:string){chatInfo.current={};createSpec.current=create;openingLab.current=asLab;placing.current=id?placeItem:undefined;setFolderPath('');setConversation('');setTeam([]);selection.current=undefined;opening.current=id;place.current=null;opened.current='';shown.current={folder:'',answerer:''};setWorld(null);setAnswerer(null);setFolder('');setAsking(null);setUndo(null);setChatNote('');setNotice('');setStuck(false);leaveTo.current=null;setPhase('loading');setChannel(crypto.randomUUID());}
  useEffect(()=>{
   if(!channel)return;let disposed=false;
   const send=(value:Record<string,unknown>)=>frame.current?.contentWindow?.postMessage({type:'dpro-genvr',channel,...value},window.location.origin);sendRef.current=send;
@@ -70,6 +72,30 @@ export function GenVRPage({client,active,sidebarSlot,onOpenChat,request}:{client
     if(disposed)return;showChat({folder:b.folder,answerer:b.answerer??null,history});
     try{const [saved,roster]=await Promise.all([client.request({method:'GET',path:`${GENVR_PATH}/${world.projectId}`} as never),client.request({method:'GET',path:GENVR_AGENTS} as never)]);if(!disposed&&saved.status===200&&roster.status===200){const names=new Map((roster.body as {agents:{id:string;name:string}[]}).agents.map(a=>[a.id,a.name]));const members=(saved.body as {agents:{id:string}[]}).agents.map(a=>({id:a.id,name:names.get(a.id)??a.id}));setTeam(members);if(members.length)showChat({folder:b.folder,answerer:b.answerer??null,team:members.map(a=>a.name)});}}catch{/* the list stays empty */}}
    catch{if(!disposed){opened.current='';setChatNote('This world’s folder could not be prepared. The chat still works without it.');}}
+  };
+  const refreshHistory=async()=>{const w=place.current;if(!w||disposed)return;try{const h=await client.request({method:'GET',path:`/api/genvr/worlds/${w.projectId}/history`} as never);if(!disposed&&h.status===200)showChat({folder:shown.current.folder,answerer:null,history:(h.body as {messages:{role:'user'|'assistant';text:string}[]}).messages});}catch{/* the panel keeps what it shows */}};
+  const chatRun=async(id:string,text:string)=>{
+   const conversation=conversationRef.current,stop=new AbortController();chatRuns.current.set(id,stop);
+   const end=(ok:boolean,error?:string)=>{chatRuns.current.delete(id);send({operation:'chat-end',id,ok,...(error?{error}:{})});if(ok)void refreshHistory();};
+   if(!conversation||!owner){end(false,'Open the place once more; its chat is not ready.');return;}
+   const runId=`run-genvr-${crypto.randomUUID()}`;
+   try{
+    const r=await client.request({method:'POST',path:`/api/chat/conversations/${conversation}/runs`,body:{runId,message:text,...(shown.current.answerer?{agentId:shown.current.answerer}:{})}} as never,stop.signal);
+    if(r.status===409){end(false,'The agent is still answering in this chat. Wait for it, then send again.');return;}
+    if(r.status!==202&&r.status!==200){end(false,'Girru could not start the reply. Try again.');return;}
+    if((r.body as {completed?:boolean})?.completed===true){end(true);return;}
+    let after=0,ended=false,failed='';
+    for(let tries=0;!ended&&!stop.signal.aborted&&tries<200;tries++){
+     const res=await client.runEvents(runId,after,e=>{
+      if(e.type==='text')send({operation:'chat-delta',id,delta:e.content});
+      else if(e.type==='tool_result')for(const t of e.results)send({operation:'chat-tool',id,name:t.name.replace(/^mcp__[^_]+__/,''),ok:!t.isError&&!t.approvalId,result:t.approvalId?'Waiting for your OK in Girru Chat (Open in Chat).':t.output.slice(0,600)});
+      else if(e.type==='end'&&e.status!=='complete')failed=e.status==='stopped'?'Stopped.':'The agent could not answer. Open in Chat shows why.';
+     },stop.signal);
+     after=res.last;ended=res.ended;
+    }
+    if(stop.signal.aborted)return;
+    end(!failed,failed||undefined);
+   }catch{if(!stop.signal.aborted)end(false,'Girru could not reach the agent. Try again.');}
   };
   const finish=(id:string,value:{content:string;tool_calls:Call[]}|null,error?:string)=>{turns.current.delete(id);send(value?{operation:'model-result',id,ok:true,value}:{operation:'model-result',id,ok:false,error:error??'Girru could not answer.'});};
   // One turn of the Studio chat: answered by the world's agent; world changes wait for the owner.
@@ -101,6 +127,9 @@ export function GenVRPage({client,active,sidebarSlot,onOpenChat,request}:{client
    if(data.operation==='home'){const to=leaveTo.current;leaveTo.current=null;setChannel('');setPhase('idle');setStuck(false);setNotice('');setGenvrPlace(p=>to??(p==='lab'?'spaces':p));return;}
    if(data.operation==='closed'){if(data.ok){const to=leaveTo.current;leaveTo.current=null;setChannel('');setPhase('idle');setStuck(false);setGenvrPlace(p=>to??(p==='lab'?'spaces':p));}else{leaveTo.current=null;setNotice('The Studio could not save this space. Keep it open and try again, or close it without saving.');setStuck(true);}return;}
    if(data.operation==='context'){const world=owner?placeOf(data.context):null;if(!world)return;place.current=world;setWorld(world);void openWorld(world);return;}
+   // GV1e (Mohamed): the Studio chat is the place's real Girru chat run; its reply streams back to the Studio.
+   if(data.operation==='chat-send'&&typeof data.id==='string'&&/^c\d{1,10}$/.test(data.id)&&typeof data.text==='string'){void chatRun(data.id,data.text);return;}
+   if(data.operation==='chat-cancel'&&typeof data.id==='string'){const run=chatRuns.current.get(data.id);run?.abort();chatRuns.current.delete(data.id);return;}
    if(data.operation==='open-folder'){if(folderPathRef.current&&canRevealFolder())revealFolder(folderPathRef.current);return;}
    if(data.operation==='open-chat'){const id=conversationRef.current;if(id)onOpenChatRef.current?.(id);return;}
    if(data.operation==='choose-answerer'){if(owner&&place.current){void loadAgents();setPicking(true);}return;}
@@ -143,7 +172,9 @@ export function GenVRPage({client,active,sidebarSlot,onOpenChat,request}:{client
    first=false;
   }).catch(()=>{});},15000):undefined;
   window.addEventListener('message',receive);const timer=setTimeout(()=>{if(!disposed)setPhase(current=>current==='loading'?'slow':current);},20000);
-  return()=>{disposed=true;clearTimeout(timer);if(approvals)clearInterval(approvals);window.removeEventListener('message',receive);for(const stop of turns.current.values())stop.abort();turns.current.clear();sendRef.current=()=>{};};
+  // GV1e: lines written in Girru Chat reach the Studio chat too (while nothing is being answered here).
+  const syncing=setInterval(()=>{if(!chatRuns.current.size&&place.current)void refreshHistory();},6000);
+  return()=>{disposed=true;clearTimeout(timer);clearInterval(syncing);if(approvals)clearInterval(approvals);window.removeEventListener('message',receive);for(const stop of turns.current.values())stop.abort();turns.current.clear();sendRef.current=()=>{};};
  },[client,channel]);
  const spaces=projects.filter(p=>!p.lab),lab=projects.find(p=>p.lab),inside=spaces.find(p=>p.id===insideId)??null;
  async function rename(id:string,title:string){const r=await client.request({method:'GET',path:`${GENVR_PATH}/${id}`} as never);const b=r.body as {project?:Record<string,unknown>;revision?:number};if(r.status!==200||!b.project||typeof b.revision!=='number')throw Error();const w=await client.request({method:'PUT',path:`${GENVR_PATH}/${id}`,body:{project:{...b.project,title},revision:b.revision}} as never);if(w.status!==200)throw Error();setProjects(list=>list.map(p=>p.id===id?{...p,title}:p));}
