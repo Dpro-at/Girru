@@ -89,6 +89,8 @@ const APPROVAL_CONTINUE = 'I decided the waiting approval. Continue the task wit
 export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, productName = 'Girru', client, onAddConnector, onOpenCard, onOpenMemory, onOpenMemoryPage, onChooseContext, onSetUpModel, onOpenVoiceSettings, onOpenApprovals, onOpenAgent, onOpenRules, terminalRequest = 0, boardRequest = 0, placeRequest = 0, active = true, titleSlot = null }: { embeddedCode?:boolean; onOpenCode?:(folder:string,file?:string)=>void; titleSlot?: HTMLElement | null; placeRequest?: number; controller: ConversationsController; mode: 'live' | 'mock'; productName?: string; terminalRequest?: number; boardRequest?: number; client?: SessionClient; onChooseContext?:()=>void; onAddConnector?: () => void; onSetUpModel?: () => void; onOpenVoiceSettings?: () => void; onOpenApprovals?: () => void; onOpenAgent?: (agentId: string) => void; onOpenRules?: (agentId: string, category: string) => void; onOpenCard?: (boardId: string, cardId: string) => void; onOpenMemory?: (drawerId: string, memoryId: string) => void; onOpenMemoryPage?: () => void; active?: boolean }) {
   const s = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const [meetingMeta, setMeetingMeta] = useState<MeetingRecord | null>(null);
+  // Mohamed: New meeting lives in the chat's ⋯ menu; the meeting bar shows only while a meeting is on.
+  const [meetingCreate, setMeetingCreate] = useState(0);
   const [meetingCall, setMeetingCall] = useState(false), [meetingStage, setMeetingStage] = useState<HTMLDivElement | null>(null);
   useEffect(() => { if (meetingCall) { setPane(null); setTermOpen(false); } }, [meetingCall]);
   const thread = useRef<HTMLDivElement>(null);
@@ -410,13 +412,16 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
     openRemember(last, s.turns.filter(t => t.content.trim()).map(t => `${t.role === 'user' ? 'You' : nameOf(t.agentId ?? convAgentId)}: ${t.content.trim()}`).join('\n\n'));
   };
   const openChatCode=async()=>{if(!onOpenCode)return;if(!await controller.ensureCodeConversation())return;const folder=controller.activeProject()?.folder??await controller.editorDirectory();if(folder)onOpenCode(folder);};
+  const canMeet = !phone && !embeddedCode && mode === 'live' && !!client && client.getSnapshot().user?.role === 'owner';
+  const meetingItem: MenuItem = { label: 'New meeting…', icon: 'users', run: () => setMeetingCreate(n => n + 1) };
   const moreItems = (): MenuItem[] => {
-    if (!s.activeId || !activeConv) return [];
+    if (!s.activeId || !activeConv) return canMeet ? [meetingItem] : [];
     const id = s.activeId;
     const all: MenuItem[] = [
       { label: 'Rename', icon: 'pencil', run: () => setChatSheet('rename') },
       { label: activeConv.pinned ? 'Unpin' : 'Pin', icon: 'pin', shortcut: '⌘P', run: () => void controller.pin(id, !activeConv.pinned) },
       'sep',
+      ...(canMeet ? [meetingItem] : []),
       { label: 'Open in a new window', icon: 'open', shortcut: '⌘O', run: () => openChatWindow(id) },
       ...(onOpenCode ? [{label:'Open in Code',icon:'code' as const,run:()=>void openChatCode()}] : []),
       { label: 'Continue in another folder…', icon: 'folder', run: () => setChatSheet('continue') },
@@ -504,13 +509,13 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
       {onOpenCode && !phone && <button type="button" className="tool" aria-label="Open in Code" title="Open this project in Code" onClick={()=>void openChatCode()}><UiIcon name="code" size={15}/></button>}
       {canBoard && !phone && <button type="button" className="tool chat-to-board" onClick={() => cardForm ? setCardForm(null) : openCardForm()} aria-pressed={!!cardForm} aria-label="Add to board" title="Add to board (⌘B)">
         <UiIcon name="board" size={15}/></button>}
-      {s.activeId && activeConv && <button type="button" className="tool chat-more" aria-label="More for this chat" title="Rename · Pin · Export · Remember the whole chat · Delete…" aria-haspopup="menu"
+      {((s.activeId && activeConv) || canMeet) && <button type="button" className="tool chat-more" aria-label="More for this chat" title="New meeting · Rename · Pin · Export · Remember the whole chat · Delete…" aria-haspopup="menu"
         onClick={e => moreMenu.at(e, moreItems())}><UiIcon name="more" size={15}/></button>}
       <button type="button" className="tool" aria-pressed={pane !== null} aria-label={pane !== null ? 'Hide the side panel' : 'Show the side panel'} title={pane !== null ? 'Hide the side panel (⌥⌘I)' : 'Show the side panel (⌥⌘I)'}
         onClick={() => setPane(p => p === null ? 'details' : null)}><UiIcon name="inspector" size={15}/></button>
     </span>, titleSlot)}
     {phone && mode === 'live' && client && <PhoneMeetingBar client={client} controller={controller} active={active}/>}
-    {!phone && !embeddedCode && mode === 'live' && client && client.getSnapshot().user?.role === 'owner' && <Meetings key={s.activeId ?? 'new'} client={client} controller={controller} active={active} onMeetingChanged={setMeetingMeta} callTarget={meetingStage} onCallChanged={setMeetingCall} onOpenCard={onOpenCard}/>}
+    {!phone && !embeddedCode && mode === 'live' && client && client.getSnapshot().user?.role === 'owner' && <Meetings key={s.activeId ?? 'new'} client={client} controller={controller} active={active} onMeetingChanged={setMeetingMeta} createRequest={meetingCreate} callTarget={meetingStage} onCallChanged={setMeetingCall} onOpenCard={onOpenCard}/>}
     <MeetingPanels active={meetingCall} onStage={setMeetingStage}>
     {mode === 'live' && avatarOn && !meetingMeta && <ChatAvatar turns={s.turns} agentId={convAgentId ?? s.agentId ?? ''} agentName={nameOf(convAgentId ?? s.agentId)} onClose={toggleAvatar}/>}
     {outsideNotice && <div className="outside-notice" role="status"><UiIcon name="shield" size={16}/>

@@ -24,3 +24,12 @@ test('completed initial rounds hide empty controls; chosen participants remain r
  assert.match(render({automatic:true,busy:true}),/Stop automatic turns/);
  assert.doesNotMatch(render({automatic:true,busy:true}),/disabled/);
 });
+
+test('New meeting is in the chat ⋯ menu; the meeting bar shows only while a meeting is on', () => {
+  const fs = require('node:fs'), path = require('node:path');
+  const view = fs.readFileSync(path.join(__dirname, '../src/ChatView.tsx'), 'utf8'), meetings = fs.readFileSync(path.join(__dirname, '../src/Meetings.tsx'), 'utf8');
+  assert.ok(view.includes("{ label: 'New meeting…', icon: 'users', run: () => setMeetingCreate(n => n + 1) }"));
+  assert.ok(view.includes('createRequest={meetingCreate}'));
+  assert.ok(meetings.includes('{meeting && <div className="meeting-toolbar">'));
+  assert.ok(!meetings.includes('Discuss work with your departments') && !meetings.includes('<span>New meeting</span>'));
+});
