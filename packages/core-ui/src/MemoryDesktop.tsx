@@ -136,9 +136,9 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
   const p9b = useStoreP9b(client);
   const p9bRef = useRef(p9b); p9bRef.current = p9b;
   // STORE-MAP-01 P8: a task's notes opened from its page (Memory › Tasks › T-n) keep that task's place as the list.
-  // MR7: the project panel opens with the project; hidden only when the owner hides it (remembered on this computer).
-  const [panelHidden, setPanelHidden] = useState(() => { try { return localStorage.getItem('girru.memory.projectPanel.hidden') === '1'; } catch { return false; } });
-  const togglePanel = () => setPanelHidden(h => { try { localStorage.setItem('girru.memory.projectPanel.hidden', h ? '0' : '1'); } catch { /* best effort */ } if (!h) k?.d.showDetails(null); return !h; });
+  // MR7: the project panel opens with the project; hidden only when the owner hides it (kept while the app runs).
+  const [panelHidden, setPanelHidden] = useState(() => panelPrefs.hidden);
+  const togglePanel = () => setPanelHidden(h => { panelPrefs.hidden = !h; if (!h) k?.d.showDetails(null); return !h; });
   const taskScope = useRef<string | null>(null);
   const ds = useStore(k?.d), xs = useStore(k?.x), ss = useStore(k?.sc), rs = useStore(k?.rv), ms = useStore(k?.mv), fs = useStore(k?.pf), ts = useStore(k?.tr);
   const menu = useMenu();
@@ -663,8 +663,9 @@ function MemoryInspector({ k, item, p9b = false, onHistory, onTrash, onChecked }
 
 /** MR7: a size in tokens, short ("18.4k"). */
 const kTokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n));
-const FOLD_KEY = 'girru.memory.projectPanel.folded';
-function readFolded(): string[] { try { const v = JSON.parse(localStorage.getItem(FOLD_KEY) ?? '[]'); return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []; } catch { return []; } }
+/** MR7: folded parts and the panel's shown/hidden choice last while the app runs (the app keeps no browser storage). */
+const panelPrefs = { folded: [] as string[], hidden: false };
+function readFolded(): string[] { return [...panelPrefs.folded]; }
 
 /** A part of the project panel you can fold, like Chat's side panel; remembered on this computer. */
 function PanelPart({ id, title, aside, folded, onFold, children }: { id: string; title: string; aside?: ReactNode; folded: boolean; onFold: (id: string) => void; children: ReactNode }) {
@@ -693,7 +694,7 @@ function ProjectInspector({ k, p6 = false, project, onSettings, onGroup }: { k: 
   const [allReaders, setAllReaders] = useState(false);
   const [folded, setFolded] = useState<string[]>(readFolded);
   const [busyAgent, setBusyAgent] = useState<string | null>(null);
-  const fold = (id: string) => setFolded(f => { const next = f.includes(id) ? f.filter(x => x !== id) : [...f, id]; try { localStorage.setItem(FOLD_KEY, JSON.stringify(next)); } catch { /* per computer, best effort */ } return next; });
+  const fold = (id: string) => setFolded(f => { const next = f.includes(id) ? f.filter(x => x !== id) : [...f, id]; panelPrefs.folded = next; return next; });
   const size = ss.size;
   const readers = ss.usage ?? [];
   const writers = readers.filter(u => u.write).length;
