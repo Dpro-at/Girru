@@ -32,6 +32,9 @@ export function NeedsYou({ c, mode, onOpenChat, design, files, client, hidden, p
   // P6: a task-number question waits too, so the "Nothing needs you" line would be wrong beside it.
   const fp = useSyncExternalStore(files ? files.subscribe : noSubscribe, files ? files.getSnapshot : noSnapshot, files ? files.getSnapshot : noSnapshot);
   const taskQuestions = Array.isArray(fp?.problems) && fp.problems.length > 0;
+  // MR2: while the hidden-keys row waits, "Nothing needs you" would be wrong beside it.
+  const hk = useSyncExternalStore(hidden ? hidden.subscribe : noSubscribe, hidden ? hidden.getSnapshot : noSnapshot, hidden ? hidden.getSnapshot : noSnapshot);
+  const keysWaiting = !!hk && hk.drawers.length > 0;
   const ref = useRef<HTMLDivElement>(null);
   const visible = s.phase === 'ready' ? c.visible() : [];
   // Open the first question when there is none open.
@@ -40,7 +43,8 @@ export function NeedsYou({ c, mode, onOpenChat, design, files, client, hidden, p
   if (s.phase === 'error') return <div className="dk-empty"><p>{s.notice}</p><button type="button" onClick={() => void c.load()}>Try again</button></div>;
   if (s.phase !== 'ready') return <p className="dk-empty" role="status">Reading what waits for you…</p>;
   const keysRow = hidden ? <HiddenKeysQuestion c={hidden} nameOf={projectName}/> : null;
-  if (!s.items.length && taskQuestions && files) return <div className="dk-needs">{keysRow}{design && <DesignQuestions d={design}/>}<TaskProblems c={files} client={client} say={say}/></div>;
+  if (!s.items.length && (taskQuestions || keysWaiting) && files) return <div className="dk-needs">{keysRow}{design && <DesignQuestions d={design}/>}<TaskProblems c={files} client={client} say={say}/></div>;
+  if (!s.items.length && keysWaiting) return <div className="dk-needs">{keysRow}{design && <DesignQuestions d={design}/>}</div>;
   if (!s.items.length) return <>{keysRow}{design && <DesignQuestions d={design}/>}{files && <TaskProblems c={files} client={client} say={say}/>}<div className="dk-empty"><UiIcon name="check" size={20}/><p>Nothing needs you. Girru saves routine facts on its own and asks only when something matters or disagrees.</p>{s.result && <p className="fine-print">{s.result}</p>}</div></>;
   function keys(e: KeyboardEvent<HTMLElement>) {
     if ((e.target as HTMLElement).closest('input, textarea, select')) return;
