@@ -52,7 +52,7 @@ test('local runtime availability has a minimal program-only contract',()=>{
  assert.equal(allowedRequest('GET',GENVR_RUNTIME),true);
  assert.equal(allowedGenVR('POST',GENVR_RUNTIME,{}),false);
  assert.equal(allowedGenVR('GET',GENVR_RUNTIME+'?owner=other'),false);
- assert.deepEqual(genvrResponse(GENVR_RUNTIME,200,{state:'installed',version:'0.3.0-preview.17',job:'private',account:'private'}),{state:'installed',version:'0.3.0-preview.17'});
+ assert.deepEqual(genvrResponse(GENVR_RUNTIME,200,{state:'installed',version:'0.3.0-preview.18',job:'private',account:'private'}),{state:'installed',version:'0.3.0-preview.18'});
  assert.deepEqual(genvrResponse(GENVR_RUNTIME,200,{state:'missing',version:null}),{state:'missing',version:null});
  assert.throws(()=>genvrResponse(GENVR_RUNTIME,200,{state:'installed',version:'invalid'}));
 });
