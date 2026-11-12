@@ -80,16 +80,16 @@ test('engine start and direct manual call never register a paper timer or execut
  finally{cron.schedule=original;if(background===undefined)delete process.env.AGENT_PLAYER_BACKGROUND;else process.env.AGENT_PLAYER_BACKGROUND=background;await engine.stop();}
 });
 test('post-authorization paper target mutation rolls back schedule proof and authorization event',async()=>{
- const f=await prepared(),p=await scheduleProof(f),original=db.prepare;let injected=false;
- db.prepare=function(text,...args){if(text.startsWith('INSERT INTO scheduled_job_authorization_events')){injected=true;original.call(this,'UPDATE paper_accounts SET stopped=1 WHERE account_id=?').run(f.input.accountId);}return original.call(this,text,...args);};
- try{await assert.rejects(auth.authorizeScheduledJob(p.proof.receipt,f.context,f.actor,p.preview.operation,f.scheduleTime));}finally{db.prepare=original;}
+ const f=await prepared(),p=await scheduleProof(f),original=Object.getPrototypeOf(db).prepare;let injected=false;
+ Object.getPrototypeOf(db).prepare=function(text,...args){if(text.startsWith('INSERT INTO scheduled_job_authorization_events')){injected=true;original.call(this,'UPDATE paper_accounts SET stopped=1 WHERE account_id=?').run(f.input.accountId);}return original.call(this,text,...args);};
+ try{await assert.rejects(auth.authorizeScheduledJob(p.proof.receipt,f.context,f.actor,p.preview.operation,f.scheduleTime));}finally{Object.getPrototypeOf(db).prepare=original;}
  assert.equal(injected,true);assert.equal(db.prepare('SELECT COUNT(*) n FROM scheduled_job_authorizations WHERE job_id=?').get(f.job.id).n,0);assert.equal(db.prepare('SELECT consumed_at FROM verification_receipts WHERE token_hash=?').get(createHash('sha256').update(p.proof.receipt).digest('hex')).consumed_at,null);assert.equal(db.prepare('SELECT stopped FROM paper_accounts WHERE account_id=?').get(f.input.accountId).stopped,0);
 });
 
 test('post-save current paper mutation is rolled back with definition revision and audit',async()=>{
- const f=await prepared(),original=db.prepare,before=db.prepare('SELECT * FROM cron_jobs WHERE id=?').get(f.job.id);let injected=false;
- db.prepare=function(text,...args){if(text.startsWith('INSERT INTO scheduled_job_definition_events')){injected=true;original.call(this,'UPDATE paper_accounts SET stopped=1 WHERE account_id=?').run(f.input.accountId);}return original.call(this,text,...args);};
- try{await assert.rejects(definitions.saveScheduledDefinition(f.actor,f.context.tokenVersion,f.job.id,1,{name:'Current checked save'},f.scheduleTime));}finally{db.prepare=original;}
+ const f=await prepared(),original=Object.getPrototypeOf(db).prepare,before=db.prepare('SELECT * FROM cron_jobs WHERE id=?').get(f.job.id);let injected=false;
+ Object.getPrototypeOf(db).prepare=function(text,...args){if(text.startsWith('INSERT INTO scheduled_job_definition_events')){injected=true;original.call(this,'UPDATE paper_accounts SET stopped=1 WHERE account_id=?').run(f.input.accountId);}return original.call(this,text,...args);};
+ try{await assert.rejects(definitions.saveScheduledDefinition(f.actor,f.context.tokenVersion,f.job.id,1,{name:'Current checked save'},f.scheduleTime));}finally{Object.getPrototypeOf(db).prepare=original;}
  assert.equal(injected,true);assert.deepEqual(db.prepare('SELECT * FROM cron_jobs WHERE id=?').get(f.job.id),before);assert.equal(db.prepare('SELECT revision FROM scheduled_job_security_versions WHERE job_id=?').get(f.job.id).revision,1);assert.equal(db.prepare('SELECT stopped FROM paper_accounts WHERE account_id=?').get(f.input.accountId).stopped,0);
 });
 
