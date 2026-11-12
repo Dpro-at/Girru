@@ -23,6 +23,11 @@ const vectors = argValue('vectors', 'hash');
 const nQueries = Number(argValue('queries', '20'));
 const out = argValue('out', null);
 const packedVectors = process.argv.includes('--packed');
+// --json-stub (with --packed, semantic): the vector is stored only in the packed column (what
+// recall reads when it is there) and the JSON column holds '[0]', so 10M rows fit on disk
+// (~5 GB per million instead of ~18). The search path is the same: packed wins (row-memory.ts).
+const jsonStub = process.argv.includes('--json-stub');
+if (jsonStub && !(packedVectors && vectors === 'semantic')) throw new Error('--json-stub needs --packed --vectors semantic');
 const SEM_MODEL = 'qwen3-embedding:0.6b';
 if (vectors === 'semantic' && !(await ollamaHas(SEM_MODEL))) {
   console.error(`${SEM_MODEL} is not available on the local Ollama; nothing measured`);
@@ -43,6 +48,14 @@ const storage = getMemoryStorage();
 await quietly(() => storage.initialize());
 
 const r = rng(99);
+function semanticPacked() {
+  const v = new Float32Array(1024);
+  let n = 0;
+  for (let i = 0; i < 1024; i++) { v[i] = r() - 0.5; n += v[i] * v[i]; }
+  n = Math.sqrt(n);
+  for (let i = 0; i < 1024; i++) v[i] /= n;
+  return Buffer.from(v.buffer);
+}
 function semanticVector() {
   const v = new Array(1024);
   let n = 0;
@@ -61,10 +74,12 @@ let batch = [];
 let i = 0;
 const flush = () => { const rows = batch; batch = []; db.transaction(() => { for (const row of rows) insert.run(...row); }); };
 for (const m of syntheticMemories(size, 23)) {
-  const emb = vectors === 'semantic'
+  const stubVec = jsonStub ? semanticPacked() : null;
+  const emb = stubVec ? ['[0]', `ollama:${SEM_MODEL}`, 1024]
+    : vectors === 'semantic'
     ? [semanticVector(), `ollama:${SEM_MODEL}`, 1024]
     : [JSON.stringify(hashEmbed(normalizeMemoryText(m.content))), HASH_MODEL, HASH_DIMS];
-  const vec = packedVectors ? packVector(JSON.parse(emb[0])) : null;
+  const vec = stubVec ?? (packedVectors ? packVector(JSON.parse(emb[0])) : null);
   batch.push([`m-${i++}`, OWNER, m.type, m.content, ...emb, m.createdAt, m.drawerKind, m.drawerKey, vec]);
   drawerCount[m.drawerKind] = (drawerCount[m.drawerKind] || 0) + 1;
   chars += m.content.length;
@@ -116,7 +131,7 @@ if (vectors === 'semantic') {
 const { recallStoreStats } = await import(moduleUrl(backendDir, 'src/memory/recall-store.ts'));
 const store = recallStoreStats();
 const report = {
-  size, vectors, packed: packedVectors, p9: process.env.GIRRU_STORE_P9 === '1', coldMs, openedRows: opened, drawerSplit: drawerCount, avgChars: Math.round(chars / size), seedMs,
+  size, vectors, packed: packedVectors, jsonStub, p9: process.env.GIRRU_STORE_P9 === '1', coldMs, openedRows: opened, drawerSplit: drawerCount, avgChars: Math.round(chars / size), seedMs,
   dbMB: +(dbBytes / 1e6).toFixed(1), engine: p9b ? 'p9b quality recall' : 'storage.search', ...(p9b ? { fellBack } : {}), queries: times.length,
   searchMs: { p50: +percentile(times, 50).toFixed(1), p95: +percentile(times, 95).toFixed(1), max: +Math.max(...times).toFixed(1) },
   queryEmbedMs: embedMs, peakRssMB: Math.round(peakRss / 1e6),
