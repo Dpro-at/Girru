@@ -25,14 +25,14 @@ export const PANEL_PARTS: readonly { id: PanelPart; name: string; icon: UiIconNa
   { id: 'memory', name: 'From memory', icon: 'brain' }, { id: 'mcp', name: 'MCP connections', icon: 'tool' },
 ];
 export type PanelPrefs = { order: PanelPart[]; folded: PanelPart[] };
-export const DEFAULT_PANEL: PanelPrefs = { order: PANEL_PARTS.map(p => p.id), folded: [] };
+export const DEFAULT_PANEL: PanelPrefs = { order: PANEL_PARTS.map(p => p.id), folded: ['memory'] };
 export const PANEL_PATH = '/api/chat/panel';
 const isPart = (x: unknown): x is PanelPart => typeof x === 'string' && PANEL_PARTS.some(p => p.id === x);
 export function readPanel(raw: unknown): PanelPrefs {
   const v = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
   const order = [...new Set((Array.isArray(v.order) ? v.order as unknown[] : []).filter(isPart))];
   for (const p of DEFAULT_PANEL.order) if (!order.includes(p)) order.push(p);
-  return { order, folded: [...new Set((Array.isArray(v.folded) ? v.folded as unknown[] : []).filter(isPart))] };
+  return { order, folded: Array.isArray(v.folded) ? [...new Set((v.folded as unknown[]).filter(isPart))] : [...DEFAULT_PANEL.folded] };
 }
 export function movePart(order: readonly PanelPart[], id: PanelPart, by: -1 | 1): PanelPart[] {
   const i = order.indexOf(id), j = i + by;
@@ -243,7 +243,7 @@ export function ChatDetails({ controller, client, recall, memoryCard, placeExtra
           onMenu={menu.at} items={[{ label: 'Open in Files', icon: 'folder', run: () => onOpenPane('files', o.path) }, { label: 'Copy path', icon: 'copy', run: () => copy(o.path) }]}/>)}
         {resultsExtra}
       </>, more: outputs.length > 3 && !more.has('results') ? <ShowMore n={outputs.length - 3} onClick={() => setMore(new Set([...more, 'results']))}/> : undefined },
-    memory: { has: !!memoryCard || !!trace, summary: trace?.items?.length ? `${trace.items.length} used` : 'Saved from this chat',
+    memory: { has: !!memoryCard || !!trace, summary: trace?.items?.length ? `${trace.items.length} used` : '',
       side: onOpenMemory ? <button type="button" className="link-button" onClick={onOpenMemory}>Open Memory</button> : undefined,
       body: <>{trace && recall ? <ContextCard trace={trace} c={recall}/> : null}{memoryCard}</> },
     mcp: { has: conns.length > 0, summary: conns.some(c => c.needsYou) ? `${conns.filter(c => c.needsYou).length} needs you` : `${conns.length} on`, tone: conns.some(c => c.needsYou) ? 'needs' : undefined,

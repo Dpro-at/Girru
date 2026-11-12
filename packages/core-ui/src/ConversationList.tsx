@@ -100,7 +100,6 @@ export function ConversationList({ controller, onOpen, search, onNewChat, onAddT
     { label: 'Rename', icon: 'pencil', run: () => setRenaming(c.id) },
     { label: c.pinned ? 'Unpin' : 'Pin', icon: 'pin', shortcut: '⌘P', run: () => void controller.pin(c.id, !c.pinned) },
     ...(onAddToBoard ? [{ label: 'Add to board…', icon: 'board' as const, shortcut: '⌘B', run: () => onAddToBoard(c.id) }] : []),
-    ...(s.projects.length ? ['sep' as const, ...[{ id: '', name: 'No project' }, ...s.projects].map(p => ({ label: p.id ? `Move to ${p.name}` : 'Move out of the project', icon: 'folder' as const, checked: (c.projectId ?? '') === p.id, run: () => void controller.moveToProject(c.id, p.id) }))] : []),
     'sep',
     { label: 'Export as Markdown', icon: 'download', shortcut: '⇧⌘S', run: () => void controller.exportMarkdown(c.id) },
     { label: c.archived ? 'Bring back from the archive' : 'Archive', icon: 'archive', shortcut: '⌘⌫', run: () => void archive(c, !c.archived) },
