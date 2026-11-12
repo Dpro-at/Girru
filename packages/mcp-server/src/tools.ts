@@ -3,6 +3,7 @@ import {workspaceControlDefinition,workspaceControlTool,ControlInputError} from 
 import {workspaceDraftsDefinition,workspaceDraftsTool,DraftInputError} from './domains/drafts.js';
 import {workspaceReportsDefinition,workspaceReportsTool,ReportsInputError} from './domains/reports.js';
 import {workspaceMemoryDefinition,workspaceMemoryTool,MemoryInputError} from './domains/memory.js';
+import {workspaceGenvrDefinition,workspaceGenvrTool,GenvrInputError} from './domains/genvr.js';
 /**
  * The MCP tools and the result-card rendering.
  *
@@ -53,6 +54,7 @@ export const TOOL_DEFINITIONS = [
   workspaceDraftsDefinition,
   workspaceDevicesDefinition,
   workspaceControlDefinition,
+  workspaceGenvrDefinition,
   {
     name:'meetings',title:'Department meetings',
     description:'Owner-session only. Read meetings, departments and paged participants. On the owner’s explicit instruction create a meeting with selected departments, all departments, heads only or exact agents; invitations do not start any model call. Edit draft decisions only while the owner is reviewing the meeting. Starting speaking rounds, media capture, approving decisions and creating their tasks are performed by the owner in the app and are not offered by this tool. Never claim a task exists until a saved card id is returned by the meeting.',
@@ -370,6 +372,7 @@ export async function callTool(name: string, rawArgs: unknown, deps: HandlerDeps
       case 'workspace_drafts': {const out=await workspaceDraftsTool(args,deps.backend);return ok(out.message,out.data);}
       case 'workspace_reports': {const out=await workspaceReportsTool(args,deps.backend);return ok(out.message,out.data);}
     case 'workspace_memory': {const out=await workspaceMemoryTool(args,deps.backend);return ok(out.message,out.data);}
+      case 'genvr_spaces': {const out=await workspaceGenvrTool(args,deps.backend);return ok(out.message,out.data);}
       case 'workspace_settings': return await workspaceSettingsTool(args,deps);
       case 'trading_practice': return await tradingPracticeTool(args,deps);
       case 'workspace_apps': return await workspaceAppsTool(args,deps);
@@ -397,7 +400,7 @@ export async function callTool(name: string, rawArgs: unknown, deps: HandlerDeps
       default: return fail(`Unknown tool "${name}"`);
     }
   } catch (err) {
-    if (err instanceof InputError || err instanceof ControlInputError || err instanceof DraftInputError || err instanceof ReportsInputError || err instanceof MemoryInputError) return fail(`Invalid arguments: ${err.message}`);
+    if (err instanceof InputError || err instanceof ControlInputError || err instanceof DraftInputError || err instanceof ReportsInputError || err instanceof MemoryInputError || err instanceof GenvrInputError) return fail(`Invalid arguments: ${err.message}`);
     if (err instanceof BackendError) {
       if (err.status === 429 && err.data?.capacity) {
         return fail(`The small agent is busy (${capacityLine(err.data.capacity)}). Do the task yourself or try again after a run finishes.`, { refused: 'capacity', capacity: err.data.capacity });
