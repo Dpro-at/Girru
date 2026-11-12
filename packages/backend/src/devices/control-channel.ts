@@ -13,6 +13,8 @@ export class ComputerOwnerChannel {
  const membership={identity,workspace:'owner-metadata-bootstrap',authority:{testOnly:false,permitRelay:permit,fresh:(_a:string,b:string)=>peers.has(b)},repo:{peers:async()=>[...peers.values()]},current:async(id:string)=>{const p=peers.get(id);if(!p)throw Error('computer_control_peer_not_pinned');return p;},direct:async()=>null,joiningHosts:()=>[],pairingMailboxes:()=>[],pendingJoinFrames:()=>[],pairingFrame:async()=>null,nextSequence:async()=>++this.counter} as unknown as ComputerMembership;
  this.transport=new ComputerTransport(membership,relayUrl,async()=>{throw Error('computer_bootstrap_execution_refused');},undefined,options.nextOuterCounter);this.transport.onControl((peer,body)=>this.receive(peer,body));this.timer=setInterval(()=>void this.retry(),100);this.timer.unref();}
  pin(publicKey:string){const id=deviceIdOf(peerKey(publicKey));if(this.peers.size>=64&&!this.peers.has(id))throw Error('computer_control_capacity');this.transport.pinControlPeer(publicKey);this.peers.set(id,{peer_id:id,public_key:publicKey,epoch:1,revoked:0,local_device_id:this.transport.membership.identity.id});return id;}
+ /** CP17: forget a pinned computer (a person who is no longer linked). */
+ unpin(peer:string){this.peers.delete(peer);this.transport.unpinControlPeer(peer);}
  pinnedPublicKey(peer:string){return this.peers.get(peer)?.public_key??null;}
  handle(handler:(peer:string,request:Record<string,unknown>)=>Promise<unknown>){this.handler=handler;}
  async start(){await this.transport.start();}

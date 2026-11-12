@@ -59,7 +59,7 @@ test('workspace_memory strips credential-shaped content and truncates current te
 });
 
 test('public catalogue covers definitions and registered dispatch and matches README rows',async()=>{
- const {readFileSync}=await import('node:fs');const catalogue=publicToolCatalogue();assert.equal(catalogue.length,TOOL_DEFINITIONS.length);assert.equal(new Set(catalogue.map(x=>x.name)).size,catalogue.length);assert.equal(catalogue.length,29);
+ const {readFileSync}=await import('node:fs');const catalogue=publicToolCatalogue();assert.equal(catalogue.length,TOOL_DEFINITIONS.length);assert.equal(new Set(catalogue.map(x=>x.name)).size,catalogue.length);assert.equal(catalogue.length,30);
  const readme=readFileSync(new URL('../README.md',import.meta.url),'utf8');const documented=[...readme.matchAll(/^\| `([^`]+)` \|/gm)].map(m=>m[1]);assert.deepEqual(documented.sort(),catalogue.map(t=>t.name).sort());
  for(const t of catalogue){const documentedRow=readme.split('\n').find(line=>line.startsWith('| `'+t.name+'` |'));for(const op of t.operations)assert.ok(documentedRow.includes('`'+op+'`'),'Missing operation documentation '+t.name+'.'+op);const out=await callTool(t.name,{}, {backend:{async request(){throw new BackendError('Synthetic denial',403);}}});assert.doesNotMatch(out.content[0].text,/^Unknown tool/);assert.ok(readme.includes('`'+t.name+'`'));}
 });

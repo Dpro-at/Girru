@@ -85,3 +85,25 @@ test('signing in with Google adds the computer, unless two-step sign-in is on',a
  now+=30000;assert.equal(request(third,'device.approve.totp',{code:codeAt(secret),confirmed:true}).deviceStatus,'approved');
  await assert.rejects(()=>login(fourth,'661000222',{addByGoogle:'yes'}),/input/);
 });
+
+test('CP17: two-step sign-in confirms a Google-added computer; turning it on confirms the computer it is turned on from',async()=>{
+  const first=peer(),g1=peer(),g2=peer(),subject='880088';
+  const f=await login(first,subject);now+=1000;
+  const a=await login(g1,subject,{addByGoogle:true}),b=await login(g2,subject,{addByGoogle:true});
+  const via=id=>store.one('SELECT approved_via v FROM devices WHERE id=?',id).v;
+  assert.equal(via(a.view.deviceId),'google');
+  assert.throws(()=>request(g1,'device.confirm.totp',{code:'000000',confirmed:true}),/twofactor_off/);
+  assert.equal(request(g1,'people.me').confirmed,false);
+  const {secret}=request(g1,'twofactor.setup');
+  request(g1,'twofactor.enable',{code:codeAt(secret)});
+  assert.equal(via(a.view.deviceId),'kept','turning it on confirms this computer');
+  assert.equal(request(g1,'people.me').twoFactor,true);
+  now+=31000;
+  assert.throws(()=>request(g2,'device.confirm.totp',{code:'000000',confirmed:true}),/code_wrong|wait/);
+  assert.equal(via(b.view.deviceId),'google');
+  now+=31000;
+  assert.deepEqual(request(g2,'device.confirm.totp',{code:codeAt(secret),confirmed:true}),{confirmed:true});
+  assert.equal(via(b.view.deviceId),'kept');
+  assert.equal(request(g2,'people.me').confirmed,true);
+  assert.equal(via(f.view.deviceId),'','the first computer is unchanged');
+});

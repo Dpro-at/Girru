@@ -215,3 +215,41 @@
 .computer-trust{display:flex;flex-direction:column;gap:8px;min-width:0;flex:1}
 .computer-trust-code{font:600 20px/1.2 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.12em;background:var(--subtle);border-radius:8px;padding:10px 14px;text-align:center}
 .computer-trust-actions{display:flex;gap:8px;flex-wrap:wrap}
+/* CP17 E: sidebar search and the All / Online / Offline filter. */
+.computers-search{padding:4px 8px 6px;display:flex;gap:6px;align-items:center}
+.computers-search input{flex:1;min-width:0;width:100%;box-sizing:border-box;height:28px;border-radius:7px;border:1px solid var(--border);background:var(--surface);color:var(--text);padding:0 9px;font:inherit;font-size:12px}
+.computers-filter{display:flex;gap:4px;padding:0 8px 6px;flex-wrap:wrap}
+.computers-filter button{border:0;border-radius:999px;padding:2px 9px;font:inherit;font-size:11px;background:var(--subtle);color:var(--muted);cursor:pointer}
+.computers-filter button[aria-checked=true]{background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--text)}
+.computers-filter button span{opacity:.75}
+.computers-none{padding:6px 12px}
+/* CP17 E: the owner's groups in the sidebar. */
+.computers-group{display:flex;flex-direction:column}
+.computers-group-input{margin:4px 8px;height:26px;border-radius:6px;border:1px solid var(--accent);background:var(--surface);color:var(--text);padding:0 8px;font:inherit;font-size:12px}
+.computers-new-group{color:var(--accent)}
+/* CP17 A–D: your Girru ID, adding people, their requests, People in the sidebar. */
+.computers-add{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 9px;border-radius:7px;font-size:12px;white-space:nowrap;flex:none}
+.computers-label{display:flex;align-items:center}
+.computers-label-add{margin-left:auto;border:0;background:transparent;color:var(--accent);cursor:pointer;padding:0 4px;display:inline-flex}
+.people-you{display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:10px;background:var(--subtle)}
+.people-you-head{display:flex;align-items:center;gap:8px}
+.people-you-head b{flex:1}
+.people-you-head button,.people-you-row button{display:inline-flex;align-items:center;gap:4px}
+.people-you-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.people-you-row>small:first-child{inline-size:70px;color:var(--muted)}
+.people-you-row input{height:28px;border-radius:7px;border:1px solid var(--accent);background:var(--surface);color:var(--text);padding:0 9px;font:inherit;min-width:160px}
+.people-id{font:500 14px/1.3 ui-monospace,Menlo,Consolas,monospace;background:var(--surface);border-radius:7px;padding:5px 10px}
+.people-find{display:flex;gap:8px}
+.people-find input{flex:1;min-width:0;height:30px;border-radius:7px;border:1px solid var(--border);background:var(--surface);color:var(--text);padding:0 10px;font:inherit}
+.people-person{display:flex;align-items:center;gap:10px;padding:10px 0}
+.people-person>span:nth-child(2){flex:1;display:flex;flex-direction:column;min-width:0}
+.people-person small{color:var(--muted)}
+.people-pill{font-size:11px;padding:2px 9px;border-radius:999px;background:color-mix(in srgb,var(--accent) 18%,transparent);white-space:nowrap}
+.people-pill.warn{background:color-mix(in srgb,#E5A93B 22%,transparent)}
+.people-code{display:block;font:600 22px/1.2 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.14em;background:var(--subtle);border-radius:8px;padding:10px 14px;text-align:center;margin:6px 0}
+.people-request .computer-task-actions{flex-wrap:wrap;align-self:flex-start}
+.people-answer{width:100%;box-sizing:border-box;margin:6px 0;border-radius:7px;border:1px solid var(--border);background:var(--surface);color:var(--text);padding:8px 10px;font:inherit;font-size:12.5px;resize:vertical}
+.people-confirm{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.people-confirm-text{color:var(--muted)}
+.people-confirm input{width:76px;height:26px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);padding:0 8px;font:inherit}
+.people-confirm small{color:var(--muted)}
