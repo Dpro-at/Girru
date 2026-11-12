@@ -69,10 +69,18 @@ const suggestions = [
   ...SET.stale.map((s) => ({ q: s.q, lang: s.lang, kind: 'current fact', target: `${s.id}-new` })),
 ];
 
+/** A message meant for the page (bad input, wrong state). Anything else is logged here and answered generically. */
+class InputError extends Error {}
+const publicMessage = (e) => {
+  if (e instanceof InputError) return e.message;
+  console.error('[playground]', e);
+  return 'request failed (details in the server console)';
+};
+
 const state = { size: 0, vectors: null, jsonStub: false, seeding: null, seedMs: null, error: null, mode: 'auto', lastSearch: null };
 
 function setMode(mode) {
-  if (!MODES[mode]) throw new Error(`unknown mode ${mode}`);
+  if (!MODES[mode]) throw new InputError(`unknown mode ${mode}`);
   for (const k of ['GIRRU_RECALL_EXACT_MAX', 'GIRRU_RECALL_ANN_MIN', 'GIRRU_RECALL_STORE']) delete process.env[k];
   Object.assign(process.env, MODES[mode]);
   process.env.GIRRU_STORE_P9 = '1';
@@ -90,13 +98,17 @@ async function save(id, content, drawer, user = OWNER, createdAt = '2026-06-01T0
 
 const yieldNow = () => new Promise((r) => setImmediate(r));
 
-async function seed({ size, vectors, jsonStub }) {
-  if (state.seeding) throw new Error('already generating');
+function checkSeed({ size, vectors, jsonStub }) {
+  if (state.seeding) throw new InputError('already generating');
   size = Math.max(0, Math.min(10_000_000, Math.floor(Number(size) || 0)));
-  if (!['random', 'real', 'hash'].includes(vectors)) throw new Error('vectors: random | real | hash');
-  if (vectors === 'real' && !ollama) throw new Error(`${SEM_MODEL} is not available on the local Ollama`);
-  if (vectors === 'real' && size > 50_000) throw new Error('real vectors: at most 50,000 (the local model embeds about 100-300 a second)');
-  if (vectors === 'random' && !ollama) throw new Error('random semantic vectors need the local model for the query; use hash');
+  if (!['random', 'real', 'hash'].includes(vectors)) throw new InputError('vectors: random | real | hash');
+  if (vectors === 'real' && !ollama) throw new InputError(`${SEM_MODEL} is not available on the local Ollama`);
+  if (vectors === 'real' && size > 50_000) throw new InputError('real vectors: at most 50,000 (the local model embeds about 100-300 a second)');
+  if (vectors === 'random' && !ollama) throw new InputError('random semantic vectors need the local model for the query; use hash');
+  return { size, vectors, jsonStub: !!jsonStub };
+}
+
+async function seed({ size, vectors, jsonStub }) {
   state.seeding = { done: 0, total: size, phase: 'clearing' };
   state.error = null;
   const t0 = Date.now();
@@ -146,7 +158,7 @@ async function seed({ size, vectors, jsonStub }) {
     forgetRecallIndex();
     Object.assign(state, { size, vectors, jsonStub: vectors === 'random' && !!jsonStub, seedMs: Date.now() - t0 });
   } catch (e) {
-    state.error = String(e?.message || e);
+    state.error = publicMessage(e);
   } finally {
     state.seeding = null;
   }
@@ -160,12 +172,12 @@ function dataInfo() {
 }
 
 async function search({ query, limit = 5, drawers = 'owner + project alpha', mode = 'auto' }) {
-  if (state.seeding) throw new Error('still generating data');
+  if (state.seeding) throw new InputError('still generating data');
   query = String(query || '').slice(0, 500);
-  if (!query.trim()) throw new Error('empty query');
+  if (!query.trim()) throw new InputError('empty query');
   limit = Math.max(1, Math.min(50, Number(limit) || 5));
   const open = DRAWER_PRESETS[drawers];
-  if (!open) throw new Error('unknown drawers');
+  if (!open) throw new InputError('unknown drawers');
   setMode(mode);
   const extra = {};
   const before = recallStoreStats();
@@ -198,8 +210,8 @@ async function search({ query, limit = 5, drawers = 'owner + project alpha', mod
 }
 
 async function bench({ mode = 'auto', drawers = 'owner + project alpha', label = '', record = true, n = 20 }) {
-  if (state.seeding) throw new Error('still generating data');
-  if (!state.size && !dataInfo().rows) throw new Error('generate data first');
+  if (state.seeding) throw new InputError('still generating data');
+  if (!state.size && !dataInfo().rows) throw new InputError('generate data first');
   setMode(mode);
   forgetRecallIndex();
   const qs = SET.hit.flatMap((h) => h.queries.map((q) => q.q)).slice(0, Math.max(1, Math.min(72, n)));
@@ -255,14 +267,15 @@ const server = createServer(async (req, res) => {
       if (!String(req.headers['content-type'] || '').startsWith('application/json')) return json(res, 415, { error: 'json only' });
       let body = '';
       for await (const chunk of req) { body += chunk; if (body.length > 100_000) return json(res, 413, { error: 'too large' }); }
-      const input = body ? JSON.parse(body) : {};
-      if (url.pathname === '/api/seed') { seed(input); return json(res, 202, { started: true }); }
+      let input;
+      try { input = body ? JSON.parse(body) : {}; } catch { throw new InputError('invalid JSON'); }
+      if (url.pathname === '/api/seed') { const opts = checkSeed(input); seed(opts).catch((e) => { state.error = publicMessage(e); }); return json(res, 202, { started: true }); }
       if (url.pathname === '/api/search') return json(res, 200, await search(input));
       if (url.pathname === '/api/bench') return json(res, 200, await bench(input));
     }
     json(res, 404, { error: 'not found' });
   } catch (e) {
-    json(res, 400, { error: String(e?.message || e) });
+    json(res, e instanceof InputError ? 400 : 500, { error: publicMessage(e) });
   }
 });
 
