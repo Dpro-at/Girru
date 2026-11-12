@@ -173,7 +173,7 @@ export function memoryPagesPath(path) {
   const with_ = (route, rules, extra = {}) => { const params = rules ? query(raw, rules) : (raw === '' ? {} : null); return params ? { route, params, ...extra } : null; };
   let m;
   if ((m = /^\/api\/memory\/scopes\/ask-agent\/([0-9a-f-]{36})$/.exec(base))) return with_('ask-agent-job', null, { id: m[1] });
-  if ((m = /^\/api\/memory\/scopes\/projects\/([^/]+)\/size$/.exec(base)) && slug(m[1])) return with_('project-size', null, { id: m[1] });
+  if ((m = /^\/api\/memory\/scopes\/projects\/([^/]+)\/(size|documents|summaries)$/.exec(base)) && slug(m[1])) return with_(`project-${m[2]}`, null, { id: m[1] });
   switch (base) {
     case '/api/memory/scopes/tree': return with_('tree', QUERIES.tree);
     case '/api/memory/scopes/search': return with_('search', QUERIES.search);
@@ -289,7 +289,7 @@ export function allowedMemoryPages(method, path, body) {
     case 'project-kind': return method === 'POST' && record(body) && onlyKeys(body, ['kind']) && (body.kind === 'project' || body.kind === 'library');
     case 'hidden-keys': return method === 'GET' && body === undefined;
     case 'ask-agent-job': return method === 'GET' && body === undefined;
-    case 'project-size': return method === 'GET' && body === undefined;
+    case 'project-size': case 'project-documents': case 'project-summaries': return method === 'GET' && body === undefined;
     case 'ask-agent': return method === 'POST' && record(body) && onlyKeys(body, ['agentId', 'request', 'text', 'drawer']) && agentId(body.agentId) && text(body.request, 500) && typeof body.text === 'string' && body.text.length <= 50000 && (body.drawer === undefined || validDrawerId(body.drawer));
     case 'hidden-keys-answer': return method === 'POST' && record(body) && onlyKeys(body, ['answer', 'drawer']) && (body.answer === 'keep' || body.answer === 'move') && (body.drawer === undefined || (typeof body.drawer === 'string' && body.drawer.length <= 200));
     case 'hidden-key-reveal': return method === 'POST' && body === undefined;
@@ -644,6 +644,17 @@ export function memoryPagesResponse(path, status, body) {
       return { total: count(body.total), drawers: (Array.isArray(body.drawers) ? body.drawers : []).slice(0, 200).filter(d => record(d) && typeof d.drawer === 'string' && d.drawer.length <= 200).map(d => ({ drawer: d.drawer, count: count(d.count), memories: count(d.memories), kinds: kinds(d.kinds) })) };
     }
     case 'ask-agent': if (typeof body.jobId !== 'string' || !/^[0-9a-f-]{36}$/.test(body.jobId)) fail(); return { jobId: body.jobId };
+    case 'project-documents': {
+      const doc = d => record(d) && typeof d.path === 'string' ? { path: clip(d.path, 400), updatedAt: whenOrNull(d.updatedAt) ?? new Date(0).toISOString(), status: d.status === 'unreadable' ? 'unreadable' : 'ok', reason: typeof d.reason === 'string' ? clip(d.reason, 200) : null, pages: Number.isSafeInteger(d.pages) ? d.pages : null, bytes: count(d.bytes), ...(typeof d.purpose === 'string' ? { purpose: clip(d.purpose, 120) } : {}) } : null;
+      const docs = x => (Array.isArray(x) ? x : []).slice(0, 600).map(doc).filter(Boolean);
+      return { key: docs(body.key), other: docs(body.other) };
+    }
+    case 'project-summaries': {
+      const lines = x => (Array.isArray(x) ? x : []).slice(0, 10).filter(v => typeof v === 'string').map(v => clip(v, 400));
+      return { summaries: (Array.isArray(body.summaries) ? body.summaries : []).slice(0, 3).filter(s => record(s) && ['today', 'week', 'month'].includes(s.period)).map(s => ({
+        period: s.period, label: clip(s.label, 40), from: whenOrNull(s.from) ?? '', sessions: count(s.sessions), sources: lines(s.sources).map(v => clip(v, 60)), done: lines(s.done), left: lines(s.left), next: lines(s.next),
+        handoffs: (Array.isArray(s.handoffs) ? s.handoffs : []).slice(0, 20).filter(record).map(h => ({ from: clip(h.from, 80), at: typeof h.at === 'string' ? clip(h.at, 40) : '', done: lines(h.done), left: lines(h.left), next: lines(h.next) })) })) };
+    }
     case 'project-size': {
       const part = x => ({ count: count(record(x) ? x.count : 0), tokens: count(record(x) ? x.tokens : 0) });
       return { memories: part(body.memories), keyFiles: part(body.keyFiles), documents: part(body.documents), summaries: part(body.summaries), total: count(body.total), perReply: count(body.perReply),

@@ -2329,6 +2329,16 @@ button.status-item:hover { background:var(--row-hover); color:var(--text); }
 .doc-banner .dk-ask { margin:0; }
 .doc-status .doc-importance, .doc-importance { display:inline-flex; flex-direction:row; white-space:nowrap; align-items:center; gap:6px; margin-inline-end:auto; }
 .doc-importance input { inline-size:110px; }
+/* MEM-READ-01 MR6: Where the work stands; Key files. */
+.dk-work-row { display:grid; gap:2px; padding:8px 12px; }
+.dk-work-row .dk-row-title { display:flex; align-items:center; gap:6px; margin:0; font-size:13px; }
+.dk-work-row .dk-row-lines { margin:0; }
+.dk-work-row .dk-read-more { justify-self:start; }
+.dk-work-sessions { list-style:none; margin:4px 0 0; padding:0 0 0 12px; display:grid; gap:6px; border-inline-start:2px solid var(--border); }
+.dk-work-sessions p { margin:0; font-size:12.5px; }
+.dk-doc-list { list-style:none; margin:0; padding:0; display:grid; gap:2px; }
+.dk-doc { display:grid; grid-template-columns:20px minmax(0,1fr) auto; gap:4px 8px; align-items:start; padding:6px 12px; }
+.dk-docs { display:grid; gap:8px; padding-block-end:8px; border-block-end:1px solid var(--border); margin-block-end:8px; }
 /* MEM-READ-01 MR7: the project's side panel — a status line, then parts you fold. */
 .dk-status-line { font-variant-numeric:tabular-nums; }
 .dk-project-panel { min-inline-size:0; overflow-x:hidden; grid-template-columns:minmax(0,1fr); }

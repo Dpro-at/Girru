@@ -78,6 +78,11 @@ memories are not loaded into replies. `workspace_memory` operation
   through its reference in a tool call, only with the owner's approval.
 - **Handoffs**: before you stop, leave a handoff (done / left / next /
   questions) so the next agent of any brand continues from it.
+- **Where the work stands**: `project_brief` and `latest_handoff` start with
+  Today, This week and This month for the project, made from these handoffs.
+  Read them first and continue from there; key files (CLAUDE.md, AGENTS.md,
+  HANDOFF.md, BACKLOG.md, DECISIONS.md, README.md) are project files you read
+  with your tools, never memories.
 
 ## Rules
 

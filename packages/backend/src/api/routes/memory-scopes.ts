@@ -36,6 +36,8 @@
  *   POST /api/memory/scopes/hidden-keys/answer     { answer: 'keep' | 'move', drawer? } -> { answered, moved }  Keep hidden here / Move to Connections
  *   POST /api/memory/scopes/hidden-keys/:id/reveal -> { value }  the owner's Show (audited; never cached)
  *   GET  /api/memory/scopes/projects/:slug/size    -> { memories, keyFiles, documents, summaries: { count, tokens }, total, perReply, biggest }  (MR7, estimates)
+ *   GET  /api/memory/scopes/projects/:slug/documents -> { key: [...with purpose], other: [...] }  Files tab: Key files first (MR6)
+ *   GET  /api/memory/scopes/projects/:slug/summaries -> { summaries: [{ period, label, sessions, sources, done, left, next, handoffs }] }  (MR6)
  *   POST /api/memory/scopes/projects/:slug/kind    { kind: 'project' | 'library' } -> { slug, kind, before }  ("It's a project" / "Not a project", MEM-READ-01 MR3)
  * Access by inheritance
  *   GET  /api/memory/access                        -> { version, rules, templates }
@@ -60,7 +62,8 @@ import { resolveFileAgent } from '../../memory/memory-files.js';
 import { classifyLibraryProjects, setProjectKind } from '../../memory/scopes/project-kinds.js';
 import { answerHiddenKeys, hiddenKeysReport, hideKeysOnce, revealKey } from '../../memory/hidden-keys.js';
 import { AskAgentError, askJob, startAskJob } from '../../memory/ask-agent.js';
-import { projectSize } from '../../memory/project-size.js';
+import { projectDocuments, projectSize } from '../../memory/project-size.js';
+import { projectSummaries } from '../../memory/project-summaries.js';
 import { isValidDrawerKey } from '../../memory/drawers.js';
 import { provenanceJobStatus, setChecked } from '../../memory/validity.js';
 import { vectorJobStatus } from '../../memory/vectors.js';
@@ -195,6 +198,16 @@ export async function memoryScopeRoutes(fastify: FastifyInstance) {
     const slug = (request.params as { slug: string }).slug;
     if (!isValidDrawerKey('project', slug)) return reply.code(404).send({ error: 'Not found', code: 'not_found' });
     return projectSize(owner.userId!, slug);
+  });
+  route('GET', '/api/memory/scopes/projects/:slug/documents', async (owner, request, reply) => {
+    const slug = (request.params as { slug: string }).slug;
+    if (!isValidDrawerKey('project', slug)) return reply.code(404).send({ error: 'Not found', code: 'not_found' });
+    return projectDocuments(owner.userId!, slug);
+  });
+  route('GET', '/api/memory/scopes/projects/:slug/summaries', async (owner, request, reply) => {
+    const slug = (request.params as { slug: string }).slug;
+    if (!isValidDrawerKey('project', slug)) return reply.code(404).send({ error: 'Not found', code: 'not_found' });
+    return { summaries: await projectSummaries(owner.userId!, slug) };
   });
   route('POST', '/api/memory/scopes/projects/:slug/kind', async (owner, request) => {
     const slug = (request.params as { slug: string }).slug;

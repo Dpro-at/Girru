@@ -6,7 +6,7 @@
 import { Store, codeOf } from './memory-store';
 import type { Requester } from './memory-store';
 import { queryString } from './memory-pages-contract.js';
-import type { AccessMode, ProjectSize, AccessOverview, AccessRule, DoctorReport, EffectiveAccess, ExplorerItem, ExplorerPage, PinnedFact, ProjectAction, ProjectApplied, ProjectExport, ProjectPreview, ScopeTree, TreeProject, WeeklySummary } from './memory-pages-contract.js';
+import type { AccessMode, PeriodSummary, ProjectDocuments, ProjectSize, AccessOverview, AccessRule, DoctorReport, EffectiveAccess, ExplorerItem, ExplorerPage, PinnedFact, ProjectAction, ProjectApplied, ProjectExport, ProjectPreview, ScopeTree, TreeProject, WeeklySummary } from './memory-pages-contract.js';
 import type { CacheMetrics } from './memory-recall-contract.js';
 
 export type Waiting = { total: number; important: number; conflicts: number; links: number; imported: number; files: number };
@@ -77,6 +77,16 @@ export class MemoryScopesController extends Store<ScopeState> {
       await this.load(true);
       return true;
     } catch { return false; }
+  }
+
+  /** MEM-READ-01 MR6: Today / This week / Month from the project's handoffs (only periods with work). */
+  async summaries(slug: string): Promise<PeriodSummary[] | null> {
+    const r = await this.read<{ summaries: PeriodSummary[] }>(`/api/memory/scopes/projects/${encodeURIComponent(slug)}/summaries`);
+    return r ? r.summaries : null;
+  }
+  /** MEM-READ-01 MR6: the project's documents, Key files first. */
+  async documents(slug: string): Promise<ProjectDocuments | null> {
+    return this.read<ProjectDocuments>(`/api/memory/scopes/projects/${encodeURIComponent(slug)}/documents`);
   }
 
   /** MEM-READ-01 MR5: Ask an agent to change a document. A proposal only; nothing is saved. */

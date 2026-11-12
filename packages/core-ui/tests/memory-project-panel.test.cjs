@@ -45,3 +45,16 @@ test('Read + write is the same project exception Settings makes; Undo sets it ba
   assert.equal(await undo(), true);
   assert.equal(c.getSnapshot().usage[0].write, false);
 });
+
+test('MR6: documents (Key files first) and summaries pass both projections', () => {
+  const docsPath = '/api/memory/scopes/projects/grenzer/documents', sumPath = '/api/memory/scopes/projects/grenzer/summaries';
+  assert.equal(allowedRequest('GET', docsPath, undefined), true);
+  assert.equal(allowedRequest('GET', sumPath, undefined), true);
+  const twice = (p, x) => memoryPagesResponse(p, 200, memoryPagesResponse(p, 200, x));
+  const d = twice(docsPath, { key: [{ path: 'CLAUDE.md', updatedAt: '2026-11-12T10:00:00.000Z', status: 'ok', reason: null, pages: null, bytes: 12000, purpose: 'Instructions for Claude Code', root: '/secret/path' }], other: [{ path: 'Old offer.doc', updatedAt: '2026-01-01T00:00:00.000Z', status: 'unreadable', reason: 'old Word format', pages: null, bytes: 1 }] });
+  assert.deepEqual(d.key[0], { path: 'CLAUDE.md', updatedAt: '2026-11-12T10:00:00', status: 'ok', reason: null, pages: null, bytes: 12000, purpose: 'Instructions for Claude Code' });
+  assert.equal(d.other[0].reason, 'old Word format');
+  const s = twice(sumPath, { summaries: [{ period: 'today', label: 'Today', from: '2026-11-12T00:00:00.000Z', sessions: 3, sources: ['Claude Code', 'Grenzer agent'], done: ['nftables fallback tested'], left: ['backup tests'], next: ['release 0.3.1'], handoffs: [] }, { period: 'year', label: 'x' }] });
+  assert.equal(s.summaries.length, 1);
+  assert.deepEqual(s.summaries[0].sources, ['Claude Code', 'Grenzer agent']);
+});

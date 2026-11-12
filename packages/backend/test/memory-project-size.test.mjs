@@ -50,3 +50,30 @@ test('size per part: memories, key files and other documents; per reply is cappe
   assert.match(t.text, /Memory ≈ 16k tokens .* loads ≈ [\d.]+k? per reply/);
   assert.match(t.text, /Read by: /);
 });
+
+test('MR6: key files come first with what they are for; the others after', async () => {
+  const D = await S.projectDocuments(OWNER, 'grenzer');
+  assert.deepEqual(D.key.map(d => [d.path, d.purpose]), [['CLAUDE.md', 'Instructions for Claude Code'], ['.cursor/rules/a.mdc', 'Rules for Cursor']]);
+  assert.deepEqual(D.other.map(d => d.path), ['docs/architecture.md']);
+});
+
+test('MR6: today / this week / month from handoffs, only when there was work; agents get the same lines', async () => {
+  const P = await load('src/memory/project-summaries.ts');
+  const now = new Date(2026, 10, 12, 18, 0, 0); // Thursday 12 Nov 2026
+  const at = (d) => d.toISOString().replace('T', ' ').slice(0, 19);
+  db.prepare("INSERT INTO agents_config (id, name) VALUES ('ga', 'Grenzer agent')").run();
+  const add = (id, when, done, left, next) => db.prepare("INSERT INTO agent_handoffs (id, owner_id, agent_id, scope_kind, scope_id, project_id, version, done, remaining, next_steps, source, created_at) VALUES (?, ?, 'ga', 'conversation', ?, 'grenzer', 1, ?, ?, ?, 'agent', ?)")
+    .run(id, OWNER, 'c-' + id, JSON.stringify(done), JSON.stringify(left), JSON.stringify(next), at(when));
+  assert.deepEqual(await P.projectSummaries(OWNER, 'grenzer', now), [], 'no work, no rows');
+  add('h1', new Date(2026, 10, 12, 10), ['nftables fallback tested on the VPS'], ['backup module tests'], ['release 0.3.1']);
+  add('h2', new Date(2026, 10, 10, 10), ['Stripe test mode ready'], [], []);
+  add('h3', new Date(2026, 10, 3, 10), ['Backup module designed'], [], []);
+  add('h4', new Date(2026, 9, 30, 10), ['Old October work'], [], []);
+  const list = await P.projectSummaries(OWNER, 'grenzer', now);
+  assert.deepEqual(list.map(s => [s.label, s.sessions]), [['Today', 1], ['This week', 2], ['November', 3]]);
+  assert.deepEqual(list[0].done, ['nftables fallback tested on the VPS']);
+  assert.deepEqual(list[0].sources, ['Grenzer agent']);
+  const text = P.summariesText(list);
+  assert.match(text, /### Where the work stands\n- Today \(1 session · Grenzer agent\): Done: nftables fallback tested on the VPS\. Left: backup module tests\. Next: release 0\.3\.1\./);
+  assert.doesNotMatch(text, /October/);
+});

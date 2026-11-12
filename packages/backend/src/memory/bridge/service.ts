@@ -441,7 +441,12 @@ export async function mcpCall(c: unknown, token: unknown, cwd: unknown, tool: un
       // P8 (D28): with a task number, that task's section (its newest handoff and links) after the brief.
       const task = storeP8Enabled() ? await taskSection(ownerId, project.id, a.task) : null;
       // MEM-READ-01 MR7: what loading this project means and who reads it (MCP answer only, not the brief file).
-      const load = await (await import('../project-size.js')).projectLoadText(ownerId, (await import('../project-keys.js')).projectKeyOf(project)).catch(() => null);
+      const projKey = (await import('../project-keys.js')).projectKeyOf(project);
+      const loaded = await (await import('../project-size.js')).projectLoadText(ownerId, projKey).catch(() => null);
+      // MR6: Today and This week first, so a new session continues from where the last one stopped.
+      const { projectSummaries, summariesText } = await import('../project-summaries.js');
+      const stands = summariesText(await projectSummaries(ownerId, projKey).catch(() => []));
+      const load = loaded ? { ...loaded, text: stands ? `${stands}\n\n${loaded.text}` : loaded.text } : null;
       const extra = load ? { size: { total: load.size.total, perReply: load.size.perReply }, readers: load.readers.map((r) => ({ name: r.name, write: r.write })) } : {};
       if (task) return { text: `${briefMarkdown(b)}${load ? `\n\n${load.text}` : ''}\n\n${task.text}`, data: { project: { id: project.id, name: b.name }, facts: b.facts.length, memories: b.memories.length, handoff: !!b.handoff, ...extra, task: { cardId: task.cardId, handoff: task.handoff?.id ?? null } } };
       return { text: `${briefMarkdown(b)}${load ? `\n\n${load.text}` : ''}`, data: { project: { id: project.id, name: b.name }, facts: b.facts.length, memories: b.memories.length, handoff: !!b.handoff, ...extra } };
@@ -458,7 +463,9 @@ export async function mcpCall(c: unknown, token: unknown, cwd: unknown, tool: un
         return { text: task.handoff ? wireHandoffNote(task.handoff) : `No handoff for ${a.task} yet.`, data: { handoff: task.handoff } };
       }
       const h = await projectHandoff(ownerId, project.id);
-      return { text: h ? handoffText(h) : 'No handoff note in this project yet.', data: { handoff: h } };
+      const { projectSummaries, summariesText } = await import('../project-summaries.js');
+      const stands = summariesText(await projectSummaries(ownerId, (await import('../project-keys.js')).projectKeyOf(project)).catch(() => []));
+      return { text: `${stands ? `${stands}\n\n` : ''}${h ? handoffText(h) : 'No handoff note in this project yet.'}`, data: { handoff: h } };
     }
     case 'memory_search': {
       const query = typeof a.query === 'string' ? a.query.trim().slice(0, 500) : '';

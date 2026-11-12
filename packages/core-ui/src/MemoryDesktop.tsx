@@ -33,6 +33,7 @@ import type { ProjectGroup } from './memory-desktop-contract.js';
 import { NeedsYou } from './MemoryNeeds';
 import { HiddenKeysController, KeyText, hiddenSummary } from './memory-hidden-keys';
 import { DocumentEditor, MarkdownDocument } from './DocumentEditor';
+import { ProjectDocumentsList, WorkStands } from './MemoryProjectWork';
 
 /** MEM-READ-01 MR1: how a memory came ("Imported", "Saved by you", "Learned"), else its kind. */
 /** MR1: the inspector shows the title on top and the text without an imported file name or the repeated title. */
@@ -351,8 +352,8 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
     : place === 'archived' ? <ArchivedPlace projects={(ss.tree?.projects ?? []).filter(p => p.archived)} onOpen={slug => d.open(`project:${slug}`)} onBack={slug => projectAction(slug, 'unarchive')}/>
     : project && ds.projectView === 'design' ? <DesignView d={d} slug={project.slug} client={client}/>
     : project && ds.projectView === 'databases' ? <DatabasesView d={d} slug={project.slug} agents={ss.agents}/>
-    : project && ds.projectView === 'files' ? <FilesView client={client} agents={ss.agents} drawers={[{ id: `project:${project.slug}`, name: project.name }]}/>
-    : <MemoryList k={k} p9b={p9b} pinned={ds.pinned} showPinned={place === 'all' || !!project} onMenu={(e, i) => menu.at(e, memoryMenu(i))} onPinnedMenu={(e, f) => menu.at(e, [{ label: 'Edit…', icon: 'pencil', run: () => setSheet({ kind: 'edit-pinned', fact: f }) }, { label: 'Unpin', icon: 'pin', run: () => void d.unpin(f) }])}
+    : project && ds.projectView === 'files' ? <div className="dk-list"><ProjectDocumentsList sc={sc} slug={project.slug}/><FilesView client={client} agents={ss.agents} drawers={[{ id: `project:${project.slug}`, name: project.name }]}/></div>
+    : <MemoryList k={k} footer={project ? <WorkStands sc={sc} slug={project.slug}/> : undefined} p9b={p9b} pinned={ds.pinned} showPinned={place === 'all' || !!project} onMenu={(e, i) => menu.at(e, memoryMenu(i))} onPinnedMenu={(e, f) => menu.at(e, [{ label: 'Edit…', icon: 'pencil', run: () => setSheet({ kind: 'edit-pinned', fact: f }) }, { label: 'Unpin', icon: 'pin', run: () => void d.unpin(f) }])}
       empty={project ? <><p>Nothing remembered here yet. Girru remembers on its own while you chat. You can add something yourself too.</p><button type="button" className="primary" onClick={() => { x.startAdd(); setSheet({ kind: 'remember' }); }}>Remember</button></>
         : xs.query ? <p>No memory matches. Put words in "quotes" for exact words.</p> : <p>Nothing here yet. Girru remembers on its own while you chat.</p>}/>;
 
@@ -519,7 +520,7 @@ function MemorySidebar({ trust, k, p6, p9, peopleLocal, onPersonMenu, filesNeedY
 }
 
 // ---------------------------------------------------------------- list
-function MemoryList({ k, p9b = false, pinned, showPinned, onMenu, onPinnedMenu, empty }: { k: K; p9b?: boolean; pinned: readonly PinnedFact[]; showPinned: boolean; onMenu: (e: React.MouseEvent, i: ExplorerItem) => void; onPinnedMenu: (e: React.MouseEvent, f: PinnedFact) => void; empty: ReactNode }) {
+function MemoryList({ k, p9b = false, pinned, showPinned, onMenu, onPinnedMenu, empty, footer }: { k: K; footer?: ReactNode; p9b?: boolean; pinned: readonly PinnedFact[]; showPinned: boolean; onMenu: (e: React.MouseEvent, i: ExplorerItem) => void; onPinnedMenu: (e: React.MouseEvent, f: PinnedFact) => void; empty: ReactNode }) {
   const { x } = k;
   const s = useStore(x)!;
   const trust = useStore(k.tr)?.trust;
@@ -585,6 +586,7 @@ function MemoryList({ k, p9b = false, pinned, showPinned, onMenu, onPinnedMenu, 
     </section>)}
     {count === 0 && <div className="dk-empty">{empty}</div>}
     {s.nextCursor && <p className="dk-more-row" role="status">{s.busy ? 'Loading more…' : <button type="button" className="link-button" onClick={() => void x.more()}>Load more</button>}</p>}
+    {!s.nextCursor && !s.query && footer}
   </div>;
 }
 
