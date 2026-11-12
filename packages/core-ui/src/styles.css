@@ -2331,15 +2331,18 @@ button.status-item:hover { background:var(--row-hover); color:var(--text); }
 .doc-importance input { inline-size:110px; }
 /* MEM-READ-01 MR7: the project's side panel — a status line, then parts you fold. */
 .dk-status-line { font-variant-numeric:tabular-nums; }
-.dk-part { display:grid; gap:8px; padding-block:10px; border-block-start:1px solid var(--border); }
-.dk-part h4 { display:flex; align-items:center; gap:8px; margin:0; font-size:12.5px; }
-.app-shell :is(.page-column, .page-ui) button.dk-part-head, .dk-part-head { display:inline-flex; align-items:center; gap:4px; padding:0; border:0; background:none; box-shadow:none; font:inherit; font-weight:650; color:var(--text); min-block-size:0; }
-.dk-part-aside { margin-inline-start:auto; font-weight:400; color:var(--muted); display:inline-flex; gap:4px; align-items:center; white-space:nowrap; }
+.dk-project-panel { min-inline-size:0; overflow-x:hidden; grid-template-columns:minmax(0,1fr); }
+.dk-project-panel > * { min-inline-size:0; }
+.dk-project-panel .dk-insp-head > div { min-inline-size:0; }
+.dk-part { display:grid; gap:8px; padding-block:10px; border-block-start:1px solid var(--border); min-inline-size:0; }
+.dk-part h4 { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; margin:0; font-size:12.5px; min-inline-size:0; }
+.app-shell :is(.page-column, .page-ui) button.dk-part-head, .dk-part-head { display:inline-flex; align-items:center; gap:4px; padding:0; border:0; background:none; box-shadow:none; font:inherit; font-weight:650; color:var(--text); min-block-size:0; white-space:nowrap; }
+.dk-part-aside { margin-inline-start:auto; font-weight:400; color:var(--muted); display:inline-flex; flex-wrap:wrap; gap:4px; align-items:center; }
 .dk-readers { list-style:none; margin:0; padding:0; display:grid; gap:6px; }
-.dk-readers li { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:8px; align-items:center; }
+.dk-readers li { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:8px; align-items:center; min-inline-size:0; }
 .dk-reader-name { display:grid; min-inline-size:0; }
 .dk-reader-name b { font-weight:550; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.app-shell :is(.page-column, .page-ui) button.dk-level-tag, .dk-level-tag { padding:1px 8px; border-radius:999px; font-size:11.5px; min-block-size:0; background:var(--secondary); color:var(--muted); box-shadow:none; border:0; }
+.app-shell :is(.page-column, .page-ui) button.dk-level-tag, .dk-level-tag { padding:1px 8px; border-radius:999px; font-size:11.5px; min-block-size:0; white-space:nowrap; background:var(--secondary); color:var(--muted); box-shadow:none; border:0; }
 .app-shell :is(.page-column, .page-ui) button.dk-level-tag[data-write], .dk-level-tag[data-write] { background:color-mix(in srgb, var(--accent) 16%, transparent); color:var(--accent); }
 .dk-size dd { font-variant-numeric:tabular-nums; }
 /* MEM-READ-01 MR5: Ask an agent inside the shared editor. */
