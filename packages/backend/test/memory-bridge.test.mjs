@@ -183,7 +183,7 @@ test('the owner edits outside the markers, a new fact (with a secret) is approve
   assert.ok(after.endsWith('\nOwner later note.\n'), 'text after the section unchanged');
   assert.match(after, /runs on push/);
   for (const f of ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']) assert.ok(!readFileSync(join(folder, f), 'utf8').includes(SECRET), `no secret in ${f}`);
-  assert.match(after, /\[REDACTED:/);
+  assert.match(after, /\[(?:REDACTED|SECRET):/); // MEM-READ-01 MR2: kept hidden as a reference
   // Nothing changed -> nothing written again.
   assert.equal((await syncMemoryBridge()).written, 0);
 });

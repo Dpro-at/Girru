@@ -440,8 +440,11 @@ export async function mcpCall(c: unknown, token: unknown, cwd: unknown, tool: un
       const b = await projectBrief(ownerId, project, company);
       // P8 (D28): with a task number, that task's section (its newest handoff and links) after the brief.
       const task = storeP8Enabled() ? await taskSection(ownerId, project.id, a.task) : null;
-      if (task) return { text: `${briefMarkdown(b)}\n\n${task.text}`, data: { project: { id: project.id, name: b.name }, facts: b.facts.length, memories: b.memories.length, handoff: !!b.handoff, task: { cardId: task.cardId, handoff: task.handoff?.id ?? null } } };
-      return { text: briefMarkdown(b), data: { project: { id: project.id, name: b.name }, facts: b.facts.length, memories: b.memories.length, handoff: !!b.handoff } };
+      // MEM-READ-01 MR7: what loading this project means and who reads it (MCP answer only, not the brief file).
+      const load = await (await import('../project-size.js')).projectLoadText(ownerId, (await import('../project-keys.js')).projectKeyOf(project)).catch(() => null);
+      const extra = load ? { size: { total: load.size.total, perReply: load.size.perReply }, readers: load.readers.map((r) => ({ name: r.name, write: r.write })) } : {};
+      if (task) return { text: `${briefMarkdown(b)}${load ? `\n\n${load.text}` : ''}\n\n${task.text}`, data: { project: { id: project.id, name: b.name }, facts: b.facts.length, memories: b.memories.length, handoff: !!b.handoff, ...extra, task: { cardId: task.cardId, handoff: task.handoff?.id ?? null } } };
+      return { text: `${briefMarkdown(b)}${load ? `\n\n${load.text}` : ''}`, data: { project: { id: project.id, name: b.name }, facts: b.facts.length, memories: b.memories.length, handoff: !!b.handoff, ...extra } };
     }
     case 'pinned_facts': {
       const facts = await pinnedFacts(ownerId, project, company);

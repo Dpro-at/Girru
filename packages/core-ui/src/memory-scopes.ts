@@ -6,7 +6,7 @@
 import { Store, codeOf } from './memory-store';
 import type { Requester } from './memory-store';
 import { queryString } from './memory-pages-contract.js';
-import type { AccessOverview, AccessRule, DoctorReport, EffectiveAccess, ExplorerItem, ExplorerPage, PinnedFact, ProjectAction, ProjectApplied, ProjectExport, ProjectPreview, ScopeTree, TreeProject, WeeklySummary } from './memory-pages-contract.js';
+import type { AccessMode, ProjectSize, AccessOverview, AccessRule, DoctorReport, EffectiveAccess, ExplorerItem, ExplorerPage, PinnedFact, ProjectAction, ProjectApplied, ProjectExport, ProjectPreview, ScopeTree, TreeProject, WeeklySummary } from './memory-pages-contract.js';
 import type { CacheMetrics } from './memory-recall-contract.js';
 
 export type Waiting = { total: number; important: number; conflicts: number; links: number; imported: number; files: number };
@@ -27,6 +27,8 @@ export type ScopeState = Readonly<{
   // A department or a project (M8)
   facts: readonly PinnedFact[]; factsBusy: boolean; topicKeys: readonly string[]; scopeWeek: number | null;
   usage: readonly Usage[] | null; usageChecked: number; rules: readonly AccessRule[];
+  /** MEM-READ-01 MR7: the open project's size in tokens (estimates). */
+  size?: ProjectSize | null;
   // Project actions
   action: ProjectAction | null; preview: ProjectPreview | null; previewBusy: boolean; previewNotice?: string; applied?: ProjectApplied;
 }>;
@@ -46,7 +48,7 @@ export class MemoryScopesController extends Store<ScopeState> {
   #ticket = 0;
   constructor(client: Requester, private readonly now = () => Date.now()) {
     super({ phase: 'idle', tree: null, scope: 'company', find: '', open: [], agents: {}, recent: [], weekCount: null, weekMore: false, topics: null, mapEntities: null, mapLinks: null,
-      waiting: null, weekly: null, doctor: null, cacheHit: null, importStatus: null, readers: {}, facts: [], factsBusy: false, topicKeys: [], scopeWeek: null, usage: null, usageChecked: 0, rules: [],
+      waiting: null, weekly: null, doctor: null, cacheHit: null, importStatus: null, readers: {}, facts: [], factsBusy: false, topicKeys: [], scopeWeek: null, usage: null, usageChecked: 0, rules: [], size: null,
       action: null, preview: null, previewBusy: false }, client);
   }
 
@@ -184,7 +186,31 @@ export class MemoryScopesController extends Store<ScopeState> {
       facts: facts?.facts ?? [], topicKeys: keys, scopeWeek: page ? recentIn(page.items, now) : null,
       rules: (access?.rules ?? []).filter(r => r.scope === scope || (scope.startsWith('project:') && r.scope === `department:${this.project()?.departmentId}`)),
     });
-    if (scope.startsWith('project:')) void this.loadUsage(t, scope.slice(8));
+    if (scope.startsWith('project:')) { void this.loadUsage(t, scope.slice(8)); void this.loadSize(t, scope.slice(8)); }
+  }
+
+  private async loadSize(t: number, slug: string) {
+    const size = await this.read<ProjectSize>(`/api/memory/scopes/projects/${encodeURIComponent(slug)}/size`);
+    if (t === this.#ticket) this.publish({ size: size ?? null });
+  }
+
+  /**
+   * MR7: a reader's level here, Read only or Read + write: the same project exception Settings › Memory › Access
+   * makes (previewed, then applied). Returns the undo, or null when it was not changed.
+   */
+  async setReaderWrite(slug: string, agentId: string, write: boolean): Promise<(() => Promise<boolean>) | null> {
+    const change = (w: boolean) => [{ op: 'set_rule' as const, scope: `project:${slug}`, agentId, drawerKind: 'project' as const, write: (w ? 'allow' : 'deny') as AccessMode }];
+    const run = async (w: boolean): Promise<boolean> => {
+      try {
+        const p = await this.req('POST', '/api/memory/access/preview', { changes: change(w) });
+        if (p.status !== 200) return false;
+        const a = await this.req('POST', '/api/memory/access/apply', { changes: change(w), expectedPreviewHash: (p.body as { previewHash: string }).previewHash, confirm: true });
+        if (a.status !== 200) return false;
+        this.publish({ usage: (this.getSnapshot().usage ?? []).map(u => (u.agentId === agentId ? { ...u, write: w, why: 'exception here' } : u)) });
+        return true;
+      } catch { return false; }
+    };
+    return (await run(write)) ? () => run(!write) : null;
   }
 
   /** Who may read this project's memory: effective access of the first agents (server checks each). */

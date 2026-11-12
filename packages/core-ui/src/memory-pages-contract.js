@@ -173,6 +173,7 @@ export function memoryPagesPath(path) {
   const with_ = (route, rules, extra = {}) => { const params = rules ? query(raw, rules) : (raw === '' ? {} : null); return params ? { route, params, ...extra } : null; };
   let m;
   if ((m = /^\/api\/memory\/scopes\/ask-agent\/([0-9a-f-]{36})$/.exec(base))) return with_('ask-agent-job', null, { id: m[1] });
+  if ((m = /^\/api\/memory\/scopes\/projects\/([^/]+)\/size$/.exec(base)) && slug(m[1])) return with_('project-size', null, { id: m[1] });
   switch (base) {
     case '/api/memory/scopes/tree': return with_('tree', QUERIES.tree);
     case '/api/memory/scopes/search': return with_('search', QUERIES.search);
@@ -288,6 +289,7 @@ export function allowedMemoryPages(method, path, body) {
     case 'project-kind': return method === 'POST' && record(body) && onlyKeys(body, ['kind']) && (body.kind === 'project' || body.kind === 'library');
     case 'hidden-keys': return method === 'GET' && body === undefined;
     case 'ask-agent-job': return method === 'GET' && body === undefined;
+    case 'project-size': return method === 'GET' && body === undefined;
     case 'ask-agent': return method === 'POST' && record(body) && onlyKeys(body, ['agentId', 'request', 'text', 'drawer']) && agentId(body.agentId) && text(body.request, 500) && typeof body.text === 'string' && body.text.length <= 50000 && (body.drawer === undefined || validDrawerId(body.drawer));
     case 'hidden-keys-answer': return method === 'POST' && record(body) && onlyKeys(body, ['answer', 'drawer']) && (body.answer === 'keep' || body.answer === 'move') && (body.drawer === undefined || (typeof body.drawer === 'string' && body.drawer.length <= 200));
     case 'hidden-key-reveal': return method === 'POST' && body === undefined;
@@ -642,6 +644,11 @@ export function memoryPagesResponse(path, status, body) {
       return { total: count(body.total), drawers: (Array.isArray(body.drawers) ? body.drawers : []).slice(0, 200).filter(d => record(d) && typeof d.drawer === 'string' && d.drawer.length <= 200).map(d => ({ drawer: d.drawer, count: count(d.count), memories: count(d.memories), kinds: kinds(d.kinds) })) };
     }
     case 'ask-agent': if (typeof body.jobId !== 'string' || !/^[0-9a-f-]{36}$/.test(body.jobId)) fail(); return { jobId: body.jobId };
+    case 'project-size': {
+      const part = x => ({ count: count(record(x) ? x.count : 0), tokens: count(record(x) ? x.tokens : 0) });
+      return { memories: part(body.memories), keyFiles: part(body.keyFiles), documents: part(body.documents), summaries: part(body.summaries), total: count(body.total), perReply: count(body.perReply),
+        biggest: record(body.biggest) && typeof body.biggest.name === 'string' ? { name: clip(body.biggest.name, 300), tokens: count(body.biggest.tokens) } : null };
+    }
     case 'ask-agent-job': {
       if (body.state === 'running') return { state: 'running' };
       if (body.state === 'error') return { state: 'error', code: clip(body.code, 40), error: clip(body.error, 300) };

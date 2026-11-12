@@ -35,6 +35,7 @@
  *   GET  /api/memory/scopes/hidden-keys            -> { total, drawers: [{ drawer, count, memories, kinds }] } keys hidden since the owner last answered (MR2; runs the one-time pass first)
  *   POST /api/memory/scopes/hidden-keys/answer     { answer: 'keep' | 'move', drawer? } -> { answered, moved }  Keep hidden here / Move to Connections
  *   POST /api/memory/scopes/hidden-keys/:id/reveal -> { value }  the owner's Show (audited; never cached)
+ *   GET  /api/memory/scopes/projects/:slug/size    -> { memories, keyFiles, documents, summaries: { count, tokens }, total, perReply, biggest }  (MR7, estimates)
  *   POST /api/memory/scopes/projects/:slug/kind    { kind: 'project' | 'library' } -> { slug, kind, before }  ("It's a project" / "Not a project", MEM-READ-01 MR3)
  * Access by inheritance
  *   GET  /api/memory/access                        -> { version, rules, templates }
@@ -59,6 +60,8 @@ import { resolveFileAgent } from '../../memory/memory-files.js';
 import { classifyLibraryProjects, setProjectKind } from '../../memory/scopes/project-kinds.js';
 import { answerHiddenKeys, hiddenKeysReport, hideKeysOnce, revealKey } from '../../memory/hidden-keys.js';
 import { AskAgentError, askJob, startAskJob } from '../../memory/ask-agent.js';
+import { projectSize } from '../../memory/project-size.js';
+import { isValidDrawerKey } from '../../memory/drawers.js';
 import { provenanceJobStatus, setChecked } from '../../memory/validity.js';
 import { vectorJobStatus } from '../../memory/vectors.js';
 import { storeP3Enabled } from '../../services/store-p3.js';
@@ -187,6 +190,11 @@ export async function memoryScopeRoutes(fastify: FastifyInstance) {
     audit(request, owner, 'memory.hidden_key_reveal', 'memory_hidden_keys', id, {});
     reply.header('Cache-Control', 'no-store');
     return { value };
+  });
+  route('GET', '/api/memory/scopes/projects/:slug/size', async (owner, request, reply) => {
+    const slug = (request.params as { slug: string }).slug;
+    if (!isValidDrawerKey('project', slug)) return reply.code(404).send({ error: 'Not found', code: 'not_found' });
+    return projectSize(owner.userId!, slug);
   });
   route('POST', '/api/memory/scopes/projects/:slug/kind', async (owner, request) => {
     const slug = (request.params as { slug: string }).slug;

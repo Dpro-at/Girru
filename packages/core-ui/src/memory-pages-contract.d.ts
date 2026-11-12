@@ -59,6 +59,8 @@ export type ProjectExport = { project: string; files: Array<{ name: string; cont
 export type AccessRule = { id: string; scope: string; agentId: string | null; drawerKind: AccessColumn; read: AccessMode; write: AccessMode; endsAt: string | null; expired: boolean; reason: string | null; createdAt: string };
 export type RoleTemplate = { id: string; name: string; memoryRead: DrawerKind[]; memoryWrite: DrawerKind[]; scopeRead: ScopeColumn[] | null; scopeWrite: ScopeColumn[] | null; agents: number };
 export type AccessOverview = { version: number; rules: AccessRule[]; templates: RoleTemplate[] };
+/** MEM-READ-01 MR7: a project's size in tokens (estimates). */
+export type ProjectSize = { memories: { count: number; tokens: number }; keyFiles: { count: number; tokens: number }; documents: { count: number; tokens: number }; summaries: { count: number; tokens: number }; total: number; perReply: number; biggest: { name: string; tokens: number } | null };
 export type AccessChange =
   | { op: 'set_rule'; scope: string; agentId?: string | null; drawerKind: AccessColumn; read?: AccessMode; write?: AccessMode; endsAt?: string | null; reason?: string | null }
   | { op: 'clear_rule'; scope: string; agentId?: string | null; drawerKind: AccessColumn }
