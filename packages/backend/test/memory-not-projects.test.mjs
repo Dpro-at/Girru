@@ -100,6 +100,12 @@ test('existing library projects move to Not projects once; It\'s a project bring
   assert.ok(archived.has('bubbletea-v1-3-10') && !archived.has('grenzer'));
   const visible = db.prepare(`SELECT drawer_key AS k FROM memories WHERE user_id = ? AND ${S.NOT_ARCHIVED_SQL}`).all(OWNER).map(r => r.k);
   assert.deepEqual([...new Set(visible)].sort(), ['grenzer']);
+  // Lists (All memories, kind:project) leave library memories out; the library's own drawer still opens.
+  const T = await load('src/memory/scopes/tree.ts');
+  const all = await T.exploreScope(OWNER, { scope: 'company', limit: '50' });
+  assert.deepEqual([...new Set(all.items.map(i => i.drawerId))].sort(), ['project:grenzer']);
+  const own = await T.exploreScope(OWNER, { scope: 'project:bubbletea-v1-3-10', limit: '50' });
+  assert.equal(own.items.length, 1);
   // It's a project: kept, and automatic detection never changes it again.
   const out = await K.setProjectKind(OWNER, 'bubbletea-v1-3-10', 'project', OWNER);
   assert.deepEqual(out, { slug: 'bubbletea-v1-3-10', kind: 'project', before: 'library' });
@@ -111,6 +117,23 @@ test('existing library projects move to Not projects once; It\'s a project bring
   await K.setProjectKind(OWNER, 'grenzer', 'project', OWNER);
   await assert.rejects(K.setProjectKind(OWNER, 'nope-unknown', 'project', OWNER), /Unknown project/);
   await assert.rejects(K.setProjectKind(OWNER, 'grenzer', 'maybe', OWNER), /kind must be/);
+});
+
+test('id keys (store P3): a memory-only project is still found by its old folder key', async () => {
+  const id = '11111111-2222-4333-8444-555555555555';
+  db.prepare('INSERT INTO chat_projects (id, user_id, name, slug) VALUES (?, ?, ?, ?)').run(id, OWNER, 'lipgloss-v0-9-1', 'lipgloss-v0-9-1');
+  db.prepare("INSERT INTO memory_project_keys (owner_id, slug, project_id, origin) VALUES (?, ?, ?, 'memory_only')").run(OWNER, 'lipgloss-v0-9-1', id);
+  addMemory(id, 'Lipgloss styles');
+  K.resetProjectKindCache();
+  await K.classifyLibraryProjects(OWNER, { force: true });
+  const p = (await S.listProjects(OWNER)).find(x => x.slug === id || x.chatProjectId === id);
+  assert.equal(p.memoryOnly, true);
+  assert.equal(p.notProject, true);
+  assert.equal(p.notProjectReason, 'Go library');
+  // It's a project, then Undo (Not a project): the reason comes from its name, not the id key.
+  await K.setProjectKind(OWNER, id, 'project', OWNER);
+  await K.setProjectKind(OWNER, id, 'library', OWNER);
+  assert.equal((await S.getProject(OWNER, id)).notProjectReason, 'Go library');
 });
 
 test('a chat project is always a project', async () => {

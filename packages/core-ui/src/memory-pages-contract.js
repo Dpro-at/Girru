@@ -354,8 +354,8 @@ function project(p) {
     archivedAt: whenOrNull(p.archivedAt), mergedInto: idOr(p.mergedInto, slug), ...(record(p) && 'memories' in p ? counts(p) : {}),
     // MEM-TRASH-01 / groups: a project in the Trash, and its group.
     ...(whenOrNull(p.trashedAt) ? { trashedAt: whenOrNull(p.trashedAt) } : {}), ...(typeof p.groupId === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(p.groupId) ? { groupId: p.groupId } : {}),
-    // A chat project is always a project (its internal id stays out).
-    ...((typeof p.chatProjectId === 'string' && p.chatProjectId) || p.chatProject === true ? { chatProject: true } : {}),
+    // A project the owner made is always a project (its internal chat id stays out).
+    ...((typeof p.chatProjectId === 'string' && p.chatProjectId && p.memoryOnly !== true) || p.chatProject === true ? { chatProject: true } : {}),
     // MEM-READ-01 MR3: found in downloaded code, listed under Not projects.
     ...(p.notProject === true ? { notProject: true, notProjectReason: clip(p.notProjectReason, 40) || 'Downloaded code' } : {}),
   };

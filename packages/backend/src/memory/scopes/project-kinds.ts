@@ -4,7 +4,8 @@
  * A project whose key or folder comes from downloaded code (the Go module
  * folder, node_modules, vendor, …) is marked 'library' on its own, once.
  * The owner's "It's a project" marks it 'project'; automatic detection never
- * changes a row that exists. A chat project is always the owner's own.
+ * changes a row that exists. A project the owner made (a chat project that is
+ * not memory-only) is always a project.
  */
 
 import { all, one, run, sql } from '../../repositories/sql-steps.js';
@@ -25,6 +26,9 @@ async function discoveryRoots(ownerId: string): Promise<string[]> {
   return out;
 }
 
+/** A project the owner made (a chat project that did not come from memory alone). */
+const ownerMade = (p: { chatProjectId: string | null; memoryOnly: boolean }) => !!p.chatProjectId && !p.memoryOnly;
+
 const classified = new Map<string, number>();
 const RECHECK_MS = 10 * 60_000;
 
@@ -40,13 +44,17 @@ export async function classifyLibraryProjects(ownerId: string, opts: { force?: b
   const decided = new Set((await sql().read(all<{ slug: string }>('SELECT slug FROM memory_project_kinds WHERE owner_id = ?', ownerId))).map(r => r.slug));
   const libraryRoots = new Map<string, string>();
   for (const root of await discoveryRoots(ownerId)) if (isLibraryPath(root)) { const key = folderKey(root); if (key && !libraryRoots.has(key)) libraryRoots.set(key, root); }
+  // Under P3 a project's key is an id; its old folder key is kept in memory_project_keys.
+  const oldKeys = new Map<string, string[]>();
+  for (const r of await sql().read(all<{ slug: string; id: string }>('SELECT slug, project_id AS id FROM memory_project_keys WHERE owner_id = ?', ownerId))) oldKeys.set(r.id, [...(oldKeys.get(r.id) ?? []), r.slug]);
   let marked = 0;
   for (const p of projects) {
-    if (decided.has(p.slug) || p.chatProjectId) continue;
-    const root = libraryRoots.get(p.slug);
-    if (!root && !libraryProjectKey(p.slug)) continue;
+    if (decided.has(p.slug) || ownerMade(p)) continue;
+    const keys = [...new Set([p.slug, ...(oldKeys.get(p.slug) ?? []), folderKey(p.name)])].filter(Boolean);
+    const root = keys.map(k => libraryRoots.get(k)).find(Boolean);
+    if (!root && !keys.some(libraryProjectKey)) continue;
     await sql().tx(() => run(`INSERT INTO memory_project_kinds (owner_id, slug, kind, reason, updated_by, updated_at) VALUES (?, ?, 'library', ?, 'discovery', ?) ON CONFLICT (owner_id, slug) DO NOTHING`,
-      ownerId, p.slug, libraryKindOf(root ?? null, p.slug), new Date(now).toISOString()), { immediate: true });
+      ownerId, p.slug, libraryKindOf(root ?? null, keys.find(libraryProjectKey)), new Date(now).toISOString()), { immediate: true });
     marked++;
   }
   return marked;
@@ -58,9 +66,9 @@ export async function setProjectKind(ownerId: string, slug: unknown, kind: unkno
   if (kind !== 'library' && kind !== 'project') throw new ScopeInputError('kind must be library or project');
   const known = (await sql().read(listProjectsStep(ownerId))).find(p => p.slug === slug);
   if (!known) throw new ScopeInputError('Unknown project', 404, 'not_found');
-  if (kind === 'library' && known.chatProjectId) throw new ScopeInputError('A chat project is always a project', 409, 'chat_project');
+  if (kind === 'library' && ownerMade(known)) throw new ScopeInputError('A chat project is always a project', 409, 'chat_project');
   const before = (await sql().read(one<{ kind: ProjectKind }>('SELECT kind FROM memory_project_kinds WHERE owner_id = ? AND slug = ?', ownerId, slug)))?.kind ?? null;
-  const reason = kind === 'library' ? (known.notProjectReason ?? libraryKindOf(null, slug)) : '';
+  const reason = kind === 'library' ? (known.notProjectReason ?? libraryKindOf(null, [slug, folderKey(known.name)].find(libraryProjectKey))) : '';
   await sql().tx(() => run(`INSERT INTO memory_project_kinds (owner_id, slug, kind, reason, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT (owner_id, slug) DO UPDATE SET kind = excluded.kind, reason = excluded.reason, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
     ownerId, slug, kind, reason, by, new Date().toISOString()), { immediate: true });

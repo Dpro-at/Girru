@@ -23,7 +23,7 @@ import { all, dialect, one, sql, type Step } from '../../repositories/sql-steps.
 import { likeCi } from '../../db/pg/dialect.js';
 import { DRAWER_KINDS, drawerId, isValidDrawerKey, parseDrawerId, DrawerInputError, type DrawerKind } from '../drawers.js';
 import { memoryUseCounts } from '../context/trace.js';
-import { GENERAL_DEPARTMENT, ScopeInputError, departmentStep, listDepartmentsStep, listProjectsStep, type ProjectScope } from './store.js';
+import { GENERAL_DEPARTMENT, NOT_LIBRARY_SQL, ScopeInputError, departmentStep, listDepartmentsStep, listProjectsStep, type ProjectScope } from './store.js';
 import { NOT_REPLACED_SQL, TRUST } from '../validity.js';
 
 export const SCOPE_TREE_TTL_MS = 15_000;
@@ -323,6 +323,8 @@ export async function exploreScope(ownerId: string, input: ExplorerInput): Promi
     const baseParams: Array<string | number> = [ownerId, ...cond.params];
     if (q) { base.push(`content ${likeCi(d)} ? ESCAPE '\\'`); baseParams.push(`%${escLike(q)}%`); }
     if (!showReplaced) base.push(NOT_REPLACED_SQL);
+    // MR3: library folders are not projects; their memories show only when that one drawer is opened.
+    if (!scope.startsWith('project:')) base.push(NOT_LIBRARY_SQL);
     const filters = [...base];
     const filterParams = [...baseParams];
     if (trust) { filters.push('trust = ?'); filterParams.push(trust as string); }

@@ -161,7 +161,7 @@ function ProjectsPane({ client, scopes, disc }: { client: SessionClient; scopes:
     undo.current = async () => { await scopes.setProjectKind(slug, kind === 'project' ? 'library' : 'project'); };
     setToast({ id: Date.now(), text: kind === 'project' ? `${name} is a project again` : `${name} moved to Not projects`, undo: true });
   }
-  const libName = (p: { slug: string; name: string }) => p.name !== p.slug ? p.name : (/^(.*?)-v\d+-\d+-\d+/.exec(p.slug)?.[1] || p.slug);
+  const libName = (p: { slug: string; name: string }) => /^(.*?)-v\d+-\d+-\d+/.exec(p.name)?.[1] || p.name;
   const projects = (ss?.tree?.projects ?? []).filter(p => !p.archived && !p.mergedInto && !trust?.isOutside(trustIdOf(p)));
   const groups: readonly ProjectGroup[] = Array.isArray(dk?.groups) ? dk!.groups as readonly ProjectGroup[] : [];
   const roots = ds?.view?.roots ?? [];

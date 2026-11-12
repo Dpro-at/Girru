@@ -48,6 +48,8 @@ export interface ProjectScope {
   notProject: boolean;
   /** Why it is not a project ("Go library"), when notProject. */
   notProjectReason: string | null;
+  /** Made from memory only (no chat project the owner created); under P3 such keys get a chat project row too. */
+  memoryOnly: boolean;
 }
 
 /**
@@ -58,6 +60,11 @@ export const NOT_ARCHIVED_SQL = `NOT EXISTS (SELECT 1 FROM memory_project_scopes
   WHERE ps.owner_id = memories.user_id AND memories.drawer_kind = 'project'
     AND ps.slug = memories.drawer_key AND ps.archived_at IS NOT NULL)
   AND NOT EXISTS (SELECT 1 FROM memory_project_kinds pk
+  WHERE pk.owner_id = memories.user_id AND memories.drawer_kind = 'project'
+    AND pk.slug = memories.drawer_key AND pk.kind = 'library')`;
+
+/** SQL condition (on `memories`): not in a project marked as a library folder (MEM-READ-01 MR3). */
+export const NOT_LIBRARY_SQL = `NOT EXISTS (SELECT 1 FROM memory_project_kinds pk
   WHERE pk.owner_id = memories.user_id AND memories.drawer_kind = 'project'
     AND pk.slug = memories.drawer_key AND pk.kind = 'library')`;
 
@@ -149,8 +156,9 @@ export function* listProjectsStep(ownerId: string): Step<ProjectScope[]> {
   const rows = yield* all<ScopeRow>('SELECT slug, name, department_id, pinned, archived_at, merged_into, trashed_at FROM memory_project_scopes WHERE owner_id = ?', ownerId);
   const groups = new Map((yield* all<{ slug: string; group_id: string }>('SELECT slug, group_id FROM memory_project_group_members WHERE owner_id = ?', ownerId)).map((g) => [g.slug, g.group_id]));
   const libraries = new Map((yield* all<{ slug: string; reason: string }>("SELECT slug, reason FROM memory_project_kinds WHERE owner_id = ? AND kind = 'library'", ownerId)).map((k) => [k.slug, k.reason]));
+  const memoryOnly = new Set((yield* all<{ id: string }>("SELECT project_id AS id FROM memory_project_keys WHERE owner_id = ? AND origin = 'memory_only'", ownerId)).map((k) => k.id));
   const bySlug = new Map<string, ProjectScope>();
-  const base = (slug: string): ProjectScope => ({ slug, name: slug, departmentId: GENERAL_DEPARTMENT, pinned: false, archived: false, archivedAt: null, mergedInto: null, chatProjectId: null, trashedAt: null, groupId: groups.get(slug) ?? null, notProject: libraries.has(slug), notProjectReason: libraries.get(slug) || (libraries.has(slug) ? 'Downloaded code' : null) });
+  const base = (slug: string): ProjectScope => ({ slug, name: slug, departmentId: GENERAL_DEPARTMENT, pinned: false, archived: false, archivedAt: null, mergedInto: null, chatProjectId: null, trashedAt: null, groupId: groups.get(slug) ?? null, notProject: libraries.has(slug), notProjectReason: libraries.get(slug) || (libraries.has(slug) ? 'Downloaded code' : null), memoryOnly: memoryOnly.has(slug) });
   for (const d of drawers) if (d.key && isValidDrawerKey('project', d.key)) bySlug.set(d.key, base(d.key));
   for (const r of rows) {
     const p = bySlug.get(r.slug) ?? base(r.slug);
@@ -185,6 +193,7 @@ export function* projectStep(ownerId: string, slug: string): Step<ProjectScope |
   const group = yield* one<{ group_id: string }>('SELECT group_id FROM memory_project_group_members WHERE owner_id = ? AND slug = ?', ownerId, slug);
   const has = yield* one("SELECT 1 AS x FROM memories WHERE user_id = ? AND drawer_kind = 'project' AND drawer_key = ? LIMIT 1", ownerId, slug);
   const library = yield* one<{ reason: string }>("SELECT reason FROM memory_project_kinds WHERE owner_id = ? AND slug = ? AND kind = 'library'", ownerId, slug);
+  const memoryOnly = yield* one("SELECT 1 AS x FROM memory_project_keys WHERE owner_id = ? AND project_id = ? AND origin = 'memory_only'", ownerId, slug);
   if (!chat && !row && !has) return null;
   return {
     slug,
@@ -199,6 +208,7 @@ export function* projectStep(ownerId: string, slug: string): Step<ProjectScope |
     groupId: group?.group_id ?? null,
     notProject: !!library,
     notProjectReason: library ? library.reason || 'Downloaded code' : null,
+    memoryOnly: !!memoryOnly,
   };
 }
 
