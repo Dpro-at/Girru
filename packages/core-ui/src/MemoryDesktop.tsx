@@ -32,6 +32,7 @@ import type { MenuItem } from './desktop-ui';
 import type { ProjectGroup } from './memory-desktop-contract.js';
 import { NeedsYou } from './MemoryNeeds';
 import { HiddenKeysController, KeyText, hiddenSummary } from './memory-hidden-keys';
+import { NightWorkController } from './MemoryNightWork';
 import { DocumentEditor, MarkdownDocument } from './DocumentEditor';
 import { ProjectDocumentsList, WorkStands } from './MemoryProjectWork';
 
@@ -88,7 +89,7 @@ export type SettingsTarget = 'rules' | 'folders' | 'sources' | 'projects' | 'acc
 
 /** Controllers of the window, made once per client. */
 function useControllers(client: SessionClient) {
-  const [c, setC] = useState<{ d: MemoryDesktopController; x: MemoryExplorerController; sc: MemoryScopesController; rv: MemoryReviewController; mv: MemoryMoveController; map: MemoryMapController; ho: MemoryHandoffsController; disc: DiscoveryController; pf: ProjectFilesController; pp: MemoryPeopleController; tr: MemoryTrustController; hk: HiddenKeysController }>();
+  const [c, setC] = useState<{ d: MemoryDesktopController; x: MemoryExplorerController; sc: MemoryScopesController; rv: MemoryReviewController; mv: MemoryMoveController; map: MemoryMapController; ho: MemoryHandoffsController; disc: DiscoveryController; pf: ProjectFilesController; pp: MemoryPeopleController; tr: MemoryTrustController; hk: HiddenKeysController; nw: NightWorkController }>();
   useEffect(() => {
     const x = new MemoryExplorerController(client), sc = new MemoryScopesController(client);
     const d = new MemoryDesktopController(client, () => { void x.load(); void sc.load(true); });
@@ -104,7 +105,8 @@ function useControllers(client: SessionClient) {
     const tr = new MemoryTrustController(client, d);
     // MEM-READ-01 MR2: hidden keys (lock chips, Show, the Needs you row).
     const hk = new HiddenKeysController(client);
-    setC({ d, x, sc, rv, mv, map, ho, disc, pf, pp, tr, hk });
+    const nw = new NightWorkController(client as never);
+    setC({ d, x, sc, rv, mv, map, ho, disc, pf, pp, tr, hk, nw });
     return () => { d.dispose(); x.dispose(); sc.dispose(); rv.dispose(); mv.dispose(); map.dispose(); ho.dispose(); disc.dispose(); pf.dispose(); pp.dispose(); tr.dispose(); };
   }, [client]);
   return c;
@@ -345,7 +347,7 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
     : ds.extra === 'files' ? <FilesView client={client} agents={ss.agents} drawers={[{ id: 'owner', name: 'About you' }, { id: 'experience', name: 'Lessons' }, ...(ss.tree?.projects ?? []).filter(p => !p.archived && !p.mergedInto && !p.trashedAt).map(p => ({ id: `project:${p.slug}`, name: p.name }))]}/>
     : place === 'needs' && needsView === 'corrected' ? <CorrectedView c={tr} names={ss.agents}/>
     : place === 'needs' && needsView === 'questions' ? <QuestionsView c={tr} names={ss.agents}/>
-    : place === 'needs' ? <NeedsYou c={rv} mode={ds.needsMode} onOpenChat={onOpenChat} design={d} files={p6 ? pf : undefined} client={client} hidden={k.hk} projectName={dr => dr.startsWith('project:') ? ss.tree?.projects.find(p => p.slug === dr.slice(8))?.name : undefined}/>
+    : place === 'needs' ? <NeedsYou c={rv} mode={ds.needsMode} onOpenChat={onOpenChat} design={d} files={p6 ? pf : undefined} client={client} hidden={k.hk} night={k.nw} projectName={dr => dr.startsWith('project:') ? ss.tree?.projects.find(p => p.slug === dr.slice(8))?.name : undefined}/>
     : place === 'trash' ? <TrashView d={d} me={client.getSnapshot().user?.id} onAsk={ids => setSheet({ kind: 'forget', ids })}/>
     : place.startsWith('group:') ? <GroupView d={d} sc={sc} groupId={place.slice(6)}/>
     : place === 'agents' ? <AgentsPlace names={ss.agents} onOpen={id => d.open(`agent:${id}`)}/>

@@ -305,6 +305,10 @@ test('automatic import persists an opt-in schedule, catches up due work and save
  const docs=await scanProjectDocuments('auto-owner',[folder]),id=docs.documents[0].id;
  let calls=0,scans=0;const opts={now:1000,home:dir,pollMs:5,scan:async()=>{scans++;return {documents:[{id}],nextCursor:null}},extract:async()=>{calls++;return [{title:'Borealis evidence',content:fact,scope:'owner',evidence:fact}]}};
  await A.configureAutomaticImport('auto-owner',{enabled:true,intervalMinutes:60},1000);
+ // MEM-READ-01 MR9: while night work is on (the default) the interval timer leaves the import to the night.
+ const N=await loadFile(join(backendDir,'src/memory/night-work.ts'));
+ await A.runDueAutomaticImports(opts);assert.equal(scans,0,'night work owns the import');
+ await N.setNightSettings('auto-owner',{enabled:false});
  await Promise.all([A.runDueAutomaticImports(opts),A.runDueAutomaticImports(opts)]);
  let settings=await A.automaticImportSettings('auto-owner');assert.equal(settings.nextRun,3601000);assert.equal(settings.lastImported,1);assert.equal(settings.lastProposed,1);assert.equal(calls,1);assert.equal(scans,1);
  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM memories WHERE user_id='auto-owner'").get().n,1,'enabled automatic imports save their own facts without review');

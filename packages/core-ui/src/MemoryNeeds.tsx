@@ -17,6 +17,7 @@ import type { MemoryDesktopController } from './memory-desktop';
 import type { ProjectFilesController } from './project-files';
 import { TaskProblems } from './MemoryProjectFiles';
 import { HiddenKeysQuestion } from './memory-hidden-keys';
+import { NightReportRow, type NightWorkController } from './MemoryNightWork';
 import type { HiddenKeysController } from './memory-hidden-keys';
 
 const noSubscribe = () => () => {};
@@ -24,8 +25,8 @@ const noSnapshot = () => null;
 
 const KIND_ICON: Record<ReviewItem['kind'], UiIconName> = { conflict: 'diff', important: 'alert', agent: 'sparkle', imported: 'download', file: 'file', link: 'link' };
 
-export function NeedsYou({ c, mode, onOpenChat, design, files, client, hidden, projectName }: { c: MemoryReviewController; mode: 'one' | 'list'; onOpenChat?: (id: string) => void; design?: MemoryDesktopController; files?: ProjectFilesController;
-  /** MEM-READ-01 MR2: "N keys and logins were hidden" (Keep hidden here / Move to Connections…). */ hidden?: HiddenKeysController; projectName?: (drawer: string) => string | undefined;
+export function NeedsYou({ c, mode, onOpenChat, design, files, client, hidden, projectName, night }: { c: MemoryReviewController; mode: 'one' | 'list'; onOpenChat?: (id: string) => void; design?: MemoryDesktopController; files?: ProjectFilesController;
+  /** MEM-READ-01 MR2: "N keys and logins were hidden" (Keep hidden here / Move to Connections…). */ hidden?: HiddenKeysController; projectName?: (drawer: string) => string | undefined; /** MR9: the morning report. */ night?: NightWorkController;
   /** CODE-OPEN-01: a task-number question opens tasks.md at its line. */ client?: Parameters<typeof TaskProblems>[0]['client'] }) {
   const say = design ? (t: string) => design.say(t) : undefined;
   const s = useSyncExternalStore(c.subscribe, c.getSnapshot, c.getSnapshot);
@@ -34,7 +35,8 @@ export function NeedsYou({ c, mode, onOpenChat, design, files, client, hidden, p
   const taskQuestions = Array.isArray(fp?.problems) && fp.problems.length > 0;
   // MR2: while the hidden-keys row waits, "Nothing needs you" would be wrong beside it.
   const hk = useSyncExternalStore(hidden ? hidden.subscribe : noSubscribe, hidden ? hidden.getSnapshot : noSnapshot, hidden ? hidden.getSnapshot : noSnapshot);
-  const keysWaiting = !!hk && hk.drawers.length > 0;
+  const nr = useSyncExternalStore(night ? night.subscribe : noSubscribe, night ? night.getSnapshot : noSnapshot, night ? night.getSnapshot : noSnapshot);
+  const keysWaiting = (!!hk && hk.drawers.length > 0) || !!nr?.report;
   const ref = useRef<HTMLDivElement>(null);
   const visible = s.phase === 'ready' ? c.visible() : [];
   // Open the first question when there is none open.
@@ -42,7 +44,8 @@ export function NeedsYou({ c, mode, onOpenChat, design, files, client, hidden, p
   useEffect(() => { ref.current?.focus(); }, [mode]);
   if (s.phase === 'error') return <div className="dk-empty"><p>{s.notice}</p><button type="button" onClick={() => void c.load()}>Try again</button></div>;
   if (s.phase !== 'ready') return <p className="dk-empty" role="status">Reading what waits for you…</p>;
-  const keysRow = hidden ? <HiddenKeysQuestion c={hidden} nameOf={projectName}/> : null;
+  const nightRow = night ? <NightReportRow c={night}/> : null;
+  const keysRow = hidden || night ? <>{nightRow}{hidden && <HiddenKeysQuestion c={hidden} nameOf={projectName}/>}</> : null;
   if (!s.items.length && (taskQuestions || keysWaiting) && files) return <div className="dk-needs">{keysRow}{design && <DesignQuestions d={design}/>}<TaskProblems c={files} client={client} say={say}/></div>;
   if (!s.items.length && keysWaiting) return <div className="dk-needs">{keysRow}{design && <DesignQuestions d={design}/>}</div>;
   if (!s.items.length) return <>{keysRow}{design && <DesignQuestions d={design}/>}{files && <TaskProblems c={files} client={client} say={say}/>}<div className="dk-empty"><UiIcon name="check" size={20}/><p>Nothing needs you. Girru saves routine facts on its own and asks only when something matters or disagrees.</p>{s.result && <p className="fine-print">{s.result}</p>}</div></>;

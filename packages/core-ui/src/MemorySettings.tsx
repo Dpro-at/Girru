@@ -2,7 +2,8 @@
 // memory options moved out of the Memory window. Rules · Folders and drives ·
 // Sources · Documents · Projects · Access · Health and backup · Schedule. Each pane reuses
 // the controller the old Memory tabs used, so nothing is lost on the way.
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { NightWorkController, NightWorkSettings } from './MemoryNightWork';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useStoreP2, useStoreP3 } from './store-switches';
 import type { SessionClient } from './session';
 import type {BackgroundMemoryConsentResponse,NativeMemoryProfile} from './memory-encryption-contract.js';
@@ -29,7 +30,7 @@ import type { ScopeRules } from './memory-pages-contract.js';
 export type MemorySettingsPane = 'rules' | 'folders' | 'sources' | 'documents' | 'projects' | 'access' | 'health' | 'schedule';
 export const MEMORY_PANES: ReadonlyArray<{ key: MemorySettingsPane; label: string }> = [
   { key: 'rules', label: 'Rules' }, { key: 'folders', label: 'Folders and drives' }, { key: 'sources', label: 'Sources' }, { key: 'documents', label: 'Documents' }, { key: 'projects', label: 'Projects' },
-  { key: 'access', label: 'Access' }, { key: 'health', label: 'Health and backup' }, { key: 'schedule', label: 'Schedule' },
+  { key: 'access', label: 'Access' }, { key: 'health', label: 'Health and backup' }, { key: 'schedule', label: 'Night work' },
 ];
 
 function useOnce<T extends { dispose(): void }>(make: () => T, deps: unknown[]): T | undefined {
@@ -235,18 +236,23 @@ function AccessPane({ client, tree }: { client: SessionClient; tree: import('./m
 // ---------------------------------------------------------------- Schedule
 function SchedulePane({ client, disc, health }: { client: SessionClient; disc: DiscoveryController; health: MemoryHealthController }) {
   const ds = use(disc); const hs = use(health);
+  // MEM-READ-01 MR9: night work replaces the every 15/30/60-minute imports while it is on.
+  const night = useMemo(() => new NightWorkController(client as never), [client]);
+  const ns = useSyncExternalStore(night.subscribe, night.getSnapshot, night.getSnapshot);
+  const nightOn = ns.settings?.enabled !== false;
   const [note, setNote] = useState<string | null>(null);
   useEffect(() => { if (hs?.phase === 'idle') void health.load('company'); }, [health]);
   const v = ds?.view; const id = hs?.importDraft;
   return <div className="mem-settings-body">
     <p className="fine-print">One place for everything Girru does on its own. (Was set in three places before: Health, Project files, Found on this computer.)</p>
+    <NightWorkSettings c={night}/>
     <label className="settings-row"><span>Read this computer again<span className="fine-print">finds new and changed files; imports nothing on its own</span></span>
       <select value={v ? (v.settings.watch ? v.settings.intervalMinutes : 0) : 0} disabled={!v} onChange={e => { const n = Number(e.target.value); void disc.setWatch(n > 0, (n || v!.settings.intervalMinutes) as 15 | 30 | 60); }}>
         <option value={0}>Only when I scan</option><option value={15}>Every 15 minutes</option><option value={30}>Every 30 minutes</option><option value={60}>Every 60 minutes</option></select></label>
-    <AutomaticMemoryImport client={client}/>
+    {nightOn ? <p className="fine-print">Imports of project notes and other agents' memory run at night while night work is on (turn it off to choose every 15, 30 or 60 minutes instead).</p> : <><AutomaticMemoryImport client={client}/>
     <label className="settings-row"><span>Import from other agents' conversations</span>
       <select value={id ? (id.enabled ? id.intervalMinutes : 0) : 0} disabled={!id} onChange={e => { const n = Number(e.target.value); health.editImport(n ? { enabled: true, intervalMinutes: n as 15 | 30 | 60 } : { enabled: false }); void health.saveRules().then(() => setNote('Saved.')); }}>
-        <option value={0}>Off</option><option value={15}>Every 15 minutes</option><option value={30}>Every 30 minutes</option><option value={60}>Every 60 minutes</option></select></label>
+        <option value={0}>Off</option><option value={15}>Every 15 minutes</option><option value={30}>Every 30 minutes</option><option value={60}>Every 60 minutes</option></select></label></>}
     <p className="fine-print">The weekly summary time is in Rules.</p>
     {(note || ds?.result) && <p className="fine-print" role="status">{note ?? ds?.result}</p>}
   </div>;

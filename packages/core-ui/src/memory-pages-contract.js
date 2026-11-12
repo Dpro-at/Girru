@@ -203,6 +203,10 @@ export function memoryPagesPath(path) {
     case '/api/memory/scopes/projects': return with_('project-create', null);
     case '/api/memory/scopes/hidden-keys': return with_('hidden-keys', null);
     case '/api/memory/scopes/ask-agent': return with_('ask-agent', null);
+    case '/api/memory/scopes/night': return with_('night', null);
+    case '/api/memory/scopes/night/run': return with_('night-run', null);
+    case '/api/memory/scopes/night/report': return with_('night-report', null);
+    case '/api/memory/scopes/night/report/done': return with_('night-done', null);
 
     case '/api/memory/scopes/hidden-keys/answer': return with_('hidden-keys-answer', null);
     case '/api/memory/scopes/jobs': return with_('jobs', null);
@@ -289,6 +293,9 @@ export function allowedMemoryPages(method, path, body) {
     case 'project-kind': return method === 'POST' && record(body) && onlyKeys(body, ['kind']) && (body.kind === 'project' || body.kind === 'library');
     case 'hidden-keys': return method === 'GET' && body === undefined;
     case 'ask-agent-job': return method === 'GET' && body === undefined;
+    case 'night': return (method === 'GET' && body === undefined) || (method === 'PUT' && record(body) && onlyKeys(body, ['enabled', 'from', 'to']) && (body.enabled === undefined || typeof body.enabled === 'boolean') && ['from', 'to'].every(k => body[k] === undefined || (typeof body[k] === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(body[k]))));
+    case 'night-run': case 'night-done': return method === 'POST' && body === undefined;
+    case 'night-report': return method === 'GET' && body === undefined;
     case 'project-size': case 'project-documents': case 'project-summaries': return method === 'GET' && body === undefined;
     case 'ask-agent': return method === 'POST' && record(body) && onlyKeys(body, ['agentId', 'request', 'text', 'drawer']) && agentId(body.agentId) && text(body.request, 500) && typeof body.text === 'string' && body.text.length <= 50000 && (body.drawer === undefined || validDrawerId(body.drawer));
     case 'hidden-keys-answer': return method === 'POST' && record(body) && onlyKeys(body, ['answer', 'drawer']) && (body.answer === 'keep' || body.answer === 'move') && (body.drawer === undefined || (typeof body.drawer === 'string' && body.drawer.length <= 200));
@@ -660,6 +667,15 @@ export function memoryPagesResponse(path, status, body) {
       return { memories: part(body.memories), keyFiles: part(body.keyFiles), documents: part(body.documents), summaries: part(body.summaries), total: count(body.total), perReply: count(body.perReply),
         biggest: record(body.biggest) && typeof body.biggest.name === 'string' ? { name: clip(body.biggest.name, 300), tokens: count(body.biggest.tokens) } : null };
     }
+    case 'night': case 'night-report': {
+      const hm = x => (typeof x === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(x) ? x : '01:00');
+      const rep = r => (record(r) && typeof r.night === 'string' ? { night: clip(r.night, 10), startedAt: clip(r.startedAt, 40), endedAt: clip(r.endedAt, 40), stopped: ['done', 'used', 'unplugged', 'hours', 'error'].includes(r.stopped) ? r.stopped : 'done',
+        files: count(r.files), projects: count(r.projects), proposals: count(r.proposals), summaries: (Array.isArray(r.summaries) ? r.summaries : []).slice(0, 50).filter(x => typeof x === 'string').map(x => clip(x, 120)), keys: count(r.keys), duplicates: count(r.duplicates) } : null);
+      if (p.route === 'night-report') return { report: rep(body.report) };
+      return { ...(record(body.settings) ? { settings: { enabled: body.settings.enabled === true, from: hm(body.settings.from), to: hm(body.settings.to) } } : {}), ...('last' in body ? { last: rep(body.last) } : {}) };
+    }
+    case 'night-run': return { started: body.started === true };
+    case 'night-done': return { ok: body.ok === true };
     case 'ask-agent-job': {
       if (body.state === 'running') return { state: 'running' };
       if (body.state === 'error') return { state: 'error', code: clip(body.code, 40), error: clip(body.error, 300) };

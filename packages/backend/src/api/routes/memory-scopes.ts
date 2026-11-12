@@ -32,6 +32,11 @@
  *   GET  /api/memory/scopes/projects/:slug/export  -> { project, files: [{ name, content }] }
  *   POST /api/memory/scopes/ask-agent              { agentId, request, text, drawer? } -> { jobId }  Ask an agent in the shared editor (MR5; proposal only, nothing saved)
  *   GET  /api/memory/scopes/ask-agent/:jobId       -> { state: running | done (text, note) | error (code, error) }
+ *   GET  /api/memory/scopes/night                  -> { settings: { enabled, from, to }, last: report | null }   Night work (MR9)
+ *   PUT  /api/memory/scopes/night                  { enabled?, from?, to? } -> { settings }
+ *   POST /api/memory/scopes/night/run              -> { started: true }   Run now (stops between steps on its own)
+ *   GET  /api/memory/scopes/night/report           -> { report | null }   the morning row in Needs you
+ *   POST /api/memory/scopes/night/report/done      -> { ok: true }
  *   GET  /api/memory/scopes/hidden-keys            -> { total, drawers: [{ drawer, count, memories, kinds }] } keys hidden since the owner last answered (MR2; runs the one-time pass first)
  *   POST /api/memory/scopes/hidden-keys/answer     { answer: 'keep' | 'move', drawer? } -> { answered, moved }  Keep hidden here / Move to Connections
  *   POST /api/memory/scopes/hidden-keys/:id/reveal -> { value }  the owner's Show (audited; never cached)
@@ -64,6 +69,7 @@ import { answerHiddenKeys, hiddenKeysReport, hideKeysOnce, revealKey } from '../
 import { AskAgentError, askJob, startAskJob } from '../../memory/ask-agent.js';
 import { projectDocuments, projectSize } from '../../memory/project-size.js';
 import { projectSummaries } from '../../memory/project-summaries.js';
+import { NightInputError, dismissNightReport, lastNight, nightReport, nightSettings, runNightWork, setNightSettings } from '../../memory/night-work.js';
 import { isValidDrawerKey } from '../../memory/drawers.js';
 import { provenanceJobStatus, setChecked } from '../../memory/validity.js';
 import { vectorJobStatus } from '../../memory/vectors.js';
@@ -171,6 +177,26 @@ export async function memoryScopeRoutes(fastify: FastifyInstance) {
     reply.header('Cache-Control', 'no-store');
     return out;
   });
+
+  // ---- night work (MEM-READ-01 MR9) ----
+  route('GET', '/api/memory/scopes/night', async (owner) => {
+    const s = await nightSettings(owner.userId!);
+    return { settings: { enabled: s.enabled, from: s.from, to: s.to }, last: await lastNight(owner.userId!) };
+  });
+  route('PUT', '/api/memory/scopes/night', async (owner, request, reply) => {
+    try {
+      const settings = await setNightSettings(owner.userId!, body(request));
+      audit(request, owner, 'memory.night_settings', 'memory_night_work', owner.userId!, { ...settings });
+      return { settings };
+    } catch (err) { if (err instanceof NightInputError) return reply.code(400).send({ error: err.message, code: 'invalid_scope' }); throw err; }
+  });
+  route('POST', '/api/memory/scopes/night/run', async (owner, request) => {
+    void runNightWork(owner.userId!, { force: true }).catch(() => undefined);
+    audit(request, owner, 'memory.night_run', 'memory_night_work', owner.userId!, {});
+    return { started: true };
+  });
+  route('GET', '/api/memory/scopes/night/report', async (owner) => ({ report: await nightReport(owner.userId!) }));
+  route('POST', '/api/memory/scopes/night/report/done', async (owner) => { await dismissNightReport(owner.userId!); return { ok: true }; });
 
   // ---- hidden keys (MEM-READ-01 MR2) ----
   route('GET', '/api/memory/scopes/hidden-keys', async (owner) => {
