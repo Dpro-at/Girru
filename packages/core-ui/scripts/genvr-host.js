@@ -28,6 +28,9 @@ window.addEventListener('message',async event=>{
  }
  // Board W1: Girru's own chat. The parent streams the answer, sends what the chat shows, and asks to undo
  // (the Studio's own Ctrl/Cmd+Z on the Build and Items tabs, sent from an element so its key handler reads it).
+ if(data.operation==='chat-delta'&&typeof data.id==='string'&&typeof data.delta==='string'&&data.delta.length<=65536){try{chats.get(data.id)?.events.onDelta(data.delta);}catch{}}
+ if(data.operation==='chat-tool'&&typeof data.id==='string'&&typeof data.name==='string'){try{chats.get(data.id)?.events.onTool?.(data.name.slice(0,64),data.ok===true,String(data.result??'').slice(0,2000));}catch{}}
+ if(data.operation==='chat-end'&&typeof data.id==='string'){const work=chats.get(data.id);if(work){if(data.ok)work.resolve();else work.reject(Error(typeof data.error==='string'?data.error.slice(0,300):'Girru could not answer.'));}}
  if(data.operation==='model-delta'&&typeof data.id==='string'&&typeof data.delta==='string'&&data.delta.length<=65536){models.get(data.id)?.onDelta(data.delta);}
  if(data.operation==='chat-info'&&studio?.setChat&&data.info&&typeof data.info==='object'&&JSON.stringify(data.info).length<=1000000){try{studio.setChat(data.info);}catch{/* an older Studio without the chat option */}}
  if(data.operation==='undo'&&Number.isInteger(data.count)&&data.count>0&&data.count<=50){for(let i=0;i<data.count;i++)document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'z',code:'KeyZ',ctrlKey:!/Mac/.test(navigator.platform),metaKey:/Mac/.test(navigator.platform),bubbles:true,cancelable:true}));}
@@ -41,22 +44,25 @@ const models=new Map(),MODEL_BYTES=2*1024*1024,MODEL_MS=10*60*1000;
 const PLACE_TABS=['build','items','avatar','filming','lab'];
 /** The folder button opens the folder only where Girru can show it (the desktop app). */
 function canOpenFolder(){try{return typeof parent.dproApp?.revealFolder==='function';}catch{return false;}}
+/** GV1e (Mohamed): the Studio chat is the place's real Girru chat. A message goes to Girru's chat run; the
+ * reply streams back here; the agent builds with the place's tools over the live MCP connection. */
+const chats=new Map();
+function sendToGirru(text,events,signal){
+ return new Promise((resolve,reject)=>{
+  if(typeof text!=='string'||!text.trim()||text.length>100000){reject(Error('This message cannot be sent.'));return;}
+  const id='c'+(++sequence);
+  const finish=()=>{chats.delete(id);signal?.removeEventListener('abort',abort);};
+  const abort=()=>{finish();send({operation:'chat-cancel',id});reject(Object.assign(Error('Stopped.'),{name:'AbortError'}));};
+  if(signal?.aborted){abort();return;}signal?.addEventListener('abort',abort,{once:true});
+  chats.set(id,{events,resolve:()=>{finish();resolve();},reject:error=>{finish();reject(error);}});
+  send({operation:'chat-send',id,text});
+ });
+}
 function hostChat(){
  return {
   onContext:context=>{if(!context||typeof context!=='object'||typeof context.projectId!=='string'||typeof context.name!=='string')return;send({operation:'context',context:{projectId:context.projectId.slice(0,100),name:context.name.slice(0,200),tab:PLACE_TABS.includes(context.tab)?context.tab:'build',look:String(context.look??'').slice(0,40),kind:String(context.kind??'').slice(0,40)}});},
   // GV1e: the Studio chat is the place's Girru chat: Open in Chat goes to Girru Chat; earlier lines come with chat-info.
-  chat:{chooseAnswerer:()=>send({operation:'choose-answerer'}),openChat:()=>send({operation:'open-chat'}),...(window.parent&&canOpenFolder()?{openFolder:()=>send({operation:'open-folder'})}:{})},
-  model:(messages,onDelta,signal,_onQueue,tools)=>new Promise((resolve,reject)=>{
-   const value={messages,tools:Array.isArray(tools)?tools:[]};let text;try{text=JSON.stringify(value);}catch{reject(Error('This conversation cannot be sent to Girru.'));return;}
-   if(text.length>MODEL_BYTES){reject(Error('This conversation is too long for Girru. Start a new chat.'));return;}
-   const id='m'+(++sequence);
-   const finish=()=>{models.delete(id);clearTimeout(timer);signal?.removeEventListener('abort',abort);};
-   const abort=()=>{finish();send({operation:'model-cancel',id});reject(Object.assign(Error('Stopped.'),{name:'AbortError'}));};
-   const timer=setTimeout(()=>{finish();send({operation:'model-cancel',id});reject(Error('Girru did not answer in time. Try again.'));},MODEL_MS);
-   if(signal?.aborted){abort();return;}signal?.addEventListener('abort',abort,{once:true});
-   models.set(id,{onDelta:delta=>{try{onDelta(delta);}catch{}},resolve:result=>{finish();resolve(result);},reject:error=>{finish();reject(error);}});
-   send({id,operation:'model',value:JSON.parse(text)});
-  }),
+  chat:{chooseAnswerer:()=>send({operation:'choose-answerer'}),openChat:()=>send({operation:'open-chat'}),send:sendToGirru,...(window.parent&&canOpenFolder()?{openFolder:()=>send({operation:'open-folder'})}:{})},
  };
 }
 // The final answer of a model request: {content, tool_calls}, checked before the Studio sees it.

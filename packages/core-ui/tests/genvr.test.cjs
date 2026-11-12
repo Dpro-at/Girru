@@ -52,7 +52,7 @@ test('local runtime availability has a minimal program-only contract',()=>{
  assert.equal(allowedRequest('GET',GENVR_RUNTIME),true);
  assert.equal(allowedGenVR('POST',GENVR_RUNTIME,{}),false);
  assert.equal(allowedGenVR('GET',GENVR_RUNTIME+'?owner=other'),false);
- assert.deepEqual(genvrResponse(GENVR_RUNTIME,200,{state:'installed',version:'0.3.0-preview.21',job:'private',account:'private'}),{state:'installed',version:'0.3.0-preview.21'});
+ assert.deepEqual(genvrResponse(GENVR_RUNTIME,200,{state:'installed',version:'0.3.0-preview.22',job:'private',account:'private'}),{state:'installed',version:'0.3.0-preview.22'});
  assert.deepEqual(genvrResponse(GENVR_RUNTIME,200,{state:'missing',version:null}),{state:'missing',version:null});
  assert.throws(()=>genvrResponse(GENVR_RUNTIME,200,{state:'installed',version:'invalid'}));
 });
@@ -131,4 +131,12 @@ test('GV1e contract: history and the place behind a chat pass the app server wit
 test('menus near the top open downward (the who-answers picker over the Studio)',()=>{
  const src=require('node:fs').readFileSync(require('node:path').join(__dirname,'../src/ChatComposerControls.tsx'),'utf8');
  assert.match(src,/above < 240 && below > above\s*\? \{ position: 'absolute', left, top: r\.bottom - h\.top \+ 6/);
+});
+test('GV1e real chat: the Studio chat sends to the place chat run and streams back; Details shows the place as one row',()=>{
+ const read=f=>require('node:fs').readFileSync(require('node:path').join(__dirname,f),'utf8');
+ const page=read('../src/GenVRPage.tsx'),host=read('../scripts/genvr-host.js'),place=read('../src/GenVRChatPlace.tsx');
+ assert.match(host,/send:sendToGirru,/);assert.doesNotMatch(host,/  model:\(messages,onDelta,signal/);
+ assert.match(page,/path:`\/api\/chat\/conversations\/\$\{conversation\}\/runs`/);assert.match(page,/client\.runEvents\(runId,after,/);
+ assert.match(page,/chatInfo\.current=\{\.\.\.chatInfo\.current,/);assert.match(page,/const syncing=setInterval\(/);
+ assert.match(place,/className="details-row"/);assert.doesNotMatch(place,/No agents in this place yet/);
 });

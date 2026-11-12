@@ -26,9 +26,11 @@ export function GenVRChatPlace({ client, chatProjectId }: { client: SessionClien
   }, [client, chatProjectId]);
   if (!world) return null;
   const open = () => window.dispatchEvent(new CustomEvent(OPEN_GENVR_EVENT, { detail: { placeId: world.projectId } }));
-  return <div className="genvr-chat-place">
-    <div className="genvr-chat-place-row"><UiIcon name="globe" size={14}/><span><b>{world.title}</b><small>GenVR place</small></span><button type="button" className="link-button" title="Open this place in the Studio" onClick={open}>Open in Studio</button></div>
-    {world.answerer && <p className="fine-print">Answers here · {world.answerer.name}</p>}
-    <p className="fine-print">{team.length ? `Agents in this place · ${team.join(', ')}` : 'No agents in this place yet'}</p>
+  // One row in the Details style (Mohamed): the place, who answers and the agents in it, and Open in Studio.
+  const sub = ['GenVR place', world.answerer ? `answers here: ${world.answerer.name}` : '', team.length ? `in it: ${team.join(', ')}` : ''].filter(Boolean).join(' · ');
+  return <div className="details-row">
+    <span className="details-icon"><UiIcon name="globe" size={13}/></span>
+    <span className="pop-text"><b dir="auto" title={world.title}>{world.title}</b><small>{sub}</small></span>
+    <button type="button" className="link-button" title="Open this place in the Studio" onClick={open}>Open in Studio</button>
   </div>;
 }

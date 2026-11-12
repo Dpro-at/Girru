@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
-const PIN = Object.freeze({ version: '0.3.0-preview.21', archiveSha256: '20ccb0400924cb0dd5000dc0e955b4371bf5fa045db2bb48d4a83f842e6ddef6', entrySha256: '80c5a4d6e7d876c53c13980a5fb0c303558e3471186dba1230e438c3689051b5', size: 181643524 });
+const PIN = Object.freeze({ version: '0.3.0-preview.22', archiveSha256: 'c8307a9d15cb89e26ab79fc129d177825ab768a987c0db0ef9543f00d18c0324', entrySha256: '3deb372f59c024eb37528c6d6cd9af95381749161977c6c93feba54097344d90', size: 181646087 });
 const DIR = /^\d{1,6}\.\d{1,6}\.\d{1,6}(?:-[0-9A-Za-z.-]{1,40})?-[a-f0-9]{8}$/;
 
 function regular(root, relative) {
