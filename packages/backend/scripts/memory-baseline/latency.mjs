@@ -11,6 +11,7 @@
 // P9: --packed also stores the packed Float32 copy (P3, embedding_vec) as a save does
 // today; GIRRU_STORE_P9=1 measures the recall index (coldMs = the first search, which
 // builds it).
+// --record "label" appends the run to docs/internal/memory-search-results.json.
 // P9b: --p9b times the reply recall of the quality engine instead (intent,
 // fetch of 24 candidates, local re-rank within 300 ms; memory/quality/recall.ts).
 import { backendDir, moduleUrl, addUser, argValue, cleanup, ollamaHas, openDb, percentile, quietly } from './env.mjs';
@@ -141,5 +142,15 @@ const report = {
 };
 console.log(JSON.stringify(report));
 if (out) writeFileSync(out, JSON.stringify(report, null, 2));
+// --record "label": append to docs/internal/memory-search-results.json (the playground shows it).
+const label = argValue('record', null);
+if (label) {
+  const { appendResult, searchSettings } = await import('./results.mjs');
+  appendResult(backendDir, {
+    source: 'latency.mjs', label, size, vectors, jsonStub, openedRows: opened, queries: times.length,
+    searchMs: report.searchMs, queryEmbedMs: report.queryEmbedMs, coldMs, peakRssMB: report.peakRssMB,
+    indexMB: report.index.MB, drawers: report.index.drawers, dbMB: report.dbMB, settings: searchSettings(),
+  });
+}
 closeDatabase();
 cleanup();

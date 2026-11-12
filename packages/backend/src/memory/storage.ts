@@ -535,8 +535,9 @@ export class MemoryStorage implements IMemoryStorage {
     where: string,
     params: any[],
   ): Promise<MemorySearchResult[]> {
-    // MEM-SPEED-01: the store kept in step by id (recall-store.ts) for a plain drawer search on SQLite.
-    if (query.drawers) {
+    // MEM-SPEED-01: the store kept in step by id (recall-store.ts) for a drawer search on SQLite.
+    // GIRRU_RECALL_STORE=0 turns it off (the P9 path below; a comparison and an escape hatch).
+    if (query.drawers && process.env.GIRRU_RECALL_STORE !== '0') {
       const viaStore = await this.searchStore(query, q);
       if (viaStore) return viaStore;
     }

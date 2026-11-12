@@ -1,0 +1,642 @@
+{
+  "version": 1,
+  "description": "Memory search measurements (MEM-SPEED-01): MemoryStorage.search, owner chat with project alpha open, 20 queries of recall-set-p0.json. searchMs includes the query embedding (queryEmbedMs). Append only: latency.mjs --record and the playground benchmark add runs.",
+  "runs": [
+    {
+      "id": "mac-10000-before",
+      "date": "2026-10-01T00:00:00Z",
+      "machine": {
+        "cpu": "Apple silicon (development Mac)",
+        "threads": null,
+        "ramGB": null,
+        "os": "darwin arm64"
+      },
+      "git": {
+        "commit": null,
+        "branch": "main"
+      },
+      "source": "docs/architecture/storage-map.md \"Measured on this computer\"",
+      "label": "Before the memory work (as documented)",
+      "size": 10000,
+      "vectors": "semantic",
+      "searchMs": {
+        "p50": 276,
+        "p95": null,
+        "max": null
+      }
+    },
+    {
+      "id": "mac-100000-before",
+      "date": "2026-10-01T00:00:00Z",
+      "machine": {
+        "cpu": "Apple silicon (development Mac)",
+        "threads": null,
+        "ramGB": null,
+        "os": "darwin arm64"
+      },
+      "git": {
+        "commit": null,
+        "branch": "main"
+      },
+      "source": "docs/architecture/storage-map.md \"Measured on this computer\"",
+      "label": "Before the memory work (as documented)",
+      "size": 100000,
+      "vectors": "semantic",
+      "searchMs": {
+        "p50": 3400,
+        "p95": null,
+        "max": null
+      }
+    },
+    {
+      "id": "mac-10000-p9",
+      "date": "2026-11-01T00:00:00Z",
+      "machine": {
+        "cpu": "Apple silicon (development Mac)",
+        "threads": null,
+        "ramGB": null,
+        "os": "darwin arm64"
+      },
+      "git": {
+        "commit": null,
+        "branch": "main"
+      },
+      "source": "docs/architecture/storage-map.md \"Measured on this computer\"",
+      "label": "P9 recall index (as documented)",
+      "size": 10000,
+      "vectors": "semantic",
+      "searchMs": {
+        "p50": 44,
+        "p95": null,
+        "max": null
+      }
+    },
+    {
+      "id": "mac-100000-p9",
+      "date": "2026-11-01T00:00:00Z",
+      "machine": {
+        "cpu": "Apple silicon (development Mac)",
+        "threads": null,
+        "ramGB": null,
+        "os": "darwin arm64"
+      },
+      "git": {
+        "commit": null,
+        "branch": "main"
+      },
+      "source": "docs/architecture/storage-map.md \"Measured on this computer\"",
+      "label": "P9 recall index (as documented)",
+      "size": 100000,
+      "vectors": "semantic",
+      "searchMs": {
+        "p50": 280,
+        "p95": null,
+        "max": null
+      }
+    },
+    {
+      "id": "seed-base-10k",
+      "date": "2026-11-12T18:31:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "9105007f",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Baseline: P9 recall index (full scan, 256 MB cap)",
+      "size": 10000,
+      "vectors": "semantic",
+      "jsonStub": false,
+      "openedRows": 4701,
+      "queries": 20,
+      "searchMs": {
+        "p50": 119.8,
+        "p95": 123.9,
+        "max": 134.4
+      },
+      "queryEmbedMs": {
+        "p50": 55.4,
+        "p95": 58.1
+      },
+      "coldMs": 2328.4,
+      "peakRssMB": 452,
+      "indexMB": null,
+      "drawers": null,
+      "dbMB": 181.8,
+      "settings": {
+        "p9": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "seed-base-100k",
+      "date": "2026-11-12T18:33:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "9105007f",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Baseline: P9 recall index (full scan, 256 MB cap)",
+      "size": 100000,
+      "vectors": "semantic",
+      "jsonStub": false,
+      "openedRows": 46731,
+      "queries": 20,
+      "searchMs": {
+        "p50": 807.1,
+        "p95": 824.8,
+        "max": 855.7
+      },
+      "queryEmbedMs": {
+        "p50": 55.4,
+        "p95": 58
+      },
+      "coldMs": 3107.1,
+      "peakRssMB": 743,
+      "indexMB": null,
+      "drawers": null,
+      "dbMB": 1783.1,
+      "settings": {
+        "p9": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "seed-base-1m",
+      "date": "2026-11-12T19:03:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "9105007f",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Baseline: P9 recall index (full scan, 256 MB cap)",
+      "size": 1000000,
+      "vectors": "semantic",
+      "jsonStub": false,
+      "openedRows": 464930,
+      "queries": 20,
+      "searchMs": {
+        "p50": 32574.2,
+        "p95": 33824.7,
+        "max": 37838.5
+      },
+      "queryEmbedMs": {
+        "p50": 69.3,
+        "p95": 80.6
+      },
+      "coldMs": 36920.7,
+      "peakRssMB": 4058,
+      "indexMB": null,
+      "drawers": null,
+      "dbMB": 17799,
+      "settings": {
+        "p9": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "seed-s1-100k",
+      "date": "2026-11-12T18:52:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "4e2d3075",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Step 1: store kept in step by id, inverted BM25, top-k heap",
+      "size": 100000,
+      "vectors": "semantic",
+      "jsonStub": false,
+      "openedRows": 46731,
+      "queries": 20,
+      "searchMs": {
+        "p50": 104.8,
+        "p95": 224.1,
+        "max": 225.3
+      },
+      "queryEmbedMs": {
+        "p50": 60.2,
+        "p95": 64.3
+      },
+      "coldMs": 2450.1,
+      "peakRssMB": 666,
+      "indexMB": null,
+      "drawers": null,
+      "dbMB": 1783.1,
+      "settings": {
+        "p9": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "seed-s2-100k-i8",
+      "date": "2026-11-12T18:58:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "d6c81381",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Step 2: int8 vectors forced (EXACT_MAX=0) + Float32 re-score",
+      "size": 100000,
+      "vectors": "semantic",
+      "jsonStub": false,
+      "openedRows": 46731,
+      "queries": 20,
+      "searchMs": {
+        "p50": 110.7,
+        "p95": 137.1,
+        "max": 141.2
+      },
+      "queryEmbedMs": {
+        "p50": 61.9,
+        "p95": 65.7
+      },
+      "coldMs": 2925.8,
+      "peakRssMB": 508,
+      "indexMB": null,
+      "drawers": null,
+      "dbMB": 1783.1,
+      "settings": {
+        "p9": true,
+        "exactMax": "0",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "seed-s3-1m",
+      "date": "2026-11-12T19:12:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "f28d37d2",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Step 3: HNSW (usearch) from 100k per drawer",
+      "size": 1000000,
+      "vectors": "semantic",
+      "jsonStub": false,
+      "openedRows": 464930,
+      "queries": 20,
+      "searchMs": {
+        "p50": 135.5,
+        "p95": 267.1,
+        "max": 270.4
+      },
+      "queryEmbedMs": {
+        "p50": 60.9,
+        "p95": 64.5
+      },
+      "coldMs": 80064.5,
+      "peakRssMB": 1521,
+      "indexMB": 891,
+      "drawers": {
+        "exact": 1,
+        "i8": 0,
+        "ann": 2
+      },
+      "dbMB": 17799,
+      "settings": {
+        "p9": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "seed-final-10k",
+      "date": "2026-11-12T20:00:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "9bf30093",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Final: stable hot loops, HNSW from 20k per drawer",
+      "size": 10000,
+      "vectors": "semantic",
+      "jsonStub": false,
+      "openedRows": 4701,
+      "queries": 20,
+      "searchMs": {
+        "p50": 85.1,
+        "p95": 118.4,
+        "max": 119.5
+      },
+      "queryEmbedMs": {
+        "p50": 77.3,
+        "p95": 119.2
+      },
+      "coldMs": 370.6,
+      "peakRssMB": 436,
+      "indexMB": 21,
+      "drawers": {
+        "exact": 3,
+        "i8": 0,
+        "ann": 0
+      },
+      "dbMB": 181.8,
+      "settings": {
+        "p9": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "seed-final-100k",
+      "date": "2026-11-12T20:00:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "9bf30093",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Final: stable hot loops, HNSW from 20k per drawer",
+      "size": 100000,
+      "vectors": "semantic",
+      "jsonStub": false,
+      "openedRows": 46731,
+      "queries": 20,
+      "searchMs": {
+        "p50": 94.5,
+        "p95": 113.9,
+        "max": 129.9
+      },
+      "queryEmbedMs": {
+        "p50": 60.4,
+        "p95": 68.4
+      },
+      "coldMs": 4585.8,
+      "peakRssMB": 613,
+      "indexMB": 124,
+      "drawers": {
+        "exact": 2,
+        "i8": 0,
+        "ann": 1
+      },
+      "dbMB": 1783.1,
+      "settings": {
+        "p9": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "seed-final-1m",
+      "date": "2026-11-12T20:00:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "9bf30093",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Final: stable hot loops, HNSW from 20k per drawer",
+      "size": 1000000,
+      "vectors": "semantic",
+      "jsonStub": false,
+      "openedRows": 464930,
+      "queries": 20,
+      "searchMs": {
+        "p50": 89.9,
+        "p95": 105.4,
+        "max": 116.1
+      },
+      "queryEmbedMs": {
+        "p50": 55,
+        "p95": 57.1
+      },
+      "coldMs": 68939.5,
+      "peakRssMB": 1302,
+      "indexMB": 765,
+      "drawers": {
+        "exact": 0,
+        "i8": 0,
+        "ann": 3
+      },
+      "dbMB": 17799,
+      "settings": {
+        "p9": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "seed-final-1m-stub",
+      "date": "2026-11-12T20:00:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "9bf30093",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Final: stable hot loops, HNSW from 20k per drawer (--json-stub: vector in the packed column only)",
+      "size": 1000000,
+      "vectors": "semantic",
+      "jsonStub": true,
+      "openedRows": 464930,
+      "queries": 20,
+      "searchMs": {
+        "p50": 81.9,
+        "p95": 100.4,
+        "max": 104.4
+      },
+      "queryEmbedMs": {
+        "p50": 54.8,
+        "p95": 58.6
+      },
+      "coldMs": 63410.8,
+      "peakRssMB": 1298,
+      "indexMB": 765,
+      "drawers": {
+        "exact": 0,
+        "i8": 0,
+        "ann": 3
+      },
+      "dbMB": 5011.5,
+      "settings": {
+        "p9": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "seed-final-3m",
+      "date": "2026-11-12T20:00:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "9bf30093",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Final: stable hot loops, HNSW from 20k per drawer (--json-stub: vector in the packed column only)",
+      "size": 3000000,
+      "vectors": "semantic",
+      "jsonStub": true,
+      "openedRows": 1395576,
+      "queries": 20,
+      "searchMs": {
+        "p50": 108.5,
+        "p95": 126.6,
+        "max": 141.7
+      },
+      "queryEmbedMs": {
+        "p50": 56.1,
+        "p95": 60.5
+      },
+      "coldMs": 236162.8,
+      "peakRssMB": 3119,
+      "indexMB": 2298,
+      "drawers": {
+        "exact": 0,
+        "i8": 0,
+        "ann": 3
+      },
+      "dbMB": 15030.7,
+      "settings": {
+        "p9": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "seed-final-10m",
+      "date": "2026-11-12T20:00:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "9bf30093",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Final: stable hot loops, HNSW from 20k per drawer (--json-stub: vector in the packed column only)",
+      "size": 10000000,
+      "vectors": "semantic",
+      "jsonStub": true,
+      "openedRows": 4651105,
+      "queries": 20,
+      "searchMs": {
+        "p50": 266.2,
+        "p95": 575.3,
+        "max": 2521.1
+      },
+      "queryEmbedMs": {
+        "p50": 59.3,
+        "p95": 65.1
+      },
+      "coldMs": 1612076.6,
+      "peakRssMB": 9126,
+      "indexMB": 7661,
+      "drawers": {
+        "exact": 0,
+        "i8": 0,
+        "ann": 3
+      },
+      "dbMB": 50128.4,
+      "settings": {
+        "p9": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    }
+  ]
+}
