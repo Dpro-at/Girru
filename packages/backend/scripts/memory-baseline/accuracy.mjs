@@ -28,6 +28,10 @@ const out = argValue('out', null);
 const rowsOut = argValue('rows', null);
 const label = argValue('record', null);
 const limitQ = Number(argValue('questions', '0')) || Infinity;
+// --mode A: the last message only (what a chat recalls today). B (context query) comes with its builder.
+const mode = argValue('mode', 'A');
+if (mode !== 'A') { console.error(`mode ${mode} is not built yet`); process.exit(2); }
+const queryOf = (q) => q.q;
 if (!(await ollamaHas(SEM_MODEL))) { console.error(`${SEM_MODEL} is not available on the local Ollama; nothing measured`); process.exit(2); }
 if (!cacheDir) { console.error('--cache <folder> is required (distractor embeddings, outside the repo)'); process.exit(2); }
 process.env.MEMORY_EMBEDDINGS = 'ollama';
@@ -127,15 +131,48 @@ for (const q of questions) {
   const drawers = D.selectDrawers({ audience: 'owner', project: q.project });
   const open = new Set(drawers.map((d) => `${d.kind}:${d.key || ''}`));
   const tE = performance.now();
-  await quietly(() => emb.embedQuery(q.q));
+  const query = queryOf(q);
+  await quietly(() => emb.embedQuery(query));
   const embedMs = performance.now() - tE; // the two paths below take the cached vector
   const tS = performance.now();
-  const raw = await quietly(() => storage.search({ query: q.q, userId: OWNER, drawers, limit: 10 }));
+  const raw = await quietly(() => storage.search({ query, userId: OWNER, drawers, limit: 10 }));
   const searchMs = performance.now() - tS;
   const tC = performance.now();
-  const chat = await quietly(() => qualityRecall({ userId: OWNER, drawers, query: q.q, limit: 6, ask: false }));
+  const chat = await quietly(() => qualityRecall({ userId: OWNER, drawers, query, limit: 6, ask: false }));
   const chatMs = performance.now() - tC;
   rows.push({ q, embedMs, search: { ids: raw.map((r) => r.memory.id), ms: searchMs }, chat: { ids: chat.items.map((it) => it.memory.id), reliable: chat.reliable, ms: chatMs, fellBack: chat.fellBack } });
+}
+
+// 3b. Save, then ask at once (the app's own save path), and a memory written without a vector yet.
+const FRESH = [
+  ['The Falcon staging password rotation happens on the first Monday of every month.', 'When is the Falcon staging password rotated?', 'falcon'],
+  ["Harbor's new office printer is a Brother HL-L2350 on the third floor.", 'Which printer does the Harbor office have now?', 'harbor'],
+  ['مشروع ميريديان: الاجتماع الأسبوعي صار يوم الأحد الساعة العاشرة صباحاً.', 'متى الاجتماع الأسبوعي لميريديان؟', 'meridian'],
+  ['Quill: die Kundendemo wurde auf den 12. Dezember verschoben.', 'Wann ist die Kundendemo von Quill?', 'quill'],
+  ['سافرون: الفريق قرر يستخدم Tailwind بدل Bootstrap بالواجهة.', 'سافرون شنو يستخدمون بالواجهة هسه؟', 'saffron'],
+];
+const fresh = [];
+for (const [k, [content, question, project]] of FRESH.entries()) {
+  const id = `fresh-${k}`;
+  const drawer = { kind: 'project', key: project };
+  const tSave = performance.now();
+  await quietly(() => storage.save({ id, userId: OWNER, type: 'fact', content, drawer, memoryLayer: 'factual', importanceScore: 0.5,
+    status: 'active', metadata: {}, createdAt: new Date(), accessCount: 0, expiryTimestamp: null }));
+  const saveMs = performance.now() - tSave;
+  const drawers = D.selectDrawers({ audience: 'owner', project });
+  const tAsk = performance.now();
+  const chat = await quietly(() => qualityRecall({ userId: OWNER, drawers, query: question, limit: 6, ask: false }));
+  fresh.push({ id, case: 'saved', saveMs: +saveMs.toFixed(1), askMs: +(performance.now() - tAsk).toFixed(1), rank: chat.items.findIndex((it) => it.memory.id === id) + 1 });
+}
+// The same facts once more, written without a vector (as if the embedding model was away): found by words, or embedded by the search.
+for (const [k, [content, question, project]] of FRESH.entries()) {
+  const id = `novec-${k}`;
+  db.prepare(`INSERT INTO memories (id, user_id, type, content, memory_layer, status, metadata, importance_score, created_at, access_count, drawer_kind, drawer_key)
+    VALUES (?, ?, 'fact', ?, 'factual', 'active', '{}', 0.5, ?, 0, 'project', ?)`).run(id, OWNER, content.replace(/\.$/, ' (noted again).'), new Date().toISOString(), project);
+  const drawers = D.selectDrawers({ audience: 'owner', project });
+  const tAsk = performance.now();
+  const chat = await quietly(() => qualityRecall({ userId: OWNER, drawers, query: question, limit: 6, ask: false }));
+  fresh.push({ id, case: 'no vector yet', askMs: +(performance.now() - tAsk).toFixed(1), rank: chat.items.findIndex((it) => it.memory.id === id) + 1 });
 }
 
 // 4. Score.
@@ -147,10 +184,10 @@ const leaksOf = (ids, q) => ids.filter((id) => {
 }).length;
 function score(path) {
   const groups = new Map();
-  const g = (k) => { if (!groups.has(k)) groups.set(k, { n: 0, answerable: 0, r5: 0, h1: 0, p5sum: 0, p5n: 0, wrongProject: 0, temporalN: 0, temporalOk: 0, noAnsN: 0, noAnsOk: 0, hopN: 0, hopBoth: 0, leaks: 0, ms: [] }); return groups.get(k); };
+  const g = (k) => { if (!groups.has(k)) groups.set(k, { mixN: 0, mixUp: 0, n: 0, answerable: 0, r5: 0, h1: 0, p5sum: 0, p5n: 0, wrongProject: 0, temporalN: 0, temporalOk: 0, noAnsN: 0, noAnsOk: 0, hopN: 0, hopBoth: 0, leaks: 0, ms: [] }); return groups.get(k); };
   for (const row of rows) {
     const q = row.q, ids = row[path].ids, top5 = ids.slice(0, 5);
-    for (const k of ['all', q.kind, ...(q.crossLanguage ? ['cross-language'] : []), ...(q.temporal ? ['temporal'] : [])]) {
+    for (const k of ['all', q.kind, ...(q.distance ? [`${q.kind}-${q.distance}`] : []), ...(q.crossLanguage ? ['cross-language'] : []), ...(q.temporal ? ['temporal'] : [])]) {
       const s = g(k);
       s.n++; s.ms.push(row[path].ms + row.embedMs); s.leaks += leaksOf(ids, q);
       if (q.target) {
@@ -167,6 +204,11 @@ function score(path) {
           if (ti >= 0 && ti < 5 && !staleAbove) s.temporalOk++;
         }
         if (q.hops) { s.hopN++; if (q.hops.every((h) => top5.includes(h))) s.hopBoth++; }
+        if (q.mixUp) {
+          s.mixN++;
+          const ti = ids.indexOf(q.target), mi = ids.indexOf(q.mixUp);
+          if (mi >= 0 && mi < 5 && (ti < 0 || mi < ti)) s.mixUp++;
+        }
       } else {
         s.noAnsN++;
         if (path === 'chat' ? ids.length === 0 : !ids.some((id) => factById.has(id))) s.noAnsOk++;
@@ -177,23 +219,26 @@ function score(path) {
   return Object.fromEntries([...groups].map(([k, s]) => [k, {
     questions: s.n, recallAt5: pct(s.r5, s.answerable), hitAt1: pct(s.h1, s.answerable), precisionAt5: pct(s.p5sum, s.p5n), precisionAt5Ceiling: pct(s.p5max || 0, s.p5n),
     wrongProjectTop: pct(s.wrongProject, s.answerable), temporal: pct(s.temporalOk, s.temporalN), noAnswer: pct(s.noAnsOk, s.noAnsN),
-    multiHopBoth: pct(s.hopBoth, s.hopN), leaks: s.leaks,
+    multiHopBoth: pct(s.hopBoth, s.hopN), mixUp: pct(s.mixUp, s.mixN), leaks: s.leaks, avgReturned: null,
     ms: { p50: +percentile(s.ms, 50).toFixed(1), p95: +percentile(s.ms, 95).toFixed(1) },
   }]));
 }
 const embeds = rows.map((r) => r.embedMs);
 const report = {
-  test: 'MEM-ACC-01', distractors: nDistractors, worldFacts: world.facts.length, questions: rows.length,
+  test: 'MEM-ACC-01', mode, distractors: nDistractors, worldFacts: world.facts.length, questions: rows.length,
   embeddedNow, distractorSeconds: Math.round(distractorMs / 1000), coldMs,
   queryEmbedMs: { p50: +percentile(embeds, 50).toFixed(1), p95: +percentile(embeds, 95).toFixed(1) },
   search: score('search'), chat: score('chat'),
+  freshSave: fresh,
   note: 'ms = query embedding + that path. search: MemoryStorage.search (limit 10). chat: qualityRecall P9B (limit 6; empty = "no reliable memory"). no-answer for search = no world fact returned.',
 };
-const brief = (s) => `R@5 ${s.recallAt5} · H@1 ${s.hitAt1} · P@5 ${s.precisionAt5}/${s.precisionAt5Ceiling} · wrong-project ${s.wrongProjectTop} · temporal ${s.temporal} · no-answer ${s.noAnswer} · hops ${s.multiHopBoth} · leaks ${s.leaks} · p50 ${s.ms.p50} ms`;
+const brief = (s) => `R@5 ${s.recallAt5} · H@1 ${s.hitAt1} · P@5 ${s.precisionAt5}/${s.precisionAt5Ceiling} · wrong-project ${s.wrongProjectTop} · temporal ${s.temporal} · no-answer ${s.noAnswer} · hops ${s.multiHopBoth} · mix-up ${s.mixUp} · leaks ${s.leaks} · p50 ${s.ms.p50} ms`;
 for (const path of ['search', 'chat']) {
   console.log(`\n== ${path}`);
   for (const [k, s] of Object.entries(report[path])) console.log(`${k.padEnd(15)} n=${String(s.questions).padStart(4)}  ${brief(s)}`);
 }
+console.log('\n== save, then ask at once');
+for (const f of fresh) console.log(`${f.id.padEnd(9)} ${f.case.padEnd(14)} rank ${f.rank || 'not found'}${f.saveMs ? ` · save ${f.saveMs} ms` : ''} · ask ${f.askMs} ms`);
 if (out) writeFileSync(out, JSON.stringify(report, null, 2));
 if (rowsOut) writeFileSync(rowsOut, JSON.stringify(rows.map((r) => ({ id: r.q.id, kind: r.q.kind, lang: r.q.lang, q: r.q.q, target: r.q.target, search: r.search.ids.slice(0, 5), chat: r.chat.ids, reliable: r.chat.reliable })), null, 1));
 if (label) {

@@ -182,6 +182,27 @@ const NO_ANSWER = [
   { en: (n) => `What is the Wi-Fi password at the ${n} client office?`, ar: (n) => `ما كلمة سر الواي فاي في مكتب عميل ${n}؟` },
 ];
 
+/** Small talk that carries no fact (pads a conversation so the topic lies 10 or 30 messages back). */
+const FILLER = [
+  'ok thanks', 'تمام', 'passt', 'زين خلّينا نكمل', 'can you check the agenda for tomorrow?', 'هل وصلت رسالة البريد؟', 'Ich bin gleich zurück.', 'شكو ماكو اليوم؟',
+  'let me grab a coffee first', 'أرسل لي الملف لاحقاً', 'Danke, das reicht erstmal.', 'خوش، بعدين نحچي', 'what time is the call?', 'نسيت كلمة السر مال الواي فاي', 'Kannst du das kurz zusammenfassen?', 'ماشي',
+];
+/** How a conversation brings up a project topic (by attribute), in the language of the indirect question. */
+const OPENER = {
+  reason: { en: (n) => `We were going through the ${n} server setup and its database yesterday.`, iq: (n) => `البارحة چنا نحچي عن سيرفر ${n} والداتابيس مالته.` },
+  host: { en: (n) => `Let's talk about where ${n} runs in production.`, iq: (n) => `خلّينا نحچي عن وين ${n} مستضاف.`, de: (n) => `Lass uns über das Hosting von ${n} reden.` },
+  bug: { en: (n) => `Users of ${n} keep complaining again.`, ar: (n) => `مستخدمو ${n} يشتكون مجدداً.` },
+  client: { iq: (n) => `اليوم اتصلوا من الشركة اللي نشتغل وياها على ${n}.` },
+  deadline: { en: (n) => `I'm worried about the ${n} release.`, ar: (n) => `أنا قلق بشأن إطلاق ${n}.` },
+  deploy: { iq: (n) => `فريق ${n} سأل عن التحديثات.` },
+};
+function conversation(opener, distance, r) {
+  const pad = distance === 'near' ? 1 : distance === 'mid' ? 10 : 30;
+  const out = [opener];
+  for (let k = 0; k < pad; k++) out.push(FILLER[Math.floor(r() * FILLER.length)]);
+  return out;
+}
+
 const PEOPLE = ['Amira Saeed', 'Bernd Koller', 'Chiara Rossi', 'Dunya Hamid', 'Emil Strauss', 'Farah Naji', 'Georg Lindner', 'Huda Karim', 'Ivo Petrov', 'Jana Novak', 'Khalil Musa', 'Leonie Bauer', 'Mustafa Ali', 'Nadia Frei', 'Omar Haddad'];
 const ALLERGY = ['penicillin', 'peanuts', 'shellfish', 'pollen', 'lactose'];
 const CITY = ['Graz', 'Linz', 'Erbil', 'Basra', 'Salzburg', 'Najaf', 'Innsbruck'];
@@ -197,6 +218,7 @@ const family = (lang) => (lang === 'iq' ? 'ar' : lang);
  */
 export function buildWorld(seed = 31) {
   const r = rng(seed);
+  const rc = rng(seed + 1000); // conversations: their own sequence, so the facts stay as they were
   const facts = [];
   const questions = [];
   const langs = ['en', 'ar', 'de', 'iq'];
@@ -248,9 +270,13 @@ export function buildWorld(seed = 31) {
     }
     INDIRECT.forEach((ind, k) => {
       const target = `w-${p.slug}-${ind.attr}`;
-      questions.push({ id: `q-${p.slug}-indirect-${k}`, kind: 'indirect', lang: ind.lang, project: p.slug, q: ind.q,
-        target, relevant: [target, ...(related[ind.attr] || [])], stale: stale[ind.attr] || [], temporal: !!stale[ind.attr],
-        crossLanguage: family(ind.lang) !== family(langOf(target)) });
+      const openers = OPENER[ind.attr];
+      const opener = (openers[ind.lang] || openers.en || Object.values(openers)[0])(ind.lang === 'en' || ind.lang === 'de' ? p.en : p.ar);
+      for (const distance of ['near', 'mid', 'far']) {
+        questions.push({ id: `q-${p.slug}-indirect-${k}-${distance}`, kind: 'indirect', distance, lang: ind.lang, project: p.slug, q: ind.q,
+          history: conversation(opener, distance, rc), target, relevant: [target, ...(related[ind.attr] || [])], stale: stale[ind.attr] || [],
+          temporal: !!stale[ind.attr], crossLanguage: family(ind.lang) !== family(langOf(target)) });
+      }
     });
     NO_ANSWER.forEach((na, k) => {
       for (const [ql, fn] of Object.entries(na)) {
@@ -279,6 +305,19 @@ export function buildWorld(seed = 31) {
     questions.push({ id: `q-${p.slug}-past-host-iq`, kind: 'time-travel', lang: 'iq', project: p.slug,
       q: `بشباط شنو چانت خطتنا للهوستنگ مال ${p.ar}؟`, target: `w-${p.slug}-host_plan`, relevant: [`w-${p.slug}-host_plan`, `w-${p.slug}-host`],
       stale: [], temporal: true, crossLanguage: family(facts.find((f) => f.id === `w-${p.slug}-host_plan`).lang) !== 'ar' });
+  });
+  // Topic switch: talk about X's deadline (or client), switch to Y, ask without a name: Y's fact is right, X's is a mix-up.
+  // Going back: the owner names X again before asking. Both facts are in the owner drawer, open in every chat.
+  WORLD_PROJECTS.forEach((p, i) => {
+    const x = p, y = WORLD_PROJECTS[(i + 1) % 10];
+    for (const [attr, ask] of [['deadline', 'And when is the release deadline?'], ['client', 'Who is the contact person there again?']]) {
+      questions.push({ id: `q-switch-${x.slug}-${y.slug}-${attr}`, kind: 'topic-switch', lang: 'en', project: y.slug, q: ask,
+        history: [`Let's look at ${x.en} first.`, `The ${x.en} ${attr} worries me.`, 'ok thanks', `Now about ${y.en}.`, `${y.en} needs attention this week.`],
+        target: `w-${y.slug}-${attr}`, relevant: [`w-${y.slug}-${attr}`], stale: [], mixUp: `w-${x.slug}-${attr}`, temporal: false, crossLanguage: false });
+      questions.push({ id: `q-return-${x.slug}-${y.slug}-${attr}`, kind: 'topic-return', lang: 'en', project: y.slug, q: ask,
+        history: [`Let's look at ${y.en}.`, `${y.en} needs attention this week.`, 'ok thanks', `Back to ${x.en} for a moment.`],
+        target: `w-${x.slug}-${attr}`, relevant: [`w-${x.slug}-${attr}`], stale: [], mixUp: `w-${y.slug}-${attr}`, temporal: false, crossLanguage: false });
+    }
   });
   // People (owner drawer): allergy and home city.
   PEOPLE.forEach((name, i) => {
