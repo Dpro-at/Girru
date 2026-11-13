@@ -29,9 +29,9 @@ test('managed activation requires reviewed installation and rolls in-transaction
  assert.equal((await activation.applyPaperBotActivation(db,context,actor,f.stage.id,f.proof.receipt,f.now,true)).ok,false);
  assert.equal(receiptRow(f.proof.receipt).consumed_at,null);
  db.prepare("UPDATE paper_install_grants SET revoked_at=NULL WHERE owner_id=? AND capability='paper.bot.manage'").run(context.userId);
- const original=db.prepare;let injected=0;
- db.prepare=function(sql,...args){const statement=original.call(this,sql,...args);if(sql.startsWith('INSERT INTO paper_bot_activation_events')||sql.startsWith('INSERT INTO main.paper_bot_activation_events'))return {run(...values){const result=statement.run(...values);original.call(db,"UPDATE paper_install_grants SET revoked_at=1 WHERE owner_id=? AND capability='paper.bot.manage'").run(context.userId);injected++;return result;}};return statement;};
- try{assert.equal((await activation.applyPaperBotActivation(db,context,actor,f.stage.id,f.proof.receipt,f.now,true)).ok,false);}finally{db.prepare=original;}
+ const original=Object.getPrototypeOf(db).prepare;let injected=0;
+ Object.getPrototypeOf(db).prepare=function(sql,...args){const statement=original.call(this,sql,...args);if(sql.startsWith('INSERT INTO paper_bot_activation_events')||sql.startsWith('INSERT INTO main.paper_bot_activation_events'))return {run(...values){const result=statement.run(...values);original.call(statement.database,"UPDATE paper_install_grants SET revoked_at=1 WHERE owner_id=? AND capability='paper.bot.manage'").run(context.userId);injected++;return result;}};return statement;};
+ try{assert.equal((await activation.applyPaperBotActivation(db,context,actor,f.stage.id,f.proof.receipt,f.now,true)).ok,false);}finally{Object.getPrototypeOf(db).prepare=original;}
  assert.equal(injected,1);assert.equal(receiptRow(f.proof.receipt).consumed_at,null);assert.equal(db.prepare('SELECT count(*) n FROM paper_bots WHERE bot_id=?').get(f.stage.botId).n,0);assert.equal(db.prepare("SELECT revoked_at FROM paper_install_grants WHERE owner_id=? AND capability='paper.bot.manage'").get(context.userId).revoked_at,null);
  assert.equal((await activation.applyPaperBotActivation(db,context,actor,f.stage.id,f.proof.receipt,f.now,true)).ok,true);
 });

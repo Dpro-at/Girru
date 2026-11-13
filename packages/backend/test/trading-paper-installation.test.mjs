@@ -31,9 +31,9 @@ function seed(userId){
 test.after(async()=>{closeDatabase();await fs.rm(root,{recursive:true,force:true});});
 
 test('failure after a real journal insert rolls back first-install DDL and every effect',()=>{
- const userId=owner(),before=schema(),original=db.prepare;let injected=0;
- db.prepare=function(sql,...args){const statement=original.call(this,sql,...args);if(sql.startsWith('INSERT INTO main.paper_install_operations '))return {run(...values){statement.run(...values);injected++;throw Error('Owned fixture failure after actual write');}};return statement;};
- try{assert.deepEqual(provision(db,userId,request(),()=>now),{ok:false,reason:'unavailable'});}finally{db.prepare=original;}
+ const userId=owner(),before=schema(),original=Object.getPrototypeOf(db).prepare;let injected=0;
+ Object.getPrototypeOf(db).prepare=function(sql,...args){const statement=original.call(this,sql,...args);if(sql.startsWith('INSERT INTO main.paper_install_operations '))return {run(...values){statement.run(...values);injected++;throw Error('Owned fixture failure after actual write');}};return statement;};
+ try{assert.deepEqual(provision(db,userId,request(),()=>now),{ok:false,reason:'unavailable'});}finally{Object.getPrototypeOf(db).prepare=original;}
  assert.equal(injected,1);assert.deepEqual(schema(),before);assert.equal(db.prepare('SELECT role FROM users WHERE id=?').get(userId).role,'owner');
 });
 test('actual install prepares exact schema, explicit grants and one journal without accounts or ready metadata',()=>{
@@ -74,9 +74,9 @@ test('TEMP shadow schema and corrupted journal refuse without changing existing 
 });
 
 test('failure after actual account disable restores installation, grants, revisions, cash and bot state',()=>{
- const userId=owner();assert.equal(provision(db,userId,request(),()=>now).ok,true);const owned=seed(userId),snapshot=()=>({installation:rows('paper_installations',userId),grants:rows('paper_install_grants',userId),operations:rows('paper_install_operations',userId),accounts:rows('paper_accounts',userId),bots:rows('paper_bots',userId),history:owned.history()}),before=snapshot(),original=db.prepare;let injected=0;
- db.prepare=function(sql,...args){const statement=original.call(this,sql,...args);if(sql.startsWith('UPDATE main.paper_accounts SET app_enabled=0'))return {run(...values){statement.run(...values);injected++;throw Error('Owned fixture failure after account disable');}};return statement;};
- try{assert.equal(provision(db,userId,command('disable',1,'failed-disable'),()=>now+1).ok,false);}finally{db.prepare=original;}assert.equal(injected,1);assert.deepEqual(snapshot(),before);
+ const userId=owner();assert.equal(provision(db,userId,request(),()=>now).ok,true);const owned=seed(userId),snapshot=()=>({installation:rows('paper_installations',userId),grants:rows('paper_install_grants',userId),operations:rows('paper_install_operations',userId),accounts:rows('paper_accounts',userId),bots:rows('paper_bots',userId),history:owned.history()}),before=snapshot(),original=Object.getPrototypeOf(db).prepare;let injected=0;
+ Object.getPrototypeOf(db).prepare=function(sql,...args){const statement=original.call(this,sql,...args);if(sql.startsWith('UPDATE main.paper_accounts SET app_enabled=0'))return {run(...values){statement.run(...values);injected++;throw Error('Owned fixture failure after account disable');}};return statement;};
+ try{assert.equal(provision(db,userId,command('disable',1,'failed-disable'),()=>now+1).ok,false);}finally{Object.getPrototypeOf(db).prepare=original;}assert.equal(injected,1);assert.deepEqual(snapshot(),before);
 });
 test('unexpected registry trigger is rejected as schema corruption before any operation effect',()=>{
  const userId=owner(),before=db.prepare('SELECT count(*) n FROM paper_install_operations').get().n;db.exec('CREATE TRIGGER unexpected_install AFTER INSERT ON paper_install_operations BEGIN SELECT 1; END');try{assert.equal(provision(db,userId,request(),()=>now).ok,false);}finally{db.exec('DROP TRIGGER unexpected_install');}assert.equal(db.prepare('SELECT count(*) n FROM paper_install_operations').get().n,before);

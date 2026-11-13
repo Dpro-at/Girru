@@ -63,6 +63,8 @@ function startServer(t, base) {
   for (const d of [env.HOME, env.TMPDIR]) mkdirSync(d, { recursive: true });
   const loader = pathToFileURL(join(backendDir, 'node_modules', 'tsx', 'dist', 'loader.mjs')).href;
   const child = fork(join(backendDir, 'src', 'api', 'server.ts'), [], { cwd: dataDir, env, execArgv: ['--import', loader], stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+  // Like the desktop app: the server asks for the memory-encryption plan first; this test has none.
+  child.on('message', m => { if (m?.type === 'memory-control-ready') child.send({ v: 1, type: 'memory-control-bootstrap', plan: { control: null, selection: { selected: false, profileId: null, mode: 'none' } } }); });
   let output = '';
   child.stdout.on('data', c => { output += c; });
   child.stderr.on('data', c => { output += c; });

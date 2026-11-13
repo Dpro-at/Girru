@@ -24,8 +24,8 @@ test.after(async()=>{closeDatabase();await fs.rm(root,{recursive:true,force:true
 
 test('stage and real TOTP proof create no registry/business schemas; post-event fault rolls DDL and receipt back',async()=>{
  const f=await owner(),before=schema(),p=await prepared(f);assert.deepEqual(schema(),before);assert.equal(db.prepare("SELECT count(*) n FROM sqlite_master WHERE name IN ('paper_installations','paper_install_grants','paper_accounts','paper_bots')").get().n,0);assert.equal(consumed(p.proof.receipt),null);assert.equal(db.prepare('SELECT count(*) n FROM paper_install_review_events').get().n,0);
- const original=db.prepare;let injected=0;db.prepare=function(sql,...args){const statement=original.call(this,sql,...args);if(sql.startsWith('INSERT INTO main.paper_install_review_events '))return {run(...values){statement.run(...values);injected++;throw Error('Owned fixture failure after actual event write');}};return statement;};
- try{assert.deepEqual(await apply(f,p),{ok:false,reason:'unavailable'});}finally{db.prepare=original;}
+ const original=Object.getPrototypeOf(db).prepare;let injected=0;Object.getPrototypeOf(db).prepare=function(sql,...args){const statement=original.call(this,sql,...args);if(sql.startsWith('INSERT INTO main.paper_install_review_events '))return {run(...values){statement.run(...values);injected++;throw Error('Owned fixture failure after actual event write');}};return statement;};
+ try{assert.deepEqual(await apply(f,p),{ok:false,reason:'unavailable'});}finally{Object.getPrototypeOf(db).prepare=original;}
  assert.equal(injected,1);assert.deepEqual(schema(),before);assert.equal(consumed(p.proof.receipt),null);assert.equal(db.prepare('SELECT status FROM paper_install_reviews WHERE id=?').get(p.stage.id).status,'staged');assert.equal(db.prepare('SELECT count(*) n FROM paper_install_review_events').get().n,0);
  const result=await apply(f,p);assert.equal(result.ok,true);assert.equal(result.replayed,false);assert.equal(result.result.status,'provisioned');assert.equal(consumed(p.proof.receipt),f.time);assert.equal(registry.readPaperInstallation(db,f.context.userId,()=>f.time).runtimeConnected,false);
 });

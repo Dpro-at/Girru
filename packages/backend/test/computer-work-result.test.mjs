@@ -46,10 +46,12 @@ test('CP10: branch names are per computer and task, and plain', () => {
 test('CP10: with a GitHub origin the work goes up as this computer\'s branch and comes back from there', async () => {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'girru-gh-')));
   try {
-    const hub = path.join(root, 'hub.git'); execFileSync('git', ['init', '-q', '--bare', hub]);
+    const hub = path.join(root, 'hub.git'); execFileSync('git', ['init', '-q', '--bare', '-b', 'main', hub]); /* without a global init.defaultBranch the hub's HEAD would name master and the clone would be empty */
     const office = repo(root, 'office'); git(office, 'remote', 'add', 'origin', hub); git(office, 'push', '-q', 'origin', 'main');
     git(office, 'config', 'user.name', 'Owner'); git(office, 'config', 'user.email', 'owner@example.invalid');
     const mac = path.join(root, 'mac'); git(root, 'clone', '-q', hub, mac);
+    // CI runners have no global git identity: the receiving copy gets its own, like the office copy.
+    git(mac, 'config', 'user.name', 'Owner'); git(mac, 'config', 'user.email', 'owner@example.invalid');
     process.env.GIRRU_TEST_GITHUB_REMOTE = hub;
     const start = await startSnapshot(office);
     fs.writeFileSync(path.join(office, 'app.txt'), 'one\ntwo from office\n');

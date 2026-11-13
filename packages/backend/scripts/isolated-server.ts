@@ -127,6 +127,8 @@ const child = spawn(process.execPath, ['--import', import.meta.resolve('tsx'), p
 closeSync(logFd);
 
 child.on('message', (msg: any) => {
+  // The server asks its parent for the memory-encryption plan first; this launcher never holds one (plain memory).
+  if (msg && msg.type === 'memory-control-ready') { child.send({ v: 1, type: 'memory-control-bootstrap', plan: { control: null, selection: { selected: false, profileId: null, mode: 'none' } } }); return; }
   if (msg && msg.type === 'listening' && Number.isInteger(msg.port)) {
     console.log(`listening on 127.0.0.1:${msg.port}`);
     console.log(`data dir: ${cfg.dataDir}`);

@@ -48,17 +48,17 @@ test('actual JWT read cannot borrow reviewed consent through a second main handl
 });
 
 test('real account list and detail data SELECTs run inside their read snapshot without writes',async()=>{
- const original=ledger.prepare,observed=[];
- ledger.prepare=function(sql,...args){
+ const original=Object.getPrototypeOf(ledger).prepare,observed=[];
+ Object.getPrototypeOf(ledger).prepare=function(sql,...args){
   if(sql.startsWith('SELECT account_id,currency,mode,app_enabled,stopped FROM paper_accounts WHERE owner_id=')||sql.startsWith('SELECT owner_id,mode,currency,cash,exposure,app_enabled,app_revision,stopped FROM paper_accounts WHERE account_id='))observed.push({sql,inTransaction:this.inTransaction});
   return original.call(this,sql,...args);
  };
- const before=original.call(ledger,'SELECT total_changes() n').get().n;
+ const before=ledger.prepare('SELECT total_changes() n').get().n;
  ledger.pragma('query_only=ON');
  try{
   assert.equal((await request('other-owner','/api/trading-paper/accounts')).statusCode,200);
   assert.equal((await request('other-owner','/api/trading-paper/accounts/filled-account')).statusCode,200);
   assert.equal(observed.length,2);assert.ok(observed.every(row=>row.inTransaction===true));
-  assert.equal(original.call(ledger,'SELECT total_changes() n').get().n,before);
- }finally{ledger.pragma('query_only=OFF');ledger.prepare=original;}
+  assert.equal(ledger.prepare('SELECT total_changes() n').get().n,before);
+ }finally{ledger.pragma('query_only=OFF');Object.getPrototypeOf(ledger).prepare=original;}
 });

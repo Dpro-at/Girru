@@ -66,7 +66,11 @@ test('review fix: control characters from a command or its output never reach th
 
 test('review fix: only reading commands skip the chat mode\u2019s OK; pull and fetch still ask in Ask me', async () => {
   const m = await import('../src/tools/core/run-command.ts');
-  const cwd = process.cwd();
+  // A clean repository of its own: CI's checkout adds an access-token setting to this repo's git config,
+  // and agent commands rightly refuse a folder with unknown git settings.
+  const {mkdtempSync, writeFileSync, realpathSync} = await import('node:fs'), {tmpdir} = await import('node:os'), {join} = await import('node:path'), {execFileSync} = await import('node:child_process');
+  const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'run-command-repo-')));
+  execFileSync('git', ['init', '-q', '-b', 'main', cwd]); writeFileSync(join(cwd, 'README.md'), 'readme\n');
   for (const ok of ['git status --short', 'git log -1 --oneline', 'ls -la', 'cat README.md']) assert.equal(m.readOnlyCommand(ok, cwd), true, ok);
   for (const no of ['git pull origin main', 'git fetch origin', 'git push', 'rm x']) assert.equal(m.readOnlyCommand(no, cwd), false, no);
 });
