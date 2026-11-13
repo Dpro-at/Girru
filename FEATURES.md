@@ -46,7 +46,14 @@ Girru's memory is the centre of the system. You explain something once, and ever
 | **Careful recall** | Recall is routed by what you ask, re-ranked on your computer, and says "no reliable memory" instead of guessing. | ✅ Built |
 | **How sure** | Each memory shows how sure Girru is, from how many sources agree and whether you verified it. You can mark a memory as verified. | ✅ Built |
 | **The newest fact wins** | A new fact on the same topic replaces the old one, which stays in History and is no longer recalled. | ✅ Built |
-| **Fast at scale** | Recall keeps a small index in memory. Measured locally on generated data: about 0.3 s for 100,000 memories. | ✅ Built |
+| **Fast at scale** | Recall keeps its index in this computer's memory only, never on disk, and keeps it in step as memories change. Large drawers use a compact index. Measured locally on generated data (Windows i9): about 90 ms for 1 million memories and 270 ms for 10 million, before 32 s at 1 million. | ✅ Built |
+| **Understands the conversation** | A short follow-up such as "and where is it hosted?" is searched with the project or person the conversation is about, including the other names they go by. | ✅ Built |
+| **Questions with several parts** | "Who is the contact of the client whose deadline is in March?" is searched part by part, so each fact is found. | ✅ Built |
+| **Stays on the project** | Memories about another project or person count less than memories about the one the conversation is about. | ✅ Built |
+| **Questions about the past** | "What was our plan in February?" or "which database did we use before the switch?" finds the older fact as well. The reply is told that it was replaced and is no longer current. A question about now never gets a replaced fact. | ✅ Built |
+| **Memory as evidence** | Each recalled memory reaches the reply with its project, the day it was saved, whether it is current or replaced, and how sure Girru is, with short rules on answering for the time asked. Measured with a local model on 100,000 memories: more correct answers, especially about the past. | ✅ Built |
+| **More languages for word search** | Word search also works for Chinese, Japanese, Thai and Hindi, not only for languages that put spaces between words. | ✅ Built |
+| **Safe edits by agents** | An agent sees the version of each memory it reads. If the memory changed since, its edit is refused with the newer text instead of overwriting it. | ✅ Built |
 
 ### Learning, with you in control
 

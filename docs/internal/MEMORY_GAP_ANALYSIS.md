@@ -64,3 +64,48 @@ answers by local `qwen2.5:7b`).
 expansion (1, 2) → 4. history mode (5) → 5. corrections as tests + night self-testing (10, 9) →
 6. tokenizer for CJK/Indic + per-language benchmark (13) → 7. LongMemEval → 8. PostgreSQL fast path,
 MCP coverage, 10M tail.
+
+## Agreed roadmap, 2026-11-13 (answer reliability first)
+
+Owner's priority: Girru must know which facts a question needs and whether it holds enough evidence for each part
+before it answers. No dialect-specific work; every fix is at the search-engine level for all languages. Search
+speed stays under about 100 ms p50. Each step is measured on its own (search, then final answers by the local
+model: correct, wrong, correct answers lost), and the owner decides from the numbers.
+
+Why this order: in the last measurement most wrong answers to indirect questions came when search never found
+the memory (the query kept the project's name but dropped the conversation's topic, and memories naming no project
+outranked the project's own). A gate cannot fix a memory that was not found, so the evidence is found first, then judged.
+
+| # | Step | What it does | Measure |
+|---|---|---|---|
+| 1 | **Active context: topic** (MEM-CTX-01) | The query keeps the rarest words (by idf over the owner's memory, any language) of the message that brought the project up | Indirect recall@5 (77% before); topic-switch not worse |
+| 2 | **Active context: project anchor** | In a conversation about a project, a memory that neither names it nor sits in its drawer counts less | Recall; share of off-project memories in the top 6 |
+| 3 | **Evidence gate** | Replaces Weak Drop (it lost 42 correct answers to save 29 wrong): a measured signal from meaning and word coverage between the question and the memory | Wrong answers down; every correct answer lost counted |
+| 4 | **Memory-to-memory links / related** | A strong memory brings its siblings on the same project and subject (e.g. "we switched to X" ↔ "why we switched") | Indirect and multi-hop |
+| 5 | **Question planner + coverage** | The question split becomes a plan (why / who / outcome) with an evidence bundle per part; a part without evidence is said to be missing | Multi-part questions: complete and correct |
+| 6 | **Memory simulation tests** | A simulated project lifetime (tech change, cancelled decision, new owner, moved file, edited doc, forgotten memory); questions at each stage | No mix-ups across states and versions |
+| 7 | **Nightly retrieval training** | Night self-test; corrections the owner approved become tests | Recall over time |
+| 8 | Later | Provenance on links, consolidation with originals kept, memory budget optimizer | Tokens per answer, no accuracy loss |
+
+Not repeated: HNSW, the knowledge graph and version history already exist. Code Intelligence and project discovery
+stay plan-only ([CODE_INTELLIGENCE_PLAN.md](CODE_INTELLIGENCE_PLAN.md)).
+
+### Measured and rejected, 2026-11-13 (kept so it is not tried again)
+
+All on the accuracy test, 100k memories with real embeddings, final answers by local `qwen2.5:7b`,
+mode E. Run-to-run noise on the same prompt is about ±10 answers, so a difference under that is not one.
+
+| Tried | Result | Decision |
+|---|---|---|
+| **Topic words in the query** — the rarest words (idf) of the message that brought the project up | Indirect recall@5 0.74 → 0.59, top-1 0.55 → 0.44 | Rejected. In mixed-language memory, filler in the rarer language ("going", "yesterday") scores as rare and crowds out "database". |
+| **The whole topic message as an extra query** | Indirect recall@5 0.74 → 0.75, top-1 0.55 → 0.42, p95 121 → 205 ms | Rejected. No recall gain, one extra search per turn. |
+| **Project anchor** — a memory that neither names the conversation's project nor sits in its drawer counts less | Not built | Rejected by design: most real memories in a project drawer never repeat the project's name, so this scores well on generated distractors and would demote the owner's real memories. |
+| **Weak Drop** — recall all-weak means nothing reliable | Wrong 87 → 61, correct 367 → 310 | Rejected: lost 42 correct to save 29 wrong. |
+| **Evidence gate** — top hit shares almost no word with the question *and* the question's own words (names out) are in no recalled memory | Tuning questions: wrong 87 → 52, correct 367 → 358, invented 1 → 0. **Held-out questions (never used to pick the thresholds): 4 wrong prevented, 9 correct lost** (correct 139 → 136, wrong 74 → 75) | Rejected. The gain did not hold on questions it was not tuned on. |
+
+Findings worth keeping:
+- **`RELIABLE_SCORE` filters nothing in practice**: all 120 no-answer questions pass it. Abstaining has to come from somewhere else.
+- **Semantic strength cannot tell a good hit from a confusing one here**: among the questions the gate blocked, the prevented wrong answers had a *higher* bare-question cosine (median 0.614) than the correct answers lost (0.515). Distractors are about the same topic, so meaning alone is what misleads. An exception of the form "strong semantic match, let it through" recovers 3 correct and brings back 2 wrong — noise.
+- **Some "correct" answers are guesses**: of 8 correct answers the gate cost on the tuning set, 3 had no retrieved target at all. A measurement that counts them as losses overstates the cost.
+- **The real bottleneck is retrieval, not the answer format**: in every question the gate blocked, search had not found the target. Indirect questions whose wording shares no word with the memory are the open problem.
+- **Held-out question set**: `buildWorld(seed, { heldOut: true })` / `--held-out` — 10 other indirect wordings and 8 other no-answer questions. Every future change is checked on it before it is adopted.

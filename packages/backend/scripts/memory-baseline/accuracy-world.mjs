@@ -191,6 +191,31 @@ const INDIRECT = [
   { attr: 'deadline', lang: 'ar', q: 'متى يجب أن نسلّم؟' },
   { attr: 'deploy', lang: 'iq', q: 'شوكت عادةً ننزّل التحديثات؟' },
 ];
+/**
+ * MEM-GATE-01: a second set of indirect and no-answer questions, never used to choose any threshold
+ * (buildWorld(seed, { heldOut: true })). Same facts and openers, other wordings and other languages,
+ * so a change can be checked on questions it was not tuned on.
+ */
+const HELD_OUT_INDIRECT = [
+  { attr: 'reason', lang: 'de', q: 'Warum haben wir das damals eigentlich umgestellt?' },
+  { attr: 'reason', lang: 'ar', q: 'لماذا أجرينا ذلك التغيير؟' },
+  { attr: 'host', lang: 'en', q: 'Did we ever end up moving it?' },
+  { attr: 'host', lang: 'ar', q: 'هل تم النقل في النهاية؟' },
+  { attr: 'bug', lang: 'de', q: 'Was war das Problem, über das sich alle beschwert haben?' },
+  { attr: 'bug', lang: 'iq', q: 'شنو چانت المشكلة اللي يشتكون منها؟' },
+  { attr: 'client', lang: 'en', q: 'Who is our contact over there again?' },
+  { attr: 'deadline', lang: 'de', q: 'Bis wann müssen wir spätestens fertig sein?' },
+  { attr: 'deploy', lang: 'en', q: 'When do we usually ship the updates?' },
+  { attr: 'deploy', lang: 'ar', q: 'متى ننشر التحديثات عادةً؟' },
+];
+/** Held-out questions with no answer in memory (nothing in the world states these). */
+const HELD_OUT_NO_ANSWER = [
+  { en: (n) => `Which CI system builds ${n}?`, ar: (n) => `ما نظام البناء المستمر الذي يبني ${n}؟` },
+  { en: (n) => `What is the street address of the ${n} office?`, de: (n) => `Wie lautet die Straßenadresse des ${n}-Büros?` },
+  { en: (n) => `How much does the ${n} licence cost per year?`, ar: (n) => `كم تكلفة ترخيص ${n} سنوياً؟` },
+  { en: (n) => `Which font does the ${n} app use?`, iq: (n) => `شنو الخط المستخدم بتطبيق ${n}؟` },
+];
+
 /** No answer exists in memory for these. */
 const NO_ANSWER = [
   { en: (n) => `Which CDN does ${n} use?`, ar: (n) => `ما شبكة توصيل المحتوى التي يستخدمها ${n}؟` },
@@ -235,7 +260,9 @@ const family = (lang) => (lang === 'iq' ? 'ar' : lang);
  * Question: { id, kind (direct | context | indirect | no-answer | person), lang, project (the chat's open project),
  *   q, target (id or null), relevant [ids], stale [ids that must not outrank the target], temporal, crossLanguage }.
  */
-export function buildWorld(seed = 31) {
+export function buildWorld(seed = 31, opts = {}) {
+  const INDIRECT_SET = opts.heldOut ? HELD_OUT_INDIRECT : INDIRECT;
+  const NO_ANSWER_SET = opts.heldOut ? HELD_OUT_NO_ANSWER : NO_ANSWER;
   const r = rng(seed);
   const rc = rng(seed + 1000); // conversations: their own sequence, so the facts stay as they were
   const facts = [];
@@ -287,7 +314,7 @@ export function buildWorld(seed = 31) {
         }
       }
     }
-    INDIRECT.forEach((ind, k) => {
+    INDIRECT_SET.forEach((ind, k) => {
       const target = `w-${p.slug}-${ind.attr}`;
       const openers = OPENER[ind.attr];
       const opener = (openers[ind.lang] || openers.en || Object.values(openers)[0])(ind.lang === 'en' || ind.lang === 'de' ? p.en : p.ar);
@@ -297,7 +324,7 @@ export function buildWorld(seed = 31) {
           temporal: !!stale[ind.attr], crossLanguage: family(ind.lang) !== family(langOf(target)) });
       }
     });
-    NO_ANSWER.forEach((na, k) => {
+    NO_ANSWER_SET.forEach((na, k) => {
       for (const [ql, fn] of Object.entries(na)) {
         questions.push({ id: `q-${p.slug}-none-${k}-${ql}`, kind: 'no-answer', lang: ql, project: p.slug, q: fn(ql === 'ar' || ql === 'iq' ? p.ar : p.en),
           target: null, relevant: [], stale: [], temporal: false, crossLanguage: false });

@@ -129,7 +129,8 @@ closeSync(fd);
 const distractorMs = Date.now() - t0;
 
 // 2. The world's facts, embedded by the same model; replaced facts keep status 'replaced' (as Girru marks them).
-const world = buildWorld();
+// --held-out: the second set of indirect and no-answer questions, never used to choose a threshold.
+const world = buildWorld(31, { heldOut: process.argv.includes('--held-out') });
 const factVecs = [];
 for (let k = 0; k < world.facts.length; k += 64) factVecs.push(...await embedBatch(world.facts.slice(k, k + 64).map((f) => f.content)));
 db.transaction(() => {
@@ -177,7 +178,7 @@ for (const q of questions) {
   const bareCov = items.map((it) => coverage(it.memory.content));
   const features = { bareCosMax: +Math.max(0, ...bareCos).toFixed(4), bareCovMax: +Math.max(0, ...bareCov).toFixed(3), targetBareCos: q.target ? +cosTo(q.target).toFixed(4) : null, best: +chat.best.toFixed(4), topSim: top ? +top.similarity.toFixed(4) : 0, topVec: top ? +(top.scoreBreakdown?.vectorScore ?? 0).toFixed(4) : 0,
     topKw: top ? +(top.scoreBreakdown?.keywordScore ?? 0).toFixed(4) : 0, ownWords: own.length, coverage: top ? +coverage(top.memory.content).toFixed(3) : 0 };
-  rows.push({ q, embedMs, features, search: { ids: raw.map((r) => r.memory.id), ms: searchMs }, chat: { ids: chat.items.map((it) => it.memory.id), reliable: chat.reliable, ms: chatMs, fellBack: chat.fellBack,
+  rows.push({ q, query, embedMs, features, search: { ids: raw.map((r) => r.memory.id), ms: searchMs }, chat: { ids: chat.items.map((it) => it.memory.id), reliable: chat.reliable, ms: chatMs, fellBack: chat.fellBack,
     items: chat.items.map((it) => ({ id: it.memory.id, content: it.memory.content, band: it.band, base: it.base, replaced: it.memory.status === 'replaced',
       drawer: it.memory.drawer ? `${it.memory.drawer.kind}${it.memory.drawer.key ? `:${it.memory.drawer.key}` : ''}` : '', createdAt: String(it.memory.createdAt ?? '') })) } });
 }
@@ -263,7 +264,10 @@ if (answerModel) {
     const body = await res.json();
     let out = { known: false, answer: '' };
     try { out = JSON.parse(body.message?.content || '{}'); } catch { /* not JSON: counted as unknown */ }
-    const text = String(out.answer || '').toLowerCase();
+    // An ISO date (2027-02-28) is the same answer as "28 February 2027": the key is matched against both.
+    const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+    const raw = String(out.answer || '').toLowerCase();
+    const text = raw.replace(/(\d{4})-(\d{2})-(\d{2})/g, (all, y, m, d) => (MONTHS[+m - 1] ? `${all} ${+d} ${MONTHS[+m - 1]} ${y}` : all));
     const known = out.known === true && text.trim().length > 0;
     const verdict = !row.q.target ? (known ? 'invented' : 'correct-unknown')
       : !known ? 'said-unknown' : row.q.answer.some((k) => text.includes(k.toLowerCase())) ? 'correct' : 'wrong';
@@ -362,7 +366,8 @@ if (report.answers) {
 console.log('\n== save, then ask at once');
 for (const f of fresh) console.log(`${f.id.padEnd(9)} ${f.case.padEnd(14)} rank ${f.rank || 'not found'}${f.saveMs ? ` · save ${f.saveMs} ms` : ''} · ask ${f.askMs} ms`);
 if (out) writeFileSync(out, JSON.stringify(report, null, 2));
-if (rowsOut) writeFileSync(rowsOut, JSON.stringify(rows.map((r) => ({ id: r.q.id, kind: r.q.kind, lang: r.q.lang, q: r.q.q, target: r.q.target, features: r.features, search: r.search.ids.slice(0, 5), chat: r.chat.ids, reliable: r.chat.reliable })), null, 1));
+if (rowsOut) writeFileSync(rowsOut, JSON.stringify(rows.map((r) => ({ id: r.q.id, kind: r.q.kind, lang: r.q.lang, q: r.q.q, target: r.q.target, features: r.features, search: r.search.ids.slice(0, 5), chat: r.chat.ids, reliable: r.chat.reliable, query: r.query,
+  history: r.q.history, items: r.chat.items.map((it) => ({ id: it.id, base: +(+it.base).toFixed(3), band: it.band, text: it.content.slice(0, 110) })) })), null, 1));
 if (label) {
   const { appendResult, searchSettings } = await import('./results.mjs');
   const c = report.chat.all, s = report.search.all;
