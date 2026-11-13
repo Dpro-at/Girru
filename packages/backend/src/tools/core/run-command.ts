@@ -58,6 +58,12 @@ const GIT_FLAGS: Record<string, string[]> = {
   remote: ['-v'], branch: ['-a', '-r', '-v', '-vv', '--show-current', '--list'], tag: ['-l', '--list'], stash: [],
 };
 const VERSION_ONLY = new Set(['node', 'npm', 'pnpm', 'yarn', 'python', 'python3', 'go', 'cargo', 'java', 'dotnet', 'git']);
+// Resolve to fixed executable names, never an executable path supplied in a request.
+const EXECUTABLES: Readonly<Record<string, string>> = Object.freeze({
+  echo: 'echo', git: 'git', ls: 'ls', cat: 'cat', wc: 'wc', pwd: 'pwd', date: 'date', whoami: 'whoami',
+  head: 'head', tail: 'tail', grep: 'grep', rg: 'rg', node: 'node', npm: 'npm', pnpm: 'pnpm', yarn: 'yarn',
+  python: 'python', python3: 'python3', go: 'go', cargo: 'cargo', java: 'java', dotnet: 'dotnet',
+});
 const GIT_WORD = /^[A-Za-z0-9._\/~^@+-]{1,200}$/;
 
 /** A path the command may read: inside the project folder after links are followed. */
@@ -183,12 +189,19 @@ export function runShell(command: string | string[], cwd: string, timeout: numbe
   const started = Date.now();
   return new Promise(resolve => {
     const win = process.platform === 'win32';
-    const direct = Array.isArray(command);
-    const file = direct ? command[0] : (win ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh');
-    const args = direct ? command.slice(1) : (win ? ['/d', '/s', '/c', command] : ['-c', command]);
     const env = {...minimalChildEnv(), GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_ATTR_NOSYSTEM: '1', GIT_LITERAL_PATHSPECS: '1'};
     let child;
-    try { child = spawn(file, args, {cwd, env, windowsHide: true, windowsVerbatimArguments: win && !direct, detached: !win, shell: false}); }
+    try {
+      if (Array.isArray(command)) {
+        if (!Object.hasOwn(EXECUTABLES, command[0])) throw Error('Command executable is not allowed');
+        // Agent commands are always literal argv, including on Windows. Only the owner-approved branch below uses a shell.
+        child = spawn(EXECUTABLES[command[0]], command.slice(1), {cwd, env, windowsHide: true, windowsVerbatimArguments: false, detached: !win, shell: false});
+      } else if (win) {
+        child = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', command], {cwd, env, windowsHide: true, windowsVerbatimArguments: true, shell: false});
+      } else {
+        child = spawn('/bin/sh', ['-c', command], {cwd, env, detached: true, shell: false});
+      }
+    }
     catch (e) { resolve({code: null, out: String((e as Error).message), timedOut: false, ms: 0}); return; }
     let out = '', timedOut = false, done = false;
     const finish = (code: number | null, extra = '') => { if (done) return; done = true; clearTimeout(timer); resolve({code, out: out + extra, timedOut, ms: Date.now() - started}); };

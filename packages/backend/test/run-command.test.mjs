@@ -20,6 +20,22 @@ test('CP15: without the owner switch the command tool refuses', async () => {
   assert.equal(r.error, 'agent_commands_off');
 });
 
+test('direct commands keep metacharacters literal and refuse executable paths or inherited names', async t => {
+  const {runShell} = await import('../src/tools/core/run-command.ts');
+  const fs = await import('node:fs'); const os = await import('node:os'); const path = await import('node:path');
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'girru-argv-')));
+  t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
+  const values = ['a b', '$(id)', '; echo injected', '& whoami', '"quoted"', '%PATH%'];
+  const r = await runShell(['node', '-e', 'console.log(JSON.stringify(process.argv.slice(1)))', '--', ...values], dir, 10_000);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(JSON.parse(r.out), values);
+  for (const file of [process.execPath, './node', 'node.exe', 'cmd.exe', '/bin/sh', 'constructor', '__proto__']) {
+    const refused = await runShell([file, '--version'], dir, 10_000);
+    assert.equal(refused.code, null, file);
+    assert.match(refused.out, /executable is not allowed/);
+  }
+});
+
 test('allowed words start without a shell, and a timeout stops the children too', {skip: process.platform === 'win32'}, async () => {
   const {runShell} = await import('../src/tools/core/run-command.ts');
   const fs = await import('node:fs'); const os = await import('node:os'); const path = await import('node:path');

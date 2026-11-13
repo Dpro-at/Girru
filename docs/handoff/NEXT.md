@@ -1,5 +1,9 @@
 # Next: the phone app, from 3 November 2026 on
 
+Security work (13 November): Mohamed assigned GitHub security alerts to Codex.
+Codex owns the fixes and checks in [SECURITY_ALERTS.md](SECURITY_ALERTS.md);
+the phone/build agent should continue the phone tasks below.
+
 Tasks for the computer that builds and tests the phone app. Work on the
 branch below and report back as described at the end. Background,
 decisions and the build guide: [`packages/mobile/BUILDING.md`](../../packages/mobile/BUILDING.md).
