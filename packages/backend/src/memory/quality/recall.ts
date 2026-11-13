@@ -100,6 +100,8 @@ export interface QualityRecallInput {
   agentId?: string | null;
   /** Items returned at most (default 6). */
   limit?: number;
+  /** MEM-ACC-03: extra queries (the head of a question with a relative clause); their hits join the pool at their own score. */
+  parts?: readonly string[];
   /** Memory ids already in the prompt (the context pack). */
   skip?: ReadonlySet<string>;
   /** MD8: record the open question when nothing reliable is found (chat replies). */
@@ -191,6 +193,14 @@ export async function qualityRecall(input: QualityRecallInput): Promise<QualityR
   const now = input.now ?? Date.now();
   const byId = new Map<string, Candidate>();
   for (const r of found) byId.set(r.memory.id, { m: r.memory, base: r.similarity, why: (r.scoreBreakdown?.keywordScore ?? 0) > 0 ? 'keyword' : 'meaning' });
+  for (const part of (input.parts ?? []).slice(0, 2)) {
+    const extra = await getMemoryStorage().search({ userId: input.userId, query: part.trim().slice(0, 2000), drawers, limit: pool, mode: 'hybrid' });
+    for (const r of extra) {
+      const prev = byId.get(r.memory.id);
+      if (!prev) byId.set(r.memory.id, { m: r.memory, base: r.similarity, why: (r.scoreBreakdown?.keywordScore ?? 0) > 0 ? 'keyword' : 'meaning' });
+      else if (r.similarity > prev.base) prev.base = r.similarity;
+    }
+  }
   for (const g of graph) {
     const prev = byId.get(g.memory.id);
     // A named entity (say a project or a person's name) links many memories with one graph score, so

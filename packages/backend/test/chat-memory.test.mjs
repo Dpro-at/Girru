@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { randomBytes } from 'node:crypto';
 
 import { switchValueOn } from './helpers/switches.mjs';
@@ -39,13 +40,13 @@ globalThis.fetch = async (url, init = {}) => {
 const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
 
-const { getDatabase } = await import(join(backendDir, 'src/db/database.ts'));
-const { projectKeyOf } = await import(join(backendDir, 'src/memory/project-keys.ts')); // project memory key (id while GIRRU_STORE_P3 is on)
+const { getDatabase } = await import(pathToFileURL(join(backendDir, 'src/db/database.ts')).href);
+const { projectKeyOf } = await import(pathToFileURL(join(backendDir, 'src/memory/project-keys.ts')).href); // project memory key (id while GIRRU_STORE_P3 is on)
 const db = getDatabase();
 await db.initialize();
-const { getCredentialStorage } = await import(join(backendDir, 'src/credentials/storage.ts'));
+const { getCredentialStorage } = await import(pathToFileURL(join(backendDir, 'src/credentials/storage.ts')).href);
 await getCredentialStorage().initialize();
-const { getOrchestrator } = await import(join(backendDir, 'src/multi-agent/index.ts'));
+const { getOrchestrator } = await import(pathToFileURL(join(backendDir, 'src/multi-agent/index.ts')).href);
 await getOrchestrator().initialize(join(dir, '.data', 'multi-agent', 'orchestrator.db'));
 for (const [id, role] of [['cm-owner', 'owner'], ['cm-admin', 'admin'], ['cm-user', 'user']]) {
   db.prepare(`INSERT INTO users (id, email, username, password_hash, role, status, email_verified) VALUES (?, ?, ?, 'x', ?, 'active', 1)`).run(id, `${id}@example.test`, id, role);
@@ -54,10 +55,10 @@ db.prepare(`INSERT INTO agents_config (id, name, provider, model, is_primary) VA
 db.prepare(`INSERT INTO agents_config (id, name, provider, model, is_primary) VALUES ('cm-writer', 'Writer', 'ollama', 'qwen-test', 0)`).run();
 db.prepare(`INSERT INTO agents_config (id, name, provider, model, is_primary) VALUES ('cm-coder', 'Coder', 'ollama', 'qwen-test', 0)`).run();
 
-const { generateToken } = await import(join(backendDir, 'src/auth/jwt.ts'));
-const { buildServer } = await import(join(backendDir, 'src/api/app.ts'));
-const { chatRuns } = await import(join(backendDir, 'src/services/chat-runs.ts'));
-const { addAssistantMessage, createProject } = await import(join(backendDir, 'src/repositories/chat-conversations.ts'));
+const { generateToken } = await import(pathToFileURL(join(backendDir, 'src/auth/jwt.ts')).href);
+const { buildServer } = await import(pathToFileURL(join(backendDir, 'src/api/app.ts')).href);
+const { chatRuns } = await import(pathToFileURL(join(backendDir, 'src/services/chat-runs.ts')).href);
+const { addAssistantMessage, createProject } = await import(pathToFileURL(join(backendDir, 'src/repositories/chat-conversations.ts')).href);
 const app = await buildServer({ logger: false });
 await app.ready();
 const as = (id) => ({ authorization: `Bearer ${generateToken(id, 1)}` });

@@ -27,6 +27,7 @@ import { lexicalTokens } from './text-normalize.js';
 import { termCounts } from './hybrid.js';
 import { LEGACY_HASH_MODEL } from './embedding.js';
 import { forgetRecallStore, recallStoreStats } from './recall-store.js';
+import { forgetContextEntities } from './context/entities.js';
 
 export interface IndexEntry {
   id: string;
@@ -114,6 +115,7 @@ function sweepIdle(now: number): void {
 /** Drop a user's whole index (forget, trash, a model change). */
 export function forgetRecallIndex(userId?: string): void {
   forgetRecallStore(userId); // MEM-SPEED-01: the store kept in step by id
+  forgetContextEntities(userId); // MEM-ACC-02: the names kept for recall queries
   if (userId === undefined) {
     users.clear();
     totalBytes = 0;

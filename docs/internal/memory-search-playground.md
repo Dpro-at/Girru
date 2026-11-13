@@ -56,3 +56,17 @@ GIRRU_STORE_P9=1 node --max-old-space-size=32768 --import tsx scripts/memory-bas
 | `GIRRU_RECALL_RESCORE` | 200 | candidates re-scored with their full vector |
 | `GIRRU_RECALL_INDEX_MB` | ¼ of RAM | the index size cap; past it search falls back to the P9 path |
 | `GIRRU_RECALL_ANN_THREADS` | all cores | `1`: the same HNSW graph on every run (tests) |
+| `GIRRU_RECALL_CONTEXT` | on | `0`: a chat recalls with the last message alone (before MEM-ACC-02) |
+| `GIRRU_RECALL_PARTS` | on | `0`: no extra search for the head of a question with a relative clause (MEM-ACC-03) |
+
+## Accuracy test (MEM-ACC-01)
+
+`scripts/memory-baseline/accuracy.mjs` hides a simulated world (10 projects, 15 people, 1,280
+questions with known answers, conversations and topic switches) among generated memories, all
+embedded by the real local model, and measures what a chat recalls: Recall@5, Hit@1, wrong
+project, mix-ups, temporal, multi-hop, no-answer, leaks and time. `--mode A` asks with the last
+message only, `--mode B0` with the context query a chat uses now.
+
+```bash
+node --max-old-space-size=16384 --import tsx scripts/memory-baseline/accuracy.mjs --mode B0 --distractors 100000 --cache <folder outside the repo>
+```
