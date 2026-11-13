@@ -55,6 +55,12 @@ Verified through GitHub on 14 November 2026, 00:08 CET:
 
 Dependabot #192–198 and CodeQL #632–635 are all `fixed`. The four CodeQL alerts were fixed at 23:08:01 UTC on 13 November (00:08:01 CET on 14 November). None was dismissed; no security workflow or rule was disabled. Historical dismissed findings are not new open alerts.
 
-The automatic [post-merge general test rerun](https://github.com/Dpro-at/Girru/actions/runs/43524075485) was still running at this checkpoint. The full pre-merge test suite already passed on the identical source tree. This final handoff changes documentation only.
+The full [post-merge Tests workflow on main](https://github.com/Dpro-at/Girru/actions/runs/43524075485) also **passed** on merge commit `6d22682da71989513282d8653dc12cf8f2d7e28e`, finishing on 14 November 2026 at 00:16:19 CET. All three jobs succeeded:
+
+- Type-check and test suites: verified UI build, frontend/backend type checks, UI tests, desktop tests, backend tests, memory-encryption tests on SQLite/PostgreSQL, and backend account tests.
+- Desktop portability on Windows.
+- Desktop portability on macOS.
+
+No failed job or test step required a code fix. The security alert counts were checked again after the workflow completed: Dependabot 0, code scanning 0, secret scanning 0. The only changes since the tested merge are the Markdown handoff updates; application code and test/workflow configuration are unchanged.
 
 Security task complete. The phone/build agent can continue its existing tasks without repeating this investigation.
