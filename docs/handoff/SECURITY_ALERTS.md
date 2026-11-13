@@ -35,4 +35,6 @@ The command-route regression test now uses portable ESM imports and Node command
 
 ## Delivery status
 
-Prepared for a pull request and GitHub CodeQL verification. Alerts remain open on the default branch until corrected source is merged and GitHub confirms the new analysis. No alert has been dismissed or scan disabled.
+Pull request: [#215 — Fix GitHub security alerts in dependencies and local execution](https://github.com/Dpro-at/Girru/pull/215).
+
+Local checks passed; GitHub CodeQL and CI are running on the pull request. Follow its live checks before merging. Alerts remain open on the default branch until corrected source is merged and GitHub confirms the new analysis. No alert has been dismissed or scan disabled.
