@@ -160,3 +160,58 @@ test('a folder that vanished refuses the whole sync, and writes nothing', async 
   // and the next sync writes the files from what is stored — see project-sync.ts.
   mkdirSync(folder, { recursive: true });
 });
+
+// The tool layer: what a Girru chat actually calls, with the gates that protect it.
+const { projectSyncTool, projectSyncApplyTool } = await import(mod('src/tools/memory/project-sync.ts'));
+const { memoryBridgeApplyTool } = await import(mod('src/tools/memory/bridge.ts'));
+const { APPROVAL_REQUIRED_TOOLS } = await import(mod('src/tools/approvals.ts'));
+const asOwner = { userId: OWNER, agentId: 'ps-main' };
+
+test('writing needs the owner\'s approval, and only the owner\'s own turn', async () => {
+  assert.ok(APPROVAL_REQUIRED_TOOLS.project_sync_apply, 'project_sync_apply is approval-gated');
+  assert.equal(APPROVAL_REQUIRED_TOOLS.project_sync, undefined, 'the read-only preview is not');
+  // Someone else's turn, another account, a channel turn: all refused, for both tools.
+  for (const tool of [projectSyncTool, projectSyncApplyTool]) {
+    const outside = await tool.execute({ project_id: project.id }, { ...asOwner, toolPolicy: { channel: 'telegram' } });
+    assert.match(outside.content[0].text, /refused/, `${tool.name} refuses an outside turn`);
+    const other = await tool.execute({ project_id: project.id }, { userId: 'ps-stranger', agentId: 'ps-main' });
+    assert.match(other.content[0].text, /refused/, `${tool.name} refuses another account`);
+  }
+});
+
+test('the chat path: project_sync previews, project_sync_apply writes', async () => {
+  const note = { done: ['the tool path'], left: [], next: ['ship it'], questions: [] };
+  const preview = await projectSyncTool.execute({ project_id: project.id, handoff: note, memory: ['Falcon: releases go out on Tuesdays.'] }, asOwner);
+  assert.match(preview.content[0].text, /Project sync for/);
+  assert.match(preview.content[0].text, /Approve project_sync_apply with preview_hash/);
+  const hash = preview.data.plan.previewHash;
+  assert.match(hash, /^[0-9a-f]{64}$/);
+
+  // The hash of a different plan is refused, so an approval cannot be reused.
+  const wrong = await projectSyncApplyTool.execute({ project_id: project.id, handoff: note, preview_hash: hash, confirm: true }, asOwner);
+  assert.match(wrong.content[0].text, /refused/, 'the facts were left out of the apply, so it is a different plan');
+
+  const applied = await projectSyncApplyTool.execute(
+    { project_id: project.id, handoff: note, memory: ['Falcon: releases go out on Tuesdays.'], preview_hash: hash, confirm: true }, asOwner);
+  assert.match(applied.content[0].text, /Project sync:/);
+  assert.ok(applied.data.handoffId, 'the handoff was saved');
+  assert.equal(liveRows('%releases go out on Tuesdays%'), 0, 'the fact waits for review');
+  assert.ok(existsSync(join(folder, 'AGENTS.md')));
+});
+
+test('after the owner stops file sync, a sync leaves the folder alone', async () => {
+  const stopped = await memoryBridgeApplyTool.execute({ action: 'stop_files', project_id: project.id }, asOwner);
+  assert.ok(!stopped.error, `stop_files worked (${stopped.content[0].text})`);
+  assert.equal((await folderSettings(OWNER, project.id)).filesEnabled, false);
+  const before = readFileSync(join(folder, 'AGENTS.md'), 'utf-8');
+
+  const note = { done: ['work after stopping'], left: [], next: ['nothing'], questions: [] };
+  const preview = await projectSyncTool.execute({ project_id: project.id, handoff: note }, asOwner);
+  assert.match(preview.content[0].text, /Files: left alone/);
+  const applied = await projectSyncApplyTool.execute(
+    { project_id: project.id, handoff: note, preview_hash: preview.data.plan.previewHash, confirm: true }, asOwner);
+  assert.match(applied.content[0].text, /files were left alone/);
+  assert.ok(applied.data.handoffId, 'the handoff is still saved: that is Girru\'s own memory, not the folder');
+  assert.equal(readFileSync(join(folder, 'AGENTS.md'), 'utf-8'), before, 'the file is byte for byte as it was');
+  assert.equal((await folderSettings(OWNER, project.id)).filesEnabled, false, 'and the switch stays off');
+});
