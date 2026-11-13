@@ -16,7 +16,7 @@ Repository: `Dpro-at/Girru`. Base: `6b6dbf57b158c9db7419c73f7ca4c09638ad9316`. B
 ## Implemented fixes
 
 - Updated the backend lockfile to `hono` 4.13.18 and `@hono/node-server` 2.1.8. Both exceed the advisory patch floors without changing the MCP SDK contract.
-- Direct commands resolve executable names through a fixed allowlist and explicitly use literal argv on Windows. Version probes use program-specific flags: `node version` and similar script/modifying invocations now require approval. Owner-approved shell execution remains a separate branch; the existing approval ticket flow is preserved.
+- Direct commands resolve executable names through a fixed allowlist and explicitly use literal argv on Windows. Version probes use program-specific flags: `node version` and similar script/modifying invocations now require approval. Direct argv and owner-approved shell execution have separate entry points and tool dispatch paths; the existing approval ticket flow is preserved.
 - Project folder selection uses the same `checkFolder` validation as project persistence: absolute paths only, existing directories, no whole disk/home. Native canonical paths also fix duplicate project creation for Windows short/long path spellings. Owner authentication and explicit confirmation remain required.
 - Google installed-client import opens once, checks the descriptor and current pathname before reading, and rejects links, replaced files and oversized data. Nonblocking open prevents FIFOs hanging the importer on POSIX.
 
@@ -36,5 +36,7 @@ The command-route regression test now uses portable ESM imports and Node command
 ## Delivery status
 
 Pull request: [#215 — Fix GitHub security alerts in dependencies and local execution](https://github.com/Dpro-at/Girru/pull/215).
+
+During this work, PR #213 reached main (`643bec79`) with the same `@hono/node-server` 2.1.8 update from commit `9010d05b`, closing Dependabot #192–193 independently. Main was merged into this branch without conflicts. The remaining dependency change in this PR is `hono` 4.13.18; preserve the memory work already on main.
 
 Local checks passed; GitHub CodeQL and CI are running on the pull request. Follow its live checks before merging. Alerts remain open on the default branch until corrected source is merged and GitHub confirms the new analysis. No alert has been dismissed or scan disabled.
