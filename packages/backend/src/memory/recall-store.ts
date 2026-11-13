@@ -211,11 +211,19 @@ const TRIGGERS = ['girru_recall_ins', 'girru_recall_upd', 'girru_recall_del'];
  *
  * Rows older than LOG_KEEP_MS are deleted now and then. A process whose position has been pruned away
  * (idle longer than that) cannot know what it missed, so it rebuilds, as before.
+ *
+ * A DELETE writes no id. Forgetting a memory has to leave no trace (CORE-07), and an id in this table
+ * would outlive the row it names by up to an hour and could be caught in a backup taken meanwhile. So a
+ * delete logs the sentinel below, which tells every other process to drop its stores and read the
+ * database again — the behaviour before this log existed. Deletes are rare and the owner asks for them;
+ * saves and edits, which are constant, keep the cheap path.
  */
 const LOG_TABLE = 'memory_recall_changes';
 const LOG_TRIGGERS = ['girru_recall_log_ins', 'girru_recall_log_upd', 'girru_recall_log_del'];
 const LOG_KEEP_MS = 60 * 60 * 1000;
 const PRUNE_EVERY_MS = 5 * 60 * 1000;
+/** A delete, with no id: "something was removed, read the database again" (see the comment above). */
+const DELETED_SENTINEL = '-';
 /** GIRRU_RECALL_CHANGELOG=0: no log; another connection's write drops every store, as before. */
 const logEnabled = (): boolean => process.env.GIRRU_RECALL_CHANGELOG !== '0';
 
@@ -237,7 +245,7 @@ function ensureLog(db: any): void {
       INSERT INTO ${LOG_TABLE} (user_id, memory_id, at) VALUES (NEW.user_id, NEW.id, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
     END;
     CREATE TRIGGER IF NOT EXISTS girru_recall_log_del AFTER DELETE ON memories BEGIN
-      INSERT INTO ${LOG_TABLE} (user_id, memory_id, at) VALUES (OLD.user_id, OLD.id, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
+      INSERT INTO ${LOG_TABLE} (user_id, memory_id, at) VALUES ('', '${DELETED_SENTINEL}', CAST(strftime('%s', 'now') AS INTEGER) * 1000);
     END;`);
 }
 
@@ -251,8 +259,10 @@ function applyLog(db: any): boolean {
   // A hole: the oldest row we can still see is newer than the one after our position.
   const oldest = (db.prepare(`SELECT MIN(seq) AS s FROM ${LOG_TABLE}`).get() as { s: number | null }).s;
   if (lastChangeSeq !== null && oldest !== null && oldest > lastChangeSeq + 1) { lastChangeSeq = rows[rows.length - 1].seq; return false; }
-  for (const r of rows) onChange(r.user_id, r.memory_id);
   lastChangeSeq = rows[rows.length - 1].seq;
+  // A delete names no memory, so there is nothing to re-read by id: start again from the database.
+  if (rows.some((r) => r.memory_id === DELETED_SENTINEL)) return false;
+  for (const r of rows) onChange(r.user_id, r.memory_id);
   return true;
 }
 
