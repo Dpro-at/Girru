@@ -39,6 +39,9 @@ test('direct commands keep metacharacters literal and refuse executable paths or
   const r = await runShell(['node', '-e', 'console.log(JSON.stringify(process.argv.slice(1)))', '--', ...values], dir, 10_000);
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(JSON.parse(r.out), values);
+  const raw = await runShell('node --version', dir, 10_000);
+  assert.equal(raw.code, null, 'the direct entry point never interprets a command string');
+  assert.match(raw.out, /executable is not allowed/);
   for (const file of [process.execPath, './node', 'node.exe', 'cmd.exe', '/bin/sh', 'constructor', '__proto__']) {
     const refused = await runShell([file, '--version'], dir, 10_000);
     assert.equal(refused.code, null, file);
@@ -47,14 +50,14 @@ test('direct commands keep metacharacters literal and refuse executable paths or
 });
 
 test('allowed words start without a shell, and a timeout stops the children too', {skip: process.platform === 'win32'}, async () => {
-  const {runShell} = await import('../src/tools/core/run-command.ts');
+  const {runShell, runOwnerShell} = await import('../src/tools/core/run-command.ts');
   const fs = await import('node:fs'); const os = await import('node:os'); const path = await import('node:path');
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'girru-rc-')));
   try {
     const r = await runShell(['echo', '$(id)', '; rm x'], dir, 10_000);
     assert.equal(r.code, 0); assert.equal(r.out.trim(), '$(id) ; rm x', 'no shell: the words are printed as they are');
     const t0 = Date.now();
-    const slow = await runShell('sleep 30 & sleep 30', dir, 500);
+    const slow = await runOwnerShell('sleep 30 & sleep 30', dir, 500);
     assert.equal(slow.timedOut, true); assert.ok(Date.now() - t0 < 5000);
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 });

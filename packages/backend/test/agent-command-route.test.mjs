@@ -53,6 +53,10 @@ test('CP15 MCP: off until the owner turns it on; owner only; known commands run,
   assert.deepEqual({ ...row }, { status: 'pending', tool_name: 'run_command_owner' });
   // The owner's Run in Approvals runs it in the same project folder.
   const { writeFileSync, existsSync } = await import('node:fs');
+  writeFileSync(join(project, 'version'), "require('node:fs').writeFileSync('unexpected.txt', 'executed')");
+  const script = (await call('cr-owner', { projectId: p.id, command: 'node version' })).json();
+  assert.equal(script.code, 'waiting_for_run', 'a project script is not a version probe');
+  assert.equal(existsSync(join(project, 'unexpected.txt')), false, 'no side effects before owner approval');
   writeFileSync(join(project, 'note.txt'), 'x');
   const asked = (await call('cr-owner', { projectId: p.id, command: `node -e "require('node:fs').unlinkSync('note.txt')"` })).json();
   const { approveAndRun } = await import('../src/tools/approvals.ts');
