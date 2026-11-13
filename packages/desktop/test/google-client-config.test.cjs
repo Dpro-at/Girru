@@ -40,6 +40,26 @@ test('native file import rejects oversized, malformed and symlink credentials',a
 });
 
 const {serverGoogleExchange}=require('../src/google-client-config.cjs');
+
+test('client import checks the opened file before reading and refuses a replaced pathname',async t=>{
+ const fs=require('node:fs');
+ const {readInstalledClient}=require('../src/google-client-config.cjs');
+ const events=[];let replaced=false;
+ const stat={ino:1,dev:1,size:JSON.stringify(fixture).length,isFile:()=>true,isSymbolicLink:()=>false};
+ t.mock.method(fs.promises,'open',async()=>{events.push('open');return {
+   stat:async()=>{events.push('fstat');return stat;},
+   read:async(buffer,offset,length,position)=>{events.push('read');const bytes=Buffer.from(JSON.stringify(fixture));const n=Math.min(length,Math.max(0,bytes.length-position));bytes.copy(buffer,offset,position,position+n);return {bytesRead:n};},
+   close:async()=>events.push('close'),
+ };});
+ t.mock.method(fs.promises,'lstat',async()=>{events.push('lstat');return {...stat,ino:replaced?2:1};});
+ assert.equal((await readInstalledClient('synthetic.json',clientId)).clientId,clientId);
+ assert.deepEqual(events.slice(0,4),['open','fstat','lstat','read']);
+ assert.equal(events.at(-1),'close');
+ events.length=0;replaced=true;
+ await assert.rejects(readInstalledClient('synthetic.json',clientId),/installed_client_invalid/);
+ assert.deepEqual(events,['open','fstat','lstat','close']);
+});
+
 test('with a configured account service, Google sign-in needs no client file: the service finishes it',async()=>{
  const sent=[];const fetcher=async(url,init)=>{const body=JSON.parse(init.body);sent.push({url,body});if(!Object.keys(body).length)return {status:403,text:async()=>JSON.stringify({code:'account_input_invalid'})};return {status:200,text:async()=>JSON.stringify({idToken:'a.b.c'})};};
  const server=serverGoogleExchange('https://relay.example.test/identity/v1',fetcher);

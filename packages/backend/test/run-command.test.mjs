@@ -20,15 +20,44 @@ test('CP15: without the owner switch the command tool refuses', async () => {
   assert.equal(r.error, 'agent_commands_off');
 });
 
-test('allowed words start without a shell, and a timeout stops the children too', {skip: process.platform === 'win32'}, async () => {
+test('version checks never treat a project script or modifying package command as a version flag', async () => {
+  const {allowedCommand} = await import('../src/tools/core/run-command.ts');
+  for (const command of ['node version', 'python version', 'python3 version', 'java version', 'dotnet version', 'yarn version', 'npm version', 'pnpm version', 'cargo version']) {
+    assert.equal(allowedCommand(command, process.cwd()), null, command);
+  }
+  for (const command of ['node --version', 'node -v', 'python --version', 'python3 -V', 'java -version', 'dotnet --version', 'yarn --version', 'go version', 'git version']) {
+    assert.ok(allowedCommand(command, process.cwd()), command);
+  }
+});
+
+test('direct commands keep metacharacters literal and refuse executable paths or inherited names', async t => {
   const {runShell} = await import('../src/tools/core/run-command.ts');
+  const fs = await import('node:fs'); const os = await import('node:os'); const path = await import('node:path');
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'girru-argv-')));
+  t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
+  const values = ['a b', '$(id)', '; echo injected', '& whoami', '"quoted"', '%PATH%'];
+  const r = await runShell(['node', '-e', 'console.log(JSON.stringify(process.argv.slice(1)))', '--', ...values], dir, 10_000);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(JSON.parse(r.out), values);
+  const raw = await runShell('node --version', dir, 10_000);
+  assert.equal(raw.code, null, 'the direct entry point never interprets a command string');
+  assert.match(raw.out, /executable is not allowed/);
+  for (const file of [process.execPath, './node', 'node.exe', 'cmd.exe', '/bin/sh', 'constructor', '__proto__']) {
+    const refused = await runShell([file, '--version'], dir, 10_000);
+    assert.equal(refused.code, null, file);
+    assert.match(refused.out, /executable is not allowed/);
+  }
+});
+
+test('allowed words start without a shell, and a timeout stops the children too', {skip: process.platform === 'win32'}, async () => {
+  const {runShell, runOwnerShell} = await import('../src/tools/core/run-command.ts');
   const fs = await import('node:fs'); const os = await import('node:os'); const path = await import('node:path');
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'girru-rc-')));
   try {
     const r = await runShell(['echo', '$(id)', '; rm x'], dir, 10_000);
     assert.equal(r.code, 0); assert.equal(r.out.trim(), '$(id) ; rm x', 'no shell: the words are printed as they are');
     const t0 = Date.now();
-    const slow = await runShell('sleep 30 & sleep 30', dir, 500);
+    const slow = await runOwnerShell('sleep 30 & sleep 30', dir, 500);
     assert.equal(slow.timedOut, true); assert.ok(Date.now() - t0 < 5000);
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 });
