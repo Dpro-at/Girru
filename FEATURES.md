@@ -93,6 +93,9 @@ Girru's memory is the centre of the system. You explain something once, and ever
 | **Memory server (MCP)** | Coding tools can read the brief, pinned facts and the latest handoff, search project memory, suggest new memories and leave handoff notes. | ✅ Built |
 | **Automatic connection** | Supported coding tools found on your computer are connected to the memory server. You can preview and undo this. | ✅ Built |
 | **Your text stays yours** | Girru writes only inside its own marked section and never changes your own text around it. | ✅ Built |
+| **Several tools at once** | Claude Code, Codex, Gemini CLI and Antigravity can read the same memory at the same time, each in its own program. Measured on this computer with three programs on one memory: searches stay about as fast as for one of them. | ✅ Built |
+| **No tool overwrites another** | When two tools edit the same memory from the same version, one is saved and the other is refused with the newer text, so neither loses the other's work. | ✅ Built |
+| **A handoff reaches the next tool** | A note one tool leaves is in the memory the next tool reads; a large memory makes the other programs wait for it, which is being worked on. | 🟡 Partly built |
 | **Kept out of Git** | Generated files can be hidden from Git automatically. | ✅ Built |
 | **Learn back from tools** | Notes you write in your coding tools' own memory files come back as suggestions for you to review. | ✅ Built |
 | **More tool files** | Cursor and GitHub Copilot get Girru's instructions and the memory server too. | ✅ Built |

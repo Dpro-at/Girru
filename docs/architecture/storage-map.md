@@ -127,6 +127,35 @@ The MCP server answers only for folders Girru knows as project folders, and only
 
 When Girru runs a coding app as a reply inside a chat, the app gets the agent's definition, a fixed memory pack and the conversation; it does not use the owner's own MCP settings.
 
+### Several tools on one memory
+
+Each tool is its own program with its own connection to the same SQLite file (WAL). Measured with
+`scripts/memory-baseline/agents.mjs`, which runs the real paths in separate processes:
+
+| | 3,000 memories | 100,000 memories |
+|---|---|---|
+| Searches a second, 1 program | 1,759 | 272 |
+| Searches a second, 3 programs | 4,118 | 499 |
+| Searches a second, 6 programs | — | 994 |
+| Search p50 / p95, 3 programs | 0.6 / 1.7 ms | 4.5 / 9.5 ms |
+| Search p50 while another saves | 1.4 ms | 4.9 ms |
+| Search p95 while another saves | 68 ms | **3,165 ms** |
+| A handoff becomes visible after | 0–16 ms | **1,645 ms** |
+| Three programs editing one memory | 1 saved, 2 refused | 1 saved, 2 refused |
+| One project's memory in another project's chat | 0 | 0 |
+
+Offline vectors, so these are about working together, not about embedding quality. Two numbers are the
+work left: while one program saves, the others' slowest searches and a handoff wait seconds at 100,000.
+The recall index of each program sees another program's write only through `PRAGMA data_version` (its
+change-capture triggers are TEMP, so per connection) and therefore drops and rebuilds everything. The
+fix is a change-log table each program reads by id; see
+[the gap analysis](../internal/MEMORY_GAP_ANALYSIS.md).
+
+Writes never race: the next version of a memory is claimed inside one transaction, and
+`UNIQUE(memory_id, version)` decides the winner, so an edit made against an older version is refused
+with the current text instead of overwriting it. No tool writes the database directly; everything goes
+through Girru.
+
 ## Sync status
 
 Today the generated copies are refreshed every 60 seconds. **Planned:** every change writes a change event in the same transaction as the record; a worker updates files, MCP answers and status from those events and resumes after a crash. Each project then shows, per file:
