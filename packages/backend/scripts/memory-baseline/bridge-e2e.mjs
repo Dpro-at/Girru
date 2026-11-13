@@ -84,8 +84,10 @@ await learn({
   });
 });
 
+// Every tool Girru serves without a switch of its own (cursor and copilot need GIRRU_STORE_P7).
+const CLIENTS = ['claude-code', 'codex', 'gemini-cli', 'antigravity'];
 // The owner switches each coding tool on (off by default, as in the app).
-for (const cl of ['claude-code', 'codex']) await setClient(OWNER, cl, true);
+for (const cl of CLIENTS) await setClient(OWNER, cl, true);
 
 const app = await buildServer({ logger: false });
 await app.ready();
@@ -132,11 +134,17 @@ async function tool(client) {
   };
 }
 
-let claude = null, codex = null;
+const open = [];
 try {
-  claude = await tool('claude-code');
+  // Every tool, each in its own OS process, all on the one memory.
+  for (const cl of CLIENTS) {
+    const t = await tool(cl);
+    open.push(t);
+    const names = await t.list();
+    check(`${cl} connects to the dpro-memory server in its own process`, names.length > 0, `${names.length} tools`);
+  }
+  const [claude, codex] = open;
   const tools = await claude.list();
-  check('Claude Code connects to the dpro-memory server in its own process', tools.length > 0, `${tools.length} tools: ${tools.join(', ')}`);
   // The one memory contract (P6) renames the write tools to verbs; take whichever this build serves.
   const RECALL = tools.includes('memory_recall') ? 'memory_recall' : 'memory_search';
   const HANDOFF = tools.includes('memory_handoff') ? 'memory_handoff' : 'handoff_write';
@@ -152,10 +160,11 @@ try {
   const wrote = await claude.call(HANDOFF, { done: ['the export fix'], left: ['the retry limit'], next: ['the invoice totals'], questions: [] });
   check('handoff_write accepts a note from Claude Code', !wrote.isError, said(wrote));
 
-  // The other tool, a second OS process on the same SQLite file.
-  codex = await tool('codex');
-  const read = await codex.call('latest_handoff');
-  check('Codex reads that handoff at once, in another process', !read.isError && /export fix/i.test(read.text), said(read));
+  // Every other tool, each its own OS process on the same SQLite file, reads that handoff.
+  for (const other of open.slice(1)) {
+    const read = await other.call('latest_handoff');
+    check(`${other.client} reads that handoff at once, in another process`, !read.isError && /export fix/i.test(read.text), said(read));
+  }
 
   const codexFound = await codex.call(RECALL, { query: 'why did we move off MariaDB' });
   check('Codex finds the same memory', !codexFound.isError && /window functions/i.test(codexFound.text), said(codexFound));
@@ -180,7 +189,7 @@ try {
   check('the run finished', false, String(err?.message ?? err).slice(0, 300));
   if (err?.stack) log(err.stack.split('\n').slice(0, 6).join('\n'));
 } finally {
-  await claude?.close(); await codex?.close();
+  for (const t of open) await t.close();
   await app.close().catch(() => {});
   process.chdir(backendDir);
   try { rmSync(dir, { recursive: true, force: true }); } catch { log(`left behind    ${dir}`); }
