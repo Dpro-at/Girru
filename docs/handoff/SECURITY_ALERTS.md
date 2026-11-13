@@ -1,4 +1,4 @@
-# GitHub security alerts — 13 November 2026
+# GitHub security alerts — completed 14 November 2026
 
 Owner: Codex, assigned by Mohamed in the security chat. Codex handles the fixes and checks; the phone/build agent continues the phone handoff and does not need to duplicate this work.
 
@@ -39,4 +39,22 @@ Pull request: [#215 — Fix GitHub security alerts in dependencies and local exe
 
 During this work, PR #213 reached main (`643bec79`) with the same `@hono/node-server` 2.1.8 update from commit `9010d05b`, closing Dependabot #192–193 independently. Main was merged into this branch without conflicts. The remaining dependency change in this PR is `hono` 4.13.18; preserve the memory work already on main.
 
-Local checks passed; GitHub CodeQL and CI are running on the pull request. Follow its live checks before merging. Alerts remain open on the default branch until corrected source is merged and GitHub confirms the new analysis. No alert has been dismissed or scan disabled.
+All checks on PR head `8c55e84f` passed, including the full [Type-check and test suites workflow](https://github.com/Dpro-at/Girru/actions/runs/43515429554), Windows/macOS portability, and [Security Scanning](https://github.com/Dpro-at/Girru/actions/runs/43515431758). CodeQL reported zero findings.
+
+Mohamed authorized merging after successful checks. PR #215 was merged on 14 November 2026 (Europe/Vienna), at commit `6d22682da71989513282d8653dc12cf8f2d7e28e`. Its tree is identical to the tested PR head.
+
+Post-merge [Security Scanning on main](https://github.com/Dpro-at/Girru/actions/runs/43524075508) succeeded, including dependency audits, resolved dependency graph submission, secret detection and CodeQL. CodeQL analysis `2165176982` scanned merge commit `6d22682d` without errors or warnings.
+
+Verified through GitHub on 14 November 2026, 00:08 CET:
+
+| Security category | Open alerts |
+| --- | ---: |
+| Dependabot | 0 |
+| Code scanning (all branches) | 0 |
+| Secret scanning | 0 |
+
+Dependabot #192–198 and CodeQL #632–635 are all `fixed`. The four CodeQL alerts were fixed at 23:08:01 UTC on 13 November (00:08:01 CET on 14 November). None was dismissed; no security workflow or rule was disabled. Historical dismissed findings are not new open alerts.
+
+The automatic [post-merge general test rerun](https://github.com/Dpro-at/Girru/actions/runs/43524075485) was still running at this checkpoint. The full pre-merge test suite already passed on the identical source tree. This final handoff changes documentation only.
+
+Security task complete. The phone/build agent can continue its existing tasks without repeating this investigation.
