@@ -57,7 +57,12 @@ const GIT_FLAGS: Record<string, string[]> = {
   fetch: ['--all', '--prune', '-p', '--tags', '--dry-run'], pull: ['--ff-only', '--no-rebase'], 'ls-remote': ['--heads', '--tags'],
   remote: ['-v'], branch: ['-a', '-r', '-v', '-vv', '--show-current', '--list'], tag: ['-l', '--list'], stash: [],
 };
-const VERSION_ONLY = new Set(['node', 'npm', 'pnpm', 'yarn', 'python', 'python3', 'go', 'cargo', 'java', 'dotnet', 'git']);
+// "version" is executable input to Node/Python/Java, and a modifying subcommand in some package managers.
+const VERSION_FLAGS: Readonly<Record<string, readonly string[]>> = {
+  node: ['--version', '-v'], npm: ['--version', '-v'], pnpm: ['--version', '-v'], yarn: ['--version', '-v'],
+  python: ['--version', '-V'], python3: ['--version', '-V'], go: ['version'], cargo: ['--version', '-V'],
+  java: ['--version', '-version'], dotnet: ['--version'], git: ['--version', 'version'],
+};
 // Resolve to fixed executable names, never an executable path supplied in a request.
 const EXECUTABLES: Readonly<Record<string, string>> = Object.freeze({
   echo: 'echo', git: 'git', ls: 'ls', cat: 'cat', wc: 'wc', pwd: 'pwd', date: 'date', whoami: 'whoami',
@@ -118,7 +123,7 @@ export function allowedCommand(command: string, cwd: string, remotes: (cwd: stri
   const words = splitCommand(command);
   if (!words) return null;
   const [cmd, ...args] = words;
-  if (VERSION_ONLY.has(cmd) && args.length === 1 && ['--version', '-v', 'version'].includes(args[0])) return words;
+  if (Object.hasOwn(VERSION_FLAGS, cmd) && args.length === 1 && VERSION_FLAGS[cmd].includes(args[0])) return words;
   if (cmd === 'echo') return args.some(a => a.startsWith('-')) ? null : words;
   if (cmd !== 'git') {
     const rest = Object.hasOwn(FLAGS, cmd) ? checkFlags(args, FLAGS[cmd]) : null;

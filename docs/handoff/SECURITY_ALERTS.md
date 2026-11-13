@@ -16,7 +16,7 @@ Repository: `Dpro-at/Girru`. Base: `6b6dbf57b158c9db7419c73f7ca4c09638ad9316`. B
 ## Implemented fixes
 
 - Updated the backend lockfile to `hono` 4.13.18 and `@hono/node-server` 2.1.8. Both exceed the advisory patch floors without changing the MCP SDK contract.
-- Direct commands resolve executable names through a fixed allowlist and explicitly use literal argv on Windows. Owner-approved shell execution remains a separate branch; the existing approval ticket flow is preserved.
+- Direct commands resolve executable names through a fixed allowlist and explicitly use literal argv on Windows. Version probes use program-specific flags: `node version` and similar script/modifying invocations now require approval. Owner-approved shell execution remains a separate branch; the existing approval ticket flow is preserved.
 - Project folder selection uses the same `checkFolder` validation as project persistence: absolute paths only, existing directories, no whole disk/home. Native canonical paths also fix duplicate project creation for Windows short/long path spellings. Owner authentication and explicit confirmation remain required.
 - Google installed-client import opens once, checks the descriptor and current pathname before reading, and rejects links, replaced files and oversized data. Nonblocking open prevents FIFOs hanging the importer on POSIX.
 
@@ -24,7 +24,7 @@ Repository: `Dpro-at/Girru`. Base: `6b6dbf57b158c9db7419c73f7ca4c09638ad9316`. B
 
 Windows, Node 24.2.0:
 
-- Backend `run-command`, `agent-command-route`, and `device-project-folder`: 11 passed, 1 POSIX-only timeout test skipped.
+- Backend `run-command`, `agent-command-route`, and `device-project-folder`: 12 passed, 1 POSIX-only timeout test skipped.
 - Desktop `google-client-config`: 9 passed.
 - Dependency graph projection: 3 passed.
 - Backend `tsc --noEmit -p .`: passed.

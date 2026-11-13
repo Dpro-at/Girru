@@ -20,6 +20,16 @@ test('CP15: without the owner switch the command tool refuses', async () => {
   assert.equal(r.error, 'agent_commands_off');
 });
 
+test('version checks never treat a project script or modifying package command as a version flag', async () => {
+  const {allowedCommand} = await import('../src/tools/core/run-command.ts');
+  for (const command of ['node version', 'python version', 'python3 version', 'java version', 'dotnet version', 'yarn version', 'npm version', 'pnpm version', 'cargo version']) {
+    assert.equal(allowedCommand(command, process.cwd()), null, command);
+  }
+  for (const command of ['node --version', 'node -v', 'python --version', 'python3 -V', 'java -version', 'dotnet --version', 'yarn --version', 'go version', 'git version']) {
+    assert.ok(allowedCommand(command, process.cwd()), command);
+  }
+});
+
 test('direct commands keep metacharacters literal and refuse executable paths or inherited names', async t => {
   const {runShell} = await import('../src/tools/core/run-command.ts');
   const fs = await import('node:fs'); const os = await import('node:os'); const path = await import('node:path');
