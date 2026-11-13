@@ -123,5 +123,24 @@ Findings worth keeping:
 - `save-profile.mjs` — where one save spends its time at a given size.
 - `accuracy.mjs --pack` + `pack-diff.mjs` + `pack-score.mjs` — the two-level test: what a chat would send a model, the questions where a change altered recall, and a mechanical score of any model's answers. Girru's own score is recall; a local model's answers are a secondary signal.
 
-### Open, measured but not fixed
-**One agent's write rebuilds every other agent's index.** `recall-store.ts` sees another connection's write only through `PRAGMA data_version` (its change-capture triggers are TEMP, so per connection) and drops every owner's store. At 100,000 memories that is read p95 3,165 ms while another agent saves, and 1,645 ms for a handoff to become visible. The fix discussed: a small change-log table (autoincrement id, owner, memory id) with each process remembering the last id it applied, so another process's writes are applied by id. The same gap exists for PostgreSQL (item 18).
+### MEM-CONC-03: the change log (fixed)
+One agent's write used to rebuild every other agent's index: the change capture is TEMP, so another
+connection's write was visible only as `PRAGMA data_version` moving. Triggers in the database now
+append the owner and id of every write, and each process re-reads only those rows by primary key.
+Paired runs at 100,000 memories, log off then on, back to back on one machine:
+
+| | Off | On |
+|---|---|---|
+| Search p95 while another saves | 3,503 ms | **18.8 ms** |
+| A handoff becomes visible after | 2,277 ms | **0 ms** |
+| Memories saved in 8 s meanwhile | 1,527 | **2,260** |
+| Search p50 while another saves | 6.5 ms | 11.1 ms |
+| Searching alone | same either way (within this machine's drift) | |
+
+The median search during a save rises because the readers now apply those writes instead of ignoring
+them until a rebuild. Switch: `GIRRU_RECALL_CHANGELOG=0`. Rows older than an hour are pruned, at most
+every five minutes; a process idle longer rebuilds, as before. The log holds ids only, never memory
+text, and the index still never goes to disk.
+
+**Still open:** the same mechanism for PostgreSQL (item 18) — its search uses the older in-process path
+and has no change capture at all.
