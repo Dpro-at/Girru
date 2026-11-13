@@ -85,3 +85,24 @@ test('the log never holds memory text, only ids', () => {
   assert.equal(all.includes('staging password'), false);
   assert.equal(all.includes('Ingrid'), false);
 });
+
+test('a database carrying the older delete trigger is repaired, and its rows are dropped', async () => {
+  const { forgetRecallStore } = await import(mod('src/memory/recall-store.ts'));
+  // Put a database into the state it would have had between the change log landing and the fix:
+  // a delete trigger that writes OLD.id, and a log row naming a memory that is now forgotten.
+  db.exec(`DROP TRIGGER IF EXISTS girru_recall_log_del;
+    CREATE TRIGGER girru_recall_log_del AFTER DELETE ON memories BEGIN
+      INSERT INTO memory_recall_changes (user_id, memory_id, at) VALUES (OLD.user_id, OLD.id, 1);
+    END;`);
+  await save('mem-old-trigger', 'Alpha project: a note that will be deleted.');
+  db.prepare('DELETE FROM memories WHERE id = ?').run('mem-old-trigger');
+  assert.ok(logRows().some((r) => r.memory_id === 'mem-old-trigger'), 'the old trigger did leak the id');
+
+  // The next search runs ready(), which must notice the trigger is not ours and repair it.
+  forgetRecallStore();
+  await storage.search({ query: 'a note', userId: OWNER, drawers: D.selectDrawers({ audience: 'owner', project: 'alpha' }), limit: 3 });
+
+  const sql = db.prepare(`SELECT sql FROM sqlite_master WHERE type='trigger' AND name='girru_recall_log_del'`).get().sql;
+  assert.ok(sql.includes("'-'"), 'the delete trigger is ours again (no id)');
+  assert.equal(logRows().filter((r) => r.memory_id === 'mem-old-trigger').length, 0, 'and the leaked row is gone');
+});

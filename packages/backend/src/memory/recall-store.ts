@@ -227,8 +227,23 @@ const DELETED_SENTINEL = '-';
 /** GIRRU_RECALL_CHANGELOG=0: no log; another connection's write drops every store, as before. */
 const logEnabled = (): boolean => process.env.GIRRU_RECALL_CHANGELOG !== '0';
 
-/** Create the log and its triggers when they are missing (any connection may be the first). */
+/**
+ * Create the log and its triggers when they are missing, and REPLACE them when their body is not the
+ * one below. `CREATE TRIGGER IF NOT EXISTS` would keep an older trigger: a database made while the
+ * delete trigger still wrote `OLD.id` would go on recording forgotten ids for good. When that is what
+ * we find, every row in the log goes too — the log is only a note of recent changes, so emptying it is
+ * always safe (each process reads the database again), and it is the only way to be sure no id written
+ * by the old trigger is left behind.
+ */
 function ensureLog(db: any): void {
+  const del = db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'girru_recall_log_del'`).get() as { sql?: string } | undefined;
+  const outdated = !!del?.sql && !del.sql.includes(`'${DELETED_SENTINEL}'`);
+  if (outdated) {
+    for (const t of LOG_TRIGGERS) db.exec(`DROP TRIGGER IF EXISTS ${t};`);
+    db.exec(`DELETE FROM ${LOG_TABLE};`); // may hold ids of memories already forgotten
+    forgetRecallStore();
+    lastChangeSeq = null;
+  }
   db.exec(`
     CREATE TABLE IF NOT EXISTS ${LOG_TABLE} (
       seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -292,19 +307,15 @@ function ready(): boolean {
       logReady = false;
       lastPruneAt = Date.now(); // the first prune is due after PRUNE_EVERY_MS, not at start-up
     }
-    // MEM-CONC-03: the shared change log, checked once per connection (a search must not pay for a
-    // sqlite_master lookup). If it is dropped later, applyLog throws and the catch below rebuilds it.
-    if (!logReady && logEnabled()) {
-      const logs = (db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE (type = 'table' AND name = ?) OR (type = 'trigger' AND name IN (${LOG_TRIGGERS.map(() => '?').join(', ')}))`).get(LOG_TABLE, ...LOG_TRIGGERS) as { n: number }).n;
-      if (logs !== LOG_TRIGGERS.length + 1) {
-        ensureLog(db);
-        forgetRecallStore(); // writes made before the log existed were not recorded
-        lastChangeSeq = null;
-      }
-      logReady = true;
-    }
-    if (logEnabled() && lastChangeSeq === null) lastChangeSeq = ((db.prepare(`SELECT MAX(seq) AS s FROM ${LOG_TABLE}`).get() as { s: number | null }).s) ?? 0;
-    const n = (db.prepare(`SELECT COUNT(*) AS n FROM temp.sqlite_master WHERE type = 'trigger' AND name IN (${TRIGGERS.map(() => '?').join(', ')})`).get(...TRIGGERS) as { n: number }).n;
+    // The same query also answers whether the log's delete trigger is the one below (MEM-CONC-03): a
+    // database made before that fix keeps a trigger writing OLD.id, and would record forgotten ids for
+    // good. Checked on every call because it costs nothing here, not once per connection.
+    const row = db.prepare(`SELECT
+        (SELECT COUNT(*) FROM temp.sqlite_master WHERE type = 'trigger' AND name IN (${TRIGGERS.map(() => '?').join(', ')})) AS n,
+        (SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name = 'girru_recall_log_del' AND sql LIKE ?) AS ours`)
+      .get(...TRIGGERS, `%'${DELETED_SENTINEL}'%`) as { n: number; ours: number };
+    const n = row.n;
+    if (logReady && row.ours === 0) { logReady = false; } // missing or outdated: ensureLog repairs it below
     if (n !== TRIGGERS.length) {
       db.exec(`
         DROP TRIGGER IF EXISTS temp.girru_recall_ins;
@@ -315,6 +326,18 @@ function ready(): boolean {
         CREATE TEMP TRIGGER girru_recall_del AFTER DELETE ON main.memories BEGIN SELECT girru_recall_changed(OLD.user_id, OLD.id); END;`);
       forgetRecallStore(); // changes before the triggers were (back) in place were not seen
     }
+    // MEM-CONC-03: the shared change log. The table and its triggers are made (or repaired) by
+    // whichever connection finds them missing or outdated.
+    if (!logReady && logEnabled()) {
+      const logs = (db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE (type = 'table' AND name = ?) OR (type = 'trigger' AND name IN (${LOG_TRIGGERS.map(() => '?').join(', ')}))`).get(LOG_TABLE, ...LOG_TRIGGERS) as { n: number }).n;
+      if (logs !== LOG_TRIGGERS.length + 1 || row.ours === 0) {
+        ensureLog(db);
+        forgetRecallStore(); // writes made before the log existed were not recorded
+        lastChangeSeq = null;
+      }
+      logReady = true;
+    }
+    if (logEnabled() && lastChangeSeq === null) lastChangeSeq = ((db.prepare(`SELECT MAX(seq) AS s FROM ${LOG_TABLE}`).get() as { s: number | null }).s) ?? 0;
     // MEM-CONC-03: another connection wrote (data_version only moves for other connections). Its ids
     // come from the log and are re-read like our own; only a pruned-away position forces a rebuild.
     const v = Number(db.pragma('data_version', { simple: true }));
