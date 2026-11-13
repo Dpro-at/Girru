@@ -58,11 +58,11 @@ async function load(ownerId: string): Promise<OwnerEntities> {
 }
 
 /** The known entities of an owner and the names of the open project (when the chat has one). */
-export async function contextEntities(ownerId: string, openProjectSlug: string | null): Promise<{ entities: KnownEntity[]; openProject: KnownEntity | null }> {
+export async function contextEntities(ownerId: string, openProjectSlug: string | null): Promise<{ entities: KnownEntity[]; openProject: KnownEntity | null; projects: Array<{ slug: string; names: string[] }> }> {
   let e = cache.get(ownerId);
   if (!e || Date.now() - e.at > ENTITY_TTL_MS) { e = await load(ownerId); cache.set(ownerId, e); }
   const open = openProjectSlug ? (e.projects.get(openProjectSlug) ?? { names: namesOf([openProjectSlug.replace(/-/g, ' ')]) }) : null;
-  return { entities: e.all, openProject: open && open.names.length ? open : null };
+  return { entities: e.all, openProject: open && open.names.length ? open : null, projects: [...e.projects].map(([slug, p]) => ({ slug, names: [...p.names] })) };
 }
 
 /**
