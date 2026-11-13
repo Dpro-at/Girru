@@ -107,6 +107,7 @@ Memory is the core of Girru. Every agent, chat and coding tool works from the sa
 - 🔍 **Finds the right thing.** Search combines keywords with meaning and understands Arabic, including dialect. A knowledge graph links people, projects and topics.
 - 🧑‍⚖️ **Learns with your approval.** Routine facts are saved on their own; important ones wait for you. Contradictions are flagged, every change is versioned, and deleted memories go to a Trash you can restore from.
 - 🧾 **Shows its sources.** Each reply records which memories it used and why.
+- ⚡ **Fast at any size.** Search stays quick as memory grows: 1 million memories answered in 36 ms on a Mac (Apple M6) and 90 ms on a Windows PC, down from 32.6 s, with the same results. Measured locally, query embedding included; the first search after a start builds the index (about a minute at 1 million). 10 million is measured too (0.27 s on the PC).
 - 🤝 **Hands work over.** When a chat or task ends, a short handoff note (done, left, next) lets the next agent continue.
 - 💻 **One memory for your coding tools.** One project brief reaches Claude Code, Codex and Antigravity together, through `AGENTS.md` and a memory server (MCP). Girru writes only inside its own marked section.
 - 📥 **Brings in what you have.** Import past coding conversations and project documents. Secrets are hidden first, and you review before anything is kept.

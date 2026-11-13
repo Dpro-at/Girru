@@ -15,7 +15,7 @@
 // Claude / OpenAI tokenizers are not available offline: chars/3 (the app's
 // estimateTokens) and chars/4 are reported as ESTIMATES.
 // Run from packages/backend: node --import tsx scripts/memory-baseline/tokens.mjs [--out f.json]
-import { backendDir, dataRoot, addUser, argValue, cleanup, ollamaHas, openDb, quietly, realFetch, OLLAMA } from './env.mjs';
+import { backendDir, moduleUrl, dataRoot, addUser, argValue, cleanup, ollamaHas, openDb, quietly, realFetch, OLLAMA } from './env.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { syntheticMemories } from './corpus.mjs';
@@ -70,11 +70,11 @@ async function measure(parts) {
 }
 
 // --- Synthetic company -----------------------------------------------------
-const { resolveAgentContext } = await import(join(backendDir, 'src/services/agent-context/resolve.ts'));
+const { resolveAgentContext } = await import(moduleUrl(backendDir, 'src/services/agent-context/resolve.ts'));
 const { db, closeDatabase } = await openDb();
-const { getCredentialStorage } = await import(join(backendDir, 'src/credentials/storage.ts'));
+const { getCredentialStorage } = await import(moduleUrl(backendDir, 'src/credentials/storage.ts'));
 await quietly(() => getCredentialStorage().initialize());
-const { getOrchestrator } = await import(join(backendDir, 'src/multi-agent/index.ts'));
+const { getOrchestrator } = await import(moduleUrl(backendDir, 'src/multi-agent/index.ts'));
 await quietly(() => getOrchestrator().initialize(join(dataRoot, '.data', 'multi-agent', 'orchestrator.db')));
 const OWNER = 'p0-owner';
 addUser(db, OWNER, 'owner');
@@ -85,10 +85,10 @@ Work in small steps, explain trade-offs briefly, test before you say something i
 Write code and comments in English; reply to the owner in simple Arabic unless asked otherwise. Never put keys, passwords or tokens in replies or memory.`;
 db.prepare(`INSERT INTO agents_config (id, name, provider, model, is_primary, system_prompt) VALUES (?, 'Rafid', 'ollama', 'qwen3:4b', 1, ?)`).run(AGENT, HIRED);
 
-const { addStarterRules } = await import(join(backendDir, 'src/services/agent-rules.ts'));
+const { addStarterRules } = await import(moduleUrl(backendDir, 'src/services/agent-rules.ts'));
 const rules = await quietly(() => addStarterRules(OWNER));
 
-const { centralSkills } = await import(join(backendDir, 'src/skills/central-store.ts'));
+const { centralSkills } = await import(moduleUrl(backendDir, 'src/skills/central-store.ts'));
 const skillDoc = (name, topic) => `---\nname: ${name}\ndescription: How we handle ${topic} in client projects.\n---\n\n# ${name}\n\n` +
   Array.from({ length: 14 }, (_, i) => `## Step ${i + 1}\nWhen working on ${topic}, check the project notes first, follow the house style, keep changes small and reversible, write a short test, and record the decision with its reason. Prefer boring, well-known tools. Ask the owner before anything that costs money or touches production data.\n`).join('\n');
 const skillIds = [];
@@ -102,8 +102,8 @@ await quietly(() => centralSkills().assign(AGENT, skillIds.filter(Boolean), revi
 const insert = db.prepare(`INSERT INTO memories (id, user_id, type, content, embedding, embedding_model, embedding_dims,
   memory_layer, status, metadata, importance_score, created_at, access_count, drawer_kind, drawer_key)
   VALUES (?, ?, ?, ?, ?, 'hash-v2', 256, 'factual', 'active', '{}', ?, ?, 0, ?, ?)`);
-const { hashEmbed } = await import(join(backendDir, 'src/memory/embedding.ts'));
-const { normalizeMemoryText } = await import(join(backendDir, 'src/memory/text-normalize.ts'));
+const { hashEmbed } = await import(moduleUrl(backendDir, 'src/memory/embedding.ts'));
+const { normalizeMemoryText } = await import(moduleUrl(backendDir, 'src/memory/text-normalize.ts'));
 let n = 0;
 db.transaction(() => {
   for (const m of syntheticMemories(3000, 5)) {
@@ -111,7 +111,7 @@ db.transaction(() => {
     insert.run(`m-${n++}`, OWNER, m.type, m.content, JSON.stringify(hashEmbed(normalizeMemoryText(m.content))), imp, m.createdAt, m.drawerKind, m.drawerKey);
   }
 });
-const { addPinnedFact, parsePinnedScope } = await import(join(backendDir, 'src/memory/scopes/pinned.ts'));
+const { addPinnedFact, parsePinnedScope } = await import(moduleUrl(backendDir, 'src/memory/scopes/pinned.ts'));
 for (const [scope, text] of [
   ['company', 'We are a small software company in Vienna; clients are small businesses in Austria and Iraq.'],
   ['company', 'Never send client data to a cloud service without the owner saying yes.'],
@@ -120,10 +120,10 @@ for (const [scope, text] of [
   ['project:alpha', 'Alpha targets Windows 11 and macOS 15.'],
 ]) await quietly(() => addPinnedFact(OWNER, parsePinnedScope(scope), text, OWNER));
 
-const { createProject } = await import(join(backendDir, 'src/repositories/chat-conversations.ts'));
+const { createProject } = await import(moduleUrl(backendDir, 'src/repositories/chat-conversations.ts'));
 const alphaProjectId = (await createProject(OWNER, { name: 'alpha' })).id;
-const { generateToken } = await import(join(backendDir, 'src/auth/jwt.ts'));
-const { buildServer } = await import(join(backendDir, 'src/api/app.ts'));
+const { generateToken } = await import(moduleUrl(backendDir, 'src/auth/jwt.ts'));
+const { buildServer } = await import(moduleUrl(backendDir, 'src/api/app.ts'));
 const app = await quietly(() => buildServer({ logger: false }));
 await quietly(() => app.ready());
 const auth = { authorization: `Bearer ${generateToken(OWNER, 1)}` };
@@ -151,7 +151,7 @@ const chatRes = await quietly(() => app.inject({ method: 'POST', url: '/api/chat
 if (!captured.length) throw new Error(`chat made no model call: ${chatRes.statusCode} ${chatRes.body.slice(0, 300)}`);
 const chatBody = captured[0];
 const has = (body, text) => JSON.stringify(body.messages || []).includes(text);
-const { rulesContext } = await import(join(backendDir, 'src/services/agent-rules.ts'));
+const { rulesContext } = await import(moduleUrl(backendDir, 'src/services/agent-rules.ts'));
 const ruleLine = (await quietly(() => rulesContext(AGENT, {}))).split('\n').find((l) => /^\s*[-*\d]/.test(l) && l.trim().length > 20) ?? '\u0000';
 const MARK = { hired: 'Your specialty is backend engineering', rules: ruleLine.trim().slice(0, 40), pinned: 'small software company in Vienna' };
 report.ruleMarker = MARK.rules;
@@ -166,7 +166,7 @@ report.entryPoints.chat = { status: chatRes.statusCode, modelCalls: captured.len
 }
 
 // 2. Channel turn (outside sender, as plugins/sdk.ts sends it).
-const { beginChannelTurn, CHANNEL_TURN_HEADER } = await import(join(backendDir, 'src/tools/channel-policy.ts'));
+const { beginChannelTurn, CHANNEL_TURN_HEADER } = await import(moduleUrl(backendDir, 'src/tools/channel-policy.ts'));
 captured.length = 0;
 const turn = beginChannelTurn({ channel: 'telegram', conversationId: 'p0-tg-1', allowedDestinations: [] }, OWNER);
 const chRes = await quietly(() => app.inject({ method: 'POST', url: '/api/chat',
@@ -180,14 +180,14 @@ report.entryPoints.channel = captured.length
   : { status: chRes.statusCode, error: chRes.body.slice(0, 300) };
 
 // 3. Task run, rebuilt from task-run-executor.ts:369-400 with the same functions.
-const { agentSkillsPrompt } = await import(join(backendDir, 'src/skills/central-store.ts'));
-const { HANDOFF_NOTE } = await import(join(backendDir, 'src/memory/handoff/store.ts'));
-const { createAgentToolsRegistry } = await import(join(backendDir, 'src/tools/index.ts'));
-const { taskRunPinnedFacts } = await import(join(backendDir, 'src/memory/scopes/task-facts.ts'));
-const { toolMemoryDrawers } = await import(join(backendDir, 'src/tools/memory/scope.ts'));
+const { agentSkillsPrompt } = await import(moduleUrl(backendDir, 'src/skills/central-store.ts'));
+const { HANDOFF_NOTE } = await import(moduleUrl(backendDir, 'src/memory/handoff/store.ts'));
+const { createAgentToolsRegistry } = await import(moduleUrl(backendDir, 'src/tools/index.ts'));
+const { taskRunPinnedFacts } = await import(moduleUrl(backendDir, 'src/memory/scopes/task-facts.ts'));
+const { toolMemoryDrawers } = await import(moduleUrl(backendDir, 'src/tools/memory/scope.ts'));
 const taskRegistry = await quietly(() => createAgentToolsRegistry({ userId: AGENT, accessOwnerId: OWNER, sessionId: 'cron-p0-task', workspaceDir: dataRoot, agentId: AGENT, taskId: 'p0-task' }));
 // The executor's own base prompt (today's builder, or the resolved context with GIRRU_STORE_P2 on).
-const { taskRunBasePrompt } = await import(join(backendDir, 'src/services/task-run-executor.ts'));
+const { taskRunBasePrompt } = await import(moduleUrl(backendDir, 'src/services/task-run-executor.ts'));
 let taskSystem = (await quietly(() => taskRunBasePrompt({ id: AGENT, name: 'Rafid', system_prompt: HIRED }, { user_id: OWNER }))) + `\n\n${HANDOFF_NOTE}`;
 const facts = await quietly(() => taskRunPinnedFacts({ ownerId: OWNER, agentId: AGENT, taskId: 'p0-task', delegatedFrom: [], drawers: toolMemoryDrawers(taskRegistry.getContext()), drawersNarrowed: false })).catch(() => '');
 if (facts) taskSystem += `\n\n${facts}`;
@@ -197,12 +197,12 @@ report.entryPoints.taskRun = { reconstructed: 'task-run-executor.ts:369-400', to
 
 // 3a. STORE-MAP-01 P2b: the same task run on the local model as the executor builds it with P2b on
 // (tools on demand, the model's window from the local Ollama capped by CHAT_NUM_CTX, the memory rule).
-const { storeP2bEnabled } = await import(join(backendDir, 'src/services/store-p2b.ts'));
+const { storeP2bEnabled } = await import(moduleUrl(backendDir, 'src/services/store-p2b.ts'));
 if (storeP2bEnabled()) {
-  const { localModelWindow, NO_INVENTED_MEMORY } = await import(join(backendDir, 'src/services/local-turn.ts'));
-  const { planLocalBudget } = await import(join(backendDir, 'src/memory/context/local-budget.ts'));
-  const { OnDemandTools } = await import(join(backendDir, 'src/tools/on-demand.ts'));
-  const { capTokens: cap } = await import(join(backendDir, 'src/services/agent-context/budget.ts'));
+  const { localModelWindow, NO_INVENTED_MEMORY } = await import(moduleUrl(backendDir, 'src/services/local-turn.ts'));
+  const { planLocalBudget } = await import(moduleUrl(backendDir, 'src/memory/context/local-budget.ts'));
+  const { OnDemandTools } = await import(moduleUrl(backendDir, 'src/tools/on-demand.ts'));
+  const { capTokens: cap } = await import(moduleUrl(backendDir, 'src/services/agent-context/budget.ts'));
   const w = await localModelWindow('ollama', 'qwen3:4b');
   const b = planLocalBudget(w.tokens);
   const od = new OnDemandTools(taskRegistry.getToolsForAPI(), b.tier, { fitTokens: b.tools });
@@ -214,7 +214,7 @@ if (storeP2bEnabled()) {
 
 // 3b. Task run of the storage pilot agent (resolved context, CX6): same tools, the one resolved
 // context instead of the old builder, plus the executor's handoff note and narrowed pinned facts.
-const { renderSystemPrompt } = await import(join(backendDir, 'src/services/agent-context/render.ts'));
+const { renderSystemPrompt } = await import(moduleUrl(backendDir, 'src/services/agent-context/render.ts'));
 let pilotTask = renderSystemPrompt(await quietly(() => resolveAgentContext({ agentId: AGENT, entry: 'task', ownerId: OWNER, projectId: null }))) + `\n\n${HANDOFF_NOTE}`;
 if (facts) pilotTask += `\n\n${facts}`;
 report.entryPoints.taskRunPilot = { resolved: 'services/agent-context (STORE-MAP-01 pilot)', tools: taskRegistry.getToolsForAPI().length,
@@ -222,15 +222,15 @@ report.entryPoints.taskRunPilot = { resolved: 'services/agent-context (STORE-MAP
   ...(await measure({ system: pilotTask, conversation: `user: Task: ${QUESTION}`, toolSchemas: JSON.stringify(taskRegistry.getToolsForAPI()) })) };
 
 // 4. Coding app (subscription) reply, as the chat.ts subscription branch builds it.
-const { subscriptionAgentContext, subscriptionReplyPrompt } = await import(join(backendDir, 'src/services/subscription-agent-context.ts'));
-const { subscriptionToolLoop } = await import(join(backendDir, 'src/services/subscription-tool-loop.ts'));
-const { contextPack } = await import(join(backendDir, 'src/memory/context/pack.ts'));
-const D = await import(join(backendDir, 'src/memory/drawers.ts'));
+const { subscriptionAgentContext, subscriptionReplyPrompt } = await import(moduleUrl(backendDir, 'src/services/subscription-agent-context.ts'));
+const { subscriptionToolLoop } = await import(moduleUrl(backendDir, 'src/services/subscription-tool-loop.ts'));
+const { contextPack } = await import(moduleUrl(backendDir, 'src/memory/context/pack.ts'));
+const D = await import(moduleUrl(backendDir, 'src/memory/drawers.ts'));
 const drawers = D.selectDrawers({ audience: 'owner', project: 'alpha' });
 // As chat.ts builds it: GIRRU_STORE_P2 on = the resolved context, its data part and a token budget.
-const { storeP2Enabled } = await import(join(backendDir, 'src/services/agent-context/switch.ts'));
-const { renderCodingAppInstructions, renderMemoryData } = await import(join(backendDir, 'src/services/agent-context/render.ts'));
-const { capTokens, CODING_APP_MEMORY_TOKENS } = await import(join(backendDir, 'src/services/agent-context/budget.ts'));
+const { storeP2Enabled } = await import(moduleUrl(backendDir, 'src/services/agent-context/switch.ts'));
+const { renderCodingAppInstructions, renderMemoryData } = await import(moduleUrl(backendDir, 'src/services/agent-context/render.ts'));
+const { capTokens, CODING_APP_MEMORY_TOKENS } = await import(moduleUrl(backendDir, 'src/services/agent-context/budget.ts'));
 const p2Ctx = storeP2Enabled() ? await quietly(() => resolveAgentContext({ agentId: AGENT, entry: 'coding_app', ownerId: OWNER, projectId: alphaProjectId })) : null;
 const context = p2Ctx ? renderCodingAppInstructions(p2Ctx) : await quietly(() => subscriptionAgentContext(AGENT, { sessionId: 'p0-session-sub' }));
 let pack = (await quietly(() => contextPack({ userId: OWNER, agentId: AGENT, drawers, persona: '', scopeFacts: null, handoff: null }))).text.trim();
@@ -243,7 +243,7 @@ const subRegistry = await quietly(() => createAgentToolsRegistry({ userId: OWNER
 let firstPrompt = '';
 // STORE-MAP-01 P2b (XP1): as chat.ts does, tools on demand for the coding app too (index in the context).
 const subAll = subRegistry.getAll().map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema }));
-const { OnDemandTools: SubOD } = await import(join(backendDir, 'src/tools/on-demand.ts'));
+const { OnDemandTools: SubOD } = await import(moduleUrl(backendDir, 'src/tools/on-demand.ts'));
 const subOd = storeP2bEnabled() ? new SubOD(subAll, 'large') : null;
 const subPrompt = subOd ? subscriptionReplyPrompt(`${context}\n\n${subOd.index()}`, `${memoryPart}\n\n${history}`) : replyPrompt;
 await subscriptionToolLoop({ prompt: subPrompt, signal: AbortSignal.timeout(10_000),
@@ -255,9 +255,9 @@ report.entryPoints.codingApp = { tools: subRegistry.getAll().length,
   note: 'the app itself only records estimateTokens(replyPrompt) and no CLI usage (SUB5)' };
 
 // 5. MCP (dpro-memory) for a coding tool working in the alpha folder.
-const { BRIDGE_TOOL_DEFINITIONS } = await import(join(backendDir, 'src/memory/bridge/mcp-server.ts'));
-const { projectBrief, briefMarkdown, clean } = await import(join(backendDir, 'src/memory/bridge/brief.ts'));
-const { getMemoryStorage } = await import(join(backendDir, 'src/memory/storage.ts'));
+const { BRIDGE_TOOL_DEFINITIONS } = await import(moduleUrl(backendDir, 'src/memory/bridge/mcp-server.ts'));
+const { projectBrief, briefMarkdown, clean } = await import(moduleUrl(backendDir, 'src/memory/bridge/brief.ts'));
+const { getMemoryStorage } = await import(moduleUrl(backendDir, 'src/memory/storage.ts'));
 const brief = briefMarkdown(await quietly(() => projectBrief(OWNER, { id: 'p0-alpha', name: 'Alpha', slug: 'alpha' })));
 const hits = await quietly(() => getMemoryStorage().search({ userId: OWNER, query: QUESTION, drawers: [{ kind: 'project', key: 'alpha' }], limit: 8 }));
 report.entryPoints.mcp = await measure({

@@ -16,6 +16,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { offeredNames, expectedNumCtx, expectedNumPredict, p2bOn } from './helpers/p2b.mjs';
 
@@ -68,31 +69,31 @@ globalThis.fetch = stubFetch;
 const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
 
-const { getDatabase, closeDatabase } = await import(join(backendDir, 'src/db/database.ts'));
+const { getDatabase, closeDatabase } = await import(pathToFileURL(join(backendDir, 'src/db/database.ts')).href);
 const db = getDatabase();
 await db.initialize();
-const { getCredentialStorage } = await import(join(backendDir, 'src/credentials/storage.ts'));
+const { getCredentialStorage } = await import(pathToFileURL(join(backendDir, 'src/credentials/storage.ts')).href);
 await getCredentialStorage().initialize();
-const { getOrchestrator } = await import(join(backendDir, 'src/multi-agent/index.ts'));
+const { getOrchestrator } = await import(pathToFileURL(join(backendDir, 'src/multi-agent/index.ts')).href);
 await getOrchestrator().initialize(join(dir, '.data', 'multi-agent', 'orchestrator.db'));
 for (const [id, role] of [['rc-owner', 'owner'], ['rc-user', 'user']]) {
   db.prepare(`INSERT INTO users (id, email, username, password_hash, role, status, email_verified) VALUES (?, ?, ?, 'x', ?, 'active', 1)`).run(id, `${id}@example.test`, id, role);
 }
 db.prepare(`INSERT INTO agents_config (id, name, provider, model, is_primary) VALUES ('rc-main', 'Main', 'ollama', 'qwen-test', 1)`).run();
 
-const { generateToken } = await import(join(backendDir, 'src/auth/jwt.ts'));
-const { buildServer } = await import(join(backendDir, 'src/api/app.ts'));
-const { chatRuns } = await import(join(backendDir, 'src/services/chat-runs.ts'));
-const { addUserMessage, addAssistantMessage } = await import(join(backendDir, 'src/repositories/chat-conversations.ts'));
-const { saveHandoff } = await import(join(backendDir, 'src/memory/handoff/store.ts'));
-const { handoffAgentId } = await import(join(backendDir, 'src/memory/handoff/scope.ts'));
-const G = await import(join(backendDir, 'src/memory/graph/index.ts'));
-const policy = await import(join(backendDir, 'src/tools/channel-policy.ts'));
-const { EmbeddingService } = await import(join(backendDir, 'src/memory/embedding.ts'));
-const { memoryMoveTool } = await import(join(backendDir, 'src/tools/memory/move.ts'));
-const { approvalCategory } = await import(join(backendDir, 'src/tools/approvals.ts'));
-const { DEFAULT_AGENT_TOOLS } = await import(join(backendDir, 'src/tools/grants.ts'));
-const { contextBudget } = await import(join(backendDir, 'src/memory/context/budget.ts'));
+const { generateToken } = await import(pathToFileURL(join(backendDir, 'src/auth/jwt.ts')).href);
+const { buildServer } = await import(pathToFileURL(join(backendDir, 'src/api/app.ts')).href);
+const { chatRuns } = await import(pathToFileURL(join(backendDir, 'src/services/chat-runs.ts')).href);
+const { addUserMessage, addAssistantMessage } = await import(pathToFileURL(join(backendDir, 'src/repositories/chat-conversations.ts')).href);
+const { saveHandoff } = await import(pathToFileURL(join(backendDir, 'src/memory/handoff/store.ts')).href);
+const { handoffAgentId } = await import(pathToFileURL(join(backendDir, 'src/memory/handoff/scope.ts')).href);
+const G = await import(pathToFileURL(join(backendDir, 'src/memory/graph/index.ts')).href);
+const policy = await import(pathToFileURL(join(backendDir, 'src/tools/channel-policy.ts')).href);
+const { EmbeddingService } = await import(pathToFileURL(join(backendDir, 'src/memory/embedding.ts')).href);
+const { memoryMoveTool } = await import(pathToFileURL(join(backendDir, 'src/tools/memory/move.ts')).href);
+const { approvalCategory } = await import(pathToFileURL(join(backendDir, 'src/tools/approvals.ts')).href);
+const { DEFAULT_AGENT_TOOLS } = await import(pathToFileURL(join(backendDir, 'src/tools/grants.ts')).href);
+const { contextBudget } = await import(pathToFileURL(join(backendDir, 'src/memory/context/budget.ts')).href);
 const app = await buildServer({ logger: false });
 await app.ready();
 
@@ -385,7 +386,7 @@ test('chat: an invalid memoryScope is refused with 400 before the stream opens',
 });
 
 test('wire contract: the UI allow-list and projections match the real responses', async () => {
-  const C = await import(join(backendDir, '../core-ui/src/memory-recall-contract.js'));
+  const C = await import(pathToFileURL(join(backendDir, '../core-ui/src/memory-recall-contract.js')).href);
   const path = C.recallMessagePath(first.message.id);
   assert.ok(C.allowedMemoryRecall('GET', path));
   assert.equal(C.allowedMemoryRecall('GET', path, {}), false);

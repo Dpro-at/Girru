@@ -362,6 +362,20 @@ These numbers are local measurements made by the project on one development Mac,
 
 With local models only (`GIRRU_STORE_P2B`), a chat turn for a model with an 8k window measured 2,562 prompt tokens instead of 10,805.
 
+### Search speed at scale (MEM-SPEED-01)
+
+Measured on 12 November 2026 on generated test data: one owner, an owner chat with one project open (about half of all memories in the open drawers), 20 questions in English, Arabic, Iraqi dialect and German. Each question is embedded by the local model `qwen3-embedding:0.6b`, and that time is included. "First search" is the first search after a start, which builds the in-memory index. The index is never written to disk.
+
+| Memories | Windows PC (Intel i9-14900F, 64 GB): before | Windows PC: now (median / p95) | Mac (Apple M6, 32 GB): now (median / p95) | First search, PC / Mac | Memory used, PC / Mac |
+|---|---|---|---|---|---|
+| 10,000 | 120 ms | 85 / 118 ms | – | 0.4 s / – | 0.4 GB / – |
+| 100,000 | 807 ms | 95 / 114 ms | 34 / 47 ms | 4.6 s / 2.6 s | 0.6 / 0.6 GB |
+| 1,000,000 | 32.6 s | 90 / 105 ms | 36 / 49 ms | 69 s / 50 s | 1.3 / 1.5 GB |
+| 3,000,000 | – | 109 / 127 ms | – | 3.9 min / – | 3.1 GB / – |
+| 10,000,000 | – | 266 / 575 ms | – | 27 min / – | 9.1 GB / – |
+
+Recall on the test set is the same as before (top 5: 0.958 same language, 0.714 across languages; no leaks). The "Recall time" rows in the table above were measured earlier, with older code, on the development Mac. Every run, with the machine and the code version, is in `docs/internal/memory-search-results.json`; the full report is `docs/internal/MEMORY_SEARCH_REPORT.md`.
+
 Every installed provider passed the same memory scenario (save, recall, replace, handoff, propose, a refused wrong argument, and a last recall that returns the new fact) through each way it connects: subscriptions through their command-line tools, the `dpro-memory` MCP server, and a local model through Ollama. One small local model held to an 8k window is recorded as "memory limited": it missed one recall and invented nothing.
 
 ## Privacy

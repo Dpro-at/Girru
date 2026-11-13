@@ -27,6 +27,7 @@ import { packVector, unpackVector, writeVectorStep } from './vectors.js';
 import { storeP3Enabled } from '../services/store-p3.js';
 import { storeP9Enabled } from '../services/store-p9.js';
 import { LIGHT_COLUMNS, entriesFor, entryCosine, type LightRow } from './recall-index.js';
+import { openStore, searchStore, staleIn, type StoreQuery } from './recall-store.js';
 import {
   DRAWER_KEY_SQL,
   DRAWER_KIND_SQL,
@@ -534,6 +535,12 @@ export class MemoryStorage implements IMemoryStorage {
     where: string,
     params: any[],
   ): Promise<MemorySearchResult[]> {
+    // MEM-SPEED-01: the store kept in step by id (recall-store.ts) for a drawer search on SQLite.
+    // GIRRU_RECALL_STORE=0 turns it off (the P9 path below; a comparison and an escape hatch).
+    if (query.drawers && process.env.GIRRU_RECALL_STORE !== '0') {
+      const viaStore = await this.searchStore(query, q);
+      if (viaStore) return viaStore;
+    }
     const light = where.replace(/^SELECT \* FROM memories/, `SELECT ${LIGHT_COLUMNS}, ${DRAWER_KIND_SQL} AS dk, ${DRAWER_KEY_SQL} AS dkey FROM memories`);
     let rows = await sql().read(all<LightRow>(`${light} ORDER BY created_at ASC, id ASC`, ...params));
     if (q.model === this.embeddingService.targetModel()) {
@@ -573,6 +580,52 @@ export class MemoryStorage implements IMemoryStorage {
         memory,
         similarity: t.similarity,
         scoreBreakdown: { vectorScore: t.vector ?? 0, keywordScore: lexical[t.i], recencyScore: 0, importanceScore: memory.importanceScore ?? 0.5 },
+      });
+    }
+    return results;
+  }
+
+  /**
+   * MEM-SPEED-01: the search over the store kept in step by id
+   * (recall-store.ts). Null when the store cannot serve it (PostgreSQL, a
+   * selected encrypted store, past the size cap): the P9 path runs instead.
+   */
+  private async searchStore(
+    query: MemorySearchQuery,
+    q: Awaited<ReturnType<ReturnType<typeof getEmbeddingService>['embedQuery']>>,
+  ): Promise<MemorySearchResult[] | null> {
+    const sq: StoreQuery = {
+      userId: query.userId, query: query.query, drawers: query.drawers!, limit: query.limit || 10,
+      ...(query.type ? { type: query.type } : {}),
+      ...(query.layer ? { layer: query.layer } : {}),
+      ...(query.minImportanceScore !== undefined ? { minImportance: query.minImportanceScore }
+        : query.minImportance !== undefined ? { minImportance: query.minImportance / 10 } : {}),
+    };
+    let open = await openStore(query.userId, query.drawers!);
+    if (!open) return null;
+    if (q.model === this.embeddingService.targetModel()) {
+      const stale = staleIn(query.userId, open, sq, q.model, LAZY_REEMBED_PER_SEARCH);
+      const fakes = stale.map((r) => ({ id: r.id, userId: query.userId, content: r.content } as Memory));
+      if (fakes.length) {
+        await this.reembedStale(fakes, q.model);
+        open = await openStore(query.userId, query.drawers!); // new vectors, and a forget meanwhile
+        if (!open) return null;
+      }
+    }
+    const top = searchStore(query.userId, open, sq, q);
+    if (top.length === 0) return [];
+    const ids = top.map((t) => t.id);
+    // By primary key; the owner is checked here.
+    const full = await sql().read(all(`SELECT * FROM memories WHERE id IN (${ids.map(() => '?').join(', ')})`, ...ids));
+    const byId = new Map(full.filter((row: any) => row.user_id === query.userId).map((row: any) => [row.id, this.rowToMemory(row)]));
+    const results: MemorySearchResult[] = [];
+    for (const t of top) {
+      const memory = byId.get(t.id);
+      if (!memory) continue;
+      results.push({
+        memory,
+        similarity: t.similarity,
+        scoreBreakdown: { vectorScore: t.vector ?? 0, keywordScore: t.lexical, recencyScore: 0, importanceScore: memory.importanceScore ?? 0.5 },
       });
     }
     return results;

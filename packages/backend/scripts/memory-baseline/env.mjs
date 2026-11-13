@@ -7,8 +7,11 @@ import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 
 export const backendDir = process.cwd();
+/** A backend module path as an import URL (a bare C: path is not a valid ESM specifier on Windows). */
+export const moduleUrl = (...parts) => pathToFileURL(join(...parts)).href;
 if (!backendDir.endsWith(join('packages', 'backend'))) {
   throw new Error('Run from packages/backend: node --import tsx scripts/memory-baseline/<script>.mjs');
 }
@@ -48,7 +51,7 @@ export async function quietly(fn) {
 
 /** Open the throwaway database and run the app's own initialization. */
 export async function openDb() {
-  const { getDatabase, closeDatabase } = await import(join(backendDir, 'src/db/database.ts'));
+  const { getDatabase, closeDatabase } = await import(moduleUrl(backendDir, 'src/db/database.ts'));
   const db = getDatabase();
   await quietly(() => db.initialize());
   return { db, closeDatabase };

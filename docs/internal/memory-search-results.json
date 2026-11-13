@@ -1,0 +1,1570 @@
+{
+  "version": 1,
+  "description": "Memory search measurements (MEM-SPEED-01): MemoryStorage.search, owner chat with project alpha open, 20 queries of recall-set-p0.json. searchMs includes the query embedding (queryEmbedMs). Append only: latency.mjs --record and the playground benchmark add runs.",
+  "runs": [
+    {
+      "id": "mac-10000-before",
+      "date": "2026-10-01T00:00:00Z",
+      "machine": {
+        "cpu": "Apple silicon (development Mac)",
+        "threads": null,
+        "ramGB": null,
+        "os": "darwin arm64"
+      },
+      "git": {
+        "commit": null,
+        "branch": "main"
+      },
+      "source": "docs/architecture/storage-map.md \"Measured on this computer\"",
+      "label": "Before the memory work (as documented)",
+      "size": 10000,
+      "vectors": "semantic",
+      "searchMs": {
+        "p50": 276,
+        "p95": null,
+        "max": null
+      }
+    },
+    {
+      "id": "mac-100000-before",
+      "date": "2026-10-01T00:00:00Z",
+      "machine": {
+        "cpu": "Apple silicon (development Mac)",
+        "threads": null,
+        "ramGB": null,
+        "os": "darwin arm64"
+      },
+      "git": {
+        "commit": null,
+        "branch": "main"
+      },
+      "source": "docs/architecture/storage-map.md \"Measured on this computer\"",
+      "label": "Before the memory work (as documented)",
+      "size": 100000,
+      "vectors": "semantic",
+      "searchMs": {
+        "p50": 3400,
+        "p95": null,
+        "max": null
+      }
+    },
+    {
+      "id": "mac-10000-p9",
+      "date": "2026-11-01T00:00:00Z",
+      "machine": {
+        "cpu": "Apple silicon (development Mac)",
+        "threads": null,
+        "ramGB": null,
+        "os": "darwin arm64"
+      },
+      "git": {
+        "commit": null,
+        "branch": "main"
+      },
+      "source": "docs/architecture/storage-map.md \"Measured on this computer\"",
+      "label": "P9 recall index (as documented)",
+      "size": 10000,
+      "vectors": "semantic",
+      "searchMs": {
+        "p50": 44,
+        "p95": null,
+        "max": null
+      }
+    },
+    {
+      "id": "mac-100000-p9",
+      "date": "2026-11-01T00:00:00Z",
+      "machine": {
+        "cpu": "Apple silicon (development Mac)",
+        "threads": null,
+        "ramGB": null,
+        "os": "darwin arm64"
+      },
+      "git": {
+        "commit": null,
+        "branch": "main"
+      },
+      "source": "docs/architecture/storage-map.md \"Measured on this computer\"",
+      "label": "P9 recall index (as documented)",
+      "size": 100000,
+      "vectors": "semantic",
+      "searchMs": {
+        "p50": 280,
+        "p95": null,
+        "max": null
+      }
+    },
+    {
+      "id": "seed-base-10k",
+      "date": "2026-11-12T18:31:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "9105007f",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Baseline: P9 recall index (full scan, 256 MB cap)",
+      "size": 10000,
+      "vectors": "semantic",
+      "jsonStub": false,
+      "openedRows": 4701,
+      "queries": 20,
+      "searchMs": {
+        "p50": 119.8,
+        "p95": 123.9,
+        "max": 134.4
+      },
+      "queryEmbedMs": {
+        "p50": 55.4,
+        "p95": 58.1
+      },
+      "coldMs": 2328.4,
+      "peakRssMB": 452,
+      "indexMB": null,
+      "drawers": null,
+      "dbMB": 181.8,
+      "settings": {
+        "p9": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "seed-base-100k",
+      "date": "2026-11-12T18:33:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "9105007f",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Baseline: P9 recall index (full scan, 256 MB cap)",
+      "size": 100000,
+      "vectors": "semantic",
+      "jsonStub": false,
+      "openedRows": 46731,
+      "queries": 20,
+      "searchMs": {
+        "p50": 807.1,
+        "p95": 824.8,
+        "max": 855.7
+      },
+      "queryEmbedMs": {
+        "p50": 55.4,
+        "p95": 58
+      },
+      "coldMs": 3107.1,
+      "peakRssMB": 743,
+      "indexMB": null,
+      "drawers": null,
+      "dbMB": 1783.1,
+      "settings": {
+        "p9": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "seed-base-1m",
+      "date": "2026-11-12T19:03:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "9105007f",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Baseline: P9 recall index (full scan, 256 MB cap)",
+      "size": 1000000,
+      "vectors": "semantic",
+      "jsonStub": false,
+      "openedRows": 464930,
+      "queries": 20,
+      "searchMs": {
+        "p50": 32574.2,
+        "p95": 33824.7,
+        "max": 37838.5
+      },
+      "queryEmbedMs": {
+        "p50": 69.3,
+        "p95": 80.6
+      },
+      "coldMs": 36920.7,
+      "peakRssMB": 4058,
+      "indexMB": null,
+      "drawers": null,
+      "dbMB": 17799,
+      "settings": {
+        "p9": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "seed-s1-100k",
+      "date": "2026-11-12T18:52:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "4e2d3075",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Step 1: store kept in step by id, inverted BM25, top-k heap",
+      "size": 100000,
+      "vectors": "semantic",
+      "jsonStub": false,
+      "openedRows": 46731,
+      "queries": 20,
+      "searchMs": {
+        "p50": 104.8,
+        "p95": 224.1,
+        "max": 225.3
+      },
+      "queryEmbedMs": {
+        "p50": 60.2,
+        "p95": 64.3
+      },
+      "coldMs": 2450.1,
+      "peakRssMB": 666,
+      "indexMB": null,
+      "drawers": null,
+      "dbMB": 1783.1,
+      "settings": {
+        "p9": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "seed-s2-100k-i8",
+      "date": "2026-11-12T18:58:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "d6c81381",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Step 2: int8 vectors forced (EXACT_MAX=0) + Float32 re-score",
+      "size": 100000,
+      "vectors": "semantic",
+      "jsonStub": false,
+      "openedRows": 46731,
+      "queries": 20,
+      "searchMs": {
+        "p50": 110.7,
+        "p95": 137.1,
+        "max": 141.2
+      },
+      "queryEmbedMs": {
+        "p50": 61.9,
+        "p95": 65.7
+      },
+      "coldMs": 2925.8,
+      "peakRssMB": 508,
+      "indexMB": null,
+      "drawers": null,
+      "dbMB": 1783.1,
+      "settings": {
+        "p9": true,
+        "exactMax": "0",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "seed-s3-1m",
+      "date": "2026-11-12T19:12:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "f28d37d2",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Step 3: HNSW (usearch) from 100k per drawer",
+      "size": 1000000,
+      "vectors": "semantic",
+      "jsonStub": false,
+      "openedRows": 464930,
+      "queries": 20,
+      "searchMs": {
+        "p50": 135.5,
+        "p95": 267.1,
+        "max": 270.4
+      },
+      "queryEmbedMs": {
+        "p50": 60.9,
+        "p95": 64.5
+      },
+      "coldMs": 80064.5,
+      "peakRssMB": 1521,
+      "indexMB": 891,
+      "drawers": {
+        "exact": 1,
+        "i8": 0,
+        "ann": 2
+      },
+      "dbMB": 17799,
+      "settings": {
+        "p9": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "seed-final-10k",
+      "date": "2026-11-12T20:00:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "9bf30093",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Final: stable hot loops, HNSW from 20k per drawer",
+      "size": 10000,
+      "vectors": "semantic",
+      "jsonStub": false,
+      "openedRows": 4701,
+      "queries": 20,
+      "searchMs": {
+        "p50": 85.1,
+        "p95": 118.4,
+        "max": 119.5
+      },
+      "queryEmbedMs": {
+        "p50": 77.3,
+        "p95": 119.2
+      },
+      "coldMs": 370.6,
+      "peakRssMB": 436,
+      "indexMB": 21,
+      "drawers": {
+        "exact": 3,
+        "i8": 0,
+        "ann": 0
+      },
+      "dbMB": 181.8,
+      "settings": {
+        "p9": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "seed-final-100k",
+      "date": "2026-11-12T20:00:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "9bf30093",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Final: stable hot loops, HNSW from 20k per drawer",
+      "size": 100000,
+      "vectors": "semantic",
+      "jsonStub": false,
+      "openedRows": 46731,
+      "queries": 20,
+      "searchMs": {
+        "p50": 94.5,
+        "p95": 113.9,
+        "max": 129.9
+      },
+      "queryEmbedMs": {
+        "p50": 60.4,
+        "p95": 68.4
+      },
+      "coldMs": 4585.8,
+      "peakRssMB": 613,
+      "indexMB": 124,
+      "drawers": {
+        "exact": 2,
+        "i8": 0,
+        "ann": 1
+      },
+      "dbMB": 1783.1,
+      "settings": {
+        "p9": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "seed-final-1m",
+      "date": "2026-11-12T20:00:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "9bf30093",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Final: stable hot loops, HNSW from 20k per drawer",
+      "size": 1000000,
+      "vectors": "semantic",
+      "jsonStub": false,
+      "openedRows": 464930,
+      "queries": 20,
+      "searchMs": {
+        "p50": 89.9,
+        "p95": 105.4,
+        "max": 116.1
+      },
+      "queryEmbedMs": {
+        "p50": 55,
+        "p95": 57.1
+      },
+      "coldMs": 68939.5,
+      "peakRssMB": 1302,
+      "indexMB": 765,
+      "drawers": {
+        "exact": 0,
+        "i8": 0,
+        "ann": 3
+      },
+      "dbMB": 17799,
+      "settings": {
+        "p9": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "seed-final-1m-stub",
+      "date": "2026-11-12T20:00:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "9bf30093",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Final: stable hot loops, HNSW from 20k per drawer (--json-stub: vector in the packed column only)",
+      "size": 1000000,
+      "vectors": "semantic",
+      "jsonStub": true,
+      "openedRows": 464930,
+      "queries": 20,
+      "searchMs": {
+        "p50": 81.9,
+        "p95": 100.4,
+        "max": 104.4
+      },
+      "queryEmbedMs": {
+        "p50": 54.8,
+        "p95": 58.6
+      },
+      "coldMs": 63410.8,
+      "peakRssMB": 1298,
+      "indexMB": 765,
+      "drawers": {
+        "exact": 0,
+        "i8": 0,
+        "ann": 3
+      },
+      "dbMB": 5011.5,
+      "settings": {
+        "p9": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "seed-final-3m",
+      "date": "2026-11-12T20:00:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "9bf30093",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Final: stable hot loops, HNSW from 20k per drawer (--json-stub: vector in the packed column only)",
+      "size": 3000000,
+      "vectors": "semantic",
+      "jsonStub": true,
+      "openedRows": 1395576,
+      "queries": 20,
+      "searchMs": {
+        "p50": 108.5,
+        "p95": 126.6,
+        "max": 141.7
+      },
+      "queryEmbedMs": {
+        "p50": 56.1,
+        "p95": 60.5
+      },
+      "coldMs": 236162.8,
+      "peakRssMB": 3119,
+      "indexMB": 2298,
+      "drawers": {
+        "exact": 0,
+        "i8": 0,
+        "ann": 3
+      },
+      "dbMB": 15030.7,
+      "settings": {
+        "p9": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "seed-final-10m",
+      "date": "2026-11-12T20:00:00Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "9bf30093",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs (recorded by hand, MEM-SPEED-01 session)",
+      "label": "Final: stable hot loops, HNSW from 20k per drawer (--json-stub: vector in the packed column only)",
+      "size": 10000000,
+      "vectors": "semantic",
+      "jsonStub": true,
+      "openedRows": 4651105,
+      "queries": 20,
+      "searchMs": {
+        "p50": 266.2,
+        "p95": 575.3,
+        "max": 2521.1
+      },
+      "queryEmbedMs": {
+        "p50": 59.3,
+        "p95": 65.1
+      },
+      "coldMs": 1612076.6,
+      "peakRssMB": 9126,
+      "indexMB": 7661,
+      "drawers": {
+        "exact": 0,
+        "i8": 0,
+        "ann": 3
+      },
+      "dbMB": 50128.4,
+      "settings": {
+        "p9": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "mac-m6-100000",
+      "date": "2026-11-12T21:30:00Z",
+      "machine": {
+        "cpu": "Apple M6 (Mac Mini)",
+        "threads": null,
+        "ramGB": 32,
+        "os": "darwin arm64"
+      },
+      "git": {
+        "commit": "05905476",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs --record \"Mac: final\" (run by the mac girru session; copied here)",
+      "label": "Mac: final",
+      "size": 100000,
+      "vectors": "semantic",
+      "jsonStub": true,
+      "openedRows": 46731,
+      "queries": 20,
+      "searchMs": {
+        "p50": 34.2,
+        "p95": 46.9,
+        "max": null
+      },
+      "queryEmbedMs": {
+        "p50": 17.2,
+        "p95": null
+      },
+      "coldMs": 2600,
+      "peakRssMB": 561,
+      "indexMB": 124,
+      "drawers": null,
+      "dbMB": null,
+      "settings": {
+        "p9": true,
+        "store": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "mac-m6-1000000",
+      "date": "2026-11-12T21:30:00Z",
+      "machine": {
+        "cpu": "Apple M6 (Mac Mini)",
+        "threads": null,
+        "ramGB": 32,
+        "os": "darwin arm64"
+      },
+      "git": {
+        "commit": "05905476",
+        "branch": "girru/memory-search-speed-97063e",
+        "memoryCodeChanged": false
+      },
+      "source": "latency.mjs --record \"Mac: final\" (run by the mac girru session; copied here)",
+      "label": "Mac: final",
+      "size": 1000000,
+      "vectors": "semantic",
+      "jsonStub": true,
+      "openedRows": 464930,
+      "queries": 20,
+      "searchMs": {
+        "p50": 36.3,
+        "p95": 48.5,
+        "max": 50.3
+      },
+      "queryEmbedMs": {
+        "p50": 17.3,
+        "p95": null
+      },
+      "coldMs": 50100,
+      "peakRssMB": 1500,
+      "indexMB": 765,
+      "drawers": {
+        "exact": 0,
+        "i8": 0,
+        "ann": 3
+      },
+      "dbMB": 5000,
+      "settings": {
+        "p9": true,
+        "store": true,
+        "exactMax": "default",
+        "annMin": "default",
+        "rescore": "default",
+        "indexMB": "default"
+      }
+    },
+    {
+      "id": "rmwe1iix6",
+      "date": "2026-11-12T21:08:35.274Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "9073f025",
+        "branch": "girru/memory-accuracy",
+        "memoryCodeChanged": false
+      },
+      "source": "accuracy.mjs",
+      "kind": "accuracy",
+      "label": "Accuracy baseline A (last message only), 100k real embeddings",
+      "size": 100140,
+      "vectors": "real",
+      "queries": 1040,
+      "searchMs": {
+        "p50": 74.1,
+        "p95": 92.8
+      },
+      "queryEmbedMs": {
+        "p50": 55.8,
+        "p95": 66.8
+      },
+      "coldMs": 3623.8,
+      "quality": {
+        "hitAt5": 0.501,
+        "hitAt1": 0.372,
+        "precisionAt5": 0.155,
+        "searchRecallAt5": 0.488,
+        "noAnswer": 0.008,
+        "temporal": 0.35,
+        "wrongProjectTop": 0.039,
+        "leaks": 0
+      },
+      "byKind": {
+        "all": {
+          "recallAt5": 0.501,
+          "hitAt1": 0.372,
+          "noAnswer": 0.008
+        },
+        "direct": {
+          "recallAt5": 0.75,
+          "hitAt1": 0.547,
+          "noAnswer": null
+        },
+        "context": {
+          "recallAt5": 0.333,
+          "hitAt1": 0.247,
+          "noAnswer": null
+        },
+        "cross-language": {
+          "recallAt5": 0.419,
+          "hitAt1": 0.287,
+          "noAnswer": null
+        },
+        "temporal": {
+          "recallAt5": 0.475,
+          "hitAt1": 0.26,
+          "noAnswer": null
+        },
+        "indirect": {
+          "recallAt5": 0.03,
+          "hitAt1": 0.02,
+          "noAnswer": null
+        },
+        "no-answer": {
+          "recallAt5": null,
+          "hitAt1": null,
+          "noAnswer": 0.008
+        },
+        "multi-hop": {
+          "recallAt5": 0,
+          "hitAt1": 0,
+          "noAnswer": null
+        },
+        "time-travel": {
+          "recallAt5": 0.55,
+          "hitAt1": 0.25,
+          "noAnswer": null
+        },
+        "person": {
+          "recallAt5": 0.95,
+          "hitAt1": 0.817,
+          "noAnswer": null
+        }
+      },
+      "settings": {
+        "p9": true,
+        "p9b": true,
+        "store": true
+      }
+    },
+    {
+      "id": "rmwe1pgto",
+      "date": "2026-11-12T21:13:59.148Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "d189525f",
+        "branch": "girru/memory-accuracy",
+        "memoryCodeChanged": false
+      },
+      "source": "accuracy.mjs",
+      "kind": "accuracy",
+      "label": "Accuracy A (last message only) with conversations, 1,280 questions, 100k real embeddings",
+      "size": 100140,
+      "vectors": "real",
+      "queries": 1280,
+      "searchMs": {
+        "p50": 22.1,
+        "p95": 78.7
+      },
+      "queryEmbedMs": {
+        "p50": 0,
+        "p95": 58.9
+      },
+      "coldMs": 2306,
+      "quality": {
+        "hitAt5": 0.416,
+        "hitAt1": 0.297,
+        "precisionAt5": 0.126,
+        "searchRecallAt5": 0.401,
+        "noAnswer": 0.008,
+        "temporal": 0.318,
+        "wrongProjectTop": 0.054,
+        "mixUp": 0.375,
+        "leaks": 0
+      },
+      "byKind": {
+        "all": {
+          "recallAt5": 0.416,
+          "hitAt1": 0.297,
+          "noAnswer": 0.008,
+          "mixUp": 0.375
+        },
+        "direct": {
+          "recallAt5": 0.736,
+          "hitAt1": 0.539,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "context": {
+          "recallAt5": 0.328,
+          "hitAt1": 0.242,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "cross-language": {
+          "recallAt5": 0.34,
+          "hitAt1": 0.232,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "temporal": {
+          "recallAt5": 0.433,
+          "hitAt1": 0.233,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "indirect": {
+          "recallAt5": 0.04,
+          "hitAt1": 0.02,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "indirect-near": {
+          "recallAt5": 0.04,
+          "hitAt1": 0.02,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "indirect-mid": {
+          "recallAt5": 0.04,
+          "hitAt1": 0.02,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "indirect-far": {
+          "recallAt5": 0.04,
+          "hitAt1": 0.02,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "no-answer": {
+          "recallAt5": null,
+          "hitAt1": null,
+          "noAnswer": 0.008,
+          "mixUp": null
+        },
+        "multi-hop": {
+          "recallAt5": 0,
+          "hitAt1": 0,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "time-travel": {
+          "recallAt5": 0.55,
+          "hitAt1": 0.25,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "topic-switch": {
+          "recallAt5": 0.5,
+          "hitAt1": 0.1,
+          "noAnswer": null,
+          "mixUp": 0.3
+        },
+        "topic-return": {
+          "recallAt5": 0.5,
+          "hitAt1": 0.1,
+          "noAnswer": null,
+          "mixUp": 0.45
+        },
+        "person": {
+          "recallAt5": 0.95,
+          "hitAt1": 0.817,
+          "noAnswer": null,
+          "mixUp": null
+        }
+      },
+      "settings": {
+        "p9": true,
+        "p9b": true,
+        "store": true,
+        "mode": "A"
+      }
+    },
+    {
+      "id": "rmwe1zb18",
+      "date": "2026-11-12T21:21:38.204Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "b4de3851",
+        "branch": "girru/memory-accuracy",
+        "memoryCodeChanged": true
+      },
+      "source": "accuracy.mjs",
+      "kind": "accuracy",
+      "label": "Accuracy B0 (context query: entity names, no topic words), 1,280 questions, 100k real embeddings",
+      "size": 100140,
+      "vectors": "real",
+      "queries": 1280,
+      "searchMs": {
+        "p50": 81.5,
+        "p95": 97
+      },
+      "queryEmbedMs": {
+        "p50": 60.5,
+        "p95": 69.6
+      },
+      "coldMs": 2764,
+      "quality": {
+        "hitAt5": 0.835,
+        "hitAt1": 0.617,
+        "precisionAt5": 0.224,
+        "searchRecallAt5": 0.828,
+        "noAnswer": 0,
+        "temporal": 0.577,
+        "wrongProjectTop": 0.017,
+        "mixUp": 0,
+        "leaks": 0
+      },
+      "byKind": {
+        "all": {
+          "recallAt5": 0.835,
+          "hitAt1": 0.617,
+          "noAnswer": 0,
+          "mixUp": 0
+        },
+        "direct": {
+          "recallAt5": 0.889,
+          "hitAt1": 0.614,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "context": {
+          "recallAt5": 0.858,
+          "hitAt1": 0.692,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "cross-language": {
+          "recallAt5": 0.83,
+          "hitAt1": 0.578,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "temporal": {
+          "recallAt5": 0.804,
+          "hitAt1": 0.367,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "indirect": {
+          "recallAt5": 0.73,
+          "hitAt1": 0.51,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "indirect-near": {
+          "recallAt5": 0.73,
+          "hitAt1": 0.51,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "indirect-mid": {
+          "recallAt5": 0.73,
+          "hitAt1": 0.51,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "indirect-far": {
+          "recallAt5": 0.73,
+          "hitAt1": 0.51,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "no-answer": {
+          "recallAt5": null,
+          "hitAt1": null,
+          "noAnswer": 0,
+          "mixUp": null
+        },
+        "multi-hop": {
+          "recallAt5": 0.45,
+          "hitAt1": 0,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "time-travel": {
+          "recallAt5": 0.6,
+          "hitAt1": 0.1,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "topic-switch": {
+          "recallAt5": 1,
+          "hitAt1": 1,
+          "noAnswer": null,
+          "mixUp": 0
+        },
+        "topic-return": {
+          "recallAt5": 1,
+          "hitAt1": 1,
+          "noAnswer": null,
+          "mixUp": 0
+        },
+        "person": {
+          "recallAt5": 1,
+          "hitAt1": 0.85,
+          "noAnswer": null,
+          "mixUp": null
+        }
+      },
+      "settings": {
+        "p9": true,
+        "p9b": true,
+        "store": true,
+        "mode": "B0"
+      }
+    },
+    {
+      "id": "rmwe1zb3t",
+      "date": "2026-11-12T21:21:38.297Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "b4de3851",
+        "branch": "girru/memory-accuracy",
+        "memoryCodeChanged": true
+      },
+      "source": "accuracy.mjs",
+      "kind": "accuracy",
+      "label": "Accuracy B (context query: entity names + topic words), 1,280 questions, 100k real embeddings",
+      "size": 100140,
+      "vectors": "real",
+      "queries": 1280,
+      "searchMs": {
+        "p50": 84.8,
+        "p95": 100.8
+      },
+      "queryEmbedMs": {
+        "p50": 60.6,
+        "p95": 70.1
+      },
+      "coldMs": 2842.3,
+      "quality": {
+        "hitAt5": 0.793,
+        "hitAt1": 0.585,
+        "precisionAt5": 0.214,
+        "searchRecallAt5": 0.78,
+        "noAnswer": 0,
+        "temporal": 0.514,
+        "wrongProjectTop": 0.017,
+        "mixUp": 0,
+        "leaks": 0
+      },
+      "byKind": {
+        "all": {
+          "recallAt5": 0.793,
+          "hitAt1": 0.585,
+          "noAnswer": 0,
+          "mixUp": 0
+        },
+        "direct": {
+          "recallAt5": 0.889,
+          "hitAt1": 0.617,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "context": {
+          "recallAt5": 0.856,
+          "hitAt1": 0.694,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "cross-language": {
+          "recallAt5": 0.78,
+          "hitAt1": 0.544,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "temporal": {
+          "recallAt5": 0.754,
+          "hitAt1": 0.346,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "indirect": {
+          "recallAt5": 0.57,
+          "hitAt1": 0.38,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "indirect-near": {
+          "recallAt5": 0.57,
+          "hitAt1": 0.38,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "indirect-mid": {
+          "recallAt5": 0.57,
+          "hitAt1": 0.38,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "indirect-far": {
+          "recallAt5": 0.57,
+          "hitAt1": 0.38,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "no-answer": {
+          "recallAt5": null,
+          "hitAt1": null,
+          "noAnswer": 0,
+          "mixUp": null
+        },
+        "multi-hop": {
+          "recallAt5": 0.45,
+          "hitAt1": 0,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "time-travel": {
+          "recallAt5": 0.6,
+          "hitAt1": 0.1,
+          "noAnswer": null,
+          "mixUp": null
+        },
+        "topic-switch": {
+          "recallAt5": 1,
+          "hitAt1": 1,
+          "noAnswer": null,
+          "mixUp": 0
+        },
+        "topic-return": {
+          "recallAt5": 1,
+          "hitAt1": 1,
+          "noAnswer": null,
+          "mixUp": 0
+        },
+        "person": {
+          "recallAt5": 1,
+          "hitAt1": 0.85,
+          "noAnswer": null,
+          "mixUp": null
+        }
+      },
+      "settings": {
+        "p9": true,
+        "p9b": true,
+        "store": true,
+        "mode": "B"
+      }
+    },
+    {
+      "id": "rmwe3p515",
+      "date": "2026-11-12T22:09:43.097Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "6b918b4c",
+        "branch": "girru/memory-accuracy",
+        "memoryCodeChanged": false
+      },
+      "source": "accuracy.mjs --answer-model",
+      "kind": "answers",
+      "label": "End-to-end answers by qwen2.5:7b from B0 recall (today's memory format), 100k real embeddings",
+      "size": 100140,
+      "vectors": "real",
+      "queries": 320,
+      "searchMs": {
+        "p50": 578,
+        "p95": null
+      },
+      "quality": {
+        "noAnswerSaysUnknown": 0.967,
+        "answerableCorrect": 0.755,
+        "answerableSaidUnknown": 0.17,
+        "answerableWrong": 0.075,
+        "retrievedCorrect": 0.82
+      },
+      "byKind": {
+        "no-answer": {
+          "correct-unknown": 116,
+          "invented": 4
+        },
+        "direct": {
+          "correct": 29,
+          "said-unknown": 1
+        },
+        "context": {
+          "correct": 24,
+          "wrong": 6
+        },
+        "indirect": {
+          "correct": 12,
+          "said-unknown": 14,
+          "wrong": 4
+        },
+        "multi-hop": {
+          "said-unknown": 10,
+          "correct": 7,
+          "wrong": 3
+        },
+        "time-travel": {
+          "correct": 11,
+          "said-unknown": 8,
+          "wrong": 1
+        },
+        "topic-switch": {
+          "correct": 19,
+          "said-unknown": 1
+        },
+        "topic-return": {
+          "correct": 19,
+          "wrong": 1
+        },
+        "person": {
+          "correct": 30
+        }
+      },
+      "settings": {
+        "mode": "B0",
+        "variant": "P",
+        "model": "qwen2.5:7b"
+      }
+    },
+    {
+      "id": "rmwe3p541",
+      "date": "2026-11-12T22:09:43.201Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "6b918b4c",
+        "branch": "girru/memory-accuracy",
+        "memoryCodeChanged": false
+      },
+      "source": "accuracy.mjs --answer-model",
+      "kind": "answers",
+      "label": "End-to-end answers by qwen2.5:7b from B0 recall (with match strength), 100k real embeddings",
+      "size": 100140,
+      "vectors": "real",
+      "queries": 320,
+      "searchMs": {
+        "p50": 578,
+        "p95": null
+      },
+      "quality": {
+        "noAnswerSaysUnknown": 1,
+        "answerableCorrect": 0.665,
+        "answerableSaidUnknown": 0.27,
+        "answerableWrong": 0.065,
+        "retrievedCorrect": 0.744
+      },
+      "byKind": {
+        "no-answer": {
+          "correct-unknown": 120
+        },
+        "direct": {
+          "correct": 29,
+          "said-unknown": 1
+        },
+        "context": {
+          "correct": 27,
+          "wrong": 1,
+          "said-unknown": 2
+        },
+        "indirect": {
+          "said-unknown": 19,
+          "wrong": 8,
+          "correct": 3
+        },
+        "multi-hop": {
+          "said-unknown": 15,
+          "correct": 3,
+          "wrong": 2
+        },
+        "time-travel": {
+          "correct": 7,
+          "said-unknown": 13
+        },
+        "topic-switch": {
+          "correct": 17,
+          "said-unknown": 3
+        },
+        "topic-return": {
+          "correct": 17,
+          "wrong": 2,
+          "said-unknown": 1
+        },
+        "person": {
+          "correct": 30
+        }
+      },
+      "settings": {
+        "mode": "B0",
+        "variant": "S",
+        "model": "qwen2.5:7b"
+      }
+    },
+    {
+      "id": "rmwe4omc8",
+      "date": "2026-11-12T22:37:18.488Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "e1a77279",
+        "branch": "girru/memory-accuracy",
+        "memoryCodeChanged": true
+      },
+      "source": "accuracy.mjs",
+      "kind": "accuracy",
+      "label": "Accuracy C (B0 + question head as an extra query), 1,280 questions, 100k real embeddings",
+      "size": 100140,
+      "vectors": "real",
+      "queries": 1280,
+      "searchMs": {
+        "p50": 75.9,
+        "p95": 92.7
+      },
+      "queryEmbedMs": {
+        "p50": 56.6,
+        "p95": 63.6
+      },
+      "coldMs": 2284.4,
+      "quality": {
+        "hitAt5": 0.848,
+        "hitAt1": 0.628,
+        "multiHopBoth": 1,
+        "noAnswerSaysUnknown": 0.958,
+        "answerableCorrect": 0.755,
+        "mixUp": 0,
+        "leaks": 0
+      },
+      "byKind": {
+        "all": {
+          "recallAt5": 0.848,
+          "hitAt1": 0.628,
+          "ms": {
+            "p50": 75.9,
+            "p95": 92.7
+          }
+        },
+        "direct": {
+          "recallAt5": 0.892,
+          "hitAt1": 0.614,
+          "ms": {
+            "p50": 76.6,
+            "p95": 85.6
+          }
+        },
+        "context": {
+          "recallAt5": 0.858,
+          "hitAt1": 0.697,
+          "ms": {
+            "p50": 76.4,
+            "p95": 85.5
+          }
+        },
+        "cross-language": {
+          "recallAt5": 0.841,
+          "hitAt1": 0.581,
+          "ms": {
+            "p50": 75.8,
+            "p95": 87.3
+          }
+        },
+        "temporal": {
+          "recallAt5": 0.804,
+          "hitAt1": 0.371,
+          "ms": {
+            "p50": 75.8,
+            "p95": 86
+          }
+        },
+        "indirect": {
+          "recallAt5": 0.74,
+          "hitAt1": 0.52,
+          "ms": {
+            "p50": 26.1,
+            "p95": 151.8
+          }
+        },
+        "indirect-near": {
+          "recallAt5": 0.74,
+          "hitAt1": 0.52,
+          "ms": {
+            "p50": 78.8,
+            "p95": 158.3
+          }
+        },
+        "indirect-mid": {
+          "recallAt5": 0.74,
+          "hitAt1": 0.52,
+          "ms": {
+            "p50": 21.6,
+            "p95": 43.2
+          }
+        },
+        "indirect-far": {
+          "recallAt5": 0.74,
+          "hitAt1": 0.52,
+          "ms": {
+            "p50": 24.6,
+            "p95": 45.4
+          }
+        },
+        "no-answer": {
+          "recallAt5": null,
+          "hitAt1": null,
+          "ms": {
+            "p50": 76.6,
+            "p95": 151.3
+          }
+        },
+        "multi-hop": {
+          "recallAt5": 1,
+          "hitAt1": 0.6,
+          "ms": {
+            "p50": 154,
+            "p95": 170.4
+          }
+        },
+        "time-travel": {
+          "recallAt5": 0.6,
+          "hitAt1": 0.1,
+          "ms": {
+            "p50": 76.1,
+            "p95": 87.6
+          }
+        },
+        "topic-switch": {
+          "recallAt5": 1,
+          "hitAt1": 1,
+          "ms": {
+            "p50": 74.3,
+            "p95": 79.7
+          }
+        },
+        "topic-return": {
+          "recallAt5": 1,
+          "hitAt1": 1,
+          "ms": {
+            "p50": 17.4,
+            "p95": 72.9
+          }
+        },
+        "person": {
+          "recallAt5": 1,
+          "hitAt1": 0.767,
+          "ms": {
+            "p50": 75.2,
+            "p95": 82.2
+          }
+        }
+      },
+      "settings": {
+        "p9": true,
+        "p9b": true,
+        "store": true,
+        "mode": "C",
+        "answerModel": "qwen2.5:7b"
+      }
+    }
+  ]
+}

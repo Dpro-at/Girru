@@ -61,6 +61,8 @@ grouped by layer (Frontend, Backend, Python).
 | `pino-pretty` | MIT | Log formatting |
 | `grammy` | MIT | Telegram Bot API client |
 | `@whiskeysockets/baileys` | **GPL-3.0** | WhatsApp Web API client |
+| `usearch` | Apache 2.0 | In-process HNSW vector index for memory recall (MEM-SPEED-01); bundles NumKong (Apache 2.0 / BSD-3-Clause); prebuilt for Windows, macOS and Linux |
+| `bindings`, `node-addon-api`, `node-gyp-build` | MIT | Native addon loading (dependencies of `usearch`) |
 
 > ⚠️ **GPL-3.0 Note**: `@whiskeysockets/baileys` is GPL-3.0. If you distribute this software, the combined work must comply with GPL-3.0 terms. Since Girru is open-source, this is compatible.
 
@@ -88,7 +90,7 @@ grouped by layer (Frontend, Backend, Python).
 | License | Packages | Key Requirement |
 |---------|----------|-----------------|
 | **MIT** | Most packages | Keep copyright notice |
-| **Apache 2.0** | puppeteer, openai, Vercel AI SDK, TypeScript | Keep copyright notice + state changes |
+| **Apache 2.0** | puppeteer, openai, Vercel AI SDK, TypeScript, usearch | Keep copyright notice + state changes |
 | **ISC** | lucide-react, node-cron, @clack/prompts | Keep copyright notice |
 | **GPL-3.0** | edge-tts, @whiskeysockets/baileys | Distribute source under GPL-3.0 |
 | **HPND** | Pillow | Keep copyright notice |
@@ -104,5 +106,6 @@ The following packages require attribution under Apache License 2.0:
 - **openai** — Copyright OpenAI
 - **ai, @ai-sdk/openai, @ai-sdk/react** — Copyright Vercel Inc.
 - **typescript** — Copyright Microsoft Corporation
+- **usearch** (with NumKong) — Copyright Unum Cloud
 
 Full Apache 2.0 license text: https://www.apache.org/licenses/LICENSE-2.0

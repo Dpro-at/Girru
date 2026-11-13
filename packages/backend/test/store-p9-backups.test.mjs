@@ -15,6 +15,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync, readdirSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { randomBytes } from 'node:crypto';
 
 const backendDir = process.cwd();
@@ -39,17 +40,17 @@ globalThis.fetch = async (url) => { throw new Error(`unexpected network call in 
 const quiet = () => {}; console.log = quiet; console.info = quiet; console.warn = quiet;
 after(() => rmSync(dir, { recursive: true, force: true }));
 
-const { getDatabase, closeDatabase } = await import(join(backendDir, 'src/db/database.ts'));
+const { getDatabase, closeDatabase } = await import(pathToFileURL(join(backendDir, 'src/db/database.ts')).href);
 let db = getDatabase();
 await db.initialize();
 const OWNER = 'p9b-owner';
 db.prepare(`INSERT INTO users (id, email, username, password_hash, role, status) VALUES (?, ?, ?, 'x', 'owner', 'active')`).run(OWNER, `${OWNER}@example.test`, OWNER);
 writeFileSync(join(data, 'agents', 'g-lead', 'rules.md'), 'be kind\n');
 
-const B = await import(join(backendDir, 'src/services/backups.ts'));
-const L = await import(join(backendDir, 'src/memory/forget-ledger.ts'));
-const { forgetMemory } = await import(join(backendDir, 'src/memory/forget.ts'));
-const { getMemoryStorage } = await import(join(backendDir, 'src/memory/storage.ts'));
+const B = await import(pathToFileURL(join(backendDir, 'src/services/backups.ts')).href);
+const L = await import(pathToFileURL(join(backendDir, 'src/memory/forget-ledger.ts')).href);
+const { forgetMemory } = await import(pathToFileURL(join(backendDir, 'src/memory/forget.ts')).href);
+const { getMemoryStorage } = await import(pathToFileURL(join(backendDir, 'src/memory/storage.ts')).href);
 const storage = getMemoryStorage();
 await storage.initialize();
 const manifest = (id) => JSON.parse(readFileSync(join(B.workspaceBackupsDir(), id, 'manifest.json'), 'utf8'));
