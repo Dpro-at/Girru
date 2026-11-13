@@ -11,7 +11,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
+import { pathToFileURL } from 'node:url';
+/** A backend module as an import URL (a bare C: path is not a valid ESM specifier on Windows). */
+const mod = (rel) => pathToFileURL(join(backendDir, rel)).href;
 import { randomBytes } from 'node:crypto';
 import { offeredNames, expectedNumCtx, expectedNumPredict, p2bOn } from './helpers/p2b.mjs';
 
@@ -49,12 +52,12 @@ globalThis.fetch = async (url, init = {}) => {
 const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
 
-const { getDatabase } = await import(join(backendDir, 'src/db/database.ts'));
+const { getDatabase } = await import(mod('src/db/database.ts'));
 const db = getDatabase();
 await db.initialize();
-const { getCredentialStorage } = await import(join(backendDir, 'src/credentials/storage.ts'));
+const { getCredentialStorage } = await import(mod('src/credentials/storage.ts'));
 await getCredentialStorage().initialize();
-const { getOrchestrator } = await import(join(backendDir, 'src/multi-agent/index.ts'));
+const { getOrchestrator } = await import(mod('src/multi-agent/index.ts'));
 await getOrchestrator().initialize(join(dir, '.data', 'multi-agent', 'orchestrator.db'));
 for (const [id, role] of [['ho-owner', 'owner'], ['ho-user', 'user']]) {
   db.prepare(`INSERT INTO users (id, email, username, password_hash, role, status, email_verified) VALUES (?, ?, ?, 'x', ?, 'active', 1)`).run(id, `${id}@example.test`, id, role);
@@ -63,14 +66,14 @@ for (const [id, name, primary] of [['ho-main', 'Main', 1], ['ho-writer', 'Writer
   db.prepare(`INSERT INTO agents_config (id, name, provider, model, is_primary) VALUES (?, ?, 'ollama', 'qwen-test', ?)`).run(id, name, primary);
 }
 
-const { generateToken } = await import(join(backendDir, 'src/auth/jwt.ts'));
-const { buildServer } = await import(join(backendDir, 'src/api/app.ts'));
-const { chatRuns } = await import(join(backendDir, 'src/services/chat-runs.ts'));
-const { createProject } = await import(join(backendDir, 'src/repositories/chat-conversations.ts'));
-const { createAgentToolsRegistry } = await import(join(backendDir, 'src/tools/index.ts'));
-const store = await import(join(backendDir, 'src/memory/handoff/store.ts'));
-const scopes = await import(join(backendDir, 'src/memory/handoff/scope.ts'));
-const gen = await import(join(backendDir, 'src/memory/handoff/generate.ts'));
+const { generateToken } = await import(mod('src/auth/jwt.ts'));
+const { buildServer } = await import(mod('src/api/app.ts'));
+const { chatRuns } = await import(mod('src/services/chat-runs.ts'));
+const { createProject } = await import(mod('src/repositories/chat-conversations.ts'));
+const { createAgentToolsRegistry } = await import(mod('src/tools/index.ts'));
+const store = await import(mod('src/memory/handoff/store.ts'));
+const scopes = await import(mod('src/memory/handoff/scope.ts'));
+const gen = await import(mod('src/memory/handoff/generate.ts'));
 const app = await buildServer({ logger: false });
 await app.ready();
 
@@ -166,7 +169,7 @@ test('channel (outside) turns never get the tools or a note', async () => {
   assert.ok((await legacy.execute('handoff_save', { done: ['x'] })).error);
   // Only the saved-conversation route and the task-run executor put a note into a prompt.
   const users = [];
-  const walk = (d) => { for (const entry of readdirSync(d,{withFileTypes:true})) { const p = join(d,entry.name); if (entry.isDirectory()) walk(p); else if (entry.isFile()&&p.endsWith('.ts') && /HandoffText\(/.test(readFileSync(p, 'utf8'))) users.push(p.slice(backendDir.length + 1)); } };
+  const walk = (d) => { for (const entry of readdirSync(d,{withFileTypes:true})) { const p = join(d,entry.name); if (entry.isDirectory()) walk(p); else if (entry.isFile()&&p.endsWith('.ts') && /HandoffText\(/.test(readFileSync(p, 'utf8'))) users.push(p.slice(backendDir.length + 1).split(sep).join('/')); } };
   walk(join(backendDir, 'src'));
   assert.deepEqual(users.sort(), ['src/agent/execution/task-turn.ts', 'src/api/routes/chat-conversations.ts', 'src/memory/handoff/scope.ts']);
 });
