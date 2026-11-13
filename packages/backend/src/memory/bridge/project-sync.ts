@@ -20,7 +20,8 @@ import { assertNoDefaultMemoryAccess } from '../encryption/execution-context.js'
 import { cleanHandoff, HandoffInputError, type HandoffBody } from '../handoff/store.js';
 import { learn } from '../learning.js';
 import { storeP8Enabled } from '../../services/store-p8.js';
-import { latestBridgeHandoff, saveBridgeHandoff } from './store.js';
+import { folderSettings, latestBridgeHandoff, saveBridgeHandoff } from './store.js';
+import { isOutsideProject } from '../project-trust.js';
 import { BridgeError, filesApply, filesPreview, ownProject } from './service.js';
 import { projectDrawer } from './brief.js';
 import type { FilePlan } from './managed-files.js';
@@ -33,6 +34,8 @@ export interface SyncPlan {
   files: FilePlan[];
   fileChanges: number;
   conflicts: number;
+  /** Why the files are left alone: the owner's switch is off, or this is someone else's repository. */
+  filesSkipped: string | null;
   /** The handoff this sync would save, or why it would not. */
   handoff: HandoffBody | null;
   handoffSkipped: string | null;
@@ -80,7 +83,17 @@ const planHash = (filesHash: string, handoff: HandoffBody | null, memory: string
 export async function syncPreview(ownerId: string, projectId: unknown, input: SyncInput = {}): Promise<SyncPlan> {
   assertNoDefaultMemoryAccess();
   const p = await ownProject(ownerId, projectId);
-  const files = await filesPreview(ownerId, p.id);
+  // A sync keeps the managed files up to date; it never turns them on. `filesApply` sets
+  // filesEnabled, so without this check a sync would undo the owner's "stop updating this folder"
+  // and write into a repository on the Outside projects list. Only the owner's own approval of
+  // `memory_bridge` apply_files starts writing a folder.
+  const settings = await folderSettings(ownerId, p.id);
+  const filesSkipped = !settings.filesEnabled
+    ? 'the owner has not turned project files on for this folder (memory_bridge apply_files does that)'
+    : (await isOutsideProject(ownerId, p.id))
+      ? 'this project is on the Outside projects list; trust it first'
+      : null;
+  const files = filesSkipped ? null : await filesPreview(ownerId, p.id);
   const memory = facts(input.memory);
 
   let handoff: HandoffBody | null = null;
@@ -102,9 +115,10 @@ export async function syncPreview(ownerId: string, projectId: unknown, input: Sy
 
   return {
     // ownProject refuses a project without a folder, so this is set.
-    projectId: p.id, folder: p.folder as string, files: files.files, fileChanges: files.changes, conflicts: files.conflicts,
+    projectId: p.id, folder: p.folder as string,
+    files: files?.files ?? [], fileChanges: files?.changes ?? 0, conflicts: files?.conflicts ?? 0, filesSkipped,
     handoff, handoffSkipped, memory,
-    previewHash: planHash(files.previewHash, handoff, memory),
+    previewHash: planHash(files?.previewHash ?? `skipped:${filesSkipped}`, handoff, memory),
   };
 }
 
@@ -117,6 +131,8 @@ export interface SyncResult {
   fileChanges: number;
   /** Set when the database part succeeded and the files did not: the next sync writes them. */
   filesError: string | null;
+  /** Set when the files were left alone on purpose (the owner's switch, or an outside project). */
+  filesSkipped: string | null;
 }
 
 /**
@@ -152,15 +168,18 @@ export async function syncApply(ownerId: string, projectId: unknown, input: Sync
   }
 
   // 2. The files last: they are derived, so a failure here is fixed by the next sync, never a loss.
+  // Left alone entirely when the plan said so (the owner's switch, or someone else's repository).
   let fileChanges = 0;
   let filesError: string | null = null;
-  try {
-    const files = await filesPreview(ownerId, plan.projectId);
-    const written = await filesApply(ownerId, plan.projectId, { previewHash: files.previewHash, confirm: true }, 'project_sync');
-    fileChanges = written.changes;
-  } catch (err) {
-    filesError = String((err as Error)?.message ?? err).slice(0, 300);
+  if (!plan.filesSkipped) {
+    try {
+      const files = await filesPreview(ownerId, plan.projectId);
+      const written = await filesApply(ownerId, plan.projectId, { previewHash: files.previewHash, confirm: true }, 'project_sync');
+      fileChanges = written.changes;
+    } catch (err) {
+      filesError = String((err as Error)?.message ?? err).slice(0, 300);
+    }
   }
 
-  return { projectId: plan.projectId, handoffId, proposals, notProposed, fileChanges, filesError };
+  return { projectId: plan.projectId, handoffId, proposals, notProposed, fileChanges, filesError, filesSkipped: plan.filesSkipped };
 }

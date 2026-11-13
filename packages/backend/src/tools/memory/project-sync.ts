@@ -43,7 +43,7 @@ const list = (what: string) => ({ type: 'array' as const, items: { type: 'string
 /** The plan as the owner reads it before approving: every part, and what it would not do. */
 function planText(plan: SyncPlan): string {
   const lines = [`Project sync for ${plan.folder}`];
-  lines.push(plan.fileChanges
+  lines.push(plan.filesSkipped ? `Files: left alone — ${plan.filesSkipped}` : plan.fileChanges
     ? `Files: ${plan.fileChanges} change(s) in ${plan.files.filter((f) => f.action !== 'unchanged').map((f) => f.relative).join(', ') || 'the managed section'}${plan.conflicts ? ` · ${plan.conflicts} conflict(s)` : ''}`
     : 'Files: already up to date');
   lines.push(plan.handoff
@@ -107,7 +107,9 @@ Send the same handoff and memory as the preview, with its preview_hash and confi
       const parts = [
         r.handoffId ? 'handoff saved' : 'no handoff',
         r.proposals.length ? `${r.proposals.length} fact(s) waiting for your review` : 'nothing proposed',
-        r.filesError ? `the files were NOT written (${r.filesError}) — the next sync writes them` : `${r.fileChanges} file change(s) written`,
+        r.filesSkipped ? `the files were left alone (${r.filesSkipped})`
+          : r.filesError ? `the files were NOT written (${r.filesError}) — the next sync writes them`
+            : `${r.fileChanges} file change(s) written`,
       ];
       if (r.notProposed.length) parts.push(`not proposed: ${r.notProposed.map((n) => n.reason).join('; ')}`);
       return ok(`Project sync: ${parts.join(' · ')}.`, r);

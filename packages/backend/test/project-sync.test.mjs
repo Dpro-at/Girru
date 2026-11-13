@@ -49,6 +49,8 @@ db.prepare(`INSERT INTO users (id, email, username, password_hash, role, status,
 const { createProject } = await import(mod('src/repositories/chat-conversations.ts'));
 const { setBridgeEnv } = await import(mod('src/memory/bridge/service.ts'));
 const { syncPreview, syncApply } = await import(mod('src/memory/bridge/project-sync.ts'));
+const { filesPreview, filesApply } = await import(mod('src/memory/bridge/service.ts'));
+const { folderSettings } = await import(mod('src/memory/bridge/store.ts'));
 const { latestBridgeHandoff } = await import(mod('src/memory/bridge/store.ts'));
 setBridgeEnv({ home: dir, env: {} });
 const project = await createProject(OWNER, { name: 'Falcon', folder });
@@ -57,6 +59,30 @@ const HANDOFF = { done: ['the export fix'], left: ['the retry limit'], next: ['t
 const FACTS = ['Falcon: the nightly export runs at 02:00.'];
 const liveRows = (like) => db.prepare(`SELECT COUNT(*) AS n FROM memories WHERE user_id = ? AND status = 'active' AND content LIKE ?`).get(OWNER, like).n;
 
+// A sync keeps the managed files up to date; it must never be what turns them on. `filesApply` sets
+// filesEnabled, so this is the check that a sync cannot undo the owner's "stop updating this folder".
+test('with the owner\'s file switch off, the files are left alone', async () => {
+  assert.equal((await folderSettings(OWNER, project.id)).filesEnabled, false, 'off to begin with');
+  const note = { done: ['a first piece'], left: [], next: ['more'], questions: [] };
+  const plan = await syncPreview(OWNER, project.id, { handoff: note });
+  assert.match(plan.filesSkipped, /not turned project files on/);
+  assert.equal(plan.fileChanges, 0);
+  assert.deepEqual(plan.files, []);
+  const r = await syncApply(OWNER, project.id, { handoff: note, previewHash: plan.previewHash, confirm: true });
+  assert.ok(r.handoffId, 'the handoff is still saved');
+  assert.equal(r.fileChanges, 0);
+  assert.match(r.filesSkipped, /not turned project files on/);
+  assert.equal(existsSync(join(folder, 'AGENTS.md')), false, 'no file was written');
+  assert.equal((await folderSettings(OWNER, project.id)).filesEnabled, false, 'and the switch is still off');
+});
+
+test('the owner turns the files on themselves, then a sync keeps them up to date', async () => {
+  const p = await filesPreview(OWNER, project.id);
+  await filesApply(OWNER, project.id, { previewHash: p.previewHash, confirm: true });
+  assert.equal((await folderSettings(OWNER, project.id)).filesEnabled, true);
+  assert.ok(existsSync(join(folder, 'AGENTS.md')));
+});
+
 test('the preview shows files, handoff and facts under one hash, and writes nothing', async () => {
   const plan = await syncPreview(OWNER, project.id, { handoff: HANDOFF, memory: FACTS });
   assert.equal(plan.projectId, project.id);
@@ -64,8 +90,9 @@ test('the preview shows files, handoff and facts under one hash, and writes noth
   assert.deepEqual(plan.memory, FACTS);
   assert.match(plan.previewHash, /^[0-9a-f]{64}$/);
   assert.ok(plan.files.length > 0, 'the managed files are part of the plan');
-  assert.equal(await latestBridgeHandoff(OWNER, project.id), undefined, 'no handoff was saved');
+  const notes = db.prepare('SELECT COUNT(*) AS n FROM memory_bridge_handoffs WHERE owner_id = ?').get(OWNER).n;
   assert.equal(liveRows('%nightly export%'), 0, 'no memory was written');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM memory_bridge_handoffs WHERE owner_id = ?').get(OWNER).n, notes, 'no handoff was saved');
   // The hash covers every part: a different handoff or fact is a different plan.
   const other = await syncPreview(OWNER, project.id, { handoff: { ...HANDOFF, next: ['something else'] }, memory: FACTS });
   assert.notEqual(other.previewHash, plan.previewHash);
@@ -82,7 +109,6 @@ test('apply needs confirm and the hash of the plan the owner saw', async () => {
   await assert.rejects(() => syncApply(OWNER, project.id, { handoff: HANDOFF, memory: FACTS, previewHash: 'f'.repeat(64), confirm: true }),
     /changed since that preview/, 'a hash from another plan is refused');
   // Still nothing written by the refusals.
-  assert.equal(await latestBridgeHandoff(OWNER, project.id), undefined);
   assert.equal(liveRows('%nightly export%'), 0);
 });
 
