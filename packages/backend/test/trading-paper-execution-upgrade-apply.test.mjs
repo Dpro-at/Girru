@@ -71,9 +71,9 @@ test('pending, unknown, changed profile and stale affected set refuse without co
  }
 });
 test('actual SQL fault after overlay and binding insertion rolls receipt and every overlay row back',async()=>{
- const f=await ready(),before=preserved(f),original=db.prepare;let reached=false;
- db.prepare=function(text,...args){if(text.startsWith('INSERT INTO main.paper_execution_upgrade_events')){reached=true;assert.deepEqual(counts(f),[1,1,0]);return original.call(this,'INSERT INTO main.fixture_missing_upgrade_table VALUES(1)');}return original.call(this,text,...args);};
- try{assert.equal((await apply(f)).ok,false);}finally{db.prepare=original;}
+ const f=await ready(),before=preserved(f),original=Object.getPrototypeOf(db).prepare;let reached=false;
+ Object.getPrototypeOf(db).prepare=function(text,...args){if(text.startsWith('INSERT INTO main.paper_execution_upgrade_events')){reached=true;assert.deepEqual(counts(f),[1,1,0]);return original.call(this,'INSERT INTO main.fixture_missing_upgrade_table VALUES(1)');}return original.call(this,text,...args);};
+ try{assert.equal((await apply(f)).ok,false);}finally{Object.getPrototypeOf(db).prepare=original;}
  assert.equal(reached,true);assert.deepEqual(counts(f),[0,0,0]);assert.deepEqual(preserved(f),before);assert.equal(db.prepare('SELECT consumed_at FROM verification_receipts WHERE token_hash=?').get(createHash('sha256').update(f.upgradeProof.receipt).digest('hex')).consumed_at,null);
  assert.equal((await apply(f)).ok,true);
 });
@@ -89,9 +89,9 @@ test('effective read is query-only; foreign/TEMP/current owner-factor loss refus
 });
 
 test('post-insert current target mutation rolls back proof overlay bindings and target change',async()=>{
- const f=await ready(),before=preserved(f),original=db.prepare;let injected=false;
- db.prepare=function(text,...args){if(text.startsWith('INSERT INTO main.paper_execution_upgrade_events')){injected=true;original.call(this,'UPDATE main.paper_accounts SET stopped=1 WHERE account_id=?').run(f.input.accountId);}return original.call(this,text,...args);};
- try{assert.equal((await apply(f)).ok,false);}finally{db.prepare=original;}
+ const f=await ready(),before=preserved(f),original=Object.getPrototypeOf(db).prepare;let injected=false;
+ Object.getPrototypeOf(db).prepare=function(text,...args){if(text.startsWith('INSERT INTO main.paper_execution_upgrade_events')){injected=true;original.call(this,'UPDATE main.paper_accounts SET stopped=1 WHERE account_id=?').run(f.input.accountId);}return original.call(this,text,...args);};
+ try{assert.equal((await apply(f)).ok,false);}finally{Object.getPrototypeOf(db).prepare=original;}
  assert.equal(injected,true);assert.deepEqual(preserved(f),before);assert.deepEqual(counts(f),[0,0,0]);assert.equal(db.prepare('SELECT consumed_at FROM verification_receipts WHERE token_hash=?').get(createHash('sha256').update(f.upgradeProof.receipt).digest('hex')).consumed_at,null);
 });
 const hashJSON=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
@@ -116,15 +116,15 @@ test('already-revoked consent provenance is proof-bound while later genuine revo
 });
 
 test('post-insert profile revision mutation also rolls back proof and overlay atomically',async()=>{
- const f=await ready(),before=preserved(f),profile=db.prepare('SELECT * FROM paper_execution_profiles WHERE account_id=?').get(f.input.accountId),original=db.prepare;
- db.prepare=function(text,...args){if(text.startsWith('INSERT INTO main.paper_execution_upgrade_events'))original.call(this,'UPDATE main.paper_execution_profiles SET revision=revision+1 WHERE account_id=?').run(f.input.accountId);return original.call(this,text,...args);};
- try{assert.equal((await apply(f)).ok,false);}finally{db.prepare=original;}
+ const f=await ready(),before=preserved(f),profile=db.prepare('SELECT * FROM paper_execution_profiles WHERE account_id=?').get(f.input.accountId),original=Object.getPrototypeOf(db).prepare;
+ Object.getPrototypeOf(db).prepare=function(text,...args){if(text.startsWith('INSERT INTO main.paper_execution_upgrade_events'))original.call(this,'UPDATE main.paper_execution_profiles SET revision=revision+1 WHERE account_id=?').run(f.input.accountId);return original.call(this,text,...args);};
+ try{assert.equal((await apply(f)).ok,false);}finally{Object.getPrototypeOf(db).prepare=original;}
  assert.deepEqual(preserved(f),before);assert.deepEqual(db.prepare('SELECT * FROM paper_execution_profiles WHERE account_id=?').get(f.input.accountId),profile);assert.deepEqual(counts(f),[0,0,0]);assert.equal(db.prepare('SELECT consumed_at FROM verification_receipts WHERE token_hash=?').get(createHash('sha256').update(f.upgradeProof.receipt).digest('hex')).consumed_at,null);
 });
 
 test('actual owned child SIGKILL after overlay binding and event insert rolls back receipt and every pending transaction effect',async()=>{
  const f=await ready({filled:true}),before=preserved(f);const moduleURL=new URL('../src/services/trading-paper-execution-upgrade-apply.ts',import.meta.url).href,dbURL=new URL('../src/db/database.ts',import.meta.url).href;
- const source=`const {getDatabase}=await import(${JSON.stringify(dbURL)});const main=getDatabase();await main.initialize();const db=main.getDb();const {applyPaperExecutionUpgrade}=await import(${JSON.stringify(moduleURL)});db.function('crash_owned_upgrade',()=>{process.kill(process.pid,'SIGKILL');return 0;});const original=db.prepare;db.prepare=function(text,...args){if(text.startsWith('INSERT INTO main.paper_execution_upgrade_events'))db.exec("CREATE TEMP TRIGGER crash_owned_upgrade AFTER INSERT ON main.paper_execution_upgrade_events BEGIN SELECT crash_owned_upgrade(); END");return original.call(this,text,...args);};let input='';for await(const chunk of process.stdin)input+=chunk;const f=JSON.parse(input);await applyPaperExecutionUpgrade(db,f.context,f.actor,f.id,f.receipt,f.now);process.exit(91);`;
+ const source=`const {getDatabase}=await import(${JSON.stringify(dbURL)});const main=getDatabase();await main.initialize();const db=main.getDb();const {applyPaperExecutionUpgrade}=await import(${JSON.stringify(moduleURL)});db.function('crash_owned_upgrade',()=>{process.kill(process.pid,'SIGKILL');return 0;});const original=Object.getPrototypeOf(db).prepare;Object.getPrototypeOf(db).prepare=function(text,...args){if(text.startsWith('INSERT INTO main.paper_execution_upgrade_events'))db.exec("CREATE TEMP TRIGGER crash_owned_upgrade AFTER INSERT ON main.paper_execution_upgrade_events BEGIN SELECT crash_owned_upgrade(); END");return original.call(this,text,...args);};let input='';for await(const chunk of process.stdin)input+=chunk;const f=JSON.parse(input);await applyPaperExecutionUpgrade(db,f.context,f.actor,f.id,f.receipt,f.now);process.exit(91);`;
  const child=spawn(process.execPath,['--import','tsx','--input-type=module','-e',source],{env:process.env,stdio:['pipe','ignore','ignore']});child.stdin.end(JSON.stringify({context:f.context,actor:f.actor,id:f.upgradeReview.id,receipt:f.upgradeProof.receipt,now:f.upgradeTime}));const exited=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{child.kill('SIGKILL');reject(Error('owned crash fixture timeout'));},10000);child.once('error',error=>{clearTimeout(timer);reject(error);});child.once('exit',(code,signal)=>{clearTimeout(timer);resolve({code,signal});});});assert.equal(exited.signal,'SIGKILL');
  assert.deepEqual(counts(f),[0,0,0]);assert.deepEqual(preserved(f),before);assert.equal(db.prepare('SELECT consumed_at FROM verification_receipts WHERE token_hash=?').get(createHash('sha256').update(f.upgradeProof.receipt).digest('hex')).consumed_at,null);assert.equal((await apply(f)).ok,true);assert.equal((await apply(f)).replayed,true);
 });
