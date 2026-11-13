@@ -36,6 +36,7 @@ import { createRequire } from 'node:module';
 import { getDatabase } from '../db/index.js';
 import { sql, sqliteSteps } from '../repositories/sql-steps.js';
 import { lexicalTokens } from './text-normalize.js';
+import { TOPIC_COMMON_SHARE } from './context/query.js';
 import { BM25_B, BM25_K1, MIN_RECALL_SCORE, WORKING_LAYER_BOOST, hybridScore, termCounts, vectorScore } from './hybrid.js';
 import { LEGACY_HASH_MODEL } from './embedding.js';
 import { DRAWER_KEY_SQL, DRAWER_KIND_SQL, normalizeDrawer, type DrawerRef } from './drawers.js';
@@ -538,6 +539,34 @@ export async function openStore(userId: string, drawers: DrawerRef[]): Promise<O
     out.push(d);
   }
   return { drawers: out, store: u };
+}
+
+/**
+ * MEM-CTX-02: how many live memories of the open drawers contain a word, and how many there are in
+ * all. A topic word taken from the conversation is only worth searching for when the owner's memory
+ * of this project actually uses it; a word in most of them says nothing. Any language: it counts
+ * tokens. Null when the store is not loaded.
+ */
+export function drawerTermCounts(userId: string, open: OpenStore): { df: (token: string) => number; live: number } | null {
+  const u = users.get(userId);
+  if (!u || u !== open.store) return null;
+  const inOpen = new Set(open.drawers);
+  let live = 0;
+  for (const d of open.drawers) live += d.live;
+  if (live === 0) return null;
+  return {
+    live,
+    // Counting stops at `common`: the caller only needs df >= 1 and df below that share, so a word
+    // the whole store uses costs a bounded scan instead of its full postings.
+    df: (token: string) => {
+      const p = u.terms.get(token);
+      if (!p) return 0;
+      const common = Math.ceil(live * TOPIC_COMMON_SHARE);
+      let k = 0;
+      for (let i = 0; i < p.n && k < common; i++) { const s = p.slots[i]; if (u.alive[s] && inOpen.has(u.drawerOf[s])) k++; }
+      return k;
+    },
+  };
 }
 
 /** Rows whose vector is not of `model`, among the candidates, oldest first (lazy re-embed). */

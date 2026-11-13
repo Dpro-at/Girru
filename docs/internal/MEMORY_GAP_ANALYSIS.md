@@ -109,3 +109,19 @@ Findings worth keeping:
 - **Some "correct" answers are guesses**: of 8 correct answers the gate cost on the tuning set, 3 had no retrieved target at all. A measurement that counts them as losses overstates the cost.
 - **The real bottleneck is retrieval, not the answer format**: in every question the gate blocked, search had not found the target. Indirect questions whose wording shares no word with the memory are the open problem.
 - **Held-out question set**: `buildWorld(seed, { heldOut: true })` / `--held-out` — 10 other indirect wordings and 8 other no-answer questions. Every future change is checked on it before it is adopted.
+
+## Adopted, 2026-11-13 (measured on held-out questions and with a strong model)
+
+| # | Change | Measured |
+|---|---|---|
+| **MEM-CTX-02** | The recall query keeps topic words from the message that brought the project up, but only words the owner's memory of those drawers actually uses (`drawerTermCounts`), rarest there first, and never fewer than two (one word only ever cost hits) | Held-out indirect recall@5 0.79 → **0.86**, cross-language 0.858 → 0.879, search p50 106.6 → 107.0 ms. On the 14 held-out questions whose recall changed, a strong model went 8 → **14 of 14 correct, 0 wrong**; the local qwen2.5:7b went 2 → 6 wrong on the same evidence |
+| **MEM-CONC-01** | The next memory version is claimed inside one transaction, so `UNIQUE(memory_id, version)` decides the winner. `lockName` is a no-op on SQLite, so the old read-then-write let two processes edit from one version | 3 processes, one memory: 2 saved / 1 refused (a lost update) → **1 saved / 2 refused**, three runs |
+| **MEM-CONC-02** | The graph prune after a save covers only the entities and links that memory held, by id. `pruneGraphStep` scans every memory of the owner five times and ran on every save | One save at 100,000 memories: **950 ms → 1 ms**. Saves in 8 s: 4 → 1,472 |
+
+### Measuring tools added
+- `agents.mjs` — several agents in their own processes on one SQLite file: reads together (1 / 3 / 6), reads while another saves, three edits of one memory, handoff travel time, project isolation.
+- `save-profile.mjs` — where one save spends its time at a given size.
+- `accuracy.mjs --pack` + `pack-diff.mjs` + `pack-score.mjs` — the two-level test: what a chat would send a model, the questions where a change altered recall, and a mechanical score of any model's answers. Girru's own score is recall; a local model's answers are a secondary signal.
+
+### Open, measured but not fixed
+**One agent's write rebuilds every other agent's index.** `recall-store.ts` sees another connection's write only through `PRAGMA data_version` (its change-capture triggers are TEMP, so per connection) and drops every owner's store. At 100,000 memories that is read p95 3,165 ms while another agent saves, and 1,645 ms for a handoff to become visible. The fix discussed: a small change-log table (autoincrement id, owner, memory id) with each process remembering the last id it applied, so another process's writes are applied by id. The same gap exists for PostgreSQL (item 18).

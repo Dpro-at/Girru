@@ -300,16 +300,46 @@ async function updateVersionedNow(userId: string, id: string, updates: Partial<M
   const storage = getMemoryStorage();
   const old = await storage.getOwned(userId, id);
   if (!old) return null;
-  if (expectedVersion !== undefined) {
-    // Compare-and-set: refuse an edit made on an older version (the editor keeps its text).
-    const v = await sql().read(currentVersionStep(id));
-    if (v !== expectedVersion) throw new MemoryVersionConflictError({ id, content: old.content, type: old.type, importance: versionEntryOf(old).importance, version: v });
+  // MEM-CONC-01: the next version is CLAIMED in one transaction before the row is written, so two
+  // agents in two processes cannot both edit from the same version. The check alone was not enough:
+  // `lockName` is a no-op on SQLite, so both read the same version and the second overwrote the
+  // first. UNIQUE(memory_id, version) (migration 059) decides the winner inside the transaction;
+  // the loser is refused with the version it should have read. Measured by scripts/memory-baseline/
+  // agents.mjs (3 processes, one memory): 2 saved / 1 refused before, 1 saved / 2 refused after.
+  const entry = versionEntryOf({ ...old, ...updates } as Memory);
+  const drawer = (updates.drawer ?? old.drawer)!;
+  const claim = () => sql().tx(function* () {
+    if (expectedVersion !== undefined) {
+      const v = yield* currentVersionStep(id);
+      if (v !== expectedVersion) throw new MemoryVersionConflictError({ id, content: old.content, type: old.type, importance: versionEntryOf(old).importance, version: v });
+    }
+    yield* recordBaselineIfMissingStep(old, actor);
+    yield* recordVersionStep({ memoryId: id, userId, drawer, change: 'update', entry, actor, reason });
+  });
+  // An edit with no expected version only asks for the next number, so a lost race is retried;
+  // an edit that named a version is refused, because its text was written against an older one.
+  for (let attempt = 0; ; attempt++) {
+    try { await claim(); break; } catch (e) {
+      if (e instanceof MemoryVersionConflictError) throw e;
+      if (!isVersionRaceError(e) || expectedVersion !== undefined || attempt >= 3) {
+        if (isVersionRaceError(e) && expectedVersion !== undefined) {
+          const v = await sql().read(currentVersionStep(id));
+          throw new MemoryVersionConflictError({ id, content: old.content, type: old.type, importance: versionEntryOf(old).importance, version: v });
+        }
+        throw e;
+      }
+    }
   }
-  await recordBaselineIfMissing(old, actor);
   await storage.update(id, updates);
-  const updated = (await storage.getOwned(userId, id))!;
-  await recordVersion({ memoryId: id, userId, drawer: updated.drawer!, change: 'update', entry: versionEntryOf(updated), actor, reason });
-  return updated;
+  return (await storage.getOwned(userId, id))!;
+}
+
+/** Another process claimed the same version number first (UNIQUE(memory_id, version)), or held the write lock. */
+function isVersionRaceError(e: unknown): boolean {
+  const code = String((e as { code?: string } | null)?.code ?? '');
+  const message = String((e as Error | null)?.message ?? '');
+  return code.startsWith('SQLITE_CONSTRAINT') || code === 'SQLITE_BUSY' || code === '23505'
+    || /UNIQUE constraint failed: memory_versions/i.test(message) || /database is locked|duplicate key/i.test(message);
 }
 
 /**

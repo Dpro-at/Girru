@@ -35,6 +35,13 @@ export interface ContextQueryInput {
   entities?: readonly KnownEntity[];
   /** False: the entity's names only, no topic words. */
   topic?: boolean;
+  /**
+   * MEM-CTX-02: how many of the owner's memories in the open drawers use a word, and how many there
+   * are. A topic word is kept only when the memory itself uses it (df >= 1) and does not use it
+   * everywhere (df below TOPIC_COMMON_SHARE), rarest first. Without this, topic words are the first
+   * content words of the message, which is what MEM-CTX-01 measured as worse.
+   */
+  memoryWords?: { df: (token: string) => number; live: number } | null;
 }
 
 export interface ContextQuery {
@@ -108,18 +115,36 @@ function latestMention(texts: readonly string[], entities: readonly KnownEntity[
   return null;
 }
 
-/** Content words of `text` that the message does not already have and that are not names. */
-function topicWords(text: string, message: string, entity: KnownEntity): string[] {
+/** MEM-CTX-02: a word in this share of the open drawers' memories or more carries no topic. */
+export const TOPIC_COMMON_SHARE = 0.5;
+/**
+ * MEM-CTX-02: fewer topic words than this are not used at all. One word ("runs", "التحديثات",
+ * "خلّينا") moves the query without saying what the conversation is about: measured on the accuracy
+ * test it only ever cost hits, while every question it won back carried two ("server database").
+ */
+export const MIN_TOPIC_WORDS = 2;
+
+/**
+ * Content words of `text` that the message does not already have and that are not names. With
+ * `memoryWords` (MEM-CTX-02): only words the owner's memory of these drawers uses, rarest there
+ * first; without it: the first content words, in order.
+ */
+function topicWords(text: string, message: string, entity: KnownEntity, memoryWords?: { df: (token: string) => number; live: number } | null): string[] {
   const have = new Set(lexicalTokens(message));
   const nameTokens = new Set(entity.names.flatMap((n) => lexicalTokens(n)));
-  const out: string[] = [];
+  const found: Array<{ word: string; at: number; df: number }> = [];
   for (const word of text.split(/[\s,.;:!?؟،()"'«»]+/u)) {
-    const toks = lexicalTokens(word);
-    if (toks.length === 0 || toks.every((t) => have.has(t) || nameTokens.has(t) || t.length < 3)) continue;
-    if (!out.includes(word)) out.push(word);
-    if (out.length >= MAX_TOPIC_WORDS) break;
+    const toks = lexicalTokens(word).filter((t) => !have.has(t) && !nameTokens.has(t) && t.length >= 3);
+    if (toks.length === 0 || found.some((f) => f.word === word)) continue;
+    if (!memoryWords) { found.push({ word, at: found.length, df: 0 }); continue; }
+    // The best token of the word: used by the memory of these drawers, but not by most of it.
+    const dfs = toks.map((t) => memoryWords.df(t)).filter((d) => d >= 1 && d < memoryWords.live * TOPIC_COMMON_SHARE);
+    if (dfs.length === 0) continue;
+    found.push({ word, at: found.length, df: Math.min(...dfs) });
   }
-  return out;
+  if (!memoryWords) return found.slice(0, MAX_TOPIC_WORDS).map((f) => f.word);
+  if (found.length < MIN_TOPIC_WORDS) return [];
+  return found.sort((a, b) => a.df - b.df || a.at - b.at).slice(0, MAX_TOPIC_WORDS).sort((a, b) => a.at - b.at).map((f) => f.word);
 }
 
 export function buildContextQuery(input: ContextQueryInput): ContextQuery {
@@ -136,7 +161,7 @@ export function buildContextQuery(input: ContextQueryInput): ContextQuery {
     const inHistory = latestMention(history, entities);
     if (inHistory) {
       entity = inHistory.entity; source = 'conversation';
-      if (input.topic !== false) topic = topicWords(history[inHistory.index], message, entity);
+      if (input.topic !== false) topic = topicWords(history[inHistory.index], message, entity, input.memoryWords);
     } else if (input.openProject && input.openProject.names.length) {
       entity = input.openProject; source = 'open-project';
     }

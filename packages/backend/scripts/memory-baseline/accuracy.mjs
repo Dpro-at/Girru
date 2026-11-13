@@ -33,12 +33,17 @@ const answerModel = argValue('answer-model', null);
 const answerSample = Number(argValue('answer-sample', '240'));
 // --answer-kinds indirect,multi-hop: every question of these kinds (instead of a spread); --answer-variants P (or P,S).
 const answerKinds = argValue('answer-kinds', null)?.split(',') ?? null;
+// --pack <file>: write what a chat would send a model (the recalled memory block, the conversation and
+// the question) plus the answer key, and call no model. Girru's own job is measured by recall; this is
+// how a real model (Claude, Codex) can be asked the same questions separately.
+const packOut = argValue('pack', null);
 const answerVariants = (argValue('answer-variants', 'P,S')).split(',');
 // --mode A: the last message only (what a chat recalled before MEM-ACC-02).
 // --mode B: the context query (src/memory/context/query.ts): entity of the conversation or the open project, its names, topic words.
 const mode = argValue('mode', 'A');
-if (!['A', 'B', 'B0', 'C', 'D', 'E'].includes(mode)) { console.error(`mode ${mode} is not built yet`); process.exit(2); }
+if (!['A', 'B', 'B0', 'C', 'D', 'E', 'G'].includes(mode)) { console.error(`mode ${mode} is not built yet`); process.exit(2); }
 const { buildContextQuery } = await import(moduleUrl(backendDir, 'src/memory/context/query.ts'));
+const store = await import(moduleUrl(backendDir, 'src/memory/recall-store.ts'));
 const PROJECT_ENTITIES = new Map(WORLD_PROJECTS.map((p) => [p.slug, { names: [p.en, p.ar] }]));
 const KNOWN = [...PROJECT_ENTITIES.values(), ...WORLD_PEOPLE.map((n) => ({ names: [n, n.split(' ')[0]] }))];
 // The message with the known names taken out (Falcon, فالكون, لفالكون, Amira…).
@@ -48,10 +53,13 @@ const names_out = (t) => t.replace(NAME_RE, ' ').replace(/\s+/g, ' ').trim();
 // C: the B0 query plus the head of a question with a relative clause as an extra query (multi-hop).
 // D: C plus the focus (memories naming only another known entity rank lower).
 // E: D plus questions about a past state also read replaced facts (labelled no longer current).
-const focusOf = (q) => (mode === 'D' || mode === 'E' ? buildContextQuery({ message: q.q, history: q.history || [], openProject: PROJECT_ENTITIES.get(q.project) || null, entities: KNOWN, topic: false }).focus : null);
-const partsOf = (q) => (mode === 'C' || mode === 'D' || mode === 'E' ? buildContextQuery({ message: q.q, history: q.history || [], openProject: PROJECT_ENTITIES.get(q.project) || null, entities: KNOWN, topic: false }).parts : []);
-const queryOf = (q) => (mode === 'A' ? q.q
-  : buildContextQuery({ message: q.q, history: q.history || [], openProject: PROJECT_ENTITIES.get(q.project) || null, entities: KNOWN, topic: mode === 'B' }).query);
+const focusOf = (q) => (mode === 'D' || mode === 'E' || mode === 'G' ? buildContextQuery({ message: q.q, history: q.history || [], openProject: PROJECT_ENTITIES.get(q.project) || null, entities: KNOWN, topic: false }).focus : null);
+const partsOf = (q) => (mode === 'C' || mode === 'D' || mode === 'E' || mode === 'G' ? buildContextQuery({ message: q.q, history: q.history || [], openProject: PROJECT_ENTITIES.get(q.project) || null, entities: KNOWN, topic: false }).parts : []);
+// G: E plus topic words of the message that brought the project up, kept only when the owner's memory
+// of these drawers uses them (MEM-CTX-02). memoryWords comes from the open store of the same drawers.
+const queryOf = (q, memoryWords = null) => (mode === 'A' ? q.q
+  : buildContextQuery({ message: q.q, history: q.history || [], openProject: PROJECT_ENTITIES.get(q.project) || null, entities: KNOWN,
+    topic: mode === 'B' || mode === 'G', memoryWords }).query);
 if (!(await ollamaHas(SEM_MODEL))) { console.error(`${SEM_MODEL} is not available on the local Ollama; nothing measured`); process.exit(2); }
 if (!cacheDir) { console.error('--cache <folder> is required (distractor embeddings, outside the repo)'); process.exit(2); }
 process.env.MEMORY_EMBEDDINGS = 'ollama';
@@ -153,14 +161,19 @@ for (const q of questions) {
   const drawers = D.selectDrawers({ audience: 'owner', project: q.project });
   const open = new Set(drawers.map((d) => `${d.kind}:${d.key || ''}`));
   const tE = performance.now();
-  const query = queryOf(q);
+  let memoryWords = null;
+  if (mode === 'G') {
+    const open = await quietly(() => store.openStore(OWNER, drawers));
+    memoryWords = open ? store.drawerTermCounts(OWNER, open) : null;
+  }
+  const query = queryOf(q, memoryWords);
   await quietly(() => emb.embedQuery(query));
   const embedMs = performance.now() - tE; // the two paths below take the cached vector
   const tS = performance.now();
   const raw = await quietly(() => storage.search({ query, userId: OWNER, drawers, limit: 10 }));
   const searchMs = performance.now() - tS;
   const tC = performance.now();
-  const chat = await quietly(() => qualityRecall({ userId: OWNER, drawers, query, parts: partsOf(q), focus: focusOf(q), ...(mode === 'E' ? {} : { past: false }), limit: 6, ask: false }));
+  const chat = await quietly(() => qualityRecall({ userId: OWNER, drawers, query, parts: partsOf(q), focus: focusOf(q), ...(mode === 'E' || mode === 'G' ? {} : { past: false }), limit: 6, ask: false }));
   const chatMs = performance.now() - tC;
   // Diagnosis (no-answer): the top hit's score parts, and the share of the message's own words found in it.
   const nameTokens = new Set(KNOWN.flatMap((e) => e.names.flatMap((n) => lexicalTokens(n))));
@@ -217,8 +230,8 @@ for (const [k, [content, question, project]] of FRESH.entries()) {
 
 // 3c. The answer a local chat model gives from the recalled memory (P: as a chat shows it today; S: with the match strength).
 let answers = null;
-if (answerModel) {
-  if (!(await ollamaHas(answerModel))) { console.error(`${answerModel} is not on the local Ollama`); process.exit(2); }
+if (answerModel || packOut) {
+  if (answerModel && !(await ollamaHas(answerModel))) { console.error(`${answerModel} is not on the local Ollama`); process.exit(2); }
   const { NO_INVENTED_MEMORY } = await import(moduleUrl(backendDir, 'src/services/local-turn.ts'));
   // Every question without an answer, and an even spread of the others over their kinds.
   const none = rows.filter((r) => !r.q.target);
@@ -273,8 +286,18 @@ if (answerModel) {
       : !known ? 'said-unknown' : row.q.answer.some((k) => text.includes(k.toLowerCase())) ? 'correct' : 'wrong';
     return { verdict, ms: performance.now() - t, answer: String(out.answer || '').slice(0, 160) };
   };
-  answers = [];
-  for (const row of picked) {
+  if (packOut) {
+    const pack = picked.map((row) => ({
+      id: row.q.id, kind: row.q.kind, lang: row.q.lang, project: row.q.project,
+      memory: evidence(row.chat.items), conversation: row.q.history ?? [], question: row.q.q,
+      answerKey: row.q.answer ?? null, hasAnswer: !!row.q.target,
+      retrieved: row.q.target ? row.chat.ids.includes(row.q.target) : null,
+    }));
+    writeFileSync(packOut, JSON.stringify({ mode, distractors: nDistractors, rules: NO_INVENTED_MEMORY, questions: pack }, null, 1));
+    console.log(`pack           ${pack.length} questions -> ${packOut}`);
+  }
+  answers = answerModel ? [] : null;
+  for (const row of answerModel ? picked : []) {
     // P: today's format; the second slot holds the other variant asked for (S: match strength, B: structured evidence).
     const second = answerVariants.find((v) => v !== 'P');
     const P = await ask(row, 'P'), S = second ? await ask(row, second) : P;

@@ -16,14 +16,19 @@ if (!backendDir.endsWith(join('packages', 'backend'))) {
   throw new Error('Run from packages/backend: node --import tsx scripts/memory-baseline/<script>.mjs');
 }
 
-export const dataRoot = mkdtempSync(join(tmpdir(), 'girru-p0-'));
+// GIRRU_BENCH_DATA: an existing throwaway folder to share instead of making a new one, so several
+// processes can open ONE database (agents.mjs: many agents at once). Only that folder's owner removes it.
+const shared = process.env.GIRRU_BENCH_DATA;
+export const dataRoot = shared || mkdtempSync(join(tmpdir(), 'girru-p0-'));
+export const sharedData = !!shared;
 mkdirSync(join(dataRoot, '.data'), { recursive: true });
 process.chdir(dataRoot);
 process.env.HOME = dataRoot;
 process.env.AGENT_PLAYER_DATA_DIR = join(dataRoot, '.data');
 process.env.DATABASE_PATH = join(dataRoot, '.data', 'agent-player.db');
-process.env.JWT_SECRET = randomBytes(64).toString('hex'); // throwaway
-process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway
+// Shared runs need the SAME secrets in every process (the encryption key is part of the data).
+process.env.JWT_SECRET ||= randomBytes(64).toString('hex'); // throwaway
+process.env.ENCRYPTION_KEY ||= randomBytes(32).toString('hex'); // throwaway
 process.env.MEMORY_GRAPH_MODEL = 'off';
 delete process.env.DATABASE_URL; // SQLite only; PostgreSQL is not measured here
 
@@ -39,6 +44,7 @@ globalThis.fetch = async (url, init) => {
 
 export function cleanup() {
   try { process.chdir(backendDir); } catch { /* ignore */ }
+  if (sharedData) return; // another process owns it
   rmSync(dataRoot, { recursive: true, force: true });
 }
 
