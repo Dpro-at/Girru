@@ -33,7 +33,9 @@ const PATTERNS: ReadonlyArray<[RecallIntent, RegExp]> = [
  */
 const MONTH = /\b(in|im|during|before|since|bis|seit)\s+(january|february|march|april|may|june|july|august|september|october|november|december|januar|februar|märz|maerz|april|mai|juni|juli|august|september|oktober|november|dezember)\b|\b(19|20)\d{2}\b/iu;
 const AR_MONTH = /(ب|في |قبل |بشهر |في شهر )(كانون|شباط|آذار|اذار|نيسان|أيار|ايار|حزيران|تموز|آب|اب|أيلول|ايلول|تشرين|يناير|فبراير|مارس|أبريل|ابريل|مايو|يونيو|يوليو|أغسطس|اغسطس|سبتمبر|أكتوبر|اكتوبر|نوفمبر|ديسمبر)/u;
-const PAST_STATE = /\b(before (the|we|it)|used to|originally|at first|at the time|back then|previous(ly)?|old (one|plan|server|setup|database|version)|was (the|it|our)|were (the|we|our)|did we (use|have|plan))\b|قبل (التغيير|التبديل|الانتقال|النقل)|سابقاً|سابقا|في البداية|بالبداية|چان|چانت|چنا|كان |كانت |\b(früher|vorher|ursprünglich|damals|bevor)\b/iu;
+// Explicit time words only: a bare past verb (was, چان, چنا, كان) is also how a current question is
+// asked in conversation ("منو چان الشخص اللي نتواصل وياه؟"), and reading replaced facts then adds noise.
+const PAST_STATE = /\b(before (the|we) (switch|change|move|migration|update)|used to|originally|at first|at the time|back then|previously)\b|قبل (التغيير|التبديل|الانتقال|النقل)|سابقاً|سابقا|في البداية|بالبداية|\b(früher|vorher|ursprünglich|damals)\b/iu;
 
 export function asksAboutThePast(query: string): boolean {
   const q = String(query ?? '').slice(0, 2000);

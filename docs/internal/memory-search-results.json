@@ -1565,6 +1565,84 @@
         "mode": "C",
         "answerModel": "qwen2.5:7b"
       }
+    },
+    {
+      "id": "rmwe7yqn9",
+      "date": "2026-11-13T00:09:09.477Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "9756859d",
+        "branch": "girru/memory-version-check",
+        "memoryCodeChanged": true
+      },
+      "source": "accuracy.mjs (fair comparison)",
+      "kind": "answers",
+      "label": "Fair comparison C (context + question head), answers by qwen2.5:7b, 100k real embeddings",
+      "size": 100140,
+      "vectors": "real",
+      "queries": 660,
+      "searchMs": {
+        "p50": 83.5,
+        "p95": 112
+      },
+      "quality": {
+        "answerableCorrect": 0.765,
+        "answerableWrong": 0.055,
+        "noAnswerInvented": 0.042,
+        "indirectCorrect": 0.423,
+        "indirectWrong": 0.25,
+        "multiHopCorrect": 0.7,
+        "timeTravelCorrect": 0.55,
+        "hitAt5": 0.847
+      },
+      "settings": {
+        "mode": "C",
+        "model": "qwen2.5:7b"
+      }
+    },
+    {
+      "id": "rmwe7yqpz",
+      "date": "2026-11-13T00:09:09.575Z",
+      "machine": {
+        "cpu": "Intel(R) Core(TM) i9-14900F",
+        "threads": 32,
+        "ramGB": 64,
+        "os": "win32 x64 10.0.26300"
+      },
+      "git": {
+        "commit": "9756859d",
+        "branch": "girru/memory-version-check",
+        "memoryCodeChanged": true
+      },
+      "source": "accuracy.mjs (fair comparison)",
+      "kind": "answers",
+      "label": "Fair comparison D (+ project focus), answers by qwen2.5:7b, 100k real embeddings",
+      "size": 100140,
+      "vectors": "real",
+      "queries": 660,
+      "searchMs": {
+        "p50": 88.2,
+        "p95": 122.1
+      },
+      "quality": {
+        "answerableCorrect": 0.83,
+        "answerableWrong": 0.03,
+        "noAnswerInvented": 0.025,
+        "indirectCorrect": 0.427,
+        "indirectWrong": 0.28,
+        "multiHopCorrect": 0.7,
+        "timeTravelCorrect": 0.45,
+        "hitAt5": 0.86
+      },
+      "settings": {
+        "mode": "D",
+        "model": "qwen2.5:7b"
+      }
     }
   ]
 }
