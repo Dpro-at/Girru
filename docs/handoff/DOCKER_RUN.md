@@ -135,3 +135,10 @@ Verified locally on Linux/amd64 with Docker Desktop on Windows:
   the installed Electron app and Chrome both reopened the sign-in view.
 - The Tests workflow now builds the image, waits for health, checks the live UI,
   setup discovery and native modules on pull requests without publishing an image.
+  [PR #218](https://github.com/Dpro-at/Girru/pull/218) ran the
+  [Docker job successfully](https://github.com/Dpro-at/Girru/actions/runs/43575402685/job/132388415919).
+- The Windows launcher opened the installed Electron window with its dedicated
+  Docker profile and waited for first-owner setup. The Compose project is named
+  `girru-docker` so other checkouts with the same directory name stay separate.
+  A separate runtime test confirmed the supplied JWT and encryption keys take
+  precedence over generated values.

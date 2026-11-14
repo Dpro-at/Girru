@@ -5,6 +5,8 @@ try {
     $docker = (Get-Command docker.exe -ErrorAction SilentlyContinue).Source
     if (-not $docker) { $docker = Join-Path $env:ProgramFiles 'Docker/Docker/resources/bin/docker.exe' }
     if (-not (Test-Path -LiteralPath $docker)) { throw 'Install or start Docker Desktop first.' }
+    # Docker Desktop also resolves its credential helper through PATH.
+    $env:Path = (Split-Path -Parent $docker) + ';' + $env:Path
     $app = @(
         (Join-Path $env:LOCALAPPDATA 'Programs/Dpro/Girru/Girru.exe')
         (Join-Path $env:LOCALAPPDATA 'Programs/Girru/Girru.exe')
