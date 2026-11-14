@@ -152,15 +152,32 @@ async function docRecallCurrent(input: { userId: string; query: string; limit?: 
   }).filter((x) => x.score >= MIN_RECALL_SCORE).sort((a, b) => b.score - a.score);
   const best = scored[0]?.score ?? 0;
   if (best < (q.semantic ? RELIABLE_SCORE.semantic : RELIABLE_SCORE.hash)) return { items: [], reliable: false, best };
+  const limit = input.limit ?? DOC_RECALL_LIMIT;
+  const hit = (x: { d: Loaded['docs'][number]; score: number }): DocHit => ({
+    chunkId: x.d.id, file: x.d.file, page: x.d.page, heading: x.d.heading, text: x.d.content, score: Math.round(x.score * 1000) / 1000, scope: x.d.scope,
+    ...(x.d.scope.kind === 'project' && outside.has(x.d.scope.key) ? { outside: true } : {}),
+  });
   const perFile = new Map<string, number>();
   const items: DocHit[] = [];
+  // Passed the score floor and skipped only because its file was already at MAX_PER_FILE.
+  const capped: Array<{ d: Loaded['docs'][number]; score: number }> = [];
   for (const x of scored) {
-    if (items.length >= (input.limit ?? DOC_RECALL_LIMIT) || x.score < best * ITEM_SHARE) break;
+    if (items.length >= limit || x.score < best * ITEM_SHARE) break;
     const n = perFile.get(x.d.file) ?? 0;
-    if (n >= MAX_PER_FILE) continue;
+    if (n >= MAX_PER_FILE) { capped.push(x); continue; }
     perFile.set(x.d.file, n + 1);
-    items.push({ chunkId: x.d.id, file: x.d.file, page: x.d.page, heading: x.d.heading, text: x.d.content, score: Math.round(x.score * 1000) / 1000, scope: x.d.scope,
-      ...(x.d.scope.kind === 'project' && outside.has(x.d.scope.key) ? { outside: true } : {}) });
+    items.push(hit(x));
+  }
+  // MEM-DOC-RANK-01: the per-file cap is there so one long document cannot fill the whole answer, and
+  // it keeps that job: a file yields its third hit only once every other file has had its turn. What
+  // it must not do is hand back FEWER hits than were asked for while good candidates sit excluded.
+  // Measured on two real projects (docs/internal/RANKING_FINDINGS.md): the cap was the single biggest
+  // reason a known-item query missed its own passage — 7 of 14 misses in this repository, 8 of 21 in
+  // Flowxtra — and in every one of those the passage had already scored well enough to be returned.
+  // Scores and order are untouched; only slots that would have gone empty are filled.
+  for (const x of capped) {
+    if (items.length >= limit) break;
+    items.push(hit(x));
   }
   return { items, reliable: items.length > 0, best };
 }
