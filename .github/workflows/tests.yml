@@ -17,6 +17,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  docker:
+    name: Build and smoke-test Girru in Docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and wait for the backend
+        run: docker compose up --build --detach --wait --wait-timeout 180
+      - name: Check the live interface and locked native modules
+        run: |
+          curl -fsS http://127.0.0.1:41522/api/health | jq -e '.status == "ok"'
+          curl -fsS http://127.0.0.1:41522/api/setup/status | jq -e '.setupRequired'
+          curl -fsS http://127.0.0.1:41522/ | grep -F 'content="live-candidate"'
+          docker compose exec -T backend node -e '
+            const assert = require("node:assert/strict");
+            const lock = require("./package-lock.json").packages;
+            for (const name of Object.keys(require("./package.json").dependencies)) {
+              assert.equal(require("./node_modules/" + name + "/package.json").version, lock["node_modules/" + name].version);
+            }
+            const db = require("better-sqlite3")(":memory:");
+            assert.equal(db.prepare("SELECT 42 AS n").get().n, 42);
+            db.close();
+            const { Index } = require("usearch");
+            const index = new Index({ dimensions: 2, metric: "cos", quantization: "f32" });
+            index.add(1n, new Float32Array([1, 0]));
+            assert.equal(index.search(new Float32Array([1, 0]), 1).keys[0], 1n);'
+      - name: Show service logs on failure
+        if: failure()
+        run: docker compose logs --tail 80 backend
+      - name: Stop the test service
+        if: always()
+        run: docker compose down --volumes
   test:
     name: Type-check and test suites
     runs-on: ubuntu-latest

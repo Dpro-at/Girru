@@ -25,7 +25,7 @@ Girru supports 3 deployment modes:
 
 | Mode | Best For | Pros | Cons | Complexity |
 |------|----------|------|------|------------|
-| **Docker** | Production, CI/CD | Isolated, portable, easy updates | Requires Docker | Medium |
+| **Docker** | Local workspace, CI | One workspace for Electron and browser | Requires Docker | Medium |
 | **Direct** | Development, maximum performance | Fastest, native OS | Manual updates | Low |
 | **Server** | Remote hosting, cloud deployment | Accessible anywhere, auto SSL | Network dependency | High |
 
@@ -33,209 +33,65 @@ Girru supports 3 deployment modes:
 
 ## Docker Deployment
 
-### Prerequisites
+Girru runs its SQLite backend and verified Core UI in one Linux container.
+The installed Girru Electron app and a browser can sign in to the same Docker
+workspace. Compose publishes only `127.0.0.1:41522`. Use that exact address.
 
-- Docker 20.10+ and Docker Compose 2.0+
-- 2 GB RAM minimum, 4 GB recommended
-- Ports 41521 and 41522 available
+### Open the installed app on Windows
 
-### Production Docker Setup
+Start Docker Desktop and double-click **Start-Girru-Docker.cmd** in this checkout.
+It builds and starts Compose, waits for the backend, and opens the installed Girru
+in a separate Electron profile. On first run, choose your workspace type and paste
+the private setup link from the launcher into the setup field. Subsequent launches
+open the same Docker workspace. Your usual Girru shortcut keeps its own profile.
 
-#### 1. Install Docker
+### Open in Electron or a browser on any host
 
-**Ubuntu/Debian:**
-```bash
-sudo apt update
-sudo apt install docker.io docker-compose
-sudo systemctl enable --now docker
-sudo usermod -aG docker $USER
+From the repository root with Docker Engine and Compose v2:
+
+```sh
+docker compose up -d --build --wait
+docker compose ps
 ```
 
-**CentOS/RHEL:**
-```bash
-sudo yum install docker docker-compose
-sudo systemctl enable --now docker
-sudo usermod -aG docker $USER
+- **Girru Electron**. Open **File → Connect to an Existing Girru…** and enter
+  `http://127.0.0.1:41522`. Use **File → Use Girru on This Computer** to
+  switch back to the desktop-managed workspace.
+- **Browser**. Open `http://127.0.0.1:41522`.
+- **First owner**. Run the following command on the Docker host. Open its private
+  link in a browser, or choose a workspace type in Electron and paste the link
+  into **Private setup link or code**. A new link replaces the previous one.
+  After setup, both clients use the ordinary sign-in at the same address.
+
+```sh
+docker compose exec -T backend node /app/scripts/docker/setup.cjs
 ```
 
-**Windows/macOS:**
-- Download Docker Desktop: https://www.docker.com/products/docker-desktop
+The bridge verifies the host and origin and forwards permitted requests to a
+private backend on a random container-loopback port. The health probe at
+`http://127.0.0.1:41522/api/health` checks that backend. Host filesystem access
+and native workspace key custody belong to the locally managed desktop workspace.
+Docker uses its own files, keys and settings.
 
-#### 2. Run Girru Installer
+### Data and configuration
 
-Select **Docker Mode** during installation. The installer will create:
+Compose reuses the named volumes `agent-player-data` (SQLite, settings, secrets
+and memory under `/app/.data`) and `agent-player-public` (storage under
+`/app/public/storage`). Use `GIRRU_DATA_VOLUME` and `GIRRU_STORAGE_VOLUME`
+to select a separate pair for testing. The recall index is in memory.
+Use `docker compose down` to stop and remove the container while preserving
+data. Run the startup command again after an update. View logs with
+`docker compose logs backend`.
 
-- `docker-compose.yml`
-- `Dockerfile.frontend`
-- `Dockerfile.backend`
-- `.env` configuration file
+The backend accepts `JWT_SECRET` and `ENCRYPTION_KEY` from the runtime environment.
+If supplying your own, use a stable random JWT secret of at least 32 characters
+and a 64-character hex encryption key. With neither supplied, first boot generates
+private values in the data volume and reuses them on restart. Keep that volume
+and externally supplied keys together when backing up the instance.
 
-#### 3. Verify Installation
-
-```bash
-cd /opt/agent-player  # Linux
-cd C:\Program Files\AgentPlayer  # Windows
-
-# Check running containers
-docker-compose ps
-
-# Expected output:
-# NAME                     STATUS              PORTS
-# agent-player-backend-1   Up 5 minutes        0.0.0.0:41522->41522/tcp
-# agent-player-frontend-1  Up 5 minutes        0.0.0.0:41521->41521/tcp
-```
-
-### Docker Commands Reference
-
-```bash
-# Start containers
-docker-compose up -d
-
-# Stop containers
-docker-compose stop
-
-# Restart containers
-docker-compose restart
-
-# View logs (real-time)
-docker-compose logs -f
-
-# View logs (specific service)
-docker-compose logs -f backend
-docker-compose logs -f frontend
-
-# Remove containers (keeps data)
-docker-compose down
-
-# Remove containers AND volumes (⚠️ deletes data)
-docker-compose down -v
-
-# Rebuild images (after code changes)
-docker-compose build
-docker-compose up -d
-
-# Execute command in container
-docker-compose exec backend npm run migrate
-docker-compose exec frontend npm run build
-```
-
-### Environment Variables
-
-Edit `.env` file in installation directory:
-
-```bash
-# Frontend
-FRONTEND_PORT=41521
-NEXT_PUBLIC_API_URL=http://localhost:41522
-
-# Backend
-BACKEND_PORT=41522
-NODE_ENV=production
-DATABASE_PATH=.data/agent-player.db
-
-# Claude API
-ANTHROPIC_API_KEY=your_api_key_here
-
-# JWT Secret (auto-generated during installation)
-JWT_SECRET=generated_secret_here
-
-# Python
-PYTHON_PATH=/usr/local/bin/python3
-```
-
-### Docker Compose Configuration
-
-**docker-compose.yml:**
-
-```yaml
-version: '3.8'
-
-services:
-  backend:
-    build:
-      context: .
-      dockerfile: Dockerfile.backend
-    container_name: agent-player-backend
-    ports:
-      - "41522:41522"
-    volumes:
-      - agent-player-data:/app/.data
-      - agent-player-public:/app/public
-    environment:
-      - NODE_ENV=production
-      - PORT=41522
-      - DATABASE_PATH=.data/agent-player.db
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - JWT_SECRET=${JWT_SECRET}
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:41522/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
-    container_name: agent-player-frontend
-    ports:
-      - "41521:41521"
-    environment:
-      - NODE_ENV=production
-      - NEXT_PUBLIC_API_URL=http://localhost:41522
-    depends_on:
-      - backend
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:41521"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-volumes:
-  agent-player-data:
-    driver: local
-  agent-player-public:
-    driver: local
-
-networks:
-  default:
-    name: agent-player-network
-```
-
-### Docker Production Tips
-
-1. **Use bind mounts for development:**
-   ```yaml
-   volumes:
-     - ./packages/backend:/app/packages/backend
-     - ./packages/frontend:/app/packages/frontend
-   ```
-
-2. **Resource limits:**
-   ```yaml
-   services:
-     backend:
-       deploy:
-         resources:
-           limits:
-             memory: 2G
-             cpus: '2.0'
-   ```
-
-3. **Logging configuration:**
-   ```yaml
-   services:
-     backend:
-       logging:
-         driver: "json-file"
-         options:
-           max-size: "10m"
-           max-file: "3"
-   ```
-
----
+For host Ollama on Docker Desktop, set `OLLAMA_URL=http://host.docker.internal:11434`
+before starting Compose and configure Ollama to accept connections from Docker.
+Model downloads and GPU/display access require separate host setup. Compose uses SQLite.
 
 ## Server Deployment (SSH)
 

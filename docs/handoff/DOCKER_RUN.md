@@ -91,4 +91,54 @@ a build today can differ from a build tomorrow. For a memory engine whose native
 
 ## Result
 
-_(Codex: fill this in. The build output from step 1 first, then what you changed, then the checks.)_
+Before editing any files, both `docker build -f Dockerfile.backend .` and
+`docker compose -p girru-docker-baseline up -d --build` exited 1 on
+`1a718703`. No container started. Relevant lines from the original build:
+
+```text
+#31 ERROR: failed to calculate checksum of ref uu2uhrlg7bcf4flc74gon7v70::2sigszao436lirr3wauuzci29: "/python-scripts": not found
+#32 ERROR: failed to calculate checksum of ref uu2uhrlg7bcf4flc74gon7v70::2sigszao436lirr3wauuzci29: "/packages/backend/requirements.txt": not found
+ERROR: failed to build: failed to solve: failed to compute cache key: failed to calculate checksum of ref uu2uhrlg7bcf4flc74gon7v70::2sigszao436lirr3wauuzci29: "/python-scripts": not found
+```
+
+Compose ended with:
+
+```text
+failed to solve: failed to compute cache key: failed to calculate checksum of ref uu2uhrlg7bcf4flc74gon7v70::pm0cjrhg5ddjsb9yzo04rj0p3: "/python-scripts": not found
+```
+
+The owner requested the installed Electron app and a browser on the same Docker
+workspace. Compose now packages the backend, Python tools and Core UI live build
+in a single image. Node 24.21.0 on Debian uses each package's committed npm lock.
+The bridge reuses Girru's per-launch authentication and private random backend
+port. Only the bridge publishes a host port, on IPv4 loopback at 41522. The
+original numeric volume owner and named volumes carry forward. Runtime secrets
+can be supplied from the environment or generated on the data volume at startup.
+
+On Windows, `Start-Girru-Docker.cmd` opens the installed Girru in a separate
+Electron profile. Manual connection, browser access and first-owner setup are
+in the [deployment guide](../DEPLOYMENT.md#docker-deployment). The native app,
+installers, release workflow and deferred `Dockerfile.frontend` were left as
+requested. SQLite is the tested database.
+
+Verified locally on Linux/amd64 with Docker Desktop on Windows:
+
+- Compose reported healthy and the host received HTTP 200 with `{"status":"ok"}`.
+- All 37 direct production dependency versions matched the backend lockfile.
+  Native SQLite returned 42 and usearch retrieved an inserted vector from memory.
+- Installed Girru 1.4.4 and Chrome both rendered the first-run UI. A disposable
+  owner created inside Girru signed in through Chrome and `/api/auth/me` returned
+  the same account. Both clients used the same Docker address.
+- Anonymous identity access returned 401 and a foreign Origin on health returned
+  403. The service ran as UID 1001.
+- After a forced container recreation, setup discovery still found the owner and
+  the installed Electron app and Chrome both reopened the sign-in view.
+- The Tests workflow now builds the image, waits for health, checks the live UI,
+  setup discovery and native modules on pull requests without publishing an image.
+  [PR #218](https://github.com/Dpro-at/Girru/pull/218) ran the
+  [Docker job successfully](https://github.com/Dpro-at/Girru/actions/runs/43575402685/job/132388415919).
+- The Windows launcher opened the installed Electron window with its dedicated
+  Docker profile and waited for first-owner setup. The Compose project is named
+  `girru-docker` so other checkouts with the same directory name stay separate.
+  A separate runtime test confirmed the supplied JWT and encryption keys take
+  precedence over generated values.
