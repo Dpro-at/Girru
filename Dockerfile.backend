@@ -1,102 +1,46 @@
-# Multi-stage build for Fastify backend with Python
-# Stage 1: Dependencies
-FROM node:20-alpine AS deps
-WORKDIR /app
+FROM node:24.21.0-bookworm-slim AS base
 
-# Install build dependencies for native modules
-RUN apk add --no-cache python3 make g++ gcc
+FROM base AS backend-deps
+WORKDIR /app/packages/backend
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
+COPY packages/backend/package.json packages/backend/package-lock.json packages/backend/.npmrc ./
+RUN npm ci --omit=dev --no-audit --no-fund
 
-# Install pnpm
-RUN npm install -g pnpm@9.15.4
+FROM base AS ui
+WORKDIR /app/packages/core-ui
+COPY packages/core-ui/package.json packages/core-ui/package-lock.json packages/core-ui/.npmrc ./
+RUN npm ci --no-audit --no-fund
+COPY packages/core-ui ./
+COPY packages/display-renderer ../display-renderer
+RUN node scripts/build.cjs --candidate --live-entry && chmod -R a+rX dist
 
-# Copy package files
-COPY package.json pnpm-lock.yaml* ./
-COPY packages/backend/package.json ./packages/backend/
-
-# Install dependencies (including better-sqlite3)
-RUN pnpm install --frozen-lockfile
-
-# Stage 2: Python Environment
-FROM python:3.12-alpine AS python-builder
-WORKDIR /app
-
-# Install Python dependencies
-COPY packages/backend/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Stage 3: Builder
-FROM node:20-alpine AS builder
-WORKDIR /app
-
-# Install build dependencies
-RUN apk add --no-cache python3 make g++ gcc
-
-# Install pnpm
-RUN npm install -g pnpm@9.15.4
-
-# Copy dependencies from deps stage
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/packages/backend/node_modules ./packages/backend/node_modules
-
-# Copy source code
-COPY packages/backend ./packages/backend
-
-# Build TypeScript
-RUN cd packages/backend && pnpm build
-
-# Stage 4: Runner
-FROM python:3.12-alpine AS runner
-WORKDIR /app
-
-# Install Node.js
-RUN apk add --no-cache nodejs npm
-
-# Install pnpm
-RUN npm install -g pnpm@9.15.4
-
-# Create non-root user
-RUN addgroup --system --gid 1001 backend
-RUN adduser --system --uid 1001 backend
-
-# Copy Python dependencies from python-builder
-COPY --from=python-builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=python-builder /usr/local/bin /usr/local/bin
-
-# Copy Node.js dependencies and built files
-COPY --from=builder /app/packages/backend/node_modules ./packages/backend/node_modules
-COPY --from=builder /app/packages/backend/dist ./packages/backend/dist
-COPY --from=builder /app/packages/backend/package.json ./packages/backend/
-
-# Bundled specialty source and its read-only revision registry
-COPY packages/backend/skills/professional-workspace-settings.json packages/backend/skills/professional-source-history.json ./packages/backend/skills/
-
-# Copy database migrations
-COPY packages/backend/src/db/migrations ./packages/backend/src/db/migrations
-
-# Copy Python scripts
-COPY python-scripts ./python-scripts
-
-# Create necessary directories with correct permissions
-RUN mkdir -p /app/.data/storage /app/.data/memory /app/.data/agents /app/.data/backups /app/public/storage
-RUN chown -R backend:backend /app/.data /app/public/storage
-
-# Set correct permissions
-RUN chown -R backend:backend /app
-
-# Switch to non-root user
-USER backend
-
-# Expose port
+FROM base AS runtime
+WORKDIR /app/packages/backend
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates git python-is-python3 python3-venv ffmpeg && rm -rf /var/lib/apt/lists/*
+COPY packages/backend/python-scripts/requirements.txt /tmp/python-requirements.txt
+RUN python3 -m venv /opt/girru-python && /opt/girru-python/bin/pip install --no-cache-dir -r /tmp/python-requirements.txt
+ENV PATH="/opt/girru-python/bin:${PATH}" NODE_ENV=production \
+    AGENT_PLAYER_DATA_DIR=/app/.data STORAGE_BASE_DIR=/app/public/storage
+COPY --from=backend-deps /app/packages/backend/node_modules ./node_modules
+COPY packages/backend/package.json packages/backend/package-lock.json packages/backend/tsconfig.json ./
+COPY packages/backend/src ./src
+COPY packages/backend/skills ./skills
+COPY packages/backend/extensions ./extensions
+COPY packages/backend/python-scripts ./python-scripts
+COPY packages/identity/src/memory-native-proof.cjs packages/identity/src/memory-native-owner-wire.cjs ../identity/src/
+COPY packages/desktop/src/backend-process.cjs packages/desktop/src/setup-code.cjs ../desktop/src/
+COPY packages/core-ui/package.json ../core-ui/
+COPY packages/core-ui/scripts ../core-ui/scripts
+COPY packages/core-ui/src ../core-ui/src
+COPY --from=ui /app/packages/core-ui/dist ../core-ui/dist
+COPY public /app/public
+COPY scripts/docker/start.cjs scripts/docker/setup.cjs /app/scripts/docker/
+# Keep the numeric owner used by the previous image, including existing named volumes.
+RUN groupadd -g 1001 girru && useradd -u 1001 -g girru -m girru && \
+    install -d -m 0700 -o girru -g girru /app/.data /app/public/storage
+USER girru
 EXPOSE 41522
-
-# Set environment variables
-ENV NODE_ENV=production
-ENV PORT=41522
-ENV PYTHON_PATH=/usr/local/bin/python3
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:41522/api/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
-
-# Start Fastify server
-CMD ["node", "packages/backend/dist/api/server.js"]
+HEALTHCHECK --interval=10s --timeout=5s --start-period=60s --retries=3 \
+    CMD node -e "fetch('http://127.0.0.1:41522/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+CMD ["node", "/app/scripts/docker/start.cjs"]

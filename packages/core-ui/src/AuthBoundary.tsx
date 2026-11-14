@@ -182,7 +182,8 @@ function OwnerSetup({ client, setupCode, initialPage }: { client: SessionClient;
   const [companyKind, setCompanyKind] = useState<string>();
   const [kindQuery, setKindQuery] = useState('');
   const back = () => { if (workspaceType === 'company') setAskKind(true); else setChooseType(true); };
-  const code = setupCode ?? '';
+  const [enteredCode, setEnteredCode] = useState('');
+  const code = setupCode ?? enteredCode;
   const hasSetupLink = SETUP_CODE.test(code);
   const [busy, setBusy] = useState(false); const [notice, setNotice] = useState<keyof typeof ownerSetupNotices | null>(null);
   const withGoogle = (signin: boolean) => { writeSetupEntry(signin ? 'signin' : null); void client.loginGoogle({ setupToken: code }); };
@@ -204,6 +205,13 @@ function OwnerSetup({ client, setupCode, initialPage }: { client: SessionClient;
   if (!hasSetupLink) return <section className="setup-pane" aria-label="Open the setup link">
     <h2>Open setup on this computer</h2>
     <p>Open the setup link shown by Girru on the installation computer. It connects this page to your new workspace.</p>
+    <label>Private setup link or code<input type="password" autoComplete="off" spellCheck={false}
+      onChange={event => {
+        const input = event.currentTarget.value.trim();
+        const prefix = window.location.origin + '/';
+        const code = input.startsWith(prefix) ? setupCodeFromFragment(input.slice(prefix.length)) : input;
+        if (code && SETUP_CODE.test(code)) { setEnteredCode(code); setWelcome(false); }
+      }}/></label>
     <div className="setup-actions"><button type="button" onClick={back}>Back</button></div>
   </section>;
   return <form className="owner-setup" aria-label="Create the owner account" method="post" onSubmit={async e => {

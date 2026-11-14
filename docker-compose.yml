@@ -1,46 +1,23 @@
-version: '3.8'
-
 services:
-  # Backend Service (Fastify + Python)
   backend:
     build:
       context: .
       dockerfile: Dockerfile.backend
-    image: agent-player-backend:latest
-    container_name: agent-player-backend
     ports:
-      - "41522:41522"
+      - "127.0.0.1:41522:41522"
     environment:
-      - NODE_ENV=production
-      - PORT=41522
-      - DATABASE_PATH=/app/.data/agent-player.db
-      - STORAGE_BASE_DIR=/app/public/storage
-      - MEMORY_BASE_DIR=/app/.data/memory
-      - PYTHON_PATH=/usr/local/bin/python3
+      - JWT_SECRET
+      - ENCRYPTION_KEY
+      - OLLAMA_URL
     volumes:
-      - data-storage:/app/.data:rw
-      - public-storage:/app/public/storage:rw
-    networks:
-      - agent-player-network
+      - data-storage:/app/.data
+      - public-storage:/app/public/storage
+    init: true
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:41522/api/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+    stop_grace_period: 25s
 
-# Named volumes for data persistence
 volumes:
   data-storage:
-    driver: local
-    name: agent-player-data
+    name: ${GIRRU_DATA_VOLUME:-agent-player-data}
   public-storage:
-    driver: local
-    name: agent-player-public
-
-# Bridge network for inter-container communication
-networks:
-  agent-player-network:
-    driver: bridge
-    name: agent-player-network
+    name: ${GIRRU_STORAGE_VOLUME:-agent-player-public}

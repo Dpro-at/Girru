@@ -363,7 +363,7 @@ const launchTokenShape = /^[A-Za-z0-9_-]{43}$/;
  * launchToken (desktop app) is the per-launch secret the backend requires on
  * every request; it is added here and never reaches the page.
  */
-function createApplicationServer({ browserController = null, packageRoot = root, genvrRuntimesDir = process.env.GIRRU_APP_RUNTIMES_DIR, storeAppsDataDir, channel, stage1ReadOnly = false, upstreamPort = 42521, launchToken = null, timeoutMs = 10000, streamTimeoutMs = CHAT_DEADLINE_MS, streamIdleMs = CHAT_IDLE_MS, runStreamMs = RUN_STREAM_MS, runIdleMs = RUN_IDLE_MS } = {}) {
+function createApplicationServer({ healthCheck = null, browserController = null, packageRoot = root, genvrRuntimesDir = process.env.GIRRU_APP_RUNTIMES_DIR, storeAppsDataDir, channel, stage1ReadOnly = false, upstreamPort = 42521, launchToken = null, timeoutMs = 10000, streamTimeoutMs = CHAT_DEADLINE_MS, streamIdleMs = CHAT_IDLE_MS, runStreamMs = RUN_STREAM_MS, runIdleMs = RUN_IDLE_MS } = {}) {
   if(storeAppsDataDir!==undefined&&(typeof storeAppsDataDir!=='string'||!path.isAbsolute(storeAppsDataDir)))throw Error('Invalid Store workspace.');
   if (typeof stage1ReadOnly !== 'boolean') throw Error('Invalid stage1 configuration');
   const validPort = x => Number.isInteger(x) && x >= 1 && x <= 65535;
@@ -410,6 +410,12 @@ function createApplicationServer({ browserController = null, packageRoot = root,
       duplicates.add(key);
     }
     if ((req.headers.origin && req.headers.origin !== origin) || (req.headers['sec-fetch-site'] && !['same-origin', 'none'].includes(req.headers['sec-fetch-site']))) return send(403);
+    // Docker readiness includes the private API. Only expose the fixed status on this origin.
+    if (healthCheck && raw === '/api/health' && req.method === 'GET') {
+      let ready = false;
+      try { ready = await healthCheck(); } catch { /* backend stopped or timed out */ }
+      return send(ready ? 200 : 503, { status: ready ? 'ok' : 'unavailable' });
+    }
     if (stage1ReadOnly && raw.startsWith('/api/') && !stage1Route(req.method, raw)) return send(403, { code: 'stage1_read_only' });
     if (requestPath(raw) === null || raw.length > 2048) return send(400);
     const studioPath = requestPath(raw);
