@@ -142,3 +142,17 @@ Verified locally on Linux/amd64 with Docker Desktop on Windows:
   `girru-docker` so other checkouts with the same directory name stay separate.
   A separate runtime test confirmed the supplied JWT and encryption keys take
   precedence over generated values.
+
+### Merge and verification on main
+
+On 14 November 2026, all ten checks that ran on PR head `51ebafe0` passed.
+GitHub merged [PR #218](https://github.com/Dpro-at/Girru/pull/218) into
+`main` at [`1b49d41f`](https://github.com/Dpro-at/Girru/commit/1b49d41f434760c15f6fe6709fa42dc96874be3e).
+
+- All four [Tests jobs on the merge commit](https://github.com/Dpro-at/Girru/actions/runs/43576999385)
+  passed. CI built and smoke-tested the Docker image, tested desktop portability
+  on Windows and macOS, and passed the type checks and application suites,
+  including account tests and memory-encryption tests on SQLite and PostgreSQL.
+- All six [Security Scanning jobs on the merge commit](https://github.com/Dpro-at/Girru/actions/runs/43576999360)
+  passed, including CodeQL, secret detection, the three dependency audits and
+  dependency graph submission. The last job runs on `main` and was skipped on the PR.
