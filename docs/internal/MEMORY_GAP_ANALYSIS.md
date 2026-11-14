@@ -170,3 +170,31 @@ FEATURES.md row listing Today / Earlier this week / …, but the storage map's o
 same noun beat the section that answers the question. Worth a look if indirect questions are revisited.
 
 Run it on another machine, or on any folder, with `--repo <path>`; `--vectors hash` needs no model.
+
+### A second project, and a check nobody writes the questions for
+
+The ten questions above were written by someone who had read these documents, which flatters the
+result. `--known-item N` asks N real headings taken from the project's own documents instead and checks
+the passage under each one comes back: no hand-written questions, so it runs on a project nobody here
+has read and cannot be tuned by choosing questions that pass.
+
+Many documents repeat a heading ("Rules", "Notes"), so a passage under the SAME heading is not a wrong
+answer — it is the topic that was asked for. Both counts are reported.
+
+| 40 headings each | This repository | Flowxtra (a different project) |
+|---|---|---|
+| Files · pieces of text · first index | 500 · 3,389 · 101 s | 500 · 8,000 · 183 s |
+| That exact passage first | 43% | 28% |
+| That exact passage in the best four | 68% | 53% |
+| **A passage under the same heading first** | **60%** | **63%** |
+| **Same heading, in the best four** | **85%** | **80%** |
+| Headings the project repeats elsewhere | 43% | 45% |
+| Recall p50 / p95 | 67 / 88 ms | 79 / 93 ms |
+
+Read the "same heading" rows: 80–85% of topics are found in the best four on two unrelated real
+projects, which is close to the 90% of the hand-written questions and arrived at without anyone
+choosing the questions. The strict rows are lower mostly because about 45% of headings are ambiguous in
+both projects.
+
+Flowxtra is more than twice as dense (8,000 pieces of text from 500 files) and recall stays within a
+few milliseconds, so size is not what limits this — ranking is.
