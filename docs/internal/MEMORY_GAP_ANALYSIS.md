@@ -144,3 +144,29 @@ text, and the index still never goes to disk.
 
 **Still open:** the same mechanism for PostgreSQL (item 18) — its search uses the older in-process path
 and has no change capture at all.
+
+## First real-project measurement, 2026-11-14
+
+Every accuracy figure above comes from a generated world of ten invented projects. This one does not:
+`scripts/memory-baseline/real-project.mjs` indexes **this repository's own documents** and asks ten
+real questions whose answers are written in them, each naming the file its answer lives in and a
+phrase that must come back. A miss is a real miss — the text exists and was not found.
+
+Windows i9, 500 files, 3,381 pieces of text, 122.9 s to index the first time:
+
+| | Meaning-based (`qwen3-embedding:0.6b`) | Words only (the offline fallback) |
+|---|---|---|
+| Answers in the retrieved text | **9 of 10** | 5 of 10 |
+| Right file retrieved | **9 of 10** | 6 of 10 |
+| Recall p50 / p95 | 85 / 298 ms | 4 / 89 ms |
+
+The gap between the two columns is what the embedding model is for: "does the recall index get written
+to disk" finds the line saying it **never goes to disk** only in the first column — words alone cannot
+join those.
+
+The one miss, both ways: "how are handoff notes grouped when you read them". The answer is the
+FEATURES.md row listing Today / Earlier this week / …, but the storage map's own *Handoffs* section and
+`API.md` outranked it. Not a retrieval failure so much as a ranking one — a plausible section about the
+same noun beat the section that answers the question. Worth a look if indirect questions are revisited.
+
+Run it on another machine, or on any folder, with `--repo <path>`; `--vectors hash` needs no model.
