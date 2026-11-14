@@ -190,10 +190,19 @@ against the previous run).
   data; the re-score of the best 200 by vector plus the best 200 by words keeps the measured
   recall unchanged.
 
-- **Privacy (S7):** nothing is written to disk. Changed ids come from TEMP triggers that call a JS
-  function (connection only, not in the database file). forget / delete / replace / archive leave
-  the store and the HNSW index (killSlot); `forgetRecallIndex` drops a user's store; idle 30 min
-  drops it; a write by another connection (`PRAGMA data_version`) drops every store.
+- **Privacy (S7):** the index itself is never written to disk. Changed ids of this connection come
+  from TEMP triggers that call a JS function (connection only, not in the database file). forget /
+  delete / replace / archive leave the store and the HNSW index (killSlot); `forgetRecallIndex`
+  drops a user's store; idle 30 min drops it.
+  **Changed on 13 November (MEM-CONC-03):** a write by another connection no longer drops every
+  store. Triggers in the database append the owner and the id of each saved or edited memory to
+  `memory_recall_changes`, and every process re-reads only those rows by primary key — read p95 while
+  another agent saves went from 3,503 ms to 18.8 ms, and a handoff from 2,277 ms to 0 ms at 100k.
+  That table is on disk, so: it holds **ids only, never memory text**; rows are deleted after an hour;
+  and a **DELETE logs no id at all** (a sentinel instead), because an id there would outlive the row
+  it names and could be caught in a backup taken meanwhile — so forgetting still leaves no trace
+  (CORE-07). A delete therefore makes other processes read the database again, as before.
+  Switch: `GIRRU_RECALL_CHANGELOG=0`. Tests: `recall-changelog-forget`.
 
 - **Open questions for the owner:**
   1. **First search after a start at 10M takes 27 minutes** (3M: 4 min, 1M: 1 min) because the
@@ -206,5 +215,6 @@ against the previous run).
   3. For the ad: "1 million memories: 0.09 s per search (was 32.6 s)" and "3 million: 0.11 s"
      are measured on this machine with the query embedding included. 10M is measured too (0.27 s
      median) but needs 9 GB of RAM and a 27-minute first build. Which one should the ad use?
-  4. PostgreSQL and the encrypted store still use the P9 path (the change capture is SQLite only).
+  4. PostgreSQL and the encrypted store still use the P9 path (the change capture, and the change log
+     of 13 November, are SQLite only). The owner deprioritised PostgreSQL on 13 November.
   5. Measure on the Mac (main machine soon): run `latency.mjs --record` or the playground there.

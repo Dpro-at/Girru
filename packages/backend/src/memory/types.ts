@@ -186,6 +186,8 @@ export interface MemorySearchQuery {
   recencyBoost?: boolean;
   /** Legacy: single type filter */
   type?: MemoryType;
+  /** MEM-HIST-01: also search replaced facts (a question about a past state); results keep status 'replaced'. */
+  includeReplaced?: boolean;
   /** Only these drawers (CORE-03). Absent = all of the user's drawers; [] = none. */
   drawers?: import('./drawers.js').DrawerRef[];
 }

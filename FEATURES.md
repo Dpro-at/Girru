@@ -46,7 +46,14 @@ Girru's memory is the centre of the system. You explain something once, and ever
 | **Careful recall** | Recall is routed by what you ask, re-ranked on your computer, and says "no reliable memory" instead of guessing. | ✅ Built |
 | **How sure** | Each memory shows how sure Girru is, from how many sources agree and whether you verified it. You can mark a memory as verified. | ✅ Built |
 | **The newest fact wins** | A new fact on the same topic replaces the old one, which stays in History and is no longer recalled. | ✅ Built |
-| **Fast at scale** | Recall keeps a small index in memory. Measured locally on generated data: about 0.3 s for 100,000 memories. | ✅ Built |
+| **Fast at scale** | Recall keeps its index in this computer's memory only, never on disk, and keeps it in step as memories change. Large drawers use a compact index. Measured locally on generated data (Windows i9): about 90 ms for 1 million memories and 270 ms for 10 million, before 32 s at 1 million. | ✅ Built |
+| **Understands the conversation** | A short follow-up such as "and where is it hosted?" is searched with the project or person the conversation is about, including the other names they go by. | ✅ Built |
+| **Questions with several parts** | "Who is the contact of the client whose deadline is in March?" is searched part by part, so each fact is found. | ✅ Built |
+| **Stays on the project** | Memories about another project or person count less than memories about the one the conversation is about. | ✅ Built |
+| **Questions about the past** | "What was our plan in February?" or "which database did we use before the switch?" finds the older fact as well. The reply is told that it was replaced and is no longer current. A question about now never gets a replaced fact. | ✅ Built |
+| **Memory as evidence** | Each recalled memory reaches the reply with its project, the day it was saved, whether it is current or replaced, and how sure Girru is, with short rules on answering for the time asked. Measured with a local model on 100,000 memories: more correct answers, especially about the past. | ✅ Built |
+| **More languages for word search** | Word search also works for Chinese, Japanese, Thai and Hindi, not only for languages that put spaces between words. | ✅ Built |
+| **Safe edits by agents** | An agent sees the version of each memory it reads. If the memory changed since, its edit is refused with the newer text instead of overwriting it. | ✅ Built |
 
 ### Learning, with you in control
 
@@ -86,6 +93,11 @@ Girru's memory is the centre of the system. You explain something once, and ever
 | **Memory server (MCP)** | Coding tools can read the brief, pinned facts and the latest handoff, search project memory, suggest new memories and leave handoff notes. | ✅ Built |
 | **Automatic connection** | Supported coding tools found on your computer are connected to the memory server. You can preview and undo this. | ✅ Built |
 | **Your text stays yours** | Girru writes only inside its own marked section and never changes your own text around it. | ✅ Built |
+| **Several tools at once** | Claude Code, Codex, Gemini CLI and Antigravity can read the same memory at the same time, each in its own program. Measured on this computer with three programs on one memory: searches stay about as fast as for one of them. | ✅ Built |
+| **No tool overwrites another** | When two tools edit the same memory from the same version, one is saved and the other is refused with the newer text, so neither loses the other's work. | ✅ Built |
+| **A handoff reaches the next tool** | A note one tool leaves is in the memory the next tool reads, straight away. Measured with 100,000 memories: it used to take over two seconds for the other programs to see it, now none. | ✅ Built |
+| **One update for the whole project** | Say "we finished this, update everything" in a Girru chat, and you get one preview of the lot: the section Girru keeps in your project's instruction files, the note for the next tool, and the facts worth keeping. You approve once and it is written together. A folder you asked Girru to leave alone stays untouched, and the facts still wait for your review. | ✅ Built |
+| **Handoffs by when** | A project with months of notes reads as Today, Earlier this week, Earlier this month, Earlier this year, Older — instead of one long list. The notes themselves are never rewritten or shortened. | ✅ Built |
 | **Kept out of Git** | Generated files can be hidden from Git automatically. | ✅ Built |
 | **Learn back from tools** | Notes you write in your coding tools' own memory files come back as suggestions for you to review. | ✅ Built |
 | **More tool files** | Cursor and GitHub Copilot get Girru's instructions and the memory server too. | ✅ Built |

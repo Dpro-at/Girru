@@ -127,6 +127,51 @@ The MCP server answers only for folders Girru knows as project folders, and only
 
 When Girru runs a coding app as a reply inside a chat, the app gets the agent's definition, a fixed memory pack and the conversation; it does not use the owner's own MCP settings.
 
+### Several tools on one memory
+
+Each tool is its own program with its own connection to the same SQLite file (WAL). Measured with
+`scripts/memory-baseline/agents.mjs`, which runs the real paths in separate processes:
+
+At 100,000 memories, with the change log below off and on, the two runs back to back on one machine
+(this machine's speed drifts between runs, so only a paired run compares):
+
+| | Without the log | **With the log** |
+|---|---|---|
+| Searches a second, 1 program | 140 | 150 |
+| Searches a second, 3 programs | 528 | 438 |
+| Searches a second, 6 programs | 768 | 689 |
+| Search p50 while another saves | 6.5 ms | 11.1 ms |
+| Search p95 while another saves | **3,503 ms** | **18.8 ms** |
+| A handoff becomes visible after | **2,277 ms** | **0 ms** |
+| Memories saved in 8 s meanwhile | 1,527 | 2,260 |
+| Three programs editing one memory | 1 saved, 2 refused | 1 saved, 2 refused |
+| One project's memory in another project's chat | 0 | 0 |
+
+Offline vectors, so these are about working together, not about embedding quality. Searching alone
+costs the same either way (the differences above are this machine's own drift). What the log changes is
+what another program's write costs everyone else: the slowest search during a save drops from three and
+a half seconds to under twenty milliseconds, a handoff is there as soon as it is written, and the
+writer itself gets further because the readers are no longer rebuilding against it. The median search
+during a save rises from 6.5 to 11.1 ms, which is the readers actually applying those writes instead of
+ignoring them until a rebuild.
+
+**The change log** (`memory_recall_changes`, `GIRRU_RECALL_CHANGELOG=0` turns it off): the change
+capture of each program is TEMP, therefore per connection, so another program's write used to be
+visible only as `PRAGMA data_version` moving, and every owner's index was dropped and rebuilt. Triggers
+in the database now append the owner and the id of every write, whichever program made it, and each
+program re-reads only those rows by primary key — the same path it uses for its own writes. The log
+holds no memory text, only ids already in `memories`; the index itself still never goes to disk. Rows
+older than an hour are deleted, at most once every five minutes, by whichever program notices. A
+program idle longer than that cannot know what it missed, so it rebuilds, as before. The table and its
+triggers are made at runtime by whichever connection finds them missing, so the PostgreSQL schema is
+untouched (the fast store is SQLite-only). The same gap is still open for PostgreSQL; see
+[the gap analysis](../internal/MEMORY_GAP_ANALYSIS.md).
+
+Writes never race: the next version of a memory is claimed inside one transaction, and
+`UNIQUE(memory_id, version)` decides the winner, so an edit made against an older version is refused
+with the current text instead of overwriting it. No tool writes the database directly; everything goes
+through Girru.
+
 ## Sync status
 
 Today the generated copies are refreshed every 60 seconds. **Planned:** every change writes a change event in the same transaction as the record; a worker updates files, MCP answers and status from those events and resumes after a crash. Each project then shows, per file:

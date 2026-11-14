@@ -1,4 +1,4 @@
-import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
+import {fileURLToPath as backendFixtureFileURLToPath, pathToFileURL} from 'node:url';
 // MEM-BRIDGE-01: Girru memory is the one brain for Claude Code, Codex, Gemini CLI and Antigravity.
 //  - a fact approved in Girru appears in the managed AGENTS.md brief and in the MCP read tools;
 //  - owner text outside Girru's markers stays byte for byte; no secret reaches any written file;
@@ -34,35 +34,35 @@ globalThis.fetch = async (url) => { throw new Error(`unexpected network call in 
 const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
 
-const { getDatabase } = await import(join(backendDir, 'src/db/database.ts'));
-const { projectKeyOf } = await import(join(backendDir, 'src/memory/project-keys.ts')); // project memory key (id while GIRRU_STORE_P3 is on)
+const { getDatabase } = await import(pathToFileURL(join(backendDir, 'src/db/database.ts')).href);
+const { projectKeyOf } = await import(pathToFileURL(join(backendDir, 'src/memory/project-keys.ts')).href); // project memory key (id while GIRRU_STORE_P3 is on)
 const db = getDatabase();
 await db.initialize();
-const { getCredentialStorage } = await import(join(backendDir, 'src/credentials/storage.ts'));
+const { getCredentialStorage } = await import(pathToFileURL(join(backendDir, 'src/credentials/storage.ts')).href);
 await getCredentialStorage().initialize();
-const { getOrchestrator } = await import(join(backendDir, 'src/multi-agent/index.ts'));
+const { getOrchestrator } = await import(pathToFileURL(join(backendDir, 'src/multi-agent/index.ts')).href);
 await getOrchestrator().initialize(join(dir, '.data', 'multi-agent', 'orchestrator.db'));
 for (const [id, role] of [['br-owner', 'owner'], ['br-user', 'user']]) {
   db.prepare(`INSERT INTO users (id, email, username, password_hash, role, status, email_verified) VALUES (?, ?, ?, 'x', ?, 'active', 1)`).run(id, `${id}@example.test`, id, role);
 }
 db.prepare(`INSERT INTO agents_config (id, name, provider, model, is_primary) VALUES ('br-main', 'Main', 'ollama', 'qwen-test', 1)`).run();
 
-const { generateToken } = await import(join(backendDir, 'src/auth/jwt.ts'));
-const { buildServer } = await import(join(backendDir, 'src/api/app.ts'));
-const { createProject } = await import(join(backendDir, 'src/repositories/chat-conversations.ts'));
-const { learn } = await import(join(backendDir, 'src/memory/learning.ts'));
-const { publishInstanceIdentity, getInstanceIdentity } = await import(join(backendDir, 'src/services/instance-identity.ts'));
-const { createBridgeMcpServer, httpBackend } = await import(join(backendDir, 'src/memory/bridge/mcp-server.ts'));
-const { sessionProof } = await import(join(backendDir, 'src/memory/bridge/proof.ts'));
-const { setBridgeEnv } = await import(join(backendDir, 'src/memory/bridge/service.ts'));
-const { syncMemoryBridge } = await import(join(backendDir, 'src/memory/bridge/sync.ts'));
-const { MARK_START: OLD_START, MARK_END: OLD_END, GIRRU_START, GIRRU_END } = await import(join(backendDir, 'src/memory/bridge/managed-files.ts'));
+const { generateToken } = await import(pathToFileURL(join(backendDir, 'src/auth/jwt.ts')).href);
+const { buildServer } = await import(pathToFileURL(join(backendDir, 'src/api/app.ts')).href);
+const { createProject } = await import(pathToFileURL(join(backendDir, 'src/repositories/chat-conversations.ts')).href);
+const { learn } = await import(pathToFileURL(join(backendDir, 'src/memory/learning.ts')).href);
+const { publishInstanceIdentity, getInstanceIdentity } = await import(pathToFileURL(join(backendDir, 'src/services/instance-identity.ts')).href);
+const { createBridgeMcpServer, httpBackend } = await import(pathToFileURL(join(backendDir, 'src/memory/bridge/mcp-server.ts')).href);
+const { sessionProof } = await import(pathToFileURL(join(backendDir, 'src/memory/bridge/proof.ts')).href);
+const { setBridgeEnv } = await import(pathToFileURL(join(backendDir, 'src/memory/bridge/service.ts')).href);
+const { syncMemoryBridge } = await import(pathToFileURL(join(backendDir, 'src/memory/bridge/sync.ts')).href);
+const { MARK_START: OLD_START, MARK_END: OLD_END, GIRRU_START, GIRRU_END } = await import(pathToFileURL(join(backendDir, 'src/memory/bridge/managed-files.ts')).href);
 // P2: the one Girru section replaces the dpro-memory markers.
 const P2 = switchValueOn(process.env.GIRRU_STORE_P2 ?? '');
 const [MARK_START, MARK_END] = P2 ? [GIRRU_START, GIRRU_END] : [OLD_START, OLD_END];
-const { claudeProjectDir } = await import(join(backendDir, 'src/memory/bridge/clients.ts'));
-const { memoryBridgeTool, memoryBridgeApplyTool } = await import(join(backendDir, 'src/tools/memory/bridge.ts'));
-const { APPROVAL_REQUIRED_TOOLS } = await import(join(backendDir, 'src/tools/approvals.ts'));
+const { claudeProjectDir } = await import(pathToFileURL(join(backendDir, 'src/memory/bridge/clients.ts')).href);
+const { memoryBridgeTool, memoryBridgeApplyTool } = await import(pathToFileURL(join(backendDir, 'src/tools/memory/bridge.ts')).href);
+const { APPROVAL_REQUIRED_TOOLS } = await import(pathToFileURL(join(backendDir, 'src/tools/approvals.ts')).href);
 const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
 const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
 
@@ -86,7 +86,7 @@ const injectFetch = async (url, init = {}) => {
 // STORE-MAP-01 P6 (SEC2-1): with the switch on, a coding app reaches a project only with the session
 // capability Girru's launcher gives it. Here the owner allowed company facts for the project.
 const P6 = switchValueOn(process.env.GIRRU_STORE_P6 ?? '');
-const { launchCapability } = await import(join(backendDir, 'src/memory/bridge/capability.ts'));
+const { launchCapability } = await import(pathToFileURL(join(backendDir, 'src/memory/bridge/capability.ts')).href);
 const capabilityFor = async (client, cwd) =>
   P6 && (cwd === folder || cwd.startsWith(folder + sep)) ? (await launchCapability(OWNER, project.id, client, true)).token : null;
 /** An MCP client connected to the dpro-memory server as `client`, running in `cwd`. */
@@ -386,7 +386,7 @@ test('folder settings: files can be stopped, turning them on needs preview + con
 });
 
 test('the real stdio server starts the way a CLI starts it, lists its tools and only talks to loopback', async () => {
-  const { serverLaunch } = await import(join(backendDir, 'src/memory/bridge/clients.ts'));
+  const { serverLaunch } = await import(pathToFileURL(join(backendDir, 'src/memory/bridge/clients.ts')).href);
   const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
   const launch = serverLaunch('codex');
   const transport = new StdioClientTransport({ command: launch.command, args: launch.args, cwd: folder,

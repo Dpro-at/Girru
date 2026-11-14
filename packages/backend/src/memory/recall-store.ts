@@ -36,6 +36,7 @@ import { createRequire } from 'node:module';
 import { getDatabase } from '../db/index.js';
 import { sql, sqliteSteps } from '../repositories/sql-steps.js';
 import { lexicalTokens } from './text-normalize.js';
+import { TOPIC_COMMON_SHARE } from './context/query.js';
 import { BM25_B, BM25_K1, MIN_RECALL_SCORE, WORKING_LAYER_BOOST, hybridScore, termCounts, vectorScore } from './hybrid.js';
 import { LEGACY_HASH_MODEL } from './embedding.js';
 import { DRAWER_KEY_SQL, DRAWER_KIND_SQL, normalizeDrawer, type DrawerRef } from './drawers.js';
@@ -130,6 +131,11 @@ const users = new Map<string, UserStore>();
 let storeBytes = 0;
 let seenDataVersion: number | null = null;
 let captureDb: unknown = null;
+/** MEM-CONC-03: the last change-log row this process has applied, and when the log was last pruned. */
+let lastChangeSeq: number | null = null;
+let lastPruneAt = 0;
+/** The log's table and triggers were found in place for `captureDb` (checked once, not per search). */
+let logReady = false;
 
 /** A drawer with more memories than this keeps int8 vectors (MEM-SPEED-01 step 2). */
 export function exactMax(): number {
@@ -194,6 +200,95 @@ function onChange(userId: unknown, id: unknown): null {
 const TRIGGERS = ['girru_recall_ins', 'girru_recall_upd', 'girru_recall_del'];
 
 /**
+ * MEM-CONC-03: the change log, so another program's write costs the same as our own.
+ *
+ * The capture above is TEMP, therefore per connection: a write by another program (Claude Code,
+ * Codex, a second window) was seen only as `PRAGMA data_version` moving, and every owner's store was
+ * dropped and rebuilt. At 100,000 memories that was a read p95 of 3,165 ms and 1,645 ms before a
+ * handoff was visible. These triggers live in the database, so EVERY connection appends the owner and
+ * id of what it wrote; each process then re-reads only those rows by primary key, exactly as it does
+ * for its own writes. The log holds no memory text — only ids already in `memories`.
+ *
+ * Rows older than LOG_KEEP_MS are deleted now and then. A process whose position has been pruned away
+ * (idle longer than that) cannot know what it missed, so it rebuilds, as before.
+ *
+ * A DELETE writes no id. Forgetting a memory has to leave no trace (CORE-07), and an id in this table
+ * would outlive the row it names by up to an hour and could be caught in a backup taken meanwhile. So a
+ * delete logs the sentinel below, which tells every other process to drop its stores and read the
+ * database again — the behaviour before this log existed. Deletes are rare and the owner asks for them;
+ * saves and edits, which are constant, keep the cheap path.
+ */
+const LOG_TABLE = 'memory_recall_changes';
+const LOG_TRIGGERS = ['girru_recall_log_ins', 'girru_recall_log_upd', 'girru_recall_log_del'];
+const LOG_KEEP_MS = 60 * 60 * 1000;
+const PRUNE_EVERY_MS = 5 * 60 * 1000;
+/** A delete, with no id: "something was removed, read the database again" (see the comment above). */
+const DELETED_SENTINEL = '-';
+/** GIRRU_RECALL_CHANGELOG=0: no log; another connection's write drops every store, as before. */
+const logEnabled = (): boolean => process.env.GIRRU_RECALL_CHANGELOG !== '0';
+
+/**
+ * Create the log and its triggers when they are missing, and REPLACE them when their body is not the
+ * one below. `CREATE TRIGGER IF NOT EXISTS` would keep an older trigger: a database made while the
+ * delete trigger still wrote `OLD.id` would go on recording forgotten ids for good. When that is what
+ * we find, every row in the log goes too — the log is only a note of recent changes, so emptying it is
+ * always safe (each process reads the database again), and it is the only way to be sure no id written
+ * by the old trigger is left behind.
+ */
+function ensureLog(db: any): void {
+  const del = db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'girru_recall_log_del'`).get() as { sql?: string } | undefined;
+  const outdated = !!del?.sql && !del.sql.includes(`'${DELETED_SENTINEL}'`);
+  if (outdated) {
+    for (const t of LOG_TRIGGERS) db.exec(`DROP TRIGGER IF EXISTS ${t};`);
+    db.exec(`DELETE FROM ${LOG_TABLE};`); // may hold ids of memories already forgotten
+    forgetRecallStore();
+    lastChangeSeq = null;
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ${LOG_TABLE} (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      memory_id TEXT NOT NULL,
+      at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_recall_changes_at ON ${LOG_TABLE}(at);
+    CREATE TRIGGER IF NOT EXISTS girru_recall_log_ins AFTER INSERT ON memories BEGIN
+      INSERT INTO ${LOG_TABLE} (user_id, memory_id, at) VALUES (NEW.user_id, NEW.id, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
+    END;
+    CREATE TRIGGER IF NOT EXISTS girru_recall_log_upd AFTER UPDATE ON memories BEGIN
+      INSERT INTO ${LOG_TABLE} (user_id, memory_id, at) VALUES (OLD.user_id, OLD.id, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
+      INSERT INTO ${LOG_TABLE} (user_id, memory_id, at) VALUES (NEW.user_id, NEW.id, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
+    END;
+    CREATE TRIGGER IF NOT EXISTS girru_recall_log_del AFTER DELETE ON memories BEGIN
+      INSERT INTO ${LOG_TABLE} (user_id, memory_id, at) VALUES ('', '${DELETED_SENTINEL}', CAST(strftime('%s', 'now') AS INTEGER) * 1000);
+    END;`);
+}
+
+/**
+ * Apply every change another connection logged since the last call. Returns false when the rows this
+ * process needed are gone (pruned), so the caller rebuilds instead of serving a store with a hole.
+ */
+function applyLog(db: any): boolean {
+  const rows = db.prepare(`SELECT seq, user_id, memory_id FROM ${LOG_TABLE} WHERE seq > ? ORDER BY seq`).all(lastChangeSeq ?? 0) as Array<{ seq: number; user_id: string; memory_id: string }>;
+  if (rows.length === 0) return true;
+  // A hole: the oldest row we can still see is newer than the one after our position.
+  const oldest = (db.prepare(`SELECT MIN(seq) AS s FROM ${LOG_TABLE}`).get() as { s: number | null }).s;
+  if (lastChangeSeq !== null && oldest !== null && oldest > lastChangeSeq + 1) { lastChangeSeq = rows[rows.length - 1].seq; return false; }
+  lastChangeSeq = rows[rows.length - 1].seq;
+  // A delete names no memory, so there is nothing to re-read by id: start again from the database.
+  if (rows.some((r) => r.memory_id === DELETED_SENTINEL)) return false;
+  for (const r of rows) onChange(r.user_id, r.memory_id);
+  return true;
+}
+
+/** Drop log rows older than LOG_KEEP_MS, at most once every PRUNE_EVERY_MS (any process may do it). */
+function pruneLog(db: any, now: number): void {
+  if (now - lastPruneAt < PRUNE_EVERY_MS) return;
+  lastPruneAt = now;
+  try { db.prepare(`DELETE FROM ${LOG_TABLE} WHERE at < ?`).run(now - LOG_KEEP_MS); } catch { /* another process may be writing; next time */ }
+}
+
+/**
  * True when the store can serve this search: the main SQLite connection, with
  * change capture in place. Re-creates the triggers (and drops every store)
  * when they are gone, e.g. after the table was rebuilt.
@@ -208,8 +303,19 @@ function ready(): boolean {
       captureDb = db;
       forgetRecallStore();
       seenDataVersion = null;
+      lastChangeSeq = null;
+      logReady = false;
+      lastPruneAt = Date.now(); // the first prune is due after PRUNE_EVERY_MS, not at start-up
     }
-    const n = (db.prepare(`SELECT COUNT(*) AS n FROM temp.sqlite_master WHERE type = 'trigger' AND name IN (${TRIGGERS.map(() => '?').join(', ')})`).get(...TRIGGERS) as { n: number }).n;
+    // The same query also answers whether the log's delete trigger is the one below (MEM-CONC-03): a
+    // database made before that fix keeps a trigger writing OLD.id, and would record forgotten ids for
+    // good. Checked on every call because it costs nothing here, not once per connection.
+    const row = db.prepare(`SELECT
+        (SELECT COUNT(*) FROM temp.sqlite_master WHERE type = 'trigger' AND name IN (${TRIGGERS.map(() => '?').join(', ')})) AS n,
+        (SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name = 'girru_recall_log_del' AND sql LIKE ?) AS ours`)
+      .get(...TRIGGERS, `%'${DELETED_SENTINEL}'%`) as { n: number; ours: number };
+    const n = row.n;
+    if (logReady && row.ours === 0) { logReady = false; } // missing or outdated: ensureLog repairs it below
     if (n !== TRIGGERS.length) {
       db.exec(`
         DROP TRIGGER IF EXISTS temp.girru_recall_ins;
@@ -220,10 +326,31 @@ function ready(): boolean {
         CREATE TEMP TRIGGER girru_recall_del AFTER DELETE ON main.memories BEGIN SELECT girru_recall_changed(OLD.user_id, OLD.id); END;`);
       forgetRecallStore(); // changes before the triggers were (back) in place were not seen
     }
-    // A write by another connection is not captured: start again from the database.
+    // MEM-CONC-03: the shared change log. The table and its triggers are made (or repaired) by
+    // whichever connection finds them missing or outdated.
+    if (!logReady && logEnabled()) {
+      const logs = (db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE (type = 'table' AND name = ?) OR (type = 'trigger' AND name IN (${LOG_TRIGGERS.map(() => '?').join(', ')}))`).get(LOG_TABLE, ...LOG_TRIGGERS) as { n: number }).n;
+      if (logs !== LOG_TRIGGERS.length + 1 || row.ours === 0) {
+        ensureLog(db);
+        forgetRecallStore(); // writes made before the log existed were not recorded
+        lastChangeSeq = null;
+      }
+      logReady = true;
+    }
+    if (logEnabled() && lastChangeSeq === null) lastChangeSeq = ((db.prepare(`SELECT MAX(seq) AS s FROM ${LOG_TABLE}`).get() as { s: number | null }).s) ?? 0;
+    // MEM-CONC-03: another connection wrote (data_version only moves for other connections). Its ids
+    // come from the log and are re-read like our own; only a pruned-away position forces a rebuild.
     const v = Number(db.pragma('data_version', { simple: true }));
-    if (seenDataVersion !== null && v !== seenDataVersion) forgetRecallStore();
+    if (seenDataVersion !== null && v !== seenDataVersion) {
+      let caught = !logEnabled();
+      // The log could have been dropped (a rebuilt table, a cleanup): make it again and start over.
+      if (logEnabled()) {
+        try { if (!applyLog(db)) caught = true; } catch { ensureLog(db); logReady = true; lastChangeSeq = null; caught = true; }
+      }
+      if (caught) forgetRecallStore();
+    }
     seenDataVersion = v;
+    if (logEnabled()) pruneLog(db, Date.now());
     return true;
   } catch {
     return false;
@@ -488,6 +615,8 @@ export interface StoreQuery {
   type?: string;
   layer?: string;
   minImportance?: number;
+  /** MEM-HIST-01: replaced facts are candidates too. */
+  includeReplaced?: boolean;
   limit: number;
 }
 
@@ -538,6 +667,34 @@ export async function openStore(userId: string, drawers: DrawerRef[]): Promise<O
   return { drawers: out, store: u };
 }
 
+/**
+ * MEM-CTX-02: how many live memories of the open drawers contain a word, and how many there are in
+ * all. A topic word taken from the conversation is only worth searching for when the owner's memory
+ * of this project actually uses it; a word in most of them says nothing. Any language: it counts
+ * tokens. Null when the store is not loaded.
+ */
+export function drawerTermCounts(userId: string, open: OpenStore): { df: (token: string) => number; live: number } | null {
+  const u = users.get(userId);
+  if (!u || u !== open.store) return null;
+  const inOpen = new Set(open.drawers);
+  let live = 0;
+  for (const d of open.drawers) live += d.live;
+  if (live === 0) return null;
+  return {
+    live,
+    // Counting stops at `common`: the caller only needs df >= 1 and df below that share, so a word
+    // the whole store uses costs a bounded scan instead of its full postings.
+    df: (token: string) => {
+      const p = u.terms.get(token);
+      if (!p) return 0;
+      const common = Math.ceil(live * TOPIC_COMMON_SHARE);
+      let k = 0;
+      for (let i = 0; i < p.n && k < common; i++) { const s = p.slots[i]; if (u.alive[s] && inOpen.has(u.drawerOf[s])) k++; }
+      return k;
+    },
+  };
+}
+
 /** Rows whose vector is not of `model`, among the candidates, oldest first (lazy re-embed). */
 export function staleIn(userId: string, open: OpenStore, q: StoreQuery, model: string, max: number): Array<{ id: string; content: string }> {
   const u = users.get(userId);
@@ -554,7 +711,7 @@ export function staleIn(userId: string, open: OpenStore, q: StoreQuery, model: s
 }
 
 function candidate(u: UserStore, s: number, q: StoreQuery): boolean {
-  if (u.replaced[s]) return false;
+  if (u.replaced[s] && !q.includeReplaced) return false;
   if (q.type !== undefined && u.type[s] !== q.type) return false;
   if (q.layer !== undefined && u.layerRaw[s] !== q.layer) return false;
   if (q.minImportance !== undefined && !(u.importance[s] >= q.minImportance)) return false;
@@ -704,7 +861,7 @@ function scanDrawer(c: Scan, d: Drawer): void {
 export function searchStore(userId: string, open: OpenStore, q: StoreQuery, qv: QueryVector): StoreHit[] {
   const u = users.get(userId);
   if (!u || u !== open.store) return []; // forgotten (or dropped) since openStore
-  const filtered = q.type !== undefined || q.layer !== undefined || q.minImportance !== undefined;
+  const filtered = q.type !== undefined || q.layer !== undefined || q.minImportance !== undefined || !!q.includeReplaced;
   const inOpen = new Set(open.drawers);
 
   // BM25 statistics over the candidates (bm25FromCounts).

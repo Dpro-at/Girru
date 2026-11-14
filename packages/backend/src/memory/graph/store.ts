@@ -103,6 +103,38 @@ function* upsertEntityStep(userId: string, name: string, kind: EntityKind, alias
   return row;
 }
 
+/**
+ * MEM-CONC-02: prune only the entities and links THIS memory had, when nothing else holds them up
+ * any more. Every id is looked up by primary key, so the cost is the memory's own graph (at most 12
+ * entities and 12 links), not the owner's whole memory. `pruneGraphStep` scans every memory of the
+ * owner five times; it ran on every save, which cost ~950 ms per save at 100,000 memories and blocked
+ * reads in the same process for that long. Orphans from forgotten memories stay the job's work
+ * (syncMemoryGraph) and the forget path's.
+ */
+function* prunePickedStep(userId: string, entityIds: readonly string[], linkIds: readonly string[]): Step<void> {
+  if (linkIds.length) {
+    const q = linkIds.map(() => '?').join(',');
+    yield* run(`DELETE FROM memory_graph_links WHERE user_id = ? AND id IN (${q})
+       AND id NOT IN (SELECT link_id FROM memory_graph_link_sources WHERE user_id = ? AND link_id IN (${q}))`,
+    userId, ...linkIds, userId, ...linkIds);
+  }
+  if (entityIds.length) {
+    const q = entityIds.map(() => '?').join(',');
+    yield* run(`DELETE FROM memory_graph_entities WHERE user_id = ? AND id IN (${q})
+       AND id NOT IN (SELECT entity_id FROM memory_graph_mentions WHERE user_id = ? AND entity_id IN (${q}))
+       AND id NOT IN (SELECT src_id FROM memory_graph_links WHERE user_id = ? AND src_id IN (${q}))
+       AND id NOT IN (SELECT dst_id FROM memory_graph_links WHERE user_id = ? AND dst_id IN (${q}))`,
+    userId, ...entityIds, userId, ...entityIds, userId, ...entityIds, userId, ...entityIds);
+  }
+}
+
+/** The entities and links one memory holds up right now (read before it is detached). */
+function* memoryGraphIdsStep(userId: string, memoryId: string): Step<{ entityIds: string[]; linkIds: string[] }> {
+  const entities = yield* all<{ entity_id: string }>('SELECT entity_id FROM memory_graph_mentions WHERE memory_id = ? AND user_id = ?', memoryId, userId);
+  const links = yield* all<{ link_id: string }>('SELECT link_id FROM memory_graph_link_sources WHERE memory_id = ? AND user_id = ?', memoryId, userId);
+  return { entityIds: entities.map((e) => e.entity_id), linkIds: links.map((l) => l.link_id) };
+}
+
 /** Remove one memory's attachments and link sources (no pruning). */
 function* detachMemoryStep(userId: string, memoryId: string): Step<void> {
   yield* run('DELETE FROM memory_graph_mentions WHERE memory_id = ? AND user_id = ?', memoryId, userId);
@@ -152,6 +184,8 @@ export function* writeMemoryGraphStep(memory: Memory, hash: string, ex: GraphExt
   const userId = memory.userId;
   const live = yield* one<{ content: string }>('SELECT content FROM memories WHERE id = ? AND user_id = ?', memory.id, userId);
   if (!live || contentHash(live.content) !== hash) return { status: 'gone' };
+  // MEM-CONC-02: what this memory held up before, so only that can be pruned afterwards.
+  const had = yield* memoryGraphIdsStep(userId, memory.id);
   yield* detachMemoryStep(userId, memory.id);
 
   const existing = yield* all<EntityRow>('SELECT id, kind, name, norm_name, aliases FROM memory_graph_entities WHERE user_id = ?', userId);
@@ -186,7 +220,8 @@ export function* writeMemoryGraphStep(memory: Memory, hash: string, ex: GraphExt
     if (link.status === 'pending') pending++;
   }
   yield* run('INSERT INTO memory_graph_state (memory_id, user_id, content_hash, method) VALUES (?, ?, ?, ?)', memory.id, userId, hash, ex.method);
-  yield* pruneGraphStep(userId);
+  // MEM-CONC-02: only the rows this memory stopped holding up, by id (never a scan of every memory).
+  yield* prunePickedStep(userId, had.entityIds.filter((id) => ![...ids.values()].includes(id)), had.linkIds);
   return { status: 'indexed', method: ex.method, entities: ids.size, links, pending };
 }
 

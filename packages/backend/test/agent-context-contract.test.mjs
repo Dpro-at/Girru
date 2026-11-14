@@ -1,4 +1,4 @@
-import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
+import {fileURLToPath as backendFixtureFileURLToPath, pathToFileURL} from 'node:url';
 // STORE-MAP-01 P2 contract (CX6, AG1, AG6): what every entry point gives the same agent.
 // With GIRRU_STORE_P2 off nothing changes (the known gaps are pinned here: chat drops the hired
 // instructions, task runs drop the owner rules, skills go in as full text). With it on:
@@ -48,13 +48,13 @@ globalThis.fetch = async (url, init = {}) => {
 const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
 
-const { getDatabase } = await import(join(backendDir, 'src/db/database.ts'));
-const { projectKeyOf } = await import(join(backendDir, 'src/memory/project-keys.ts')); // project memory key (id while GIRRU_STORE_P3 is on)
+const { getDatabase } = await import(pathToFileURL(join(backendDir, 'src/db/database.ts')).href);
+const { projectKeyOf } = await import(pathToFileURL(join(backendDir, 'src/memory/project-keys.ts')).href); // project memory key (id while GIRRU_STORE_P3 is on)
 const db = getDatabase();
 await db.initialize();
-const { getCredentialStorage } = await import(join(backendDir, 'src/credentials/storage.ts'));
+const { getCredentialStorage } = await import(pathToFileURL(join(backendDir, 'src/credentials/storage.ts')).href);
 await getCredentialStorage().initialize();
-const { getOrchestrator } = await import(join(backendDir, 'src/multi-agent/index.ts'));
+const { getOrchestrator } = await import(pathToFileURL(join(backendDir, 'src/multi-agent/index.ts')).href);
 await getOrchestrator().initialize(join(dir, '.data', 'multi-agent', 'orchestrator.db'));
 const OWNER = 'cc-owner';
 db.prepare(`INSERT INTO users (id, email, username, password_hash, role, status, email_verified) VALUES (?, ?, ?, 'x', 'owner', 'active', 1)`).run(OWNER, `${OWNER}@example.test`, OWNER);
@@ -62,18 +62,18 @@ const HIRED = 'Your specialty is release engineering. Always test before you say
 db.prepare(`INSERT INTO agents_config (id, name, provider, model, is_primary, system_prompt, department) VALUES ('cc-agent', 'Rafid', 'ollama', 'qwen-test', 1, ?, 'engineering')`).run(HIRED);
 db.prepare(`INSERT INTO agents_config (id, name, provider, model, is_primary) VALUES ('cc-other', 'Nora', 'ollama', 'qwen-test', 0)`).run();
 
-const { generateToken } = await import(join(backendDir, 'src/auth/jwt.ts'));
-const { buildServer } = await import(join(backendDir, 'src/api/app.ts'));
-const { createProject, createConversation } = await import(join(backendDir, 'src/repositories/chat-conversations.ts'));
-const { addStarterRules, createRule, rulesByPrecedence } = await import(join(backendDir, 'src/services/agent-rules.ts'));
-const { centralSkills } = await import(join(backendDir, 'src/skills/central-store.ts'));
-const { addPinnedFact, parsePinnedScope } = await import(join(backendDir, 'src/memory/scopes/pinned.ts'));
-const { taskRunBasePrompt } = await import(join(backendDir, 'src/services/task-run-executor.ts'));
-const { resolveAgentContext } = await import(join(backendDir, 'src/services/agent-context/resolve.ts'));
-const { renderCodingAppInstructions, renderMemoryData } = await import(join(backendDir, 'src/services/agent-context/render.ts'));
-const { guideReadTool } = await import(join(backendDir, 'src/tools/skills/guide-read.ts'));
-const { createAgentToolsRegistry } = await import(join(backendDir, 'src/tools/index.ts'));
-const { beginChannelTurn, CHANNEL_TURN_HEADER } = await import(join(backendDir, 'src/tools/channel-policy.ts'));
+const { generateToken } = await import(pathToFileURL(join(backendDir, 'src/auth/jwt.ts')).href);
+const { buildServer } = await import(pathToFileURL(join(backendDir, 'src/api/app.ts')).href);
+const { createProject, createConversation } = await import(pathToFileURL(join(backendDir, 'src/repositories/chat-conversations.ts')).href);
+const { addStarterRules, createRule, rulesByPrecedence } = await import(pathToFileURL(join(backendDir, 'src/services/agent-rules.ts')).href);
+const { centralSkills } = await import(pathToFileURL(join(backendDir, 'src/skills/central-store.ts')).href);
+const { addPinnedFact, parsePinnedScope } = await import(pathToFileURL(join(backendDir, 'src/memory/scopes/pinned.ts')).href);
+const { taskRunBasePrompt } = await import(pathToFileURL(join(backendDir, 'src/services/task-run-executor.ts')).href);
+const { resolveAgentContext } = await import(pathToFileURL(join(backendDir, 'src/services/agent-context/resolve.ts')).href);
+const { renderCodingAppInstructions, renderMemoryData } = await import(pathToFileURL(join(backendDir, 'src/services/agent-context/render.ts')).href);
+const { guideReadTool } = await import(pathToFileURL(join(backendDir, 'src/tools/skills/guide-read.ts')).href);
+const { createAgentToolsRegistry } = await import(pathToFileURL(join(backendDir, 'src/tools/index.ts')).href);
+const { beginChannelTurn, CHANNEL_TURN_HEADER } = await import(pathToFileURL(join(backendDir, 'src/tools/channel-policy.ts')).href);
 
 const app = await buildServer({ logger: false });
 await app.ready();
@@ -184,11 +184,11 @@ test('rules by precedence: groups in order, numbered across groups', async () =>
 });
 
 test('MD4 and MD9: save criteria lead memory_save and the brief; recalled memories carry their date and place', async () => {
-  const { memorySaveTool } = await import(join(backendDir, 'src/tools/memory/save.ts'));
-  const { SAVE_CRITERIA } = await import(join(backendDir, 'src/services/agent-context/switch.ts'));
-  const { standingRules } = await import(join(backendDir, 'src/memory/bridge/brief.ts'));
-  const { messageRecall } = await import(join(backendDir, 'src/memory/context/pack.ts'));
-  const { newMemory, saveVersioned } = await import(join(backendDir, 'src/memory/learning.ts'));
+  const { memorySaveTool } = await import(pathToFileURL(join(backendDir, 'src/tools/memory/save.ts')).href);
+  const { SAVE_CRITERIA } = await import(pathToFileURL(join(backendDir, 'src/services/agent-context/switch.ts')).href);
+  const { standingRules } = await import(pathToFileURL(join(backendDir, 'src/memory/bridge/brief.ts')).href);
+  const { messageRecall } = await import(pathToFileURL(join(backendDir, 'src/memory/context/pack.ts')).href);
+  const { newMemory, saveVersioned } = await import(pathToFileURL(join(backendDir, 'src/memory/learning.ts')).href);
   assert.ok(!memorySaveTool.description.startsWith(SAVE_CRITERIA), 'off: unchanged');
   assert.ok(!standingRules().includes(SAVE_CRITERIA));
   await saveVersioned(newMemory(OWNER, { kind: 'project', key: projectKeyOf(project) }, { type: 'fact', importance: 6, content: 'Alpha staging is restored every Sunday night.' }, {}), 'test', 'test');

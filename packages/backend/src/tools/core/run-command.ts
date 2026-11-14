@@ -10,7 +10,7 @@
  *    run_command_owner, which shows the exact command and runs it only after the owner presses Run.
  *  - The child gets a minimal environment (no server secrets) and never the server's own folder.
  */
-import {spawn, spawnSync} from 'node:child_process';
+import {spawn, spawnSync, type ChildProcess} from 'node:child_process';
 import path from 'node:path';
 import {realpathSync, statSync} from 'node:fs';
 import os from 'node:os';
@@ -57,7 +57,18 @@ const GIT_FLAGS: Record<string, string[]> = {
   fetch: ['--all', '--prune', '-p', '--tags', '--dry-run'], pull: ['--ff-only', '--no-rebase'], 'ls-remote': ['--heads', '--tags'],
   remote: ['-v'], branch: ['-a', '-r', '-v', '-vv', '--show-current', '--list'], tag: ['-l', '--list'], stash: [],
 };
-const VERSION_ONLY = new Set(['node', 'npm', 'pnpm', 'yarn', 'python', 'python3', 'go', 'cargo', 'java', 'dotnet', 'git']);
+// "version" is executable input to Node/Python/Java, and a modifying subcommand in some package managers.
+const VERSION_FLAGS: Readonly<Record<string, readonly string[]>> = {
+  node: ['--version', '-v'], npm: ['--version', '-v'], pnpm: ['--version', '-v'], yarn: ['--version', '-v'],
+  python: ['--version', '-V'], python3: ['--version', '-V'], go: ['version'], cargo: ['--version', '-V'],
+  java: ['--version', '-version'], dotnet: ['--version'], git: ['--version', 'version'],
+};
+// Resolve to fixed executable names, never an executable path supplied in a request.
+const EXECUTABLES: Readonly<Record<string, string>> = Object.freeze({
+  echo: 'echo', git: 'git', ls: 'ls', cat: 'cat', wc: 'wc', pwd: 'pwd', date: 'date', whoami: 'whoami',
+  head: 'head', tail: 'tail', grep: 'grep', rg: 'rg', node: 'node', npm: 'npm', pnpm: 'pnpm', yarn: 'yarn',
+  python: 'python', python3: 'python3', go: 'go', cargo: 'cargo', java: 'java', dotnet: 'dotnet',
+});
 const GIT_WORD = /^[A-Za-z0-9._\/~^@+-]{1,200}$/;
 
 /** A path the command may read: inside the project folder after links are followed. */
@@ -112,7 +123,7 @@ export function allowedCommand(command: string, cwd: string, remotes: (cwd: stri
   const words = splitCommand(command);
   if (!words) return null;
   const [cmd, ...args] = words;
-  if (VERSION_ONLY.has(cmd) && args.length === 1 && ['--version', '-v', 'version'].includes(args[0])) return words;
+  if (Object.hasOwn(VERSION_FLAGS, cmd) && args.length === 1 && VERSION_FLAGS[cmd].includes(args[0])) return words;
   if (cmd === 'echo') return args.some(a => a.startsWith('-')) ? null : words;
   if (cmd !== 'git') {
     const rest = Object.hasOwn(FLAGS, cmd) ? checkFlags(args, FLAGS[cmd]) : null;
@@ -178,17 +189,31 @@ function readParams(params: unknown): {command: string; timeout: number} | null 
 export const plainText = (s: string) => s.replace(/\r\n/g, '\n').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
 const text = (s: string, error?: string): ToolResult => ({content: [{type: 'text', text: s}], ...(error ? {error} : {})});
 
-/** Runs words directly (no shell) or, for a command the owner approved, a whole line through the system shell. */
-export function runShell(command: string | string[], cwd: string, timeout: number): Promise<{code: number | null; out: string; timedOut: boolean; ms: number}> {
+interface CommandResult {code: number | null; out: string; timedOut: boolean; ms: number}
+const commandEnv = () => ({...minimalChildEnv(), GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_ATTR_NOSYSTEM: '1', GIT_LITERAL_PATHSPECS: '1'});
+
+/** Direct argv only. This entry point cannot fall back to interpreting a command string. */
+export function runShell(command: string[], cwd: string, timeout: number): Promise<CommandResult> {
+  return collectOutput(() => {
+    if (!Array.isArray(command) || !Object.hasOwn(EXECUTABLES, command[0])) throw Error('Command executable is not allowed');
+    return spawn(EXECUTABLES[command[0]], command.slice(1), {cwd, env: commandEnv(), windowsHide: true, windowsVerbatimArguments: false, detached: process.platform !== 'win32', shell: false});
+  }, timeout);
+}
+
+/** Only the owner tool, reached after the registry consumes an approval ticket, uses a shell. */
+export function runOwnerShell(command: string, cwd: string, timeout: number): Promise<CommandResult> {
+  return collectOutput(() => process.platform === 'win32'
+    ? spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', command], {cwd, env: commandEnv(), windowsHide: true, windowsVerbatimArguments: true, shell: false})
+    : spawn('/bin/sh', ['-c', command], {cwd, env: commandEnv(), detached: true, shell: false}), timeout);
+}
+
+/** Shared output/timeout handling receives a process factory, never command text or execution policy. */
+function collectOutput(start: () => ChildProcess, timeout: number): Promise<CommandResult> {
   const started = Date.now();
   return new Promise(resolve => {
     const win = process.platform === 'win32';
-    const direct = Array.isArray(command);
-    const file = direct ? command[0] : (win ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh');
-    const args = direct ? command.slice(1) : (win ? ['/d', '/s', '/c', command] : ['-c', command]);
-    const env = {...minimalChildEnv(), GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_ATTR_NOSYSTEM: '1', GIT_LITERAL_PATHSPECS: '1'};
     let child;
-    try { child = spawn(file, args, {cwd, env, windowsHide: true, windowsVerbatimArguments: win && !direct, detached: !win, shell: false}); }
+    try { child = start(); }
     catch (e) { resolve({code: null, out: String((e as Error).message), timedOut: false, ms: 0}); return; }
     let out = '', timedOut = false, done = false;
     const finish = (code: number | null, extra = '') => { if (done) return; done = true; clearTimeout(timer); resolve({code, out: out + extra, timedOut, ms: Date.now() - started}); };
@@ -205,15 +230,18 @@ export function runShell(command: string | string[], cwd: string, timeout: numbe
   });
 }
 
-async function execute(params: unknown, context: ToolExecutionContext | undefined, ownerApproved: boolean): Promise<ToolResult> {
+interface CommandPlan {command: string; timeout: number; cwd: string}
+async function prepareCommand(params: unknown, context: ToolExecutionContext | undefined): Promise<CommandPlan | ToolResult> {
   if (!await agentCommandsOn(context?.accessOwnerId ?? context?.userId)) return text('Running commands is off on this computer. The owner can turn it on in Settings › Permissions › Agents can run commands.', 'agent_commands_off');
   const plan = readParams(params);
   if (!plan) return text('Give one command as text (and an optional timeout in milliseconds).', 'invalid_command');
   const cwd = projectCwd(context);
   if (!cwd) return text('This chat has no project folder, so commands cannot run here. Choose a folder for the chat first.', 'no_project_folder');
-  const words = ownerApproved ? null : allowedCommand(plan.command, cwd);
-  if (!ownerApproved && !words) return text(`This command needs the owner: call run_command_owner with the same command, and Girru shows it with a Run button.\n${plan.command}`, 'owner_run_required');
-  const r = await runShell(words ?? plan.command, cwd, plan.timeout);
+  return {...plan, cwd};
+}
+
+async function reportCommand(plan: CommandPlan, r: CommandResult, context: ToolExecutionContext | undefined, ownerApproved: boolean): Promise<ToolResult> {
+  const {cwd} = plan;
   // CP15: every command and its output also show in Girru's Terminal, in the "Agent commands" tab.
   try {
     const owner = context?.accessOwnerId ?? context?.userId;
@@ -229,7 +257,13 @@ export const runCommandTool: Tool = {
   name: 'run_command',
   description: 'Run a read or sync command in this chat’s project folder and get its output, at once: git status/log/diff/show/branch/fetch/pull/rev-parse/ls-files/grep, ls, cat, head, tail, wc, grep, rg, and --version checks. No pipes or shell features. Anything else (builds, tests, installs, deleting, pushing, pipes, paths outside the folder) goes through run_command_owner.',
   input_schema: schema as any,
-  async execute(params, context) { return execute(params, context, false); },
+  async execute(params, context) {
+    const plan = await prepareCommand(params, context);
+    if (!('command' in plan)) return plan;
+    const words = allowedCommand(plan.command, plan.cwd);
+    if (!words) return text(`This command needs the owner: call run_command_owner with the same command, and Girru shows it with a Run button.\n${plan.command}`, 'owner_run_required');
+    return reportCommand(plan, await runShell(words, plan.cwd, plan.timeout), context, false);
+  },
 };
 
 export const runCommandOwnerTool: Tool = {
@@ -237,5 +271,9 @@ export const runCommandOwnerTool: Tool = {
   requiresApproval: true,
   description: 'Ask the owner to run any other command (builds, tests, installs, pipes, delete, push, outside the folder) in this chat’s project folder. Girru shows the exact command with a Run button; it runs only after the owner presses it.',
   input_schema: schema as any,
-  async execute(params, context) { return execute(params, context, true); },
+  async execute(params, context) {
+    const plan = await prepareCommand(params, context);
+    if (!('command' in plan)) return plan;
+    return reportCommand(plan, await runOwnerShell(plan.command, plan.cwd, plan.timeout), context, true);
+  },
 };

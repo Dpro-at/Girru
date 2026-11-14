@@ -1,4 +1,4 @@
-import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
+import {fileURLToPath as backendFixtureFileURLToPath, pathToFileURL} from 'node:url';
 // CORE-05: mixed learning approval (routine saved, important -> proposal),
 // versioning of every API/tool change, weekly summary.
 // Run: node --import tsx --test test/memory-learning.test.mjs
@@ -41,7 +41,7 @@ const quiet = { log: console.log, warn: console.warn };
 console.log = () => {};
 console.warn = () => {};
 
-const { getDatabase, closeDatabase } = await import(join(backendDir, 'src/db/database.ts'));
+const { getDatabase, closeDatabase } = await import(pathToFileURL(join(backendDir, 'src/db/database.ts')).href);
 const db = getDatabase();
 await db.initialize();
 const addUser = (id, role) => db.prepare(`INSERT INTO users (id, email, username, password_hash, role, status) VALUES (?, ?, ?, 'x', ?, 'active')`).run(id, `${id}@example.test`, id, role);
@@ -50,17 +50,17 @@ addUser('ml-user', 'user');
 db.prepare('UPDATE agents_config SET is_primary = 0').run();
 db.prepare(`INSERT INTO agents_config (id, name, is_primary) VALUES ('ml-agent', 'Ml Agent', 1)`).run();
 
-const { registerAuthGate } = await import(join(backendDir, 'src/auth/auth-gate.ts'));
-const { memoryRoutes } = await import(join(backendDir, 'src/api/routes/memory.ts'));
-const { memoryFilesRoutes } = await import(join(backendDir, 'src/api/routes/memory-files.ts'));
-const { memoryLearningRoutes } = await import(join(backendDir, 'src/api/routes/memory-learning.ts'));
-const L = await import(join(backendDir, 'src/memory/learning.ts'));
-const W = await import(join(backendDir, 'src/memory/weekly-summary.ts'));
-const J = await import(join(backendDir, 'src/memory/jobs.ts'));
-const D = await import(join(backendDir, 'src/memory/drawers.ts'));
-const { memorySaveTool } = await import(join(backendDir, 'src/tools/memory/save.ts'));
-const { memoryEditTool, memoryDeleteTool } = await import(join(backendDir, 'src/tools/memory/edit.ts'));
-const { generateToken } = await import(join(backendDir, 'src/auth/jwt.ts'));
+const { registerAuthGate } = await import(pathToFileURL(join(backendDir, 'src/auth/auth-gate.ts')).href);
+const { memoryRoutes } = await import(pathToFileURL(join(backendDir, 'src/api/routes/memory.ts')).href);
+const { memoryFilesRoutes } = await import(pathToFileURL(join(backendDir, 'src/api/routes/memory-files.ts')).href);
+const { memoryLearningRoutes } = await import(pathToFileURL(join(backendDir, 'src/api/routes/memory-learning.ts')).href);
+const L = await import(pathToFileURL(join(backendDir, 'src/memory/learning.ts')).href);
+const W = await import(pathToFileURL(join(backendDir, 'src/memory/weekly-summary.ts')).href);
+const J = await import(pathToFileURL(join(backendDir, 'src/memory/jobs.ts')).href);
+const D = await import(pathToFileURL(join(backendDir, 'src/memory/drawers.ts')).href);
+const { memorySaveTool } = await import(pathToFileURL(join(backendDir, 'src/tools/memory/save.ts')).href);
+const { memoryEditTool, memoryDeleteTool } = await import(pathToFileURL(join(backendDir, 'src/tools/memory/edit.ts')).href);
+const { generateToken } = await import(pathToFileURL(join(backendDir, 'src/auth/jwt.ts')).href);
 const { default: Fastify } = await import('fastify');
 
 const app = Fastify();
@@ -359,8 +359,8 @@ test('weekly summary job: in-process, owner-scoped, created once per owner', asy
 // UI-IP-04 review (CORE-04b): an add-only learning/agent proposal approved twice at once
 // (both requests past the first checks, waiting on the embedding) adds exactly one memory.
 test('concurrent double approve of an add-only learning proposal: one memory, one 409 already_decided', async () => {
-  const MF = await import(join(backendDir, 'src/memory/memory-files.ts'));
-  const { getMemoryStorage } = await import(join(backendDir, 'src/memory/storage.ts'));
+  const MF = await import(pathToFileURL(join(backendDir, 'src/memory/memory-files.ts')).href);
+  const { getMemoryStorage } = await import(pathToFileURL(join(backendDir, 'src/memory/storage.ts')).href);
   const content = 'Prefers the quarterly report in Arabic and English';
   for (const source of ['learning', 'agent']) {
     const text = `${content} (${source})`;

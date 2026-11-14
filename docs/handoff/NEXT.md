@@ -1,5 +1,11 @@
 # Next: the phone app, from 3 November 2026 on
 
+Security work completed (14 November): Codex merged PR #215 after all PR checks
+passed. The full post-merge Tests workflow and Security Scanning on main also
+passed; Dependabot, code scanning and secret scanning each have zero open
+alerts. Results: [SECURITY_ALERTS.md](SECURITY_ALERTS.md). The phone/build agent
+should continue the phone tasks below.
+
 Tasks for the computer that builds and tests the phone app. Work on the
 branch below and report back as described at the end. Background,
 decisions and the build guide: [`packages/mobile/BUILDING.md`](../../packages/mobile/BUILDING.md).

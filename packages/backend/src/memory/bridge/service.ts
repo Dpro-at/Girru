@@ -57,7 +57,7 @@ const where = (): BridgeEnv => ({ home: bridgeEnv.home ?? os.homedir(), env: bri
 /** The home folder the coding apps' user-level files live in (a temporary one in tests). */
 export const bridgeHome = (): string => where().home!;
 
-async function ownProject(ownerId: string, projectId: unknown): Promise<Project> {
+export async function ownProject(ownerId: string, projectId: unknown): Promise<Project> {
   if (typeof projectId !== 'string' || !projectId) throw new BridgeError('projectId is required');
   const p = await findProject(ownerId, projectId);
   if (!p) throw new BridgeError('Not found', 404, 'not_found');

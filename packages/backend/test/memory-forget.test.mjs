@@ -1,4 +1,4 @@
-import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
+import {fileURLToPath as backendFixtureFileURLToPath, pathToFileURL} from 'node:url';
 // CORE-07: forgetting. "Forget this" removes a memory from search, the hybrid
 // index, readable copies, exports, version text, proposals and summaries;
 // only a tombstone stays. Retention rules are an explicit owner job.
@@ -29,7 +29,7 @@ const quiet = { log: console.log, warn: console.warn };
 console.log = () => {};
 console.warn = () => {};
 
-const { getDatabase, closeDatabase } = await import(join(backendDir, 'src/db/database.ts'));
+const { getDatabase, closeDatabase } = await import(pathToFileURL(join(backendDir, 'src/db/database.ts')).href);
 const db = getDatabase();
 await db.initialize();
 const addUser = (id, role) => db.prepare(`INSERT INTO users (id, email, username, password_hash, role, status) VALUES (?, ?, ?, 'x', ?, 'active')`).run(id, `${id}@example.test`, id, role);
@@ -39,21 +39,21 @@ db.prepare('UPDATE agents_config SET is_primary = 0').run();
 db.prepare(`INSERT INTO agents_config (id, name, is_primary) VALUES ('mg-agent', 'Mg Agent', 1)`).run();
 db.prepare(`INSERT INTO agents_config (id, name) VALUES ('mg-second', 'Mg Second')`).run();
 
-const { registerAuthGate } = await import(join(backendDir, 'src/auth/auth-gate.ts'));
-const { memoryRoutes } = await import(join(backendDir, 'src/api/routes/memory.ts'));
-const { memoryFilesRoutes } = await import(join(backendDir, 'src/api/routes/memory-files.ts'));
-const { memoryLearningRoutes } = await import(join(backendDir, 'src/api/routes/memory-learning.ts'));
-const { getMemoryIndexer } = await import(join(backendDir, 'src/memory/indexer.ts'));
-const { getMemoryStorage } = await import(join(backendDir, 'src/memory/storage.ts'));
-const W = await import(join(backendDir, 'src/memory/weekly-summary.ts'));
-const J = await import(join(backendDir, 'src/memory/jobs.ts'));
-const R = await import(join(backendDir, 'src/memory/retention.ts'));
-const D = await import(join(backendDir, 'src/memory/drawers.ts'));
-const { MemoryTiersService } = await import(join(backendDir, 'src/services/memory-tiers.ts'));
-const { memoryEditTool } = await import(join(backendDir, 'src/tools/memory/edit.ts'));
-const { memoryForgetTool } = await import(join(backendDir, 'src/tools/memory/forget.ts'));
-const { approvalCategory } = await import(join(backendDir, 'src/tools/approvals.ts'));
-const { generateToken } = await import(join(backendDir, 'src/auth/jwt.ts'));
+const { registerAuthGate } = await import(pathToFileURL(join(backendDir, 'src/auth/auth-gate.ts')).href);
+const { memoryRoutes } = await import(pathToFileURL(join(backendDir, 'src/api/routes/memory.ts')).href);
+const { memoryFilesRoutes } = await import(pathToFileURL(join(backendDir, 'src/api/routes/memory-files.ts')).href);
+const { memoryLearningRoutes } = await import(pathToFileURL(join(backendDir, 'src/api/routes/memory-learning.ts')).href);
+const { getMemoryIndexer } = await import(pathToFileURL(join(backendDir, 'src/memory/indexer.ts')).href);
+const { getMemoryStorage } = await import(pathToFileURL(join(backendDir, 'src/memory/storage.ts')).href);
+const W = await import(pathToFileURL(join(backendDir, 'src/memory/weekly-summary.ts')).href);
+const J = await import(pathToFileURL(join(backendDir, 'src/memory/jobs.ts')).href);
+const R = await import(pathToFileURL(join(backendDir, 'src/memory/retention.ts')).href);
+const D = await import(pathToFileURL(join(backendDir, 'src/memory/drawers.ts')).href);
+const { MemoryTiersService } = await import(pathToFileURL(join(backendDir, 'src/services/memory-tiers.ts')).href);
+const { memoryEditTool } = await import(pathToFileURL(join(backendDir, 'src/tools/memory/edit.ts')).href);
+const { memoryForgetTool } = await import(pathToFileURL(join(backendDir, 'src/tools/memory/forget.ts')).href);
+const { approvalCategory } = await import(pathToFileURL(join(backendDir, 'src/tools/approvals.ts')).href);
+const { generateToken } = await import(pathToFileURL(join(backendDir, 'src/auth/jwt.ts')).href);
 const { default: Fastify } = await import('fastify');
 
 const app = Fastify();
@@ -341,7 +341,7 @@ test('tier expiry never removes owner, project or people memories (forgetting ru
 });
 
 test('embeddings keep no vocabulary of seen words (no cache of forgotten text)', async () => {
-  const { getEmbeddingService } = await import(join(backendDir, 'src/memory/embedding.ts'));
+  const { getEmbeddingService } = await import(pathToFileURL(join(backendDir, 'src/memory/embedding.ts')).href);
   const svc = getEmbeddingService();
   assert.equal(svc.vocabulary, undefined);
   const a = await svc.embed('stable vector words');
@@ -350,9 +350,9 @@ test('embeddings keep no vocabulary of seen words (no cache of forgotten text)',
 });
 
 test('CORE-07b: an approved memory_forget re-runs with the turn\'s stored drawer scope, never wider', async () => {
-  const tools = await import(join(backendDir, 'src/tools/index.ts'));
-  const A = await import(join(backendDir, 'src/tools/approvals.ts'));
-  const S = await import(join(backendDir, 'src/tools/memory/scope.ts'));
+  const tools = await import(pathToFileURL(join(backendDir, 'src/tools/index.ts')).href);
+  const A = await import(pathToFileURL(join(backendDir, 'src/tools/approvals.ts')).href);
+  const S = await import(pathToFileURL(join(backendDir, 'src/tools/memory/scope.ts')).href);
   const inDelta = await create('mg-owner', 'Okapi-31 delta note', { drawer: { kind: 'project', key: 'delta' } });
   const inEps = await create('mg-owner', 'Okapi-32 epsilon note', { drawer: { kind: 'project', key: 'epsilon' } });
   const turn = { workspaceDir: dir, userId: 'mg-owner', agentId: 'mg-agent', sessionId: 's-07b', taskId: 'task-07b', memoryDrawers: D.selectDrawers({ audience: 'owner', project: 'delta' }) };

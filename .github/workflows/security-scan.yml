@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches: [main, develop]
+  # Every pull request, whatever it targets (see tests.yml): a stacked PR used to get no scan.
   pull_request:
-    branches: [main, develop]
   schedule:
     - cron: '0 2 * * *'
 

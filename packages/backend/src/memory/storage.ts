@@ -483,7 +483,8 @@ export class MemoryStorage implements IMemoryStorage {
     }
     // MEM-SCALE-01: an archived project is kept but never recalled; P3: nor is a replaced fact.
     // STORE-MAP-01 P5: an agent's own notes are read only by that agent's prompt, never by a search.
-    where += ` AND ${NOT_ARCHIVED_SQL} AND ${NOT_REPLACED_SQL} AND ${NOT_AGENT_NOTES_SQL}`;
+    // MEM-HIST-01: a question about a past state also reads replaced facts (labelled so by the caller).
+    where += ` AND ${NOT_ARCHIVED_SQL}${query.includeReplaced ? '' : ` AND ${NOT_REPLACED_SQL}`} AND ${NOT_AGENT_NOTES_SQL}`;
 
     // Support both legacy minImportance (1-10) and new minImportanceScore (0-1)
     if (query.minImportanceScore !== undefined) {
@@ -598,6 +599,7 @@ export class MemoryStorage implements IMemoryStorage {
       userId: query.userId, query: query.query, drawers: query.drawers!, limit: query.limit || 10,
       ...(query.type ? { type: query.type } : {}),
       ...(query.layer ? { layer: query.layer } : {}),
+      ...(query.includeReplaced ? { includeReplaced: true } : {}),
       ...(query.minImportanceScore !== undefined ? { minImportance: query.minImportanceScore }
         : query.minImportance !== undefined ? { minImportance: query.minImportance / 10 } : {}),
     };
