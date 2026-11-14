@@ -10,6 +10,8 @@
 
 import type { Tool, ToolResult, ToolExecutionContext } from '../types.js';
 import { toolMemoryUser, toolOwnerTurn } from './scope.js';
+import { hideKeysInText, recordHiddenKeys } from '../../memory/hidden-keys.js';
+import { redactImportText } from '../../memory/import/redact.js';
 import { one, sql } from '../../repositories/sql-steps.js';
 import type { AgentChangeResult } from '../../memory/learning.js';
 import { repositories } from '../../repositories/index.js';
@@ -93,15 +95,20 @@ later memory_save with that topic_key updates this memory.`,
     }
     const version = versionParam(params.version);
     if (version === null) return text('Error: version must look like "v3"', undefined, 'Invalid version');
+    // MEM-READ-01 MR2: keys in the new text are hidden (key store + lock chip), never stored in plain text.
+    const user = toolMemoryUser(context)!;
+    const hidden = typeof params.content === 'string' ? await hideKeysInText(user, params.content, 'memory').catch(() => null) : null;
     const result = await change(context, {
       memoryId: params.id, op: 'update', ...(version !== undefined ? { expectedVersion: version } : {}),
       updates: {
-        content: params.content as string | undefined,
+        // If the key store failed, the keys are removed instead (never kept in plain text).
+        content: typeof params.content === 'string' ? redactImportText(hidden?.text ?? params.content).text : undefined,
         importance: typeof params.importance === 'number' ? params.importance : undefined,
         ...(params.topic_key !== undefined ? { topicKey: params.topic_key as string | null } : {}),
       },
       reason: typeof params.reason === 'string' ? params.reason : null,
     });
+    if (hidden?.hidden.length && (result as { status?: string }).status !== 'refused') await recordHiddenKeys(user, params.id, 'memory', hidden.hidden).catch(() => undefined);
     return answer(result, 'update', params.id);
   },
 };

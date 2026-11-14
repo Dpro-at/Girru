@@ -30,6 +30,20 @@
  *   POST /api/memory/scopes/projects/:slug/preview { action, target?, departmentId? } -> { action, project, target?, department?, effects, previewHash }
  *   POST /api/memory/scopes/projects/:slug/apply   { action, target?, departmentId?, expectedPreviewHash, confirm: true } -> { action, project, effects, result }
  *   GET  /api/memory/scopes/projects/:slug/export  -> { project, files: [{ name, content }] }
+ *   POST /api/memory/scopes/ask-agent              { agentId, request, text, drawer? } -> { jobId }  Ask an agent in the shared editor (MR5; proposal only, nothing saved)
+ *   GET  /api/memory/scopes/ask-agent/:jobId       -> { state: running | done (text, note) | error (code, error) }
+ *   GET  /api/memory/scopes/night                  -> { settings: { enabled, from, to }, last: report | null }   Night work (MR9)
+ *   PUT  /api/memory/scopes/night                  { enabled?, from?, to? } -> { settings }
+ *   POST /api/memory/scopes/night/run              -> { started: true }   Run now (stops between steps on its own)
+ *   GET  /api/memory/scopes/night/report           -> { report | null }   the morning row in Needs you
+ *   POST /api/memory/scopes/night/report/done      -> { ok: true }
+ *   GET  /api/memory/scopes/hidden-keys            -> { total, drawers: [{ drawer, count, memories, kinds }] } keys hidden since the owner last answered (MR2; runs the one-time pass first)
+ *   POST /api/memory/scopes/hidden-keys/answer     { answer: 'keep' | 'move', drawer? } -> { answered, moved }  Keep hidden here / Move to Connections
+ *   POST /api/memory/scopes/hidden-keys/:id/reveal -> { value }  the owner's Show (audited; never cached)
+ *   GET  /api/memory/scopes/projects/:slug/size    -> { memories, keyFiles, documents, summaries: { count, tokens }, total, perReply, biggest }  (MR7, estimates)
+ *   GET  /api/memory/scopes/projects/:slug/documents -> { key: [...with purpose], other: [...] }  Files tab: Key files first (MR6)
+ *   GET  /api/memory/scopes/projects/:slug/summaries -> { summaries: [{ period, label, sessions, sources, done, left, next, handoffs }] }  (MR6)
+ *   POST /api/memory/scopes/projects/:slug/kind    { kind: 'project' | 'library' } -> { slug, kind, before }  ("It's a project" / "Not a project", MEM-READ-01 MR3)
  * Access by inheritance
  *   GET  /api/memory/access                        -> { version, rules, templates }
  *   POST /api/memory/access/preview                { changes } -> { previewHash, version, agentsAffected, projectsAffected, ... }
@@ -50,6 +64,13 @@ import type { Actor } from '../../repositories/actor.js';
 import { requestMeta } from '../../repositories/audit.js';
 import { actorOrReply, requireOwner } from '../../repositories/scope.js';
 import { resolveFileAgent } from '../../memory/memory-files.js';
+import { classifyLibraryProjects, setProjectKind } from '../../memory/scopes/project-kinds.js';
+import { answerHiddenKeys, hiddenKeysReport, hideKeysOnce, revealKey } from '../../memory/hidden-keys.js';
+import { AskAgentError, askJob, startAskJob } from '../../memory/ask-agent.js';
+import { projectDocuments, projectSize } from '../../memory/project-size.js';
+import { projectSummaries } from '../../memory/project-summaries.js';
+import { NightInputError, dismissNightReport, lastNight, nightReport, nightSettings, runNightWork, setNightSettings } from '../../memory/night-work.js';
+import { isValidDrawerKey } from '../../memory/drawers.js';
 import { provenanceJobStatus, setChecked } from '../../memory/validity.js';
 import { vectorJobStatus } from '../../memory/vectors.js';
 import { storeP3Enabled } from '../../services/store-p3.js';
@@ -133,7 +154,93 @@ export async function memoryScopeRoutes(fastify: FastifyInstance) {
   // ---- tree, search, agents, explorer ----
   route('GET', '/api/memory/scopes/tree', async (owner, request) => {
     const fresh = q(request).fresh;
-    return scopeTree(owner.userId!, { fresh: fresh === '1' || fresh === 'true' });
+    // MR3: projects found in downloaded code move to "Not projects" on their own (once).
+    const marked = await classifyLibraryProjects(owner.userId!).catch(() => 0);
+    if (marked) invalidateScopeTree(owner.userId!);
+    return scopeTree(owner.userId!, { fresh: marked > 0 || fresh === '1' || fresh === 'true' });
+  });
+  // ---- Ask an agent in the shared editor (MEM-READ-01 MR5): a proposal only; the owner's Save is the only write ----
+  route('POST', '/api/memory/scopes/ask-agent', async (owner, request, reply) => {
+    const b = body(request);
+    try {
+      const jobId = startAskJob(owner.userId!, { agentId: b.agentId, request: b.request, text: b.text, drawer: b.drawer });
+      audit(request, owner, 'memory.ask_agent', 'agents_config', String(b.agentId ?? ''), { chars: typeof b.text === 'string' ? b.text.length : 0 });
+      return { jobId };
+    } catch (err) {
+      if (err instanceof AskAgentError) return reply.code(err.status).send({ error: err.message, code: err.code });
+      throw err;
+    }
+  });
+  route('GET', '/api/memory/scopes/ask-agent/:id', async (owner, request, reply) => {
+    const out = askJob(owner.userId!, (request.params as { id: string }).id);
+    if (!out) return reply.code(404).send({ error: 'Not found', code: 'not_found' });
+    reply.header('Cache-Control', 'no-store');
+    return out;
+  });
+
+  // ---- night work (MEM-READ-01 MR9) ----
+  route('GET', '/api/memory/scopes/night', async (owner) => {
+    const s = await nightSettings(owner.userId!);
+    return { settings: { enabled: s.enabled, from: s.from, to: s.to }, last: await lastNight(owner.userId!) };
+  });
+  route('PUT', '/api/memory/scopes/night', async (owner, request, reply) => {
+    try {
+      const settings = await setNightSettings(owner.userId!, body(request));
+      audit(request, owner, 'memory.night_settings', 'memory_night_work', owner.userId!, { ...settings });
+      return { settings };
+    } catch (err) { if (err instanceof NightInputError) return reply.code(400).send({ error: err.message, code: 'invalid_scope' }); throw err; }
+  });
+  route('POST', '/api/memory/scopes/night/run', async (owner, request) => {
+    void runNightWork(owner.userId!, { force: true }).catch(() => undefined);
+    audit(request, owner, 'memory.night_run', 'memory_night_work', owner.userId!, {});
+    return { started: true };
+  });
+  route('GET', '/api/memory/scopes/night/report', async (owner) => ({ report: await nightReport(owner.userId!) }));
+  route('POST', '/api/memory/scopes/night/report/done', async (owner) => { await dismissNightReport(owner.userId!); return { ok: true }; });
+
+  // ---- hidden keys (MEM-READ-01 MR2) ----
+  route('GET', '/api/memory/scopes/hidden-keys', async (owner) => {
+    await hideKeysOnce(owner.userId!).catch(() => undefined);
+    const r = await hiddenKeysReport(owner.userId!);
+    return { total: r.total, drawers: r.drawers };
+  });
+  route('POST', '/api/memory/scopes/hidden-keys/answer', async (owner, request) => {
+    const b = body(request);
+    if (b.answer !== 'keep' && b.answer !== 'move') throw new ScopeInputError('answer must be keep or move');
+    if (b.drawer !== undefined && (typeof b.drawer !== 'string' || b.drawer.length > 200)) throw new ScopeInputError('Invalid drawer');
+    const out = await answerHiddenKeys(owner.userId!, b.answer, b.drawer as string | undefined);
+    audit(request, owner, 'memory.hidden_keys_answer', 'memory_hidden_keys', String(b.drawer ?? 'all'), { answer: b.answer, answered: out.answered, moved: out.moved });
+    return out;
+  });
+  route('POST', '/api/memory/scopes/hidden-keys/:id/reveal', async (owner, request, reply) => {
+    const id = (request.params as { id: string }).id;
+    const value = await revealKey(owner.userId!, id);
+    if (value === null) return reply.code(404).send({ error: 'Not found', code: 'not_found' });
+    audit(request, owner, 'memory.hidden_key_reveal', 'memory_hidden_keys', id, {});
+    reply.header('Cache-Control', 'no-store');
+    return { value };
+  });
+  route('GET', '/api/memory/scopes/projects/:slug/size', async (owner, request, reply) => {
+    const slug = (request.params as { slug: string }).slug;
+    if (!isValidDrawerKey('project', slug)) return reply.code(404).send({ error: 'Not found', code: 'not_found' });
+    return projectSize(owner.userId!, slug);
+  });
+  route('GET', '/api/memory/scopes/projects/:slug/documents', async (owner, request, reply) => {
+    const slug = (request.params as { slug: string }).slug;
+    if (!isValidDrawerKey('project', slug)) return reply.code(404).send({ error: 'Not found', code: 'not_found' });
+    return projectDocuments(owner.userId!, slug);
+  });
+  route('GET', '/api/memory/scopes/projects/:slug/summaries', async (owner, request, reply) => {
+    const slug = (request.params as { slug: string }).slug;
+    if (!isValidDrawerKey('project', slug)) return reply.code(404).send({ error: 'Not found', code: 'not_found' });
+    return { summaries: await projectSummaries(owner.userId!, slug) };
+  });
+  route('POST', '/api/memory/scopes/projects/:slug/kind', async (owner, request) => {
+    const slug = (request.params as { slug: string }).slug;
+    const out = await setProjectKind(owner.userId!, slug, body(request).kind, owner.userId!);
+    invalidateScopeTree(owner.userId!);
+    audit(request, owner, 'memory_scope.project_kind', 'memory_project', slug, { kind: out.kind, before: out.before });
+    return out;
   });
   route('GET', '/api/memory/scopes/search', async (owner, request) => {
     const x = q(request);

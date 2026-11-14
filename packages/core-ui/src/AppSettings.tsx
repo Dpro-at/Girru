@@ -53,7 +53,7 @@ const ROWS:Record<Place,Row>={
  computers:{value:'computers',label:'Computers',icon:'screen',words:'computers devices task target remote linked add forget wi-fi share account recover',note:'Your other computers.'},
  phone:{value:'phone',label:'Phone',icon:'mobile',words:'phone mobile iphone android pair qr code app relay wi-fi forget signed in',note:'Use Girru from your phone.'},
  mcp:{value:'mcp',label:'MCP connections',icon:'tool',words:'mcp connections connectors tools servers add import coding apps genvr-local',note:'Tools your agents reach through MCP servers.'},
- memory:{value:'memory',label:'Memory',icon:'database',words:MEMORY_PANES.map(p=>p.label).join(' ')+' memory rules sources access',note:'Memory rules, sources and access.'},
+ memory:{value:'memory',label:'Memory',icon:'database',words:MEMORY_PANES.map(p=>p.label).join(' ')+' memory rules sources access night idle charging schedule library folders hidden keys',note:'Memory rules, sources and access.'},
  departments:{value:'departments',label:'Departments',icon:'building',words:'departments teams groups rename move agents new department',note:'The departments of your agents.'},
  apps:{value:'apps',label:'My apps',icon:'layers',words:'applications my apps store add-ons catalogue private',jump:true},
  library:{value:'library',label:'Library',icon:'book',words:'personalities specialties skills library',jump:true},

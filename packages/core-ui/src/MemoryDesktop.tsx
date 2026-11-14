@@ -31,6 +31,27 @@ import { Avatar, ContextMenu, IconButton, Notice, Popover, Sheet, Tile, WithSwat
 import type { MenuItem } from './desktop-ui';
 import type { ProjectGroup } from './memory-desktop-contract.js';
 import { NeedsYou } from './MemoryNeeds';
+import { HiddenKeysController, KeyText, hiddenSummary } from './memory-hidden-keys';
+import { NightWorkController } from './MemoryNightWork';
+import { DocumentEditor, MarkdownDocument } from './DocumentEditor';
+import { ProjectDocumentsList, WorkStands } from './MemoryProjectWork';
+
+/** MEM-READ-01 MR1: how a memory came ("Imported", "Saved by you", "Learned"), else its kind. */
+/** MR1: the inspector shows the title on top and the text without an imported file name or the repeated title. */
+export function readableBody(text: string, title?: string): { heading: string | null; body: string } {
+  const t = text.trim();
+  if (/^\s{0,3}#{1,3}\s/.test(t) || !title) return { heading: null, body: t };
+  const noFile = t.replace(/^(?:[a-z0-9]+[-_.][a-z0-9._-]*|[a-z0-9]+(?:[-_][a-z0-9]+)+)\s*:\s+/i, '');
+  const plainStart = noFile.replace(/\*\*|__|`/g, '');
+  if (plainStart.startsWith(title)) {
+    // Drop the title (as written, with its Markdown marks) and the " — " after it.
+    let i = 0, seen = 0; while (i < noFile.length && seen < title.length) { if (!/[*_`]/.test(noFile[i]) || noFile[i] === title[seen]) seen++; i++; }
+    const body = noFile.slice(i).replace(/^\s*(?:—|-|:)\s*/, '');
+    return { heading: title, body: /^[\s.!?…]*$/.test(body) ? '' : body };
+  }
+  return { heading: title, body: t };
+}
+const FROM_WORD: Record<string, string> = { import: 'Imported', memory_file: 'Imported', conversation: 'Imported', owner: 'Saved by you', agent: 'Learned', learning: 'Learned', chat: 'From a chat', retention: 'Summary', outsider: 'From outside' };
 import { useStoreP3, useStoreP6, useStoreP8, useStoreP9, useStoreP9b } from './store-switches';
 import { MemoryTrustController } from './memory-trust';
 import { fileMenu } from './CodeOpen';
@@ -68,7 +89,7 @@ export type SettingsTarget = 'rules' | 'folders' | 'sources' | 'projects' | 'acc
 
 /** Controllers of the window, made once per client. */
 function useControllers(client: SessionClient) {
-  const [c, setC] = useState<{ d: MemoryDesktopController; x: MemoryExplorerController; sc: MemoryScopesController; rv: MemoryReviewController; mv: MemoryMoveController; map: MemoryMapController; ho: MemoryHandoffsController; disc: DiscoveryController; pf: ProjectFilesController; pp: MemoryPeopleController; tr: MemoryTrustController }>();
+  const [c, setC] = useState<{ d: MemoryDesktopController; x: MemoryExplorerController; sc: MemoryScopesController; rv: MemoryReviewController; mv: MemoryMoveController; map: MemoryMapController; ho: MemoryHandoffsController; disc: DiscoveryController; pf: ProjectFilesController; pp: MemoryPeopleController; tr: MemoryTrustController; hk: HiddenKeysController; nw: NightWorkController }>();
   useEffect(() => {
     const x = new MemoryExplorerController(client), sc = new MemoryScopesController(client);
     const d = new MemoryDesktopController(client, () => { void x.load(); void sc.load(true); });
@@ -82,7 +103,10 @@ function useControllers(client: SessionClient) {
     const pp = new MemoryPeopleController(client);
     // STORE-MAP-01 P9b: how sure, corrected after use, open questions (asks nothing until the switch is on).
     const tr = new MemoryTrustController(client, d);
-    setC({ d, x, sc, rv, mv, map, ho, disc, pf, pp, tr });
+    // MEM-READ-01 MR2: hidden keys (lock chips, Show, the Needs you row).
+    const hk = new HiddenKeysController(client);
+    const nw = new NightWorkController(client as never);
+    setC({ d, x, sc, rv, mv, map, ho, disc, pf, pp, tr, hk, nw });
     return () => { d.dispose(); x.dispose(); sc.dispose(); rv.dispose(); mv.dispose(); map.dispose(); ho.dispose(); disc.dispose(); pf.dispose(); pp.dispose(); tr.dispose(); };
   }, [client]);
   return c;
@@ -112,6 +136,9 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
   const p9b = useStoreP9b(client);
   const p9bRef = useRef(p9b); p9bRef.current = p9b;
   // STORE-MAP-01 P8: a task's notes opened from its page (Memory › Tasks › T-n) keep that task's place as the list.
+  // MR7: the project panel opens with the project; hidden only when the owner hides it (kept while the app runs).
+  const [panelHidden, setPanelHidden] = useState(() => panelPrefs.hidden);
+  const togglePanel = () => setPanelHidden(h => { panelPrefs.hidden = !h; if (!h) k?.d.showDetails(null); return !h; });
   const taskScope = useRef<string | null>(null);
   const ds = useStore(k?.d), xs = useStore(k?.x), ss = useStore(k?.sc), rs = useStore(k?.rv), ms = useStore(k?.mv), fs = useStore(k?.pf), ts = useStore(k?.tr);
   const menu = useMenu();
@@ -180,6 +207,8 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
       const typing = !!t.closest?.('input, textarea, select, [contenteditable="true"]');
       const cmd = e.metaKey || e.ctrlKey; const key = e.key.toLowerCase();
       if (document.querySelector('.dk-sheet-scrim, .dk-menu')) return;
+      // MR7: ⌥⌘I shows or hides the project's side panel, like Chat.
+      if (cmd && e.altKey && (key === 'i' || e.code === 'KeyI')) { e.preventDefault(); togglePanel(); return; }
       const files = p6Ref.current && k.d.getSnapshot().extra === 'project-files';
       if (files && cmd && key === 'f') { e.preventDefault(); filesSearchRef.current?.focus(); }
       else if (files && cmd && key === 'r' && !e.shiftKey) { e.preventDefault(); const sel = k.pf.getSnapshot().selected; if (sel && !k.pf.getSnapshot().busy) void k.pf.rewrite(sel); }
@@ -318,15 +347,15 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
     : ds.extra === 'files' ? <FilesView client={client} agents={ss.agents} drawers={[{ id: 'owner', name: 'About you' }, { id: 'experience', name: 'Lessons' }, ...(ss.tree?.projects ?? []).filter(p => !p.archived && !p.mergedInto && !p.trashedAt).map(p => ({ id: `project:${p.slug}`, name: p.name }))]}/>
     : place === 'needs' && needsView === 'corrected' ? <CorrectedView c={tr} names={ss.agents}/>
     : place === 'needs' && needsView === 'questions' ? <QuestionsView c={tr} names={ss.agents}/>
-    : place === 'needs' ? <NeedsYou c={rv} mode={ds.needsMode} onOpenChat={onOpenChat} design={d} files={p6 ? pf : undefined} client={client}/>
+    : place === 'needs' ? <NeedsYou c={rv} mode={ds.needsMode} onOpenChat={onOpenChat} design={d} files={p6 ? pf : undefined} client={client} hidden={k.hk} night={k.nw} projectName={dr => dr.startsWith('project:') ? ss.tree?.projects.find(p => p.slug === dr.slice(8))?.name : undefined}/>
     : place === 'trash' ? <TrashView d={d} me={client.getSnapshot().user?.id} onAsk={ids => setSheet({ kind: 'forget', ids })}/>
     : place.startsWith('group:') ? <GroupView d={d} sc={sc} groupId={place.slice(6)}/>
     : place === 'agents' ? <AgentsPlace names={ss.agents} onOpen={id => d.open(`agent:${id}`)}/>
     : place === 'archived' ? <ArchivedPlace projects={(ss.tree?.projects ?? []).filter(p => p.archived)} onOpen={slug => d.open(`project:${slug}`)} onBack={slug => projectAction(slug, 'unarchive')}/>
     : project && ds.projectView === 'design' ? <DesignView d={d} slug={project.slug} client={client}/>
     : project && ds.projectView === 'databases' ? <DatabasesView d={d} slug={project.slug} agents={ss.agents}/>
-    : project && ds.projectView === 'files' ? <FilesView client={client} agents={ss.agents} drawers={[{ id: `project:${project.slug}`, name: project.name }]}/>
-    : <MemoryList k={k} p9b={p9b} pinned={ds.pinned} showPinned={place === 'all' || !!project} onMenu={(e, i) => menu.at(e, memoryMenu(i))} onPinnedMenu={(e, f) => menu.at(e, [{ label: 'Edit…', icon: 'pencil', run: () => setSheet({ kind: 'edit-pinned', fact: f }) }, { label: 'Unpin', icon: 'pin', run: () => void d.unpin(f) }])}
+    : project && ds.projectView === 'files' ? <div className="dk-list"><ProjectDocumentsList sc={sc} slug={project.slug}/><FilesView client={client} agents={ss.agents} drawers={[{ id: `project:${project.slug}`, name: project.name }]}/></div>
+    : <MemoryList k={k} footer={project ? <WorkStands sc={sc} slug={project.slug}/> : undefined} p9b={p9b} pinned={ds.pinned} showPinned={place === 'all' || !!project} onMenu={(e, i) => menu.at(e, memoryMenu(i))} onPinnedMenu={(e, f) => menu.at(e, [{ label: 'Edit…', icon: 'pencil', run: () => setSheet({ kind: 'edit-pinned', fact: f }) }, { label: 'Unpin', icon: 'pin', run: () => void d.unpin(f) }])}
       empty={project ? <><p>Nothing remembered here yet. Girru remembers on its own while you chat. You can add something yourself too.</p><button type="button" className="primary" onClick={() => { x.startAdd(); setSheet({ kind: 'remember' }); }}>Remember</button></>
         : xs.query ? <p>No memory matches. Put words in "quotes" for exact words.</p> : <p>Nothing here yet. Girru remembers on its own while you chat.</p>}/>;
 
@@ -336,7 +365,7 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
     : place === 'needs' && needsView === 'questions' ? <QuestionInspector c={tr} names={ss.agents} drawers={[{ id: 'owner', name: 'About you' }, ...(ss.tree?.projects ?? []).filter(p => !p.archived && !p.mergedInto && !p.trashedAt).map(p => ({ id: `project:${p.slug}`, name: p.name }))]}/>
     : xs.open && open && listPlace ? <MemoryInspector k={k} item={open} p9b={p9b} onHistory={() => setSheet({ kind: 'history' })} onTrash={() => void trashIds([open.id])}/>
     : person ? <PersonInspector c={pp} personKey={person} staysLocal={peopleLocal}/>
-    : project && ds.details === 'project' ? <ProjectInspector k={k} p6={p6} project={project} onSettings={onOpenSettings} onGroup={() => setSheet({ kind: 'group', projects: [project.slug] })}/>
+    : project && (ds.details === 'project' || !panelHidden) ? <ProjectInspector k={k} p6={p6} project={project} onSettings={onOpenSettings} onGroup={() => setSheet({ kind: 'group', projects: [project.slug] })}/>
     : null;
 
   return <P3.Provider value={p3}><section className="dk-mem" aria-label="Memory" data-inspector={inspector ? 'open' : undefined} data-inline-sidebar={sidebarSlot ? undefined : 'true'}>
@@ -345,7 +374,7 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
       <header className="dk-toolbar">
         {ds.extra && !filesOpen && <IconButton icon="arrow-left" label="Back to the list" onClick={() => d.setExtra(null)}/>}
         <div className="dk-title">
-          {project && !ds.extra ? <button type="button" className="dk-title-button" title="Project details" onClick={() => d.showDetails(ds.details === 'project' ? null : 'project')}><Tile name={project.name}/><h2>{title}</h2></button> : person && !ds.extra ? <span className="dk-title-person"><Avatar name={title}/><h2>{title}</h2></span> : <h2>{title}</h2>}
+          {project && !ds.extra ? <button type="button" className="dk-title-button" title="Show or hide the project panel (⌥⌘I)" aria-pressed={!panelHidden} onClick={togglePanel}><Tile name={project.name}/><h2>{title}</h2></button> : person && !ds.extra ? <span className="dk-title-person"><Avatar name={title}/><h2>{title}</h2></span> : <h2>{title}</h2>}
           {sub && <span className="dk-sub">{sub}</span>}
         </div>
         <ImportStatus client={client} active={active} onReview={() => d.open('needs')}/>
@@ -493,10 +522,13 @@ function MemorySidebar({ trust, k, p6, p9, peopleLocal, onPersonMenu, filesNeedY
 }
 
 // ---------------------------------------------------------------- list
-function MemoryList({ k, p9b = false, pinned, showPinned, onMenu, onPinnedMenu, empty }: { k: K; p9b?: boolean; pinned: readonly PinnedFact[]; showPinned: boolean; onMenu: (e: React.MouseEvent, i: ExplorerItem) => void; onPinnedMenu: (e: React.MouseEvent, f: PinnedFact) => void; empty: ReactNode }) {
+function MemoryList({ k, p9b = false, pinned, showPinned, onMenu, onPinnedMenu, empty, footer }: { k: K; footer?: ReactNode; p9b?: boolean; pinned: readonly PinnedFact[]; showPinned: boolean; onMenu: (e: React.MouseEvent, i: ExplorerItem) => void; onPinnedMenu: (e: React.MouseEvent, f: PinnedFact) => void; empty: ReactNode }) {
   const { x } = k;
   const s = useStore(x)!;
   const trust = useStore(k.tr)?.trust;
+  const ss = useStore(k.sc);
+  // Under id keys a project drawer's key is an id: show the project's name.
+  const placeName = (drawer: string) => drawer.startsWith('project:') ? ss?.tree?.projects.find(p => p.slug === drawer.slice(8))?.name ?? drawerName(drawer) : drawerName(drawer);
   const bodyRef = useRef<HTMLDivElement>(null);
   const [anchor, setAnchor] = useState<string | null>(null);
   const groups = useMemo(() => {
@@ -547,17 +579,40 @@ function MemoryList({ k, p9b = false, pinned, showPinned, onMenu, onPinnedMenu, 
       {items.map(i => { const kind = kindOf(i); const checked = s.checked.includes(i.id); return <div key={i.id} data-id={i.id} className="dk-row" role="option" aria-selected={s.open === i.id || checked} data-checked={checked || undefined} data-replaced={i.supersededBy ? true : undefined}
         onClick={e => click(e, i)} onDoubleClick={() => { void x.openMemory(i.id).then(() => x.startEdit()); }} onContextMenu={e => { if (!checked && s.open !== i.id) void x.openMemory(i.id); onMenu(e, i); }}>
         <span className="dk-row-icon" title={kind.word}><UiIcon name={kind.icon} size={14}/></span>
-        <span className="dk-row-text"><span className="dk-row-main" dir="auto"><WithSwatches text={oneLine(i.preview)}/></span>
-          <span className="dk-row-sub">{i.supersededBy ? 'Not true any more · ' : ''}{kind.word} · {ago(i.createdAt)}{!i.drawerId.startsWith('project:') || placeScope(k.d.getSnapshot().place) === 'company' ? ` · ${drawerName(i.drawerId)}` : ''}</span></span>
+        <span className="dk-row-text"><span className="dk-row-main dk-row-title" dir="auto"><KeyText text={i.title || oneLine(i.preview)}/></span>
+          {i.lines && <span className="dk-row-lines" dir="auto"><KeyText text={i.lines}/></span>}
+          <span className="dk-row-sub">{i.supersededBy ? 'Not true any more · ' : ''}{FROM_WORD[i.source ?? ''] ?? kind.word} · {ago(i.createdAt)}{!i.drawerId.startsWith('project:') || placeScope(k.d.getSnapshot().place) === 'company' ? ` · ${placeName(i.drawerId)}` : ''}{hiddenSummary(i.preview) ? <span className="dk-key-count"><UiIcon name="lock" size={10}/>{hiddenSummary(i.preview)}</span> : null}
+            {s.open !== i.id && <> · <button type="button" className="link-button dk-read-more" tabIndex={-1}>Read more</button></>}</span></span>
         {p9b && <TrustChip t={trust?.[i.id]}/>}
       </div>; })}
     </section>)}
     {count === 0 && <div className="dk-empty">{empty}</div>}
     {s.nextCursor && <p className="dk-more-row" role="status">{s.busy ? 'Loading more…' : <button type="button" className="link-button" onClick={() => void x.more()}>Load more</button>}</p>}
+    {!s.nextCursor && !s.query && footer}
   </div>;
 }
 
 // ---------------------------------------------------------------- inspector
+/**
+ * MEM-READ-01 MR4: Edit opens Girru's shared document editor as a sheet (Text / Side by side / Preview,
+ * find, undo, ⌘S, Esc). Importance sits in its bottom bar; "changed while you edit" stays a notice on top.
+ * Hidden keys are lock chips in the preview; their references cannot reveal a value here.
+ */
+function MemoryEditSheet({ k, item, onSaved }: { k: K; item: ExplorerItem; onSaved: () => void }) {
+  const { x } = k;
+  const s = useStore(x)!; const ss = useStore(k.sc);
+  const where = item.drawerId.startsWith('project:') ? ss?.tree?.projects.find(p => p.slug === item.drawerId.slice(8))?.name ?? drawerName(item.drawerId) : drawerName(item.drawerId);
+  const save = (force = false) => { if (!s.busy && s.draft.trim()) void x.saveEdit(force).then(ok => { if (ok) onSaved(); }); };
+  return <DocumentEditor title={`${item.title || 'Memory'} · Edit`} note={where} maxLength={50000}
+    files={[{ id: item.id, name: item.title || 'Memory', content: s.draft }]} onChange={(_, t) => x.editDraft(t)} onClose={() => x.cancelEdit()} onSave={() => save()}
+    message={s.busy ? 'Saving…' : s.notice ?? 'Saved as a new version; History keeps the old one. ⌘S saves · Esc closes'}
+    leaf={(t, key) => <KeyText key={key} text={t}/>}
+    ask={Object.keys(ss?.agents ?? {}).length ? { agents: Object.entries(ss!.agents).map(([id, name]) => ({ id, name })), run: (agentId, request, text) => k.sc.askAgent(agentId, request, text, item.drawerId) } : undefined}
+    banner={s.conflict ? <div className="dk-ask" role="alert"><p><b>This memory changed while you were editing.</b> Nothing was overwritten. Saved meanwhile:</p><p className="dk-insp-text" dir="auto">{s.conflict.content}</p>
+      <div className="actions"><button type="button" className="primary" disabled={s.busy} onClick={() => save(true)}>Save mine as the newest</button><button type="button" disabled={s.busy} onClick={() => void x.keepTheirs()}>Keep theirs</button></div></div> : undefined}
+    footer={<label className="doc-importance">Importance<input type="range" min={1} max={10} value={s.draftImportance} onChange={e => x.editImportance(Number(e.target.value))}/><b>{s.draftImportance}</b></label>}/>;
+}
+
 function MemoryInspector({ k, item, p9b = false, onHistory, onTrash, onChecked }: { k: K; item: ExplorerItem; p9b?: boolean; onHistory: () => void; onTrash: () => void; onChecked?: (id: string) => void }) {
   const { x, d, mv, sc, tr } = k;
   const s = useStore(x)!; const ss = useStore(sc)!; const ts = useStore(tr)!;
@@ -568,13 +623,10 @@ function MemoryInspector({ k, item, p9b = false, onHistory, onTrash, onChecked }
   const by = item.sourceAgentId ? ss.agents[item.sourceAgentId] ?? 'An agent' : SOURCE_LABEL[item.source ?? ''] ?? kind.word;
   const before = { content: s.full ?? item.preview, importance: item.importance };
   return <div className="dk-insp">
-    {s.editing ? <form className="dk-edit" onSubmit={e => { e.preventDefault(); void x.saveEdit().then(ok => { if (ok) { d.edited(item.id, before); tr.forgetTrust(item.id); } }); }}>
-      <textarea aria-label="Memory text" dir="auto" rows={6} value={s.draft} maxLength={50000} autoFocus onChange={e => x.editDraft(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void x.saveEdit().then(ok => { if (ok) d.edited(item.id, before); }); } if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); x.cancelEdit(); } }}/>
-      <label className="dk-field-inline">Importance<input type="range" min={1} max={10} value={s.draftImportance} onChange={e => x.editImportance(Number(e.target.value))}/><span>{s.draftImportance}</span></label>
-      {!s.conflict && <div className="actions"><button type="button" onClick={() => x.cancelEdit()}>Cancel</button><button type="submit" className="primary" disabled={s.busy || !s.draft.trim()}>Save</button></div>}
-      <p className="fine-print">Saved as a new version; History keeps the old one. {mod}↩ saves.</p>
-    </form> : <p className="dk-insp-text" dir="auto"><WithSwatches text={s.full ?? item.preview}/></p>}
+    {s.editing && <MemoryEditSheet k={k} item={item} onSaved={() => { d.edited(item.id, before); tr.forgetTrust(item.id); }}/>}
+    {<div className="dk-insp-text dk-insp-md" dir="auto">{(() => { const r = readableBody(s.full ?? item.preview, item.title); return <>
+      {r.heading && <h1>{r.heading}</h1>}
+      <MarkdownDocument text={r.body} leaf={(t, key) => <KeyText key={key} text={t} reveal={id => k.hk.reveal(id)}/>}/></>; })()}</div>}
     {!s.editing && <div className="dk-insp-icons">
       <IconButton icon="pencil" label="Edit" shortcut="↩" onClick={() => x.startEdit()}/>
       <IconButton icon="pin" label="Pin for every agent" onClick={() => void d.pin(s.full ?? item.preview, item.drawerId)}/>
@@ -586,7 +638,7 @@ function MemoryInspector({ k, item, p9b = false, onHistory, onTrash, onChecked }
       ])}/>}
     </div>}
     {p9b && <ContextMenu menu={insMenu.menu} onClose={insMenu.close}/>}
-    {s.conflict && <div className="dk-ask" role="alert"><p><b>This memory changed while you were editing.</b> Nothing was overwritten. Saved meanwhile:</p><p className="dk-insp-text" dir="auto">{s.conflict.content}</p>
+    {s.conflict && !s.editing && <div className="dk-ask" role="alert"><p><b>This memory changed while you were editing.</b> Nothing was overwritten. Saved meanwhile:</p><p className="dk-insp-text" dir="auto">{s.conflict.content}</p>
       <div className="actions"><button type="button" className="primary" disabled={s.busy} onClick={() => void x.saveEdit(true).then(ok => { if (ok) d.edited(item.id, before); })}>Save mine as the newest</button><button type="button" disabled={s.busy} onClick={() => void x.keepTheirs()}>Keep theirs</button></div>
       <p className="fine-print">Saving yours makes a new version; theirs stays in History.</p></div>}
     {p3 && v?.validTo && <div className="dk-ask dk-replaced"><p><UiIcon name="history" size={13}/> Not true any more since {new Date(v.validTo).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}. Agents no longer get it.</p>
@@ -596,7 +648,7 @@ function MemoryInspector({ k, item, p9b = false, onHistory, onTrash, onChecked }
       {p3 && v?.trust && <><dt>Trust</dt><dd className="dk-trust" data-trust={v.trust}><UiIcon name={v.trust === 'checked' ? 'check' : v.trust === 'imported' ? 'download' : 'sparkle'} size={13}/>{TRUST_LABEL[v.trust]}
         {v.trust !== 'checked' && <button type="button" className="link-button" disabled={s.busy} onClick={() => void x.setChecked(item.id, true).then(ok => { if (ok) onChecked?.(item.id); })}>Mark as checked</button>}</dd></>}
       {p3 && v && v.replaces.length > 0 && <><dt>Valid</dt><dd>since {v.validFrom ? new Date(v.validFrom).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : 'it was saved'} · replaces an older fact <button type="button" className="link-button" onClick={() => { const older = v.replaces[0]; void (s.replaced ? x.openMemory(older) : x.showReplaced(true).then(() => x.openMemory(older))); }}>open</button></dd></>}
-      <dt>Where</dt><dd>{drawerName(item.drawerId)}</dd>
+      <dt>Where</dt><dd>{item.drawerId.startsWith('project:') ? ss.tree?.projects.find(p => p.slug === item.drawerId.slice(8))?.name ?? drawerName(item.drawerId) : drawerName(item.drawerId)}</dd>
       <dt>Kind</dt><dd><UiIcon name={kind.icon} size={13}/>{TYPE_LABEL[item.type] ?? item.type} · importance {item.importance}</dd>
       {p9b && <HowSureRows t={t} names={ss.agents}/>}
       <dt>Used</dt><dd>{det ? (det.usage.usedIn ? `in ${det.usage.usedIn} ${det.usage.usedIn === 1 ? 'reply' : 'replies'}${det.usage.lastUsedAt ? `, last ${ago(det.usage.lastUsedAt)}` : ''}` : 'not used in a reply yet') : '…'}</dd>
@@ -609,6 +661,24 @@ function MemoryInspector({ k, item, p9b = false, onHistory, onTrash, onChecked }
   </div>;
 }
 
+/** MR7: a size in tokens, short ("18.4k"). */
+const kTokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n));
+/** MR7: folded parts and the panel's shown/hidden choice last while the app runs (the app keeps no browser storage). */
+const panelPrefs = { folded: [] as string[], hidden: false };
+function readFolded(): string[] { return [...panelPrefs.folded]; }
+
+/** A part of the project panel you can fold, like Chat's side panel; remembered on this computer. */
+function PanelPart({ id, title, aside, folded, onFold, children }: { id: string; title: string; aside?: ReactNode; folded: boolean; onFold: (id: string) => void; children: ReactNode }) {
+  return <section className="dk-part" data-folded={folded || undefined} aria-label={title}>
+    <h4><button type="button" className="dk-part-head" aria-expanded={!folded} onClick={() => onFold(id)}><UiIcon name={folded ? 'chevron' : 'chevron-down'} size={12}/>{title}</button>{aside && <span className="dk-part-aside">{aside}</span>}</h4>
+    {!folded && children}
+  </section>;
+}
+
+/**
+ * MEM-READ-01 MR7: the project's side panel, like Chat's: a status line (memory in tokens, what an agent loads per reply),
+ * then parts to fold — Read by (each agent's Read only / Read + write, changed here with Undo), Coding apps, Size, Project.
+ */
 function ProjectInspector({ k, p6 = false, project, onSettings, onGroup }: { k: K; p6?: boolean; project: TreeProject; onSettings?: (t: SettingsTarget) => void; onGroup: () => void }) {
   const { d, sc, disc, pf } = k;
   const ss = useStore(sc)!; const ds = useStore(d)!; const dv = useStore(disc); const fs = useStore(pf)!;
@@ -622,27 +692,55 @@ function ProjectInspector({ k, p6 = false, project, onSettings, onGroup }: { k: 
   const group = d.groupOf(project.slug);
   const dept = ss.tree?.departments.find(x => x.id === project.departmentId);
   const [allReaders, setAllReaders] = useState(false);
-  return <div className="dk-insp">
-    <div className="dk-insp-head"><Tile name={project.name} size={28}/><div><h3>{project.name}</h3><p className="fine-print">{folders.length > 1 ? `One project made of ${folders.length} folders. Their memory is kept together.` : 'Its memory, design and databases.'}</p></div></div>
-    {folders.length > 0 && <ul className="dk-folders">{folders.map(f => <li key={f.path}><UiIcon name="folder" size={13}/><span className="dk-path" title={f.path}>{f.path}</span><span className="fine-print">{f.how}</span></li>)}</ul>}
-    <div className="actions"><button type="button" onClick={() => onSettings?.('projects')}>Add a folder…</button>{folders.length > 1 && <button type="button" onClick={() => onSettings?.('projects')}>Separate…</button>}</div>
-    {suggestion && <div className="dk-ask"><p>Looks like the same project: <b>{suggestion.a.name}</b> and <b>{suggestion.b.name}</b></p>
-      <div className="actions"><button type="button" className="primary" onClick={() => disc.startMerge([suggestion.a.id, suggestion.b.id], project.name)}>Join</button><button type="button" onClick={() => void disc.dismissSuggestion(suggestion)}>Not the same</button></div></div>}
-    <dl className="dk-facts">
-      <dt>Group</dt><dd>{group ? group.name : <button type="button" className="link-button" onClick={onGroup}>{ds.groups === 'missing' ? 'none' : 'Add to a group…'}</button>}</dd>
-      <dt>Department</dt><dd>{dept?.name ?? '—'}</dd>
-      <dt>Memories</dt><dd>{project.memories}</dd>
-      <dt>Read by</dt><dd>{ss.usage === null ? '…' : ss.usage.length ? <span className="dk-avatars">{ss.usage.slice(0, 5).map(u => <Avatar key={u.agentId} name={u.name}/>)}{ss.usage.length > 5 && <span className="dk-more">+{ss.usage.length - 5}</span>}</span> : 'no agent yet'}</dd>
-      <dt>Rules</dt><dd>{ss.rules.length ? 'its own' : `same as ${dept?.name ?? 'the company'}`} · <button type="button" className="link-button" onClick={() => onSettings?.('rules')}>change</button></dd>
-    </dl>
-    {ss.usage && ss.usage.length > 0 && <section className="dk-who"><h4>Who reads {project.name}</h4><ul>{(allReaders ? ss.usage : ss.usage.slice(0, 6)).map(u => <li key={u.agentId}><Avatar name={u.name}/><span>{u.name}</span><span className="fine-print">{u.write ? 'reads, saves' : 'reads'} · {u.why}</span></li>)}</ul>
-      <div className="actions">{ss.usage.length > 6 && <button type="button" className="link-button" onClick={() => setAllReaders(v => !v)}>{allReaders ? 'Show fewer' : `See all ${ss.usage.length}`}</button>}<button type="button" onClick={() => onSettings?.('access')}>Add an agent…</button></div>
-      <p className="fine-print">Add or take one out with an exception in Settings › Memory › Access; each change shows who reads it after.</p></section>}
-    {p6 && (fs.phase === 'ready' || fs.phase === 'loading') && <section className="dk-who"><h4>Coding apps</h4>
-      {files ? <ProjectSwitches c={pf} d={d} project={files}/> : fs.phase === 'ready' && <p className="fine-print">This project has no folder for coding apps yet.</p>}</section>}
+  const [folded, setFolded] = useState<string[]>(readFolded);
+  const [busyAgent, setBusyAgent] = useState<string | null>(null);
+  const fold = (id: string) => setFolded(f => { const next = f.includes(id) ? f.filter(x => x !== id) : [...f, id]; panelPrefs.folded = next; return next; });
+  const size = ss.size;
+  const readers = ss.usage ?? [];
+  const writers = readers.filter(u => u.write).length;
+  async function setWrite(agentId: string, name: string, write: boolean) {
+    setBusyAgent(agentId);
+    const undo = await sc.setReaderWrite(project.slug, agentId, write);
+    setBusyAgent(null);
+    if (!undo) { d.say(`${name} was not changed. Try again.`); return; }
+    d.remember(`${name} now ${write ? 'reads and writes' : 'only reads'} ${project.name}.`, undo);
+  }
+  return <div className="dk-insp dk-project-panel">
+    <div className="dk-insp-head"><Tile name={project.name} size={28}/><div><h3>{project.name}</h3>
+      <p className="fine-print dk-status-line">{size ? <>≈ {kTokens(size.total)} tokens of memory · agents load ≈ {kTokens(size.perReply)} per reply</> : folders.length > 1 ? `One project made of ${folders.length} folders. Their memory is kept together.` : 'Its memory, design and databases.'}</p></div></div>
+    <PanelPart id="readers" title="Read by" folded={folded.includes('readers')} onFold={fold}
+      aside={<>{ss.usage === null ? '…' : `${readers.length} ${readers.length === 1 ? 'agent' : 'agents'} · ${writers} can write`} · <button type="button" className="link-button" onClick={() => onSettings?.('access')}>Change…</button></>}>
+      {readers.length ? <ul className="dk-readers">{(allReaders ? readers : readers.slice(0, 6)).map(u => <li key={u.agentId}><Avatar name={u.name}/><span className="dk-reader-name"><b>{u.name}</b><span className="fine-print">{u.why}</span></span>
+        <button type="button" className="dk-level-tag" data-write={u.write || undefined} disabled={busyAgent === u.agentId} title={u.write ? 'Click: read only' : 'Click: read + write'} onClick={() => void setWrite(u.agentId, u.name, !u.write)}>{u.write ? 'Read + write' : 'Read only'}</button></li>)}</ul>
+        : <p className="fine-print">{ss.usage === null ? 'Checking who reads it…' : 'No agent reads this project yet.'}</p>}
+      <div className="actions">{readers.length > 6 && <button type="button" className="link-button" onClick={() => setAllReaders(v => !v)}>{allReaders ? 'Show fewer' : `See all ${readers.length}`}</button>}<button type="button" onClick={() => onSettings?.('access')}>Add an agent…</button></div>
+      <p className="fine-print">Only agents with Read + write may save, edit or forget this project's memories; the others use them in replies.</p>
+    </PanelPart>
+    {p6 && (fs.phase === 'ready' || fs.phase === 'loading') && <PanelPart id="apps" title="Coding apps" folded={folded.includes('apps')} onFold={fold}>
+      {files ? <ProjectSwitches c={pf} d={d} project={files}/> : fs.phase === 'ready' && <p className="fine-print">This project has no folder for coding apps yet.</p>}</PanelPart>}
+    <PanelPart id="size" title="Size" aside={size ? `≈ ${kTokens(size.total)} tokens` : '…'} folded={folded.includes('size')} onFold={fold}>
+      {size ? <><dl className="dk-facts dk-size">
+        <dt>{size.memories.count} {size.memories.count === 1 ? 'memory' : 'memories'}</dt><dd>≈ {kTokens(size.memories.tokens)}</dd>
+        <dt>{size.keyFiles.count} key {size.keyFiles.count === 1 ? 'file' : 'files'}</dt><dd>≈ {kTokens(size.keyFiles.tokens)}</dd>
+        <dt>{size.documents.count} other {size.documents.count === 1 ? 'document' : 'documents'}</dt><dd>≈ {kTokens(size.documents.tokens)}</dd>
+        {size.summaries.count > 0 && <><dt>Summaries</dt><dd>≈ {kTokens(size.summaries.tokens)}</dd></>}
+      </dl>{size.biggest && <p className="fine-print">Biggest: {size.biggest.name} ≈ {kTokens(size.biggest.tokens)}</p>}
+      <p className="fine-print">Estimates. An agent loads the most useful memories per reply; the rest stay on disk.</p></> : <p className="fine-print">Counting…</p>}
+    </PanelPart>
+    <PanelPart id="project" title="Project" folded={folded.includes('project')} onFold={fold}>
+      {folders.length > 0 && <ul className="dk-folders">{folders.map(f => <li key={f.path}><UiIcon name="folder" size={13}/><span className="dk-path" title={f.path}>{f.path}</span><span className="fine-print">{f.how}</span></li>)}</ul>}
+      <div className="actions"><button type="button" onClick={() => onSettings?.('projects')}>Add a folder…</button>{folders.length > 1 && <button type="button" onClick={() => onSettings?.('projects')}>Separate…</button>}</div>
+      {suggestion && <div className="dk-ask"><p>Looks like the same project: <b>{suggestion.a.name}</b> and <b>{suggestion.b.name}</b></p>
+        <div className="actions"><button type="button" className="primary" onClick={() => disc.startMerge([suggestion.a.id, suggestion.b.id], project.name)}>Join</button><button type="button" onClick={() => void disc.dismissSuggestion(suggestion)}>Not the same</button></div></div>}
+      <dl className="dk-facts">
+        <dt>Group</dt><dd>{group ? group.name : <button type="button" className="link-button" onClick={onGroup}>{ds.groups === 'missing' ? 'none' : 'Add to a group…'}</button>}</dd>
+        <dt>Department</dt><dd>{dept?.name ?? '—'}</dd>
+        <dt>Memories</dt><dd>{project.memories}</dd>
+        <dt>Rules</dt><dd>{ss.rules.length ? 'its own' : `same as ${dept?.name ?? 'the company'}`} · <button type="button" className="link-button" onClick={() => onSettings?.('rules')}>change</button></dd>
+      </dl>
+    </PanelPart>
   </div>;
 }
-
 
 // ---------------------------------------------------------------- other places
 function AgentsPlace({ names, onOpen }: { names: Readonly<Record<string, string>>; onOpen: (id: string) => void }) {

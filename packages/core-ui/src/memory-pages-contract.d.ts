@@ -34,18 +34,21 @@ export type HandoffKind = 'conversation' | 'task';
 export type ConflictDecision = 'keep_new' | 'keep_old' | 'keep_both';
 export type Health = 'ok' | 'attention' | 'problem';
 export type ScopeCounts = { memories: number; pendingReviews: number; conflicts: number; pinnedFacts: number; lastMemoryAt: string | null; health: Health; reasons: string[] };
-export type TreeProject = ScopeCounts & { slug: string; name: string; departmentId: string; pinned: boolean; archived: boolean; archivedAt: string | null; mergedInto: string | null; trashedAt?: string; groupId?: string };
+export type TreeProject = ScopeCounts & { slug: string; name: string; departmentId: string; pinned: boolean; archived: boolean; archivedAt: string | null; mergedInto: string | null; trashedAt?: string; groupId?: string; chatProject?: boolean; notProject?: boolean; notProjectReason?: string | null };
 export type ProjectRef = Omit<TreeProject, keyof ScopeCounts> & Partial<ScopeCounts>;
 export type TreeDepartment = ScopeCounts & { id: string; name: string; isDefault: boolean; projects: number; archivedProjects: number };
 export type ScopeTree = {
   generatedAt: string; cached: boolean;
   company: ScopeCounts & { drawers: Record<string, number>; departments: number; projects: number; archivedProjects: number };
-  departments: TreeDepartment[]; projects: TreeProject[]; people: Array<ScopeCounts & { key: string }>;
+  departments: TreeDepartment[]; projects: TreeProject[];
+  /** MEM-READ-01 MR3: projects found in downloaded code (split off `projects` by the client). */
+  notProjects?: TreeProject[];
+  people: Array<ScopeCounts & { key: string }>;
   agents: { total: number; withTemplate: number; withExceptions: number };
 };
 export type ScopeHit = { kind: 'department' | 'project' | 'people' | 'agent'; id: string; name: string; departmentId?: string; archived: boolean; memories: number };
 export type AgentScope = { id: string; name: string; department: string | null; template: { id: string; name: string } | null; exceptions: number };
-export type ExplorerItem = { id: string; type: string; preview: string; drawerId: string; topicKey: string | null; importance: number; layer: string; createdAt: string; sourceAgentId: string | null; source?: string | null; usedIn?: number; trust?: 'checked' | 'unchecked' | 'imported' | null; supersededBy?: string | null; validTo?: string | null };
+export type ExplorerItem = { id: string; type: string; preview: string; drawerId: string; topicKey: string | null; importance: number; layer: string; createdAt: string; sourceAgentId: string | null; source?: string | null; usedIn?: number; trust?: 'checked' | 'unchecked' | 'imported' | null; supersededBy?: string | null; validTo?: string | null; /** MEM-READ-01 MR1 */ title?: string; lines?: string };
 export type ExplorerPage = { scope: string; items: ExplorerItem[]; nextCursor: string | null; total: number; facets: { type: Record<string, number>; layer: Record<string, number>; drawer: Record<string, number>; source?: Record<string, number> } };
 export type PinnedFact = { id: string; scope: string; text: string; position: number; createdAt: string; updatedAt: string };
 export type AgentSample = { agentId: string; agentName: string; project: string | null; before: { read: AccessColumn[]; write: AccessColumn[] }; after: { read: AccessColumn[]; write: AccessColumn[] } };
@@ -56,6 +59,12 @@ export type ProjectExport = { project: string; files: Array<{ name: string; cont
 export type AccessRule = { id: string; scope: string; agentId: string | null; drawerKind: AccessColumn; read: AccessMode; write: AccessMode; endsAt: string | null; expired: boolean; reason: string | null; createdAt: string };
 export type RoleTemplate = { id: string; name: string; memoryRead: DrawerKind[]; memoryWrite: DrawerKind[]; scopeRead: ScopeColumn[] | null; scopeWrite: ScopeColumn[] | null; agents: number };
 export type AccessOverview = { version: number; rules: AccessRule[]; templates: RoleTemplate[] };
+/** MEM-READ-01 MR6 */
+export type PeriodSummary = { period: 'today' | 'week' | 'month'; label: string; from: string; sessions: number; sources: string[]; done: string[]; left: string[]; next: string[]; handoffs: Array<{ from: string; at: string; done: string[]; left: string[]; next: string[] }> };
+export type ProjectDocument = { path: string; updatedAt: string; status: 'ok' | 'unreadable'; reason: string | null; pages: number | null; bytes: number; purpose?: string };
+export type ProjectDocuments = { key: ProjectDocument[]; other: ProjectDocument[] };
+/** MEM-READ-01 MR7: a project's size in tokens (estimates). */
+export type ProjectSize = { memories: { count: number; tokens: number }; keyFiles: { count: number; tokens: number }; documents: { count: number; tokens: number }; summaries: { count: number; tokens: number }; total: number; perReply: number; biggest: { name: string; tokens: number } | null };
 export type AccessChange =
   | { op: 'set_rule'; scope: string; agentId?: string | null; drawerKind: AccessColumn; read?: AccessMode; write?: AccessMode; endsAt?: string | null; reason?: string | null }
   | { op: 'clear_rule'; scope: string; agentId?: string | null; drawerKind: AccessColumn }

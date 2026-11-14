@@ -81,7 +81,7 @@ function storeReady(): Promise<void> {
  * Move every secret in `text` into the key store of `userId` and return the
  * text with references. The same value twice in one text gets one reference.
  */
-export async function vaultSecretsInText(userId: string, conversationId: string, text: string, known?: Map<string, SavedSecret>): Promise<{ text: string; saved: SavedSecret[] }> {
+export async function vaultSecretsInText(userId: string, conversationId: string, text: string, known?: Map<string, SavedSecret>, skillId: string = CHAT_SECRET_SKILL): Promise<{ text: string; saved: SavedSecret[] }> {
   const found = new Map<string, SavedSecret>(); // value -> reference (new in this text)
   const values = new Map<string, string>(); // id -> value
   const scanned = redactImportText(text, {
@@ -106,7 +106,7 @@ export async function vaultSecretsInText(userId: string, conversationId: string,
       await storeReady();
       await getCredentialManager().create({
         name: credentialName(s.type, s.id), type: credentialTypeOf(s.type), value: values.get(s.id)!,
-        description: `chat:${conversationId}`, skillId: CHAT_SECRET_SKILL, userId,
+        description: `chat:${conversationId}`, skillId, userId,
       });
       saved.push(s);
       known?.set(values.get(s.id)!, s);

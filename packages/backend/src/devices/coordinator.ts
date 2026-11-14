@@ -353,6 +353,9 @@ export class ComputerCoordinator {
     }
     /** CP10a copy: asks that arrived here (another computer wants a project), and copies on their way here. */
     private copyAsks = new Map<string, { from: string; name: string; at: number }>();
+    /** Copy requests the owner already answered: a redelivered request must not ask again (or be allowed after a refusal). */
+    private copyAnswered = new Set<string>();
+    private answered(requestId: string) { this.copyAnswered.add(requestId); if (this.copyAnswered.size > 256) this.copyAnswered.delete(this.copyAnswered.values().next().value!); }
     private copies = new Map<string, { to: string; name: string; parent: string; state: 'waiting' | 'receiving' | 'ready' | 'refused' | 'failed'; size?: number; sha256?: string; parts?: number; received: number; projectId?: string; at: number }>();
     private copyDir(id: string) { if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw Error('computer_copy_invalid'); return pathCopy.join(dataRoot(), 'project-copies', id); }
     async requestProjectCopy(actor: Actor, target: string, name: string, parent: string) {
@@ -370,7 +373,7 @@ export class ComputerCoordinator {
         await this.membership.assertOwner(actor);
         const ask = this.copyAsks.get(requestId); if (!ask) throw Error('computer_copy_missing');
         const project = await findProject(this.membership.ownerId, projectId); if (!project?.folder) throw Error('computer_project_folder_missing');
-        this.copyAsks.delete(requestId);
+        this.copyAsks.delete(requestId); this.answered(requestId);
         let packed;
         try { packed = await packProject(project.folder); }
         catch (e) { await this.queue(ask.from, 'project_offer', { requestId, state: 'failed' }, requestId + '-o'); throw e; }
@@ -382,12 +385,12 @@ export class ComputerCoordinator {
     async denyProjectCopy(actor: Actor, requestId: string) {
         await this.membership.assertOwner(actor);
         const ask = this.copyAsks.get(requestId); if (!ask) throw Error('computer_copy_missing');
-        this.copyAsks.delete(requestId);
+        this.copyAsks.delete(requestId); this.answered(requestId);
         await this.queue(ask.from, 'project_offer', { requestId, state: 'refused' }, requestId + '-o');
         return { refused: true };
     }
     private async receiveCopy(e: Envelope) {
-        if (e.kind === 'project_request') { if (this.copyAsks.size >= 8) throw Error('computer_copy_busy'); this.copyAsks.set(e.payload.requestId, { from: e.sender, name: e.payload.name, at: this.now() }); return; }
+        if (e.kind === 'project_request') { if (this.copyAnswered.has(e.payload.requestId) || this.copyAsks.has(e.payload.requestId)) return; if (this.copyAsks.size >= 8) throw Error('computer_copy_busy'); this.copyAsks.set(e.payload.requestId, { from: e.sender, name: e.payload.name, at: this.now() }); return; }
         if (e.kind !== 'project_offer' && e.kind !== 'project_part') return;
         const c = this.copies.get(e.payload.requestId);
         if (!c || c.to !== e.sender) throw Error('computer_copy_binding');

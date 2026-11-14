@@ -17,6 +17,11 @@
 //   POST   /api/memory/scopes/projects/:slug/preview     { action, target?, departmentId? }
 //   POST   /api/memory/scopes/projects/:slug/apply       { action, target?, departmentId?, expectedPreviewHash, confirm: true }
 //   GET    /api/memory/scopes/projects/:slug/export
+//   POST   /api/memory/scopes/projects/:slug/kind        { kind: 'project' | 'library' }  (MEM-READ-01 MR3)
+//   GET    /api/memory/scopes/hidden-keys                keys hidden since the owner last answered (MR2)
+//   POST   /api/memory/scopes/hidden-keys/answer         { answer: 'keep' | 'move', drawer? }
+//   POST   /api/memory/scopes/hidden-keys/:id/reveal     the owner's Show (one value)
+//   POST   /api/memory/scopes/ask-agent                  { agentId, request, text, drawer? } Ask an agent (MR5), a proposal only
 //   Access by inheritance
 //   GET    /api/memory/access
 //   POST   /api/memory/access/preview                    { changes }
@@ -167,6 +172,8 @@ export function memoryPagesPath(path) {
   const raw = q < 0 ? '' : path.slice(q + 1);
   const with_ = (route, rules, extra = {}) => { const params = rules ? query(raw, rules) : (raw === '' ? {} : null); return params ? { route, params, ...extra } : null; };
   let m;
+  if ((m = /^\/api\/memory\/scopes\/ask-agent\/([0-9a-f-]{36})$/.exec(base))) return with_('ask-agent-job', null, { id: m[1] });
+  if ((m = /^\/api\/memory\/scopes\/projects\/([^/]+)\/(size|documents|summaries)$/.exec(base)) && slug(m[1])) return with_(`project-${m[2]}`, null, { id: m[1] });
   switch (base) {
     case '/api/memory/scopes/tree': return with_('tree', QUERIES.tree);
     case '/api/memory/scopes/search': return with_('search', QUERIES.search);
@@ -194,10 +201,19 @@ export function memoryPagesPath(path) {
     case '/api/memory/graph/sync': return with_('graph-sync', null);
     case '/api/handoffs/coding-apps': return with_('coding-handoffs', QUERIES.codingHandoffs);
     case '/api/memory/scopes/projects': return with_('project-create', null);
+    case '/api/memory/scopes/hidden-keys': return with_('hidden-keys', null);
+    case '/api/memory/scopes/ask-agent': return with_('ask-agent', null);
+    case '/api/memory/scopes/night': return with_('night', null);
+    case '/api/memory/scopes/night/run': return with_('night-run', null);
+    case '/api/memory/scopes/night/report': return with_('night-report', null);
+    case '/api/memory/scopes/night/report/done': return with_('night-done', null);
+
+    case '/api/memory/scopes/hidden-keys/answer': return with_('hidden-keys-answer', null);
     case '/api/memory/scopes/jobs': return with_('jobs', null);
   }
   if ((m = /^\/api\/memory\/scopes\/pinned\/([^/]+)$/.exec(base)) && plainId(m[1])) return with_('pinned-fact', null, { id: m[1] });
-  if ((m = /^\/api\/memory\/scopes\/projects\/([^/]+)\/(preview|apply|export|deleted-memory|adopt)$/.exec(base)) && slug(m[1])) return with_(`project-${m[2]}`, null, { id: m[1] });
+  if ((m = /^\/api\/memory\/scopes\/hidden-keys\/([a-z0-9]{6,32})\/reveal$/.exec(base))) return with_('hidden-key-reveal', null, { id: m[1] });
+  if ((m = /^\/api\/memory\/scopes\/projects\/([^/]+)\/(preview|apply|export|deleted-memory|adopt|kind)$/.exec(base)) && slug(m[1])) return with_(`project-${m[2]}`, null, { id: m[1] });
   if ((m = /^\/api\/memory\/access\/effective\/([^/]+)$/.exec(base)) && agentId(m[1])) return with_('effective', QUERIES.effective, { id: m[1] });
   if ((m = /^\/api\/memory\/graph\/entities\/([^/]+)$/.exec(base)) && plainId(m[1])) return with_('entity', null, { id: m[1] });
   if ((m = /^\/api\/memory\/graph\/links\/([^/]+)\/(approve|reject)$/.exec(base)) && plainId(m[1])) return with_(`link-${m[2]}`, null, { id: m[1] });
@@ -274,6 +290,16 @@ export function allowedMemoryPages(method, path, body) {
     case 'project-create': return method === 'POST' && record(body) && onlyKeys(body, ['name']) && text(body.name, 80) && body.name.trim().length > 0;
     case 'project-deleted-memory': case 'jobs': return get;
     case 'project-adopt': return method === 'POST' && record(body) && onlyKeys(body, ['projectId']) && plainId(body.projectId);
+    case 'project-kind': return method === 'POST' && record(body) && onlyKeys(body, ['kind']) && (body.kind === 'project' || body.kind === 'library');
+    case 'hidden-keys': return method === 'GET' && body === undefined;
+    case 'ask-agent-job': return method === 'GET' && body === undefined;
+    case 'night': return (method === 'GET' && body === undefined) || (method === 'PUT' && record(body) && onlyKeys(body, ['enabled', 'from', 'to']) && (body.enabled === undefined || typeof body.enabled === 'boolean') && ['from', 'to'].every(k => body[k] === undefined || (typeof body[k] === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(body[k]))));
+    case 'night-run': case 'night-done': return method === 'POST' && body === undefined;
+    case 'night-report': return method === 'GET' && body === undefined;
+    case 'project-size': case 'project-documents': case 'project-summaries': return method === 'GET' && body === undefined;
+    case 'ask-agent': return method === 'POST' && record(body) && onlyKeys(body, ['agentId', 'request', 'text', 'drawer']) && agentId(body.agentId) && text(body.request, 500) && typeof body.text === 'string' && body.text.length <= 50000 && (body.drawer === undefined || validDrawerId(body.drawer));
+    case 'hidden-keys-answer': return method === 'POST' && record(body) && onlyKeys(body, ['answer', 'drawer']) && (body.answer === 'keep' || body.answer === 'move') && (body.drawer === undefined || (typeof body.drawer === 'string' && body.drawer.length <= 200));
+    case 'hidden-key-reveal': return method === 'POST' && body === undefined;
     case 'project-preview': return method === 'POST' && projectAction(body, false);
     case 'project-apply': return method === 'POST' && projectAction(body, true);
     case 'access-preview': return method === 'POST' && record(body) && onlyKeys(body, ['changes']) && changes(body.changes);
@@ -352,6 +378,10 @@ function project(p) {
     archivedAt: whenOrNull(p.archivedAt), mergedInto: idOr(p.mergedInto, slug), ...(record(p) && 'memories' in p ? counts(p) : {}),
     // MEM-TRASH-01 / groups: a project in the Trash, and its group.
     ...(whenOrNull(p.trashedAt) ? { trashedAt: whenOrNull(p.trashedAt) } : {}), ...(typeof p.groupId === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(p.groupId) ? { groupId: p.groupId } : {}),
+    // A project the owner made is always a project (its internal chat id stays out).
+    ...((typeof p.chatProjectId === 'string' && p.chatProjectId && p.memoryOnly !== true) || p.chatProject === true ? { chatProject: true } : {}),
+    // MEM-READ-01 MR3: found in downloaded code, listed under Not projects.
+    ...(p.notProject === true ? { notProject: true, notProjectReason: clip(p.notProjectReason, 40) || 'Downloaded code' } : {}),
   };
 }
 function tree(b) {
@@ -381,6 +411,8 @@ function explorerItem(i) {
     importance: Math.min(10, Math.max(0, count(i.importance))), layer: clip(i.layer, 20), createdAt: when(i.createdAt), sourceAgentId: idOr(i.sourceAgentId, agentId),
     source: typeof i.source === 'string' && /^[a-z_-]{1,32}$/.test(i.source) ? i.source : null, usedIn: count(i.usedIn),
     trust: TRUST_WORDS.includes(i.trust) ? i.trust : null, supersededBy: plainId(i.supersededBy) ? i.supersededBy : null, validTo: whenOrNull(i.validTo),
+    // MEM-READ-01 MR1: the row's title and clean lines.
+    ...(typeof i.title === 'string' && i.title ? { title: clip(i.title, 120) } : {}), ...(typeof i.lines === 'string' && i.lines ? { lines: clip(i.lines, 300) } : {}),
   };
 }
 function fact(f) {
@@ -564,7 +596,9 @@ function codingHandoff(h) {
 }
 
 const CODES = {
-  scopes: ['invalid_scope', 'not_found', 'preview_hash_required', 'confirm_required', 'preview_changed', 'name_taken', 'no_change', 'too_many', 'target_archived'],
+  scopes: ['invalid_scope', 'not_found', 'preview_hash_required', 'confirm_required', 'preview_changed', 'name_taken', 'no_change', 'too_many', 'target_archived',
+    // MR3 / MR5
+    'chat_project', 'invalid_agent', 'invalid_request', 'invalid_text', 'stays_local', 'model_unavailable', 'busy', 'bad_answer'],
   doctor: ['confirm_required', 'report_hash_required', 'report_changed', 'invalid_kinds'],
   handoff: ['invalid_handoff', 'not_found'],
   decide: ['already_decided', 'stale', 'review_changed', 'review_hash_required'],
@@ -612,6 +646,45 @@ export function memoryPagesResponse(path, status, body) {
     case 'project-create': return { project: record(body.project) && plainId(body.project.key) ? { key: body.project.key, name: clip(body.project.name, 80) } : fail() };
     case 'project-deleted-memory': return { memory: record(body.memory) && plainId(body.memory.key) ? { key: body.memory.key, name: clip(body.memory.name, 80), memories: count(body.memory.memories) } : null };
     case 'project-adopt': return { moved: count(body.moved) };
+    case 'hidden-keys': {
+      const kinds = k => Object.fromEntries(['login', 'password', 'key', 'token'].filter(w => record(k) && Number.isSafeInteger(k[w]) && k[w] > 0).map(w => [w, k[w]]));
+      return { total: count(body.total), drawers: (Array.isArray(body.drawers) ? body.drawers : []).slice(0, 200).filter(d => record(d) && typeof d.drawer === 'string' && d.drawer.length <= 200).map(d => ({ drawer: d.drawer, count: count(d.count), memories: count(d.memories), kinds: kinds(d.kinds) })) };
+    }
+    case 'ask-agent': if (typeof body.jobId !== 'string' || !/^[0-9a-f-]{36}$/.test(body.jobId)) fail(); return { jobId: body.jobId };
+    case 'project-documents': {
+      const doc = d => record(d) && typeof d.path === 'string' ? { path: clip(d.path, 400), updatedAt: whenOrNull(d.updatedAt) ?? new Date(0).toISOString(), status: d.status === 'unreadable' ? 'unreadable' : 'ok', reason: typeof d.reason === 'string' ? clip(d.reason, 200) : null, pages: Number.isSafeInteger(d.pages) ? d.pages : null, bytes: count(d.bytes), ...(typeof d.purpose === 'string' ? { purpose: clip(d.purpose, 120) } : {}) } : null;
+      const docs = x => (Array.isArray(x) ? x : []).slice(0, 600).map(doc).filter(Boolean);
+      return { key: docs(body.key), other: docs(body.other) };
+    }
+    case 'project-summaries': {
+      const lines = x => (Array.isArray(x) ? x : []).slice(0, 10).filter(v => typeof v === 'string').map(v => clip(v, 400));
+      return { summaries: (Array.isArray(body.summaries) ? body.summaries : []).slice(0, 3).filter(s => record(s) && ['today', 'week', 'month'].includes(s.period)).map(s => ({
+        period: s.period, label: clip(s.label, 40), from: whenOrNull(s.from) ?? '', sessions: count(s.sessions), sources: lines(s.sources).map(v => clip(v, 60)), done: lines(s.done), left: lines(s.left), next: lines(s.next),
+        handoffs: (Array.isArray(s.handoffs) ? s.handoffs : []).slice(0, 20).filter(record).map(h => ({ from: clip(h.from, 80), at: typeof h.at === 'string' ? clip(h.at, 40) : '', done: lines(h.done), left: lines(h.left), next: lines(h.next) })) })) };
+    }
+    case 'project-size': {
+      const part = x => ({ count: count(record(x) ? x.count : 0), tokens: count(record(x) ? x.tokens : 0) });
+      return { memories: part(body.memories), keyFiles: part(body.keyFiles), documents: part(body.documents), summaries: part(body.summaries), total: count(body.total), perReply: count(body.perReply),
+        biggest: record(body.biggest) && typeof body.biggest.name === 'string' ? { name: clip(body.biggest.name, 300), tokens: count(body.biggest.tokens) } : null };
+    }
+    case 'night': case 'night-report': {
+      const hm = x => (typeof x === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(x) ? x : '01:00');
+      const rep = r => (record(r) && typeof r.night === 'string' ? { night: clip(r.night, 10), startedAt: clip(r.startedAt, 40), endedAt: clip(r.endedAt, 40), stopped: ['done', 'used', 'unplugged', 'hours', 'error'].includes(r.stopped) ? r.stopped : 'done',
+        files: count(r.files), projects: count(r.projects), proposals: count(r.proposals), summaries: (Array.isArray(r.summaries) ? r.summaries : []).slice(0, 50).filter(x => typeof x === 'string').map(x => clip(x, 120)), keys: count(r.keys), duplicates: count(r.duplicates) } : null);
+      if (p.route === 'night-report') return { report: rep(body.report) };
+      return { ...(record(body.settings) ? { settings: { enabled: body.settings.enabled === true, from: hm(body.settings.from), to: hm(body.settings.to) } } : {}), ...('last' in body ? { last: rep(body.last) } : {}) };
+    }
+    case 'night-run': return { started: body.started === true };
+    case 'night-done': return { ok: body.ok === true };
+    case 'ask-agent-job': {
+      if (body.state === 'running') return { state: 'running' };
+      if (body.state === 'error') return { state: 'error', code: clip(body.code, 40), error: clip(body.error, 300) };
+      if (body.state !== 'done' || typeof body.text !== 'string' || body.text.length > 50000) fail();
+      return { state: 'done', text: body.text, note: clip(body.note, 300) };
+    }
+    case 'hidden-keys-answer': return { answered: count(body.answered), moved: count(body.moved) };
+    case 'hidden-key-reveal': if (typeof body.value !== 'string' || body.value.length > 20000) fail(); return { value: body.value };
+    case 'project-kind': if (!slug(body.slug) || !['project', 'library'].includes(body.kind)) fail(); return { slug: body.slug, kind: body.kind, before: ['project', 'library'].includes(body.before) ? body.before : null };
     case 'jobs': return { jobs: list(body.jobs, 10).filter(j => record(j) && ['sources', 'vectors'].includes(j.id)).map(j => ({ id: j.id, done: count(j.done), total: count(j.total) })) };
     case 'access': return { version: count(body.version), rules: list(body.rules, 5000).map(rule), templates: list(body.templates, 200).map(template) };
     case 'access-preview': return accessPreview(body);

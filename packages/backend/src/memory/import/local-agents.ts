@@ -31,6 +31,7 @@ import Database from 'better-sqlite3';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { isLibraryPath } from './library-folders.js';
 import readline from 'node:readline';
 
 export const LOCAL_SOURCES = ['claude-code', 'codex', 'antigravity', 'gemini-cli'] as const;
@@ -423,7 +424,7 @@ const TEMPORARY = /(^|[\\/])(tmp|temp|var[\\/]folders|scratchpad)([\\/]|$)/i;
  * folder, a drive or user folder, or a temporary folder.
  */
 export function rootDrawerKey(root: string | null, home = os.homedir()): string | null {
-  if (!root || root === home || segs(root).length < 3 || segs(root).at(-1)!.startsWith('.') || /^(?:[a-z]:)?[\\/]*(?:users|home)[\\/][^\\/]+[\\/]*$/i.test(root)) return null;
+  if (!root || root === home || isLibraryPath(root) || segs(root).length < 3 || segs(root).at(-1)!.startsWith('.') || /^(?:[a-z]:)?[\\/]*(?:users|home)[\\/][^\\/]+[\\/]*$/i.test(root)) return null;
   const rel = path.relative(home, root);
   if (TEMPORARY.test(rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : root)) return null;
   const key = (segs(root).at(-1) ?? '').normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);

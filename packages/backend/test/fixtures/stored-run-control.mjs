@@ -17,7 +17,7 @@ export async function createStoredRunControlFixture(){
  CREATE TABLE memory_access_scope_rules AS SELECT * FROM memory_access_rules;
  CREATE TABLE memory_role_templates(id TEXT,owner_id TEXT,name TEXT,norm_name TEXT,memory_read TEXT,memory_write TEXT,scope_read TEXT,scope_write TEXT);
  CREATE TABLE memory_agent_roles(owner_id TEXT,agent_id TEXT,template_id TEXT);
- CREATE TABLE memory_project_scopes(owner_id TEXT,slug TEXT,department_id TEXT);
+ CREATE TABLE memory_project_scopes(owner_id TEXT,slug TEXT,department_id TEXT);CREATE TABLE memory_project_kinds(owner_id TEXT,slug TEXT,kind TEXT);
  INSERT INTO users VALUES('owner','owner','active',1);
  INSERT INTO agents_config VALUES('agent','Synthetic','ollama','synthetic-local',NULL,0,1000,'* * * * *',1);
  `);const expiry=Date.now()+30000;db.prepare('INSERT INTO task_runs(id,task_id,agent_id,user_id,status,cancel_requested,lease_owner,lease_generation,lease_expires_at,input_encrypted,input_iv,input_tag,contract_encrypted,contract_iv,contract_tag) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run('run','task','agent','owner','running',0,'worker',1,expiry,'synthetic-cipher','iv','tag',null,null,null);

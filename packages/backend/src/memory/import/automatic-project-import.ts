@@ -89,9 +89,17 @@ export async function runDueAutomaticImports(opts:Options={}){
  const jobs:Promise<void>[]=[];
  for(const name of files){if(!/^[a-f0-9]{64}\.json$/.test(name))continue;const s=JSON.parse(await fs.readFile(path.join(folder(),name),'utf8')) as Saved;
   if(!s.enabled||(s.nextRun>(opts.now??Date.now())&&!['scanning','importing'].includes(s.status))||active.has(s.userId))continue;
+  // MEM-READ-01 MR9: while night work is on it runs this import at night; the 15/30/60-minute timer leaves it alone (a running import still finishes).
+  if(!['scanning','importing'].includes(s.status)&&await import('../night-work.js').then(n=>n.nightWorkOn(s.userId)).catch(()=>false))continue;
   const promise=(async()=>{const owner=await q.one<{role:string;status:string}>('SELECT role,status FROM users WHERE id=?',s.userId);if(owner?.role==='owner'&&owner.status==='active')await run(s.userId,opts);})().finally(()=>active.delete(s.userId));active.set(s.userId,promise);jobs.push(promise);
  }
  await Promise.allSettled(jobs);
+}
+/** MR9: night work runs this owner's import now (the same batches and cursor; only when the owner turned this import on). */
+export async function runAutomaticImportNow(user:string,opts:Options={}){
+ if(active.has(user)){await active.get(user);return;}
+ const s=await read(user);if(!s.enabled)return;
+ const promise=run(user,opts).finally(()=>active.delete(user));active.set(user,promise);await promise;
 }
 export function startAutomaticProjectImports(){if(timer)return;stopped=false;timer=setInterval(()=>{void runDueAutomaticImports().catch(()=>{});},15000);timer.unref();void runDueAutomaticImports().catch(()=>{});}
 export async function stopAutomaticProjectImports(){stopped=true;clearInterval(timer);timer=undefined;await Promise.allSettled([...active.values()]);}

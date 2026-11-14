@@ -40,6 +40,7 @@ import { packVector } from '../vectors.js';
 import { lexicalTokens } from '../text-normalize.js';
 import { redactImportText } from '../import/redact.js';
 import { extractPdfText } from './pdf-text.js';
+import { NOT_READ_EXT, officeText } from './office-text.js';
 import { chunkMarkdown, chunkPages, chunkText, type DocChunk } from './chunk.js';
 import { readFound, scanRoot, MAX_FILES, type FoundFile } from './scan.js';
 import { getAgentDir, validAgentFileId } from '../../services/agent-files.js';
@@ -177,10 +178,18 @@ async function sourceRoots(s: SourceRow): Promise<Array<{ root: string; label: s
 
 interface FileRow { id: string; root: string; rel_path: string; file_hash: string; revision: number; bytes: number; mtime_ms: number; status: string; chunks: number }
 
-type Extracted = { ok: true; chunks: DocChunk[]; pages: number | null } | { ok: false; reason: string };
+type Extracted = { ok: true; chunks: DocChunk[]; pages: number | null; info?: string } | { ok: false; reason: string };
 
 /** Text and chunks of one file's bytes (never a guess: an unreadable file says why). */
-export function extractChunks(kind: FoundFile['kind'], data: Buffer): Extracted {
+export function extractChunks(kind: FoundFile['kind'], data: Buffer, name = ''): Extracted {
+  if (kind === 'notread') return { ok: false, reason: NOT_READ_EXT[path.extname(name).toLowerCase()] ?? 'not a type Girru reads' };
+  if (kind !== 'md' && kind !== 'txt' && kind !== 'pdf') {
+    // MR8: office and OpenDocument files, CSV, RTF, HTML, JSON, YAML — text only, each part cited by its label.
+    const r = officeText(kind, data);
+    if (!r.ok) return { ok: false, reason: r.reason };
+    const pages = r.sections.map((s, i) => ({ page: i + 1, text: redactImportText(s.text).text }));
+    return { ok: true, chunks: pages.length === 1 && (kind === 'docx' || kind === 'odt' || kind === 'rtf' || kind === 'html') ? chunkMarkdown(pages[0].text) : chunkPages(pages), pages: r.count, info: r.info };
+  }
   if (kind === 'pdf') {
     const r = extractPdfText(data);
     if (!r.ok) return { ok: false, reason: r.reason };
@@ -284,7 +293,7 @@ export async function indexSource(sourceId: string, opts: { embedder?: Embedding
           continue;
         }
         const display = (label ? `${label}/${found.rel}` : found.rel).split(path.sep).join('/');
-        const ex = extractChunks(found.kind, data);
+        const ex = extractChunks(found.kind, data, found.rel);
         let chunks: Array<DocChunk & { model: string | null; vec: Buffer | null }> = [];
         if (ex.ok) {
           const room = Math.max(0, chunkBudget + (prev?.chunks ?? 0));
@@ -296,7 +305,7 @@ export async function indexSource(sourceId: string, opts: { embedder?: Embedding
         }
         await sql().tx(() => replaceFileStep({
           source, fileId, found, display, hash, revision: (prev?.revision ?? 0) + 1,
-          status: ex.ok ? 'ok' : 'unreadable', reason: ex.ok ? null : ex.reason, pages: ex.ok ? ex.pages : null, chunks,
+          status: ex.ok ? 'ok' : 'unreadable', reason: ex.ok ? ex.info ?? null : ex.reason, pages: ex.ok ? ex.pages : null, chunks,
         }));
         base.changed++;
         await yieldTurn();

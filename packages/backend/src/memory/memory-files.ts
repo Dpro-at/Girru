@@ -531,8 +531,14 @@ export interface ChangeProposalInput {
   conflictWith?: string | null;
 }
 
-export function createChangeProposal(input: ChangeProposalInput): Promise<MemoryProposal> {
-  return sql().tx(() => createChangeProposalStep(input));
+export async function createChangeProposal(input: ChangeProposalInput): Promise<MemoryProposal> {
+  // MEM-READ-01 MR2: keys in proposed text are hidden (key store + lock chip) before anyone reviews or stores it.
+  const { hideKeysInChanges, recordHiddenKeys } = await import('./hidden-keys.js');
+  const where = drawerId(normalizeDrawer(input.drawer));
+  const prepared = await hideKeysInChanges(input.userId, input.changes, where);
+  const proposal = await sql().tx(() => createChangeProposalStep({ ...input, changes: prepared.changes }));
+  await recordHiddenKeys(input.userId, null, where, prepared.hidden).catch(() => undefined);
+  return proposal;
 }
 
 /** createChangeProposal as a SQL step (inside a transaction: the import commit). */

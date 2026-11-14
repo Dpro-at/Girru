@@ -41,6 +41,7 @@ const KEYED: readonly Keyed[] = [
   { table: 'memory_access_scope_rules', owner: 'owner_id', col: 'scope_id', where: "scope_kind = 'project'" },
   { table: 'memory_scope_rules', owner: 'owner_id', col: 'scope_id', where: "scope_kind = 'project'" },
   { table: 'memory_project_group_members', owner: 'owner_id', col: 'slug' },
+  { table: 'memory_project_kinds', owner: 'owner_id', col: 'slug' },
   { table: 'memory_project_design', owner: 'owner_id', col: 'slug' },
   { table: 'memory_project_databases', owner: 'owner_id', col: 'slug' },
   { table: 'memory_project_db_access', owner: 'owner_id', col: 'slug' },

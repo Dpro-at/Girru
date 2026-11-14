@@ -9,6 +9,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { computerRoots } from './computer-roots.js';
 import { dataRoot, dataPath } from '../../config/data-root.js';
 import { redactImportText } from './redact.js';
+import { isLibraryPath, libraryDirName } from './library-folders.js';
 export const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FILES = 400, MAX_ENTRIES = 30000;
 const hash = (s: string | Buffer) => createHash('sha256').update(s).digest('hex');
@@ -32,7 +33,7 @@ function descend(relative:string) {
  if(tail.length===1)return ['.claude','.codex','.gemini','.github','.cursor'].includes(tail[0]);
  return (tail[0]==='.codex'&&tail[1]==='memories'&&tail.slice(2).every(part=>!part.startsWith('.'))) || (tail[0]==='.cursor'&&tail[1]==='rules'&&tail.length===2);
 }
-function eligible(relative: string) { const parts=relative.split(path.sep); if(parts.slice(0,-1).some(part=>/\.(?:app|framework)$/i.test(part)))return false;if(parts.some(x=>secret.test(x)||skip.test(x)))return false;if(hiddenNote(parts))return true;return !parts.some(x=>x.startsWith('.')) && /\.(md|txt|rst)$/i.test(relative) && (named.test(parts.at(-1)!) || parts.slice(0,-1).some(x=>/^(docs|documentation)$/i.test(x))); }
+function eligible(relative: string) { if(isLibraryPath(relative))return false; const parts=relative.split(path.sep); if(parts.slice(0,-1).some(part=>/\.(?:app|framework)$/i.test(part)))return false;if(parts.some(x=>secret.test(x)||skip.test(x)))return false;if(hiddenNote(parts))return true;return !parts.some(x=>x.startsWith('.')) && /\.(md|txt|rst)$/i.test(relative) && (named.test(parts.at(-1)!) || parts.slice(0,-1).some(x=>/^(docs|documentation)$/i.test(x))); }
 
 const catalogFile = (user: string) => dataPath('project-document-catalogs', hash(user)+'.json');
 async function catalog(user: string): Promise<Record<string,Entry>> { try { return JSON.parse(await fs.readFile(catalogFile(user),'utf8')); } catch (e: any) { if(e.code==='ENOENT')return {};throw e; } }
@@ -54,7 +55,7 @@ async function scan(user: string, roots: unknown, options: ComputerScanOptions =
    items.sort((a,b)=>priority(a.name)-priority(b.name)||a.name.localeCompare(b.name));
    for(const item of items) {
     if(++visited>MAX_ENTRIES||found.length>=MAX_FILES){limited=true;return;}
-    if(item.isSymbolicLink()||item.name.startsWith('.')||skip.test(item.name)||secret.test(item.name))continue;
+    if(item.isSymbolicLink()||item.name.startsWith('.')||skip.test(item.name)||secret.test(item.name)||libraryDirName(item.name,dir))continue;
     const file=path.join(dir,item.name),relative=path.relative(root,file);
     if(item.isDirectory()){if(depth>0)await walk(file,depth-1);else limited=true;}
     else if(item.isFile()&&eligible(relative)) {
@@ -118,7 +119,7 @@ async function scanComputerPage(user:string,cursor:unknown,watch=false,options:C
   items.sort((a,b)=>priority(a.name)-priority(b.name)||a.name.localeCompare(b.name));
   while(current.offset<items.length&&visited<2000&&documents.length<100){
    const item=items[current.offset++];visited++;state.scanned++;
-   if(item.isSymbolicLink()||skip.test(item.name)||secret.test(item.name)||(current.dir===current.root&&item.name==='private'))continue;
+   if(item.isSymbolicLink()||skip.test(item.name)||secret.test(item.name)||libraryDirName(item.name,current.dir)||(current.dir===current.root&&item.name==='private'))continue;
    const candidate=path.join(current.dir,item.name),relative=path.relative(current.root??home,candidate);
    if(item.isDirectory()){if(/\.(?:app|framework)$/i.test(item.name))continue;if(item.name==='.claude'){state.memoryHomes??=[];if(!state.memoryHomes.includes(current.dir))state.memoryHomes.push(current.dir);}if(!descend(relative))continue;if(current.depth)state.queue.push({dir:candidate,root:current.root??home,depth:current.depth-1,offset:0});else state.limited=true;continue;}
    if(!item.isFile()||!eligible(relative))continue;

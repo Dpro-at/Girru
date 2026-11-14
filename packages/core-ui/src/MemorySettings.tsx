@@ -2,7 +2,8 @@
 // memory options moved out of the Memory window. Rules · Folders and drives ·
 // Sources · Documents · Projects · Access · Health and backup · Schedule. Each pane reuses
 // the controller the old Memory tabs used, so nothing is lost on the way.
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { NightWorkController, NightWorkSettings } from './MemoryNightWork';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useStoreP2, useStoreP3 } from './store-switches';
 import type { SessionClient } from './session';
 import type {BackgroundMemoryConsentResponse,NativeMemoryProfile} from './memory-encryption-contract.js';
@@ -29,7 +30,7 @@ import type { ScopeRules } from './memory-pages-contract.js';
 export type MemorySettingsPane = 'rules' | 'folders' | 'sources' | 'documents' | 'projects' | 'access' | 'health' | 'schedule';
 export const MEMORY_PANES: ReadonlyArray<{ key: MemorySettingsPane; label: string }> = [
   { key: 'rules', label: 'Rules' }, { key: 'folders', label: 'Folders and drives' }, { key: 'sources', label: 'Sources' }, { key: 'documents', label: 'Documents' }, { key: 'projects', label: 'Projects' },
-  { key: 'access', label: 'Access' }, { key: 'health', label: 'Health and backup' }, { key: 'schedule', label: 'Schedule' },
+  { key: 'access', label: 'Access' }, { key: 'health', label: 'Health and backup' }, { key: 'schedule', label: 'Night work' },
 ];
 
 function useOnce<T extends { dispose(): void }>(make: () => T, deps: unknown[]): T | undefined {
@@ -153,6 +154,15 @@ function ProjectsPane({ client, scopes, disc }: { client: SessionClient; scopes:
     setToast({ id: Date.now(), text: outside ? `${name} is on Outside projects` : `${name} is trusted`, undo: true });
   }
   const outsideList = (trust?.getSnapshot().view?.projects ?? []).filter(v => v.outside);
+  // MR3: library folders (Go module folder, node_modules…) are never projects; one can come back.
+  const notProjects = ss?.tree?.notProjects ?? [];
+  const [showAllLibs, setShowAllLibs] = useState(false);
+  async function setKind(slug: string, name: string, kind: 'project' | 'library') {
+    if (!(await scopes.setProjectKind(slug, kind))) { setToast({ id: Date.now(), text: 'Not changed. Try again.', undo: false }); return; }
+    undo.current = async () => { await scopes.setProjectKind(slug, kind === 'project' ? 'library' : 'project'); };
+    setToast({ id: Date.now(), text: kind === 'project' ? `${name} is a project again` : `${name} moved to Not projects`, undo: true });
+  }
+  const libName = (p: { slug: string; name: string }) => /^(.*?)-v\d+-\d+-\d+/.exec(p.name)?.[1] || p.name;
   const projects = (ss?.tree?.projects ?? []).filter(p => !p.archived && !p.mergedInto && !trust?.isOutside(trustIdOf(p)));
   const groups: readonly ProjectGroup[] = Array.isArray(dk?.groups) ? dk!.groups as readonly ProjectGroup[] : [];
   const roots = ds?.view?.roots ?? [];
@@ -164,6 +174,7 @@ function ProjectsPane({ client, scopes, disc }: { client: SessionClient; scopes:
       ...(rs.some(r => r.group) ? [{ label: 'Separate…', icon: 'diff' as const, run: () => { const r = rs.find(x => x.group); if (r) void disc.separate(r.id); } }] : []),
       ...(rs.length ? [{ label: 'Merge with another folder…', icon: 'folder' as const, run: () => disc.startMerge([rs[0].id], p.name) }] : []),
       ...(trustIdOf(p) ? ['sep' as const, { label: 'Put on Outside projects', icon: 'shield' as const, run: () => void setOutside(trustIdOf(p)!, p.name, true) }] : []),
+      ...(!p.chatProject ? ['sep' as const, { label: 'Not a project', icon: 'archive' as const, run: () => void setKind(p.slug, p.name, 'library') }] : []),
     ])}>
       <Tile name={p.name}/><span className="mem-project-name"><b>{p.name}</b><span className="fine-print">{p.memories} memories</span></span>
       <span className="mem-project-folders">{rs.length ? rs.flatMap(r => r.group ? r.group.members.map(m => <span key={m.id} className="fine-print dk-path" title={m.path}>{m.path} · joined by you</span>) : [<span key={r.id} className="fine-print dk-path" title={r.path ?? ''}>{r.path ?? r.name} · {r.path ? 'this computer' : 'older computer · no folder here'}</span>]) : <span className="fine-print">no folder found yet</span>}</span>
@@ -183,7 +194,16 @@ function ProjectsPane({ client, scopes, disc }: { client: SessionClient; scopes:
     {groups.map(g => <section key={g.id} className="mem-group"><h4><Tile name={g.name}/>{g.name}{g.label ? <span className="fine-print"> · {g.label}</span> : null}</h4><ul className="mem-projects">{projects.filter(p => g.projects.includes(p.slug)).map(row)}</ul></section>)}
     <section className="mem-group">{groups.length > 0 && <h4>Not in a group</h4>}<ul className="mem-projects">{projects.filter(p => !grouped.has(p.slug)).map(row)}</ul></section>
     {dk?.groups === 'missing' && <p className="fine-print">Groups of projects arrive with the next backend update.</p>}
-    <p className="fine-print">Right-click a project: Move to group · Merge with another folder · Separate · Put on Outside projects.</p>
+    <p className="fine-print">Right-click a project: Move to group · Merge with another folder · Separate · Put on Outside projects · Not a project.</p>
+    {notProjects.length > 0 && <section className="mem-group not-projects-group" aria-label="Not projects">
+      <h4><UiIcon name="archive" size={14}/>Not projects<span className="fine-print"> · {notProjects.length} library {notProjects.length === 1 ? 'folder' : 'folders'}</span></h4>
+      <p className="fine-print">Code that was downloaded for other projects (the Go module folder, node_modules and the like). Girru reads nothing from them and keeps no memory for them.</p>
+      <ul className="mem-projects">{(showAllLibs ? notProjects : notProjects.slice(0, 8)).map(p => <li key={p.slug} className="mem-project" onContextMenu={e => menu.at(e, [{ label: "It's a project", icon: 'check', run: () => void setKind(p.slug, libName(p), 'project') }])}>
+        <Tile name={libName(p)}/><span className="mem-project-name"><b>{libName(p)}</b><span className="fine-print">{p.notProjectReason ?? 'Downloaded code'}</span></span>
+        <span className="outside-actions"><button type="button" onClick={() => void setKind(p.slug, libName(p), 'project')}>It's a project</button></span>
+      </li>)}</ul>
+      {notProjects.length > 8 && <button type="button" className="link-button" onClick={() => setShowAllLibs(v => !v)}>{showAllLibs ? 'Show fewer' : `Show all ${notProjects.length}`}</button>}
+    </section>}
     {trust && !trust.getSnapshot().off && <section className="mem-group outside-group" aria-label="Outside projects">
       <h4><UiIcon name="shield" size={14}/>Outside projects</h4>
       <p className="fine-print">Someone else’s repositories. Their files are read as data only and rank below your memory; they never become rules or pinned facts, coding apps get no memory there, and tasks from their task file wait for you once.</p>
@@ -216,18 +236,23 @@ function AccessPane({ client, tree }: { client: SessionClient; tree: import('./m
 // ---------------------------------------------------------------- Schedule
 function SchedulePane({ client, disc, health }: { client: SessionClient; disc: DiscoveryController; health: MemoryHealthController }) {
   const ds = use(disc); const hs = use(health);
+  // MEM-READ-01 MR9: night work replaces the every 15/30/60-minute imports while it is on.
+  const night = useMemo(() => new NightWorkController(client as never), [client]);
+  const ns = useSyncExternalStore(night.subscribe, night.getSnapshot, night.getSnapshot);
+  const nightOn = ns.settings?.enabled !== false;
   const [note, setNote] = useState<string | null>(null);
   useEffect(() => { if (hs?.phase === 'idle') void health.load('company'); }, [health]);
   const v = ds?.view; const id = hs?.importDraft;
   return <div className="mem-settings-body">
     <p className="fine-print">One place for everything Girru does on its own. (Was set in three places before: Health, Project files, Found on this computer.)</p>
+    <NightWorkSettings c={night}/>
     <label className="settings-row"><span>Read this computer again<span className="fine-print">finds new and changed files; imports nothing on its own</span></span>
       <select value={v ? (v.settings.watch ? v.settings.intervalMinutes : 0) : 0} disabled={!v} onChange={e => { const n = Number(e.target.value); void disc.setWatch(n > 0, (n || v!.settings.intervalMinutes) as 15 | 30 | 60); }}>
         <option value={0}>Only when I scan</option><option value={15}>Every 15 minutes</option><option value={30}>Every 30 minutes</option><option value={60}>Every 60 minutes</option></select></label>
-    <AutomaticMemoryImport client={client}/>
+    {nightOn ? <p className="fine-print">Imports of project notes and other agents' memory run at night while night work is on (turn it off to choose every 15, 30 or 60 minutes instead).</p> : <><AutomaticMemoryImport client={client}/>
     <label className="settings-row"><span>Import from other agents' conversations</span>
       <select value={id ? (id.enabled ? id.intervalMinutes : 0) : 0} disabled={!id} onChange={e => { const n = Number(e.target.value); health.editImport(n ? { enabled: true, intervalMinutes: n as 15 | 30 | 60 } : { enabled: false }); void health.saveRules().then(() => setNote('Saved.')); }}>
-        <option value={0}>Off</option><option value={15}>Every 15 minutes</option><option value={30}>Every 30 minutes</option><option value={60}>Every 60 minutes</option></select></label>
+        <option value={0}>Off</option><option value={15}>Every 15 minutes</option><option value={30}>Every 30 minutes</option><option value={60}>Every 60 minutes</option></select></label></>}
     <p className="fine-print">The weekly summary time is in Rules.</p>
     {(note || ds?.result) && <p className="fine-print" role="status">{note ?? ds?.result}</p>}
   </div>;

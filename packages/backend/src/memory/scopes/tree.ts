@@ -23,8 +23,9 @@ import { all, dialect, one, sql, type Step } from '../../repositories/sql-steps.
 import { likeCi } from '../../db/pg/dialect.js';
 import { DRAWER_KINDS, drawerId, isValidDrawerKey, parseDrawerId, DrawerInputError, type DrawerKind } from '../drawers.js';
 import { memoryUseCounts } from '../context/trace.js';
-import { GENERAL_DEPARTMENT, ScopeInputError, departmentStep, listDepartmentsStep, listProjectsStep, type ProjectScope } from './store.js';
+import { GENERAL_DEPARTMENT, NOT_LIBRARY_SQL, ScopeInputError, departmentStep, listDepartmentsStep, listProjectsStep, type ProjectScope } from './store.js';
 import { NOT_REPLACED_SQL, TRUST } from '../validity.js';
+import { readableMemory } from '../readable.js';
 
 export const SCOPE_TREE_TTL_MS = 15_000;
 export const STALE_DAYS = 90;
@@ -230,6 +231,9 @@ export interface ExplorerItem {
   trust: string | null;
   /** STORE-MAP-01 P3: the newer memory that replaced it (shown only with replaced=show), else null. */
   supersededBy: string | null;
+  /** MEM-READ-01 MR1: a short title and the clean lines (Markdown as plain words) for the row. */
+  title?: string;
+  lines?: string;
   validTo: string | null;
 }
 export interface ExplorerPage { scope: string; items: ExplorerItem[]; nextCursor: string | null; total: number; facets: { type: Record<string, number>; layer: Record<string, number>; drawer: Record<string, number>; source: Record<string, number> } }
@@ -323,6 +327,8 @@ export async function exploreScope(ownerId: string, input: ExplorerInput): Promi
     const baseParams: Array<string | number> = [ownerId, ...cond.params];
     if (q) { base.push(`content ${likeCi(d)} ? ESCAPE '\\'`); baseParams.push(`%${escLike(q)}%`); }
     if (!showReplaced) base.push(NOT_REPLACED_SQL);
+    // MR3: library folders are not projects; their memories show only when that one drawer is opened.
+    if (!scope.startsWith('project:')) base.push(NOT_LIBRARY_SQL);
     const filters = [...base];
     const filterParams = [...baseParams];
     if (trust) { filters.push('trust = ?'); filterParams.push(trust as string); }
@@ -360,6 +366,7 @@ export async function exploreScope(ownerId: string, input: ExplorerInput): Promi
       drawerId: drawerIdOf(r.drawer_kind, r.drawer_key), topicKey: r.topic_key, importance: Math.round((r.importance_score ?? 0.5) * 10),
       layer: r.memory_layer ?? 'factual', createdAt: r.created_at, sourceAgentId: r.source_agent_id ?? null,
       source: sourceOf(r.metadata), usedIn: 0, trust: r.trust ?? null, supersededBy: r.superseded_by ?? null, validTo: r.valid_to ?? null,
+      ...readableMemory(r.content),
     }));
     const last = items[items.length - 1];
     return {

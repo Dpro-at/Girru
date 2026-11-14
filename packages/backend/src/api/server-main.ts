@@ -95,6 +95,8 @@ async function start() {
 
     if (summary.background) {
       void resumePendingImports().catch(() => console.warn('[Memory import] Saved progress unavailable; no new import started.')).finally(() => { startAutomaticProjectImports(); startDiscoveryWatch(); });
+      // MEM-READ-01 MR9: night work (01:00–06:00, idle and charging) checks every 5 minutes.
+      void import('../memory/night-work.js').then((m) => m.startNightWork()).catch(() => undefined);
       // TASKLOG-01: read the projects' task files and watch them for changes from the coding apps.
       void import('../services/task-file.js').then((m) => m.syncAllTasks(true)).catch(() => undefined);
       // MOB-LINK-01: the phone link dials the relay only while a phone or an open pairing needs it.
