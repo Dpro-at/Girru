@@ -19,6 +19,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { authorizeActiveRole } from '../../auth/route-guards.js';
 import { cleanHandoff, handoffHistory, handoffTitles, HandoffInputError, HANDOFF_KINDS, listHandoffs, saveHandoff, type HandoffKind, type HandoffScope } from '../../memory/handoff/store.js';
+import { groupByPeriod } from '../../memory/handoff/periods.js';
 import { conversationScope } from '../../memory/handoff/scope.js';
 import { one, sql } from '../../repositories/sql-steps.js';
 import { listBridgeHandoffs } from '../../memory/bridge/store.js';
@@ -67,7 +68,10 @@ export async function agentHandoffRoutes(fastify: FastifyInstance) {
     const titles = await handoffTitles(ownerId, handoffs);
     // STORE-MAP-01 P8: each note names its task (cardId, taskNo, boardId) for "Open the task T-12" (P8 on only).
     const boards = storeP8Enabled() ? await boardsOfCards(handoffs.map((h) => h.cardId ?? '')) : null;
-    return { handoffs: handoffs.map((h) => ({ ...h, title: titles.get(`${h.kind}:${h.scopeId}`) ?? null, ...(boards ? { boardId: h.cardId ? boards.get(h.cardId) ?? null : null } : {}) })) };
+    const out = handoffs.map((h) => ({ ...h, title: titles.get(`${h.kind}:${h.scopeId}`) ?? null, ...(boards ? { boardId: h.cardId ? boards.get(h.cardId) ?? null : null } : {}) }));
+    // HANDOFF-PERIOD-01: the same notes, also grouped by when they were written, so a screen can show
+    // "Today / Earlier this week / …" without regrouping them itself. The list above is unchanged.
+    return { handoffs: out, periods: groupByPeriod(out).map((g) => ({ period: g.period, label: g.label, ids: g.items.map((h) => h.id) })) };
   });
 
   // MEM-GAPS-02 (board M12): notes coding apps wrote through the memory bridge, read only here.

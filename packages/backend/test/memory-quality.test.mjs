@@ -1,4 +1,4 @@
-import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
+import {fileURLToPath as backendFixtureFileURLToPath, pathToFileURL} from 'node:url';
 // CORE-MEM-TOPIC / CORE-MEM-CONFLICT / CORE-MEM-DOCTOR: stable topic keys,
 // conflict surfacing with keep new / keep old / keep both, memory doctor.
 // Run: node --import tsx --test test/memory-quality.test.mjs
@@ -29,7 +29,7 @@ const quiet = { log: console.log, warn: console.warn };
 console.log = () => {};
 console.warn = () => {};
 
-const { getDatabase, closeDatabase } = await import(join(backendDir, 'src/db/database.ts'));
+const { getDatabase, closeDatabase } = await import(pathToFileURL(join(backendDir, 'src/db/database.ts')).href);
 const db = getDatabase();
 await db.initialize();
 const addUser = (id, role) => db.prepare(`INSERT INTO users (id, email, username, password_hash, role, status) VALUES (?, ?, ?, 'x', ?, 'active')`).run(id, `${id}@example.test`, id, role);
@@ -38,19 +38,19 @@ addUser('mq-user', 'user');
 db.prepare('UPDATE agents_config SET is_primary = 0').run();
 db.prepare(`INSERT INTO agents_config (id, name, is_primary) VALUES ('mq-agent', 'Mq Agent', 1)`).run();
 
-const { registerAuthGate } = await import(join(backendDir, 'src/auth/auth-gate.ts'));
-const { memoryRoutes } = await import(join(backendDir, 'src/api/routes/memory.ts'));
-const { memoryFilesRoutes } = await import(join(backendDir, 'src/api/routes/memory-files.ts'));
-const { memoryDoctorRoutes } = await import(join(backendDir, 'src/api/routes/memory-doctor.ts'));
-const T = await import(join(backendDir, 'src/memory/topic-key.ts'));
-const C = await import(join(backendDir, 'src/memory/contradiction.ts'));
-const D = await import(join(backendDir, 'src/memory/drawers.ts'));
-const { memorySaveTool } = await import(join(backendDir, 'src/tools/memory/save.ts'));
-const { memoryEditTool } = await import(join(backendDir, 'src/tools/memory/edit.ts'));
-const { memoryDoctorTool, memoryDoctorFixTool } = await import(join(backendDir, 'src/tools/memory/doctor.ts'));
-const { approvalCategory } = await import(join(backendDir, 'src/tools/approvals.ts'));
-const { DEFAULT_AGENT_TOOLS } = await import(join(backendDir, 'src/tools/grants.ts'));
-const { generateToken } = await import(join(backendDir, 'src/auth/jwt.ts'));
+const { registerAuthGate } = await import(pathToFileURL(join(backendDir, 'src/auth/auth-gate.ts')).href);
+const { memoryRoutes } = await import(pathToFileURL(join(backendDir, 'src/api/routes/memory.ts')).href);
+const { memoryFilesRoutes } = await import(pathToFileURL(join(backendDir, 'src/api/routes/memory-files.ts')).href);
+const { memoryDoctorRoutes } = await import(pathToFileURL(join(backendDir, 'src/api/routes/memory-doctor.ts')).href);
+const T = await import(pathToFileURL(join(backendDir, 'src/memory/topic-key.ts')).href);
+const C = await import(pathToFileURL(join(backendDir, 'src/memory/contradiction.ts')).href);
+const D = await import(pathToFileURL(join(backendDir, 'src/memory/drawers.ts')).href);
+const { memorySaveTool } = await import(pathToFileURL(join(backendDir, 'src/tools/memory/save.ts')).href);
+const { memoryEditTool } = await import(pathToFileURL(join(backendDir, 'src/tools/memory/edit.ts')).href);
+const { memoryDoctorTool, memoryDoctorFixTool } = await import(pathToFileURL(join(backendDir, 'src/tools/memory/doctor.ts')).href);
+const { approvalCategory } = await import(pathToFileURL(join(backendDir, 'src/tools/approvals.ts')).href);
+const { DEFAULT_AGENT_TOOLS } = await import(pathToFileURL(join(backendDir, 'src/tools/grants.ts')).href);
+const { generateToken } = await import(pathToFileURL(join(backendDir, 'src/auth/jwt.ts')).href);
 const { default: Fastify } = await import('fastify');
 
 const app = Fastify();

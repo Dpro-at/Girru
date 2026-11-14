@@ -16,6 +16,8 @@ import { repositories } from '../../repositories/index.js';
 import { toolMemoryActor } from '../../repositories/actor.js';
 import { storeP9bEnabled } from '../../services/store-p9b.js';
 import { bandOf, confidenceOf, trustRows } from '../../memory/quality/trust.js';
+import { currentVersionsStep } from '../../memory/validity.js';
+import { sql } from '../../repositories/sql-steps.js';
 
 interface MemorySearchParams {
   /** Search query */
@@ -244,6 +246,8 @@ Returns:
       // STORE-MAP-01 P9b (MD3): recall output shows how far each memory can be trusted.
       const trust = storeP9bEnabled() && actor.userId ? await trustRows(actor.userId, filtered).catch(() => null) : null;
       const confidence = (m: (typeof filtered)[number]) => (trust ? confidenceOf(m, trust) : null);
+      // MEM-VER-01: the id and version an edit refers to (memory_edit / memory_delete check the version).
+      const versions = await sql().read(currentVersionsStep(filtered.map((m) => m.id))).catch(() => new Map<string, number>());
 
       // Format response text
       let responseText = widened ? 'No memory matched the filters; these match the words without them.\n' : '';
@@ -273,6 +277,7 @@ Returns:
           : 'Private';
 
         responseText += `${index + 1}. ${memory.content}\n`;
+        responseText += `   Id: ${memory.id} | Version: v${versions.get(memory.id) ?? 0}\n`;
         const c = confidence(memory);
         responseText += `   Type: ${memory.type} | Importance: ${importance}/10 | Layer: ${layerDisplay}${c ? ` | Confidence: ${bandOf(c.confidence)}${c.verified ? ' (verified)' : ''}` : ''}\n`;
         responseText += `   Visibility: ${visibilityDisplay}`;
@@ -328,6 +333,7 @@ Returns:
           ...(widened ? { widened: true } : {}),
           memories: filtered.map((m: any) => ({
             id: m.id,
+            version: versions.get(m.id) ?? 0,
             content: m.content,
             type: m.type,
             importance: m.importanceScore ? Math.round(m.importanceScore * 10) : (m.importance || 5),

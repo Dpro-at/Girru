@@ -30,14 +30,20 @@ import { graphRecall } from '../graph/recall.js';
 import { agentProfile, rankedScore, type AgentProfile } from '../agent-relevance.js';
 import { getEmbeddingService } from '../embedding.js';
 import { lexicalTokens } from '../text-normalize.js';
+import { nameMatcher } from '../context/query.js';
 import { redactImportText } from '../import/redact.js';
 import type { DrawerRef } from '../drawers.js';
 import type { Memory } from '../types.js';
-import { classifyIntent, fitsIntent, isMemoryQuestion, type RecallIntent } from './intent.js';
+import { asksAboutThePast, classifyIntent, fitsIntent, isMemoryQuestion, type RecallIntent } from './intent.js';
 import { bandOf, confidenceOf, trustRows, type ConfidenceBand, type TrustRow } from './trust.js';
 import { askOnce } from './pipeline.js';
 
 export const RERANK_BUDGET_MS = 300;
+/** MEM-ACC-04: score share of a memory that names only other known entities, and the boost of one that names the focus. */
+export const OTHER_ENTITY = 0.6;
+export const FOCUS_ENTITY = 1.1;
+/** MEM-HIST-01: a replaced fact in a past question (shown as no longer current). */
+export const PAST_FACT = 1.1;
 /** Candidates fetched for the re-rank (the reply keeps at most its own limit). */
 export const POOL = 24;
 /** Best score below this (hash or semantic embeddings): no reliable memory. */
@@ -102,6 +108,18 @@ export interface QualityRecallInput {
   limit?: number;
   /** MEM-ACC-03: extra queries (the head of a question with a relative clause); their hits join the pool at their own score. */
   parts?: readonly string[];
+  /**
+   * MEM-ACC-04: the entity the conversation is about. A candidate that names only other known
+   * entities (e.g. another project's deadline in the owner drawer) counts OTHER_ENTITY of its score;
+   * one that names the focus counts FOCUS_ENTITY.
+   */
+  focus?: { names: readonly string[]; others: readonly string[] } | null;
+  /**
+   * MEM-HIST-01: true / false forces it; undefined decides from the message (asksAboutThePast).
+   * Then replaced facts are searched too, the older of two siblings is not pushed down, and a
+   * replaced fact counts PAST_FACT of its score (it answers a past question, never a current one).
+   */
+  past?: boolean;
   /** Memory ids already in the prompt (the context pack). */
   skip?: ReadonlySet<string>;
   /** MD8: record the open question when nothing reliable is found (chat replies). */
@@ -178,6 +196,7 @@ function timeout(ms: number): { promise: Promise<'late'>; clear: () => void } {
 export async function qualityRecall(input: QualityRecallInput): Promise<QualityRecall> {
   assertNoDefaultMemoryAccess();
   const intent = classifyIntent(input.query);
+  const past = input.past ?? (process.env.GIRRU_RECALL_PAST !== '0' && asksAboutThePast(input.query));
   const limit = input.limit ?? 6;
   const questionLike = isMemoryQuestion(input.query, lexicalTokens(input.query).length);
   const empty: QualityRecall = { items: [], intent, reliable: false, questionLike: questionLike, best: 0, fellBack: false, rerankMs: 0, question: null };
@@ -187,14 +206,14 @@ export async function qualityRecall(input: QualityRecallInput): Promise<QualityR
   const drawers = [...input.drawers];
   const pool = Math.max(POOL, limit) + skip.size;
   const [found, graph] = await Promise.all([
-    getMemoryStorage().search({ userId: input.userId, query, drawers, limit: pool, mode: 'hybrid' }),
+    getMemoryStorage().search({ userId: input.userId, query, drawers, limit: pool, mode: 'hybrid', ...(past ? { includeReplaced: true } : {}) }),
     graphRecall({ userId: input.userId, drawers }, query, { limit: Math.min(pool, 12) }),
   ]);
   const now = input.now ?? Date.now();
   const byId = new Map<string, Candidate>();
   for (const r of found) byId.set(r.memory.id, { m: r.memory, base: r.similarity, why: (r.scoreBreakdown?.keywordScore ?? 0) > 0 ? 'keyword' : 'meaning' });
   for (const part of (input.parts ?? []).slice(0, 2)) {
-    const extra = await getMemoryStorage().search({ userId: input.userId, query: part.trim().slice(0, 2000), drawers, limit: pool, mode: 'hybrid' });
+    const extra = await getMemoryStorage().search({ userId: input.userId, query: part.trim().slice(0, 2000), drawers, limit: pool, mode: 'hybrid', ...(past ? { includeReplaced: true } : {}) });
     for (const r of extra) {
       const prev = byId.get(r.memory.id);
       if (!prev) byId.set(r.memory.id, { m: r.memory, base: r.similarity, why: (r.scoreBreakdown?.keywordScore ?? 0) > 0 ? 'keyword' : 'meaning' });
@@ -209,8 +228,16 @@ export async function qualityRecall(input: QualityRecallInput): Promise<QualityR
     if (prev) prev.base += GRAPH_BOTH_BONUS;
     else byId.set(g.memory.id, { m: g.memory, base: g.similarity * GRAPH_ONLY, why: 'graph' });
   }
-  const candidates = [...byId.values()].filter((x) => !skip.has(x.m.id) && (x.m.status ?? 'active') === 'active'
+  const candidates = [...byId.values()].filter((x) => !skip.has(x.m.id) && ((x.m.status ?? 'active') === 'active' || (past && (x.m.status as string) === 'replaced'))
     && !(x.m.expiryTimestamp && x.m.expiryTimestamp <= now));
+  if (past) for (const c of candidates) if ((c.m.status as string) === 'replaced') c.base *= PAST_FACT;
+  if (input.focus && input.focus.names.length) {
+    const isFocus = nameMatcher(input.focus.names), isOther = nameMatcher(input.focus.others);
+    for (const c of candidates) {
+      if (isFocus(c.m.content)) c.base *= FOCUS_ENTITY;
+      else if (isOther(c.m.content)) c.base *= OTHER_ENTITY;
+    }
+  }
 
   // MD8: judged on the fast score, so the answer does not depend on whether the re-rank was in time.
   const best = candidates.reduce((s, c) => Math.max(s, c.base), 0);
@@ -236,7 +263,7 @@ export async function qualityRecall(input: QualityRecallInput): Promise<QualityR
   const ranked = fellBack
     ? candidates.map((c) => ({ c, score: c.base, ...confidenceOf(c.m, new Map()) }))
     : scored;
-  if (!fellBack) demoteOlderSiblings(ranked, best);
+  if (!fellBack && !past) demoteOlderSiblings(ranked, best);
   ranked.sort((a, b) => b.score - a.score);
 
   if (!reliable) {

@@ -35,6 +35,13 @@ export interface ContextQueryInput {
   entities?: readonly KnownEntity[];
   /** False: the entity's names only, no topic words. */
   topic?: boolean;
+  /**
+   * MEM-CTX-02: how many of the owner's memories in the open drawers use a word, and how many there
+   * are. A topic word is kept only when the memory itself uses it (df >= 1) and does not use it
+   * everywhere (df below TOPIC_COMMON_SHARE), rarest first. Without this, topic words are the first
+   * content words of the message, which is what MEM-CTX-01 measured as worse.
+   */
+  memoryWords?: { df: (token: string) => number; live: number } | null;
 }
 
 export interface ContextQuery {
@@ -45,6 +52,11 @@ export interface ContextQuery {
    * context, so the answer is searched for and not only the clause that points to it (multi-hop).
    */
   parts: string[];
+  /**
+   * MEM-ACC-04: the names of the entity the conversation is about (focus) and of the other known
+   * entities, so recall can rank a memory that names only another project or person lower.
+   */
+  focus: { names: string[]; others: string[] } | null;
   /** The entity the context came from, or null. */
   entity: KnownEntity | null;
   /** How it was chosen. */
@@ -79,6 +91,15 @@ function mentions(text: string, entity: KnownEntity): boolean {
   });
 }
 
+/** One matcher for many names (whole words, Arabic one-letter prefixes), as `mentions` does for one entity. */
+export function nameMatcher(names: readonly string[]): (text: string) => boolean {
+  const list = [...new Set(names.map((n) => norm(n).replace(/[^\p{L}\p{N}]+/gu, ' ').trim()).filter((n) => n.length >= 3))]
+    .sort((a, b) => b.length - a.length).map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  if (list.length === 0) return () => false;
+  const re = new RegExp(` (?:[لبوفك]|ال)?(?:${list.join('|')}) `, 'u');
+  return (text: string) => re.test(` ${norm(text).replace(/[^\p{L}\p{N}]+/gu, ' ')} `);
+}
+
 function latestMention(texts: readonly string[], entities: readonly KnownEntity[]): { entity: KnownEntity; index: number } | null {
   for (let i = texts.length - 1; i >= 0; i--) {
     // The last-named entity in a message wins ("first X, now Y" -> Y): by position in the text.
@@ -94,18 +115,36 @@ function latestMention(texts: readonly string[], entities: readonly KnownEntity[
   return null;
 }
 
-/** Content words of `text` that the message does not already have and that are not names. */
-function topicWords(text: string, message: string, entity: KnownEntity): string[] {
+/** MEM-CTX-02: a word in this share of the open drawers' memories or more carries no topic. */
+export const TOPIC_COMMON_SHARE = 0.5;
+/**
+ * MEM-CTX-02: fewer topic words than this are not used at all. One word ("runs", "التحديثات",
+ * "خلّينا") moves the query without saying what the conversation is about: measured on the accuracy
+ * test it only ever cost hits, while every question it won back carried two ("server database").
+ */
+export const MIN_TOPIC_WORDS = 2;
+
+/**
+ * Content words of `text` that the message does not already have and that are not names. With
+ * `memoryWords` (MEM-CTX-02): only words the owner's memory of these drawers uses, rarest there
+ * first; without it: the first content words, in order.
+ */
+function topicWords(text: string, message: string, entity: KnownEntity, memoryWords?: { df: (token: string) => number; live: number } | null): string[] {
   const have = new Set(lexicalTokens(message));
   const nameTokens = new Set(entity.names.flatMap((n) => lexicalTokens(n)));
-  const out: string[] = [];
+  const found: Array<{ word: string; at: number; df: number }> = [];
   for (const word of text.split(/[\s,.;:!?؟،()"'«»]+/u)) {
-    const toks = lexicalTokens(word);
-    if (toks.length === 0 || toks.every((t) => have.has(t) || nameTokens.has(t) || t.length < 3)) continue;
-    if (!out.includes(word)) out.push(word);
-    if (out.length >= MAX_TOPIC_WORDS) break;
+    const toks = lexicalTokens(word).filter((t) => !have.has(t) && !nameTokens.has(t) && t.length >= 3);
+    if (toks.length === 0 || found.some((f) => f.word === word)) continue;
+    if (!memoryWords) { found.push({ word, at: found.length, df: 0 }); continue; }
+    // The best token of the word: used by the memory of these drawers, but not by most of it.
+    const dfs = toks.map((t) => memoryWords.df(t)).filter((d) => d >= 1 && d < memoryWords.live * TOPIC_COMMON_SHARE);
+    if (dfs.length === 0) continue;
+    found.push({ word, at: found.length, df: Math.min(...dfs) });
   }
-  return out;
+  if (!memoryWords) return found.slice(0, MAX_TOPIC_WORDS).map((f) => f.word);
+  if (found.length < MIN_TOPIC_WORDS) return [];
+  return found.sort((a, b) => a.df - b.df || a.at - b.at).slice(0, MAX_TOPIC_WORDS).sort((a, b) => a.at - b.at).map((f) => f.word);
 }
 
 export function buildContextQuery(input: ContextQueryInput): ContextQuery {
@@ -122,14 +161,15 @@ export function buildContextQuery(input: ContextQueryInput): ContextQuery {
     const inHistory = latestMention(history, entities);
     if (inHistory) {
       entity = inHistory.entity; source = 'conversation';
-      if (input.topic !== false) topic = topicWords(history[inHistory.index], message, entity);
+      if (input.topic !== false) topic = topicWords(history[inHistory.index], message, entity, input.memoryWords);
     } else if (input.openProject && input.openProject.names.length) {
       entity = input.openProject; source = 'open-project';
     }
   }
   const head = questionHead(message);
-  if (!entity) return { query: message, parts: head ? [head] : [], entity: null, source, topic };
+  if (!entity) return { query: message, parts: head ? [head] : [], focus: null, entity: null, source, topic };
   const names = entity.names.filter((n, k, all) => all.indexOf(n) === k).slice(0, 3);
   const context = [names.join(' / '), ...(topic.length ? [topic.join(' ')] : [])].join(': ');
-  return { query: `${message}\n(${context})`, parts: head ? [`${head}\n(${context})`] : [], entity, source, topic };
+  const others = entities.filter((e) => e !== entity && !e.names.some((n) => entity!.names.includes(n))).flatMap((e) => e.names);
+  return { query: `${message}\n(${context})`, parts: head ? [`${head}\n(${context})`] : [], focus: { names: [...entity.names], others }, entity, source, topic };
 }

@@ -49,3 +49,21 @@ test('a short name or a name inside another word is not a mention', () => {
   const r = buildContextQuery({ message: 'the falconry club meets on Friday', entities: [FALCON, { names: ['Al'] }] });
   assert.equal(r.entity, null);
 });
+
+// MEM-CTX-02: topic words come from the owner's own memory of the open drawers.
+test('topic words: only words the memory of these drawers uses, and never just one', async () => {
+  const { buildContextQuery: build, TOPIC_COMMON_SHARE } = await import(pathToFileURL(join(process.cwd(), 'src/memory/context/query.ts')).href);
+  // "database" and "setup" are in this project's memory; "going"/"yesterday" are not; "project" is in all
+  // of it. The keys are what lexicalTokens makes of them (it stems: database -> databas), as the index is.
+  const df = (t) => ({ databas: 3, setup: 2, project: 10 })[t] ?? 0;
+  const memoryWords = { df, live: 10 };
+  const history = ['We were going through the Quill project server setup and its database yesterday.', 'ok'];
+  const r = build({ message: 'Remind me what happened with that server thing?', history, entities: [{ names: ['Quill', 'كويل'] }], memoryWords });
+  assert.deepEqual(r.topic, ['setup', 'database'], 'rarest in this memory first, in the order of the text');
+  assert.match(r.query, /\(Quill \/ كويل: setup database\)$/);
+  assert.ok(df('project') >= memoryWords.live * TOPIC_COMMON_SHARE, 'a word in half the memories is dropped');
+  // One usable word only: nothing is added (the query stays as it was).
+  const one = build({ message: 'what happened?', history: ['We talked about the Quill database and nothing else.'], entities: [{ names: ['Quill'] }], memoryWords });
+  assert.deepEqual(one.topic, []);
+  assert.equal(one.query, 'what happened?\n(Quill)');
+});

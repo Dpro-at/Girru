@@ -14,6 +14,7 @@ export { memoryGraphTool, memoryGraphTopicTool, memoryGraphSyncTool } from './gr
 export { memoryScopesTool, memoryScopeApplyTool, memoryAccessApplyTool, memoryScopeForgetTool } from './scopes.js';
 export { memoryMoveTool } from './move.js';
 export { memoryBridgeTool, memoryBridgeApplyTool } from './bridge.js';
+export { projectSyncTool, projectSyncApplyTool } from './project-sync.js'; // PROJECT-SYNC-01
 export { memoryReviewTool, memoryReviewDecideTool, memoryReviewRoutineTool, memoryGraphReviewTool } from './review.js';
 export { memoryPersonExportTool, memoryPersonForgetTool, memoryPrivacyReviewTool, memoryPrivacyDecideTool } from './person.js'; // STORE-MAP-01 P9
 export { memoryTrustReviewTool, memoryCorrectedCheckedTool, memoryQuestionAnswerTool, memoryQuestionForgetTool } from './trust.js'; // STORE-MAP-01 P9b screens

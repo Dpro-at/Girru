@@ -4,8 +4,10 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+  # Every pull request, whatever it targets: a stacked PR (one that merges into another branch
+  # before main) used to get no checks at all, so its code reached main having never been tested
+  # as a unit. `push` stays limited to main, so a branch is tested through its PR, not twice.
   pull_request:
-    branches: [main, develop]
 
 permissions:
   contents: read
