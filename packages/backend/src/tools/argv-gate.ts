@@ -131,6 +131,37 @@ export function commandPrefix(command: string): string[] | null {
   return humanPrefix(argv);
 }
 
+/** Parsed view of a command used for gate matching. */
+export interface CommandShape {
+  /** The human prefix (first arity non-flag tokens, flags elsewhere removed). */
+  prefix: string[];
+  /**
+   * True only when NO flag/option token appears before or between the prefix
+   * tokens — i.e. the first `arity` tokens of the command ARE the prefix,
+   * contiguous from the start. A leading option (`git --exec-path=/evil push`,
+   * `git -c protocol.ext.allow=always push`, `git -C /repo push`) changes the
+   * program's behaviour, so it makes the prefix non-strict. Flags that come
+   * AFTER the full prefix (`git push --force`) keep it strict.
+   */
+  strict: boolean;
+}
+
+/**
+ * Parse a command and report both its human prefix and whether that prefix is
+ * strict (no option precedes it). Null when it is not a single simple command.
+ */
+export function analyzeCommand(command: string): CommandShape | null {
+  const argv = parseSimpleCommand(command);
+  if (!argv || argv.length === 0) return null;
+  const words = argv.filter((t) => !FLAG(t));
+  const n = arityOfWords(words);
+  const prefix = words.slice(0, n);
+  // Strict iff the first n tokens of the raw argv carry no flag: then they are
+  // exactly the n non-flag prefix tokens, with nothing injected ahead of them.
+  const strict = argv.slice(0, n).every((t) => !FLAG(t));
+  return { prefix, strict };
+}
+
 /**
  * A rule's pattern is valid when it is 1–8 non-empty, flag-free tokens AND its
  * length equals the arity of its own program — so a rule always names a program's
@@ -154,12 +185,19 @@ function sameTokens(a: readonly string[], b: readonly string[]): boolean {
  * True when `command` is a single simple command whose human prefix equals
  * `pattern` exactly. Invalid patterns, compound commands and wrapper-fronted
  * commands all return false.
+ *
+ * With `{ strict: true }`, a leading option before/between the prefix tokens
+ * also fails the match — use this for allow decisions, where a flag ahead of
+ * the prefix (e.g. `git --exec-path=/evil push`) changes behaviour and must
+ * NOT be treated as the same command. The default is the broad match, which is
+ * the safe direction for deny/ask.
  */
-export function matchesArgvPrefix(pattern: readonly string[], command: string): boolean {
+export function matchesArgvPrefix(pattern: readonly string[], command: string, opts: { strict?: boolean } = {}): boolean {
   if (!isValidArgvPattern(pattern)) return false;
-  const prefix = commandPrefix(command);
-  if (!prefix) return false;
-  return sameTokens(prefix, pattern);
+  const shape = analyzeCommand(command);
+  if (!shape) return false;
+  if (opts.strict && !shape.strict) return false;
+  return sameTokens(shape.prefix, pattern);
 }
 
 /** The outcome of evaluating argv rules against a command. */
@@ -180,14 +218,24 @@ export interface GateDecision {
  *
  * A command that is not a single simple command never matches any rule, so it
  * can never be auto-allowed by a rule — it always reaches the human gate.
+ *
+ * Direction matters. An `allow` rule matches only when the prefix is STRICT:
+ * no option may appear before or between the prefix tokens, because a leading
+ * flag (`git --exec-path=/evil push`, `git -c protocol.ext.allow=always push`)
+ * changes what the command does and must not borrow another command's
+ * allowance. A loosely-prefixed variant falls through to the human gate. A
+ * `deny` or `ask` rule stays broad — matching the flagged variant too is the
+ * safe direction.
  */
 export function evaluateArgvRules(command: string, rules: readonly ArgvRule[]): GateDecision {
-  const prefix = commandPrefix(command);
-  if (prefix) {
+  const shape = analyzeCommand(command);
+  if (shape) {
     for (const rule of rules) {
-      if (isValidArgvPattern(rule.pattern) && sameTokens(prefix, rule.pattern)) {
-        return { action: rule.action, decider: 'rule', rule };
-      }
+      if (!isValidArgvPattern(rule.pattern) || !sameTokens(shape.prefix, rule.pattern)) continue;
+      // An allow needs a strict prefix; a leading option disqualifies it, so
+      // skip this rule and let a later deny/ask or the human gate decide.
+      if (rule.action === 'allow' && !shape.strict) continue;
+      return { action: rule.action, decider: 'rule', rule };
     }
   }
   return { action: 'ask', decider: 'human' };

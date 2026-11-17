@@ -93,6 +93,41 @@ test('evaluateArgvRules: first matching rule decides, recorded as decided by "ru
   }
 });
 
+test('leading flags before the subcommand never satisfy an allow rule (parser-differential fix)', () => {
+  const rules = [{ pattern: ['git', 'push'], action: 'allow', id: 'r1' }];
+  const allowed = (cmd) => m.evaluateArgvRules(cmd, rules);
+
+  // Flags AFTER the full prefix are fine -> still allow.
+  for (const ok of ['git push --force', 'git push -f origin main', 'git push']) {
+    const d = allowed(ok);
+    assert.equal(d.action, 'allow', ok);
+    assert.equal(d.decider, 'rule', ok);
+  }
+
+  // A leading/injected option changes git's behaviour -> must NOT allow; falls to the human gate.
+  for (const bad of ['git --exec-path=/evil push', 'git -c protocol.ext.allow=always push', 'git -C /repo push']) {
+    const d = allowed(bad);
+    assert.equal(d.action, 'ask', bad);
+    assert.equal(d.decider, 'human', bad);
+  }
+
+  // analyzeCommand reports strictness directly.
+  assert.equal(m.analyzeCommand('git push --force').strict, true);
+  assert.equal(m.analyzeCommand('git --exec-path=/evil push').strict, false);
+  assert.equal(m.analyzeCommand('git -c x=y push').strict, false);
+
+  // matchesArgvPrefix: strict mode rejects the leading-flag variant; broad mode (deny/ask) still matches it.
+  assert.equal(m.matchesArgvPrefix(['git', 'push'], 'git --exec-path=/evil push', { strict: true }), false);
+});
+
+test('a deny rule still matches a leading-flag variant (safe direction)', () => {
+  const rules = [{ pattern: ['git', 'push'], action: 'deny', id: 'd1' }];
+  // The broad form so a flagged variant cannot slip past a deny by adding a leading flag that keeps the same prefix.
+  const d = m.evaluateArgvRules('git push', rules);
+  assert.equal(d.action, 'deny');
+  assert.equal(d.decider, 'rule');
+});
+
 test('an earlier rule wins over a later one with the same prefix', () => {
   const rules = [
     { pattern: ['git', 'push'], action: 'deny', id: 'high' },
