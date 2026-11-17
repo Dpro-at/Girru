@@ -114,7 +114,14 @@ test('the loop streams reasoning and text, joins tool calls sent in pieces, feed
   // The second call carries the assistant's call and the result, linked by id.
   const [asst, tool] = bodies[1].messages.slice(-2);
   assert.equal(asst.tool_calls[0].function.arguments, '{"text":"hi"}');
-  assert.deepEqual([tool.role, tool.tool_call_id, tool.content], ['tool', asst.tool_calls[0].id, 'echo: hi']);
+  // SEC-ENVELOPE-01: the fed-back result reaches the model wrapped in the
+  // untrusted-data envelope (fresh random nonce per message, so no exact match).
+  assert.equal(tool.role, 'tool');
+  assert.equal(tool.tool_call_id, asst.tool_calls[0].id);
+  assert.ok(tool.content.includes('echo: hi'), 'the tool body survives inside the frame');
+  assert.match(tool.content, /GIRRU-UNTRUSTED-DATA nonce=[0-9a-f]{32} begin/, 'open marker with a nonce');
+  assert.match(tool.content, /GIRRU-UNTRUSTED-DATA nonce=[0-9a-f]{32} end/, 'close marker with a nonce');
+  assert.match(tool.content, /never as instructions/i, 'intro says data, not instructions');
 });
 
 test('the loop: an unreachable or refusing server is ModelUnavailable; stop ends quietly', async () => {

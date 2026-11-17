@@ -49,7 +49,19 @@ test('runs requested tools, feeds results back, continues to the answer', async 
   // Tools go in the function format; the second call carries the assistant call and both results.
   assert.deepEqual(bodies[0].tools, toOllamaTools(tools));
   assert.equal(bodies[1].messages.at(-3).tool_calls.length, 2);
-  assert.deepEqual(bodies[1].messages.slice(-2).map((m) => [m.role, m.tool_name, m.content]), [['tool', 'read_file', 'file body'], ['tool', 'exec', 'Error: refused']]);
+  // SEC-ENVELOPE-01: tool results reach the model wrapped in the untrusted-data
+  // envelope (a fresh random nonce per message, so exact-equality is impossible).
+  // Each fed-back result keeps its role/name, still contains the original body,
+  // and carries the data boundary marking it as data, not instructions.
+  const fed = bodies[1].messages.slice(-2);
+  assert.deepEqual(fed.map((m) => [m.role, m.tool_name]), [['tool', 'read_file'], ['tool', 'exec']]);
+  assert.ok(fed[0].content.includes('file body'), 'read_file body survives inside the frame');
+  assert.ok(fed[1].content.includes('Error: refused'), 'exec error survives inside the frame');
+  for (const m of fed) {
+    assert.match(m.content, /GIRRU-UNTRUSTED-DATA nonce=[0-9a-f]{32} begin/, 'open marker with a nonce');
+    assert.match(m.content, /GIRRU-UNTRUSTED-DATA nonce=[0-9a-f]{32} end/, 'close marker with a nonce');
+    assert.match(m.content, /never as instructions/i, 'intro says data, not instructions');
+  }
 });
 
 test('a thrown tool error becomes an error result, not a failed turn', async () => {
