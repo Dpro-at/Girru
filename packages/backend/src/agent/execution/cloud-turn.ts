@@ -1,4 +1,5 @@
 import {assertRunAdmission,beforeAdmittedModel,executeAdmittedTool,admitToolBatch} from './run-admission-entry.js';
+import { frameResultBlocksForModel } from './tool-step.js';
 import { safeConsole } from '../../services/safe-error-log.js';
 /**
  * Claude Streaming Chat Handler with Agentic Tool Loop
@@ -337,7 +338,7 @@ export async function streamChatClaude(
             }
 
             console.log(`[Chat] ✅ Tool result: ${resultContent[0]?.text?.slice(0, 100) || '(image)'}`);
-            return { type: 'tool_result', tool_use_id: toolCall.id, content: resultContent };
+            return { type: 'tool_result', tool_use_id: toolCall.id, content: frameResultBlocksForModel(resultContent, toolCall.tool) };
           } catch (err: any) {
             console.error(`[Chat] ❌ Tool error for ${toolCall.tool}:`, err.message);
             return {

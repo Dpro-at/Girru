@@ -1,4 +1,4 @@
-import { runStepCalls } from '../execution/tool-step.js';
+import { runStepCalls, frameToolResultForModel } from '../execution/tool-step.js';
 import type { AgentLoopEvent as LoopFrame, AgentToolDefinition as ApiTool, AgentLoopResult, ExecuteAgentTool } from '../contracts/execution.js';
 /**
  * Agent loop for LM Studio (CHAT-PRO-02 G): the same turn as the Ollama loop
@@ -100,7 +100,7 @@ export async function runLmStudioAgentLoop(o: LmStudioLoopOptions): Promise<Agen
       const { results, skippedNote } = await runStepCalls(asked, o.execute, now, o.callCap);
       if (o.signal.aborted) throw new Aborted();
       o.write({ type: 'tool_result', step, results: results.map((r) => ({ id: r.id, name: r.name, output: clip(r.text, TOOL_OUTPUT_CHARS), isError: r.isError, ms: r.ms })) });
-      for (const [i, r] of results.entries()) messages.push({ role: 'tool', tool_call_id: r.id, content: clip(r.text, o.toolOutputChars ?? TOOL_OUTPUT_MODEL_CHARS) + (skippedNote && i === results.length - 1 ? `\n\n${skippedNote}` : '') });
+      for (const [i, r] of results.entries()) messages.push({ role: 'tool', tool_call_id: r.id, content: frameToolResultForModel(clip(r.text, o.toolOutputChars ?? TOOL_OUTPUT_MODEL_CHARS), r.name) + (skippedNote && i === results.length - 1 ? `\n\n${skippedNote}` : '') });
       if (step >= maxSteps) {
         const note = `\n\nI used ${maxSteps} steps on this task. Tell me to continue and I will pick up from here.`;
         o.write({ type: 'text', content: note });

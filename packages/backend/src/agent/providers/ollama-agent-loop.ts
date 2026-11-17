@@ -85,7 +85,7 @@ export interface OllamaLoopOptions {
  * another and the rest are not run (the model is told so).
  */
 export { runStepCalls, toolResultText } from '../execution/tool-step.js';
-import { runStepCalls } from '../execution/tool-step.js';
+import { runStepCalls, frameToolResultForModel } from '../execution/tool-step.js';
 
 /** STORE-MAP-01 P2b: the tools of this step (asked once), in the function format; undefined when none. */
 export function stepTools(set: { definitions(): ApiTool[] }) {
@@ -145,7 +145,7 @@ export async function runOllamaAgentLoop(o: OllamaLoopOptions): Promise<AgentLoo
       const { results, skippedNote } = await runStepCalls(asked, o.execute, now, o.callCap);
       if (o.signal.aborted) throw new Aborted();
       o.write({ type: 'tool_result', step, results: results.map((r) => ({ id: r.id, name: r.name, output: clip(r.text, TOOL_OUTPUT_CHARS), isError: r.isError, ms: r.ms })) });
-      for (const [i, r] of results.entries()) messages.push({ role: 'tool', tool_name: r.name, content: clip(r.text, o.toolOutputChars ?? TOOL_OUTPUT_MODEL_CHARS) + (skippedNote && i === results.length - 1 ? `\n\n${skippedNote}` : '') });
+      for (const [i, r] of results.entries()) messages.push({ role: 'tool', tool_name: r.name, content: frameToolResultForModel(clip(r.text, o.toolOutputChars ?? TOOL_OUTPUT_MODEL_CHARS), r.name) + (skippedNote && i === results.length - 1 ? `\n\n${skippedNote}` : '') });
       if (step >= maxSteps) {
         const note = `\n\nI used ${maxSteps} steps on this task. Tell me to continue and I will pick up from here.`;
         o.write({ type: 'text', content: note });

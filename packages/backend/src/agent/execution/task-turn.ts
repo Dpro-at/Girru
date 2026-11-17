@@ -6,6 +6,7 @@ import {withStoredRunControl,withStoredRunClaim,withStoredRunHeartbeat,canClaimS
 import {scopeAdmittedMemory} from './run-admission-entry.js';
 import {withRunAdmission,beforeAdmittedModel,executeAdmittedTool,admitToolBatch,runInputDigest} from './run-admission-entry.js';
 import { agentSkillsPrompt } from '../../skills/central-store.js';
+import { frameToolResultForModel, frameResultBlocksForModel } from './tool-step.js';
 import { HANDOFF_NOTE } from '../../memory/handoff/store.js';
 import { isPilotAgent } from '../../memory/outbox/pilot.js';
 import { resolveAgentContext } from '../context/resolve.js';
@@ -232,10 +233,10 @@ function claudeDriver(claude: ClaudeClient, agent: AgentRow, systemPrompt: strin
     assistantMessage: (r) => ({ role: 'assistant', content: r.rawBlocks || r.content }),
     toolResultMessages: (results) => [{
       role: 'user',
-      content: results.map(({ id, result, text }) => ({
+      content: results.map(({ id, tool, result, text }) => ({
         type: 'tool_result',
         tool_use_id: id,
-        content: result?.content ?? [{ type: 'text', text }],
+        content: frameResultBlocksForModel(result?.content ?? [{ type: 'text', text }], tool),
         ...(result?.error ? { is_error: true } : {}),
       })),
     }],
@@ -267,7 +268,7 @@ function ollamaDriver(agent: AgentRow, systemPrompt: string, tools: any[] | (() 
     toolResultMessages: (results) => results.map(({ tool, result, text }) => ({
       role: 'tool',
       tool_name: tool,
-      content: (result?.error ? `Error: ${text}` : text).slice(0, toolChars ?? Number.MAX_SAFE_INTEGER),
+      content: frameToolResultForModel((result?.error ? `Error: ${text}` : text).slice(0, toolChars ?? Number.MAX_SAFE_INTEGER), tool),
     })),
   };
 }

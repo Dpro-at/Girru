@@ -1,6 +1,34 @@
 /** Provider-independent tool-step execution. The injected executor retains authorization. */
 import type { ToolResult } from '../../tools/types.js';
 import { planCalls, SKIPPED_NOTE } from '../../tools/on-demand.js';
+import { wrapUntrusted, makeNonce } from '../security/data-envelope.js';
+
+/**
+ * SEC-ENVELOPE-01: frame a tool result's text as untrusted data before it
+ * reaches the model. Tool output is the single boundary through which every
+ * untrusted source enters the conversation — fetched web pages (browser tools),
+ * imported memory and documents (memory tools), and another agent's reply
+ * (multi-agent tools) all come back as tool results. On by default; a no-op
+ * when the envelope is turned off. Our own trailing notes stay outside the frame.
+ */
+export function frameToolResultForModel(text: string, toolName?: string): string {
+  return wrapUntrusted(text, { source: toolName });
+}
+
+/**
+ * SEC-ENVELOPE-01: frame the text blocks of a provider tool_result (Claude's
+ * agentic loop keeps image blocks, so the content is an array of blocks). Every
+ * text block of one tool result shares a single per-message nonce; non-text
+ * blocks (images) pass through untouched. A no-op when the envelope is off.
+ */
+export function frameResultBlocksForModel<B extends { type?: string; text?: string }>(
+  blocks: readonly B[], toolName?: string,
+): B[] {
+  const nonce = makeNonce();
+  return blocks.map((b) =>
+    b && b.type === 'text' ? { ...b, text: wrapUntrusted(b.text ?? '', { source: toolName, nonce }) } : b,
+  );
+}
 
 export async function runStepCalls<C extends { id: string; name: string; args: Record<string, unknown> }>(
   calls: readonly C[], execute: (name: string, args: Record<string, unknown>) => Promise<ToolResult>, now: () => number, cap?: number,
