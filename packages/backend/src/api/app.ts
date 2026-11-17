@@ -61,6 +61,7 @@ import { storeP9Routes } from './routes/store-p9.js'; // STORE-MAP-01 P9: one pe
 import { departmentsRoutes } from './routes/departments.js'; // STORE-MAP-01 P3: one list of departments (GIRRU_STORE_P3)
 import { modelsRoutes } from './routes/models.js';
 import { chatRoutes } from './routes/chat.js';
+import { sideQuestionRoutes } from './routes/side-questions.js'; // AGENT-BTW-01: /btw side-question channel
 import { smartChatRoutes } from './routes/smart-chat.js';
 import { settingsRoutes } from './routes/settings.js';
 import { agentsStatusRoutes } from './routes/agents-status.js';
@@ -404,6 +405,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await fastify.register(chatAddonsRoutes,{home:process.env.DPRO_ADDON_METADATA_HOME});
   await fastify.register(storeRoutes,{home:process.env.DPRO_ADDON_METADATA_HOME});
   await fastify.register(chatRoutes);
+  await fastify.register(sideQuestionRoutes); // AGENT-BTW-01: /btw side questions (owner only, off an immutable snapshot)
   await fastify.register(meetingRoutes);
   await fastify.register(reportRoutes);
   await fastify.register(chatConversationRoutes); // saved conversations + resumable runs (CHAT-REBUILD-01)

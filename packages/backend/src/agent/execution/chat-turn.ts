@@ -74,6 +74,7 @@ import { beginLocalReply } from '../../llm/local-scheduler.js';
 import { isOpenAiLocalModelId, openAiLocalModelName, openAiLocalNotRunningMessage, openAiLocalUrl } from '../../llm/openai-local.js';
 import type { ToolDef } from '../../tools/tool-doors.js';
 import { OnDemandTools } from '../../tools/on-demand.js';
+import { captureMainContext } from '../../services/side-question/snapshot.js'; // AGENT-BTW-01
 
 const DEFAULT_MODEL = DEFAULT_OLLAMA_MODEL;
 
@@ -727,6 +728,28 @@ export async function executeChatTurn(reply: AgentReply, input: ChatTurnInput): 
     // CLI bridge providers run a separate local agent with its own tools; never for channel turns.
     if ((toolPolicy || currentChatRun()?.reviewTools) && (resolvedProvider === 'gemini-cli' || resolvedProvider === 'claude-cli')) {
       return reply.status(403).send({ error: 'This agent provider is not available for channel messages' });
+    }
+
+    // AGENT-BTW-01: publish an immutable snapshot of this turn's fully resolved
+    // request (system prompt, messages, provider/model, params) for the owner's
+    // session, so a `/btw` side question can be answered off it without touching
+    // this run. Only for the owner's own chat (never an outside channel turn),
+    // and never mid-generation — this is the context at submission time.
+    if (!channelTurn && userId) {
+      try {
+        captureMainContext({
+          ownerId: userId,
+          parentSessionId: sessionId,
+          boundary: 'request_start',
+          systemPrompt: resolvedSystemPrompt,
+          messages: turnMessages.map((m) => ({ role: m.role, content: messageText(m.content) })),
+          provider: resolvedProvider,
+          model: resolvedModel,
+          temperature: resolvedTemp,
+          ...(p2bWindow?.tokens ? { window: p2bWindow.tokens } : {}),
+          ...(resolvedProvider === 'claude' && resolvedApiKey ? { apiKey: resolvedApiKey } : {}),
+        });
+      } catch { /* a side-question snapshot is best-effort; never fail the turn */ }
     }
 
     // CHAT-01: a stream turn sends its SSE headers (and starts the heartbeat)

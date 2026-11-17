@@ -288,6 +288,16 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
     const { startTaskRunRecovery } = await import('../services/task-run-executor.js');
     startTaskRunRecovery();
 
+    // AGENT-BTW-01: a side question left `running` by a restart cannot still be
+    // in flight; mark it `interrupted`, keeping its partial answer.
+    try {
+      const { interruptLeftovers } = await import('../services/side-question/store.js');
+      const n = await interruptLeftovers();
+      if (n > 0) console.log(`[SideQuestion] Marked ${n} interrupted after restart`);
+    } catch (err) {
+      console.warn('[SideQuestion] Could not reconcile leftover side questions:', (err as Error)?.message);
+    }
+
     // BACKUP-01: the daily backup at 03:00 (or on waking after it).
     const { startDailyBackups } = await import('../services/backups.js');
     startDailyBackups();
