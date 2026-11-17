@@ -10,6 +10,7 @@
 
 import { randomUUID, randomBytes } from 'node:crypto';
 import { sha256Hex } from './evidence.js';
+import { getAsset } from './scope.js';
 
 export class SensorError extends Error {}
 
@@ -22,6 +23,10 @@ const SEVERITIES = ['info', 'low', 'medium', 'high', 'critical'];
  */
 export function pairSensor(db, userId, { assetId = null, name }) {
   if (!name || typeof name !== 'string') throw new SensorError('A name is required');
+  // Ownership gate: a sensor may only be attached to an asset this same user owns (no IDOR on write).
+  if (assetId != null) {
+    if (!getAsset(db, userId, assetId)) throw new SensorError('That server is not in your list');
+  }
   const token = `gss_${randomBytes(24).toString('base64url')}`; // Girru Server Sensor token
   const tokenHash = sha256Hex(token);
   const id = randomUUID();
