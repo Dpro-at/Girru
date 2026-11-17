@@ -37,6 +37,7 @@ import { forUpdate, greatest, insertOrIgnore, isParam, nowPlusText, nowText, off
 import { getEncryptionService } from '../credentials/encryption.js';
 import { orderedId } from '../repositories/ordered-id.js';
 import { currentChatRun } from './chat-run-context.js';
+import { onRunFinished } from '../memory/rsi/extract.js';
 import { decryptContract, encryptContract, type TaskContract, type Verdict, type VerificationStatus, contractView, type ContractView } from './task-contracts.js';
 
 export type TaskRunStatus = 'queued' | 'running' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled';
@@ -287,10 +288,10 @@ export function holdsLease(lease: Lease): Promise<boolean> {
 }
 
 /** Leave the running state (fenced). Folds active time and releases the lease. */
-export function finishAttempt(lease: Lease, status: TaskRunStatus, reason: string | null, outputPreview?: string | null): Promise<boolean> {
+export async function finishAttempt(lease: Lease, status: TaskRunStatus, reason: string | null, outputPreview?: string | null): Promise<boolean> {
   const now = Date.now();
   const terminal = status === 'completed' || status === 'failed' || status === 'cancelled';
-  return sql().read((function* () {
+  const won = await sql().read((function* () {
     const d = yield* dialect();
     const res = yield* run(`
       UPDATE task_runs SET status = ?, status_reason = ?,
@@ -303,6 +304,11 @@ export function finishAttempt(lease: Lease, status: TaskRunStatus, reason: strin
     `, status, reason, outputPreview ?? null, now, now, terminal ? 1 : 0, lease.runId, lease.owner, lease.generation);
     return res.changes === 1;
   })());
+  // MEM-RSI-01: a run reaching a terminal state is a chance to learn a lesson.
+  // Fire-and-forget, deterministic, and off by default (does nothing unless the
+  // owner turns the lessons layer on); it never affects finishing the run.
+  if (won && terminal) onRunFinished(lease.runId);
+  return won;
 }
 
 export function elapsedMs(run: TaskRunRow, now = Date.now()): number {

@@ -80,6 +80,7 @@ export const APPROVAL_REQUIRED_TOOLS: Readonly<Record<string, ApprovalCategory>>
   open_in_code: 'other', // CODE-OPEN-01: the owner approves which file opens in Code
   memory_privacy_decide: 'other', // STORE-MAP-01 P9: keeps or drops a personal-data / sensitive memory; the approval is the confirm
   memory_graph_sync: 'other', // MEM-FINISH-01 (M14 Rebuild map): re-indexes the map and prunes orphan links; the approval is the confirm
+  memory_lessons_review: 'other', // MEM-RSI-01: reverse / confirm / forget a lesson's evidence; the approval is the confirm
   // spending money
   make_call: 'money',
   trading_execute: 'money',

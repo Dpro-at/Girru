@@ -82,6 +82,8 @@ export const DEFAULT_AGENT_TOOLS: readonly string[] = [
   'memory_graph_review', // CORE-MEM-GRAPH: approve / reject a pending link; every call needs one-time owner approval
   'memory_graph_topic', // MEM-GRAPH-CLUSTER: cluster -> topic or dismiss; every call needs one-time owner approval
   'memory_graph_sync', // MEM-FINISH-01: rebuild the map (M14); every call needs one-time owner approval
+  'memory_lessons', // MEM-RSI-01: read-only evidence-gated lessons; owner's own turns only
+  'memory_lessons_review', // MEM-RSI-01: reverse / confirm / forget a source's evidence; every call needs one-time owner approval
   'memory_recall', // MEM-CACHE-01: read-only trace of the agent's own replies, summaries, cache metrics
   'memory_person_export', // STORE-MAP-01 P9: everything about one person (person's drawer open for the run); every call needs one-time owner approval
   'memory_person_forget', // STORE-MAP-01 P9: forget one person in one action; every call needs one-time owner approval
