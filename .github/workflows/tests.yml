@@ -88,7 +88,7 @@ jobs:
           node packages/core-ui/scripts/build.cjs --candidate --live-entry
       - name: Type-check
         run: |
-          node --test scripts/dependency-snapshot.test.cjs
+          node --test scripts/dependency-snapshot.test.cjs scripts/audit-gate.test.cjs
           node packages/core-ui/scripts/typecheck.cjs
           (cd packages/backend && npx tsc --noEmit -p .)
       # Some tests start node with paths relative to their package, so each suite runs from it.

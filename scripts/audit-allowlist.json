@@ -1,0 +1,13 @@
+{
+  "comment": "Advisories tolerated by scripts/audit-gate.cjs. An entry suppresses its advisory ONLY while the advisory stays out of the runtime (production) dependency tree; the gate re-blocks it the moment it reaches runtime, and blocks anything not listed here. List an advisory only when it has no patched release and the sole npm-offered fix is a breaking downgrade of a build-time tool. Re-check each entry when dependencies change and remove it as soon as a real fix ships.",
+  "allow": [
+    {
+      "ghsa": "GHSA-fc5q-39xc-vjpf",
+      "advisory": "picomatch vulnerable to ReDoS through single-branch repeated extglobs",
+      "packages": ["core-ui", "desktop"],
+      "scope": "development",
+      "reason": "Build-time glob dependency pulled transitively by vite (core-ui) and electron-builder (desktop). No patched release exists — the advisory covers every published version (<=4.0.7) — and npm's only offered fix is a breaking major downgrade of vite / electron-builder. picomatch here matches the developer's own trusted file paths at build time, is never reachable at runtime or on untrusted input, and `npm audit --omit=dev` reports zero vulnerabilities for both packages.",
+      "reviewed": "2026-11-18"
+    }
+  ]
+}
