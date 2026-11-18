@@ -432,8 +432,10 @@ export class SessionClient {
    * own origin (e.g. /api/ext/<id>/ui in an embedded frame), so that UI acts as the signed-in
    * owner. Returns undefined unless an owner session is authenticated; the embedded UI also sends
    * same-origin cookies, so a remembered-session sentinel still authenticates by cookie. */
-  embedToken = (): string | undefined =>
-    this.#state.phase === 'authenticated' && this.#state.user?.role === 'owner' ? this.#token : undefined;
+  embedToken(): string | undefined {
+    // A method (not an own field) so the bearer is never an own enumerable property of the client.
+    return this.#state.phase === 'authenticated' && this.#state.user?.role === 'owner' ? this.#token : undefined;
+  }
   subscribe = (fn: () => void) => { this.#listeners.add(fn); return () => { this.#listeners.delete(fn); }; };
   recoveryCodes=():readonly string[]=>this.#state.phase==='recovery-codes'&&this.#recoveryCodes?Object.freeze([...this.#recoveryCodes]):Object.freeze([]);
   finishRecoveryCodes(){if(this.#state.phase==='recovery-codes')this.#reset(this.#state.mode,'signed-out','expired','login');}
