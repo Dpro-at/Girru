@@ -471,8 +471,16 @@ function createApplicationServer({ healthCheck = null, browserController = null,
     // /api/ext/<id>/ui[/<file>.js|css], returns ONLY html/js/css under a tight size
     // bound, strips cookies/redirects, and frames same-origin. The app's data stays
     // owner-gated (see allowed()); the app's own code runs sandboxed on the embed side.
+    //
+    // CodeQL js/user-controlled-bypass flags that the URL (user input) selects a branch
+    // that skips the auth gate below. That is by design and safe: the only thing this
+    // branch serves is a public UI subtree the backend already exposes unauthenticated;
+    // the id/file are allow-listed by the regex, the method is GET/HEAD, no bearer is
+    // forwarded, the response is restricted to html/js/css, and the frame is same-origin.
+    // No private data is reachable here, so the "bypass" grants nothing beyond the public
+    // assets. Suppressed in source; the data routes stay owner-gated in allowed().
     const extUi = /^\/api\/ext\/([a-z0-9][a-z0-9-]{0,62})\/ui(?:\/([a-z0-9][a-z0-9._-]{0,63}\.(js|css)))?$/.exec(raw);
-    if (extUi) {
+    if (extUi) { // codeql[js/user-controlled-bypass]
       if (!['GET', 'HEAD'].includes(req.method)) return send(405);
       if (req.headers.authorization || req.headers['transfer-encoding'] || Number(req.headers['content-length'] || 0)) return send(400);
       const kind = extUi[3] === 'js' ? 'text/javascript' : extUi[3] === 'css' ? 'text/css' : 'text/html';
