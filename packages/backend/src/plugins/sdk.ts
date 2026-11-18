@@ -18,6 +18,7 @@ import * as channelHost from '../../extensions/shared/channel-host.js';
 import * as channelPolicy from '../../extensions/shared/channel-policy.js';
 import { beginChannelTurn, CHANNEL_TURN_HEADER, type ChannelOrigin } from '../tools/channel-policy.js';
 import { getDatabase } from '../db/index.js';
+import { listSshHosts } from '../discovery/service.js';
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, resolve, sep, join } from 'path';
@@ -74,6 +75,9 @@ export interface ExtensionApi {
   registerCronJob(schedule: string, handler: () => Promise<void>, jobId: string): void;
   unregisterCronJob(jobId: string): void;
 
+  // SSH servers the user imported from ~/.ssh/config (needs the 'ssh-hosts' permission).
+  // Names and addresses only — never a key's contents or a password.
+  sshHosts(userId: string): Promise<Array<{ alias: string; host: string | null; port: number | null; login: string | null }>>;
   callCenterHost?: Readonly<{load:()=>Promise<any>}>;
 
   // Services — access to core systems
@@ -476,6 +480,23 @@ export function createExtensionApi(
       const fullJobId = `ext:${extensionId}:${jobId}`;
       cronEngine.unregister(fullJobId);
       safeConsole.log(`[ExtensionApi:${extensionId}] ❌ Cron job unregistered: ${jobId}`);
+    },
+
+    // SSH servers discovered on this computer — names and addresses only, never secrets.
+    async sshHosts(userId) {
+      const result = checkPermissions(extensionId, ['ssh-hosts']);
+      if (!result.granted) {
+        const error = `Extension "${extensionId}" missing permission: ssh-hosts`;
+        safeConsole.error(`[ExtensionApi:${extensionId}] ❌ ${error}`);
+        logSecurityEvent({
+          event_type: 'extension.permission.denied', severity: 'warning', user_id: null, ip_address: null,
+          user_agent: null, resource_type: 'extension', resource_id: extensionId, action: 'read_ssh_hosts',
+          status: 'blocked', metadata: { missing_permissions: result.missing },
+        });
+        throw new Error(error);
+      }
+      if (typeof userId !== 'string' || !userId) return [];
+      return listSshHosts(userId);
     },
 
     // Config Management
