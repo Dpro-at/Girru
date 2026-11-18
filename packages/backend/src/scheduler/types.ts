@@ -149,6 +149,16 @@ export interface ICronEngine {
   unscheduleJob(jobId: string): void;
 
   /**
+   * Register an ad-hoc handler job (used by the extension plugin SDK).
+   */
+  register(jobId: string, cronExpression: string, handler: () => Promise<void> | void): void;
+
+  /**
+   * Unregister an ad-hoc handler job registered with register().
+   */
+  unregister(jobId: string): void;
+
+  /**
    * Get all scheduled jobs
    */
   getJobs(): CronJob[];
