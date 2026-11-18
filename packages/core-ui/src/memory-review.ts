@@ -39,8 +39,19 @@ export function kindOf(p: ProposalSummary & { counts?: { add: number; update: nu
   if (p.source === 'agent' && (!p.counts || p.counts.update + p.counts.delete > 0)) return 'agent';
   return 'important';
 }
+/** STORE-MAP-01 P6: a suggestion kept from a file in a project folder (shown as a label, not a reason). */
+export const REPOSITORY_FILE = 'repository-file';
 /** Reasons in plain words (machine details such as ids are left out). */
-export const plainReasons = (reasons: readonly string[]) => reasons.filter(r => /^[a-z][a-z _-]{0,40}$/i.test(r));
+/** STORE-MAP-01 P8 (D27): a lesson suggested from a run's working notes (shown as a label, not a reason). */
+export const RUN_NOTES = 'run-notes';
+/** STORE-MAP-01 P9 (board P9d): flagged memories show these as chips (Personal data, Sensitive, From a channel), not as reasons. */
+export const PERSONAL_DATA = 'personal-data';
+export const SPECIAL_CATEGORY = 'special-category';
+export const OUTSIDER = 'outsider';
+const CHIP_REASONS = new Set([REPOSITORY_FILE, RUN_NOTES, PERSONAL_DATA, SPECIAL_CATEGORY]);
+export const plainReasons = (reasons: readonly string[]) => reasons.filter(r => !CHIP_REASONS.has(r) && /^[a-z][a-z _-]{0,40}$/i.test(r));
+/** A waiting memory about a sensitive topic: never saved by itself, and "Select all" leaves it out. */
+export const isSensitive = (p: { reasons: readonly string[] } | undefined) => !!p?.reasons.includes(SPECIAL_CATEGORY);
 /** The proposal's text for the list: what it adds or changes to. */
 export function proposalText(p: Proposal): string {
   const c = p.changes[0];
@@ -183,7 +194,8 @@ export class MemoryReviewController extends Store<ReviewState> {
     if (next) void this.openItem(next.key);
   }
   toggleCheck(key: string) { const c = this.getSnapshot().checked; this.publish({ checked: c.includes(key) ? c.filter(k => k !== key) : [...c, key], confirmBulk: null }); }
-  checkAll(on: boolean) { this.publish({ checked: on ? this.visible().map(i => i.key) : [], confirmBulk: null }); }
+  /** Selects every shown question except sensitive ones (P9d: they start unchecked; tick them one by one). */
+  checkAll(on: boolean) { this.publish({ checked: on ? this.visible().filter(i => !isSensitive(i.summary)).map(i => i.key) : [], confirmBulk: null }); }
   startEdit() { const d = this.getSnapshot().detail; const c = d?.changes[0]; if (c && 'after' in c) this.publish({ editing: c.after.content }); }
   editText(editing: string) { this.publish({ editing }); }
   cancelEdit() { this.publish({ editing: null }); }

@@ -3,7 +3,7 @@
 // in alternating rounds with the drawer not opted in (triggers find nothing)
 // and opted in (each write also adds its change events), and reports the time per write.
 // Run from packages/backend: node --import tsx scripts/memory-baseline/outbox-overhead.mjs [--n 2000]
-import { backendDir, addUser, argValue, cleanup, openDb, percentile, quietly } from './env.mjs';
+import { backendDir, moduleUrl, addUser, argValue, cleanup, openDb, percentile, quietly } from './env.mjs';
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 
@@ -11,9 +11,9 @@ process.env.MEMORY_EMBEDDINGS = 'hash';
 const n = Number(argValue('n', '2000'));
 const { db, closeDatabase } = await openDb();
 addUser(db, 'p0-owner', 'owner');
-const { createProject } = await import(join(backendDir, 'src/repositories/chat-conversations.ts'));
-const { newMemory, saveVersioned } = await import(join(backendDir, 'src/memory/learning.ts'));
-const { enableScope, disableScope } = await import(join(backendDir, 'src/memory/outbox/events.ts'));
+const { createProject } = await import(moduleUrl(backendDir, 'src/repositories/chat-conversations.ts'));
+const { newMemory, saveVersioned } = await import(moduleUrl(backendDir, 'src/memory/learning.ts'));
+const { enableScope, disableScope } = await import(moduleUrl(backendDir, 'src/memory/outbox/events.ts'));
 const folder = join(process.cwd(), 'alpha');
 mkdirSync(folder, { recursive: true });
 const project = await createProject('p0-owner', { name: 'Alpha', folder });

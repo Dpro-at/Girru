@@ -1,3 +1,6 @@
+import {assertNoProtectedDatabaseAlias,readNonDatabaseFileSync} from '../memory/encryption/protected-filesystem.js';
+import {htmlToText} from './html-text.js';
+import {callCenterRuntimeAllowed,loadCallCenterRuntime} from '../services/call-center-runtime.js';
 import { safeConsole } from '../services/safe-error-log.js';
 import { extensionResourcePath } from './resource-path.js';
 /**
@@ -10,6 +13,9 @@ import type { Database } from 'better-sqlite3';
 import type { Tool } from '../tools/types.js';
 import { registerExtensionTool, unregisterExtensionTool, isReservedToolName } from '../tools/index.js';
 import { EXEC_EXTENSION_PERMISSIONS } from '../tools/exec-policy.js';
+import {loadChannelLibrary,channelHostCapabilityAllowed} from '../services/channel-runtime.js';
+import * as channelHost from '../../extensions/shared/channel-host.js';
+import * as channelPolicy from '../../extensions/shared/channel-policy.js';
 import { beginChannelTurn, CHANNEL_TURN_HEADER, type ChannelOrigin } from '../tools/channel-policy.js';
 import { getDatabase } from '../db/index.js';
 import { listSshHosts } from '../discovery/service.js';
@@ -29,6 +35,10 @@ import { extractAgentReply } from '../../extensions/shared/agent-reply.js';
  * Extensions receive this interface when their register() hook is called
  */
 export interface ExtensionApi {
+  /** Parse at most 256 KiB of HTML into at most 64 KiB of untrusted text. No fetch/scripts; DOM whitespace preserved. Encode at every HTML sink. */
+  htmlToText(input: string): string;
+  /** Host integration for the separately installed Agent Connect package only. */
+  channelHost?:Record<string,unknown>;
   authorizeChannelRequest(request: FastifyRequest): string;
   authorizeChannelUser(userId: string): void;
   /**
@@ -68,6 +78,7 @@ export interface ExtensionApi {
   // SSH servers the user imported from ~/.ssh/config (needs the 'ssh-hosts' permission).
   // Names and addresses only — never a key's contents or a password.
   sshHosts(userId: string): Promise<Array<{ alias: string; host: string | null; port: number | null; login: string | null }>>;
+  callCenterHost?: Readonly<{load:()=>Promise<any>}>;
 
   // Services — access to core systems
   db: Database;
@@ -171,6 +182,9 @@ export function createExtensionApi(
 
   return {
     extensionId,
+    htmlToText,
+    ...(extensionId==='agent-connect'&&channelHostCapabilityAllowed(db,extensionDir)?{channelHost:Object.freeze({...channelHost,...channelPolicy,loadLibrary:loadChannelLibrary})}:{}),
+    ...(extensionId==='call-center'&&callCenterRuntimeAllowed(db,extensionDir)?{callCenterHost:Object.freeze({load:async()=>{const p=await loadCallCenterRuntime();if(!p)throw Error('Call Center is not enabled.');return p;}})}:{}),
     authorizeChannelRequest(request) {
       const userId = getUserIdFromRequest(request);
       this.authorizeChannelUser(userId);
@@ -406,7 +420,8 @@ export function createExtensionApi(
           throw new Error(`Migration file not found: ${absolutePath}`);
         }
 
-        const sql = readFileSync(absolutePath, 'utf-8');
+        assertNoProtectedDatabaseAlias(absolutePath);
+        const sql = readNonDatabaseFileSync(absolutePath, 'utf-8');
         db.exec(sql);
 
         // Track migration
@@ -667,7 +682,8 @@ export function createExtensionApi(
         const locale = file.replace('.json', '');
         const filePath = extensionResourcePath(extensionDir, join(localeDir, file));
         try {
-          const translations = JSON.parse(readFileSync(filePath, 'utf-8'));
+          assertNoProtectedDatabaseAlias(filePath);
+          const translations = JSON.parse(readNonDatabaseFileSync(filePath, 'utf-8'));
           registerExtensionBackendTranslations(extensionId, locale, translations);
           safeConsole.log(`[ExtensionApi:${extensionId}] 🌐 Loaded ${locale} translations (${Object.keys(translations).length} keys)`);
         } catch (err) {

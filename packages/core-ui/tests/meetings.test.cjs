@@ -15,3 +15,29 @@ test('replacing a source stops the previous stream rather than retaining capture
 test('camera absence is distinct from a denied permission or busy device',()=>{const{meetingCaptureError}=require('../src/meeting-media.ts');assert.match(meetingCaptureError('camera',{name:'NotFoundError'}),/No camera is connected/);assert.match(meetingCaptureError('camera',{name:'NotAllowedError'}),/access is blocked/);assert.match(meetingCaptureError('camera',{name:'NotReadableError'}),/other apps/);assert.match(meetingCaptureError('screen',{name:'AbortError'}),/cancelled/);assert.doesNotMatch(meetingCaptureError('screen',{name:'NotAllowedError',message:'private details'}),/private details/);});
 test('department badges retain an accessible name in full and compact presentations',()=>{const React=require('react'),{renderToStaticMarkup}=require('react-dom/server'),{DepartmentBadge}=require('../src/DepartmentBadge.tsx');for(const compact of[false,true]){const html=renderToStaticMarkup(React.createElement(DepartmentBadge,{department:'finance',compact}));assert.match(html,/aria-label="Department: Finance"/);assert.match(html,/title="Finance"/);assert.match(html,/<svg/);assert.equal(html.includes('data-compact="true"'),compact)}assert.match(renderToStaticMarkup(React.createElement(DepartmentBadge,{department:null})),/No department/);assert.match(renderToStaticMarkup(React.createElement(DepartmentBadge,{})),/Department unavailable/)});
 test('common chat and paged participant choices keep department identity',async()=>{const{ConversationsController}=require('../src/conversations.ts'),client={getSnapshot:()=>({phase:'authenticated',epoch:1,user:{id:'owner',role:'owner'}}),subscribe:()=>()=>{},request:async()=>({status:200,body:{agents:[{id:'a',name:'Alex',department:'engineering',isPrimary:true},{id:'b',name:'Blair',department:null}]}})};const c=new ConversationsController(client);try{await c.loadAgents();assert.equal(c.getSnapshot().agents[0].department,'engineering');assert.equal(c.getSnapshot().agents[1].department,null);c.setMeetingReplyAgent({id:'c',name:'Casey',department:'finance'});assert.equal(c.getSnapshot().agents.find(a=>a.id==='c').department,'finance');c.setMeetingReplyAgent({id:'a',name:'Alex',department:'development'});assert.equal(c.getSnapshot().agents.find(a=>a.id==='a').department,'development');assert.equal(c.getSnapshot().agents.find(a=>a.id==='a').primary,true)}finally{c.dispose()}});
+
+test('completed initial rounds hide empty controls; chosen participants remain reachable',()=>{
+ const React=require('react'),{renderToStaticMarkup}=require('react-dom/server'),{MeetingRoundControls}=require('../src/Meetings.tsx');
+ const render=props=>renderToStaticMarkup(React.createElement(MeetingRoundControls,{remaining:0,selected:false,busy:false,automatic:false,onNext(){},onAutomatic(){},...props}));
+ assert.equal(render({}),'');assert.match(render({selected:true}),/Ask selected participant/);
+ assert.doesNotMatch(render({selected:true}),/remaining speakers/);assert.match(render({remaining:3}),/Invite remaining speakers \(3\)/);
+ assert.match(render({automatic:true,busy:true}),/Stop automatic turns/);
+ assert.doesNotMatch(render({automatic:true,busy:true}),/disabled/);
+});
+
+test('New meeting is in the chat ⋯ menu; the meeting bar shows only while a meeting is on', () => {
+  const fs = require('node:fs'), path = require('node:path');
+  const view = fs.readFileSync(path.join(__dirname, '../src/ChatView.tsx'), 'utf8'), meetings = fs.readFileSync(path.join(__dirname, '../src/Meetings.tsx'), 'utf8');
+  assert.ok(view.includes("{ label: 'New meeting…', icon: 'users', run: () => setMeetingCreate(n => n + 1) }"));
+  assert.ok(view.includes('createRequest={meetingCreate}'));
+  assert.ok(meetings.includes('{meeting && <div className="meeting-toolbar">'));
+  assert.ok(!meetings.includes('Discuss work with your departments') && !meetings.includes('<span>New meeting</span>'));
+});
+
+test('a meeting summary reply reads as text in the chat, not raw JSON; other replies stay as they are', () => {
+  const { meetingSummaryText } = require('../src/meeting-summary.ts');
+  const json = JSON.stringify({ summary: 'We agreed on the launch.', decisions: [{ title: 'Write the post', assigneeName: 'Jules', department: 'Sales', agentId: null }, { title: ' ' }] });
+  assert.equal(meetingSummaryText(json), '**Meeting summary**\n\nWe agreed on the launch.\n\n**Proposed decisions** (they wait for your approval)\n- Write the post — Jules · Sales');
+  assert.match(meetingSummaryText('```json\n' + JSON.stringify({ summary: 'Short.', decisions: [] }) + '\n```'), /No decisions proposed/);
+  for (const other of ['Hello', '{"summary":1,"decisions":[]}', '{"a":1}', '[1]', '{bad json']) assert.equal(meetingSummaryText(other), null);
+});

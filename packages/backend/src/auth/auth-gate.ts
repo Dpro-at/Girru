@@ -24,7 +24,7 @@
  *
  * `guest` accounts and users whose status is not 'active' are refused on
  * every non-public route except, for guests, GUEST_ROUTES (see who they are,
- * sign out) and GUEST_PUBLIC_CHAT_ROUTES (public rooms only, Q-13).
+ * sign out).
  *
  * Existing per-route guards stay in place as a second line.
  */
@@ -72,6 +72,8 @@ export const PUBLIC_ROUTES: ReadonlySet<string> = new Set([
   key('POST', '/api/setup/complete'),
   key('POST', '/api/setup/python'),
   key('POST', '/api/auth/login'),
+  key('GET','/api/auth/google/status'),
+  key('POST','/api/auth/google/start'),key('POST','/api/auth/google/status'),key('POST','/api/auth/google/finish'),key('POST','/api/auth/google/cancel'),
   // MCP-01b: HMAC proof of the install's identity for local clients (no data, no secret).
   key('GET', '/api/instance'),
   // MEM-BRIDGE-01: the dpro-memory MCP server. Loopback only; the session needs the
@@ -107,13 +109,6 @@ export const OPTIONAL_ROUTES: ReadonlySet<string> = new Set([
   key('GET', '/api/multiverse/system'),
   // Public worlds (the handler hides private ones from anonymous callers).
   key('GET', '/api/multiverse/:id'),
-  // Public chat rooms (the handlers only allow anonymous access to public rooms).
-  key('GET', '/api/public-chat/rooms/:id'),
-  key('GET', '/api/public-chat/rooms/:id/messages'),
-  key('GET', '/api/public-chat/rooms/:id/participants'),
-  key('POST', '/api/public-chat/rooms/:id/messages'),
-  key('POST', '/api/public-chat/rooms/:id/join'),
-  key('POST', '/api/public-chat/rooms/:id/leave'),
 ]);
 
 /** Server-internal identity: channel/phone turns started by server code. */
@@ -127,25 +122,10 @@ export const GUEST_ROUTES: ReadonlySet<string> = new Set([
   key('POST', '/api/auth/logout'),
 ]);
 
-/**
- * Public-room routes a `guest` account may use (Q-13, CL-06). The handlers
- * additionally limit guests to rooms marked public.
- */
-export const GUEST_PUBLIC_CHAT_ROUTES: ReadonlySet<string> = new Set([
-  key('GET', '/api/public-chat/policy'), // BE-UI-01: read-only policy
-  key('GET', '/api/public-chat/rooms'),
-  key('GET', '/api/public-chat/rooms/:id'),
-  key('GET', '/api/public-chat/rooms/:id/messages'),
-  key('GET', '/api/public-chat/rooms/:id/participants'),
-  key('POST', '/api/public-chat/rooms/:id/messages'),
-  key('POST', '/api/public-chat/rooms/:id/join'),
-  key('POST', '/api/public-chat/rooms/:id/leave'),
-]);
-
 /** True when a guest account may use this route (method + route pattern). */
 export function guestMayUse(method: string, url: string): boolean {
   const m = method === 'HEAD' ? 'GET' : method.toUpperCase();
-  return GUEST_ROUTES.has(key(m, url)) || GUEST_PUBLIC_CHAT_ROUTES.has(key(m, url));
+  return GUEST_ROUTES.has(key(m, url));
 }
 
 const READ_METHODS = new Set(['GET', 'HEAD']);
@@ -228,6 +208,7 @@ export const TIER_RULES: readonly Rule[] = [
   { methods: '*', prefix: '/api/handoffs', access: 'owner' },      // the agents' handoff notes (CORE-MEM-HANDOFF)
   { methods: '*', prefix: '/api/memory-bridge', access: 'owner' }, // CLI configs, project files, back-flow, kill switch (MEM-BRIDGE-01)
   { methods: '*', prefix: '/api/mcp', access: 'owner' },           // MCP client servers: start processes / reach URLs for agents (M1)
+  { methods: '*', prefix: '/api/security/ssh-keys', access: 'owner' }, // SSH keys on this computer: public facts, copy the public key only (SSH-KEYS-01)
   { methods: '*', prefix: '/api/phone', access: 'owner' },         // pair, rename and forget phones; relay address (MOB-PAIR-01)
 
   // --- owner or admin: configuration, outbound requests, money, other users' data ---

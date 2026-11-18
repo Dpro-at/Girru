@@ -1,3 +1,5 @@
+import {protectedMemoryFilesystemRoots} from '../memory/encryption/protected-filesystem.js';
+import {assertNoDefaultMemoryAccess} from '../memory/encryption/execution-context.js';
 /**
  * One data root for every backend store (RUN-ISO F1).
  *
@@ -30,6 +32,7 @@ export function dataRootOverride(env: NodeJS.ProcessEnv = process.env): string |
 
 /** The backend data folder: `AGENT_PLAYER_DATA_DIR`, else `<cwd>/.data`. */
 export function dataRoot(): string {
+  assertNoDefaultMemoryAccess();
   return dataRootOverride() ?? path.join(process.cwd(), '.data');
 }
 
@@ -43,12 +46,14 @@ export function dataPath(...parts: string[]): string {
  * caller's legacy path, returned unchanged (same string as before F1).
  */
 export function dataPathOr(legacy: string, ...parts: string[]): string {
+  assertNoDefaultMemoryAccess();
   const root = dataRootOverride();
   return root ? path.join(root, ...parts) : legacy;
 }
 
 /** The main SQLite database: `DATABASE_PATH`, else `<data root>/agent-player.db`. */
 export function mainDatabasePath(): string {
+  assertNoDefaultMemoryAccess();
   return process.env.DATABASE_PATH || dataPath('agent-player.db');
 }
 
@@ -122,6 +127,7 @@ export function protectedDataDirs(): string[] {
   const cwd = process.cwd();
   const dirs: Array<string | null> = [
     dataRoot(),
+    ...protectedMemoryFilesystemRoots(),
     path.join(cwd, '.data'),
     envDir('DATABASE_PATH', true),
     envDir('AUDIT_DB_PATH', true),
@@ -129,6 +135,10 @@ export function protectedDataDirs(): string[] {
     credentialsBackupDir(),
     envDir('UPLOADS_DIR', false) ?? dataPathOr(path.join(cwd, '..', '..', '.data', 'uploads'), 'uploads'),
     envDir('STORAGE_BASE_DIR', false),
+    // Installed program bytes are not agent-editable workspace files.
+    envDir('GIRRU_APP_RUNTIMES_DIR', false),
+    envDir('GIRRU_CHANNELS_RUNTIME_DIR', false),
+    envDir('AGENT_CONNECT_STATE_DIR', false) ?? path.join(os.homedir(), '.agent-connect'),
     dataPathOr(path.join(cwd, '..', '..', '.data', 'memory'), 'memory'),
     // BACKUP-01: backups hold a copy of everything above, keys included.
     backupsFolder(),

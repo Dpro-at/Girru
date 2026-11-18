@@ -47,7 +47,7 @@ export function ContextMenu({ menu, onClose }: { menu: MenuAt; onClose: () => vo
   const host = typeof document === 'undefined' ? null : menu.invoker?.closest<HTMLElement>('.app-shell') ?? null;
   const list = <div ref={ref} className="dk-menu" role="menu" style={{ left, top, inlineSize: width }} onKeyDown={move}>
     {menu.items.map((m, i) => m === 'sep' ? <hr key={i}/> : <button key={i} type="button" role={m.checked === undefined ? 'menuitem' : 'menuitemcheckbox'} aria-checked={m.checked} disabled={m.disabled} data-danger={m.danger || undefined} onClick={() => { onClose(); m.run(); }}>
-      {m.checked !== undefined && <span className="dk-menu-check">{m.checked && <UiIcon name="check" size={13}/>}</span>}{m.icon ? <UiIcon name={m.icon} size={14}/> : <span className="dk-menu-gap"/>}<span className="dk-menu-label">{m.label}</span>{m.shortcut && <kbd>{m.shortcut}</kbd>}
+      {m.checked !== undefined && <span className="dk-menu-check">{m.checked && <UiIcon name="check" size={13}/>}</span>}{m.icon ? <UiIcon name={m.icon} size={14}/> : <span className="dk-menu-gap"/>}<span className="dk-menu-label" title={m.label.length > 32 ? m.label : undefined}>{m.label}</span>{m.shortcut && <kbd>{m.shortcut}</kbd>}
     </button>)}
   </div>;
   return host ? createPortal(list, host) : list;
@@ -86,13 +86,16 @@ export function Sheet({ title, onClose, children, actions, wide }: { title: stri
     first?.focus();
     return () => window.removeEventListener('keydown', key, true);
   }, []);
-  return <div className="dk-sheet-scrim" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+  // CHAT-LIVE-01 (LW6): drawn over the whole window (like menus), so a sheet opened from the narrow sidebar is never cut off.
+  const host = typeof document === 'undefined' ? null : document.querySelector<HTMLElement>('.app-shell');
+  const sheet = <div className="dk-sheet-scrim" data-window={host ? true : undefined} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
     <div ref={ref} className="dk-sheet" data-wide={wide || undefined} role="dialog" aria-modal="true" aria-label={title}>
       <h3 className="dk-sheet-title">{title}</h3>
       <div className="dk-sheet-body">{children}</div>
       {actions && <div className="dk-sheet-actions">{actions}</div>}
     </div>
   </div>;
+  return host ? createPortal(sheet, host) : sheet;
 }
 
 /** The quiet notice at the bottom of the window; fades after a few seconds. */

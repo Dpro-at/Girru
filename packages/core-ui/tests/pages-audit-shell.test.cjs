@@ -22,7 +22,9 @@ test('Settings opens from the footer gear and ⌘, — no extra sidebar gear or 
 });
 test('an MCP connection is not an app: it lives in Settings › MCP connections, never in My apps (S-10)',()=>{const {tileActions}=require('../src/WorkspaceApplications.tsx');
  assert.deepEqual(tileActions({id:'a',kind:'mcp',name:'X'},{owner:true},{open(){},onAccountConnections(){},onPermissions(){}}),[]);
- assert.match(shell,/<AppSettings key=\{settingsVisit\} mcpOpenId=\{mcpOpen\}/);
+ const settings = shell.match(/<AppSettings\b[^\n]*/)?.[0] ?? '';
+ assert.match(settings,/\bkey=\{settingsVisit\}/);
+ assert.match(settings,/\bmcpOpenId=\{mcpOpen\}/);
  assert.match(shell,/else if\(page==='mcp'\)openSettings\('mcp'\);/);
 });
 test('places inside Library, the Store and Settings show the way back on top of their sidebar (board SH1)',()=>{

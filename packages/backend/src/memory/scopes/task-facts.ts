@@ -17,11 +17,13 @@ import { one, sql } from '../../repositories/sql-steps.js';
 import type { DrawerRef } from '../drawers.js';
 import { loadRunPermissions } from '../../tools/agent-permissions.js';
 import { pinnedFactsForReply, scopeFactAccess } from './pinned.js';
+import { cloudSafePinnedAllow } from '../stays-local.js';
+import { chatProjectKeyColumn } from '../project-keys.js';
 
-/** Project slug of the board card's conversation for this task, or null. */
+/** Memory key of the project of the board card's conversation for this task (its slug; P3: its id), or null. */
 async function cardProject(ownerId: string, taskId: string): Promise<string | null> {
   const row = await sql().read(one<{ slug: string }>(`
-    SELECT p.slug FROM board_cards c
+    SELECT p.${chatProjectKeyColumn()} AS slug FROM board_cards c
       JOIN boards b ON b.id = c.board_id
       JOIN chat_sessions s ON s.id = c.conversation_id
       JOIN chat_projects p ON p.id = s.project_id AND p.user_id = s.user_id
@@ -39,6 +41,8 @@ export interface TaskFactsInput {
   drawers: readonly DrawerRef[];
   /** The run's contract narrowed its drawers (then only an open project drawer counts). */
   drawersNarrowed?: boolean;
+  /** STORE-MAP-01 P9 (PRIV2): the run's model is not on this computer (places that stay here are left out). */
+  cloud?: boolean;
 }
 
 /** The prompt block for the run, or ''. Never throws (no facts on any error). */
@@ -48,7 +52,8 @@ export async function taskRunPinnedFacts(input: TaskFactsInput): Promise<string>
     const open = input.drawers.find((d) => d.kind === 'project')?.key ?? null;
     const project = open ?? (input.drawersNarrowed ? null : await cardProject(input.ownerId, input.taskId));
     const perms = await loadRunPermissions(input.agentId, input.delegatedFrom ?? [], { userId: input.ownerId, project });
-    const allow = scopeFactAccess(perms, input.drawers.some((d) => d.kind === 'owner'));
+    let allow = scopeFactAccess(perms, input.drawers.some((d) => d.kind === 'owner'));
+    if (input.cloud) allow = await cloudSafePinnedAllow(input.ownerId, project, allow);
     if (!allow.company && !allow.project) return '';
     return (await pinnedFactsForReply(input.ownerId, project, allow)).text;
   } catch {

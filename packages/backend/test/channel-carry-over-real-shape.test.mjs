@@ -1,3 +1,4 @@
+import './fixtures/channel-library.mjs';
 // CHANNELS-01 on the shape of a real Girru database from before the update: telegram and discord
 // on in extension_configs with their bot settings (fake tokens here), their recorded migrations,
 // their four tables empty, channel_events empty. The startup carry-over makes a real before-update
@@ -38,7 +39,7 @@ db.exec(shape); // the real shape, not Girru's current schema: no initialize()
 const { carryOverChannels, CARRIED_OVER } = await import(join(backendDir, 'src/services/channel-carry-over.ts'));
 const { workspaceBackupsDir } = await import(join(backendDir, 'src/services/backups.ts'));
 const { default: Database } = await import('better-sqlite3');
-const { registerAgentConnect } = await import(join(backendDir, 'extensions/agent-connect/index.js'));
+const { registerAgentConnect } = await import(join(backendDir, 'test/fixtures/agent-connect-legacy/index.js'));
 const { stopChannel } = await import(join(backendDir, 'extensions/shared/channel-host.js'));
 const { TelegramTransport, DiscordTransport } = await import('agent-connect-dpro');
 const { default: Fastify } = await import('fastify');

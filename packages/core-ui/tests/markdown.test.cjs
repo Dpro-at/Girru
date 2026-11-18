@@ -79,7 +79,7 @@ test('tables, task lists and code blocks with language, copy and folding', () =>
   assert.match(out, /<li class="md-task" data-done="true">/);
   const code = Array.from({ length: 30 }, (_, i) => `line ${i}`).join('\n');
   const folded = html('```python\n' + code + '\n```');
-  assert.match(folded, /<span class="md-code-lang">python<\/span>/);
+  assert.match(folded, /<span class="md-code-lang">Python<\/span>/);
   assert.match(folded, /Show 16 more lines/);
   assert.ok(!folded.includes('line 29'));
   const streaming = html('```python\n' + code);

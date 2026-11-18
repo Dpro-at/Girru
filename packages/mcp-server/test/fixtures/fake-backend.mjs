@@ -51,6 +51,11 @@ globalThis.fetch = async (input, init = {}) => {
   if (!url.startsWith(`${BASE}/`)) throw new Error('unexpected host');
   if (!entry.authOk) return json(401, { error: 'Authentication required' });
   const path = url.slice(BASE.length);
+  if(SCENARIO==='chat'){
+    if(path==='/api/auth/me')return json(200,{user:{id:'synthetic-owner',role:'owner',status:'active'}});
+    if(entry.method==='GET'&&path==='/api/chat/mcp/conversations/chat-0001/messages?before=message-0002&limit=1')return json(200,{conversationId:'chat-0001',messages:[{id:'message-0001',role:'user',content:'Synthetic stored message'}],hasMore:false,nextBefore:null});
+    if(entry.method==='POST'&&path==='/api/chat/mcp/conversations/chat-0001/send')return json(200,{conversationId:'chat-0001',runId:'synthetic-admission',state:'submitted',started:true,replayed:false});
+  }
   if (entry.method === 'POST' && path === '/api/small-agent/runs') {
     if (SCENARIO === 'busy') return json(429, { error: 'busy', capacity: capacity(2) });
     if (SCENARIO === 'notowner') return json(403, { error: 'This action requires the owner account' });

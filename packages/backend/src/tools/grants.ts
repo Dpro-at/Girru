@@ -82,7 +82,20 @@ export const DEFAULT_AGENT_TOOLS: readonly string[] = [
   'memory_graph_review', // CORE-MEM-GRAPH: approve / reject a pending link; every call needs one-time owner approval
   'memory_graph_topic', // MEM-GRAPH-CLUSTER: cluster -> topic or dismiss; every call needs one-time owner approval
   'memory_graph_sync', // MEM-FINISH-01: rebuild the map (M14); every call needs one-time owner approval
+  'memory_lessons', // MEM-RSI-01: read-only evidence-gated lessons; owner's own turns only
+  'memory_lessons_review', // MEM-RSI-01: reverse / confirm / forget a source's evidence; every call needs one-time owner approval
   'memory_recall', // MEM-CACHE-01: read-only trace of the agent's own replies, summaries, cache metrics
+  'memory_person_export', // STORE-MAP-01 P9: everything about one person (person's drawer open for the run); every call needs one-time owner approval
+  'memory_person_forget', // STORE-MAP-01 P9: forget one person in one action; every call needs one-time owner approval
+  'memory_privacy_review', // STORE-MAP-01 P9: read-only list of waiting personal-data / sensitive memories, owner's own turns, open drawers only
+  'memory_privacy_decide', // STORE-MAP-01 P9: keep or forget one of them; every call needs one-time owner approval
+  'memory_trust_review', // STORE-MAP-01 P9b: read-only corrected-after-use list and open questions, owner's own turns, open drawers only
+  'memory_corrected_checked', // STORE-MAP-01 P9b: mark a corrected memory as checked; every call needs one-time owner approval
+  'memory_question_answer', // STORE-MAP-01 P9b: save the owner's answer to an open question; every call needs one-time owner approval
+  'memory_question_forget', // STORE-MAP-01 P9b: forget an open question; every call needs one-time owner approval
+  'project_trust_review', // REPO-TRUST-01: read-only Outside projects list, owner's own turns
+  'project_trust_apply', // REPO-TRUST-01: trust / put outside / own accounts; every call needs one-time owner approval
+  'open_in_code', // CODE-OPEN-01: a file in a project or the data folder at a line; every call needs one-time owner approval
   'storage_search',
   // BOARD-02: the agent's own board cards only (list, comment, move)
   'board_my_cards',
@@ -252,7 +265,7 @@ function* ensureGrantProfileStep(agentId: string, available: Available): Step<Pr
     const profile = yield* readProfile(agentId);
     if (profile && profile.source !== 'legacy-pending') return profile;
     if (profile) {
-      const names = available.filter((t) => !isToolExecClass(t) && !isMcpToolName(t.name) && t.name !== 'edit').map((t) => t.name);
+      const names = available.filter((t) => !isToolExecClass(t) && !isMcpToolName(t.name) && t.name !== 'edit' && t.name !== 'computer_task_accept' && t.name !== 'computer_sync_apply' && !t.name.startsWith('device_')).map((t) => t.name);
       yield* writeGrantRows(agentId, names.map((tool) => ({ tool, scopes: null })), 'system:legacy');
       yield* run(`UPDATE agent_grant_profiles SET source = 'legacy', updated_at = ${nowText(d)} WHERE agent_id = ?`, agentId);
     } else {

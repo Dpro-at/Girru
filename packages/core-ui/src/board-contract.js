@@ -3,6 +3,7 @@
 // projection of every response to the reviewed fields (never error text).
 import { validAgentId } from './agent-id.js';
 import { department } from './hire-contract.js';
+import { taskLinksResponse } from './task-links-contract.js';
 
 export const BOARDS_PATH = '/api/boards';
 export const priorities = ['low', 'normal', 'high', 'urgent'];
@@ -169,7 +170,8 @@ export function allowedBoard(method, path, body) {
   if (p.kind === 'tp-people') return method === 'PUT' && record(body) && onlyKeys(body, ['kind', 'id', 'role']) && Object.keys(body).length === 3 && ['user', 'agent'].includes(body.kind) && personId(body.id) && (body.role === null || ROLES.includes(body.role));
   if (p.kind === 'tp-release') return method === 'PUT' && record(body) && Object.keys(body).length === 1 && (body.name === null || lineOk(body.name, 60));
   if (p.kind === 'tp-subtasks') return method === 'POST' && record(body) && Object.keys(body).length === 1 && lineOk(body.title, MAX_TITLE);
-  if (p.kind === 'tp-links') return method === 'PUT' && record(body) && Object.keys(body).length === 2 && id(body.waitsFor) && typeof body.on === 'boolean';
+  // STORE-MAP-01 P8: GET on the same path reads the task's links (task notes, handoffs, chats, task file).
+  if (p.kind === 'tp-links') return (method === 'GET' && body === undefined) || (method === 'PUT' && record(body) && Object.keys(body).length === 2 && id(body.waitsFor) && typeof body.on === 'boolean');
   if (p.kind === 'tp-follow') return method === 'PUT' && record(body) && Object.keys(body).length === 1 && typeof body.on === 'boolean';
   if (p.kind === 'tp-schedule') return (method === 'GET' && body === undefined) || (method === 'PUT' && scheduleOk(body));
   if (p.kind === 'task') return method === 'GET' && body === undefined;
@@ -201,6 +203,8 @@ function taskDetail(t) {
   const k = t.task;
   return {
     ...m, file: t.file === '.girru/tasks-done.md' ? '.girru/tasks-done.md' : '.girru/tasks.md', text: clip(t.text, 20000),
+    // STORE-MAP-01 P6: the task's number when the backend's P6 switch is on (absent otherwise).
+    ...(taskNo(t.number) ? { number: t.number } : {}),
     task: { no: m.no, title: clip(k.title, MAX_TITLE), state: clip(k.state, 40), department: clip(k.department, 120), agent: clip(k.agent, 120), priority: clip(k.priority, 40), done: lines(k.done), left: lines(k.left), next: lines(k.next) },
     workedOn: Array.isArray(t.workedOn) ? t.workedOn.filter(w => record(w) && typeof w.app === 'string').slice(0, 10).map(w => ({ app: clip(w.app, 40), agent: clip(w.agent, 120), date: /^\d{4}-\d{2}-\d{2}$/.test(w.date) ? w.date : '', at: typeof w.at === 'string' ? clip(w.at, 20) : null, what: typeof w.what === 'string' ? clip(w.what, 300) : null })) : [],
     log: Array.isArray(t.log) ? t.log.filter(l => record(l) && typeof l.app === 'string').slice(0, 5).map(l => ({ at: clip(l.at, 20), app: clip(l.app, 40), what: clip(l.what, 300) })) : [],
@@ -222,6 +226,9 @@ function card(c) {
     conversationId: typeof c.conversationId === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$/.test(c.conversationId) ? c.conversationId : null,
     taskFile: taskMark(c.taskFile),
     repeat: repeat(c.repeat),
+    // STORE-MAP-01 P8 (D29): sent only while the backend's P8 switch is on, and only when they say something.
+    ...(Number.isSafeInteger(c.handoffCount) && c.handoffCount > 0 ? { handoffCount: Math.min(c.handoffCount, 999) } : {}),
+    ...(c.blocked === true ? { blocked: true } : {}),
   };
 }
 
@@ -343,7 +350,7 @@ function taskPageResponse(kind, body) {
   if (kind === 'tp-people') return { people: people(body.people) };
   if (kind === 'tp-release') return { release: typeof body.release === 'string' ? clip(body.release, 60) : null };
   if (kind === 'tp-subtasks') return card(body);
-  if (kind === 'tp-links') return { ok: body.ok === true };
+  if (kind === 'tp-links') return Array.isArray(body.handoffs) ? taskLinksResponse(body) : { ok: body.ok === true };
   if (kind === 'tp-follow') return { following: body.following === true };
   if (kind === 'tp-schedule') return { schedule: repeat(body.schedule) };
   fail();

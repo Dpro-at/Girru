@@ -4,7 +4,7 @@
  *
  *   ui.get {path, part?}            one file of the verified core-ui build, base64, in parts
  *   api.call {method, path, body?}  one page request, run here as the owner
- *   api.stream {path}               a run's live events as stream frames
+ *   api.stream {path}               a run's or a terminal's live events as stream frames
  *
  * api.call passes two gates: PHONE_ROUTES below (the phone's short list) and the
  * desktop bridge's own allow list and answer projection (core-ui
@@ -23,10 +23,17 @@ import { CommandError, type CommandContext } from './commands.js';
 const require = createRequire(import.meta.url);
 const CORE_UI = fileURLToPath(new URL('../../../core-ui/', import.meta.url));
 
-/** Raw bytes of one ui.get answer; base64 keeps it under the 1 MiB envelope. */
-export const UI_PART_BYTES = 600 * 1024;
+/**
+ * Raw bytes of one ui.get answer. The part is base64 in the JSON, then the
+ * sealed JSON is base64 again in the envelope (about 16/9 of the part in all),
+ * which must stay under the relay's 1 MiB: 512 KiB gives about 910 KiB.
+ */
+export const UI_PART_BYTES = 512 * 1024;
 export const API_BODY_BYTES = 256 * 1024;
+/** A projected answer (JSON) that still fits one sealed envelope. */
 export const API_ANSWER_BYTES = 700 * 1024;
+/** A terminal reader ends after this long (terminal-contract.js › TERMINAL_STREAM_MS). */
+const TERMINAL_STREAM_MS = 10 * 60_000;
 export const LIMITS = { call: 120, get: 600, streams: 4, windowMs: 60_000 };
 
 type Body = Record<string, unknown>;
@@ -49,6 +56,12 @@ async function conversationContract() {
   return conversation!;
 }
 
+let terminalContract: { terminalPath(p: string): { kind: string; id?: string; after?: number } | null } | null = null;
+async function terminalRoutes() {
+  terminalContract ??= await import(`${CORE_UI}src/terminal-contract.js`);
+  return terminalContract!;
+}
+
 let api: FastifyInstance | null = null;
 /** server.ts binds the running app; tests bind their own. */
 export function bindPhoneApi(app: FastifyInstance | null): void { api = app; }
@@ -58,7 +71,15 @@ export function bindPhoneApi(app: FastifyInstance | null): void { api = app; }
 /** Conversation request kinds (conversation-contract.js › conversationPath) and the methods the phone may use. */
 const CHAT_KINDS: Record<string, Method[]> = {
   list: ['GET', 'POST'],
-  one: ['GET', 'PATCH'],
+  // The owner's decision (11 November): the phone's side panel is the desktop one, with Changes and Files, and deleting a chat.
+  one: ['GET', 'PATCH', 'DELETE'],
+  projects: ['GET'],
+  'project-changes': ['GET'],
+  'project-git': ['GET'],
+  'project-pr': ['GET'],
+  'project-diff': ['GET'],
+  'project-tree': ['GET'],
+  'project-file': ['GET'],
   messages: ['GET'],
   runs: ['POST'],
   stop: ['POST'],
@@ -72,8 +93,29 @@ const CHAT_KINDS: Record<string, Method[]> = {
   'chat-settings': ['GET'],
 };
 
+/** Terminal request kinds (terminal-contract.js › terminalPath); `stream` only through api.stream. */
+const TERMINAL_KINDS: Record<string, Method[]> = {
+  info: ['GET'],
+  prefs: ['GET', 'PUT'],
+  create: ['POST'],
+  input: ['POST'],
+  resize: ['POST'],
+  close: ['DELETE'],
+};
+
+const APPROVALS_READ = /^\/api\/approvals\?status=pending&limit=(?:[1-9]\d?|100)$/;
 const STEER = /^\/api\/chat\/runs\/[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}\/steer$/;
 const AGENT = /^\/api\/agents\/[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+/** The open chat's meetings, read only (phone board P29): starting, steering and reviewing stay on the computer. */
+/** Owner's decision (11 November): export, Add to board and Remember work from the phone too. The desktop gate still checks each body. */
+const ID = '[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}';
+const CHAT_EXPORT = new RegExp(`^/api/chat/conversations/${ID}/export(?:\\?tools=1)?$`);
+const CHAT_CARDS = new RegExp(`^/api/chat/conversations/${ID}/cards$`);
+const BOARDS_READ = new RegExp(`^/api/boards(?:/${ID})?$`);
+const CHAT_MEMORIES = new RegExp(`^/api/chat/conversations/${ID}/memories$`);
+const PROPOSAL = new RegExp(`^/api/memory/proposals/${ID}$`);
+const PROPOSAL_DECIDE = new RegExp(`^/api/memory/proposals/${ID}/(?:approve|reject)$`);
+const MEETINGS_READ = /^\/api\/meetings\?conversationId=[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 
 /**
  * The phone's own list: only what the chat page needs (the owner's rule: the
@@ -85,6 +127,16 @@ export async function phoneMayCall(method: string, target: string): Promise<bool
   if (typeof target !== 'string' || !target.startsWith('/api/') || target.length > 2048) return false;
   if (method === 'GET' && (target === '/api/auth/me' || target === '/api/agents' || (AGENT.test(target) && !target.endsWith('/name-suggestion')))) return true;
   if (method === 'POST' && STEER.test(target)) return true;
+  // The page's approvals badge reads the pending count; deciding stays on the phone's own Approvals screen.
+  if (method === 'GET' && APPROVALS_READ.test(target)) return true;
+  if (method === 'GET' && MEETINGS_READ.test(target)) return true;
+  if (method === 'GET' && (CHAT_EXPORT.test(target) || BOARDS_READ.test(target) || PROPOSAL.test(target))) return true;
+  if ((method === 'GET' || method === 'POST') && (CHAT_CARDS.test(target) || CHAT_MEMORIES.test(target))) return true;
+  if (method === 'POST' && PROPOSAL_DECIDE.test(target)) return true;
+  // The owner's decision: the terminal opens on the phone too, behind the phone's own biometric check
+  // (the app asks for it before it opens or joins a terminal). Its stream goes through api.stream.
+  const term = (await terminalRoutes()).terminalPath(target)?.kind;
+  if (term) return (TERMINAL_KINDS[term] ?? []).includes(method as Method);
   const { conversationPath } = await conversationContract();
   const kind = conversationPath(target)?.kind;
   return !!kind && (CHAT_KINDS[kind] ?? []).includes(method as Method);
@@ -113,6 +165,22 @@ function audit(ctx: CommandContext, action: string, path: string, success: boole
     severity: 'info', user_id: ctx.ownerId, resource_type: 'phone_command', resource_id: ctx.deviceId, action, success,
     metadata: { via: 'phone', device: ctx.deviceId, path: path.split('?')[0], ...metadata },
   });
+}
+
+/**
+ * Terminal keystrokes come many to a second: one audit row per terminal and
+ * phone a minute (with the count) instead of one per key.
+ */
+const inputAudited = new Map<string, { at: number; count: number }>();
+const TERMINAL_INPUT = /^\/api\/terminal\/sessions\/[0-9a-f-]{36}\/input$/;
+function quietInput(ctx: CommandContext, target: string, status: number): boolean {
+  if (!TERMINAL_INPUT.test(target) || status >= 400) return false;
+  const key = `${ctx.deviceId}|${target}`, now = ctx.now(), last = inputAudited.get(key);
+  if (last && now - last.at < 60_000) { last.count++; return true; }
+  if (inputAudited.size > 200) inputAudited.clear();
+  inputAudited.set(key, { at: now, count: 1 });
+  audit(ctx, 'phone.terminal.input', target, true, { keystrokesSinceLast: last?.count ?? 0 });
+  return true;
 }
 
 function only(body: Body, keys: string[]): void {
@@ -174,6 +242,22 @@ async function ownerHeaders(ownerId: string): Promise<Record<string, string>> {
   return { authorization: `Bearer ${generateToken(ownerId, user.token_version ?? 1, '60s')}`, ...(launch ? { [LAUNCH_HEADER]: launch } : {}) };
 }
 
+/**
+ * One request to the computer's own API as the owner, for the phone's native screens
+ * (settings.ts). The route list is fixed there; nothing from the phone picks the path.
+ */
+export async function ownerInject(ownerId: string, method: Method, url: string, payload?: unknown): Promise<{ status: number; body: unknown }> {
+  if (!api) throw new CommandError('ui_unavailable');
+  const res = await api.inject({
+    method, url,
+    headers: { ...(await ownerHeaders(ownerId)), accept: 'application/json', ...(payload !== undefined ? { 'content-type': 'application/json' } : {}) },
+    ...(payload !== undefined ? { payload: JSON.stringify(payload) } : {}),
+  });
+  let body: unknown = null;
+  try { body = res.body === '' ? null : JSON.parse(res.body); } catch { body = null; }
+  return { status: res.statusCode, body };
+}
+
 export async function apiCall(ctx: CommandContext, body: Body) {
   only(body, ['method', 'path', 'body']);
   const method = body.method, target = body.path;
@@ -189,7 +273,7 @@ export async function apiCall(ctx: CommandContext, body: Body) {
     headers: { ...(await ownerHeaders(ctx.ownerId)), accept: 'application/json', ...(body.body !== undefined ? { 'content-type': 'application/json' } : {}) },
     ...(body.body !== undefined ? { payload: JSON.stringify(body.body) } : {}),
   });
-  if (method !== 'GET') audit(ctx, 'phone.api.call', target, res.statusCode < 400, { method, status: res.statusCode });
+  if (method !== 'GET' && !quietInput(ctx, target, res.statusCode)) audit(ctx, 'phone.api.call', target, res.statusCode < 400, { method, status: res.statusCode });
   if (!/^application\/json/i.test(String(res.headers['content-type'] ?? '')) && res.body !== '') return { status: 502, body: null };
   let parsed: unknown;
   try { parsed = res.body === '' ? undefined : JSON.parse(res.body); } catch { return { status: 502, body: null }; }
@@ -206,10 +290,13 @@ export async function apiStream(ctx: CommandContext, body: Body) {
   only(body, ['path']);
   if (typeof body.path !== 'string') throw new CommandError('bad_format');
   const { conversationPath, projectRunEvent } = await conversationContract();
+  const term = (await terminalRoutes()).terminalPath(body.path);
   const route = conversationPath(body.path);
-  if (route?.kind !== 'events' || !route.run) throw new CommandError('not_allowed');
+  if (term?.kind !== 'stream' && (route?.kind !== 'events' || !route.run)) throw new CommandError('not_allowed');
   const open = streams.get(ctx.deviceId) ?? 0;
   if (open >= LIMITS.streams) throw new CommandError('rate_limited');
+  if (term?.kind === 'stream' && term.id) return terminalStream(ctx, body.path, term.id, term.after ?? 0, open);
+  if (route?.kind !== 'events' || !route.run) throw new CommandError('not_allowed');
   const { chatRuns } = await import('../services/chat-runs.js');
   const run = chatRuns.get(route.run);
   if (!run || run.userId !== ctx.ownerId) throw new CommandError('not_found');
@@ -217,6 +304,47 @@ export async function apiStream(ctx: CommandContext, body: Body) {
   audit(ctx, 'phone.api.stream', body.path, true, { run: route.run });
   const after = route.after ?? 0;
   return { follow: () => followEvents(ctx, run, after, projectRunEvent) };
+}
+
+/** A terminal's output as GET /api/terminal/sessions/:id/stream sends it (`event: output` / `exit`). */
+async function terminalStream(ctx: CommandContext, path: string, id: string, after: number, open: number) {
+  const { terminalManager } = await import('../api/routes/terminal.js');
+  const { TerminalError, terminalEnabled } = await import('../terminal/manager.js');
+  // The same gates as the HTTP route: an active owner (current token version) and the terminal switched on.
+  await ownerHeaders(ctx.ownerId);
+  if (!terminalEnabled()) throw new CommandError('disabled');
+  try {
+    // Ownership first, as the route does, so a wrong id is not_found before anything streams.
+    terminalManager.subscribe(ctx.ownerId, id, Number.MAX_SAFE_INTEGER, () => {})();
+  } catch (err) {
+    throw new CommandError(err instanceof TerminalError ? err.code : 'not_found');
+  }
+  streams.set(ctx.deviceId, open + 1);
+  audit(ctx, 'phone.api.stream', path, true, { terminal: id });
+  return {
+    follow: () => new Promise<void>((resolve) => {
+      let done = false;
+      let stop: (() => void) | null = null;
+      // Like the route's reader: it ends after a while and the page re-attaches with ?after=<seq>.
+      const limit = setTimeout(() => finish('dropped'), TERMINAL_STREAM_MS);
+      const finish = (status: 'complete' | 'dropped') => {
+        if (done) return;
+        done = true;
+        clearTimeout(limit);
+        stop?.();
+        streams.set(ctx.deviceId, Math.max(0, (streams.get(ctx.deviceId) ?? 1) - 1));
+        ctx.push({ type: 'stream.end', status });
+        resolve();
+      };
+      stop = terminalManager.subscribe(ctx.ownerId, id, after > 0 ? after : 0, (event: { type: string; chunk?: unknown; exitCode?: unknown }) => {
+        if (done) return;
+        const frame = event.type === 'data' ? { type: 'stream', event: 'output', data: event.chunk } : { type: 'stream', event: 'exit', data: { exitCode: event.exitCode } };
+        if (!ctx.push(frame)) return finish('dropped');
+        if (event.type !== 'data') finish('complete');
+      });
+      if (done) stop?.();
+    }),
+  };
 }
 
 type Run = { status: string; since(after: number): Array<{ seq: number; frame: Record<string, unknown> }>; emitter: import('node:events').EventEmitter };

@@ -1,5 +1,5 @@
 /**
- * CHANNELS-01: every chat channel runs in the built-in agent-connect extension, its settings under
+ * CHANNELS-01: every chat channel runs in the optional Agent Connect app, its settings under
  * channels.<id> of the one 'agent-connect' row. The separate telegram and discord extensions are gone,
  * so their settings move there once, at startup after the database opens and before extensions load.
  * SQLite only, like every extension.

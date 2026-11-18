@@ -113,6 +113,9 @@ async function main() {
 
   const app = await buildServer({ logger: false });
   await app.ready();
+  // As server.ts does: the phone's page requests (api.call) run on this app.
+  const { bindPhoneApi } = await import(join(backendDir, 'src/phone/ui-bridge.ts'));
+  bindPhoneApi(app);
   const call = (method, url, payload) => app.inject({ method, url, headers: { authorization: `Bearer ${generateToken('ph-owner', 1)}` }, ...(payload !== undefined ? { payload } : {}) });
   assert.equal((await call('PUT', '/api/phone/settings', { relayUrl })).statusCode, 200);
   await phoneLink().start();

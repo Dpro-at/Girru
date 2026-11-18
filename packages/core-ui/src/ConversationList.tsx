@@ -1,4 +1,6 @@
+import {ComputerExecutionBadge} from './ComputerDevices';
 import { ProjectSheet } from './ChatComposerControls';
+import { OutsideTag, useOutsideProjects } from './outside-projects';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
 import type { ConversationsController, Conversation } from './conversations';
@@ -6,7 +8,7 @@ import type { ChatSearchController, ChatSearchState } from './chat-search';
 import { validQuery } from './chat-search-contract.js';
 import { SearchResults } from './ChatSearch';
 import { UiIcon } from './ui-icons';
-import { ContextMenu, Notice, useMenu } from './desktop-ui';
+import { ContextMenu, Notice, Sheet, useMenu } from './desktop-ui';
 import type { MenuItem } from './desktop-ui';
 import { ContinueElsewhere, canRevealFolder, openChatWindow, revealFolder } from './chat-actions';
 import { CHAT_SECTIONS, DEFAULT_PREFS, moveSection, shortTime } from './chat-sidebar-prefs';
@@ -43,7 +45,16 @@ type Chat = Conversation & { schedule?: { next?: string } };
  * someone works, an amber number when approvals wait for the owner.
  * Row actions are on right-click (or the menu key).
  */
-export function ConversationList({ controller, onOpen, search, onNewChat, onAddToBoard }: { controller: ConversationsController; onOpen: () => void; search?: ChatSearchController; onNewChat?: () => void; onAddToBoard?: (id: string) => void }) {
+export function ConversationList({ controller, onOpen, search, onNewChat, onAddToBoard, trustClient }: { controller: ConversationsController; onOpen: () => void; search?: ChatSearchController; onNewChat?: () => void; onAddToBoard?: (id: string) => void; /** REPO-TRUST-01: the owner's session, for the outside tag and its two actions. */ trustClient?: { request: (r: never) => Promise<{ status: number; body: unknown }> } }) {
+  const trust = useOutsideProjects(trustClient);
+  const [trustToast, setTrustToast] = useState<{ id: number; text: string; undo: boolean } | null>(null);
+  const trustUndo = useRef<(() => Promise<void>) | null>(null);
+  async function setOutside(p: { id: string; name: string }, outside: boolean) {
+    const u = await trust?.set(p.id, outside);
+    if (!u) return;
+    trustUndo.current = u;
+    setTrustToast({ id: Date.now(), text: outside ? 'Outside now' : 'Trusted', undo: true });
+  }
   const s = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const found = useSyncExternalStore(search ? search.subscribe : noSearch, search ? search.getSnapshot : idleSearch, search ? search.getSnapshot : idleSearch);
   const [query, setQuery] = useState('');
@@ -89,7 +100,6 @@ export function ConversationList({ controller, onOpen, search, onNewChat, onAddT
     { label: 'Rename', icon: 'pencil', run: () => setRenaming(c.id) },
     { label: c.pinned ? 'Unpin' : 'Pin', icon: 'pin', shortcut: '⌘P', run: () => void controller.pin(c.id, !c.pinned) },
     ...(onAddToBoard ? [{ label: 'Add to board…', icon: 'board' as const, shortcut: '⌘B', run: () => onAddToBoard(c.id) }] : []),
-    ...(s.projects.length ? ['sep' as const, ...[{ id: '', name: 'No project' }, ...s.projects].map(p => ({ label: p.id ? `Move to ${p.name}` : 'Move out of the project', icon: 'folder' as const, checked: (c.projectId ?? '') === p.id, run: () => void controller.moveToProject(c.id, p.id) }))] : []),
     'sep',
     { label: 'Export as Markdown', icon: 'download', shortcut: '⇧⌘S', run: () => void controller.exportMarkdown(c.id) },
     { label: c.archived ? 'Bring back from the archive' : 'Archive', icon: 'archive', shortcut: '⌘⌫', run: () => void archive(c, !c.archived) },
@@ -100,6 +110,10 @@ export function ConversationList({ controller, onOpen, search, onNewChat, onAddT
     { label: 'Rename…', icon: 'pencil', run: () => setProjectForm({ id: p.id }) },
     { label: 'Folders and variables…', icon: 'folder', run: () => setProjectForm({ id: p.id }) },
     ...(p.folder && canRevealFolder() ? [{ label: navigator.platform.startsWith('Win') ? 'Show in Explorer' : 'Show in Finder', icon: 'open' as const, run: () => revealFolder(p.folder!) }] : []),
+    // REPO-TRUST-01: someone else's repository is kept apart; the owner decides.
+    ...(trust && !trust.getSnapshot().off ? [trust.isOutside(p.id)
+      ? { label: 'Trust this project', icon: 'check' as const, run: () => void setOutside(p, false) }
+      : { label: 'Put on Outside projects', icon: 'shield' as const, run: () => void setOutside(p, true) }] : []),
     'sep',
     { label: prefs.folded.includes(p.id) ? 'Unfold' : 'Fold', icon: 'chevron', run: () => fold(p.id) },
     { label: 'Fold all', icon: 'chevron', run: () => setPrefs({ ...prefs, folded: [...new Set([...prefs.folded, ...s.projects.map(x => x.id)])] }) },
@@ -123,7 +137,7 @@ export function ConversationList({ controller, onOpen, search, onNewChat, onAddT
         onClick={() => open(c)} onContextMenu={(e: ReactMouseEvent) => menu.at(e, rowItems(c))} onKeyDown={e => keyMenu(e, rowItems(c))}
         draggable={s.access !== 'denied' && s.projects.length > 0} onDragStart={e => { e.dataTransfer.setData(CHAT_DRAG, c.id); e.dataTransfer.effectAllowed = 'move'; }}>
         <span className="chat-row-type" aria-label={c.meeting ? 'Meeting' : c.schedule ? 'Scheduled chat' : 'Chat'} title={c.meeting ? `Meeting · ${c.meeting.state === 'completed' ? 'Finished' : c.meeting.state}` : c.schedule ? 'Scheduled chat' : 'Chat'}><UiIcon name={c.meeting ? 'users' : c.schedule ? 'calendar' : 'message'} size={12}/></span>
-        <span className="chat-row-name" dir="auto">{title(c)}</span>
+        <span className="chat-row-name" dir="auto">{title(c)}<ComputerExecutionBadge sessionId={c.id}/></span>
         {(c.running || (c.id === s.activeId && !!s.runId)) && <span className="chat-row-working" title="Working now" aria-label="Working now"/>}
         {c.waiting ? <span className="chat-row-waits" title={`${c.waiting} ${c.waiting === 1 ? 'approval waits' : 'approvals wait'} for you`} aria-label={`${c.waiting} waiting for you`}>{c.waiting}</span> : null}
         <span className="chat-row-time">{c.schedule?.next ?? shortTime(c.updatedAt)}</span>
@@ -152,7 +166,7 @@ export function ConversationList({ controller, onOpen, search, onNewChat, onAddT
             onDrop={e => { const id = e.dataTransfer.getData(CHAT_DRAG); setDropOn(null); if (id) { e.preventDefault(); void controller.moveToProject(id, p.id); } }}
             onClick={() => fold(p.id)} onContextMenu={(e: ReactMouseEvent) => menu.at(e, projectItems(p))} onKeyDown={e => keyMenu(e, projectItems(p))}>
             <span className="chat-project-chevron" data-open={!folded || undefined}><UiIcon name="chevron" size={11}/></span>
-            <UiIcon name="folder" size={13}/><span className="chat-row-name" dir="auto">{p.name}</span>
+            <UiIcon name="folder" size={13}/><span className="chat-row-name" dir="auto">{p.name}</span><OutsideTag store={trust} projectId={p.id}/>
             {folded && needs && <span className="chat-row-waits small" aria-label="Waiting for you"/>}
             {folded && count > 0 && <span className="chat-row-time">{count}</span>}
           </button>
@@ -182,6 +196,11 @@ export function ConversationList({ controller, onOpen, search, onNewChat, onAddT
     {header}
     {continueFrom && <ContinueElsewhere controller={controller} chatId={continueFrom} onDone={() => { setContinueFrom(null); onOpen(); }}/>}
     {projectForm && <ProjectSheet controller={controller} id={projectForm.id} onClose={() => setProjectForm(null)}/>}
+    {!projectForm && s.adoptOffer && <Sheet title={`Start ${s.adoptOffer.name} empty?`} onClose={() => void controller.answerAdoptOffer(false)}
+      actions={<><button type="button" onClick={() => void controller.answerAdoptOffer(true)}>Use its memory</button><button type="button" className="primary" autoFocus onClick={() => void controller.answerAdoptOffer(false)}>Start empty</button></>}>
+      <p>A project called {s.adoptOffer.name} was deleted earlier. Its memory ({s.adoptOffer.memories === 1 ? '1 memory' : `${s.adoptOffer.memories} memories`}) is still kept.</p>
+      <p className="fine-print">Start empty keeps the old memory apart (you find it in Memory). Use its memory moves it to this project.</p>
+    </Sheet>}
     {editing ? <SidebarEditor prefs={prefs} onDone={p => { setPrefs(p); setEditing(false); }} onCancel={() => setEditing(false)}/>
       : searching ? <SearchResults state={found} projectName={projectName} onOpen={openHit}/>
       : !s.conversations.length ? <p className="session-empty">No chats yet. Start one with New chat.</p>
@@ -189,6 +208,7 @@ export function ConversationList({ controller, onOpen, search, onNewChat, onAddT
     <ContextMenu menu={menu.menu} onClose={menu.close}/>
     <Notice toast={toast} onDone={id => setToast(t => (t?.id === id ? null : t))}
       onUndo={() => { const t = toast; setToast(null); const c = t && chats.find(x => x.id === t.chat); if (c) void controller.archive(c.id, !c.archived); }}/>
+    <Notice toast={trustToast} onDone={id => setTrustToast(t => (t?.id === id ? null : t))} onUndo={() => { void trustUndo.current?.(); trustUndo.current = null; setTrustToast(null); }}/>
   </div>;
 }
 

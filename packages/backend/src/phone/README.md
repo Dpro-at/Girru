@@ -8,7 +8,7 @@ the computer's half of it. No UI here.
 |---|---|
 | `protocol/e2e.ts`, `protocol/encoding.ts`, `protocol/websocket.ts` | Copies of `packages/relay/src`, unchanged. `test/phone-protocol.test.mjs` fails when they drift: copy them again, never edit them here. |
 | `protocol/pairing.ts` | QR code, pairing key, `g1.preq`, check challenge `g1.pchal`, check code, `g1.pwel` (wrapped notification key), `g1.ntf` (both sides). |
-| `store.ts` | Migration 164 tables: paired phones, the computer identity, settings, approvals shown to each phone. Private key, notification keys and push tokens are encrypted with the app's `ENCRYPTION_KEY`. |
+| `store.ts` | Migration 183 tables: paired phones, the computer identity, settings, approvals shown to each phone. Private key, notification keys and push tokens are encrypted with the app's `ENCRYPTION_KEY`. |
 | `service.ts` | `phoneLink()`: pairing sessions, relay connection, sessions, the command gate. |
 | `relay-connector.ts` | Outbound WebSocket to the relay: signed hello, allow list, open pairing ids, backoff with jitter. |
 | `commands.ts` | What a phone may ask, run as the owner through the same code as the computer's pages. |
@@ -52,7 +52,8 @@ tool: `phone_devices` (read only). No tool pairs, allows or forgets a phone.
   are ignored.
 - Audit rows carry the phone's device id.
 - The chat page on the phone passes two gates: the phone's short list in
-  `ui-bridge.ts` (chat only; never phones, terminal, project files or
+  `ui-bridge.ts` (chat and, by the owner's decision, the terminal behind the
+  phone's biometric check; never phones, project files or
   variables, credentials, sign-in, users, backups, extensions, MCP, deletes
   or uploads) and the desktop bridge's own allow list and answer projection
   (`core-ui/scripts/application-server.cjs`). `test/phone-ui-bridge.test.mjs`

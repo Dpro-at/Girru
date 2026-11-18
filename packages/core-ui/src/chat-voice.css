@@ -1,1 +1,5 @@
-.chat-voice{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:5px 0;color:var(--muted);font-size:11px}.chat-voice select{font:inherit;max-inline-size:190px;color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:5px}.chat-voice .tool{display:grid;place-items:center;padding:6px}.chat-voice [aria-pressed=true]{color:var(--accent)}.chat-voice [role=status]{overflow-wrap:anywhere;max-inline-size:340px}
+/* CV1: voice sits inside the message box's tool row, as at most two icons; the state shows only while talking or speaking. */
+.chat-voice{display:inline-flex;align-items:center;gap:2px;color:var(--muted);font-size:11px;min-width:0}
+.chat-voice .tool{display:grid;place-items:center;padding:6px}
+.chat-voice [aria-pressed=true]{color:var(--accent)}
+.chat-voice-state{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-inline-size:200px;padding:2px 8px;border-radius:999px;background:var(--subtle,var(--surface));color:var(--text)}

@@ -1,3 +1,4 @@
+import {loadBrowserRuntime} from '../../services/browser-runtime.js';
 /**
  * Browser Interact Tool
  *
@@ -152,6 +153,7 @@ Returns the session ID if keepAlive is true, allowing you to continue interactin
 
   async execute(rawParams): Promise<ToolResult> {
     const params = rawParams as BrowserInteractParams;
+    if(!await loadBrowserRuntime())return {error:'app_not_enabled',content:[{type:'text',text:'Add and enable Browser from the Store, then restart Girru.'}]};
     const controller = getBrowserController();
     let sessionId: string | null = null;
     let ownSession = false; // Track if we created the session

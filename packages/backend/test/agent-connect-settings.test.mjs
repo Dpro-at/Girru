@@ -1,3 +1,4 @@
+import './fixtures/channel-library.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {randomBytes} from 'node:crypto';
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'dpro-connect-settings-'));process.env.AGENT_PLAYER_DATA_DIR=path.join(root,'data');process.env.DATABASE_PATH=path.join(root,'data','agent-player.db');process.env.JWT_SECRET=randomBytes(64).toString('hex');process.env.ENCRYPTION_KEY=randomBytes(32).toString('hex');
 const {getDatabase,closeDatabase}=await import('../src/db/database.ts');const db=getDatabase();await db.initialize();

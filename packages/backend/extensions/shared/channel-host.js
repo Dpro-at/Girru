@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { ChannelConnector, TelegramTransport, DiscordTransport, channelInfo } from 'agent-connect-dpro';
+import { channelLibraryAvailable, ChannelConnector, TelegramTransport, DiscordTransport, channelInfo } from './channel-library.js';
 
 const runtimes = new Map();
 // Channels whose provider connection the channel library makes in Node (all others run in its
@@ -42,7 +42,7 @@ export async function registerChannelRoutes(fastify, api, id, options = {}) {
   const enabled = () => db.prepare('SELECT enabled FROM extension_configs WHERE extension_id = ?').get(options.extensionId || id)?.enabled === 1;
   const configured = config => options.isConfigured ? options.isConfigured(config) : Boolean(config.bot_token);
   const values = value => Array.isArray(value) ? value.map(String) : String(value || '').split(',').map(v => v.trim()).filter(Boolean);
-  const active = () => !stopped && enabled() && read().enabled !== false;
+  const active = () => !stopped && channelLibraryAvailable() && enabled() && read().enabled !== false;
   const insert = (message, direction, state) => db.prepare(`INSERT OR IGNORE INTO channel_events
     (channel, conversation_id, id, sender_id, sender_name, content, timestamp, direction, state)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, message.conversationId, message.id,
@@ -202,3 +202,5 @@ export async function registerChannelRoutes(fastify, api, id, options = {}) {
   // Provider-authenticated polling/Gateway replaces unauthenticated legacy webhook ingestion.
   fastify.post('/webhook', limit('webhook', 30), async (_request, reply) => reply.code(410).send({ error: 'This channel uses a persistent provider connection' }));
 }
+
+export async function stopAllChannels(){await Promise.allSettled([...runtimes.keys()].map(stopChannel));runtimes.clear();}

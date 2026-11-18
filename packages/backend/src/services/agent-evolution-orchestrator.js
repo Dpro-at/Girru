@@ -123,6 +123,9 @@ async function runConfigEvolution(agentId, config) {
           const outcome = await createEvolutionProposal(agentId, draft);
           proposals.push(outcome.status === 'proposed'
             ? { status: 'proposed', proposalId: outcome.proposal.id, kind: draft.kind, title: draft.title }
+            // STORE-MAP-01 P4: the suggestion waits in Personality review instead.
+            : outcome.status === 'personality_proposed'
+            ? { status: 'proposed', proposalId: outcome.proposalId, kind: draft.kind, title: draft.title, review: 'personality' }
             : { status: 'skipped', reason: outcome.reason, kind: draft.kind, title: draft.title, ...(outcome.proposalId ? { proposalId: outcome.proposalId } : {}) });
         } catch (error) {
           console.error(`[Evolution] Failed to file proposal:`, error);

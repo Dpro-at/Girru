@@ -41,7 +41,11 @@ function Pop({ open, onClose, label, children, wide }: { open: boolean; onClose:
     const r = anchor.current.parentElement.getBoundingClientRect(), h = host.getBoundingClientRect();
     const w = ref.current.offsetWidth;
     const left = Math.max(8, Math.min(r.left, h.right - w - 8)) - h.left;
-    setPlace({ position: 'absolute', left, bottom: h.bottom - r.top + 6, maxHeight: Math.max(160, r.top - h.top - 16) });
+    // Up from the anchor (the message box), or down when the anchor sits near the top with more room below.
+    const above = r.top - h.top - 16, below = h.bottom - r.bottom - 16;
+    setPlace(above < 240 && below > above
+      ? { position: 'absolute', left, top: r.bottom - h.top + 6, maxHeight: Math.max(160, below) }
+      : { position: 'absolute', left, bottom: h.bottom - r.top + 6, maxHeight: Math.max(160, above) });
   }, [open, host]);
   useEffect(() => {
     if (!open) return;

@@ -1,10 +1,11 @@
+import './fixtures/trading-runtime.mjs';
 // Girru's own Alpaca client (replaces @alpacahq/alpaca-trade-api 3.x): requests, errors, bar pages,
 // and the live stream, against a fake fetch and a fake WebSocket. No network.
 // Run: node --import tsx --test test/trading-alpaca-rest.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAlpacaRest, AlpacaError } from '../extensions/trading/src/alpaca-rest.js';
-import { getAccountInfo, getHistoricalBars, getLatestQuote, getOptionsChain, placeOrder } from '../extensions/trading/src/alpaca-client.js';
+import { createAlpacaRest, AlpacaError } from './fixtures/legacy-apps/extensions/trading/src/alpaca-rest.js';
+import { getAccountInfo, getHistoricalBars, getLatestQuote, getOptionsChain, placeOrder } from './fixtures/legacy-apps/extensions/trading/src/alpaca-client.js';
 
 function fakeFetch(routes) {
   const calls = [];

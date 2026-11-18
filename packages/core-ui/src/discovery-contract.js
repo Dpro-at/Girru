@@ -87,11 +87,14 @@ function root(x) {
   return { id: x.id, name: str(x.name, 200) ?? '', path: str(x.path, 2048), project: str(x.project, 200), count: n(x.count), fresh: n(x.fresh), watch: x.watch !== false,
     ...(members ? { group: { members } } : {}), ...(Array.isArray(x.hidden) ? { hidden: x.hidden.filter(k => DISCOVERY_KINDS.includes(k)) } : {}) };
 }
+// Up to 5,000 of each kind, in the order the backend sent: thousands of notes never push the
+// MCP servers and SSH keys (which sort after them) off the list (MCP-ONE-01).
+const perKind = list => { const seen = Object.create(null), out = []; for (const raw of list.slice(0, 50000)) { const x = item(raw); if (!x) continue; seen[x.kind] = (seen[x.kind] ?? 0) + 1; if (seen[x.kind] <= 5000) out.push(x); } return out; };
 const view = b => {
   const s = settings(b.settings);
   if (!s || !Array.isArray(b.items) || !Array.isArray(b.roots)) throw Error('protocol');
   const suggestions = Array.isArray(b.suggestions) ? b.suggestions.slice(0, 20).filter(x => record(x) && typeof x.key === 'string' && ID.test(x.key) && named(x.a) && named(x.b)).map(x => ({ key: x.key, a: named(x.a), b: named(x.b), reason: str(x.reason, 100) ?? '' })) : [];
-  return { scannedAt: str(b.scannedAt, 40), ms: n(b.ms), leftOut: n(b.leftOut), allowedFolders: n(b.allowedFolders), suggestions, settings: s, roots: b.roots.slice(0, 1000).map(root).filter(Boolean), items: b.items.slice(0, 5000).map(item).filter(Boolean) };
+  return { scannedAt: str(b.scannedAt, 40), ms: n(b.ms), leftOut: n(b.leftOut), allowedFolders: n(b.allowedFolders), suggestions, settings: s, roots: b.roots.slice(0, 1000).map(root).filter(Boolean), items: perKind(b.items) };
 };
 
 export function discoveryResponse(path, status, body) {

@@ -149,6 +149,11 @@
 .ag-bar i{position:absolute;inset-block:0;inset-inline-start:0;border-radius:3px;background:var(--control)}
 .ag-bar i[data-next]{background:var(--accent);opacity:.8}
 .ag-delta-n{color:var(--accent)}
+/* STORE-MAP-01 P4 (T7b, T7d): a personality text change, before → after */
+.ag-text-diff{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:6px 0}
+.ag-text-diff pre{margin:0;padding:8px;border-radius:6px;font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-block-size:260px;overflow:auto;background:var(--subtle)}
+.ag-text-diff .ag-text-after{background:color-mix(in srgb,#2E8B57 18%,var(--surface))}
+@media (max-width:640px){.ag-text-diff{grid-template-columns:1fr}}
 .ag-needs-foot{display:flex;align-items:center;flex-wrap:wrap;gap:10px}
 .ag-needs-foot>.ag-check{margin-inline-end:auto}
 .ag-check{display:inline-flex!important;align-items:center;gap:6px;font-size:12px;color:var(--text-2)}
@@ -255,3 +260,6 @@
 .ag-team-picture.ag-team-grid>.ag-band{min-inline-size:0;padding:14px;border-radius:8px;overflow-wrap:anywhere}
 .ag-team-grid>.ag-band>span{white-space:normal;align-items:flex-start}
 .ag-team-grid>.ag-band>span>svg{flex-shrink:0}
+
+/* STORE-MAP-01 P4 (T7c): the personality text in the Personality tab */
+.ag-persona-text{margin:0;padding:10px 12px;border-radius:8px;background:var(--subtle);font:12.5px/1.6 ui-monospace,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-block-size:240px;overflow:auto}

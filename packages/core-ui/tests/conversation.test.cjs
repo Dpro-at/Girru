@@ -152,3 +152,14 @@ test('folder picker contract bounds requests and strips filesystem metadata',()=
  assert.ok(!JSON.stringify(conversationResponse(path,200,row)).includes('hidden'));
  assert.throws(()=>conversationResponse(path,200,{...row,entries:[{name:'../secret',path:'/secret'}]}));
 });
+
+test('browser and bridge forward bounded target intent, never a client-resolved target decision', () => {
+  const { allowedRequest } = require('../src/session.ts');
+  const { allowed } = require('../scripts/application-server.cjs');
+  for (const permit of [allowedRequest, allowed]) {
+    assert.equal(permit('POST', '/api/chat/conversations', { agentId: 'picker-agent', targetMessage: '@Other please answer' }), true);
+    assert.equal(permit('POST', '/api/chat/conversations', { targetMessage: 1 }), false);
+    assert.equal(permit('POST', '/api/chat/conversations', { targetMessage: 'x'.repeat(100001) }), false);
+    assert.equal(permit('POST', '/api/chat/conversations', { targetMessage: '@Other', targetResolved: true }), false);
+  }
+});

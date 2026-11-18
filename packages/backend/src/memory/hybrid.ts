@@ -44,27 +44,43 @@ export const WORKING_LAYER_BOOST = 0.05;
 
 /** BM25 of each document for the query, normalized to 0–1 (see header). */
 export function bm25Scores(queryTokens: readonly string[], docs: ReadonlyArray<readonly string[]>): number[] {
+  return bm25FromCounts(queryTokens, docs.map((d) => ({ counts: termCounts(d), length: d.length })));
+}
+
+/** How often each token occurs in one document. */
+export function termCounts(doc: readonly string[]): Map<string, number> {
+  const tf = new Map<string, number>();
+  for (const t of doc) tf.set(t, (tf.get(t) || 0) + 1);
+  return tf;
+}
+
+/**
+ * bm25Scores over documents already counted (termCounts + token count), so a
+ * caller that keeps the counts (P9 recall index) does not count every
+ * document again for every query. Same numbers as bm25Scores.
+ */
+export function bm25FromCounts(
+  queryTokens: readonly string[],
+  docs: ReadonlyArray<{ counts: ReadonlyMap<string, number>; length: number }>,
+): number[] {
   const terms = [...new Set(queryTokens)];
   const n = docs.length;
   if (terms.length === 0 || n === 0) return docs.map(() => 0);
   const avgdl = docs.reduce((s, d) => s + d.length, 0) / n || 1;
   const df = new Map<string, number>();
-  const tfs = docs.map((d) => {
-    const tf = new Map<string, number>();
-    for (const t of d) tf.set(t, (tf.get(t) || 0) + 1);
-    for (const t of terms) if (tf.has(t)) df.set(t, (df.get(t) || 0) + 1);
-    return tf;
-  });
+  for (const d of docs) {
+    for (const t of terms) if (d.counts.has(t)) df.set(t, (df.get(t) || 0) + 1);
+  }
   const idf = new Map(terms.map((t) => {
     const k = df.get(t) || 0;
     return [t, Math.log(1 + (n - k + 0.5) / (k + 0.5))];
   }));
   const total = terms.reduce((s, t) => s + idf.get(t)!, 0) || 1;
-  return tfs.map((tf, i) => {
-    const dl = docs[i].length;
+  return docs.map((d) => {
+    const dl = d.length;
     let score = 0;
     for (const t of terms) {
-      const f = tf.get(t) || 0;
+      const f = d.counts.get(t) || 0;
       if (!f) continue;
       score += idf.get(t)! * (f * (BM25_K1 + 1)) / (f + BM25_K1 * (1 - BM25_B + BM25_B * dl / avgdl));
     }

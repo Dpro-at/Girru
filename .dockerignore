@@ -47,3 +47,18 @@ Thumbs.db
 *.tmp
 *.temp
 *.swp
+
+# Local credentials, runtime state and outputs at any workspace depth
+**/.env
+**/.env.*
+**/.data
+**/public/storage
+**/*.local.json
+**/secrets.env
+**/dist
+**/*.log
+**/*.sqlite*
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/__pycache__

@@ -1,3 +1,17 @@
+import type {createNativeRequestContext} from '../memory/encryption/native-request-context.js';
+import {nativeMemoryOwnerRoutes,type NativeMemoryPreparationService} from './routes/native-memory-owner.js';
+import {dproAccountRoutes} from './routes/dpro-account.js';
+import {googleAuthRoutes} from './routes/google-auth.js';
+import {deviceEnrollmentRoutes} from './routes/device-enrollment.js';
+import {bindComputerApplication,type ComputerApplication} from '../devices/application.js';
+import {deviceCoopRoutes} from './routes/device-coop.js';
+import {reportRoutes} from './routes/reports.js';
+import type {createEncryptedMemoryBridgeAdapter} from '../memory/encryption/bridge-adapter.js';
+import {bindEncryptedMemoryServer} from '../memory/encryption/server-mode.js';
+import {registerEncryptedMemoryRoutes,registerEncryptedMemoryLegacyGuard} from './routes/encrypted-memory.js';
+import {registerEncryptedMemoryRuntimeHooks,createEncryptedMemoryRuntime} from '../memory/encryption/runtime-host.js';
+import {registerEncryptedForgetLifecycleHooks,type EncryptedForgetLifecycle} from '../memory/encryption/forget-lifecycle.js';
+import {storeHostEnabled,markStoreHostStarted} from '../services/store-host-apps.js';
 import { meetingRoutes } from './routes/meetings.js';
 import {workspacePackRoutes} from './routes/workspace-pack.js';
 import {tradingMarketRoutes} from './routes/trading-market.js';
@@ -14,6 +28,7 @@ import {securityCoverageRoutes} from './routes/security-coverage.js';
 import {chatAddonsRoutes} from './routes/chat-addons.js';
 import {storeRoutes} from './routes/store.js';
 import { mcpImportRoutes } from './routes/mcp-import.js';
+import { sshKeysRoutes } from './routes/ssh-keys.js';
 /**
  * Girru Fastify app factory.
  *
@@ -35,9 +50,18 @@ import { fileURLToPath } from 'url';
 import { sessionsRoutes } from './routes/sessions.js';
 import { chatConversationRoutes } from './routes/chat-conversations.js';
 import { agentHandoffRoutes } from './routes/agent-handoffs.js'; // CORE-MEM-HANDOFF: owner-only done/left/next notes
-import { memoryBridgeRoutes } from './routes/memory-bridge.js'; // MEM-BRIDGE-01: one memory for Claude Code, Codex, Gemini CLI, Antigravity
+import { storeP8Routes } from './routes/store-p8.js'; // STORE-MAP-01 P8: task links, handoff blockers, run notes (switch on only)
+import { memoryBridgeRoutes } from './routes/memory-bridge.js';
+import { memoryHelperRoutes } from './routes/memory-helper.js'; // MODELS-01-INSTALL: the memory helper's state, 404 while GIRRU_MEMORY_HELPER is off
+import { storeP9bRoutes } from './routes/store-p9b.js'; // STORE-MAP-01 P9b screens: how sure, corrected after use, open questions
+import { docIndexRoutes } from './routes/doc-index.js';
+import { projectTrustRoutes } from './routes/project-trust.js'; // REPO-TRUST-01: outside projects // KNOW-INDEX-01: document memory (status, sources, reindex)
+import { codeOpenRoutes } from './routes/code-open.js'; // CODE-OPEN-01: Open in Code (owner; files in projects or the data folder only)
+import { storeP9Routes } from './routes/store-p9.js'; // STORE-MAP-01 P9: one person's export and forget, health // MEM-BRIDGE-01: one memory for Claude Code, Codex, Gemini CLI, Antigravity
+import { departmentsRoutes } from './routes/departments.js'; // STORE-MAP-01 P3: one list of departments (GIRRU_STORE_P3)
 import { modelsRoutes } from './routes/models.js';
 import { chatRoutes } from './routes/chat.js';
+import { sideQuestionRoutes } from './routes/side-questions.js'; // AGENT-BTW-01: /btw side-question channel
 import { smartChatRoutes } from './routes/smart-chat.js';
 import { settingsRoutes } from './routes/settings.js';
 import { agentsStatusRoutes } from './routes/agents-status.js';
@@ -52,6 +76,10 @@ import { schedulerAuthorizationRoutes } from './routes/scheduler-authorization.j
 import { schedulerRoutes } from './routes/scheduler.js';
 import {schedulerPaperControlRoutes} from './routes/scheduler-paper-control.js';
 import { memoryRoutes } from './routes/memory.js';
+import {mcpChatRoutes} from './routes/mcp-chat.js';
+import {workspaceControlRoutes} from './routes/workspace-control.js';
+import {workspaceDraftRoutes} from './routes/workspace-drafts.js';
+import { mcpMemoryProposalRoutes } from './routes/mcp-memory-proposals.js';
 import { memoryFilesRoutes } from './routes/memory-files.js';
 import { memoryLearningRoutes } from './routes/memory-learning.js';
 import { memoryDoctorRoutes } from './routes/memory-doctor.js';
@@ -102,7 +130,8 @@ import { agentGrantsRoutes } from './routes/agent-grants.js';
 import { agentPermissionsRoutes } from './routes/agent-permissions.js'; // CORE-PERMS-01
 import { taskBoardRoutes } from './routes/task-board.js'; // BOARD-01
 import { terminalRoutes } from './routes/terminal.js';
-import { uiFooterRoutes } from './routes/ui-footer.js';
+import { uiFooterRoutes, uiThemeRoutes, agentCommandsRoutes, agentCommandRunRoutes } from './routes/ui-footer.js';
+import { computerLookRoutes } from './routes/computer-look.js';
 import { uiAgentsChartRoutes } from './routes/ui-agents-chart.js';
 import { agentPersonalityRoutes } from './routes/agent-personality.js';
 import { storageRoutes } from './routes/storage.js';
@@ -112,17 +141,7 @@ import { aiToolsRoutes } from './routes/ai-tools.js';
 import { cameraRoutes } from './routes/camera.js';
 import { profileRoutes } from './routes/profile.js';
 import { notificationsRoutes } from './routes/notifications.js';
-import { registerTeamRoutes } from './routes/team.js';
 import { phoneRoutes } from './routes/phone.js';
-// Email routes moved to email-client extension
-// import { registerEmailRoutes } from './routes/email.js';
-// import emailAccountsRoutes from './routes/email-accounts.js';
-// import emailFoldersRoutes from './routes/email-folders.js';
-// import emailMessagesRoutes from './routes/email-messages.js';
-// import emailSearchRoutes from './routes/email-search.js';
-// import emailComposeRoutes from './routes/email-compose.js';
-// import emailAttachmentsRoutes from './routes/email-attachments.js';
-// import emailDraftsRoutes from './routes/email-drafts.js';
 import { worldsRoutes } from './routes/worlds.js';
 import { multiverseRoutes } from './routes/multiverse.js';
 import { worldBotsRoutes } from './routes/world-bots.js';
@@ -131,11 +150,10 @@ import { worldBuilderRoutes } from './routes/world-builder.js';
 import { extensionsRoutes } from './routes/extensions.js';
 import { systemRoutes } from './routes/system.js';
 import { appUpdateRoutes } from './routes/app-updates.js';
-import { registerTelephonyRoutes } from './routes/telephony.js';
+import {loadCallCenterRuntime} from '../services/call-center-runtime.js';
 import { agentFilesRoutes } from './routes/agent-files.js';
+import { agentPackagesRoutes } from './routes/agent-packages.js';
 import { registerDashboardRoutes } from './routes/dashboard.js';
-import { registerCalendarRoutes } from './routes/calendar.js';
-import { registerPublicChatRoutes } from './routes/public-chat.js';
 import { registerCostAnalyticsRoutes } from './routes/cost-analytics.js';
 import evolutionRoutes from './routes/evolution.js';
 import evaluationRoutes from './routes/evaluation.js';
@@ -155,6 +173,19 @@ import { registerGlobalErrorHandler } from './error-handler.js';
 import { registerLaunchToken } from './launch-token.js';
 
 export interface BuildServerOptions {
+  /** Actual SAME-control-process private native service; absent stays unavailable. */
+  nativeMemoryPreparation?:NativeMemoryPreparationService;
+  nativeOwnedControl?:{isCurrent:()=>boolean;verifyIsolation:()=>Promise<void>};
+  nativeRequestAdmission?:ReturnType<typeof createNativeRequestContext>;
+  getEncryptedMemoryRuntime?:()=>ReturnType<typeof createEncryptedMemoryRuntime>|null;
+  isEncryptedMemorySelected?:()=>boolean;
+  /** Explicit server-provisioned authority/custody. Never accepted from a request or environment flag. */
+  computerApplication?:ComputerApplication;
+  /** Explicit unlocked isolated-profile dependency; absent means encrypted lifecycle stays inactive. */
+  memoryForgetLifecycle?:EncryptedForgetLifecycle;
+  /** Explicit selected-profile runtime with supplied custody; never built from environment/default data. */
+  encryptedMemoryRuntime?:ReturnType<typeof createEncryptedMemoryRuntime>;
+  encryptedMemoryBridge?:ReturnType<typeof createEncryptedMemoryBridgeAdapter>;
   /** Explicit provisioned ledger dependency; never created from a read request. */
   paperLedger?:()=>PaperDatabase.Database|null;
   /** Separate immutable opt-in for a server-owned paper-only scheduler; never inferred from paperLedger. */
@@ -168,6 +199,9 @@ export function redactUrlSecrets(url: string): string {
 }
 
 export async function buildServer(options: BuildServerOptions = {}): Promise<FastifyInstance> {
+  if(options.encryptedMemoryBridge&&!options.encryptedMemoryRuntime)throw new Error('Encrypted bridge requires an explicit encrypted runtime');
+  if(options.memoryForgetLifecycle&&options.encryptedMemoryRuntime)throw new Error('Choose one encrypted memory lifecycle');
+  if(options.memoryForgetLifecycle&&(process.env.AGENT_PLAYER_READONLY==='1'||process.env.AGENT_PLAYER_BACKGROUND==='off'))throw new Error('Encrypted memory lifecycle is disabled by the server isolation policy');
   const paperScheduleLedger=options.paperScheduleLedger??null;
   const fastify = Fastify({
     // Cold skill/template seeding can exceed Fastify's 10-second default on Windows.
@@ -190,9 +224,20 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     }
   });
 
+  if(options.nativeOwnedControl)fastify.addHook('onReady',async()=>{if(!options.nativeOwnedControl!.isCurrent())throw new Error('owned_control_unavailable');await options.nativeOwnedControl!.verifyIsolation();});
+  registerLaunchToken(fastify);
+  options.nativeRequestAdmission?.register(fastify);
+  if(options.memoryForgetLifecycle)registerEncryptedForgetLifecycleHooks(fastify,options.memoryForgetLifecycle);
+  if(options.nativeOwnedControl){if(!options.nativeOwnedControl.isCurrent())throw new Error('owned_control_unavailable');bindEncryptedMemoryServer(fastify);registerEncryptedMemoryLegacyGuard(fastify,false);}
+  if(options.encryptedMemoryRuntime){
+    bindEncryptedMemoryServer(fastify);
+    registerEncryptedMemoryRuntimeHooks(fastify,options.encryptedMemoryRuntime);
+    registerEncryptedMemoryLegacyGuard(fastify,Boolean(options.encryptedMemoryBridge));
+  }
+
   // INSTALLER-05: inside the desktop app every request needs the per-launch
   // token; registered first so no other hook or route runs without it.
-  registerLaunchToken(fastify);
+
 
   // RUN-ISO stage 1: with AGENT_PLAYER_READONLY=1 only reads, login/logout
   // and first-run setup pass. Registered first, before every other hook and
@@ -208,7 +253,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   // before the route plugins below, because the memory and credential routes
   // create their tables at registration; otherwise a later migration fails
   // with "duplicate column" and the server cannot start on an empty data dir.
-  if (dbDriver() === 'sqlite') {
+  if (dbDriver() === 'sqlite'&&!options.nativeOwnedControl) {
     const { initializeDatabase } = await import('../db/index.js');
     await initializeDatabase();
   }
@@ -360,10 +405,21 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await fastify.register(chatAddonsRoutes,{home:process.env.DPRO_ADDON_METADATA_HOME});
   await fastify.register(storeRoutes,{home:process.env.DPRO_ADDON_METADATA_HOME});
   await fastify.register(chatRoutes);
+  await fastify.register(sideQuestionRoutes); // AGENT-BTW-01: /btw side questions (owner only, off an immutable snapshot)
   await fastify.register(meetingRoutes);
+  await fastify.register(reportRoutes);
   await fastify.register(chatConversationRoutes); // saved conversations + resumable runs (CHAT-REBUILD-01)
   await fastify.register(agentHandoffRoutes); // CORE-MEM-HANDOFF: the agents' handoff notes (owner only)
-  await fastify.register(memoryBridgeRoutes); // MEM-BRIDGE-01: owner API + the dpro-memory MCP server's two loopback routes
+  await fastify.register(storeP8Routes); // STORE-MAP-01 P8: registers nothing while GIRRU_STORE_P8 is off
+  if(options.encryptedMemoryRuntime||options.getEncryptedMemoryRuntime)await registerEncryptedMemoryRoutes(fastify,options.getEncryptedMemoryRuntime??options.encryptedMemoryRuntime!,{isEncryptedMemorySelected:options.isEncryptedMemorySelected});
+  await fastify.register(memoryBridgeRoutes,{encryptedMemoryBridge:options.encryptedMemoryBridge}); // MEM-BRIDGE-01: owner API + the dpro-memory MCP server's two loopback routes
+  await fastify.register(storeP9Routes); // STORE-MAP-01 P9: 404 while GIRRU_STORE_P9 is off
+  await fastify.register(storeP9bRoutes,{getEncryptedMemoryRuntime:options.getEncryptedMemoryRuntime,isEncryptedMemorySelected:options.isEncryptedMemorySelected}); // STORE-MAP-01 P9b screens: 404 while GIRRU_STORE_P9B is off
+  await fastify.register(projectTrustRoutes); // REPO-TRUST-01: 404 while GIRRU_REPO_TRUST is off
+  await fastify.register(docIndexRoutes); // KNOW-INDEX-01: 404 while GIRRU_DOC_INDEX is off
+  await fastify.register(codeOpenRoutes); // CODE-OPEN-01
+  await fastify.register(memoryHelperRoutes); // MODELS-01-INSTALL: 404 while GIRRU_MEMORY_HELPER is off
+  await fastify.register(departmentsRoutes); // STORE-MAP-01 P3: one list of departments, 404 while the switch is off
   await fastify.register(smartChatRoutes); // 🧠 Smart Agent System
   await fastify.register(settingsRoutes); // ⚙️ Settings API
   await fastify.register(agentsStatusRoutes); // 📊 Agents Status
@@ -372,20 +428,34 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await fastify.register(skillsRoutes);
   await fastify.register(skillInstallRoutes);
   await fastify.register(mcpImportRoutes);
+  await fastify.register(sshKeysRoutes); // SSH-KEYS-01: Settings › Security › SSH keys
   await fastify.register(skillLibraryRoutes);
   await fastify.register(specialtyTemplateRoutes); // 🛠️ Skills System
   await fastify.register(schedulerDefinitionRoutes);
-  await fastify.register(tradingMarketRoutes);
-  await fastify.register(tradingPaperPracticeRoutes);
-  await fastify.register(tradingPaperReadRoutes,{ledger:options.paperLedger??(()=>null)});
-  await fastify.register(tradingPaperBotRoutes,{ledger:options.paperLedger??(()=>null)});
-  await fastify.register(tradingPaperInstallRoutes,{ledger:options.paperLedger??(()=>null)});
-  await fastify.register(tradingPaperAccountSetupRoutes,{ledger:options.paperLedger??(()=>null)});
-  await fastify.register(tradingPaperRuntimeRoutes,{ledger:options.paperLedger??(()=>null)});
+  if(storeHostEnabled('trading'))markStoreHostStarted('trading');
+  await fastify.register(async scope=>{scope.addHook('preHandler',async(_request,reply)=>{if(!storeHostEnabled('trading'))return reply.code(503).send({code:'app_not_enabled'});});
+  await scope.register(tradingMarketRoutes);
+  await scope.register(tradingPaperPracticeRoutes);
+  await scope.register(tradingPaperReadRoutes,{ledger:options.paperLedger??(()=>null)});
+  await scope.register(tradingPaperBotRoutes,{ledger:options.paperLedger??(()=>null)});
+  await scope.register(tradingPaperInstallRoutes,{ledger:options.paperLedger??(()=>null)});
+  await scope.register(tradingPaperAccountSetupRoutes,{ledger:options.paperLedger??(()=>null)});
+  await scope.register(tradingPaperRuntimeRoutes,{ledger:options.paperLedger??(()=>null)});
+  });
   await fastify.register(schedulerAuthorizationRoutes);
   await fastify.register(schedulerPaperControlRoutes,{ledger:paperScheduleLedger});
   await fastify.register(schedulerRoutes); // ⏰ Scheduler System
-  await fastify.register(memoryRoutes); // 🧠 Memory System
+  await fastify.register(nativeMemoryOwnerRoutes,{service:options.nativeMemoryPreparation});
+  await fastify.register(memoryRoutes,{skipLegacyInitialization:Boolean(options.nativeOwnedControl)}); // 🧠 Memory System
+  await fastify.register(mcpChatRoutes);
+  if(options.computerApplication){const unbind=bindComputerApplication(options.computerApplication);fastify.addHook('onClose',async()=>{await options.computerApplication!.stop();unbind();});}
+  await fastify.register(deviceCoopRoutes,{application:options.computerApplication});
+  await fastify.register(deviceEnrollmentRoutes);
+  await fastify.register(dproAccountRoutes);
+  await fastify.register(googleAuthRoutes);
+  await fastify.register(workspaceControlRoutes);
+  await fastify.register(workspaceDraftRoutes);
+  await fastify.register(mcpMemoryProposalRoutes);
   await fastify.register(memoryFilesRoutes); // CORE-04: owner-only memory files + reviewed proposals
   await fastify.register(memoryLearningRoutes); // CORE-05: owner-only weekly learning summary
   await fastify.register(memoryDoctorRoutes); // CORE-MEM-DOCTOR: owner-only health check + confirmed fixes
@@ -433,6 +503,10 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await fastify.register(agentPermissionsRoutes); // CORE-PERMS-01: memory scope + off/ask/allow per agent
   await fastify.register(taskBoardRoutes); // BOARD-01: company task board
   await fastify.register(uiFooterRoutes); // SH3: footer choices per person
+  await fastify.register(agentCommandsRoutes); // CP15: owner switch for agents running commands
+  await fastify.register(agentCommandRunRoutes); // CP15: the same command tool for agents connected by MCP
+  await fastify.register(uiThemeRoutes); // CP13: theme saved in the program so Same as can copy it
+  await fastify.register(computerLookRoutes); // CP9c: computer pictures and names
   await fastify.register(uiAgentsChartRoutes); // Agents chart choices per person (AGENTS-ORG-01)
   await fastify.register(terminalRoutes); // TERM-01: owner-only, loopback-only shell (off unless AGENT_TERMINAL=true)
   await fastify.register(personalityLibraryRoutes);
@@ -445,7 +519,6 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await fastify.register(cameraRoutes);        // 📷 Camera Sessions + WebRTC Signaling
   await fastify.register(profileRoutes);       // 👤 User Profile (GET/PUT /api/profile)
   await fastify.register(notificationsRoutes); // 🔔 Notifications (CRUD + Settings + Schedules)
-  await fastify.register(registerTeamRoutes);     // 👥 Team Management (Teams, Members, Invitations)
   // Email routes moved to email-client extension (install via /dashboard/extensions)
   // await fastify.register(registerEmailRoutes);    // 📧 Email Configuration (SMTP Test + Verify)
   // await fastify.register(emailAccountsRoutes);    // 📬 Email Accounts (Multi-Account IMAP/SMTP + OAuth)
@@ -462,13 +535,13 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await fastify.register(worldBuilderRoutes);     // 🏗️  World Builder (Manual Building + Save/Load)
   await fastify.register(extensionsRoutes);    // 🔌 Extensions Management (SDK-based)
   await fastify.register(marketplaceRoutes);   // 🛒 Extension Marketplace (Registry, Install, Reviews)
-  await fastify.register(registerTelephonyRoutes); // ☎️ Telephony / Assistant Center (Call Center)
+  const callCenter=await loadCallCenterRuntime().catch(()=>{fastify.log.warn('Call Center is unavailable; add it again from the Store.');return null;});
+  if(callCenter)await fastify.register(async scope=>{scope.addHook('onRequest',async()=>callCenter.check());await callCenter.routes.registerTelephonyRoutes(scope);});
   await fastify.register(appUpdateRoutes()); // Settings › About and updates (owner)
   await fastify.register(systemRoutes);        // ⚙️ System Operations (Restart, Shutdown)
   await fastify.register(agentFilesRoutes);    // 📝 Agent Files (PERSONALITY.md + MEMORY.md)
+  await fastify.register(agentPackagesRoutes); // STORE-MAP-01 P5: agent packages (GIRRU_STORE_P5)
   await fastify.register(registerDashboardRoutes); // 📊 Customizable Dashboard (Widgets + Layouts)
-  await fastify.register(registerCalendarRoutes);  // 📅 Calendar System (Events + Google Calendar Sync)
-  await fastify.register(registerPublicChatRoutes); // 💬 Public Chat Rooms (Multi-User Chat with AI Agents)
   await fastify.register(registerCostAnalyticsRoutes); // 💰 Cost Analytics (Model Usage & Savings Tracking)
   await fastify.register(evolutionRoutes);        // 🧬 Agent Evolution System (Self-Learning & Adaptation)
   await fastify.register(evaluationRoutes);       // 📊 Agent Evaluation Framework (Quality Assessment & Metrics)

@@ -1,3 +1,4 @@
+import {createUnprotectedReadStream,assertMemoryFilesystemAccess} from '../../memory/encryption/protected-filesystem.js';
 /**
  * GET /api/uploads/* — serve runtime uploads from `.data/uploads` (CL-05).
  *
@@ -25,6 +26,6 @@ export async function uploadsRoutes(fastify: FastifyInstance) {
       .header('X-Content-Type-Options', 'nosniff')
       .header('Content-Security-Policy', "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox")
       .header('Content-Disposition', 'inline')
-      .send(fs.createReadStream(file));
+      .send((assertMemoryFilesystemAccess(file),createUnprotectedReadStream(file)));
   });
 }

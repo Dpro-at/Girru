@@ -107,14 +107,19 @@ Memory is the core of Girru. Every agent, chat and coding tool works from the sa
 - 🔍 **Finds the right thing.** Search combines keywords with meaning and understands Arabic, including dialect. A knowledge graph links people, projects and topics.
 - 🧑‍⚖️ **Learns with your approval.** Routine facts are saved on their own; important ones wait for you. Contradictions are flagged, every change is versioned, and deleted memories go to a Trash you can restore from.
 - 🧾 **Shows its sources.** Each reply records which memories it used and why.
+- ⚡ **Fast at any size.** Search stays quick as memory grows: 1 million memories answered in 36 ms on a Mac (Apple M6) and 90 ms on a Windows PC, down from 32.6 s, with the same results. Measured locally, query embedding included; the first search after a start builds the index (about a minute at 1 million). 10 million is measured too (0.27 s on the PC).
 - 🤝 **Hands work over.** When a chat or task ends, a short handoff note (done, left, next) lets the next agent continue.
 - 💻 **One memory for your coding tools.** One project brief reaches Claude Code, Codex and Antigravity together, through `AGENTS.md` and a memory server (MCP). Girru writes only inside its own marked section.
+- 🤝 **They can all work at once.** Several coding tools read the same memory at the same time, each in its own program, and a note one leaves is in the memory the next one reads. When two edit the same memory from the same version, one is saved and the other is refused with the newer text, so no tool silently overwrites another.
 - 📥 **Brings in what you have.** Import past coding conversations and project documents. Secrets are hidden first, and you review before anything is kept.
 - 🔐 **Private by design.** It stays on your computer. Each agent's read and write access is set by company, department and project. Background memory work uses a local model when one is available.
+- 🎯 **Careful, not confident.** Recall says "no reliable memory" instead of guessing, shows how sure it is, and a new fact on the same topic replaces the old one.
+- 🏠 **Some things never leave.** Mark a memory place, such as People, to stay on this computer: only a local model ever sees it. Export everything about one person in one file, or forget it in one action; a restored backup does not bring it back.
+- 🖥️ **Local models only, if you like.** Girru also works with no subscription: each turn fits the local model's real window. A small local memory helper, used only for search, gets ready by itself in the background once a local model runtime is installed.
 
 **Unified memory does not mean unrestricted access.** Ownership, scope, and permissions remain part of the system.
 
-See [FEATURES.md](FEATURES.md#-memory) for every memory feature and its status.
+See [FEATURES.md](FEATURES.md#-memory) for every memory feature and its status, and the [storage map](docs/architecture/storage-map.md) for what is stored where, what leaves your computer, how to export or forget it, and the numbers measured locally.
 
 Cross-provider coverage is expanding. Sharing context does not transfer a provider’s underlying model or change its training.
 

@@ -1,4 +1,5 @@
 import { safeConsole } from '../../services/safe-error-log.js';
+import { untrustedMemoryEnv } from '../../services/subscription-chat.js';
 /**
  * Claude Code CLI Tool
  *
@@ -168,6 +169,8 @@ export const claudeCliTool: Tool = {
       NO_COLOR: '1',
       TERM: 'dumb',
       ANTHROPIC_API_KEY: anthropicApiKey || undefined,
+      // STORE-MAP-01 P7 (G8): Claude Code's own auto memory stays out of Girru's runs.
+      ...untrustedMemoryEnv('claude'),
     });
 
     // claude -p "prompt" [--model model]

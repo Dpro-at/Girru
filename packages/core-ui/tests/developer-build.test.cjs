@@ -33,5 +33,6 @@ test('SH2: the account chip says plain words, never the raw role key', () => {
   assert.equal(accountRoleLabel('user'), '');
   const shell = fs.readFileSync(path.join(__dirname, '../src/SignedInShell.tsx'), 'utf8');
   assert.doesNotMatch(shell, /<small>\{user\.role\}<\/small>/);
-  assert.match(shell, /extra=\{isDeveloperBuild\(client\) && <button[^\n]*Leave to fixture/);
+  const extra = shell.split('\n').find(line => /\bextra=/.test(line)) ?? '';
+  assert.match(extra, /isDeveloperBuild\(client\) && <button[^\n]*Leave to fixture/);
 });

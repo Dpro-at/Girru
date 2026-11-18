@@ -61,6 +61,12 @@ const { getAgentDir } = await import(join(backendDir, 'src/services/agent-files.
 const { scheduleAgentEvolution } = await import(join(backendDir, 'src/services/agent-evolution-scheduler.js'));
 const { getCronEngine } = await import(join(backendDir, 'src/scheduler/engine.ts'));
 const { generateToken } = await import(join(backendDir, 'src/auth/jwt.ts'));
+const { storeP4Enabled } = await import(join(backendDir, 'src/services/store-p4.ts'));
+const store = await import(join(backendDir, 'src/services/personality-store.ts'));
+// STORE-MAP-01 P4 (G3): with the switch on, Evolution suggests in Personality review (a personality text proposal)
+// and never adds to the owner instructions; the review table of this file is no longer used for these kinds.
+const P4 = storeP4Enabled();
+const P4_SKIP = P4 && 'P4 on: Evolution text goes to Personality review (approve/stale covered by store-p4-personality and personality-evolution)';
 const { default: Fastify } = await import('fastify');
 const engine = getCronEngine();
 
@@ -89,6 +95,7 @@ const snapshot = (id) => {
   return { ...row, personality: personalityText(id) };
 };
 const pendingOf = (id, kind) => db.prepare(`SELECT * FROM evolution_proposals WHERE agent_id = ? AND status = 'pending'${kind ? ' AND kind = ?' : ''} ORDER BY rowid`).all(...[id, ...(kind ? [kind] : [])]);
+const personalityPendingOf = (id) => db.prepare(`SELECT * FROM personality_proposals WHERE agent_id = ? AND status = 'pending' AND source = 'evolution' ORDER BY rowid`).all(id);
 const historyOf = (id) => db.prepare('SELECT * FROM agent_evolution_history WHERE agent_id = ? ORDER BY rowid').all(id);
 const post = (url, who, payload = {}) => app.inject({ method: 'POST', url, headers: auth(who), payload });
 const proposalUrl = (agentId, pid, action) => `/api/evolution/${agentId}/proposals/${pid}/${action}`;
@@ -103,9 +110,18 @@ test('an evolve cycle changes nothing and files pending prompt + PERSONALITY.md 
   const result = await quietly(() => evolveAgent('ep-cycle'));
   assert.equal(result.error, undefined, String(result.error));
   assert.equal(result.evolved, false);
-  assert.ok(result.proposed >= 2, JSON.stringify(result.proposals));
+  assert.ok(result.proposed >= (P4 ? 1 : 2), JSON.stringify(result.proposals));
   assert.deepEqual(snapshot('ep-cycle'), before, 'system_prompt, capabilities and PERSONALITY.md unchanged');
   assert.deepEqual(historyOf('ep-cycle'), [], 'no history row: nothing was applied');
+  if (P4) {
+    assert.deepEqual(pendingOf('ep-cycle'), [], 'nothing in the old review table');
+    assert.ok(result.proposals.some((p) => p.status === 'skipped' && p.reason === 'owner_instructions_only'), JSON.stringify(result.proposals));
+    assert.ok(personalityPendingOf('ep-cycle').length >= 1, 'a Personality review suggestion');
+    const again = await quietly(() => evolveAgent('ep-cycle'));
+    assert.deepEqual(snapshot('ep-cycle'), before);
+    assert.equal(again.evolved, false);
+    return;
+  }
 
   const prompts = pendingOf('ep-cycle', 'prompt_append');
   const notes = pendingOf('ep-cycle', 'personality_text');
@@ -141,13 +157,14 @@ test('admin can no longer evolve (403); owner can, and the route only proposes',
   const owner = await quietly(() => post('/api/evolution/ep-route/evolve', 'ep-owner'));
   assert.equal(owner.statusCode, 200, owner.body);
   assert.equal(owner.json().evolved, false);
-  assert.ok(owner.json().proposed >= 2);
+  assert.ok(owner.json().proposed >= (P4 ? 1 : 2));
   assert.deepEqual(snapshot('ep-route'), before);
+  if (P4) assert.ok(personalityPendingOf('ep-route').length >= 1);
 
   // Reads stay admin; plain users are refused.
   const list = await app.inject({ method: 'GET', url: '/api/evolution/ep-route/proposals?status=pending', headers: auth('ep-admin') });
   assert.equal(list.statusCode, 200, list.body);
-  assert.ok(list.json().total >= 2);
+  assert.ok(list.json().total >= (P4 ? 0 : 2));
   const user = await app.inject({ method: 'GET', url: '/api/evolution/ep-route/proposals', headers: auth('ep-user') });
   assert.equal(user.statusCode, 403);
 });
@@ -169,7 +186,7 @@ test('the scheduler job and evolve-all only file proposals too', async () => {
   assert.deepEqual(snapshot('ep-all'), allBefore);
 });
 
-test('approve with the right hash applies; double approve 409; non-owner 403; bad hashes refused', async () => {
+test('approve with the right hash applies; double approve 409; non-owner 403; bad hashes refused', { skip: P4_SKIP }, async () => {
   await quietly(() => evolveAgent('ep-decide'));
   const [prompt] = pendingOf('ep-decide', 'prompt_append');
   const [note] = pendingOf('ep-decide', 'personality_text');
@@ -231,7 +248,7 @@ test('approve with the right hash applies; double approve 409; non-owner 403; ba
   }
 });
 
-test('a changed base gives 409 stale (prompt and PERSONALITY.md); rollback after a later change is refused', async () => {
+test('a changed base gives 409 stale (prompt and PERSONALITY.md); rollback after a later change is refused', { skip: P4_SKIP }, async () => {
   await quietly(() => evolveAgent('ep-stale'));
   const [prompt] = pendingOf('ep-stale', 'prompt_append');
   const [note] = pendingOf('ep-stale', 'personality_text');
@@ -293,8 +310,13 @@ test('proposed text is bounded and stored verbatim as data', async () => {
   );
   await assert.rejects(() => EP.createEvolutionProposal('ep-cycle', { kind: 'capability', title: 't', proposedText: 'x', reason: 'r' }), EP.EvolutionProposalError);
   const odd = '\n\n${process.exit(1)} <script>alert(1)</script> `rm -rf /`';
-  const out = await EP.createEvolutionProposal('ep-cycle', { kind: 'prompt_append', title: 'odd', proposedText: odd, reason: 'r' });
-  assert.equal(out.status, 'proposed');
-  assert.equal(out.proposal.proposedText, odd);
-  assert.equal((await EP.createEvolutionProposal('nope', { kind: 'prompt_append', title: 't', proposedText: 'x', reason: 'r' })).reason, 'agent_not_found');
+  const out = await EP.createEvolutionProposal('ep-cycle', { kind: P4 ? 'personality_text' : 'prompt_append', title: 'odd', proposedText: odd, reason: 'r' });
+  if (P4) {
+    assert.equal(out.status, 'personality_proposed');
+    assert.ok((await store.getPersonalityProposal('ep-cycle', out.proposalId)).proposedText.endsWith(odd), 'stored verbatim after the current text');
+  } else {
+    assert.equal(out.status, 'proposed');
+    assert.equal(out.proposal.proposedText, odd);
+  }
+  assert.equal((await EP.createEvolutionProposal('nope', { kind: P4 ? 'personality_text' : 'prompt_append', title: 't', proposedText: 'x', reason: 'r' })).reason, 'agent_not_found');
 });

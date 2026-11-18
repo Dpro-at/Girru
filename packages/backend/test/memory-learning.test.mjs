@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath, pathToFileURL} from 'node:url';
 // CORE-05: mixed learning approval (routine saved, important -> proposal),
 // versioning of every API/tool change, weekly summary.
 // Run: node --import tsx --test test/memory-learning.test.mjs
@@ -10,17 +11,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-const backendDir = process.cwd();
+import { switchValueOn } from './helpers/switches.mjs';
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-memlearn-'));
 mkdirSync(join(dir, '.data'), { recursive: true });
 process.chdir(dir);
 process.env.HOME = dir;
 process.env.DATABASE_PATH = join(dir, '.data', 'agent-player.db');
+process.env.AGENT_PLAYER_DATA_DIR = join(dir, '.data');
 process.env.JWT_SECRET = randomBytes(64).toString('hex'); // throwaway, test only
 process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway, test only
 delete process.env.MEMORY_SUMMARY_MODEL;
 delete process.env.OUTSIDER_AGENT_MEMORY;
 
+process.env.OLLAMA_URL = 'http://127.0.0.1:11434'; // Matches the intercepted URL below; no server is contacted.
 // The extraction model is stubbed: only the local Ollama generate URL answers.
 let extraction = [];
 const outbound = [];
@@ -37,7 +41,7 @@ const quiet = { log: console.log, warn: console.warn };
 console.log = () => {};
 console.warn = () => {};
 
-const { getDatabase, closeDatabase } = await import(join(backendDir, 'src/db/database.ts'));
+const { getDatabase, closeDatabase } = await import(pathToFileURL(join(backendDir, 'src/db/database.ts')).href);
 const db = getDatabase();
 await db.initialize();
 const addUser = (id, role) => db.prepare(`INSERT INTO users (id, email, username, password_hash, role, status) VALUES (?, ?, ?, 'x', ?, 'active')`).run(id, `${id}@example.test`, id, role);
@@ -46,17 +50,17 @@ addUser('ml-user', 'user');
 db.prepare('UPDATE agents_config SET is_primary = 0').run();
 db.prepare(`INSERT INTO agents_config (id, name, is_primary) VALUES ('ml-agent', 'Ml Agent', 1)`).run();
 
-const { registerAuthGate } = await import(join(backendDir, 'src/auth/auth-gate.ts'));
-const { memoryRoutes } = await import(join(backendDir, 'src/api/routes/memory.ts'));
-const { memoryFilesRoutes } = await import(join(backendDir, 'src/api/routes/memory-files.ts'));
-const { memoryLearningRoutes } = await import(join(backendDir, 'src/api/routes/memory-learning.ts'));
-const L = await import(join(backendDir, 'src/memory/learning.ts'));
-const W = await import(join(backendDir, 'src/memory/weekly-summary.ts'));
-const J = await import(join(backendDir, 'src/memory/jobs.ts'));
-const D = await import(join(backendDir, 'src/memory/drawers.ts'));
-const { memorySaveTool } = await import(join(backendDir, 'src/tools/memory/save.ts'));
-const { memoryEditTool, memoryDeleteTool } = await import(join(backendDir, 'src/tools/memory/edit.ts'));
-const { generateToken } = await import(join(backendDir, 'src/auth/jwt.ts'));
+const { registerAuthGate } = await import(pathToFileURL(join(backendDir, 'src/auth/auth-gate.ts')).href);
+const { memoryRoutes } = await import(pathToFileURL(join(backendDir, 'src/api/routes/memory.ts')).href);
+const { memoryFilesRoutes } = await import(pathToFileURL(join(backendDir, 'src/api/routes/memory-files.ts')).href);
+const { memoryLearningRoutes } = await import(pathToFileURL(join(backendDir, 'src/api/routes/memory-learning.ts')).href);
+const L = await import(pathToFileURL(join(backendDir, 'src/memory/learning.ts')).href);
+const W = await import(pathToFileURL(join(backendDir, 'src/memory/weekly-summary.ts')).href);
+const J = await import(pathToFileURL(join(backendDir, 'src/memory/jobs.ts')).href);
+const D = await import(pathToFileURL(join(backendDir, 'src/memory/drawers.ts')).href);
+const { memorySaveTool } = await import(pathToFileURL(join(backendDir, 'src/tools/memory/save.ts')).href);
+const { memoryEditTool, memoryDeleteTool } = await import(pathToFileURL(join(backendDir, 'src/tools/memory/edit.ts')).href);
+const { generateToken } = await import(pathToFileURL(join(backendDir, 'src/auth/jwt.ts')).href);
 const { default: Fastify } = await import('fastify');
 
 const app = Fastify();
@@ -334,7 +338,12 @@ test('weekly summary: deterministic digest per drawer, stubbed model, owner only
 
 test('weekly summary job: in-process, owner-scoped, created once per owner', async () => {
   const created = await J.ensureMemoryJobs();
-  assert.deepEqual(created.map((j) => j.name), ['memory-weekly-summary-ml-owner', 'memory-retention-ml-owner', 'memory-trash-ml-owner']);
+  // STORE-MAP-01 P9: with GIRRU_STORE_P9 on, the nightly read-only memory doctor and the weekly quality job are scheduled too.
+  assert.deepEqual(created.map((j) => j.name), ['memory-weekly-summary-ml-owner', 'memory-retention-ml-owner', 'memory-trash-ml-owner', ...(switchValueOn(process.env.GIRRU_STORE_P9) ? ['memory-doctor-ml-owner', 'memory-quality-ml-owner'] : []),
+    // P9b: the weekly "learn from use" job.
+    ...(switchValueOn(process.env.GIRRU_STORE_P9B) ? ['memory-usage-ml-owner'] : []),
+    // KNOW-INDEX-01: the documents job (every 20 minutes) while document memory is on.
+    ...(switchValueOn(process.env.GIRRU_DOC_INDEX) ? ['memory-documents-ml-owner'] : [])]);
   assert.deepEqual(await J.ensureMemoryJobs(), [], 'idempotent');
   const row = db.prepare(`SELECT action_type, action_data, cron_expression FROM cron_jobs WHERE name = 'memory-weekly-summary-ml-owner'`).get();
   assert.equal(row.action_type, 'memory-job');
@@ -350,8 +359,8 @@ test('weekly summary job: in-process, owner-scoped, created once per owner', asy
 // UI-IP-04 review (CORE-04b): an add-only learning/agent proposal approved twice at once
 // (both requests past the first checks, waiting on the embedding) adds exactly one memory.
 test('concurrent double approve of an add-only learning proposal: one memory, one 409 already_decided', async () => {
-  const MF = await import(join(backendDir, 'src/memory/memory-files.ts'));
-  const { getMemoryStorage } = await import(join(backendDir, 'src/memory/storage.ts'));
+  const MF = await import(pathToFileURL(join(backendDir, 'src/memory/memory-files.ts')).href);
+  const { getMemoryStorage } = await import(pathToFileURL(join(backendDir, 'src/memory/storage.ts')).href);
   const content = 'Prefers the quarterly report in Arabic and English';
   for (const source of ['learning', 'agent']) {
     const text = `${content} (${source})`;

@@ -80,7 +80,7 @@ export async function checkPublicHttpUrl(raw: string, lookup?: LookupFn): Promis
  */
 const guarded = new WeakSet<object>();
 
-export async function guardPage(page: any, onBlocked?: (url: string, reason: string) => void): Promise<void> {
+export async function guardPage(page: any, onBlocked?: (url: string, reason: string) => void,isActive:()=>boolean=()=>true): Promise<void> {
   // Once per page (the first page also shows up as a new target).
   if (guarded.has(page)) return;
   guarded.add(page);
@@ -88,11 +88,11 @@ export async function guardPage(page: any, onBlocked?: (url: string, reason: str
   page.on('request', async (request: any) => {
     if (request.isInterceptResolutionHandled?.()) return;
     const url = String(request.url());
-    const verdict = await checkBrowserUrl(url);
+    const verdict = isActive()?await checkBrowserUrl(url):{ok:false as const,reason:'app_not_enabled'};
     try {
-      if (verdict.ok) await request.continue();
+      if (verdict.ok&&isActive()) await request.continue();
       else {
-        onBlocked?.(url, verdict.reason);
+        onBlocked?.(url, verdict.ok?'app_not_enabled':verdict.reason);
         await request.abort('blockedbyclient');
       }
     } catch {

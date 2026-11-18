@@ -9,7 +9,7 @@ import { UiIcon } from './ui-icons';
 type Voice = {id:string;name:string;language:string};
 const object = (v:unknown):v is Record<string,unknown> => !!v && typeof v === 'object';
 /** Explicit local talk mode. Historical replies are never read on opening a chat. */
-export function ChatVoice({client,controller,active}:{client:SessionClient;controller:ConversationsController;active:boolean}) {
+export function ChatVoice({client,controller,active,onOpenVoiceSettings}:{client:SessionClient;controller:ConversationsController;active:boolean;onOpenVoiceSettings?:()=>void}) {
  const s = useSyncExternalStore(controller.subscribe,controller.getSnapshot,controller.getSnapshot);
  const [voices,setVoices] = useState<Voice[]>([]), [voiceId,setVoiceId] = useState(''), [available,setAvailable] = useState(false);
  const [supportedLanguages,setSupportedLanguages]=useState<string[]>(['ar','en']);
@@ -63,12 +63,16 @@ export function ChatVoice({client,controller,active}:{client:SessionClient;contr
   }
  },[s.turns,enabled,active]);
  const toggle = async()=>{if(m.enabled){setEnabled(false);mic.mute();stop();return;}seen.current=new Set(s.turns.map(voiceTurnKey));liveReplies.current.clear();setEnabled(true);await mic.unmute();};
- return <div className="chat-voice" aria-label="Main agent voice">
-  <button type="button" className="tool" aria-label={m.enabled?'End voice conversation':'Talk to Main Agent'} title={m.enabled?'End voice conversation':'Talk to Main Agent'} aria-pressed={m.enabled} disabled={!available||!voiceId||m.phase==='off'} onClick={()=>void toggle()}><UiIcon name="phone"/></button>
-  <button type="button" className="tool" aria-label="Read replies aloud" title="Read replies aloud" aria-pressed={enabled} disabled={!available||!voiceId} onClick={()=>{seen.current=new Set(s.turns.map(voiceTurnKey));liveReplies.current.clear();setEnabled(!enabled);if(enabled){mic.mute();stop();}void client.request({method:'POST',path:VOICE_LIBRARY_PATH,body:{action:'preferences',readAloud:!enabled,language:speechLanguage}}).then(r=>{if(r.status!==200)setError('The speech preference could not be saved.');}).catch(()=>setError('The speech preference could not be saved.'));}}><UiIcon name="speaker"/></button>
-  <select aria-label="Main agent voice" value={voiceId} disabled={m.enabled} onChange={e=>{stop();setVoiceId(e.target.value);void client.request({method:'POST',path:VOICE_LIBRARY_PATH,body:{action:'assign',voiceId:e.target.value}}).then(r=>{if(r.status!==200)setError('The voice choice could not be saved.');}).catch(()=>setError('The voice choice could not be saved.'));}}><option value="" disabled>{voices.length?'Choose a voice':'Choose an engine in Voice settings'}</option>{voices.map(v=><option key={v.id} value={v.id}>{v.name}</option>)}</select>
-  <button type="button" className="tool" aria-label="Preview voice" title="Preview voice" disabled={!available||!voiceId||m.enabled} onClick={()=>void speak(supportedLanguages.includes('ar')?'مرحبا، أنا مساعدك الأساسي. جاهز للعمل وياك.':'Hello, I am your main agent. I am ready to help.')}><UiIcon name="play"/></button>
-  {phase&&<button type="button" className="tool" aria-label="Stop speaking" title="Stop speaking" onClick={stop}><UiIcon name="stop"/></button>}
-  <span role="status">{phase||error||m.error||(enabled?(!m.enabled?'Read replies aloud':m.phase==='listening'?'Listening…':m.phase==='transcribing'?'Recognizing speech…':m.phase==='waiting'?'Waiting for reply…':'Starting microphone…'):!available?'Local voice runtime not configured':'Local voice')}</span>
- </div>;
+ // CV1 (Mohamed, 2026-11-11): voice lives in the message box as at most two icons; choosing the voice and previewing it are in Settings › Voice.
+ const ready = available && !!voiceId;
+ const talking = m.enabled;
+ const live = phase || (talking ? (m.phase==='listening'?'Listening…':m.phase==='transcribing'?'Recognizing speech…':m.phase==='waiting'?'Waiting for reply…':'Starting microphone…') : '');
+ const problem = (talking || phase) ? (error || m.error) : '';
+ useEffect(()=>{if(!active)return;const onKey=(e:KeyboardEvent)=>{if(e.shiftKey&&(e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='v'){e.preventDefault();if(ready)void toggle();else onOpenVoiceSettings?.();}};window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);},[active,ready,talking]);
+ return <span className="chat-voice" aria-label="Voice">
+  {(live || problem) && <span className="chat-voice-state" role="status">{problem || live}</span>}
+  {phase && <button type="button" className="tool" aria-label="Stop speaking" title="Stop speaking" onClick={stop}><UiIcon name="stop"/></button>}
+  <button type="button" className="tool" aria-label={talking?'End voice conversation':ready?'Talk to Main Agent':'Talk to Main Agent: set up a voice first'} title={talking?'End voice conversation (⇧⌘V)':ready?'Talk to Main Agent (⇧⌘V)':'Talk to Main Agent · set up a voice first (opens Settings › Voice)'} aria-pressed={talking} disabled={ready && m.phase==='off'} onClick={()=>{if(ready)void toggle();else onOpenVoiceSettings?.();}}><UiIcon name="phone"/></button>
+  {ready && <button type="button" className="tool" aria-label="Read replies aloud" title={`Read replies aloud · ${enabled?'on':'off'}${voices.find(v=>v.id===voiceId)?` (voice: ${voices.find(v=>v.id===voiceId)!.name})`:''}`} aria-pressed={enabled} onClick={()=>{seen.current=new Set(s.turns.map(voiceTurnKey));liveReplies.current.clear();setEnabled(!enabled);if(enabled){mic.mute();stop();}void client.request({method:'POST',path:VOICE_LIBRARY_PATH,body:{action:'preferences',readAloud:!enabled,language:speechLanguage}}).then(r=>{if(r.status!==200)setError('The speech preference could not be saved.');}).catch(()=>setError('The speech preference could not be saved.'));}}><UiIcon name="speaker"/></button>}
+ </span>;
 }

@@ -25,6 +25,7 @@ import { drawerId, type DrawerRef } from '../memory/drawers.js';
 import { MEMORY_TYPES, isMemoryType, type ImportanceLevel, type Memory, type MemoryType } from '../memory/types.js';
 import type { MemoryProposal } from '../memory/memory-files.js';
 import { redactImportText } from '../memory/import/redact.js';
+import { projectKeyOf } from '../memory/project-keys.js';
 
 /** Characters one "Remember this" may save. */
 export const MAX_REMEMBER = 4000;
@@ -76,7 +77,7 @@ async function rememberDrawer(userId: string, projectId: string | null, choice: 
   if (choice !== 'project') return { kind: choice as 'owner' | 'experience' };
   const project = projectId ? await findProject(userId, projectId) : undefined;
   if (!project) throw bad('This conversation has no project');
-  return { kind: 'project', key: project.slug };
+  return { kind: 'project', key: projectKeyOf(project) };
 }
 
 /**

@@ -10,12 +10,11 @@ const lines = (...xs) => xs.map(x => JSON.stringify(x)).join('\n');
 const el = (id, type, props = {}, children = []) => ({ op: 'add', path: `/elements/${id}`, value: { type, props, children } });
 const https = ['https:', '', 'example.com/a'].join('/');
 
-test('spec: builds the tree; unknown or interactive types are left out; cycles and bad JSON are safe', () => {
-  const t = parseSpec(lines({ op: 'add', path: '/root', value: 'g' }, el('g', 'Grid', { columns: 2 }, ['m', 'x', 'g']), el('m', 'Metric', { label: 'Users', value: '1,204', trend: 'up', detail: '+8%' }), el('x', 'InputField', { label: 'Email' })));
-  assert.equal(t.type, 'Grid');
-  assert.deepEqual(t.children.map(c => c.type), ['Metric'], 'form fields and a self-reference are dropped');
-  assert.equal(parseSpec('{"op":"add",'), null);
-  assert.equal(parseSpec(lines(el('a', 'Card'))), null, 'no root');
+test('spec: shared contract rejects cycles and keeps local form controls without action authority', () => {
+ assert.equal(parseSpec(lines({op:'add',path:'/root',value:'g'},el('g','Grid',{},['g']))),null);
+ const t=parseSpec(lines({op:'add',path:'/root',value:'g'},el('g','Grid',{},['m','x']),el('m','Metric',{label:'Users',value:'1,204'}),el('x','InputField',{label:'Email'})));
+ assert.deepEqual(t.children.map(c=>c.type),['Metric','InputField']);
+ assert.equal(parseSpec('{"op":"add",'),null);assert.equal(parseSpec(lines(el('a','Card'))),null);
 });
 
 test('spec: cards, tables, timeline, progress, safe links and charts with a table view', () => {

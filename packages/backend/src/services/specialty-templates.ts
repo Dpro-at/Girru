@@ -17,6 +17,7 @@ import {currentMcpTool,currentMcpToolStep} from '../mcp-client/grant-binding.js'
 import {insertAgentConfigStep,newAgentId} from '../repositories/agents-config.js';
 import {suggestAgentName,resolveNamingLanguage,validateAgentName} from './agent-names.js';
 import {redactImportText} from '../memory/import/redact.js';
+import {storeP4Enabled} from './store-p4.js';
 export class TemplateError extends Error{constructor(readonly code:string,readonly status=400){super(code);}}
 export type TemplateConfig={primarySkill:string|null;skills:string[];tools:{name:string;fingerprint:string|null}[];memoryRead:string[];memoryWrite:string[];sharedMemory:boolean;modes:Record<string,string>;requirements?:{id:string;name:string;toolName:string|null;server:string|null}[]};
 type Row={id:string;name:string;department:string;description:string;revision:number;content_hash:string;config_json:string};
@@ -102,15 +103,15 @@ export class SpecialtyTemplates{
    }else yield* run('DELETE FROM agent_specialties WHERE agent_id=? AND template_id=?',input.agentId,id);
   },{immediate:true});return this.agents(id);
  }
- async assign(ownerId:string,id:string,input:unknown){
+ async assign(ownerId:string,id:string,input:unknown,guard?:()=>Step<void>,summaryOnly=false){
   if(!uuid(id)||!object(input)||!keys(input,['revision','agentIds','expectedAgentIds'])||!Number.isSafeInteger(input.revision)||!Array.isArray(input.agentIds)||!Array.isArray(input.expectedAgentIds)||input.agentIds.length>1000||input.expectedAgentIds.length>1000||![...input.agentIds,...input.expectedAgentIds].every(v=>text(v,100)&&!!v&&v!=='small-local-agent')||new Set(input.agentIds).size!==input.agentIds.length||new Set(input.expectedAgentIds).size!==input.expectedAgentIds.length)throw new TemplateError('invalid_input');
-  await sql().tx(function*(){const d=yield* dialect();const template=yield* one<Row>('SELECT * FROM specialty_templates WHERE id=?'+forUpdate(d),id);if(!template||template.revision!==input.revision)throw new TemplateError('version_conflict',409);
+  await sql().tx(function*(){if(guard)yield* guard();const d=yield* dialect();const template=yield* one<Row>('SELECT * FROM specialty_templates WHERE id=?'+forUpdate(d),id);if(!template||template.revision!==input.revision)throw new TemplateError('version_conflict',409);
    const current=yield* all<{agent_id:string}>('SELECT agent_id FROM agent_specialties WHERE template_id=? ORDER BY agent_id',id);
    if(stable(current.map(a=>a.agent_id))!==stable([...input.expectedAgentIds].sort()))throw new TemplateError('links_changed',409);
    for(const agentId of [...input.agentIds].sort()){if(!(yield* one('SELECT id FROM agents_config WHERE id=?'+forUpdate(d),agentId)))throw new TemplateError('not_found',404);const count=yield* one<{n:number}>('SELECT COUNT(*) n FROM agent_specialties WHERE agent_id=?',agentId);if((count?.n??0)>=10&&!current.some(a=>a.agent_id===agentId))throw new TemplateError('specialty_limit',409);}
    for(const row of current)if(!input.agentIds.includes(row.agent_id))yield* run('DELETE FROM agent_specialties WHERE agent_id=? AND template_id=?',row.agent_id,id);
    for(const agentId of input.agentIds)yield* run('INSERT INTO agent_specialties(agent_id,template_id,linked_by) VALUES(?,?,?) ON CONFLICT(agent_id,template_id) DO NOTHING',agentId,id,ownerId);
-  },{immediate:true});return this.agents(id);
+  },{immediate:true});return summaryOnly?{templateId:id,revision:input.revision,agentIds:[...input.agentIds]}:this.agents(id);
  }
  async save(id:string,raw:unknown,guard?:()=>Step<void>,preserveConfig?:TemplateConfig){
   // A coming-soon specialty is saved like a new one (revision 0) once the owner writes its instructions; then it is a normal, ready specialty.
@@ -121,7 +122,7 @@ export class SpecialtyTemplates{
   const content=await this.content(raw.instructions);
   if(!uuid(id))throw new TemplateError('invalid_input');
   if(preserveConfig!==undefined&&raw.revision===0)throw new TemplateError('invalid_input');
-  if(raw.revision===0){const inserted=await q.run('INSERT INTO specialty_templates(id,name,department,description,revision,content_hash,config_json) VALUES(?,?,?,?,1,?,?) ON CONFLICT(id) DO NOTHING',id,raw.name.trim(),raw.department.trim(),raw.description,content,JSON.stringify(config));if(inserted.changes!==1)throw new TemplateError('version_conflict',409);}
+  if(raw.revision===0){await sql().tx(function*(){if(guard)yield* guard();const inserted=yield* run('INSERT INTO specialty_templates(id,name,department,description,revision,content_hash,config_json) VALUES(?,?,?,?,1,?,?) ON CONFLICT(id) DO NOTHING',id,raw.name.trim(),raw.department.trim(),raw.description,content,JSON.stringify(config));if(inserted.changes!==1)throw new TemplateError('version_conflict',409);});}
   else {await sql().tx(function*(){const d=yield* dialect();const current=yield* one<Row>('SELECT * FROM specialty_templates WHERE id=?'+forUpdate(d),id);if(!current||current.revision!==raw.revision)throw new TemplateError('version_conflict',409);
    if(preserveConfig!==undefined&&stable(JSON.parse(current.config_json))!==stable(preserveConfig))throw new TemplateError('configuration_changed',409);
    if(guard)yield* guard();
@@ -140,13 +141,16 @@ export class SpecialtyTemplates{
   const prior=await q.one<{fingerprint:string;agent_id:string}>('SELECT fingerprint,agent_id FROM template_hire_requests WHERE owner_id=? AND request_id=?',ownerId,input.requestId);if(prior){if(prior.fingerprint!==print)throw new TemplateError('request_conflict',409);return {id:prior.agent_id,duplicate:true};}
   const template=await this.get(input.templateId);if(template.revision!==input.revision)throw new TemplateError('version_conflict',409);const config=await this.config(template.config,input.linked!==true),permissions=parsePermissionsInput('new-template-agent',{...config,confirmRisky:input.linked===true||input.confirmRisky});
   const available=(await createAgentToolsRegistry({workspaceDir:process.cwd()})).listRegistered();const language=await resolveNamingLanguage(ownerId),name=requestedName??(await suggestAgentName(language)).name,id=newAgentId();
+  const p4=storeP4Enabled();
   return sql().tx(function*(){
    const d=yield* dialect();
    yield* one('SELECT id FROM users WHERE id=?'+forUpdate(d),ownerId);
    const existing=yield* one<{fingerprint:string;agent_id:string}>('SELECT fingerprint,agent_id FROM template_hire_requests WHERE owner_id=? AND request_id=?',ownerId,input.requestId);if(existing){if(existing.fingerprint!==print)throw new TemplateError('request_conflict',409);return {id:existing.agent_id,duplicate:true};}
    const current=yield* one<Row>('SELECT * FROM specialty_templates WHERE id=?'+forUpdate(d),input.templateId);if(!current||current.revision!==input.revision)throw new TemplateError('version_conflict',409);
    yield* insertAgentConfigStep({id,name,language,role:'specialist',department:template.department,explicit:null,userId:ownerId,body:{...(input.libraryPersonality?{libraryPersonality:input.libraryPersonality}:{}),description:`${template.name}: ${template.description}`,system_prompt:input.linked===true?'':template.instructions}});
-   yield* run('UPDATE agents_config SET specialty=? WHERE id=?',template.name,id);
+   // STORE-MAP-01 P4 (D14): a linked hire reads its job from the link only. A copy hire keeps its frozen copy
+   // (later library revisions never change it); the old specialty column is no longer written.
+   if(!p4)yield* run('UPDATE agents_config SET specialty=? WHERE id=?',template.name,id);
    if(input.linked===true){yield* run('INSERT INTO agent_specialties(agent_id,template_id,linked_by) VALUES(?,?,?)',id,template.id,ownerId);}else{
    yield* run('UPDATE agent_permissions SET memory_read=?,memory_write=?,shared_memory=?,modes=?,updated_by=? WHERE agent_id=?',JSON.stringify(permissions.memoryRead),JSON.stringify(permissions.memoryWrite),permissions.sharedMemory?1:0,JSON.stringify(permissions.modes),ownerId,id);
    yield* setAgentGrantsStep(id,{grants:config.tools.map(t=>t.name)},ownerId,available);

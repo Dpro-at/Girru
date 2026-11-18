@@ -16,6 +16,11 @@ export async function meetingRequest(client: SessionClient, method: 'GET' | 'POS
 }
 type Department = { name: string; total: number; heads: number };
 const label = (value: string | null) => value ? value.replace(/(^|[ _-])([a-z])/g, (_all, space: string, letter: string) => (space ? ' ' : '') + letter.toUpperCase()) : 'No department';
+
+export function MeetingRoundControls({remaining,selected,busy,automatic,onNext,onAutomatic}:{remaining:number;selected:boolean;busy:boolean;automatic:boolean;onNext:()=>void;onAutomatic:()=>void}) {
+ return <>{(remaining>0||selected)&&<button type="button" disabled={busy} onClick={onNext}>{selected?'Ask selected participant':'Next speaker'}</button>}{(remaining>0||automatic)&&<button type="button" aria-pressed={automatic} disabled={busy&&!automatic} onClick={onAutomatic}>{automatic?'Stop automatic turns':`Invite remaining speakers (${remaining})`}</button>}</>;
+}
+
 export function MeetingRoster({ client, meetingId, departments, headsOnly, selected, onPick, departmentOptions = [] }: { client: SessionClient; meetingId?: string; departments?: readonly string[]; headsOnly?: boolean; selected?: ReadonlySet<string>; onPick: (agent: MeetingAgent) => void; departmentOptions?: readonly Department[] }) {
  const [search, setSearch] = useState(''), [department, setDepartment] = useState(''), [offset, setOffset] = useState(0), [page, setPage] = useState<{ agents: MeetingAgent[]; total: number; nextOffset: number | null }>({ agents: [], total: 0, nextOffset: null }), [loading, setLoading] = useState(true), [error, setError] = useState(''), [top, setTop] = useState(0), [focus, setFocus] = useState(0);
  const viewport = useRef<HTMLDivElement>(null), scope = departments?.join(',') ?? '';
@@ -49,7 +54,7 @@ function NewMeeting({ client, projectId, onClose, onCreated }: { client: Session
   {mode === 'departments' && <label className="meeting-check"><input type="checkbox" checked={headsOnly} onChange={e => setHeadsOnly(e.target.checked)}/>Only the heads of selected departments</label>}
   <p className="meeting-fine">{count.toLocaleString()} agents selected · plus you. Invitations do not start model calls.</p>{missingHeads && <p role="status">A selected department has no head. Select its agents instead.</p>}
   {mode === 'agents' ? <MeetingRoster client={client} selected={agents} departmentOptions={departments} onPick={agent => setAgents(old => { const next = new Set(old); next.has(agent.id) ? next.delete(agent.id) : next.add(agent.id); return next; })}/> : <><button type="button" disabled={!count} aria-expanded={roster} onClick={() => setRoster(v => !v)}>Review invited agents</button>{roster && <MeetingRoster client={client} departments={mode === 'departments' ? selectedDepartments : undefined} headsOnly={isHeads} onPick={() => {}} departmentOptions={departments}/>}</>}
-  <label className="meeting-field">What should we decide?<textarea rows={3} maxLength={4000} value={objective} onChange={e => setObjective(e.target.value)} placeholder="The question, context and outcome you need"/></label>{error && <p className="meeting-notice" role="alert">{error}</p>}
+  <label className="meeting-field">What should we decide?<textarea rows={3} maxLength={4000} value={objective} onChange={e => setObjective(e.target.value)} placeholder="The question, context and outcome you need"/></label>{!objective.trim() && <p className="meeting-fine">Write what the meeting should decide to start it.</p>}{error && <p className="meeting-notice" role="alert">{error}</p>}
  </Sheet>;
 }
 function ReviewMeeting({ client, meeting, onClose, onChanged, onOpenCard }: { client: SessionClient; meeting: MeetingRecord; onClose: () => void; onChanged: (m: MeetingRecord) => void; onOpenCard?: (board: string, card: string) => void }) {
@@ -69,11 +74,14 @@ function ReviewMeeting({ client, meeting, onClose, onChanged, onOpenCard }: { cl
   {assign && <Sheet title="Assign meeting action" onClose={() => setAssign(null)}><MeetingRoster key={meeting.id+':'+meeting.version} client={client} meetingId={meeting.id} onPick={agent => { change(assign, { agentId: agent.id, department: agent.department }); setAssign(null); }}/></Sheet>}
  </Sheet>;
 }
-export function Meetings({ client, controller, onMeetingChanged, onOpenCard, callTarget, onCallChanged, active = true }: { callTarget?: HTMLElement | null; onCallChanged?: (open: boolean) => void; active?: boolean; client: SessionClient; controller: ConversationsController; onMeetingChanged: (m: MeetingRecord | null) => void; onOpenCard?: (board: string, card: string) => void }) {
+export function Meetings({ client, controller, onMeetingChanged, onOpenCard, callTarget, onCallChanged, active = true, createRequest = 0 }: { createRequest?: number; callTarget?: HTMLElement | null; onCallChanged?: (open: boolean) => void; active?: boolean; client: SessionClient; controller: ConversationsController; onMeetingChanged: (m: MeetingRecord | null) => void; onOpenCard?: (board: string, card: string) => void }) {
  const chat = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
  const [meeting, setMeeting] = useState<MeetingRecord | null>(null), [create, setCreate] = useState(false), [participants, setParticipants] = useState(false), [review, setReview] = useState(false), [call, setCall] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(''), [auto, setAuto] = useState(false), [pendingSummary, setPendingSummary] = useState(false);
  const mounted = useRef(true), loading = useRef(false), turnKey = useRef<string | null>(null), autoBusy = useRef(false);
  useEffect(() => { onCallChanged?.(!!call && !!meeting && meeting.state !== 'completed'); return () => onCallChanged?.(false); }, [call, meeting?.id, meeting?.state, onCallChanged]);
+ // The chat's ⋯ menu › New meeting… opens the same sheet (the old "New meeting" button on the bar).
+ const seenCreate = useRef(createRequest);
+ useEffect(() => { if (createRequest !== seenCreate.current) { seenCreate.current = createRequest; setCreate(true); } }, [createRequest]);
  useEffect(() => { if (!active) { setCall(false); setAuto(false); } }, [active]);
  function update(m: MeetingRecord | null) { if (!mounted.current) return; setMeeting(m); onMeetingChanged(m); }
  async function refresh() { if (loading.current || !chat.activeId) return; loading.current = true; try { const r = await meetingRequest(client, 'GET', ROOT + '?conversationId=' + encodeURIComponent(chat.activeId)); update(r.meetings[0] ?? null); } catch (e) { if (mounted.current) setError((e as Error).message); } finally { loading.current = false; } }
@@ -85,18 +93,54 @@ export function Meetings({ client, controller, onMeetingChanged, onOpenCard, cal
  useEffect(() => { if (!pendingSummary || !meeting || meeting.activeRunId || chat.runId || !meeting.reviewReady) return; setPendingSummary(false); void action(async () => { const r = await meetingRequest(client, 'POST', `${ROOT}/${meeting.id}/review`, {}); update(r.meeting); setReview(true); }); }, [pendingSummary, meeting?.activeRunId, meeting?.reviewReady, chat.runId]);
  async function state(value: string) { if (!meeting) return; setAuto(false); const r = await meetingRequest(client, 'POST', `${ROOT}/${meeting.id}/state`, { expectedVersion: meeting.version, state: value }); update(r.meeting); if (value !== 'active') await controller.refreshActive(); }
  async function finish() { if (!meeting) return; setAuto(false); if (meeting.state === 'review' || meeting.state === 'completed') { setReview(true); return; } if (meeting.reviewReady) { const r = await meetingRequest(client, 'POST', `${ROOT}/${meeting.id}/review`, {}); update(r.meeting); setReview(true); return; } if (meeting.state !== 'active') { await state('review'); setReview(true); return; } setPendingSummary(true); await next('summary'); }
- return <div className="meetings-workspace"><div className="meeting-toolbar"><div>{meeting ? <><b dir="auto">{meeting.title}</b><span className="meeting-fine">{meeting.count.toLocaleString()} present{meeting.coordinator ? ` · ${meeting.coordinator.name} coordinates` : ''} · {meeting.state === 'completed' ? 'Finished' : meeting.state === 'review' ? 'Reviewing decisions' : meeting.state === 'paused' ? 'Paused' : meeting.speaker ? `${meeting.speaker.name} is answering` : `${Math.min(meeting.cursor, meeting.count)} of ${meeting.count} initial turns`}</span></> : <span className="meeting-fine">Discuss work with your departments</span>}</div>
+ return <div className="meetings-workspace">{meeting && <div className="meeting-toolbar"><div>{meeting ? <><b dir="auto">{meeting.title}</b><span className="meeting-fine">{meeting.count.toLocaleString()} present{meeting.coordinator ? ` · ${meeting.coordinator.name} coordinates` : ''} · {meeting.state === 'completed' ? 'Finished' : meeting.state === 'review' ? 'Reviewing decisions' : meeting.state === 'paused' ? 'Paused' : meeting.speaker ? `${meeting.speaker.name} is answering` : meeting.cursor>=meeting.count ? 'Ask a participant, or ask everyone in chat' : `${Math.min(meeting.cursor, meeting.count)} of ${meeting.count} initial turns`}</span></> : null}</div>
   {meeting && <><button type="button" className="tool" title="Meeting participants" aria-label="Meeting participants" onClick={() => setParticipants(true)}><UiIcon name="users"/></button>{meeting.state !== 'completed' && <button type="button" className="tool" title={call ? 'Leave meeting call' : 'Join meeting call'} aria-label={call ? 'Leave meeting call' : 'Join meeting call'} aria-pressed={call} onClick={() => setCall(v => !v)}><UiIcon name="phone"/></button>}
-   {meeting.state === 'active' && <><button type="button" disabled={busy || !!chat.runId || !!meeting.activeRunId} onClick={() => void action(() => next())}>Next speaker</button><button type="button" aria-pressed={auto} disabled={meeting.cursor >= meeting.count} onClick={() => { if (auto) setAuto(false); else { controller.setReplyAgent(''); setAuto(true); } }}>{auto ? 'Stop automatic turns' : `Run remaining round (${Math.max(0, meeting.count - meeting.cursor)})`}</button><button type="button" disabled={busy} onClick={() => void action(() => state('paused'))}>Pause</button></>}
+   {meeting.state === 'active' && <><MeetingRoundControls remaining={Math.max(0,meeting.count-meeting.cursor)} selected={!!chat.replyAgent} busy={busy||!!chat.runId||!!meeting.activeRunId} automatic={auto} onNext={() => void action(() => next())} onAutomatic={() => { if(auto)setAuto(false);else {controller.setReplyAgent('');setAuto(true);} }}/><button type="button" disabled={busy} onClick={() => void action(() => state('paused'))}>Pause</button></>}
    {meeting.state === 'paused' && <button type="button" disabled={busy} onClick={() => void action(() => state('active'))}>Resume</button>}
    <button type="button" disabled={busy || !!chat.runId || !!meeting.activeRunId} onClick={() => void action(finish)}>{meeting.state === 'completed' || meeting.state === 'review' ? 'Decisions' : meeting.reviewReady ? 'Review summary' : 'Finish meeting'}</button>
   </>}
-  <button type="button" className="tool" title="New meeting" aria-label="New meeting" onClick={() => setCreate(true)}><UiIcon name="users"/><span>New meeting</span></button>
- </div>{meeting?.state === 'review' && <p className="meeting-fine">Decisions wait for your approval. <button type="button" className="link-button" disabled={busy} onClick={() => void action(() => state('active'))}>Return to discussion</button></p>}
+ </div>}{meeting?.state === 'review' && <p className="meeting-fine">Decisions wait for your approval. <button type="button" className="link-button" disabled={busy} onClick={() => void action(() => state('active'))}>Return to discussion</button></p>}
  {auto && <p className="meeting-fine">Agents answer one at a time using their configured models. Pause stops the round; leaving this chat stops automatic turns.</p>}{error && <p className="meeting-notice" role="alert">{error} <button type="button" onClick={() => void refresh()}>Reload</button>{meeting && meeting.state !== 'completed' && <button type="button" onClick={() => void action(async () => { await state('review'); setReview(true); })}>Write decisions myself</button>}</p>}
  {call && meeting && meeting.state !== 'completed' && (callTarget ? createPortal(<MeetingCall key={meeting.id} client={client} controller={controller} meeting={meeting} onMicrophoneEnabled={() => setAuto(false)} onLeave={() => setCall(false)}/>, callTarget) : <MeetingCall key={meeting.id} client={client} controller={controller} meeting={meeting} onMicrophoneEnabled={() => setAuto(false)} onLeave={() => setCall(false)}/>)}
  {create && <NewMeeting client={client} projectId={chat.conversations.find(c => c.id === chat.activeId)?.projectId ?? chat.projectFilter ?? null} onClose={() => setCreate(false)} onCreated={async m => { setCreate(false); await controller.load(); await controller.open(m.conversationId); update(m); }}/>}
  {participants && meeting && <Sheet title="Meeting participants" onClose={() => setParticipants(false)}><p className="meeting-fine">{meeting.count.toLocaleString()} present. Select who should answer your next message.</p><MeetingRoster key={meeting.id+':'+meeting.version} client={client} meetingId={meeting.id} onPick={agent => { controller.setMeetingReplyAgent(agent); setParticipants(false); }}/></Sheet>}
  {review && meeting && <ReviewMeeting key={meeting.id} client={client} meeting={meeting} onChanged={update} onClose={() => setReview(false)} onOpenCard={onOpenCard}/>}
  </div>;
+}
+
+const stateWords = (m: MeetingRecord) => m.state === 'completed' ? 'Finished' : m.state === 'review' ? 'Reviewing decisions' : m.state === 'paused' ? 'Paused' : 'Live';
+/**
+ * Phone boards P27/P29: the open chat's meeting, read only. A small bar above the
+ * conversation when there is one; tap for who is in and what is decided so far.
+ * Starting, steering and reviewing a meeting stay on the computer (the phone's
+ * list allows only GET /api/meetings?conversationId=…). A failed read shows nothing.
+ */
+export function PhoneMeetingBar({ client, controller, active = true }: { client: SessionClient; controller: ConversationsController; active?: boolean }) {
+ const chat = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
+ const [meeting, setMeeting] = useState<MeetingRecord | null>(null), [open, setOpen] = useState(false);
+ useEffect(() => {
+  setMeeting(null); setOpen(false);
+  const id = chat.activeId; if (!id || !active) return;
+  let live = true;
+  const read = () => { if (document.visibilityState === 'hidden') return; void meetingRequest(client, 'GET', ROOT + '?conversationId=' + encodeURIComponent(id)).then(r => { if (live) setMeeting(r.meetings?.[0] ?? null); }, () => { if (live) setMeeting(null); }); };
+  read(); const timer = setInterval(read, 5000);
+  return () => { live = false; clearInterval(timer); };
+ }, [client, chat.activeId, active, chat.meetingRevision]);
+ if (!meeting) return null;
+ const decided = meeting.decisions.filter(d => d.enabled);
+ return <>
+  <button type="button" className="phone-meeting-bar" data-state={meeting.state} aria-label={`Meeting in this chat: ${meeting.title}, ${stateWords(meeting)}. Open`} onClick={() => setOpen(true)}>
+   <span className="phone-meeting-dot" aria-hidden="true"/>
+   <span className="phone-meeting-text"><b dir="auto">Meeting · {meeting.title}</b> · {stateWords(meeting).toLowerCase()} · {meeting.count.toLocaleString()} present</span>
+   <span className="phone-meeting-open">Open<UiIcon name="arrow-right" size={13}/></span>
+  </button>
+  {open && <Sheet title={meeting.title} onClose={() => setOpen(false)} actions={<button type="button" className="primary" onClick={() => setOpen(false)}>Back to the chat</button>}>
+   <div className="phone-meeting-sheet">
+    <p className="meeting-fine">{stateWords(meeting)} · {meeting.count.toLocaleString()} present{meeting.coordinator ? ` · ${meeting.coordinator.name} leads` : ''}{meeting.speaker ? ` · ${meeting.speaker.name} is speaking` : ''}</p>
+    {meeting.objective && <p dir="auto">{meeting.objective}</p>}
+    {decided.length > 0 && <><b>Decided so far</b><ul>{decided.map(d => <li key={d.id} dir="auto">{d.title}</li>)}</ul></>}
+    <p className="meeting-fine">Start a meeting or review its decisions on your computer.</p>
+   </div>
+  </Sheet>}
+ </>;
 }

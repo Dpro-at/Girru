@@ -1,3 +1,4 @@
+import {assertNoDefaultMemoryAccess} from './encryption/execution-context.js';
 /**
  * Memory Indexer
  * Hybrid search with Vector + Full-text + Recency scoring
@@ -530,8 +531,11 @@ export class MemoryIndexer implements IMemoryIndexer {
 let indexer: MemoryIndexer | null = null;
 
 export function getMemoryIndexer(config?: Partial<MemoryConfig>): MemoryIndexer {
+  assertNoDefaultMemoryAccess();
   if (!indexer) {
     indexer = new MemoryIndexer(config);
   }
   return indexer;
 }
+
+for(const [name,descriptor] of Object.entries(Object.getOwnPropertyDescriptors(MemoryIndexer.prototype))){if(name==='constructor'||typeof descriptor.value!=='function')continue;const original=descriptor.value;Object.defineProperty(MemoryIndexer.prototype,name,{...descriptor,value:function(this:MemoryIndexer,...args:unknown[]){assertNoDefaultMemoryAccess();return original.apply(this,args);}});}

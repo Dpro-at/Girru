@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // Release check (CORE-MEM): memories survive a backend restart. A backend
 // is started on a temp data dir, memories are written over HTTP and it
 // exits; a second backend process on the same data dir reads them back
@@ -12,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-const backendDir = process.cwd();
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-memrestart-'));
 mkdirSync(join(dir, '.data'), { recursive: true });
 const env = {

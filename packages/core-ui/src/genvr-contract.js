@@ -2,26 +2,64 @@ export const GENVR_BYTES=64*1024*1024;
 export const GENVR_AGENTS='/api/genvr/agents';
 export const validGenVRTeam=value=>Array.isArray(value)&&value.length<=200&&new Set(value.map(a=>a?.id)).size===value.length&&value.every(a=>record(a)&&Object.keys(a).sort().join(',')==='avatar,id'&&genvrId(a.id)&&Number.isInteger(a.avatar)&&a.avatar>=0&&a.avatar<8);
 export const GENVR_PATH='/api/genvr/projects';
+export const GENVR_RUNTIME='/api/genvr/runtime';
 export const STUDIO_TICKET_PATH='/api/genvr/studio-library-ticket';
 export const genvrId=value=>typeof value==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(value);
 const record=value=>!!value&&typeof value==='object'&&!Array.isArray(value);
 export function validStudioProject(value){return record(value)&&value.format==='genvr-studio'&&value.version===1&&genvrId(value.id)&&typeof value.title==='string'&&value.title.length>0&&value.title.length<=200&&record(value.world)&&record(value.play);}
+
+// GENVR-WORLD-01 P1 (board W1): the world's folder and project and who answers (owner only).
+export const GENVR_WORLD=/^\/api\/genvr\/worlds\/([a-zA-Z0-9_-]{1,100})\/(open|agent|history)$/;
+/** GV1e: the GenVR place behind a Girru chat project (Chat's Details shows it). */
+export const GENVR_WORLD_OF_CHAT=/^\/api\/genvr\/worlds\/of-chat-project\/([A-Za-z0-9_-]{1,100})$/;
+export const worldRoute=path=>GENVR_WORLD.test(path)||GENVR_WORLD_OF_CHAT.test(path);
+const TOOL_NAME=/^[a-z_]{1,64}$/;
+const agentKey=value=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(value);
+function allowedWorld(method,path,body){
+ if(GENVR_WORLD_OF_CHAT.test(path))return method==='GET'&&body===undefined;
+ const kind=GENVR_WORLD.exec(path)?.[2];
+ if(kind==='history')return method==='GET'&&body===undefined;
+ if(kind==='open')return method==='POST'&&record(body)&&Object.keys(body).join()==='name'&&typeof body.name==='string'&&body.name.length<=200;
+ if(kind==='agent')return method==='PUT'&&record(body)&&Object.keys(body).join()==='agentId'&&agentKey(body.agentId);
+ return false;
+}
+const answererOk=a=>record(a)&&agentKey(a.id)&&typeof a.name==='string'&&a.name.length<=60&&typeof a.detail==='string'&&a.detail.length<=60&&typeof a.color==='string'&&/^#[0-9a-fA-F]{6}$/.test(a.color);
+const answererOf=a=>({id:a.id,name:a.name,detail:a.detail,color:a.color});
+function worldResponse(path,status,body){
+ const kind=GENVR_WORLD_OF_CHAT.test(path)?'of-chat':GENVR_WORLD.exec(path)[2];
+ if(status!==200)return record(body)&&['invalid_input','not_found','world_not_open','no_agent','model_unavailable','folder_unavailable','forbidden','unavailable'].includes(body.code)?{code:body.code,...(typeof body.message==='string'&&body.message.length<=300?{message:body.message}:{})}:null;
+ if(!record(body))throw Error('protocol');
+ if(kind==='open'){if(typeof body.folder!=='string'||body.folder.length>500||!(body.chatProjectId===null||agentKey(body.chatProjectId))||!(body.answerer===null||answererOk(body.answerer))||(body.path!==undefined&&(typeof body.path!=='string'||body.path.length>1000))||!(body.conversationId===undefined||body.conversationId===null||agentKey(body.conversationId)))throw Error('protocol');return {folder:body.folder,chatProjectId:body.chatProjectId,answerer:body.answerer&&answererOf(body.answerer),...(typeof body.path==='string'?{path:body.path}:{}),...(typeof body.conversationId==='string'?{conversationId:body.conversationId}:{})};}
+ if(kind==='history'){if(!(body.conversationId===null||agentKey(body.conversationId))||!Array.isArray(body.messages)||body.messages.length>40||!body.messages.every(m=>record(m)&&(m.role==='user'||m.role==='assistant')&&typeof m.text==='string'&&m.text.length<=20000))throw Error('protocol');return {conversationId:body.conversationId,messages:body.messages.map(m=>({role:m.role,text:m.text}))};}
+ if(kind==='of-chat'){if(!genvrId(body.projectId)||typeof body.title!=='string'||body.title.length>200||typeof body.folder!=='string'||body.folder.length>500||typeof body.path!=='string'||body.path.length>1000||!(body.answerer===null||answererOk(body.answerer)))throw Error('protocol');return {projectId:body.projectId,title:body.title,folder:body.folder,path:body.path,answerer:body.answerer&&answererOf(body.answerer)};}
+ if(kind==='agent'){if(!answererOk(body.answerer))throw Error('protocol');return {answerer:answererOf(body.answerer)};}
+ throw Error('protocol');
+}
 const marketId=value=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)&&!value.includes('..');
 export function genvrMarket(path){if(path==='/api/genvr/market')return true;const match=/^\/api\/genvr\/market(?:\?after=([A-Za-z0-9._-]+)|\/items\/([A-Za-z0-9._-]+))$/.exec(path);return !!match&&marketId(match[1]??match[2]);}
-export function genvrRoute(path){return path===STUDIO_TICKET_PATH||path==='/api/genvr/mcp/bootstrap'||genvrMarket(path)||path===GENVR_AGENTS||path===GENVR_PATH||path.startsWith(GENVR_PATH+'/')&&genvrId(path.slice(GENVR_PATH.length+1));}
-export function allowedGenVR(method,path,body){if(!genvrRoute(path))return false;if(path===STUDIO_TICKET_PATH)return method==='POST'&&record(body)&&Object.keys(body).length===0;if(path==='/api/genvr/mcp/bootstrap')return method==='POST'&&record(body)&&Object.keys(body).length===0;if(method==='GET')return body===undefined;if(method!=='PUT'||genvrMarket(path)||(path===GENVR_PATH||path===GENVR_AGENTS)||!record(body)||!['project,revision','agents,project,revision'].includes(Object.keys(body).sort().join(','))||(body.agents!==undefined&&!validGenVRTeam(body.agents)))return false;return Number.isSafeInteger(body.revision)&&body.revision>=0&&body.revision<Number.MAX_SAFE_INTEGER&&validStudioProject(body.project)&&body.project.id===path.slice(GENVR_PATH.length+1)&&JSON.stringify(body.project).length<=GENVR_BYTES;}
+export function genvrRoute(path){return path===GENVR_RUNTIME||worldRoute(path)||path===STUDIO_TICKET_PATH||path==='/api/genvr/mcp/bootstrap'||genvrMarket(path)||path===GENVR_AGENTS||path===GENVR_PATH||path.startsWith(GENVR_PATH+'/')&&genvrId(path.slice(GENVR_PATH.length+1));}
+export function allowedGenVR(method,path,body){if(!genvrRoute(path))return false;if(path===GENVR_RUNTIME)return method==='GET'&&body===undefined;if(worldRoute(path))return allowedWorld(method,path,body);if(path===STUDIO_TICKET_PATH)return method==='POST'&&record(body)&&Object.keys(body).length===0;if(path==='/api/genvr/mcp/bootstrap')return method==='POST'&&record(body)&&Object.keys(body).length===0;if(method==='GET')return body===undefined;if(method!=='PUT'||genvrMarket(path)||(path===GENVR_PATH||path===GENVR_AGENTS)||!record(body)||!['project,revision','agents,project,revision'].includes(Object.keys(body).sort().join(','))||(body.agents!==undefined&&!validGenVRTeam(body.agents)))return false;return Number.isSafeInteger(body.revision)&&body.revision>=0&&body.revision<Number.MAX_SAFE_INTEGER&&validStudioProject(body.project)&&body.project.id===path.slice(GENVR_PATH.length+1)&&JSON.stringify(body.project).length<=GENVR_BYTES;}
 export function genvrResponse(path,status,body){
  if(!genvrRoute(path))throw Error('protocol');
+ if(worldRoute(path))return worldResponse(path,status,body);
  if(status!==200)return record(body)&&['not_found','conflict','invalid_input','unsupported_store','unavailable','market_unavailable','forbidden'].includes(body.code)?{code:body.code}:null;
  if(!record(body))throw Error('protocol');
+ if(path===GENVR_RUNTIME){
+  const version=v=>v===null||typeof v==='string'&&v.length<=60&&/^[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$/.test(v);
+  if(!['bundled','installed','missing'].includes(body.state)||!version(body.version))throw Error('protocol');
+  return {state:body.state,version:body.version};
+ }
  if(path===STUDIO_TICKET_PATH){if(typeof body.ticket!=='string'||!/^[a-f0-9]{64}$/.test(body.ticket)||typeof body.expiresAt!=='string'||body.expiresAt.length>40)throw Error('protocol');return {ticket:body.ticket,expiresAt:body.expiresAt};}
  if(path==='/api/genvr/mcp/bootstrap'){if(!['ready','blocked','disabled','unavailable','conflict'].includes(body.status)||!(body.id===null||typeof body.id==='string'&&/^[a-f0-9-]{36}$/.test(body.id)))throw Error('protocol');return {status:body.status,id:body.id};}
  if(genvrMarket(path)){if(path.startsWith('/api/genvr/market/items/')){if(!record(body.asset)||body.asset.id!==path.slice('/api/genvr/market/items/'.length)||!record(body.asset.manifest)||!Array.isArray(body.asset.files))throw Error('protocol');return {asset:body.asset};}if(!Array.isArray(body.items)||body.items.length>200||!(body.next===null||marketId(body.next)))throw Error('protocol');return {items:body.items.map(item=>({manifest:item.manifest,picture:null,caption:item.caption,tags:item.tags})),next:body.next};}
  if(path===GENVR_AGENTS){if(!Array.isArray(body.agents)||body.agents.length>10000||!body.agents.every(a=>record(a)&&genvrId(a.id)&&typeof a.name==='string'&&a.name.length<=200&&(a.avatar===null||Number.isInteger(a.avatar)&&a.avatar>=0&&a.avatar<8)))throw Error('protocol');return {agents:body.agents.map(a=>({id:a.id,name:a.name,avatar:a.avatar}))};}
- if(path===GENVR_PATH){if(!Array.isArray(body.projects)||body.projects.length>1000||!body.projects.every(p=>record(p)&&genvrId(p.id)&&typeof p.title==='string'&&p.title.length<=200))throw Error('protocol');return {projects:body.projects.map(p=>({id:p.id,title:p.title,agentCount:Number.isSafeInteger(p.agentCount)&&p.agentCount>=0?p.agentCount:0}))};}
+ if(path===GENVR_PATH){if(!Array.isArray(body.projects)||body.projects.length>1000||!body.projects.every(p=>record(p)&&genvrId(p.id)&&typeof p.title==='string'&&p.title.length<=200))throw Error('protocol');const word=v=>typeof v==='string'&&/^[a-z0-9-]{1,40}$/.test(v)?v:null;return {projects:body.projects.map(p=>({id:p.id,title:p.title,agentCount:Number.isSafeInteger(p.agentCount)&&p.agentCount>=0?p.agentCount:0,style:word(p.style),sizeTier:word(p.sizeTier),view:word(p.view),orientation:word(p.orientation),devices:Array.isArray(p.devices)?p.devices.map(word).filter(Boolean).slice(0,8):[],lab:p.lab===true}))};}
  if(!Number.isSafeInteger(body.revision)||body.revision<1)throw Error('protocol');
  if(body.saved===true)return {saved:true,revision:body.revision};
  if(!validStudioProject(body.project)||body.project.id!==path.slice(GENVR_PATH.length+1)||JSON.stringify(body.project).length>GENVR_BYTES)throw Error('protocol');
  if(body.agents!==undefined&&!validGenVRTeam(body.agents))throw Error('protocol');
  return {project:body.project,revision:body.revision,agents:body.agents??[]};
 }
+
+/** GV1b Access and publishing: the GenVR page where the owner publishes a place (a user-opened link, never a transport target). */
+export const GENVR_PUBLISH_PAGE='https://genvr.net';

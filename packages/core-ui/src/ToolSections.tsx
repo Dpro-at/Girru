@@ -12,6 +12,9 @@ import { DiscoveryController, STATE_LABEL } from './discovery-controller';
 import type { DiscoveryKind } from './discovery-contract.js';
 import {SkillFoundPlace} from './SkillFoundPlace';
 import { McpLibrary } from './McpLibrary';
+import { McpConnectionDialogs } from './McpWorkspace';
+import { McpFoundPlace, useFoundMcp } from './McpFound';
+import type { Connector } from './connectors-contract.js';
 import { useRef } from 'react';
 import { ConnectorsController } from './connectors';
 import { isProblem, type McpFilter } from './mcp-desktop';
@@ -91,30 +94,32 @@ export function SkillsSection({client,active,slot,onOpenAgents}:{client:SessionC
 /** In Settings (`nav` given) the places are nested rows under "MCP connections" in the Settings sidebar and the search sits above the list. */
 export function McpSection({ client, active, slot, nav, onOpenAgents, openId }: { client: SessionClient; active: boolean; slot?: HTMLElement | null; nav?: HTMLElement | null; onOpenAgents?:()=>void; openId?:string }) {
   // MC1: one sidebar for the section: search, connection places, then where to add from. Publisher sources open as a sheet from the ⋯ menu.
-  const [place,setPlace]=useState('all'),[query,setQuery]=useState(''),search=useRef<HTMLInputElement>(null);
+  const [place,setPlace]=useState('all'),[query,setQuery]=useState(''),search=useRef<HTMLInputElement>(null),[opened,setOpened]=useState(openId);
   // "Manage in MCP connections" from Apps opens that connection in the full list.
-  useEffect(()=>{if(openId)setPlace('all');},[openId]);
+  useEffect(()=>{if(openId){setPlace('all');setOpened(openId);}},[openId]);
+  const [setup,setSetup]=useState<Connector|'new'|null>(null),[remove,setRemove]=useState<Connector|null>(null);
   const [c]=useState(()=>new ConnectorsController(client)),s=useSyncExternalStore(c.subscribe,c.getSnapshot,c.getSnapshot);
-  const d=useDiscovery(client,active);
-  useSyncExternalStore(d?.subscribe ?? (() => () => {}), d?.getSnapshot ?? (() => null), d?.getSnapshot ?? (() => null));
+  // MCP-ONE-01: one "Found, not added" place for every other app, project and Store app (MO2a).
+  const found=useFoundMcp(client,active);
   const needs=s.servers.filter(isProblem).length;
   const row=(p:Place)=><button key={p.key} type="button" className="nav-item dk-place" title={p.label} aria-current={place===p.key?'page':undefined} onClick={()=>setPlace(p.key)}><UiIcon name={p.icon} size={15}/><span className="dk-place-name">{p.label}</span>{p.badge?<span className="dk-badge-pill" aria-label={`${p.badge} need you`}>{p.badge}</span>:null}</button>;
   const show:Place[]=[{key:'all',icon:'link',label:'All connections'},{key:'on',icon:'check',label:'On'},{key:'off',icon:'stop',label:'Off'},{key:'problem',icon:'alert',label:'Needs you',badge:needs}];
-  const add:Place[]=[{key:'import',icon:'code',label:'Add from my coding apps'},{key:'found',icon:'folder',label:'Add from this computer',badge:fresh(d,'mcp')}];
+  const add:Place[]=[{key:'found',icon:'search',label:'Found, not added',badge:found.fresh}];
   const places=[...show,...add];
   const sidebar=<nav className="dk-sidebar mcp-places" aria-label="MCP connections places">
     <p className="section-label dk-label"><span>MCP connections</span></p>
     <label className="dk-search"><UiIcon name="search" size={13}/><input ref={search} type="search" aria-label="Search connections" placeholder="Search" value={query} onChange={e=>setQuery(e.target.value)}/></label>
     {show.map(row)}
-    <p className="section-label dk-label"><span>Add from</span></p>
-    {add.map(p=>row({...p,label:p.key==='import'?'My coding apps':'This computer'}))}
+    {add.map(row)}
   </nav>;
-  const body=place==='found'?(d?<SkillFoundPlace c={d} active={active} kind="mcp"/>:null):<McpLibrary client={client} active={active} controller={c} query={query} searchRef={search} openId={openId} filter={(['on','off','problem'].includes(place)?place:'all') as McpFilter} view={place==='import'?'discover':'connections'} onDiscover={()=>setPlace('import')} onOpenAgents={onOpenAgents}/>;
+  const body=place==='found'?<><McpFoundPlace client={client} found={found} query={query} onAdded={()=>void c.load()} onOpen={id=>{setOpened(id);setPlace('all');}} onAddByHand={()=>setSetup('new')}/>
+    <McpConnectionDialogs c={c} setup={setup} onSetup={setSetup} remove={remove} onRemove={setRemove} onSaved={id=>{setOpened(id);setPlace('all');}} onRemoved={()=>{}}/></>
+   :<McpLibrary client={client} active={active} controller={c} query={query} searchRef={search} openId={opened} filter={(['on','off','problem'].includes(place)?place:'all') as McpFilter} view="connections" onDiscover={()=>setPlace('found')} onOpenAgents={onOpenAgents}/>;
   if(nav!==undefined){
     const nested=(p:Place)=><button key={p.key} type="button" className="nav-item dk-place" data-nested title={p.label} aria-current={place===p.key?'page':undefined} onClick={()=>setPlace(p.key)}><span className="dk-place-name">{p.label}</span>{p.badge?<span className="dk-badge-pill" aria-label={`${p.badge} need you`}>{p.badge}</span>:null}</button>;
     return <section className="dk-mem mcp-in-settings" aria-label="MCP connections">
       {nav&&active?createPortal(<>{places.map(nested)}</>,nav):null}
-      <div className="dk-content">{place!=='found'&&<div className="mcp-settings-search"><label className="dk-search"><UiIcon name="search" size={13}/><input ref={search} type="search" aria-label="Search connections" placeholder="Search connections" value={query} onChange={e=>setQuery(e.target.value)}/></label></div>}{body}</div>
+      <div className="dk-content">{<div className="mcp-settings-search"><label className="dk-search"><UiIcon name="search" size={13}/><input ref={search} type="search" aria-label="Search connections" placeholder="Search connections" value={query} onChange={e=>setQuery(e.target.value)}/></label></div>}{body}</div>
     </section>;
   }
   return <Section slot={slot} active={active} label="MCP connections" sidebar={sidebar}>{body}</Section>;

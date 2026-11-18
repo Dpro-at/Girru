@@ -68,7 +68,10 @@ export class MemoryAccessController extends Store<AccessState> {
     return out;
   }
 
-  /** One cell of the grid: the access at this level (inherited from above unless set here). */
+  /** Presentation-only preview of scope rules, parity-checked against the backend
+   * projectRuleCell. This does not include agent grants/templates/delegation and
+   * must never authorize reads/writes. Check one agent uses the backend result.
+   */
   cell(levels: readonly Level[], index: number, kind: DrawerKind): Cell {
     const rules = this.rules();
     let read = true, write = true, own = false;

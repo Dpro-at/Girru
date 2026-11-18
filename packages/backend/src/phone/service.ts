@@ -37,6 +37,8 @@ export const PAIRING_MAX_MS = 10 * 60 * 1000;
 /** A finished pairing still answers GET this long. */
 const PAIRING_KEEP_MS = 10 * 60 * 1000;
 const MAX_ENVELOPE = 1024 * 1024;
+/** The length of the g1.msg envelope for a sealed text of `bytes` bytes (header and tag included, with room to spare). */
+export const sealedLength = (bytes: number) => Math.ceil(((bytes + 16) * 4) / 3) + 512;
 const ENV_RE = /^[A-Za-z0-9._-]+$/;
 /** A handshake is answered once: its hash is kept a little longer than the time window it can pass. */
 const HS1_KEEP_MS = 2 * DEFAULT_WINDOW_MS + 60_000;
@@ -540,7 +542,8 @@ export class PhoneLink {
     const live = this.sessions.get(deviceId);
     if (!live) return false;
     let text = JSON.stringify(obj);
-    if (Buffer.byteLength(text) > MAX_ENVELOPE - 4096) text = JSON.stringify({ type: obj.type === 'run' ? 'run' : 'reply', ref: obj.ref ?? null, ok: false, error: 'too_large', ...(obj.runId ? { runId: obj.runId } : {}) });
+    // The relay measures the sealed envelope: base64 of the text plus the tag, plus its header.
+    if (sealedLength(Buffer.byteLength(text)) > MAX_ENVELOPE) text = JSON.stringify({ type: obj.type === 'run' ? 'run' : 'reply', ref: obj.ref ?? null, ok: false, error: 'too_large', ...(obj.runId ? { runId: obj.runId } : {}) });
     // Run and stream frames are bulk: on a backed-up link they are refused first (the stream then ends with a notice).
     return this.deliver(deviceId, seal(live.session, text), live.transport, false, obj.type === 'run' || obj.type === 'stream');
   }

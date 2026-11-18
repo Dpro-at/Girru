@@ -23,6 +23,7 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { createHash } from 'node:crypto';
 import { isExecToolsEnabled, minimalChildEnv } from '../tools/exec-policy.js';
+import { GENVR_ENV_NAMES, isTrustedBundledLaunch } from './bundled-genvr.js';
 import { checkServerUrl, ensureServerWorkDir, isLoopbackHost, MAX_TOOLS_PER_SERVER, McpConfigError } from './config.js';
 import { isLaunchApproved, parseList, readSecrets, type McpSecrets, type McpServerRow } from './store.js';
 
@@ -117,7 +118,9 @@ async function openClient(row: McpServerRow, secrets: McpSecrets): Promise<Clien
   const startupTimeout = row.startup_timeout_ms ?? row.timeout_ms;
   const client = new Client(CLIENT_INFO, { capabilities: {} });
   if (row.transport === 'stdio') {
-    if (!isExecToolsEnabled()) throw new McpCallError('not_allowed', 'stdio MCP servers need AGENT_EXEC_TOOLS=true in the server environment');
+    // GenVR's bundled server is the one exception (bundled-genvr.ts), and only with its own two folders as env.
+    const bundled = isTrustedBundledLaunch(row) && Object.keys(secrets.env).every(name => GENVR_ENV_NAMES.includes(name));
+    if (!isExecToolsEnabled() && !bundled) throw new McpCallError('not_allowed', 'stdio MCP servers need AGENT_EXEC_TOOLS=true in the server environment');
     if (!isLaunchApproved(row)) throw new McpCallError('not_allowed', 'the owner has not approved this server launch');
     const cwd = ensureServerWorkDir(row.name);
     const env = minimalChildEnv(secrets.env) as Record<string, string>;

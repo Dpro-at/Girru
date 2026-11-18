@@ -347,62 +347,6 @@ export async function registerDashboardRoutes(fastify: FastifyInstance) {
   });
 
   /**
-   * GET /api/dashboard/widgets/calendar-events
-   * Upcoming calendar events (calendar widget)
-   */
-  fastify.get('/api/dashboard/widgets/calendar-events', async (request, reply) => {
-    try {
-      const userId = getUserIdFromRequest(request);
-
-      // Get upcoming events (next 7 days)
-      const now = new Date();
-      const weekLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-
-      const events = await q.all(`
-        SELECT
-          e.id,
-          e.title,
-          e.start_time,
-          e.end_time,
-          e.is_all_day,
-          e.location,
-          e.event_type,
-          s.name as calendar_name,
-          s.color as calendar_color
-        FROM calendar_events e
-        LEFT JOIN calendar_sources s ON s.id = e.calendar_source_id
-        WHERE e.user_id = ?
-          AND e.start_time >= ?
-          AND e.start_time <= ?
-          AND e.status != 'cancelled'
-        ORDER BY e.start_time ASC
-        LIMIT 10
-      `, userId, now.toISOString(), weekLater.toISOString());
-
-      return {
-        events: events.map((e: any) => ({
-          id: e.id,
-          title: e.title,
-          start: e.start_time,
-          end: e.end_time,
-          allDay: Boolean(e.is_all_day),
-          location: e.location,
-          type: e.event_type,
-          calendar: e.calendar_name,
-          color: e.calendar_color,
-        })),
-      };
-    } catch (error: any) {
-      if (error.message?.includes('Unauthorized')) {
-        return reply.code(401).send({ error: 'Unauthorized' });
-      }
-      // SECURITY: Use centralized error handler to prevent info disclosure (H-09)
-      // Return empty array if calendar tables don't exist yet (graceful degradation)
-      return { events: [] };
-    }
-  });
-
-  /**
    * GET /api/dashboard/widgets/team-members
    * Active team members (table)
    */

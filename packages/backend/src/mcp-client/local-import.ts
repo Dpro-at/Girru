@@ -6,7 +6,8 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { clampTimeout, checkCommand, checkSecretMap, checkServerUrl, isLoopbackHost, type McpTransport } from './config.js';
 import { createServer, type ServerInput } from './service.js';
-import { listServerRows, readSecrets, parseList } from './store.js';
+import { listServerRows, parseList } from './store.js';
+import { linkSource } from './sources.js';
 import { redactImportText } from '../memory/import/redact.js';
 
 export class LocalMcpError extends Error {
@@ -15,6 +16,22 @@ export class LocalMcpError extends Error {
 const object = (x: unknown): x is Record<string, any> => !!x && typeof x === 'object' && !Array.isArray(x);
 const digest = (x: unknown) => createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const sorted = (x: Record<string,string> = {}) => Object.fromEntries(Object.entries(x).sort(([a],[b]) => a.localeCompare(b)));
+/** A TOML inline table of plain values (`env = { KEY = "value", N = 1 }`), the usual Codex form for env and headers. */
+function inlineTable(literal:string):Record<string,unknown>{
+ if(!literal.endsWith('}'))throw Error();
+ const out:Record<string,unknown>=Object.create(null);let rest=literal.slice(1,-1).trim();
+ while(rest){
+  const key=/^("(?:[^"\\]|\\.)+"|'[^']+'|[A-Za-z0-9_-]+)\s*=\s*/.exec(rest);if(!key)throw Error();
+  rest=rest.slice(key[0].length);
+  const v=/^(?:"(?:[^"\\]|\\.)*"|'[^']*'|true|false|-?\d+(?:\.\d+)?)/.exec(rest);if(!v)throw Error();
+  const name=key[1].startsWith('"')?JSON.parse(key[1]):key[1].replace(/^'|'$/g,'');
+  if(Object.hasOwn(out,name))throw Error();
+  out[name]=v[0].startsWith("'")?v[0].slice(1,-1):JSON.parse(v[0]);
+  rest=rest.slice(v[0].length).trim();
+  if(rest){if(!rest.startsWith(','))throw Error();rest=rest.slice(1).trim();}
+ }
+ return out;
+}
 /** Deliberately bounded TOML subset for MCP tables. Unsupported syntax fails closed. */
 export function parseMcpToml(text: string): Record<string, unknown> {
  const servers: Record<string, any> = Object.create(null); let target: Record<string, any> | null = null;
@@ -40,12 +57,13 @@ export function parseMcpToml(text: string): Record<string, unknown> {
    if (quote) { clean+=c; if (escaped) escaped=false; else if(c==='\\'&&quote==='"')escaped=true; else if(c===quote)quote=''; }
    else if(c==='"'||c==="'"){quote=c;clean+=c;}
    else if(c==='#'){while(i<pair[2].length&&pair[2][i]!=='\n')i++;clean+='\n';}
-   else {if(c==='[')depth++;if(c===']')depth--;clean+=c;}
+   else {if(c==='['||c==='{')depth++;if(c===']'||c==='}')depth--;clean+=c;}
   }
   if (quote || depth>0) { if(pending.length>65536)throw new LocalMcpError('unsupported_toml'); continue; }
   const literal=clean.trim(); let value: unknown;
   try {
    if (/^'[^'\n]*'$/.test(literal)) value=literal.slice(1,-1);
+   else if(literal.startsWith('{')) value=inlineTable(literal);
    else if(literal.startsWith('[')) {
     // Arrays are strings only; single quoted strings are converted without evaluation.
     if(!literal.endsWith(']')||depth!==0)throw Error();
@@ -60,6 +78,33 @@ export function parseMcpToml(text: string): Record<string, unknown> {
   if(Object.hasOwn(target,key))throw new LocalMcpError('unsupported_toml');target[key]=value;pending='';
  }
  if(pending)throw new LocalMcpError('unsupported_toml');return servers;
+}
+/**
+ * Gemini CLI and Antigravity write the same servers with other key names. Turn their entries into
+ * the shape the checks below know; keys that only describe (trust, description, timeout, tool
+ * filters, disabled) are dropped. Anything else unknown still fails closed (set up by hand).
+ */
+export function adaptEntry(origin:string,raw:Record<string,any>):Record<string,any>{
+ if(origin==='Gemini'){
+  const {httpUrl,url,trust:_t,description:_d,timeout:_o,includeTools:_i,excludeTools:_e,...rest}=raw;
+  if(httpUrl!==undefined)return {...rest,url:httpUrl,type:'http',...(url!==undefined?{_both:true}:{})};
+  if(url!==undefined)return {...rest,url,type:'sse'};
+  return rest;
+ }
+ if(origin==='Antigravity'){
+  const {serverUrl,disabled:_d,...rest}=raw;
+  return serverUrl!==undefined&&rest.url===undefined?{...rest,url:serverUrl,type:rest.type??'http'}:rest;
+ }
+ return raw;
+}
+/**
+ * The launch key of a server: one per program (command and arguments) or per address. Two entries
+ * with the same key are the same server, whatever their name or secrets (MCP-ONE-01 one row).
+ */
+export function launchKey(x:{transport:string;command?:string|null;args?:readonly string[]|null;url?:string|null}):string{
+ if(x.transport==='stdio')return digest(['stdio',x.command??'',...(x.args??[])]);
+ let url=x.url??'';try{const u=new URL(url);u.hash='';url=u.toString().replace(/\/+$/,'');}catch{/* compared as written */}
+ return digest(['web',url]);
 }
 function normalized(raw: Record<string,any>, name: string): ServerInput {
  const allowed=['type','transport','command','args','env','url','headers','http_headers','enabled','startup_timeout_sec'];
@@ -82,6 +127,8 @@ function normalized(raw: Record<string,any>, name: string): ServerInput {
  const headers=checkSecretMap(raw.headers??raw.http_headers,'headers');
  return {name:safeName,transport,...(startupTimeoutMs===undefined?{}:{startupTimeoutMs}),url:url.toString(),allowRemote:!isLoopbackHost(url.hostname),...(headers?{headers}:{})};
 }
+/** The checks every imported entry goes through, for entries Girru reads from its own places (Store apps). */
+export function normalizeEntry(raw:Record<string,any>,name:string):ServerInput{return normalized(raw,name);}
 function fingerprint(input: ServerInput) {
  return digest({startupTimeoutMs:input.startupTimeoutMs??30000,transport:input.transport,command:input.command??null,args:input.args??[],url:input.url??null,allowRemote:input.allowRemote===true,env:sorted(input.env as any),headers:sorted(input.headers as any)});
 }
@@ -93,6 +140,12 @@ export function claudeDesktopConfig(home:string,platform:NodeJS.Platform=process
  if(platform==='darwin')return path.join(home,'Library','Application Support','Claude','claude_desktop_config.json');
  if(platform==='win32')return path.join(home,'AppData','Roaming','Claude','claude_desktop_config.json');
  return path.join(home,'.config','Claude','claude_desktop_config.json');
+}
+/** The coding apps' own MCP lists Girru reads (never writes): Claude Code, Claude Desktop, Codex, Gemini CLI, Antigravity. */
+export function configFiles(home:string){
+ return [{origin:'Claude',file:path.join(home,'.claude.json')},{origin:'Claude Desktop',file:claudeDesktopConfig(home)},
+  {origin:'Codex',file:path.join(home,'.codex','config.toml')},
+  {origin:'Gemini',file:path.join(home,'.gemini','settings.json')},{origin:'Antigravity',file:path.join(home,'.gemini','config','mcp_config.json')}];
 }
 type Scan={id:string;owner:string;sources:Source[];skipped:number};
 export class LocalMcpImport {
@@ -116,7 +169,7 @@ export class LocalMcpImport {
  /** Every MCP server in the known config files, plus extra files such as a project's .mcp.json (DISCOVER-01). */
  async found(extra:{origin:string;file:string}[]=[]):Promise<{servers:FoundMcp[];skipped:number}>{
   const servers:FoundMcp[]=[];let skipped=0;
-  const files=[{origin:'Claude',file:path.join(this.home,'.claude.json')},{origin:'Claude Desktop',file:claudeDesktopConfig(this.home)},{origin:'Codex',file:path.join(this.home,'.codex','config.toml')},...extra];
+  const files=[...configFiles(this.home),...extra];
   for(const {origin,file} of files)try{
    const config=await this.configurations(file);
    const groups=[{project:undefined as string|undefined,servers:config.mcpServers}];
@@ -124,7 +177,7 @@ export class LocalMcpImport {
    for(const group of groups)if(object(group.servers))for(const [key,raw]of Object.entries(group.servers).slice(0,200)){
     if(servers.length>=500){skipped++;continue;}
     const source:FoundMcp={name:redactImportText(key).text.slice(0,100),origin,file,key,project:group.project};
-    try{if(!object(raw))throw Error();source.input=normalized(raw,key);source.hash=fingerprint(source.input);}catch(e){source.issue=e instanceof LocalMcpError?e.code:'invalid_configuration';}
+    try{if(!object(raw))throw Error();source.input=normalized(adaptEntry(origin,raw),key);source.hash=fingerprint(source.input);}catch(e){source.issue=e instanceof LocalMcpError?e.code:'invalid_configuration';}
     servers.push(source);
    }
   }catch{skipped++;}
@@ -137,22 +190,22 @@ export class LocalMcpImport {
   const operation=this.queue.then(async()=>{
    if(found.issue)throw new LocalMcpError(found.issue);
    const input=await this.current({id:'',...found});if(hash!==found.hash||hash!==fingerprint(input))throw new LocalMcpError('preview_changed',409);
-   const existingId=await this.duplicate(input);if(existingId)return {id:existingId,duplicate:true};
+   const existingId=await this.duplicate(input);if(existingId){await linkSource(existingId,found);return {id:existingId,duplicate:true};}
    const name=String(input.name);if((await listServerRows()).some(r=>r.name===name))throw new LocalMcpError('name_conflict',409);
    const {env:_e,headers:_h,...bare}=input;
-   const server=await createServer(keepSecrets?input:bare,owner,{dormantImport:true});return {id:server.id,duplicate:false};
+   const server=await createServer(keepSecrets?input:bare,owner,{dormantImport:true});await linkSource(server.id,found);return {id:server.id,duplicate:false};
   });this.queue=operation.catch(()=>{});return operation;
  }
  private source(owner:string,scanId:string,sourceId:string){const scan=this.scans.get(scanId);if(!scan||scan.owner!==owner)throw new LocalMcpError('scan_not_found',404);const source=scan.sources.find(s=>s.id===sourceId);if(!source)throw new LocalMcpError('source_not_found',404);return source;}
  private async current(source:Source) {
   const config=await this.configurations(source.file),group=source.project?config.projects?.[source.project]:config;
-  const raw=group?.mcpServers?.[source.key];if(!object(raw))throw new LocalMcpError('source_unavailable');return normalized(raw,source.key);
+  const raw=group?.mcpServers?.[source.key];if(!object(raw))throw new LocalMcpError('source_unavailable');return normalized(adaptEntry(source.origin,raw),source.key);
  }
+ /** MCP-ONE-01: the same program (command and arguments) or the same address is one server, whatever its name or secrets. */
  private async duplicate(input:ServerInput){
-  for(const row of await listServerRows()){
-   const secrets=await readSecrets(row);
-   if(fingerprint({transport:row.transport,command:row.command??undefined,args:parseList(row.args),url:row.url??undefined,allowRemote:row.allow_remote===1,startupTimeoutMs:row.startup_timeout_ms??row.timeout_ms,...secrets})===fingerprint(input))return row.id;
-  }return null;
+  const key=launchKey({transport:String(input.transport),command:typeof input.command==='string'?input.command:null,args:Array.isArray(input.args)?input.args as string[]:[],url:typeof input.url==='string'?input.url:null});
+  for(const row of await listServerRows())if(launchKey({transport:row.transport,command:row.command,args:parseList(row.args),url:row.url})===key)return row.id;
+  return null;
  }
  async preview(owner:string,scanId:string,sourceId:string) {
   const source=this.source(owner,scanId,sourceId);if(source.issue)throw new LocalMcpError(source.issue);
@@ -163,9 +216,9 @@ export class LocalMcpImport {
   const operation=this.queue.then(async()=>{
    const source=this.source(owner,scanId,sourceId);if(source.issue)throw new LocalMcpError(source.issue);
    const input=await this.current(source);if(hash!==source.hash||hash!==fingerprint(input))throw new LocalMcpError('preview_changed',409);
-   const existingId=await this.duplicate(input);if(existingId)return {id:existingId,duplicate:true};
+   const existingId=await this.duplicate(input);if(existingId){await linkSource(existingId,source);return {id:existingId,duplicate:true};}
    const name=String(input.name);const rows=await listServerRows();if(rows.some(r=>r.name===name))throw new LocalMcpError('name_conflict',409);
-   const server=await createServer(input,owner,{dormantImport:true});return {id:server.id,duplicate:false};
+   const server=await createServer(input,owner,{dormantImport:true});await linkSource(server.id,source);return {id:server.id,duplicate:false};
   });this.queue=operation.catch(()=>{});return operation;
  }
 }

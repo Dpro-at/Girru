@@ -18,7 +18,7 @@ delete process.env.PUBLIC_URL;
 
 const { getDatabase, closeDatabase } = await import('../src/db/database.ts');
 const { default: Fastify } = await import('fastify');
-const { registerTelephonyRoutes } = await import('../src/api/routes/telephony.ts');
+const { registerTelephonyRoutes } = await import('./fixtures/legacy-apps/src/api/routes/telephony.ts');
 const { getCredentialStorage } = await import('../src/credentials/storage.ts');
 const { generateToken } = await import('../src/auth/jwt.ts');
 const tel = await import('../src/telephony/credentials.ts');

@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const { createApplicationServer, allowed, LIMIT, RESPONSE_LIMIT } = require('../scripts/application-server.cjs');
 const { allowedRequest, SessionClient, createSameOriginTransport } = require('../src/session.ts');
 const { HEADERS: PREVIEW_HEADERS } = require('../scripts/preview.cjs');
-const HEADERS = {...PREVIEW_HEADERS, 'Permissions-Policy':'camera=(), microphone=(self), geolocation=()', 'Content-Security-Policy':PREVIEW_HEADERS['Content-Security-Policy'] + "; media-src 'self' blob:"};
+const HEADERS = {...PREVIEW_HEADERS, 'Permissions-Policy':'camera=(), microphone=(self), geolocation=()', 'Content-Security-Policy':PREVIEW_HEADERS['Content-Security-Policy']};
 const listen = server => new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', () => resolve(server.address().port)); });
 const close = server => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
 const token = 'fiction-only-token';
@@ -127,13 +127,15 @@ test('client disconnect cancels in-flight upstream', async t => {
   await entered; req.destroy(); await closed; assert.equal(s.calls.length,1);
 });
 test('validated static candidate allows only local media and same-origin microphone; fixture entry unchanged; no query live toggle', async t => {
-  const before = fs.readFileSync(require('node:path').join(__dirname,'../dist/current.json'));
+  const currentFile = require('node:path').join(__dirname,'../dist/current.json');
+  const currentBytes = () => fs.existsSync(currentFile) ? fs.readFileSync(currentFile) : null;
+  const before = currentBytes();
   const s = await setup(t);
   // Native fetch adds no Authorization to static requests.
   const response = await fetch(s.origin); assert.equal(response.status,200); assert.equal(response.headers.get('content-security-policy'),HEADERS['Content-Security-Policy']);
   assert.equal((await fetch(s.origin+'/?live=true')).status,400);
   assert.match(fs.readFileSync(require('node:path').join(__dirname,'../src/main.tsx'),'utf8'),/<App\/>/);
-  assert.deepEqual(fs.readFileSync(require('node:path').join(__dirname,'../dist/current.json')),before);
+  assert.deepEqual(currentBytes(),before);
   assert.equal(s.calls.length,0);
 });
 test('strict listener conflict leaves original owned listener functioning', async t => {
@@ -434,4 +436,34 @@ test('schedule definition bridge returns only masked readback and paused save me
  value={jobId:id,revision:2,enabled:false,definitionHash};const write=await s.request(path,{method:'PUT',body:{expectedRevision:1,changes:{name:'Renamed'}}});assert.equal(write.status,200);assert.equal(write.headers['set-cookie'],undefined);assert.deepEqual(JSON.parse(write.text),value);
  const count=s.calls.length;assert.equal((await s.request(path,{method:'PUT',body:{expectedRevision:1,changes:{enabled:true}}})).status,400);assert.equal(s.calls.length,count);
  value={...value,token:'must-not-become-auth'};assert.equal((await s.request(path,{method:'PUT',body:{expectedRevision:1,changes:{name:'Renamed'}}})).status,502);
+});
+
+test('only media reads have the bounded 32 MB base64 allowance, ordinary responses keep the smaller cap', async t => {
+  const content='A'.repeat(RESPONSE_LIMIT+4);
+  const s=await setup(t,(_req,res)=>res.end(JSON.stringify({path:'large.png',size:content.length*3/4,mime:'image/png',base64:content})));
+  const id='0f8fad5b-d9cb-469f-a165-70867728950e';
+  const r=await s.request(`/api/chat/projects/${id}/media?path=large.png`);
+  assert.equal(r.status,200);assert.equal(JSON.parse(r.text).base64.length,content.length);
+  const small=await s.request('/api/auth/me');assert.notEqual(small.status,200);
+});
+
+test('local GenVR availability never forwards owner metadata or accepts actions',async t=>{
+ const s=await setup(t,null,{genvrRuntimesDir:'/not-an-installed-runtime'});
+ const response=await s.request('/api/genvr/runtime');
+ assert.equal(response.status,200);assert.equal(response.headers['cache-control'],'no-store');
+ assert.deepEqual(JSON.parse(response.text),{state:'missing',version:null});assert.equal(s.calls.length,0);
+ assert.equal((await s.request('/api/genvr/runtime?account=other')).status,400);
+ assert.equal((await s.request('/api/genvr/runtime',{method:'POST',body:{}})).status,405);
+ assert.equal((await s.request('/api/genvr/runtime',{headers:{Origin:'https://example.invalid'}})).status,403);
+ assert.equal(s.calls.length,0);
+});
+
+test('embedded desktop bridge serves only its selected workspace Store renderer without a backend data env',async t=>{
+ const os=require('node:os'),path=require('node:path'),{createHash}=require('node:crypto');
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'desktop-store-workspaces-'));
+ const make=(name)=>{const dataDir=path.join(root,name),app=path.join(dataDir,'apps','trading'),bytes=Buffer.from(`export const workspace=${JSON.stringify(name)};`);fs.mkdirSync(app,{recursive:true});const sha=createHash('sha256').update(bytes).digest('hex');fs.writeFileSync(path.join(app,'client.js'),bytes);fs.writeFileSync(path.join(app,'.girru-store.json'),JSON.stringify({id:'trading',source:'store',packageSha256:'a'.repeat(64),files:[{path:'client.js',size:bytes.length,sha256:sha}]}));return {dataDir,bytes,sha};};
+ const a=make('selected-a'),b=make('selected-b');
+ const first=await setup(t,undefined,{storeAppsDataDir:a.dataDir}),second=await setup(t,undefined,{storeAppsDataDir:b.dataDir});t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const one=await first.request('/store-apps/trading/client.js?v='+a.sha),two=await second.request('/store-apps/trading/client.js?v='+b.sha);
+ assert.equal(one.status,200);assert.equal(one.text,a.bytes.toString());assert.equal(two.status,200);assert.equal(two.text,b.bytes.toString());assert.equal((await first.request('/store-apps/trading/client.js?v='+b.sha)).status,409);
 });

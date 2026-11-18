@@ -10,3 +10,10 @@ test('unified app transport is exact, read-only and projects no secret or execut
 test('member session cannot forward the unified inventory',async()=>{
  let forwarded=0;const user={id:'apps-member',email:'member@example.invalid',username:'Member',role:'user'};const c=new SessionClient({mock:async r=>{if(r.path==='/api/auth/login')return {status:200,body:{token:'fixture',user}};if(r.path==='/api/auth/me')return {status:200,body:{user}};forwarded++;return {status:200,body:{items:[]}};}});c.selectMode('mock');await c.login(user.email,'fixture');await assert.rejects(c.request({method:'GET',path:WORKSPACE_APPS_PATH}));assert.equal(forwarded,0);
 });
+
+test('Store Browser app identity offers the same owner open action as the Browser workspace',()=>{
+ const {tileActions}=require('../src/WorkspaceApplications.tsx');let opened=0;
+ const actions=tileActions({id:'app:browser',kind:'added',name:'Browser'},{owner:true},{open:()=>opened++,onPermissions:()=>{},onAccountConnections:()=>{},canOpen:true});
+ assert.equal(actions[0].label,'Open Browser');actions[0].run();assert.equal(opened,1);
+ const disabled=tileActions({id:'app:browser',kind:'added',name:'Browser'},{owner:true},{open:()=>opened++,onPermissions:()=>{},onAccountConnections:()=>{},canOpen:false});assert.equal(disabled[0].disabled,true);
+});

@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // CORE-03: memory drawers, scoped reads.
 // Run: node --import tsx --test test/memory-drawers.test.mjs
 // Throwaway DB + cwd, random test-only secrets, no network (local word-count
@@ -9,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-const backendDir = process.cwd();
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-drawers-'));
 mkdirSync(join(dir, '.data'), { recursive: true });
 process.chdir(dir);

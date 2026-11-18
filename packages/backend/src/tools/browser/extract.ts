@@ -1,3 +1,4 @@
+import {loadBrowserRuntime} from '../../services/browser-runtime.js';
 /**
  * Browser Extract Tool
  *
@@ -111,6 +112,7 @@ Returns extracted data in a structured format.`,
 
   async execute(rawParams): Promise<ToolResult> {
     const params = rawParams as BrowserExtractParams;
+    if(!await loadBrowserRuntime())return {error:'app_not_enabled',content:[{type:'text',text:'Add and enable Browser from the Store, then restart Girru.'}]};
     const controller = getBrowserController();
     let sessionId: string | null = null;
 

@@ -1,4 +1,7 @@
 import { discoveryFs, isolatedReadRegularFile } from '../services/discovery-fs.js';
+import { outsideFile } from '../memory/project-trust.js';
+import { isLibraryPath, libraryDirName } from '../memory/import/library-folders.js';
+import { publicKeyInfo } from '../services/ssh-keys.js';
 /**
  * "Found on this computer" (DISCOVER-01, board M17): one scan finds what coding
  * agents left on this computer, grouped by project folder and kind, and hands
@@ -217,6 +220,7 @@ async function projectNotes(home: string, known: string[], allowed: { allow: str
       if (e.isSymbolicLink()) continue;
       if (e.isDirectory()) {
         const toolDir = slash.endsWith('/.claude') && (e.name === 'commands' || e.name === 'agents');
+        if (libraryDirName(e.name, dir)) continue;
         if (!WALK_SKIP.has(e.name) && (!e.name.startsWith('.') || e.name === '.github' || e.name === '.cursor' || e.name === '.claude') || toolDir) await walk(p, depth + 1);
         continue;
       }
@@ -226,7 +230,7 @@ async function projectNotes(home: string, known: string[], allowed: { allow: str
       const isTool = !!tool && /\.md$/i.test(e.name);
       if ((!isNote || !kinds.notes) && (!isTool || !kinds.tools) || seen.has(p)) continue;
       seen.add(p);
-      if (NOT_OURS.test(p.split(path.sep).join('/'))) { leftOut++; continue; }
+      if (NOT_OURS.test(p.split(path.sep).join('/')) || isLibraryPath(p)) { leftOut++; continue; }
       const root = await rootOf(isTool ? path.dirname(path.dirname(dir)) : dir);
       if (root === home) continue;
       const t = await readText(p, MAX_NOTE); if (!t) continue;
@@ -255,25 +259,42 @@ async function notes(home: string, roots: string[]): Promise<Found[]> {
 
 // ---- skills ----
 async function skills(home: string, roots: string[], includeGlobal = true): Promise<Found[]> {
-  const out: Found[] = [];
+  const out: Found[] = [], seen = new Set<string>();
+  let visited = 0;
   const places: { dir: string; origin: string; root: string | null }[] = [
     ...(includeGlobal ? [{ dir: path.join(home, '.claude', 'skills'), origin: 'claude', root: null },
     { dir: path.join(home, '.codex', 'skills'), origin: 'codex', root: null },
-    { dir: path.join(home, '.agents', 'skills'), origin: 'shared', root: null }] : []),
+    { dir: path.join(home, '.agents', 'skills'), origin: 'shared', root: null },
+    { dir: path.join(home, '.claude', 'plugins', 'cache'), origin: 'claude', root: null },
+    { dir: path.join(home, '.codex', 'plugins', 'cache'), origin: 'codex', root: null }] : []),
     ...roots.map((r) => ({ dir: path.join(r, '.claude', 'skills'), origin: 'project', root: r })),
   ];
-  for (const p of places) {
-    let entries; try { entries = await discoveryFs.readdir(p.dir, { withFileTypes: true }); } catch { continue; }
-    for (const e of entries.slice(0, 300)) {
-      if (!e.isDirectory() || e.name.startsWith('.')) continue;
-      const dir = path.join(p.dir, e.name);
-      if (!(await isFile(path.join(dir, 'SKILL.md')))) continue;
+  const visit = async (dir: string, place: typeof places[number], depth: number): Promise<void> => {
+    if (depth > 12 || visited >= 20000 || out.length >= 2000 || seen.has(dir)) return;
+    seen.add(dir);
+    let entries; try { entries = await discoveryFs.readdir(dir, { withFileTypes: true }); } catch { return; }
+    if (entries.some(e => e.name === 'SKILL.md' && e.isFile())) {
       try {
         const b = await skillBundle(dir);
         const st = await discoveryFs.stat(path.join(dir, 'SKILL.md'));
-        out.push({ id: itemId('skill', path.relative(home, dir)), kind: 'skill', name: b.name, from: `${homeRel(home, dir)}${path.sep}SKILL.md`, root: p.root, file: dir, hash: b.hash, updatedAt: st.mtime.toISOString(), skill: { origin: p.origin, description: b.description.slice(0, 400) } });
-      } catch { /* not a valid skill folder */ }
+        out.push({ id: itemId('skill', path.relative(home, dir)), kind: 'skill', name: b.name, from: `${homeRel(home, dir)}${path.sep}SKILL.md`, root: place.root, file: dir, hash: b.hash, updatedAt: st.mtime.toISOString(), skill: { origin: place.origin, description: b.description.slice(0, 400) } });
+      } catch { /* Not a valid skill folder; never execute source files. */ }
+      return;
     }
+    for (const entry of entries) {
+      if (++visited > 20000 || out.length >= 2000) break;
+      if (entry.isSymbolicLink() || !entry.isDirectory() || entry.name.startsWith('.') && entry.name !== '.system'
+        || ['node_modules', 'dist', 'vendor', 'assets', 'models', 'public'].includes(entry.name)) continue;
+      await visit(path.join(dir, entry.name), place, depth + 1);
+    }
+  };
+  for (const place of places) {
+    // Match the library's home confinement and refuse a linked source root.
+    const st = await discoveryFs.lstat(place.dir).catch(() => null);
+    if (!st?.isDirectory() || st.isSymbolicLink()) continue;
+    const real = await discoveryFs.realpath(place.dir).catch(() => null);
+    if (!real || place.root === null && !real.startsWith((await discoveryFs.realpath(home)) + path.sep)) continue;
+    await visit(real, place, 0);
   }
   return out;
 }
@@ -324,18 +345,17 @@ export async function sshHosts(home: string): Promise<Found[]> {
   let entries; try { entries = await discoveryFs.readdir(directory, { withFileTypes: true }); } catch { return found; }
   for (const entry of entries.filter(entry => entry.isFile() && !entry.isSymbolicLink() && entry.name.endsWith('.pub')).slice(0, 200)) {
     const publicFile = path.join(directory, entry.name), publicText = await readText(publicFile, 16 * 1024);
-    const match = publicText && /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)|sk-ssh-ed25519@openssh.com|sk-ecdsa-sha2-nistp256@openssh.com) ([A-Za-z0-9+/]+={0,2})(?:[ \t].*)?\r?\n?$/.exec(publicText.text);
-    if (!match) continue;
-    const bytes = Buffer.from(match[2], 'base64');
-    if (bytes.length < 20 || bytes.readUInt32BE(0) > bytes.length - 4 || bytes.subarray(4, 4 + bytes.readUInt32BE(0)).toString('ascii') !== match[1]) continue;
-    const fingerprint = 'SHA256:' + createHash('sha256').update(bytes).digest('base64').replace(/=+$/, '');
+    const info = publicText ? publicKeyInfo(publicText.text) : null;
+    if (!info) continue;
+    const fingerprint = info.fingerprint, [keyType, keyData] = info.line.split(' ');
     const privateName = entry.name.slice(0, -4), privateFile = path.join(directory, privateName);
     // Metadata only: never open, hash, copy or parse the private key.
     const privateExists = (await discoveryFs.lstat(privateFile).catch(() => null))?.isFile() === true;
-    found.push({ id: itemId('ssh', path.relative(home, publicFile)), kind: 'ssh', name: entry.name, from: `${homeRel(home, publicFile)} · ${fingerprint}${privateExists ? ` · private file ${privateName} (name only)` : ''}`, root: null, file: publicFile, hash: sha(`${match[1]} ${match[2]} ${privateExists}`), updatedAt: publicText!.mtime,
+    found.push({ id: itemId('ssh', path.relative(home, publicFile)), kind: 'ssh', name: entry.name, from: `${homeRel(home, publicFile)} · ${fingerprint}${privateExists ? ` · private file ${privateName} (name only)` : ''}`, root: null, file: publicFile, hash: sha(`${keyType} ${keyData} ${privateExists}`), updatedAt: publicText!.mtime,
       ssh: { alias: privateName, host: null, user: null, port: null, key: privateExists ? homeRel(home, privateFile) : null, identity: true } });
   }
-  for (const entry of entries.filter(entry => entry.isFile() && !entry.isSymbolicLink() && /^id_(?:rsa|dsa|ecdsa|ed25519|ecdsa_sk|ed25519_sk)$/.test(entry.name)).slice(0, 200)) {
+  const configuredKeys = new Set(t ? parseSshConfig(t.text).map(host => host.key).filter(Boolean) : []);
+  for (const entry of entries.filter(entry => entry.isFile() && !entry.isSymbolicLink() && (/^id_(?:rsa|dsa|ecdsa|ed25519|ecdsa_sk|ed25519_sk)$/.test(entry.name) || configuredKeys.has(entry.name))).slice(0, 200)) {
     if (entries.some(publicEntry => publicEntry.name === entry.name + '.pub')) continue;
     const privateFile = path.join(directory, entry.name), stat = await discoveryFs.lstat(privateFile).catch(() => null);
     if (!stat?.isFile() || stat.isSymbolicLink()) continue;
@@ -710,10 +730,14 @@ export async function automaticNoteSource(userId: string, id: string, home = os.
   try { document = await readProjectDocument(userId, id); } catch { return false; }
   if (!document) return false;
   const entry = document.entry, sourceId = itemId('note', path.relative(home, entry.file));
+  // MR3: notes inside downloaded code (Go module folder, node_modules…) never make a project.
+  if (isLibraryPath(entry.file)) return false;
   const saved = (await rows(userId)).get(sourceId);
   if (saved?.state === 'ignored' || saved?.state === 'kept') return false;
   const exclusions = await P.allowedFolders(userId);
   if (P.isExcluded(entry.file, exclusions.exclude)) return false;
+  // REPO-TRUST-01: notes in someone else's repository are never turned into memories on their own.
+  if (await outsideFile(userId, entry.file)) return false;
   const project = await projectRoot(entry.root, home);
   const candidateRoot = project?.root ?? entry.root;
   const root = candidateRoot === home || candidateRoot === path.parse(candidateRoot).root ? null : candidateRoot;

@@ -12,6 +12,7 @@ import { getCredentialManager } from '../credentials/manager.js';
 import { CredentialType } from '../credentials/types.js';
 import { SECRET_PLACEHOLDER, isMaskedSecret } from '../credentials/secret-mask.js';
 import { isExecToolsEnabled } from '../tools/exec-policy.js';
+import { isTrustedBundledLaunch } from './bundled-genvr.js';
 import { qualifiedToolName, type McpTransport } from './config.js';
 
 export interface McpServerRow {
@@ -127,7 +128,7 @@ export function isLaunchApproved(row: McpServerRow): boolean {
  */
 export function isServerActive(row: McpServerRow): boolean {
   if (row.enabled !== 1) return false;
-  if (row.transport === 'stdio') return isLaunchApproved(row) && isExecToolsEnabled();
+  if (row.transport === 'stdio') return isLaunchApproved(row) && (isExecToolsEnabled() || isTrustedBundledLaunch(row));
   return true;
 }
 

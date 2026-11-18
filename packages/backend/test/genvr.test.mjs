@@ -34,3 +34,15 @@ test('space membership and looks stay private and survive ordinary saves',async(
  assert.equal((await save([],0,'team-space',other)).statusCode,200);assert.deepEqual((await app.inject({url:'/api/genvr/projects/team-space',headers:other})).json().agents,[]);
  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM genvr_members WHERE user_id=?').get('studio-owner').n,1);
 });
+test('GV1 agents: a space is made like the create page, only with the create page choices and a verified SDK',async()=>{
+ const post=payload=>app.inject({method:'POST',url:'/api/genvr/projects',headers:owner,payload});
+ const good={title:' Agent shop ',look:'voxel',view:'side',orientation:'portrait',devices:['tv','phone'],size:'small'};
+ assert.equal((await app.inject({method:'POST',url:'/api/genvr/projects',payload:good})).statusCode,401);
+ for(const bad of [{...good,title:''},{...good,title:'x'.repeat(61)},{...good,look:'anime'},{...good,size:'tiny'},{...good,view:'top'},{...good,devices:[]},{...good,devices:['vr']},{...good,extra:1}])assert.equal((await post(bad)).statusCode,400,JSON.stringify(bad));
+ const made=await post(good);
+ if(made.statusCode===409){assert.equal(made.json().code,'genvr_unavailable');return;}
+ assert.equal(made.statusCode,200);const {id,revision}=made.json();assert.equal(revision,1);
+ const saved=(await app.inject({url:'/api/genvr/projects/'+id,headers:owner})).json();
+ assert.equal(saved.project.title,'Agent shop');assert.equal(saved.project.world.style.base,'voxel');assert.deepEqual(saved.project.play,{orientation:'portrait',view:'side',moves:[],devices:['phone','tv']});
+ assert.equal((await app.inject({url:'/api/genvr/projects/'+id,headers:other})).statusCode,404);
+});

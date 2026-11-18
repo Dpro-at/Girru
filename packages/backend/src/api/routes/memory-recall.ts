@@ -1,3 +1,4 @@
+import {selectedEncryptedOwnerRuntime} from '../../memory/encryption/consumer-host.js';
 /**
  * Reply recall trace, memory cache metrics and memory moves (MEM-CACHE-01).
  * Owner only (auth gate owner tier for /api/memory/recall*, /api/memory/cache*
@@ -82,6 +83,7 @@ export async function memoryRecallRoutes(fastify: FastifyInstance) {
     }
     if (b.note !== undefined && (typeof b.note !== 'string' || b.note.length > 500)) return reply.code(400).send({ error: 'note must be at most 500 characters', code: 'invalid_note' });
     try {
+      const encrypted=await selectedEncryptedOwnerRuntime(owner.userId!);if(encrypted){const proposal=await encrypted.ownerTraceCorrection({runId:trace.runId,memoryId:b.memoryId,text:b.content});return reply.code(201).send({proposal});}
       const proposal = await ownerCorrection({
         userId: owner.userId!, memoryId: b.memoryId, content: b.content, agentId: trace.agentId,
         reasons: ['owner-correction', `reply:${request.params.messageId}`], note: typeof b.note === 'string' ? b.note : null,
@@ -108,6 +110,7 @@ export async function memoryRecallRoutes(fastify: FastifyInstance) {
     if (!usedMemory(trace, b.memoryId)) return reply.code(404).send({ error: 'This reply did not use that memory', code: 'not_in_trace' });
     let result;
     try {
+      const encrypted=await selectedEncryptedOwnerRuntime(owner.userId!);if(encrypted){const forgotten=await encrypted.forget(b.memoryId);return{forgotten};}
       result = await repositories.memory.forget(owner, b.memoryId);
     } catch (err) { return sendScopeError(reply, err); }
     if (!result) return reply.code(404).send({ error: 'Memory not found', code: 'not_found' });
@@ -176,6 +179,7 @@ export async function memoryRecallRoutes(fastify: FastifyInstance) {
     }
     if (b.reason !== undefined && (typeof b.reason !== 'string' || b.reason.length > 200)) return reply.code(400).send({ error: 'reason must be at most 200 characters', code: 'invalid_reason' });
     try {
+      const encrypted=await selectedEncryptedOwnerRuntime(owner.userId!);if(encrypted){const moved=await encrypted.ownerMove(request.params.id,to,typeof b.reason==='string'?b.reason:null);return{memory:moved.memory,from:drawerId(moved.from),to:drawerId(moved.to)};}
       const { memory, from } = await repositories.memory.move(owner, request.params.id, to, typeof b.reason === 'string' ? b.reason : null);
       void repositories.audit.record(owner, {
         event_type: 'data.update', event_category: 'data_modification', severity: 'info',

@@ -1,15 +1,31 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { CreateSpace, GenVRSidebar, PublishedCards, SpaceCards, SpaceInside, type CreateSpec, type GenVRPlace, type SpaceRow } from './GenVRHome';
+import { UiIcon } from './ui-icons';
+import { PlaceSection, type SpaceStore } from './GenVRSections';
+import { WhoButton, type Who } from './ChatComposerControls';
 import type { SpaceAgent } from './GenVRTeam';
 import type { Publication } from './connections-contract.js';
 import type { SessionClient } from './session';
+import { canRevealFolder, revealFolder } from './chat-actions';
 import { GENVR_PATH, GENVR_AGENTS, STUDIO_TICKET_PATH, genvrId, validStudioProject } from './genvr-contract.js';
-type Project={id:string;title:string;agentCount?:number};
-export function GenVRPage({client,active}:{client:SessionClient;active:boolean}){
+type Project=SpaceRow;
+/** GENVR-WORLD-01 (board W1): the open world as the Studio tells it, who answers there, and its folder. */
+type Place={projectId:string;name:string;tab:string;look:string;kind:string};
+type Answerer={id:string;name:string;detail:string;color:string};
+const TABS=['build','items','avatar','filming','lab'];
+const placeOf=(value:unknown):Place|null=>{const c=value as Record<string,unknown>|null;return c&&typeof c==='object'&&genvrId(c.projectId)&&typeof c.name==='string'&&c.name.length<=200&&TABS.includes(c.tab as string)&&typeof c.look==='string'&&c.look.length<=40&&typeof c.kind==='string'&&c.kind.length<=40?{projectId:c.projectId as string,name:c.name,tab:c.tab as string,look:c.look,kind:c.kind}:null;};
+type MarketItem={manifest:{id:string}};
+export function GenVRPage({client,active,sidebarSlot,onOpenChat,request}:{client:SessionClient;active:boolean;sidebarSlot?:HTMLElement|null;/** GV1e: open this place's Girru chat in Chat. */onOpenChat?:(conversationId:string)=>void;/** GV1e: Chat's Open in Studio. */request?:{placeId:string;n:number}|null}){
+ /* GV1: the section's place in the sidebar, the space we are inside (its settings), and the create page. */
+ const [genvrPlace,setGenvrPlace]=useState<GenVRPlace>('spaces'),[insideId,setInsideId]=useState(''),[section,setSection]=useState('basic'),[creating,setCreating]=useState(false);
+ const createSpec=useRef<CreateSpec|undefined>(undefined),openingLab=useRef(false),placing=useRef<string|undefined>(undefined);
  const frame=useRef<HTMLIFrameElement>(null),revisions=useRef(new Map<string,number>()),opening=useRef<string | undefined>(undefined);
  const selection=useRef<SpaceAgent[]|undefined>(undefined);
  const [mcp,setMcp]=useState('Preparing local MCP…');
  useEffect(()=>{if(!active)return;if(client.getSnapshot().user?.role!=='owner'){setMcp('Local MCP setup is managed by the workspace owner.');return;}let disposed=false;void client.request({method:'POST',path:'/api/genvr/mcp/bootstrap',body:{}} as never).then(result=>{if(disposed)return;const state=(result.body as {status?:string})?.status;setMcp(result.status!==200?'Local MCP could not be prepared.':state==='ready'?'Local MCP ready · choose tools for each agent in its MCP tab.':state==='blocked'?'Local MCP configured · blocked by the server execution policy or working-folder configuration.':state==='disabled'?'Local MCP disabled · enable it in Settings → MCP when needed.':state==='conflict'?'Local MCP needs review in Settings → MCP.':'Local MCP package unavailable in this build.');}).catch(()=>{if(!disposed)setMcp('Local MCP could not be prepared.');});return()=>{disposed=true;};},[client,active]);
- const [channel,setChannel]=useState(''),[phase,setPhase]=useState('idle'),[notice,setNotice]=useState('');
+ const [channel,setChannel]=useState(''),[phase,setPhase]=useState('idle'),[notice,setNotice]=useState(''),[stuck,setStuck]=useState(false);
+ const leaveTo=useRef<GenVRPlace|null>(null);
  const [projects,setProjects]=useState<Project[]>([]),[listing,setListing]=useState('loading'),[query,setQuery]=useState(''),[retry,setRetry]=useState(0);
  useEffect(()=>{
   if(!active||channel)return;let disposed=false;setListing('loading');
@@ -18,23 +34,81 @@ export function GenVRPage({client,active}:{client:SessionClient;active:boolean})
    setProjects(body.projects);setListing('ready');
   }).catch(()=>{if(!disposed)setListing('error');});return()=>{disposed=true;};
  },[client,active,channel,retry]);
+ const owner=client.getSnapshot?.().user?.role==='owner';
+ const place=useRef<Place|null>(null),opened=useRef(''),sendRef=useRef<(value:Record<string,unknown>)=>void>(()=>{});
+ const shown=useRef<{folder:string;answerer:string}>({folder:'',answerer:''});
+ const [world,setWorld]=useState<Place|null>(null),[answerer,setAnswerer]=useState<Answerer|null>(null),[folder,setFolder]=useState('');
+ /* GV1d/GV1e: the open place's folder on disk, its Girru chat and the agents in it (shown in the sidebar). */
+ const [folderPath,setFolderPath]=useState(''),[conversation,setConversation]=useState(''),[team,setTeam]=useState<{id:string;name:string}[]>([]);
+ const [agents,setAgents]=useState<(Who&{primary?:boolean})[]>([]),[picking,setPicking]=useState(false),[chatNote,setChatNote]=useState('');
+ // What the Studio chat shows is kept here: each update adds to it (a history refresh keeps who answers and the rest).
+ const chatInfo=useRef<Record<string,unknown>>({});
+ const showChat=useCallback((next:{folder?:string;answerer?:Answerer|null;history?:{role:'user'|'assistant';text:string}[];team?:string[]})=>{chatInfo.current={...chatInfo.current,...(next.folder?{folder:next.folder}:{}),...(next.team?.length?{team:next.team}:{}),...(next.answerer?{answerer:{name:next.answerer.name,detail:next.answerer.detail,color:next.answerer.color}}:{}),...(next.history?{history:next.history}:{})};sendRef.current({operation:'chat-info',info:chatInfo.current});},[]);
+ const loadAgents=useCallback(async()=>{if(agents.length)return;try{const r=await client.request({method:'GET',path:'/api/agents'} as never);const rows=(r.body as {agents?:{id:string;name?:string;isPrimary?:boolean;description?:string}[]})?.agents;if(r.status===200&&Array.isArray(rows))setAgents(rows.filter(a=>genvrId(a.id)&&a.id!=='small-local-agent').map(a=>({id:a.id,name:a.name??a.id,primary:a.isPrimary===true,...(typeof a.description==='string'&&a.description.split(/[.\n]/)[0].trim().length<=64?{note:a.description.split(/[.\n]/)[0].trim()}:{})})));}catch{/* the picker stays closed */}},[client,agents.length]);
+ async function chooseAgent(id:string){
+  const world=place.current;const agentId=id||agents.find(a=>a.primary)?.id;if(!world||!agentId)return;
+  try{const r=await client.request({method:'PUT',path:`/api/genvr/worlds/${world.projectId}/agent`,body:{agentId}} as never);const next=(r.body as {answerer?:Answerer})?.answerer;if(r.status!==200||!next)throw Error();shown.current.answerer=next.id;setAnswerer(next);showChat({folder,answerer:next});setChatNote('');}
+  catch{setChatNote('Could not change who answers. Try again.');}
+ }
+ const conversationRef=useRef(''),onOpenChatRef=useRef(onOpenChat),folderPathRef=useRef(''),chatRuns=useRef(new Map<string,AbortController>());conversationRef.current=conversation;onOpenChatRef.current=onOpenChat;folderPathRef.current=folderPath;
  const [published,setPublished]=useState<Publication[]>([]);
  useEffect(()=>{if(!active||channel||client.getSnapshot().user?.role!=='owner')return;let disposed=false;void client.request({method:'GET',path:'/api/connections/genvr/publications'} as never).then(r=>{if(!disposed&&r.status===200)setPublished((r.body as {publications:Publication[]}).publications);}).catch(()=>{});return()=>{disposed=true;};},[client,active,channel,retry]);
- // No space yet: start a new one right away (once per visit).
- const started=useRef(false);
- useEffect(()=>{if(active&&!channel&&listing==='ready'&&projects.length===0&&!started.current){started.current=true;open();}},[active,channel,listing,projects.length]);
- function open(id?:string){selection.current=undefined;opening.current=id;setNotice('');setPhase('loading');setChannel(crypto.randomUUID());}
+ // GV1: with no space, the create page shows (the Studio no longer opens by itself).
+ function open(id?:string,create?:CreateSpec,asLab=false,placeItem?:string){chatInfo.current={};createSpec.current=create;openingLab.current=asLab;placing.current=id?placeItem:undefined;setFolderPath('');setConversation('');setTeam([]);selection.current=undefined;opening.current=id;place.current=null;opened.current='';shown.current={folder:'',answerer:''};setWorld(null);setAnswerer(null);setFolder('');setChatNote('');setNotice('');setStuck(false);leaveTo.current=null;setPhase('loading');setChannel(crypto.randomUUID());}
  useEffect(()=>{
   if(!channel)return;let disposed=false;
-  const send=(value:Record<string,unknown>)=>frame.current?.contentWindow?.postMessage({type:'dpro-genvr',channel,...value},window.location.origin);
+  const send=(value:Record<string,unknown>)=>frame.current?.contentWindow?.postMessage({type:'dpro-genvr',channel,...value},window.location.origin);sendRef.current=send;
+  // Board W1: the world that is open gets its folder and Girru project; the chat shows them and who answers.
+  const openWorld=async(world:Place)=>{
+   const key=world.projectId+'\u0000'+world.name;if(opened.current===key)return;opened.current=key;
+   try{const r=await client.request({method:'POST',path:`/api/genvr/worlds/${world.projectId}/open`,body:{name:world.name}} as never);if(disposed)return;const b=r.body as {folder?:string;path?:string;conversationId?:string|null;answerer?:Answerer|null};
+    if(r.status!==200||typeof b?.folder!=='string')throw Error();shown.current={folder:b.folder,answerer:b.answerer?.id??''};setFolder(b.folder);setFolderPath(b.path??'');setConversation(b.conversationId??'');setAnswerer(b.answerer??null);
+    // GV1e: the Studio chat is this place's Girru chat: its earlier lines come with what the chat shows.
+    let history:{role:'user'|'assistant';text:string}[]=[];try{const h=await client.request({method:'GET',path:`/api/genvr/worlds/${world.projectId}/history`} as never);if(h.status===200)history=(h.body as {messages:{role:'user'|'assistant';text:string}[]}).messages;}catch{/* the chat starts empty */}
+    if(disposed)return;showChat({folder:b.folder,answerer:b.answerer??null,history});
+    try{const [saved,roster]=await Promise.all([client.request({method:'GET',path:`${GENVR_PATH}/${world.projectId}`} as never),client.request({method:'GET',path:GENVR_AGENTS} as never)]);if(!disposed&&saved.status===200&&roster.status===200){const names=new Map((roster.body as {agents:{id:string;name:string}[]}).agents.map(a=>[a.id,a.name]));const members=(saved.body as {agents:{id:string}[]}).agents.map(a=>({id:a.id,name:names.get(a.id)??a.id}));setTeam(members);if(members.length)showChat({folder:b.folder,answerer:b.answerer??null,team:members.map(a=>a.name)});}}catch{/* the list stays empty */}}
+   catch{if(!disposed){opened.current='';setChatNote('This world’s folder could not be prepared. The chat still works without it.');}}
+  };
+  const refreshHistory=async()=>{const w=place.current;if(!w||disposed)return;try{const h=await client.request({method:'GET',path:`/api/genvr/worlds/${w.projectId}/history`} as never);if(!disposed&&h.status===200)showChat({folder:shown.current.folder,answerer:null,history:(h.body as {messages:{role:'user'|'assistant';text:string}[]}).messages});}catch{/* the panel keeps what it shows */}};
+  const chatRun=async(id:string,text:string)=>{
+   const conversation=conversationRef.current,stop=new AbortController();chatRuns.current.set(id,stop);
+   const end=(ok:boolean,error?:string)=>{chatRuns.current.delete(id);send({operation:'chat-end',id,ok,...(error?{error}:{})});if(ok)void refreshHistory();};
+   if(!conversation||!owner){end(false,'Open the place once more; its chat is not ready.');return;}
+   const runId=`run-genvr-${crypto.randomUUID()}`;
+   try{
+    const r=await client.request({method:'POST',path:`/api/chat/conversations/${conversation}/runs`,body:{runId,message:text,...(shown.current.answerer?{agentId:shown.current.answerer}:{})}} as never,stop.signal);
+    if(r.status===409){end(false,'The agent is still answering in this chat. Wait for it, then send again.');return;}
+    if(r.status!==202&&r.status!==200){end(false,'Girru could not start the reply. Try again.');return;}
+    if((r.body as {completed?:boolean})?.completed===true){end(true);return;}
+    let after=0,ended=false,failed='';
+    for(let tries=0;!ended&&!stop.signal.aborted&&tries<200;tries++){
+     const res=await client.runEvents(runId,after,e=>{
+      if(e.type==='text')send({operation:'chat-delta',id,delta:e.content});
+      else if(e.type==='tool_result')for(const t of e.results)send({operation:'chat-tool',id,name:t.name.replace(/^mcp__[^_]+__/,''),ok:!t.isError&&!t.approvalId,result:t.approvalId?'Waiting for your OK in Girru Chat (Open in Chat).':t.output.slice(0,600)});
+      else if(e.type==='end'&&e.status!=='complete')failed=e.status==='stopped'?'Stopped.':'The agent could not answer. Open in Chat shows why.';
+     },stop.signal);
+     after=res.last;ended=res.ended;
+    }
+    if(stop.signal.aborted)return;
+    end(!failed,failed||undefined);
+   }catch{if(!stop.signal.aborted)end(false,'Girru could not reach the agent. Try again.');}
+  };
   const receive=async(event:MessageEvent)=>{
    if(disposed||event.source!==frame.current?.contentWindow||event.origin!==window.location.origin||event.data?.type!=='dpro-genvr'||event.data.channel!==channel)return;
-   const data=event.data;if(data.operation==='ready'){let privateLibrary:string|undefined;if(client.getSnapshot().user?.role==='owner'){try{const t=await client.request({method:'POST',path:STUDIO_TICKET_PATH,body:{}} as never);if(t.status===200)privateLibrary=(t.body as {ticket:string}).ticket;}catch{/* library stays off */}}if(disposed)return;send({operation:'start',projectId:opening.current,storageNamespace:client.getSnapshot().user?.id,privateLibrary});return;}if(data.operation==='mounted'){setPhase('ready');return;}
+   const data=event.data;if(data.operation==='ready'){let privateLibrary:string|undefined;if(client.getSnapshot().user?.role==='owner'){try{const t=await client.request({method:'POST',path:STUDIO_TICKET_PATH,body:{}} as never);if(t.status===200)privateLibrary=(t.body as {ticket:string}).ticket;}catch{/* library stays off */}}if(disposed)return;send({operation:'start',projectId:opening.current,storageNamespace:client.getSnapshot().user?.id,privateLibrary,chat:owner,...(createSpec.current?{create:createSpec.current}:{}),...(openingLab.current?{lab:true}:{}),...(placing.current?{placeItem:placing.current}:{})});return;}if(data.operation==='mounted'){setPhase('ready');return;}
    if(data.operation==='unavailable'){setPhase('unavailable');return;}
-   if(data.operation==='open-failed'){setNotice('Choose the saved space from the Studio project menu to open it.');return;}
-   if(data.operation==='closed'){if(data.ok){setChannel('');setPhase('idle');}else setNotice('Studio is busy or saving failed. Keep it open and save or export your edits.');return;}
+   if(data.operation==='home'){const to=leaveTo.current;leaveTo.current=null;setChannel('');setPhase('idle');setStuck(false);setNotice('');setGenvrPlace(p=>to??(p==='lab'?'spaces':p));return;}
+   if(data.operation==='closed'){if(data.ok){const to=leaveTo.current;leaveTo.current=null;setChannel('');setPhase('idle');setStuck(false);setGenvrPlace(p=>to??(p==='lab'?'spaces':p));}else{leaveTo.current=null;setNotice('The Studio could not save this space. Keep it open and try again, or close it without saving.');setStuck(true);}return;}
+   if(data.operation==='context'){const world=owner?placeOf(data.context):null;if(!world)return;place.current=world;setWorld(world);void openWorld(world);return;}
+   // GV1e (Mohamed): the Studio chat is the place's real Girru chat run; its reply streams back to the Studio.
+   if(data.operation==='chat-send'&&typeof data.id==='string'&&/^c\d{1,10}$/.test(data.id)&&typeof data.text==='string'){void chatRun(data.id,data.text);return;}
+   if(data.operation==='chat-cancel'&&typeof data.id==='string'){const run=chatRuns.current.get(data.id);run?.abort();chatRuns.current.delete(data.id);return;}
+   if(data.operation==='open-folder'){if(folderPathRef.current&&canRevealFolder())revealFolder(folderPathRef.current);return;}
+   if(data.operation==='open-chat'){const id=conversationRef.current;if(id)onOpenChatRef.current?.(id);return;}
+   if(data.operation==='choose-answerer'){if(owner&&place.current){void loadAgents();setPicking(true);}return;}
    if(typeof data.id!=='string'||!/^\d{1,10}$/.test(data.id))return;
    try{
+    if(data.operation==='agents'&&!genvrId(data.value)){send({id:data.id,response:true,ok:true,value:[]});return;}
     if(data.operation==='agents'&&genvrId(data.value)){
      const [saved,roster]=await Promise.all([client.request({method:'GET',path:`${GENVR_PATH}/${data.value}`} as never),client.request({method:'GET',path:GENVR_AGENTS} as never)]);
      if(saved.status!==200||roster.status!==200)throw Error();
@@ -52,7 +126,7 @@ export function GenVRPage({client,active}:{client:SessionClient;active:boolean})
     }
     const request=data.operation==='list'?{method:'GET',path:GENVR_PATH}:data.operation==='read'&&genvrId(data.value)?{method:'GET',path:`${GENVR_PATH}/${data.value}`}:
      data.operation==='write'&&validStudioProject(data.value)?{method:'PUT',path:`${GENVR_PATH}/${data.value.id}`,body:{project:data.value,revision:revisions.current.get(data.value.id)??0,...(selection.current?{agents:selection.current}:{})}}:null;
-    if(!request)return;const result=await client.request(request as never);if(disposed)return;
+    if(!request){send({id:data.id,response:true,ok:false});return;}const result=await client.request(request as never);if(disposed)return;
     if(result.status!==200){send({id:data.id,response:true,ok:false,conflict:result.status===409});return;}
     const body=result.body as {projects?:unknown;project?:{id:string};revision?:number};
     if(data.operation==='read'&&body.project&&body.revision){revisions.current.set(body.project.id,body.revision);selection.current=undefined;}
@@ -68,17 +142,61 @@ export function GenVRPage({client,active}:{client:SessionClient;active:boolean})
    for(const a of rows){if(seen.has(a.id))continue;seen.add(a.id);if(first)continue;send({operation:'notify',notification:{type:'approval',title:'Approval waiting',body:`${a.toolName} is waiting for your approval in Girru → Approvals.`,sourceId:a.id,needsApproval:true}});}
    first=false;
   }).catch(()=>{});},15000):undefined;
-  window.addEventListener('message',receive);const timer=setTimeout(()=>{if(!disposed)setPhase(current=>current==='loading'?'unavailable':current);},20000);
-  return()=>{disposed=true;clearTimeout(timer);if(approvals)clearInterval(approvals);window.removeEventListener('message',receive);};
+  window.addEventListener('message',receive);const timer=setTimeout(()=>{if(!disposed)setPhase(current=>current==='loading'?'slow':current);},20000);
+  // GV1e: lines written in Girru Chat reach the Studio chat too (while nothing is being answered here).
+  const syncing=setInterval(()=>{if(!chatRuns.current.size&&place.current)void refreshHistory();},6000);
+  return()=>{disposed=true;clearTimeout(timer);clearInterval(syncing);if(approvals)clearInterval(approvals);window.removeEventListener('message',receive);for(const stop of chatRuns.current.values())stop.abort();chatRuns.current.clear();sendRef.current=()=>{};};
  },[client,channel]);
- const visible=projects.filter(project=>project.title.toLocaleLowerCase().includes(query.toLocaleLowerCase().trim()));
- return <div className="genvr-page"><header className="genvr-toolbar"><div><h2>GenVR</h2><p className="fine-print">Your private spaces in this workspace. Film exports are saved separately.</p></div>
- {channel?<button type="button" onClick={()=>{setNotice('');frame.current?.contentWindow?.postMessage({type:'dpro-genvr',channel,operation:'close'},window.location.origin);}}>Save & close Studio</button>:<button type="button" className="primary" onClick={()=>open()}>Create space</button>}</header>
- <p className="fine-print" role="status">{mcp}</p>
- {notice&&<p role="alert">{notice}</p>}
- {!channel?<section className="genvr-library" aria-label="My spaces"><div className="genvr-library-heading"><h3>My spaces <span className="fine-print">{projects.length}</span></h3><input type="search" aria-label="Search spaces" placeholder="Search spaces" value={query} maxLength={200} onChange={event=>setQuery(event.target.value)}/></div>
- {listing==='loading'?<p role="status">Loading your spaces…</p>:listing==='error'?<div role="alert"><p>Your spaces could not be loaded.</p><button type="button" onClick={()=>setRetry(value=>value+1)}>Try again</button></div>:projects.length===0?<p className="empty-note">No spaces yet. Starting a new space…</p>:visible.length===0?<p className="empty-note">No spaces match your search.</p>:<ul className="genvr-world-list">{visible.map(project=><li key={project.id}><button type="button" className="genvr-world-row" onClick={()=>open(project.id)} aria-label={`Open space: ${project.title}`}><span aria-hidden="true">◇</span><strong>{project.title}</strong><span className="fine-print">Open space →</span></button></li>)}</ul>}
- {published.length>0&&<><div className="genvr-library-heading"><h3>Published on Genvr <span className="fine-print">{published.length}</span></h3></div><ul className="genvr-world-list">{published.map(p=><li key={p.serverId}><div className="genvr-world-row"><span aria-hidden="true">◆</span><strong>{p.title}</strong><span className="fine-print">{p.status==='published'?`Published · ${p.access}`:'Private draft'} · {p.link?<a href={p.link} target="_blank" rel="noopener noreferrer">Open place</a>:p.serverId}</span></div></li>)}</ul></>}
- </section>:<>{phase==='loading'&&<p role="status">Opening GenVR Studio…</p>}{phase==='unavailable'&&<p role="alert">GenVR is unavailable in this build. Your saved spaces remain in your workspace.</p>}<iframe ref={frame} title="GenVR Studio" className="genvr-frame" src={`/genvr/studio.html#${channel}`} sandbox="allow-scripts allow-same-origin allow-downloads allow-pointer-lock"/></>}
+ const spaces=projects.filter(p=>!p.lab),lab=projects.find(p=>p.lab),inside=spaces.find(p=>p.id===insideId)??null;
+ async function rename(id:string,title:string){const r=await client.request({method:'GET',path:`${GENVR_PATH}/${id}`} as never);const b=r.body as {project?:Record<string,unknown>;revision?:number};if(r.status!==200||!b.project||typeof b.revision!=='number')throw Error();const w=await client.request({method:'PUT',path:`${GENVR_PATH}/${id}`,body:{project:{...b.project,title},revision:b.revision}} as never);if(w.status!==200)throw Error();setProjects(list=>list.map(p=>p.id===id?{...p,title}:p));}
+ /* GV1b sections: one place's settings are read and saved here; GV1c: the market list. */
+ const store=useMemo<SpaceStore|null>(()=>!insideId?null:{
+  load:async()=>{const r=await client.request({method:'GET',path:`${GENVR_PATH}/${insideId}`} as never);const b=r.body as {project?:Record<string,any>;revision?:number;agents?:{id:string;avatar:number}[]};if(r.status!==200||!b.project||typeof b.revision!=='number')throw Error();return {project:b.project,revision:b.revision,agents:Array.isArray(b.agents)?b.agents:[]};},
+  save:async(project,revision,agents)=>{const w=await client.request({method:'PUT',path:`${GENVR_PATH}/${insideId}`,body:{project,revision,...(agents?{agents}:{})}} as never);if(w.status===409)throw Error('conflict');const next=(w.body as {revision?:number})?.revision;if(w.status!==200||typeof next!=='number')throw Error();revisions.current.set(insideId,next);return next;},
+  roster:async()=>{const r=await client.request({method:'GET',path:GENVR_AGENTS} as never);const rows=(r.body as {agents?:{id:string;name:string;avatar:number|null}[]})?.agents;if(r.status!==200||!Array.isArray(rows))throw Error();return rows;},
+ },[client,insideId]);
+ const loadMarket=useCallback(async()=>{const items:MarketItem[]=[],ids=new Set<string>();let after:string|null=null;for(let page=0;page<3;page++){const r=await client.request({method:'GET',path:'/api/genvr/market'+(after?'?after='+after:'')} as never);if(r.status!==200)throw Error();const b=r.body as {items:MarketItem[];next:string|null};for(const item of b.items)if(!ids.has(item.manifest.id)){ids.add(item.manifest.id);items.push(item);}if(!b.next||b.next===after)break;after=b.next;}return items;},[client]);
+ /* GV1c v2: the Market is the Studio's Items catalog (SDK mountMarket) in its own frame; Add picks a place here. */
+ const marketFrame=useRef<HTMLIFrameElement>(null),[marketChannel]=useState(()=>crypto.randomUUID()),[marketState,setMarketState]=useState('loading'),[adding,setAdding]=useState('');
+ useEffect(()=>{
+  if(!active||channel||genvrPlace!=='market')return;let disposed=false;
+  const post=(value:Record<string,unknown>)=>marketFrame.current?.contentWindow?.postMessage({type:'dpro-genvr-market',channel:marketChannel,...value},window.location.origin);
+  const receive=async(event:MessageEvent)=>{
+   if(disposed||event.source!==marketFrame.current?.contentWindow||event.origin!==window.location.origin||event.data?.type!=='dpro-genvr-market'||event.data.channel!==marketChannel)return;
+   const data=event.data;
+   if(data.operation==='ready'){post({operation:'start'});return;}
+   if(data.operation==='mounted'){setMarketState('ready');return;}
+   if(data.operation==='unavailable'){setMarketState('unavailable');return;}
+   if(data.operation==='add'&&typeof data.itemId==='string'&&/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(data.itemId)){setAdding(data.itemId);return;}
+   if(data.operation==='catalog-list'&&typeof data.id==='string'&&/^\d{1,10}$/.test(data.id)){try{const items=await loadMarket();if(!disposed)post({id:data.id,response:true,ok:true,value:items});}catch{if(!disposed)post({id:data.id,response:true,ok:false});}}
+  };
+  window.addEventListener('message',receive);return()=>{disposed=true;window.removeEventListener('message',receive);};
+ },[active,channel,genvrPlace,marketChannel,loadMarket]);
+ // GV1e: Open in Studio from Girru Chat.
+ useEffect(()=>{if(request&&genvrId(request.placeId)){setInsideId('');setCreating(false);open(request.placeId);}},[request?.n]);
+ /** X and the sidebar always leave: a Studio that is not open yet has nothing to save. */
+ const drop=()=>{const to=leaveTo.current;leaveTo.current=null;setStuck(false);setNotice('');setChannel('');setPhase('idle');setGenvrPlace(p=>to??(p==='lab'?'spaces':p));};
+ const close=()=>{if(phase!=='ready'){drop();return;}setNotice('');setStuck(false);frame.current?.contentWindow?.postMessage({type:'dpro-genvr',channel,operation:'close'},window.location.origin);};
+ const goPlace=(p:GenVRPlace)=>{setInsideId('');setCreating(false);if(channel&&p!=='lab'){leaveTo.current=p;close();return;}setGenvrPlace(p);if(p==='lab')open(lab?.id,undefined,true);};
+ const studioTitle=world?.name??projects.find(p=>p.id===opening.current)?.title??createSpec.current?.title??'Studio';
+ const who=owner&&world?(answerer?<WhoButton team={{id:'',name:agents.find(a=>a.primary)?.name??'Main agent'}} agents={agents} value={answerer.id} label={answerer.name} onChange={id=>void chooseAgent(id)} open={picking} setOpen={next=>{if(next)void loadAgents();setPicking(next);}}/>:<span className="fine-print">No agent yet</span>):null;
+ const nav=<GenVRSidebar place={genvrPlace} onPlace={goPlace} counts={{spaces:spaces.length,published:published.length}} inside={channel?null:inside} section={section} onSection={setSection} onBack={()=>setInsideId('')}/>;
+ const mcpProblem=/could not|managed by/i.test(mcp);
+ return <div className="genvr-page">{sidebarSlot&&active?createPortal(nav,sidebarSlot):null}
+ {channel?<header className="genvr-toolbar genvr-toolbar-slim"><b>{studioTitle}</b></header>:null}
+ {mcpProblem&&<p className="fine-print" role="status">{mcp}</p>}
+ {notice&&<p role="alert" className="genvr-row-line">{notice}{stuck&&channel?<button type="button" className="link-button" onClick={drop}>Close without saving</button>:null}</p>}
+ {!channel?<section className="genvr-library" aria-label="GenVR">
+ {listing==='loading'?<p role="status">Loading your spaces…</p>:listing==='error'?<div role="alert"><p>Your spaces could not be loaded.</p><button type="button" onClick={()=>setRetry(value=>value+1)}>Try again</button></div>
+  :genvrPlace==='published'?<PublishedCards published={published}/>
+  :genvrPlace==='market'?<div className="genvr-market-stage">{marketState==='unavailable'&&<p role="alert">The market could not be opened. Check that GenVR is up to date in the Store.</p>}<iframe key={marketChannel} ref={marketFrame} title="GenVR market" className="genvr-frame" src={`/genvr/market.html#${marketChannel}`} sandbox="allow-scripts allow-same-origin"/>
+   {adding&&<div className="genvr-menu genvr-market-add" role="menu" aria-label="Add to a place">{spaces.length?spaces.map(sp=><button key={sp.id} type="button" role="menuitem" onClick={()=>{const item=adding;setAdding('');open(sp.id,undefined,false,item);}}>{sp.title}</button>):<p className="fine-print">Make a space first, in My spaces.</p>}<button type="button" onClick={()=>setAdding('')}>Cancel</button></div>}</div>
+  :genvrPlace==='lab'?<p role="status">Opening the Motion lab…</p>
+  :inside?<SpaceInside key={inside.id} space={inside} section={section} onOpen={()=>open(inside.id)} onRename={title=>rename(inside.id,title)}>{store&&section!=='basic'?<PlaceSection key={section} section={section} store={store} published={published.some(p=>p.title===inside.title)} onChanged={patch=>setProjects(list=>list.map(p=>p.id===inside.id?{...p,...patch}:p))}/>:null}</SpaceInside>
+  :creating||spaces.length===0?<CreateSpace first={spaces.length===0} onCreate={spec=>{setCreating(false);open(undefined,spec);}}/>
+  :<SpaceCards spaces={spaces} onInside={id=>{setSection('basic');setInsideId(id);}} onOpen={id=>open(id)} onNew={()=>setCreating(true)}/>}
+ </section>:<>{phase==='loading'&&<p role="status">Opening GenVR Studio…</p>}{phase==='slow'&&<p role="status">The Studio is taking long to open. It is still trying; close it at the top to go back.</p>}{phase==='unavailable'&&<p role="alert">GenVR is unavailable in this build. Your saved spaces remain in your workspace.</p>}<div className="genvr-stage">{picking&&who?<div className="genvr-who" role="dialog" aria-label="Who answers here">{who}</div>:null}<iframe key={channel} ref={frame} title="GenVR Studio" className="genvr-frame" src={`/genvr/studio.html#${channel}`} sandbox="allow-scripts allow-same-origin allow-downloads allow-pointer-lock"/>
+ </div>
+</>}
  </div>;
 }

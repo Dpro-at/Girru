@@ -31,6 +31,9 @@
 import { ClaudeClient } from './claude-client.js';
 import { DEFAULT_OLLAMA_MODEL, OLLAMA_URL, ollamaThinkOption } from './ollama.js';
 import { resolveLocalModel } from './local-models.js';
+import { backgroundKeepAlive, backgroundSlot, chatModelInUse } from './local-scheduler.js';
+import { storeP2bEnabled } from '../services/store-p2b.js';
+import { keepAliveValue } from '../memory/context/budget.js';
 import { run, sql } from '../repositories/sql-steps.js';
 import {
   CostBudgetError,
@@ -134,6 +137,18 @@ export async function gatedModelCall<T extends { usage?: Usage | null; content?:
   return { response, used, ticket };
 }
 
+/** Owner-present Claude turns with tools use the same interactive usage ledger as text chat. */
+export async function interactiveClaudeMessage(
+  paid: PaidProviderConfig,
+  messages: Parameters<ClaudeClient['sendMessage']>[0],
+  options: Parameters<ClaudeClient['sendMessage']>[1],
+  purpose = 'interactive_chat',
+): Promise<Awaited<ReturnType<ClaudeClient['sendMessage']>>> {
+  const result = await new ClaudeClient(paid.apiKey, paid.model).sendMessage(messages, options);
+  await recordInteractiveUsage({ provider: paid.provider, model: paid.model, usage: result.usage, outputText: result.content, purpose });
+  return result;
+}
+
 /** Model call for a background (or interactive) purpose; never throws. */
 export async function modelCall(ctx: ModelCallContext, req: ModelCallRequest): Promise<ModelCallResult> {
   const maxOutputTokens = Math.max(1, req.maxOutputTokens ?? 1024);
@@ -183,6 +198,9 @@ export async function modelCall(ctx: ModelCallContext, req: ModelCallRequest): P
     return { ok: false, text: '', provider: 'ollama', model, paid: false, usage: null, costCents: 0, ...(refused ? { refused } : {}), error: 'local model skipped' };
   }
   const chat = !!req.messages?.length;
+  // STORE-MAP-01 P2b (LAT): background local work waits while a local reply runs, one job at a time,
+  // and keeps the chat model warm (P2b off: no wait, no keep_alive sent, as before).
+  const release = await backgroundSlot();
   try {
     const res = await fetch(`${OLLAMA_URL}/api/${chat ? 'chat' : 'generate'}`, {
       method: 'POST',
@@ -195,6 +213,7 @@ export async function modelCall(ctx: ModelCallContext, req: ModelCallRequest): P
         stream: false,
         ...ollamaThinkOption(),
         ...(req.temperature !== undefined ? { options: { temperature: req.temperature } } : {}),
+        ...(storeP2bEnabled() ? { keep_alive: backgroundKeepAlive(model, chatModelInUse() ?? DEFAULT_OLLAMA_MODEL, keepAliveValue()) } : {}),
       }),
       signal: AbortSignal.timeout(req.timeoutMs ?? 120_000),
     });
@@ -208,6 +227,8 @@ export async function modelCall(ctx: ModelCallContext, req: ModelCallRequest): P
     return { ok: true, text: typeof text === 'string' ? text : '', provider: 'ollama', model, paid: false, usage, costCents: 0, ...(refused ? { refused } : {}) };
   } catch (err) {
     return { ok: false, text: '', provider: 'ollama', model, paid: false, usage: null, costCents: 0, ...(refused ? { refused } : {}), error: (err as Error).message };
+  } finally {
+    release();
   }
 }
 

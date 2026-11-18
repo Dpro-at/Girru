@@ -258,8 +258,6 @@ npm run ext:sync
 | الإضافة | النوع | الوصف | الحالة |
 |---------|-------|-------|--------|
 | `waf-security` | tool | WAF Security Scanner - فحص أمان تطبيقات الويب | ✅ **Active** |
-| `public-chat` | app | غرف دردشة عامة مع دعم الـ AI والـ Avatar | ✅ **Active** |
-| `email-client` | app | عميل بريد إلكتروني متكامل (IMAP/SMTP + OAuth) | ✅ **Active** |
 
 ### ⚠️ Extensions Needing Migration (محتاجة تحديث)
 

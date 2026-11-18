@@ -79,7 +79,7 @@ test('connection edits do not enable or discover; tool approval updates are refl
 test('MCP page owns a quiet desktop list and sidebar without nested library tabs',()=>{
  const {McpLibrary}=require('../src/McpLibrary.tsx'),{McpSection}=require('../src/ToolSections.tsx');
  const html=renderToStaticMarkup(React.createElement(McpLibrary,{client:{},active:false}));assert.match(html,/Installed MCP connections/);assert.match(html,/Selected MCP connection/);assert.match(html,/Add a connection/);assert.doesNotMatch(html,/<textarea|role="tablist"|connector-list catalogue-grid/);
- const section=renderToStaticMarkup(React.createElement(McpSection,{client:{},active:false}));for(const label of ['All connections','On','Off','Needs you','Add from','My coding apps','This computer','Search connections'])assert.ok(section.includes(label),label);assert.match(section,/MCP connections places/);assert.doesNotMatch(section,/Publisher sources/);
+ const section=renderToStaticMarkup(React.createElement(McpSection,{client:{},active:false}));for(const label of ['All connections','On','Off','Needs you','Found, not added','Search connections'])assert.ok(section.includes(label),label);assert.match(section,/MCP connections places/);assert.doesNotMatch(section,/Publisher sources/);
 });
 
 

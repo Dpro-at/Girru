@@ -1,3 +1,4 @@
+import {storeHostEnabled} from '../services/store-host-apps.js';
 import { safeConsole } from '../services/safe-error-log.js';
 /**
  * Cron Engine
@@ -63,7 +64,7 @@ export class CronEngine extends EventEmitter implements ICronEngine {
   }
 
   private paperAvailable():boolean{
-    try{return this.#paperLedger!==null&&this.#paperLedger.open&&dbDriver()==='sqlite'&&getDatabase().getDb()===this.#paperLedger&&backgroundEnabled();}catch{return false;}
+    try{return this.#paperLedger!==null&&this.#paperLedger.open&&dbDriver()==='sqlite'&&getDatabase().getDb()===this.#paperLedger&&storeHostEnabled('trading',this.#paperLedger)&&backgroundEnabled();}catch{return false;}
   }
 
   private paperCurrent(jobId:string,registration:PaperRegistration):boolean{

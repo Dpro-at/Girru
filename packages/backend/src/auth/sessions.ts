@@ -88,3 +88,6 @@ export async function revokeSession(userId: string, id: string, now = Date.now()
   if (!/^[a-f0-9]{24}$/.test(id)) return false;
   return (await sql().read(run('UPDATE auth_sessions SET revoked_at=? WHERE id=? AND user_id=? AND revoked_at IS NULL', now, id, userId))).changes === 1;
 }
+
+/** Shared one-way token identity for internal authenticated database checkpoints. */
+export {tokenHash as authSessionTokenHash};

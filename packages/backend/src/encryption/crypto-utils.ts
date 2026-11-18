@@ -111,10 +111,12 @@ export function deriveKey(
 export function encryptAES256GCM(
   plaintext: Buffer | string,
   key: Buffer,
-  keyId: string
+  keyId: string,
+  additionalData?: Buffer
 ): EncryptedData {
   const iv = generateIV('aes-256-gcm');
   const cipher = createCipheriv('aes-256-gcm', key, iv);
+  if (additionalData) cipher.setAAD(additionalData);
 
   const plaintextBuffer = Buffer.isBuffer(plaintext) ? plaintext : Buffer.from(plaintext, 'utf8');
   const ciphertext = Buffer.concat([cipher.update(plaintextBuffer), cipher.final()]);
@@ -136,7 +138,8 @@ export function encryptAES256GCM(
  */
 export function decryptAES256GCM(
   encrypted: EncryptedData,
-  key: Buffer
+  key: Buffer,
+  additionalData?: Buffer
 ): Buffer {
   if (!encrypted.authTag) {
     throw new Error('Missing authentication tag for GCM decryption');
@@ -147,6 +150,7 @@ export function decryptAES256GCM(
   const authTag = Buffer.from(encrypted.authTag, 'base64');
 
   const decipher = createDecipheriv('aes-256-gcm', key, iv);
+  if (additionalData) decipher.setAAD(additionalData);
   decipher.setAuthTag(authTag);
 
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]);

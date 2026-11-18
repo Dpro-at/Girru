@@ -48,10 +48,8 @@ EOF
 |-----------|------|--------|-------------|
 | **Agent Connect** | channel | ✅ Active | Every chat channel (Telegram, Discord, Slack, WhatsApp and the rest of the catalog), set up in Settings › Channels |
 | **Call Center** | integration | ✅ Active | Phone call handling system |
-| **Email Client** | app | ✅ Active | Multi-account email (Gmail, Outlook, IMAP) |
-| **Calendar** 🆕 | app | ✅ Active | Google Calendar + iCal sync, events |
-| **Team** 🆕 | app | ✅ Active | Team collaboration, members, invitations |
-| **Public Chat** 🆕 | app | ✅ Active | Multi-user chat rooms with AI agents |
+
+Email, Calendar, Team and Public Chat were removed from the core. Each will be rebuilt as a Store app.
 
 ## What You Can Build
 

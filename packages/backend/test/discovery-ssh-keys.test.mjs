@@ -1,0 +1,22 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtempSync,mkdirSync,writeFileSync,rmSync,chmodSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+const dir=mkdtempSync(join(tmpdir(),'girru-ssh-metadata-'));
+process.env.HOME=dir;process.env.USERPROFILE=dir;
+const {listSshKeys}=await import('../src/services/ssh-keys.ts');
+const {discoveryFs}=await import('../src/services/discovery-fs.ts');
+test.after(async()=>{await discoveryFs.close();rmSync(dir,{recursive:true,force:true});});
+test('configured custom private filenames remain visible without a public half or reading private contents',async()=>{
+ mkdirSync(join(dir,'.ssh'));
+ writeFileSync(join(dir,'.ssh','config'),'Host trial-host\n  HostName synthetic.example.invalid\n  IdentityFile ~/.ssh/custom-deploy\n');
+ writeFileSync(join(dir,'.ssh','custom-deploy'),'PRIVATE-FIXTURE-MUST-NOT-BE-READ');
+ chmodSync(join(dir,'.ssh','custom-deploy'),0);
+ writeFileSync(join(dir,'.ssh','known_hosts'),'NOT-A-KEY');
+ const keys=await listSshKeys(dir);
+ assert.equal(keys.length,1);
+ assert.equal(keys[0].name,'custom-deploy');assert.equal(keys[0].hasPrivate,true);assert.equal(keys[0].hasPublic,false);assert.equal(keys[0].type,null);
+ assert.deepEqual(keys[0].hosts,[{alias:'trial-host',host:'synthetic.example.invalid'}]);
+ assert.ok(!JSON.stringify(keys).includes('PRIVATE-FIXTURE'));
+});

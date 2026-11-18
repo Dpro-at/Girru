@@ -148,7 +148,10 @@ test('size limits for read and write', async () => {
   const w = await write('z1', 'big.txt', big);
   assert.ok(w.error);
   assert.match(w.content[0].text, /too large/);
-  writeFileSync(join(ws('z1'), 'huge.txt'), Buffer.alloc(sb.MAX_READ_BYTES + 1, 97));
+  // CHAT-LIVE-01: over 1 MiB is read in parts; only over MAX_SCAN_BYTES is refused.
+  writeFileSync(join(ws('z1'), 'big-ok.txt'), Buffer.alloc(sb.MAX_READ_BYTES + 1, 97));
+  assert.equal((await read('z1', 'big-ok.txt')).error, undefined);
+  writeFileSync(join(ws('z1'), 'huge.txt'), Buffer.alloc(sb.MAX_SCAN_BYTES + 1, 97));
   const r = await read('z1', 'huge.txt');
   assert.ok(r.error);
   assert.match(r.content[0].text, /too large/);
@@ -157,7 +160,7 @@ test('size limits for read and write', async () => {
 
 test('directories and missing files give clean errors; odd agent ids get a hashed folder', async () => {
   await write('a1', 'folder/f.txt', 'x');
-  assert.ok((await read('a1', 'folder')).error);
+  assert.match((await read('a1', 'folder')).content[0].text, /^Folder folder \(1 entries\):\nf\.txt/); // CHAT-LIVE-01: a folder lists itself
   assert.match((await read('a1', 'nope.txt')).content[0].text, /not found/i);
   assert.equal(sb.workspaceDirName('../../etc'), sb.workspaceDirName('../../etc'));
   assert.match(sb.workspaceDirName('../../etc'), /^h-[0-9a-f]{32}$/);

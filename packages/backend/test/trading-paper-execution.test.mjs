@@ -1,3 +1,4 @@
+import './fixtures/trading-runtime.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';import Database from 'better-sqlite3';import {mkdtempSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';import {Worker} from 'node:worker_threads';
 import {initializePaperLedger,provisionPaperAccount,reservePaperOrder,cancelPaperReservation,readPaperAccount,stopPaperAccount,revokePaperPolicy} from '../src/services/trading-paper-ledger.ts';
 import {initializePaperExecution,configurePaperExecution,recordPaperExecutionQuote,executePaperBuy} from '../src/services/trading-paper-execution.ts';

@@ -1,4 +1,4 @@
-export type TerminalFrame = { type: 'output'; seq: number; data: string } | { type: 'exit'; exitCode: number };
+export type TerminalFrame = { type: 'output'; seq: number; data: string } | { type: 'exit'; exitCode: number; signal?: number };
 export type TerminalTheme = 'dpro-night' | 'dpro-day' | 'graphite' | 'midnight' | 'ocean' | 'forest' | 'paper' | 'contrast';
 export type TerminalFont = 'system' | 'sf-mono' | 'menlo' | 'monaco' | 'jetbrains' | 'fira' | 'cascadia' | 'courier';
 export type TerminalPrefs = { theme: TerminalTheme; fontFamily: TerminalFont; fontSize: number; lineHeight: number; letterSpacing: number; cursorStyle: 'block' | 'bar' | 'underline'; cursorBlink: boolean; scrollback: number; copyOnSelect: boolean };
@@ -8,7 +8,7 @@ export const TERMINAL_CURSORS: readonly ['block', 'bar', 'underline'];
 export const DEFAULT_TERMINAL_PREFS: Readonly<TerminalPrefs>;
 export function terminalPrefOk(key: string, value: unknown): boolean;
 export function terminalPrefs(x: unknown): TerminalPrefs;
-export type TerminalRoute = { kind: 'info' | 'create' | 'prefs' } | { kind: 'close' | 'input' | 'resize'; id: string } | { kind: 'stream'; id: string; after: number };
+export type TerminalRoute = { kind: 'info' | 'create' | 'prefs' } | { kind: 'close' | 'input' | 'resize' | 'stop'; id: string } | { kind: 'stream'; id: string; after: number };
 export const TERMINAL_INPUT_CHARS: number;
 export const TERMINAL_STREAM_MS: number;
 export function terminalPath(path: string): TerminalRoute | null;

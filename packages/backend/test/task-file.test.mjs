@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url';
 // TASKLOG-01: one task file per project (.girru/tasks.md), read and written by every agent and app.
 //  - the format: a block is read and written back byte for byte; the rest of the file never changes;
 //    a block that breaks the format is reported with its line and left alone;
@@ -15,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-const backendDir = process.cwd();
+const backendDir = fileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-task-file-'));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });
 process.chdir(dir);

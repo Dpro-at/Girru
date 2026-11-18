@@ -19,6 +19,7 @@
  * left as it is. Writing replaces one block and keeps the rest byte for byte.
  * Pure functions, no file access (services/task-file.ts reads and writes).
  */
+import { storeP6Enabled } from './store-p6.js';
 
 export const TASK_HEADER = '# Tasks\n\n<!-- girru:tasks · one file for every agent and app working in this project. Keep this format: one "## T-<number> · <title>" block per task. Finished tasks move to tasks-done.md. -->\n';
 export const DONE_HEADER = '# Finished tasks\n\n<!-- girru:tasks-done · tasks moved here from tasks.md when they were done. Nobody needs to read this file unless asked. -->\n';
@@ -30,12 +31,23 @@ export const MAX_ITEMS = 30;
 export const SHOW_LOG = 5;
 
 export type Part = 'done' | 'left' | 'next' | 'log';
-export interface WorkedOn { app: string; date: string }
+/** P6 (AG5): `agent` = the Girru agent the app worked for ("Codex (Sara) 2026-10-29"). */
+export interface WorkedOn { app: string; date: string; agent?: string }
 export interface TaskBlock {
   no: string; title: string; state: string; department: string; agent: string; priority: string;
   workedOn: WorkedOn[]; done: string[]; left: string[]; next: string[]; log: string[];
 }
-export interface ReadTask { task: TaskBlock; start: number; end: number; line: number; problem: string | null }
+/**
+ * STORE-MAP-01 P6: Girru's hidden line under a task heading,
+ *   <!-- girru:id=<card id> v=<card version> -->
+ * names the board card (T5: a renamed or renumbered task keeps its card) and
+ * the version the block was written from (version stamp). Kept outside
+ * TaskBlock, so the stored copy of a task is the same with or without it.
+ */
+export interface ReadTask { task: TaskBlock; start: number; end: number; line: number; problem: string | null; id?: string | null; v?: number | null; idAt?: { start: number; end: number } | null }
+export interface Stamp { id: string; v: number }
+const HIDDEN = /^<!--\s*girru:id=([A-Za-z0-9_-]{1,64})(?:\s+v=(\d{1,9}))?\s*-->$/;
+export const stampLine = (s: Stamp) => `<!-- girru:id=${s.id} v=${s.v} -->`;
 export interface FileProblem { no: string | null; line: number; message: string }
 export interface ReadFile { tasks: ReadTask[]; problems: FileProblem[] }
 
@@ -47,17 +59,21 @@ const oneLine = (s: string, max: number) => s.replace(/[\u0000-\u001F\u007F]/g, 
 export const emptyTask = (no: string, title: string): TaskBlock => ({ no, title, state: '', department: '', agent: '', priority: '', workedOn: [], done: [], left: [], next: [], log: [] });
 export const taskNumber = (no: string) => Number(no.slice(2));
 
-/** "Claude Code 2026-10-29, Codex 2026-10-29" (a date is optional). */
-export function readWorkedOn(v: string): WorkedOn[] {
+/** "Claude Code 2026-10-29, Codex 2026-10-29" (a date is optional); with P6, "Codex (Sara) 2026-10-29" names the agent too. */
+export function readWorkedOn(v: string, withAgent = storeP6Enabled()): WorkedOn[] {
   const out: WorkedOn[] = [];
   for (const part of v.split(',')) {
     const m = part.trim().match(/^(.*?)(?:\s+(\d{4}-\d{2}-\d{2}))?$/);
-    const app = oneLine(m?.[1] ?? '', 40);
-    if (app && !out.some((w) => w.app.toLowerCase() === app.toLowerCase())) out.push({ app, date: m?.[2] ?? '' });
+    let app = oneLine(m?.[1] ?? '', 40), agent = '';
+    const who = withAgent ? app.match(/^(.*?)\s*\(([^()]{1,60})\)$/) : null;
+    if (who && who[1].trim()) { app = who[1].trim(); agent = oneLine(who[2], 60); }
+    const same = (w: WorkedOn) => w.app.toLowerCase() === app.toLowerCase() && (w.agent ?? '').toLowerCase() === agent.toLowerCase();
+    if (app && !out.some(same)) out.push(agent ? { app, date: m?.[2] ?? '', agent } : { app, date: m?.[2] ?? '' });
     if (out.length >= 10) break;
   }
   return out;
 }
+export const workedOnText = (w: WorkedOn) => `${w.app}${w.agent ? ` (${w.agent})` : ''}${w.date ? ` ${w.date}` : ''}`;
 
 /** Every block in the file, with where it starts and ends (offsets into the text) and what is wrong with it. */
 export function readTasks(text: string): ReadFile {
@@ -83,6 +99,12 @@ export function readTasks(text: string): ReadFile {
     if (!cur) continue; // the file's own text before the first task
     const c: ReadTask = cur;
     if (!l.trim()) continue;
+    const hidden = l.trim().match(HIDDEN);
+    if (hidden) {
+      if (c.idAt) flag(n, 'a task has one hidden Girru id line, not two');
+      else { c.id = hidden[1]; c.v = hidden[2] ? Number(hidden[2]) : null; c.idAt = { start, end: start + raw.length + 1 }; }
+      continue;
+    }
     const sub = l.match(/^###\s+(.+?)\s*$/);
     if (sub) {
       const p = PARTS[sub[1].toLowerCase()];
@@ -107,10 +129,27 @@ export function readTasks(text: string): ReadFile {
   return { tasks, problems };
 }
 
+/**
+ * P6: the file with Girru's hidden line set on every task that has a stamp
+ * (added under the heading, or replaced in place); nothing else changes.
+ */
+export function stampTasks(text: string, stamps: ReadonlyMap<string, Stamp>): string {
+  const tasks = readTasks(text).tasks.filter((t) => stamps.has(t.task.no)).sort((a, b) => b.start - a.start);
+  let out = text;
+  for (const t of tasks) {
+    const line = `${stampLine(stamps.get(t.task.no)!)}\n`;
+    if (t.idAt) { if (out.slice(t.idAt.start, t.idAt.end) !== line) out = out.slice(0, t.idAt.start) + line + out.slice(t.idAt.end); continue; }
+    const eol = out.indexOf('\n', t.start);
+    const at = eol < 0 ? out.length : eol + 1;
+    out = out.slice(0, at) + (eol < 0 ? '\n' : '') + line + out.slice(at);
+  }
+  return out;
+}
+
 /** One block as Girru writes it (sections always present, so every app knows where to write). */
 export function writeTask(t: TaskBlock): string {
   const items = (list: string[]) => list.map((x) => `- ${oneLine(x, MAX_ITEM)}`).filter((x) => x !== '- ').join('\n');
-  const worked = t.workedOn.map((w) => (w.date ? `${w.app} ${w.date}` : w.app)).join(', ');
+  const worked = t.workedOn.map(workedOnText).join(', ');
   return [
     `## ${t.no} · ${oneLine(t.title, MAX_TITLE)}`,
     `- State: ${oneLine(t.state, 40)}`,

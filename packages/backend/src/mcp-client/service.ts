@@ -17,6 +17,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { isExecToolsEnabled, EXEC_TOOLS_ENV_FLAG } from '../tools/exec-policy.js';
+import { isTrustedBundledLaunch } from './bundled-genvr.js';
 import {
   checkCommand, checkSecretMap, checkServerUrl, clampResultBytes, clampTimeout, launchHash, MAX_DESCRIPTION_CHARS,
   McpConfigError, MCP_TRANSPORTS, registryToolName, SERVER_NAME_PATTERN, type McpTransport,
@@ -62,8 +63,9 @@ export class McpPolicyError extends Error {
 
 export interface LaunchSpec { command: string; args: string[]; envNames: string[]; cwd: string }
 
-function execRequired(): void {
-  if (!isExecToolsEnabled()) {
+/** stdio needs AGENT_EXEC_TOOLS; the exact bundled GenVR launch (bundled-genvr.ts) is the one exception. */
+function execRequired(row?: McpServerRow): void {
+  if (!isExecToolsEnabled() && !(row && isTrustedBundledLaunch(row))) {
     throw new McpPolicyError(`stdio MCP servers start host processes; the server operator must set ${EXEC_TOOLS_ENV_FLAG}=true first`, 403, 'exec_tools_disabled');
   }
 }
@@ -206,7 +208,11 @@ export async function updateServer(id: string, input: ServerInput, ownerId: stri
   let env: Record<string, string> | undefined;
   let headers: Record<string, string> | undefined;
   if (row.transport === 'stdio') {
-    if (input.command !== undefined || input.args !== undefined || input.env !== undefined) execRequired();
+    if (input.command !== undefined || input.args !== undefined || input.env !== undefined) {
+      // Judged on the launch as it will be after this change, so only a change TO the exact bundled GenVR launch passes without the switch.
+      const env = input.env && typeof input.env === 'object' && !Array.isArray(input.env) ? Object.keys(input.env) : parseList(row.env_names);
+      execRequired({ ...row, command: typeof input.command === 'string' ? input.command : row.command, args: JSON.stringify(Array.isArray(input.args) ? input.args : args), env_names: JSON.stringify(env) });
+    }
     if (input.url !== undefined || input.headers !== undefined || input.allowRemote !== undefined) throw new McpConfigError('url, headers and allowRemote are for http/sse servers');
     if (input.command !== undefined || input.args !== undefined) {
       ({ command, args } = checkCommand(input.command ?? row.command, input.args ?? args));
@@ -255,7 +261,7 @@ export async function enableServer(id: string, input: { launchHash?: unknown }, 
   if (!row) throw notFound();
   const d = sql().dialect;
   if (row.transport === 'stdio') {
-    execRequired();
+    execRequired(row);
     if (!row.launch_hash || input.launchHash !== row.launch_hash) throw launchApprovalError(row);
     // Conditional on the approved hash: a launch change meanwhile approves nothing.
     await sql().read(run(`UPDATE mcp_servers SET enabled = 1, approved_launch_hash = launch_hash, approved_by = ?, approved_at = ${nowText(d)},
@@ -312,7 +318,7 @@ export interface DiscoveryResult {
 export async function reconnectServer(id:string,actor:string|null=null):Promise<DiscoveryResult>{
  const row=await getServerRow(id);if(!row)throw notFound();
  if(row.enabled!==1)throw new McpPolicyError('enable the MCP server before reconnecting',409,'disabled');
- if(row.transport==='stdio'){execRequired();if(!isLaunchApproved(row))throw launchApprovalError(row);}
+ if(row.transport==='stdio'){execRequired(row);if(!isLaunchApproved(row))throw launchApprovalError(row);}
  await closeConnection(id);
  return refreshServer(id,actor);
 }
@@ -323,7 +329,7 @@ export async function refreshServer(id: string, actor: string | null = null): Pr
   if (!row) throw notFound();
   if (row.enabled !== 1) throw new McpPolicyError('enable the MCP server before discovering its tools', 409, 'disabled');
   if (row.transport === 'stdio') {
-    execRequired();
+    execRequired(row);
     if (!isLaunchApproved(row)) throw launchApprovalError(row);
   }
   let listed;

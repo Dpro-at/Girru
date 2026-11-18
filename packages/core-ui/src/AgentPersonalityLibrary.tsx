@@ -8,6 +8,7 @@ import {PersonalityReview} from './PersonalityReview';
 import {Sheet} from './desktop-ui';
 import {UiIcon} from './ui-icons';
 import {forgetFacts} from './agent-facts';
+import {DocumentEditor} from './DocumentEditor';
 
 type Assignment={id:string;revision:number;linked:boolean;profile:Profile}|null;
 
@@ -19,6 +20,8 @@ type Assignment={id:string;revision:number;linked:boolean;profile:Profile}|null;
 export function AgentPersonalityLibrary({card,personality,onDone}:{card:AgentCardController;personality?:PersonalityController;onDone:PartDone}){
  const s=useSyncExternalStore(card.subscribe,card.getSnapshot,card.getSnapshot);
  const client=card.client as SessionClient,agentId=s.agentId,version=s.persona?.version??0,locked=!!s.persona?.locked;
+ // STORE-MAP-01 P4 (T7c): the personality text is part of the one record (sent only with the switch on).
+ const text=s.persona?.text,[editingText,setEditingText]=useState<string|null>(null);
  const [assignment,setAssignment]=useState<Assignment|undefined>(undefined),[draft,setDraft]=useState<Profile|null>(null),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[choosing,setChoosing]=useState(false),[speaking,setSpeaking]=useState(false);
  const library=useLibraryEntries(client);
  const timer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);const saved=useRef<Profile|null>(null);
@@ -41,6 +44,15 @@ export function AgentPersonalityLibrary({card,personality,onDone}:{card:AgentCar
   catch{setNotice('Could not change the personality. The agent or the library changed; read it again first.');}
   finally{setBusy(false);}
  }
+ /** Saved at once as a new version over the version shown; Undo restores the version before. */
+ async function saveText(next:string){
+  if(next===text)return;const before=version;setBusy(true);setNotice('');
+  try{const r=await client.request({method:'PUT',path:`/api/agents/${agentId}/personality/text`,body:{text:next,expectedVersion:before}} as never);
+   if(r.status!==200){setNotice(r.status===409?'The personality changed while you were writing. The latest is shown; your text was not saved.':'The text was not saved. Try again.');changed();return;}
+   changed();onDone('Personality text saved',()=>void card.rollback(before).then(()=>{forgetFacts(client,agentId);}));}
+  catch{setNotice('The text was not saved. Try again.');}
+  finally{setBusy(false);}
+ }
  async function lock(){const next=!locked;await card.lock(next);if(card.getSnapshot().saved)onDone(next?'Personality locked':'Personality unlocked',()=>void card.lock(!next));}
  const off=locked||busy||s.phase==='saving';
  const name=assignment?.profile.name,from=assignment?library?.find(e=>e.id===assignment.id)?.profile:undefined;
@@ -57,6 +69,9 @@ export function AgentPersonalityLibrary({card,personality,onDone}:{card:AgentCar
    </div>
    {locked&&<p className="ag-muted"><UiIcon name="lock" size={13}/> Locked: nothing changes until you unlock it.</p>}
    {notice&&<p className="ag-alert" role="status">{notice}</p>}
+   {text!==undefined&&<section aria-label="How it talks" className="ag-own"><div className="ag-head-row"><b>How it talks (its text)</b><small className="ag-muted">the same text as Files › Who it is · saving makes a new version</small><button type="button" disabled={busy||s.phase==='saving'} onClick={()=>setEditingText(text)}>Edit…</button></div>
+    {text?<pre className="ag-persona-text" dir="auto">{text}</pre>:<p className="ag-muted">No text yet. It talks from its adjustments only.</p>}</section>}
+   {editingText!==null&&<DocumentEditor title={`${s.agent?.name??'Agent'} · How it talks`} files={[{id:'personality',name:'PERSONALITY.md',content:editingText}]} maxLength={1024*1024} onChange={(_,t)=>setEditingText(t)} onClose={()=>{const t=editingText;setEditingText(null);void saveText(t);}}/>}
    {personality&&<PersonalityReview controller={personality} agentName={s.agent?.name??'This agent'}/>}
    {draft&&assignment&&<section aria-label="Its own adjustments" className="ag-own"><div className="ag-head-row"><b>Its own adjustments</b><small className="ag-muted">only this agent · saved as you go{from?` · the small mark is ${from.name}’s value`:''}</small></div>
     <fieldset disabled={off}><div className="pl-sliders">{characterKeys.map(k=><Slider key={k} k={k} p={draft} mark={from?sliderValue(from,k):undefined} markName={from?.name} onChange={adjust}/>)}</div>

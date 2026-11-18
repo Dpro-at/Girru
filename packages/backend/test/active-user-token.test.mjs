@@ -32,12 +32,10 @@ addUser('a-susp', 'user', 'suspended');
 
 const { generateToken, getUserIdFromRequest, getUserIdFromRequestSafe } = await import(join(backendDir, 'src/auth/jwt.ts'));
 const { default: Fastify } = await import('fastify');
-const { registerCalendarRoutes } = await import(join(backendDir, 'src/api/routes/calendar.ts'));
 const { profileRoutes } = await import(join(backendDir, 'src/api/routes/profile.ts'));
 const { databaseRoutes } = await import(join(backendDir, 'src/api/routes/database.ts'));
 
 const app = Fastify();
-await app.register(registerCalendarRoutes);
 await app.register(profileRoutes);
 await app.register(databaseRoutes);
 await app.ready();
@@ -58,8 +56,8 @@ test('getUserIdFromRequest accepts active users and refuses inactive/suspended o
   assert.equal(getUserIdFromRequestSafe(fakeRequest('a-off')), null);
 });
 
-test('a disabled user is refused by calendar, profile and database routes on their own', async () => {
-  for (const url of ['/api/calendar/events', '/api/profile', '/api/database/stats']) {
+test('a disabled user is refused by profile and database routes on their own', async () => {
+  for (const url of ['/api/profile', '/api/database/stats']) {
     for (const id of ['a-off', 'a-susp']) {
       const res = await app.inject({ method: 'GET', url, headers: headers(id) });
       assert.equal(res.statusCode, 401, `${id} ${url} -> ${res.statusCode}`);

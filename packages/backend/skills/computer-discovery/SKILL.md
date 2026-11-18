@@ -37,6 +37,14 @@ Each part of Girru asks for its own kinds (`kinds`): memory sources use
 `memory`, `note`, `design`, `database`; Skills use `skill`, `tool`; MCP
 connections use `mcp`; Terminal uses `ssh`.
 
+Library folders are never projects: code a package manager downloaded (the Go
+module folder `pkg/mod`, `node_modules`, `vendor`, `Pods`, `site-packages`, …)
+is skipped on its own. Projects that were made from such folders before are
+listed apart under Settings › Memory › Projects › Not projects and their
+memories are not loaded into replies. `workspace_memory` operation
+`not_projects` lists them; only when the owner says so, `mark_project`
+(`kind: "project"`) brings one back, or `kind: "library"` moves one there.
+
 ## How to work
 
 1. `discovery` action `list` (filter by `state: "new"` or `"changed"`, by
@@ -63,8 +71,18 @@ connections use `mcp`; Terminal uses `ssh`.
 - **Learnings**: save what you learn to the right project (`memory_save` or,
   from a coding app, `memory_propose`), one fact at a time, never a secret. A
   lesson about another project belongs to that project, not the one you are in.
+- **Hidden keys**: Girru hides passwords, SSH logins, API keys and tokens it
+  finds in memory; you see `[SECRET:<type>:<id>]` (the owner sees a lock chip).
+  Never ask for the value or try to rebuild it. Keep the reference as it is
+  when you edit a memory. A key the owner moved to Connections can be used
+  through its reference in a tool call, only with the owner's approval.
 - **Handoffs**: before you stop, leave a handoff (done / left / next /
   questions) so the next agent of any brand continues from it.
+- **Where the work stands**: `project_brief` and `latest_handoff` start with
+  Today, This week and This month for the project, made from these handoffs.
+  Read them first and continue from there; key files (CLAUDE.md, AGENTS.md,
+  HANDOFF.md, BACKLOG.md, DECISIONS.md, README.md) are project files you read
+  with your tools, never memories.
 
 ## Rules
 

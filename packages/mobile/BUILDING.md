@@ -13,14 +13,13 @@ check it.
 | Relay (stateless pass-through, stores nothing) | `packages/relay` | Done. 29 tests. Deployed at `wss://relay.girru.net/v1`. Protocol and threat model: `packages/relay/PROTOCOL.md`. |
 | Computer side of the link | `packages/backend/src/phone` | Done. Pairing with a QR code that renews every 2 minutes, 6-digit check code bound to a computer challenge, Allow / Don't allow, forget one / forget all, relay connection, signed phone commands (chats, send + live reply, stop, approvals with full view, tasks, schedules, team). 72 tests. See `packages/backend/src/phone/README.md`. |
 | Pairing screens on the computer | `packages/core-ui/src/Phone*.tsx`, `phone.ts`, `qr-code.ts` | Done. Last setup step "Girru on your phone", the phone button next to your name in the sidebar, Settings › Phone, the Allow dialog, the new-phone notice. Own QR encoder (no library). |
-| iPhone app | `packages/mobile/ios` | Code written, core checks pass (`swift run CoreChecks`: 301). **Never built with Xcode, never run on an iPhone.** |
-| Android app | `packages/mobile/android` | Code written, JUnit tests written. **Never compiled, tests never run** (no Android tools on the computer that wrote it). |
+| iPhone app | `packages/mobile/ios` | Builds for the simulator and the device (build Mac). Pairing over the relay works on the simulator. After pairing: four places (Chat is the computer's chat page through the session; Tasks, Approvals, Team are the app's own screens). Core checks: `swift run CoreChecks` 359. **Not run on a real iPhone yet.** |
+| Android app | `packages/mobile/android` | Pairing over the relay works (build Mac). The session, the four places and the chat page through the session are written; **the newest code is not compiled yet** (no Android tools on the computer that wrote it). |
 
-**The phone apps cannot pair end to end yet.** Their network connector (the
-part that opens the WebSocket to the relay or to the computer on the same
-Wi-Fi and moves envelopes) is still a stub in both apps: pairing logic,
-crypto, lock, storage and screens are written, the wire is not. Building that
-connector is the next task (see "Next tasks").
+Both apps pair through the relay. Only the chat is the computer's own page
+on the phone (`ui.get`, `api.call`, `api.stream`, PROTOCOL.md); every other
+phone screen is the app's own. The "Only on this Wi-Fi" path is not built in
+the apps yet. What to test now: `docs/handoff/NEXT.md`.
 
 ## Decisions already made
 

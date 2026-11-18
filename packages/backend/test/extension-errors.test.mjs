@@ -57,7 +57,7 @@ test('the extension runner adds the sanitizer to every extension route scope', (
 });
 
 test('trading /stream never sends a wildcard CORS origin', () => {
-  const routes = readFileSync(join(backendDir, 'extensions/trading/src/routes.js'), 'utf-8');
+  const routes = readFileSync(join(backendDir, 'test/fixtures/legacy-apps/extensions/trading/src/routes.js'), 'utf-8');
   assert.ok(!/Access-Control-Allow-Origin['"]\s*,\s*['"]\*/.test(routes));
   assert.match(routes, /streamAllowedOrigins\(\)\.includes\(requestOrigin\)/);
 });

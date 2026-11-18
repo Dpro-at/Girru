@@ -1,3 +1,4 @@
+import './fixtures/channel-library.mjs';
 // CHANNELS-01: the agent-connect extension hosts every catalog channel. Telegram and Discord get the
 // library's Node transports, named in a switch; their settings live under channels.<id> of the one
 // 'agent-connect' row, owner-only, with the token never shown. The connection is a fake: no network.
@@ -8,7 +9,7 @@ import Fastify from 'fastify';
 import Database from 'better-sqlite3';
 import { CHANNEL_CATALOG, TelegramTransport, DiscordTransport, PythonTransport } from 'agent-connect-dpro';
 import { isNativeChannel, nativeTransport, registerChannelRoutes, stopChannel } from '../extensions/shared/channel-host.js';
-import { registerAgentConnect } from '../extensions/agent-connect/index.js';
+import { registerAgentConnect } from './fixtures/agent-connect-legacy/index.js';
 
 test('only telegram and discord get a native transport; any other id is refused before the database is touched', async () => {
   assert.deepEqual(['telegram', 'discord', 'slack', 'whatsapp', '__proto__', 'toString', 'constructor'].map(isNativeChannel),
@@ -131,4 +132,9 @@ test('send tools act only for an owner/admin and report no secret on failure', a
     assert.ok(!JSON.stringify(denied).includes('fake-telegram-token'));
     assert.deepEqual(h.tools.discord_send.input_schema.required, ['channelId', 'text']);
   } finally { await h.close(); }
+});
+
+test('core fallback metadata preserves provider requirements with reviewed setup wording',async()=>{
+ const {CHANNEL_CATALOG:metadata}=await import('../extensions/shared/channel-catalog.js');
+ assert.deepEqual(metadata,CHANNEL_CATALOG.map(c=>c.id==='ntfy'?{...c,prerequisites:'pip install httpx'}:c));
 });

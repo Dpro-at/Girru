@@ -55,12 +55,12 @@ function motionCatalog(root) {
   return { entries, problems };
 }
 
-function createStudioHost({ env = process.env, packageRoot, voiceProvider } = {}) {
+function createStudioHost({ env = process.env, packageRoot, voiceProvider, runtimePackage } = {}) {
   const home = os.homedir();
   const state = path.resolve(env.DPRO_GENVR_STATE || path.join(home, '.genvr', 'dpro-studio'));
   const libraryRoot = env.DPRO_GENVR_LIBRARY ? path.resolve(env.DPRO_GENVR_LIBRARY) : null;
   const connectionFile = path.resolve(env.DPRO_GENVR_CONNECTION || path.join(state, 'studio-connection.json'));
-  const vendor = path.join(packageRoot, 'vendor', 'genvr', 'package');
+  const vendor = runtimePackage === undefined ? path.join(packageRoot, 'vendor', 'genvr', 'package') : runtimePackage;
   const indexFile = path.join(state, 'user-library.json');
   const motions = motionCatalog(libraryRoot);
   const verified = new Set();
@@ -81,6 +81,7 @@ function createStudioHost({ env = process.env, packageRoot, voiceProvider } = {}
   }
 
   async function start() {
+    if(!vendor)throw Error('GenVR is not installed');
     const { createLiveStudioBridge } = await import(pathToFileURL(path.join(vendor, 'live-studio-bridge.mjs')).href);
     const { createLocalVoice } = await import(pathToFileURL(path.join(vendor, 'local-voice.mjs')).href);
     const generated = (audio, sessionId, projectId) => { const rows = bridge.list().filter(row => row.projectId === projectId); return bridge.call(audio.control ? 'avatar_speech_control' : 'avatar_speech', audio, sessionId ?? (rows.length === 1 ? rows[0].id : undefined)); };
@@ -92,7 +93,7 @@ function createStudioHost({ env = process.env, packageRoot, voiceProvider } = {}
     });
     bridge = createLiveStudioBridge({ voice });
   }
-  const available = () => fs.existsSync(path.join(vendor, 'live-studio-bridge.mjs'));
+  const available = () => !!vendor && fs.existsSync(path.join(vendor, 'live-studio-bridge.mjs'));
   const ensure = () => (ready ??= start());
 
   /** Tell the host where it listens; writes the live MCP connection file (mode 600). */

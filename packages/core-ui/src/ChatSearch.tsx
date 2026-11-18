@@ -5,8 +5,10 @@ import { snippetParts } from './chat-search';
 
 const KIND_LABEL: Record<SearchHit['kind'], string> = { title: 'Title', user: 'You', assistant: 'Agent' };
 
+/** CHAT-LIVE-01 (LW6): a hit reads as plain text: Markdown marks (** __ ` # >) are dropped, the matched words stay marked. */
+export const plainSnippet = (text: string) => text.replace(/\*\*|__|`+/g, '').replace(/(^|\n)\s{0,3}(?:#{1,6}|>)\s+/g, '$1').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
 export function HitSnippet({ hit }: { hit: SearchHit }) {
-  return <span className="hit-snippet" dir="auto">{snippetParts(hit.snippet, hit.ranges).map((p, i) => p.hit ? <mark key={i}>{p.text}</mark> : <span key={i}>{p.text}</span>)}</span>;
+  return <span className="hit-snippet" dir="auto">{snippetParts(hit.snippet, hit.ranges).map((p, i) => p.hit ? <mark key={i}>{plainSnippet(p.text)}</mark> : <span key={i}>{plainSnippet(p.text)}</span>)}</span>;
 }
 
 /** A conversation's name for a result (title, else its first hit). */
@@ -24,7 +26,7 @@ export function SearchResults({ state, projectName, onOpen }: { state: ChatSearc
       const titleHit = r.hits.find(h => h.kind === 'title');
       return <section key={r.conversationId} className="search-result" aria-label={resultTitle(r)}>
         <button type="button" className="search-result-title" onClick={() => onOpen(r.conversationId, null)} dir="auto">
-          {titleHit ? <HitSnippet hit={titleHit}/> : resultTitle(r)}{project && <small className="search-result-project">{project}</small>}
+          <span className="search-result-name">{titleHit ? <HitSnippet hit={titleHit}/> : resultTitle(r)}</span>{project && <small className="search-result-project" title={project}>{project}</small>}
         </button>
         {r.hits.filter(h => h.kind !== 'title').map(h => <button key={h.messageId!} type="button" className="search-hit" onClick={() => onOpen(r.conversationId, h.messageId)}>
           <small className="search-hit-kind">{KIND_LABEL[h.kind]}</small><HitSnippet hit={h}/>

@@ -12,6 +12,7 @@ import { mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { offeredNames, expectedNumCtx, expectedNumPredict, p2bOn } from './helpers/p2b.mjs';
 
 const backendDir = process.cwd();
 const dir = mkdtempSync(join(tmpdir(), 'ap-chat-board-'));
@@ -162,7 +163,7 @@ test('an agent only suggests a card; the suggestion travels in the run and nothi
   const runId = `run-${randomBytes(6).toString('hex')}`;
   assert.equal((await call('cb-owner', 'POST', `/api/chat/conversations/${c.id}/runs`, { runId, message: 'Plan the website relaunch with the team' })).statusCode, 202);
   await ended(runId);
-  assert.ok(bodies.at(-2).tools.some((t) => t.function?.name === 'board_suggest_card'), 'offered in chat runs without a grant');
+  assert.ok(offeredNames(bodies.at(-2)).includes('board_suggest_card'), 'offered in chat runs without a grant');
   const m = (await call('cb-owner', 'GET', `/api/chat/conversations/${c.id}/messages`)).json().messages.at(-1);
   const callPart = m.parts.find((p) => p.kind === 'tools').calls[0];
   assert.equal(callPart.name, 'board_suggest_card');

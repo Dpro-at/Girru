@@ -1,3 +1,4 @@
+import {assertNoDefaultMemoryAccess,selectedMemoryExecution} from '../encryption/execution-context.js';
 /**
  * Graph recall (CORE-MEM-GRAPH): entities named in the request -> expand up
  * to two links -> the memories attached to those entities, merged with the
@@ -22,6 +23,7 @@ import type { Memory, MemorySearchQuery, MemorySearchResult } from '../types.js'
 import { graphTablesExist } from './store.js';
 import { containsName } from './types.js';
 import { NOT_ARCHIVED_SQL } from '../scopes/store.js';
+import { NOT_REPLACED_SQL } from '../validity.js';
 
 export const GRAPH_WEIGHT = 0.45;
 export const HOP_WEIGHTS = [1, 0.6, 0.35] as const;
@@ -46,7 +48,7 @@ export function scopedMemoryIds(scope: GraphScope, filters: Pick<MemorySearchQue
     params.push(...f.params);
   }
   // MEM-SCALE-01: an archived project is kept but never recalled.
-  where += ` AND ${NOT_ARCHIVED_SQL}`;
+  where += ` AND ${NOT_ARCHIVED_SQL} AND ${NOT_REPLACED_SQL}`;
   if (filters.type) { where += ' AND type = ?'; params.push(filters.type); }
   if (filters.layer) { where += ' AND memory_layer = ?'; params.push(filters.layer); }
   if (filters.minImportanceScore !== undefined) { where += ' AND importance_score >= ?'; params.push(filters.minImportanceScore); }
@@ -58,6 +60,7 @@ const placeholders = (n: number) => Array.from({ length: n }, () => '?').join(',
 
 /** Entities of the user named in a text (by name or alias, whole tokens). */
 export async function entitiesNamedIn(userId: string, text: string): Promise<Array<{ id: string; name: string; kind: string }>> {
+  assertNoDefaultMemoryAccess();
   const tokens = lexicalTokens(text);
   if (tokens.length === 0) return [];
   const rows = await sql().read(all<{ id: string; name: string; kind: string; norm_name: string; aliases: string }>(
@@ -73,6 +76,7 @@ export async function entitiesNamedIn(userId: string, text: string): Promise<Arr
  * memories are in scope (at most `hops` links away).
  */
 export async function expandEntities(scope: GraphScope, seeds: string[], hops = 2): Promise<Map<string, number>> {
+  assertNoDefaultMemoryAccess();
   const weight = new Map<string, number>(seeds.map((id) => [id, HOP_WEIGHTS[0]]));
   let frontier = [...new Set(seeds)].slice(0, MAX_FRONTIER);
   const inScope = scopedMemoryIds(scope);
@@ -101,6 +105,7 @@ export async function expandEntities(scope: GraphScope, seeds: string[], hops = 
 
 /** Memory ids attached to weighted entities, in scope, with their graph score. */
 export async function attachedMemoryScores(scope: GraphScope, weights: Map<string, number>, filters: Parameters<typeof scopedMemoryIds>[1] = {}): Promise<Map<string, number>> {
+  assertNoDefaultMemoryAccess();
   const out = new Map<string, number>();
   const ids = [...weights.keys()];
   if (ids.length === 0) return out;
@@ -119,6 +124,8 @@ export async function attachedMemoryScores(scope: GraphScope, weights: Map<strin
 
 /** Graph hits for a request (no search part). Never throws: a graph problem returns []. */
 export async function graphRecall(scope: GraphScope, query: string, opts: Parameters<typeof scopedMemoryIds>[1] & { limit?: number } = {}): Promise<MemorySearchResult[]> {
+  const selected=selectedMemoryExecution();if(selected){const {limit,...filters}=opts;return selected.graph({userId:scope.userId,drawers:scope.drawers,query,filters,limit});}
+  assertNoDefaultMemoryAccess();
   try {
     if (scope.drawers && scope.drawers.length === 0) return [];
     if (!(await graphTablesExist())) return [];
@@ -155,6 +162,7 @@ export function mergeRecall(search: MemorySearchResult[], graph: MemorySearchRes
 
 /** storage.search results with the graph hits of the same query and scope merged in. */
 export async function withGraphRecall(query: MemorySearchQuery, search: MemorySearchResult[]): Promise<MemorySearchResult[]> {
+  if(!selectedMemoryExecution())assertNoDefaultMemoryAccess();
   const limit = query.limit || 10;
   const graph = await graphRecall({ userId: query.userId, ...(query.drawers ? { drawers: query.drawers } : {}) }, query.query, {
     type: query.type, layer: query.layer, minImportance: query.minImportance, minImportanceScore: query.minImportanceScore, limit,

@@ -9,11 +9,11 @@ import { queryString } from './memory-pages-contract.js';
 import type { ExplorerItem, ExplorerPage, PinnedFact, WeeklySummary } from './memory-pages-contract.js';
 import type { DatabaseLevel, ProjectDatabases, ProjectDesign, ProjectGroup, TrashItem, TrashList } from './memory-desktop-contract.js';
 
-/** A sidebar place: Needs you, All memories, a drawer kind, a project, a group, an agent, Archived or Trash. */
-export type Place = 'needs' | 'all' | 'owner' | 'experience' | 'tasks' | 'people' | 'agents' | 'archived' | 'trash' | `project:${string}` | `group:${string}` | `agent:${string}`;
+/** A sidebar place: Needs you, All memories, a drawer kind, a project, a group, an agent, one person (P9), Archived or Trash. */
+export type Place = 'needs' | 'all' | 'owner' | 'experience' | 'tasks' | 'people' | 'agents' | 'archived' | 'trash' | `project:${string}` | `group:${string}` | `agent:${string}` | `people:${string}`;
 export type ProjectView = 'memories' | 'design' | 'databases' | 'files';
-/** Views that fill the content area from the ⋯ menu. */
-export type Extra = 'map' | 'handoffs' | 'files' | null;
+/** Views that fill the content area from the ⋯ menu (Project files: from the Coding apps group, P6). */
+export type Extra = 'map' | 'handoffs' | 'files' | 'project-files' | null;
 export type Toast = { id: number; text: string; undo: boolean; show?: Place };
 export type Missing = 'missing';
 
@@ -36,7 +36,7 @@ export type DesktopState = Readonly<{
 
 type Undo = { label: string; run: () => Promise<boolean> };
 const placeScope = (p: Place): string | null => p === 'all' ? 'company' : p === 'owner' || p === 'experience' ? p : p === 'tasks' ? 'kind:task' : p === 'people' ? 'kind:people'
-  : p.startsWith('project:') || p.startsWith('agent:') ? p : null;
+  : p.startsWith('project:') || p.startsWith('agent:') || p.startsWith('people:') ? p : null;
 export { placeScope };
 
 /** "flowxtra" → a stable tile colour for a project (or an agent avatar). */
@@ -51,7 +51,7 @@ export class MemoryDesktopController extends Store<DesktopState> {
   #undo: Undo[] = [];
   #toastId = 0;
   #ticket = 0;
-  constructor(client: Requester) {
+  constructor(client: Requester, private readonly onRestore: () => void = () => {}) {
     super({ place: 'all', projectView: 'memories', extra: null, groups: null, trash: null, trashOpen: null, design: null, logoOpen: null, databases: null, databaseOpen: null,
       groupItems: {}, pinned: [], toast: null, undoDepth: 0, busy: false, needsMode: 'one', collapsed: [], details: null }, client);
   }
@@ -124,6 +124,7 @@ export class MemoryDesktopController extends Store<DesktopState> {
         else if (r.status === 404 && codeOf(r) !== 'not_found') { this.say('Restore arrives with the next backend update; the memory stays in its history.'); return false; }
       } catch { /* counted */ }
     }
+    if (ok > 0) this.onRestore();
     if (this.getSnapshot().place === 'trash') void this.loadTrash();
     return ok === ids.length;
   }
@@ -152,6 +153,7 @@ export class MemoryDesktopController extends Store<DesktopState> {
     if (!ok) { this.say('It could not be restored.'); return false; }
     this.say(item.kind === 'project' ? 'The project is back with all its memories.' : `Restored to ${drawerName(item.drawer)}.`);
     this.publish({ trashOpen: null });
+    this.onRestore();
     await this.loadTrash();
     return true;
   }

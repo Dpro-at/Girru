@@ -13,6 +13,8 @@ public enum BridgeRequest: Equatable, Sendable {
     case scanQR
     /// { type: "push.permission", request?: Bool } → { status: String }
     case pushPermission(request: Bool)
+    /// { type: "settings.open" } → { ok: true }: the chat drawer's gear opens the app's Settings.
+    case openSettings
 }
 
 public enum BridgeError: Error, Equatable {
@@ -52,6 +54,9 @@ public enum BridgeMessageParser {
         case "qr.scan":
             try onlyKeys([])
             return .scanQR
+        case "settings.open":
+            try onlyKeys([])
+            return .openSettings
         case "push.permission":
             try onlyKeys(["request"])
             guard let raw = dict["request"] else { return .pushPermission(request: false) }

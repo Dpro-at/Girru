@@ -35,7 +35,7 @@
 
 import { createHash } from 'crypto';
 import { all, run, sql, type Step } from '../repositories/sql-steps.js';
-import { getMemoryStorage, TopicKeyTakenError } from './storage.js';
+import { getMemoryStorage, NOT_AGENT_NOTES_SQL, TopicKeyTakenError } from './storage.js';
 import { getEmbeddingService } from './embedding.js';
 import {
   defaultDrawerForType,
@@ -117,7 +117,7 @@ async function memoriesOf(userId: string, drawers: readonly DrawerRef[] | null |
 function* rawDrawersStep(userId: string, drawers: readonly DrawerRef[] | null | undefined): Step<RawRow[]> {
   const filter = drawers ? drawerSqlFilter([...drawers]) : { sql: '1 = 1', params: [] as string[] };
   return yield* all<RawRow>(
-    `SELECT id, type, drawer_kind, drawer_key, topic_key FROM memories WHERE user_id = ? AND ${filter.sql} ORDER BY created_at ASC, id ASC`,
+    `SELECT id, type, drawer_kind, drawer_key, topic_key FROM memories WHERE user_id = ? AND ${filter.sql} AND ${NOT_AGENT_NOTES_SQL} ORDER BY created_at ASC, id ASC`,
     userId, ...filter.params,
   );
 }
@@ -128,7 +128,7 @@ function* orphanVersionsStep(userId: string, drawers: readonly DrawerRef[] | nul
     SELECT v.memory_id, v.drawer_kind, v.drawer_key, v.change,
            (SELECT COUNT(*) FROM memory_versions c WHERE c.memory_id = v.memory_id AND c.user_id = v.user_id) AS n
       FROM memory_versions v
-     WHERE v.user_id = ?
+     WHERE v.user_id = ? AND COALESCE(v.drawer_kind, '') <> 'agent'
        AND v.version = (SELECT MAX(w.version) FROM memory_versions w WHERE w.memory_id = v.memory_id AND w.user_id = v.user_id)
        AND NOT EXISTS (SELECT 1 FROM memories m WHERE m.id = v.memory_id)
      ORDER BY v.memory_id
@@ -189,7 +189,7 @@ export async function checkMemory(userId: string, scope: DoctorScope = {}): Prom
 
   // Stored size vs vector length (a vector written by hand or cut off).
   const dims = await sql().read(all<{ id: string; embedding_dims: number | null }>(
-    'SELECT id, embedding_dims FROM memories WHERE user_id = ? AND embedding IS NOT NULL', userId));
+    `SELECT id, embedding_dims FROM memories WHERE user_id = ? AND embedding IS NOT NULL AND ${NOT_AGENT_NOTES_SQL}`, userId));
   const dimsById = new Map(dims.map((r) => [r.id, r.embedding_dims]));
   for (const m of memories) {
     const stored = dimsById.get(m.id);

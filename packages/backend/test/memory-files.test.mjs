@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // CORE-04: DB-canonical memory files; edits come back as reviewed proposals.
 // Run: node --import tsx --test test/memory-files.test.mjs
 // Throwaway DB + cwd, random test-only secrets, no network (local word-count
@@ -10,12 +11,13 @@ import { join, resolve, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-const backendDir = process.cwd();
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-memfiles-'));
 mkdirSync(join(dir, '.data'), { recursive: true });
 process.chdir(dir);
 process.env.HOME = dir;
 process.env.DATABASE_PATH = join(dir, '.data', 'agent-player.db');
+process.env.AGENT_PLAYER_DATA_DIR = join(dir, '.data');
 process.env.JWT_SECRET = randomBytes(64).toString('hex'); // throwaway, test only
 process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway, test only
 

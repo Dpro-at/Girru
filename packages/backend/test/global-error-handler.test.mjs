@@ -7,7 +7,7 @@
 // - Fastify schema-validation 400s, typed 4xx errors and rate-limit 429s are
 //   byte-identical to Fastify's default reply (checked against an app without
 //   the handler).
-// - A sample route from each of the 18 route files that used to echo
+// - A sample route from each of the 11 route files (the 7 email files were removed) that used to echo
 //   error.message in 5xx bodies, stubbed to throw a secret, answers the
 //   generic 500 and logs no secret.
 // Run: node --import tsx --test test/global-error-handler.test.mjs
@@ -100,15 +100,13 @@ await real.register(async (child) => {
 }, { prefix: '/api/ge-real' });
 await real.ready();
 
-// The sample app: one route plugin from each of the 18 files.
+// The sample app: one route plugin from each of the 11 files.
 const sample = Fastify();
 registerGlobalErrorHandler(sample);
 registerAuthGate(sample);
 const plugins = [
-  ['email-accounts', 'default'], ['evaluation', 'default'], ['agent-files', 'agentFilesRoutes'],
-  ['email-messages', 'default'], ['email-drafts', 'default'], ['email-attachments', 'default'],
-  ['email-folders', 'default'], ['setup', 'default'], ['email-compose', 'default'],
-  ['claude-local', 'claudeLocalRoutes'], ['email-search', 'default'], ['gateway', 'gatewayRoutes'],
+  ['evaluation', 'default'], ['agent-files', 'agentFilesRoutes'], ['setup', 'default'],
+  ['claude-local', 'claudeLocalRoutes'], ['gateway', 'gatewayRoutes'],
   ['onboarding', 'onboardingRoutes'], ['world-builder', 'worldBuilderRoutes'], ['ai-tools', 'aiToolsRoutes'],
   ['memory-quality', 'default'], ['memory-sharing', 'default'], ['world-generator', 'worldGeneratorRoutes'],
 ];
@@ -231,7 +229,7 @@ test('rate-limit 429 is unchanged', async () => {
   assert.ok(Number(a.headers['retry-after']) > 0);
 });
 
-// ── One route from each of the 18 files, stubbed to throw the secret ──────
+// ── One route from each of the 11 files, stubbed to throw the secret ──────
 
 /** Statements whose SQL matches `re` throw the secret error. */
 function failSql(re) {
@@ -268,22 +266,15 @@ mkdirSync(join(dir, '.claude', 'projects', 'proj'), { recursive: true });
 writeFileSync(join(dir, '.claude', 'projects', 'proj', 'sess.jsonl'), `${JSON.stringify({ message: { role: 'user', content: 'hi' } })}\n`);
 
 const sampleCases = [
-  ['email-accounts', 'GET', '/api/email/accounts', undefined, () => failSql(/email_accounts/), '[EmailAccounts] GET /api/email/accounts'],
   ['evaluation', 'GET', '/api/evaluation/overview', undefined, () => failSql(/agents_config/), '[Evaluation] GET /api/evaluation/overview'],
   ['agent-files', 'GET', '/api/agents/ge-agent/personality', undefined, () => {
     const r1 = patch(fsp, 'readFile', async () => { throw secretError('Error', 'EACCES'); }, true);
     const r2 = patch(fsp, 'mkdir', async () => { throw secretError('Error', 'EACCES'); }, true);
     return () => { r1(); r2(); };
   }, '[AgentFiles] GET /api/agents/:id/personality'],
-  ['email-messages', 'GET', '/api/email/accounts/acc-1/emails', undefined, () => failSql(NOT_USERS), '[EmailMessages] GET /api/email/accounts/:accountId/emails'],
-  ['email-drafts', 'GET', '/api/email/accounts/acc-1/drafts', undefined, () => failSql(NOT_USERS), '[EmailDrafts] GET /api/email/accounts/:accountId/drafts'],
-  ['email-attachments', 'GET', '/api/email/emails/em-1/attachments', undefined, () => failSql(NOT_USERS), '[EmailAttachments] GET /api/email/emails/:emailId/attachments'],
-  ['email-folders', 'GET', '/api/email/accounts/acc-1/folders', undefined, () => failSql(NOT_USERS), '[EmailFolders] GET /api/email/accounts/:accountId/folders'],
   // Public setup route: every statement fails (owner check included, so setup is not locked).
   ['setup', 'POST', '/api/setup/database', {}, () => failSql(/[\s\S]/), '[Setup] POST /api/setup/database'],
-  ['email-compose', 'POST', '/api/email/accounts/acc-1/reply/em-1', { body_text: 'x' }, () => failSql(NOT_USERS), '[EmailCompose] POST /api/email/accounts/:accountId/reply/:emailId'],
   ['claude-local', 'POST', '/api/claude-local/import/proj/sess', {}, () => failSql(/chat_sessions|chat_messages/), '[ClaudeLocal] POST /api/claude-local/import/:slug/:id'],
-  ['email-search', 'GET', '/api/email/accounts/acc-1/search/stats', undefined, () => failSql(NOT_USERS), '[EmailSearch] GET /api/email/accounts/:accountId/search/stats'],
   ['gateway', 'GET', '/api/gateway/sessions/ge-owner', undefined, () => patch(gw.UnifiedGateway.prototype, 'getSession', async () => { throw secretError(); }), '[Gateway] GET /api/gateway/sessions/:userId'],
   ['onboarding', 'POST', '/api/onboarding/start', {}, () => patch(OnboardingWizard.prototype, 'start', () => { throw secretError(); }), '[Onboarding] POST /api/onboarding/start'],
   ['world-builder', 'POST', '/api/world-builder', { name: 'W', objects: [] }, () => failSql(/storage_files|user_worlds/), '[WorldBuilder] POST /api/world-builder'],
@@ -296,8 +287,8 @@ const sampleCases = [
   ['world-generator', 'POST', '/api/world-generator/ai', { prompt: 'p', agent_id: 'a' }, () => failSql(/SELECT model FROM agents_config\b/), '[WorldGenerator] POST /api/world-generator/ai'],
 ];
 
-test('the sample covers all 18 route files', () => {
-  assert.equal(new Set(sampleCases.map((c) => c[0])).size, 18);
+test('the sample covers all 11 route files', () => {
+  assert.equal(new Set(sampleCases.map((c) => c[0])).size, 11);
 });
 
 for (const [file, method, url, payload, stub, route] of sampleCases) {

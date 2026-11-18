@@ -16,6 +16,8 @@
 import { randomUUID } from 'node:crypto';
 import { all, one, run, sql, type Step } from '../../repositories/sql-steps.js';
 import { isValidDrawerKey, type DrawerRef } from '../drawers.js';
+import { departmentTable, storeP3Enabled } from '../../services/store-p3.js';
+import { chatProjectKeyColumn, projectKeyOf } from '../project-keys.js';
 
 export const GENERAL_DEPARTMENT = 'general';
 export const GENERAL_NAME = 'General';
@@ -36,12 +38,18 @@ export interface ProjectScope {
   archived: boolean;
   archivedAt: string | null;
   mergedInto: string | null;
-  /** chat_projects.id of the owner's chat project with this slug, else null. */
+  /** chat_projects.id of the owner's chat project with this key (its slug; its id while P3 is on), else null. */
   chatProjectId: string | null;
   /** MEM-TRASH-01: when the project was moved to the Trash, else null. */
   trashedAt: string | null;
   /** MEM-UX-02: the group of projects it belongs to, else null. */
   groupId: string | null;
+  /** MEM-READ-01 MR3: found in downloaded code (Go module folder, node_modules…); listed under "Not projects". */
+  notProject: boolean;
+  /** Why it is not a project ("Go library"), when notProject. */
+  notProjectReason: string | null;
+  /** Made from memory only (no chat project the owner created); under P3 such keys get a chat project row too. */
+  memoryOnly: boolean;
 }
 
 /**
@@ -50,7 +58,15 @@ export interface ProjectScope {
  */
 export const NOT_ARCHIVED_SQL = `NOT EXISTS (SELECT 1 FROM memory_project_scopes ps
   WHERE ps.owner_id = memories.user_id AND memories.drawer_kind = 'project'
-    AND ps.slug = memories.drawer_key AND ps.archived_at IS NOT NULL)`;
+    AND ps.slug = memories.drawer_key AND ps.archived_at IS NOT NULL)
+  AND NOT EXISTS (SELECT 1 FROM memory_project_kinds pk
+  WHERE pk.owner_id = memories.user_id AND memories.drawer_kind = 'project'
+    AND pk.slug = memories.drawer_key AND pk.kind = 'library')`;
+
+/** SQL condition (on `memories`): not in a project marked as a library folder (MEM-READ-01 MR3). */
+export const NOT_LIBRARY_SQL = `NOT EXISTS (SELECT 1 FROM memory_project_kinds pk
+  WHERE pk.owner_id = memories.user_id AND memories.drawer_kind = 'project'
+    AND pk.slug = memories.drawer_key AND pk.kind = 'library')`;
 
 export const normName = (name: string): string => name.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
 
@@ -71,14 +87,14 @@ export function assertProjectSlug(slug: unknown): asserts slug is string {
 // ---------------------------------------------------------------------------
 
 export function* listDepartmentsStep(ownerId: string): Step<Department[]> {
-  const rows = yield* all<{ id: string; name: string }>('SELECT id, name FROM memory_departments WHERE owner_id = ? ORDER BY norm_name, id', ownerId);
+  const rows = yield* all<{ id: string; name: string }>(`SELECT id, name FROM ${departmentTable()} WHERE owner_id = ? ORDER BY norm_name, id`, ownerId);
   return [{ id: GENERAL_DEPARTMENT, name: GENERAL_NAME, isDefault: true }, ...rows.map((r) => ({ id: r.id, name: r.name, isDefault: false }))];
 }
 
 export function* departmentStep(ownerId: string, id: string): Step<Department | null> {
   if (id === GENERAL_DEPARTMENT) return { id, name: GENERAL_NAME, isDefault: true };
   if (typeof id !== 'string' || !DEPARTMENT_ID.test(id)) return null;
-  const r = yield* one<{ id: string; name: string }>('SELECT id, name FROM memory_departments WHERE owner_id = ? AND id = ?', ownerId, id);
+  const r = yield* one<{ id: string; name: string }>(`SELECT id, name FROM ${departmentTable()} WHERE owner_id = ? AND id = ?`, ownerId, id);
   return r ? { id: r.id, name: r.name, isDefault: false } : null;
 }
 
@@ -90,13 +106,15 @@ export async function createDepartment(ownerId: string, nameInput: unknown, by: 
   const name = cleanName(nameInput, 'department');
   return sql().tx(function* () {
     if (normName(name) === normName(GENERAL_NAME)) throw new ScopeInputError('That department already exists', 409, 'name_taken');
-    if (yield* one('SELECT 1 AS x FROM memory_departments WHERE owner_id = ? AND norm_name = ?', ownerId, normName(name))) {
+    if (yield* one(`SELECT 1 AS x FROM ${departmentTable()} WHERE owner_id = ? AND norm_name = ?`, ownerId, normName(name))) {
       throw new ScopeInputError('That department already exists', 409, 'name_taken');
     }
-    const n = (yield* one<{ n: number }>('SELECT COUNT(*) AS n FROM memory_departments WHERE owner_id = ?', ownerId))?.n ?? 0;
+    const n = (yield* one<{ n: number }>(`SELECT COUNT(*) AS n FROM ${departmentTable()} WHERE owner_id = ?`, ownerId))?.n ?? 0;
     if (Number(n) >= MAX_DEPARTMENTS) throw new ScopeInputError('Too many departments', 409, 'too_many');
     const id = `dept-${randomUUID().slice(0, 12)}`;
-    yield* run('INSERT INTO memory_departments (id, owner_id, name, norm_name, created_by) VALUES (?, ?, ?, ?, ?)', id, ownerId, name, normName(name), by);
+    yield* run(`INSERT INTO ${departmentTable()} (id, owner_id, name, norm_name, created_by) VALUES (?, ?, ?, ?, ?)`, id, ownerId, name, normName(name), by);
+    // P3: the old table mirrors the one list, so the switch can go off again.
+    if (storeP3Enabled()) yield* run('INSERT INTO memory_departments (id, owner_id, name, norm_name, created_by) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING', id, ownerId, name, normName(name), by);
     return { id, name, isDefault: false };
   }, { immediate: true });
 }
@@ -104,6 +122,13 @@ export async function createDepartment(ownerId: string, nameInput: unknown, by: 
 export async function renameDepartment(ownerId: string, id: string, nameInput: unknown): Promise<Department> {
   if (id === GENERAL_DEPARTMENT) throw new ScopeInputError('The General department cannot be renamed');
   const name = cleanName(nameInput, 'department');
+  if (normName(name) === normName(GENERAL_NAME)) throw new ScopeInputError('That department already exists', 409, 'name_taken');
+  if (storeP3Enabled()) {
+    // P3: the one list; agents, boards and rules follow the new name too.
+    const { renameDepartmentEverywhere } = await import('../../services/departments.js');
+    const d = await renameDepartmentEverywhere(ownerId, id, name);
+    return { id: d.id, name: d.name, isDefault: false };
+  }
   return sql().tx(function* () {
     const d = yield* departmentStep(ownerId, id);
     if (!d) throw new ScopeInputError('Department not found', 404, 'not_found');
@@ -130,8 +155,10 @@ export function* listProjectsStep(ownerId: string): Step<ProjectScope[]> {
   const drawers = yield* all<{ key: string }>("SELECT DISTINCT drawer_key AS key FROM memories WHERE user_id = ? AND drawer_kind = 'project'", ownerId);
   const rows = yield* all<ScopeRow>('SELECT slug, name, department_id, pinned, archived_at, merged_into, trashed_at FROM memory_project_scopes WHERE owner_id = ?', ownerId);
   const groups = new Map((yield* all<{ slug: string; group_id: string }>('SELECT slug, group_id FROM memory_project_group_members WHERE owner_id = ?', ownerId)).map((g) => [g.slug, g.group_id]));
+  const libraries = new Map((yield* all<{ slug: string; reason: string }>("SELECT slug, reason FROM memory_project_kinds WHERE owner_id = ? AND kind = 'library'", ownerId)).map((k) => [k.slug, k.reason]));
+  const memoryOnly = new Set((yield* all<{ id: string }>("SELECT project_id AS id FROM memory_project_keys WHERE owner_id = ? AND origin = 'memory_only'", ownerId)).map((k) => k.id));
   const bySlug = new Map<string, ProjectScope>();
-  const base = (slug: string): ProjectScope => ({ slug, name: slug, departmentId: GENERAL_DEPARTMENT, pinned: false, archived: false, archivedAt: null, mergedInto: null, chatProjectId: null, trashedAt: null, groupId: groups.get(slug) ?? null });
+  const base = (slug: string): ProjectScope => ({ slug, name: slug, departmentId: GENERAL_DEPARTMENT, pinned: false, archived: false, archivedAt: null, mergedInto: null, chatProjectId: null, trashedAt: null, groupId: groups.get(slug) ?? null, notProject: libraries.has(slug), notProjectReason: libraries.get(slug) || (libraries.has(slug) ? 'Downloaded code' : null), memoryOnly: memoryOnly.has(slug) });
   for (const d of drawers) if (d.key && isValidDrawerKey('project', d.key)) bySlug.set(d.key, base(d.key));
   for (const r of rows) {
     const p = bySlug.get(r.slug) ?? base(r.slug);
@@ -145,10 +172,11 @@ export function* listProjectsStep(ownerId: string): Step<ProjectScope[]> {
     bySlug.set(r.slug, p);
   }
   for (const c of chats) {
-    const p = bySlug.get(c.slug) ?? base(c.slug);
+    const key = projectKeyOf(c); // P3: the id
+    const p = bySlug.get(key) ?? base(key);
     p.chatProjectId = c.id;
     p.name = c.name || p.name;
-    bySlug.set(c.slug, p);
+    bySlug.set(key, p);
   }
   return [...bySlug.values()].sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.name.localeCompare(b.name) || a.slug.localeCompare(b.slug));
 }
@@ -160,10 +188,12 @@ export function listProjects(ownerId: string): Promise<ProjectScope[]> {
 /** One project of the owner, or null when no chat project, memory or scope row knows it. */
 export function* projectStep(ownerId: string, slug: string): Step<ProjectScope | null> {
   if (!isValidDrawerKey('project', slug)) return null;
-  const chat = yield* one<{ id: string; name: string }>('SELECT id, name FROM chat_projects WHERE user_id = ? AND slug = ?', ownerId, slug);
+  const chat = yield* one<{ id: string; name: string }>(`SELECT id, name FROM chat_projects WHERE user_id = ? AND ${chatProjectKeyColumn()} = ?`, ownerId, slug);
   const row = yield* one<ScopeRow>('SELECT slug, name, department_id, pinned, archived_at, merged_into, trashed_at FROM memory_project_scopes WHERE owner_id = ? AND slug = ?', ownerId, slug);
   const group = yield* one<{ group_id: string }>('SELECT group_id FROM memory_project_group_members WHERE owner_id = ? AND slug = ?', ownerId, slug);
   const has = yield* one("SELECT 1 AS x FROM memories WHERE user_id = ? AND drawer_kind = 'project' AND drawer_key = ? LIMIT 1", ownerId, slug);
+  const library = yield* one<{ reason: string }>("SELECT reason FROM memory_project_kinds WHERE owner_id = ? AND slug = ? AND kind = 'library'", ownerId, slug);
+  const memoryOnly = yield* one("SELECT 1 AS x FROM memory_project_keys WHERE owner_id = ? AND project_id = ? AND origin = 'memory_only'", ownerId, slug);
   if (!chat && !row && !has) return null;
   return {
     slug,
@@ -176,6 +206,9 @@ export function* projectStep(ownerId: string, slug: string): Step<ProjectScope |
     chatProjectId: chat?.id ?? null,
     trashedAt: row?.trashed_at ?? null,
     groupId: group?.group_id ?? null,
+    notProject: !!library,
+    notProjectReason: library ? library.reason || 'Downloaded code' : null,
+    memoryOnly: !!memoryOnly,
   };
 }
 
@@ -197,7 +230,7 @@ export function* upsertProjectRowStep(ownerId: string, slug: string, set: Partia
 // ---------------------------------------------------------------------------
 
 export async function archivedProjects(ownerId: string): Promise<Set<string>> {
-  const rows = await sql().read(all<{ slug: string }>('SELECT slug FROM memory_project_scopes WHERE owner_id = ? AND archived_at IS NOT NULL', ownerId));
+  const rows = await sql().read(all<{ slug: string }>("SELECT slug FROM memory_project_scopes WHERE owner_id = ? AND archived_at IS NOT NULL UNION SELECT slug FROM memory_project_kinds WHERE owner_id = ? AND kind = 'library'", ownerId, ownerId));
   return new Set(rows.map((r) => r.slug));
 }
 

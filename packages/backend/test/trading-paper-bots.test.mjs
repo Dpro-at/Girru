@@ -1,3 +1,4 @@
+import './fixtures/trading-runtime.mjs';
 import {fileURLToPath} from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';

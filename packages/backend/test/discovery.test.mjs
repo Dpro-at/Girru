@@ -371,3 +371,13 @@ test('automatic project roots stay visible and reveal project MCP while honoring
   await D.setRootWatch('dc-auto',note.rootId,true);await D.view('dc-auto',{home,rescan:true});
   await D.ignore('dc-auto',note.id,true);assert.equal(await D.automaticNoteSource('dc-auto',id,home),false);
 });
+
+test('onboarding inventory finds nested plugin and built-in skills without importing them', async () => {
+  const plugin = join(home, '.codex', 'plugins', 'cache', 'fixture-publisher', 'fixture-plugin', '1.0.0', 'skills', 'nested-skill');
+  w(join(plugin, 'SKILL.md'), '---\nname: plugin-inventory-trial\ndescription: A synthetic plugin skill\n---\n\nReview trial reports.\n');
+  const builtin = join(home, '.codex', 'skills', '.system', 'fixture-router');
+  w(join(builtin, 'SKILL.md'), '---\nname: builtin-inventory-trial\ndescription: A synthetic built-in skill\n---\n\nReview only.\n');
+  const inventory = await D.discoveryInventory(home, []);
+  assert.ok(inventory.samples.some(item => item.kind === 'skill' && item.name === 'plugin-inventory-trial'), 'plugin skills must not be silently omitted from onboarding');
+  assert.ok(inventory.samples.some(item => item.kind === 'skill' && item.name === 'builtin-inventory-trial'), 'built-in skills match the library scanner');
+});

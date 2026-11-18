@@ -1,15 +1,5 @@
-/**
- * Claude Local Integration Routes
- *
- * Reads from the user's ~/.claude/ directory to expose:
- *   - Usage statistics (stats-cache.json)
- *   - Project memory (projects/.../memory/MEMORY.md)
- *   - Session history (.jsonl files)
- *   - Saved plans (plans/*.md)
- *
- * Auto-detects the ~/.claude path using os.homedir() — no hardcoding.
- */
-
+import {readRegularFile} from '../../services/read-regular-file.js';
+import {assertNoProtectedDatabaseAlias} from '../../memory/encryption/protected-filesystem.js';
 import type { FastifyInstance } from 'fastify';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -20,62 +10,8 @@ import { orderedId } from '../../repositories/ordered-id.js';
 import { run, sql } from '../../repositories/sql-steps.js';
 import { sendInternalError } from '../error-handler.js';
 import { safeErrorFields } from '../../services/safe-error-log.js';
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function getClaudeDir(): string {
-  return path.join(os.homedir(), '.claude');
-}
-
-async function claudeDirExists(): Promise<boolean> {
-  try {
-    await fs.access(getClaudeDir());
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Convert an absolute filesystem path to Claude Code's project slug format.
- * Formula: C:\foo\bar → c--foo-bar (drive letter lowercased, colon→dash, slashes→dash)
- */
-function cwdToSlug(cwd: string): string {
-  return cwd
-    .replace(':', '-')
-    .replace(/[\\/]/g, '-')
-    .replace(/^./, (c) => c.toLowerCase());
-}
-
-/**
- * Find the best-matching project memory file for a given cwd.
- * Scans ~/.claude/projects/ and picks the slug that is the longest prefix of cwdSlug.
- */
-async function findMemoryForCwd(cwd: string): Promise<string | null> {
-  const projectsDir = path.join(getClaudeDir(), 'projects');
-  const cwdSlug = cwdToSlug(cwd);
-
-  let projects: string[] = [];
-  try {
-    projects = await fs.readdir(projectsDir);
-  } catch {
-    return null;
-  }
-
-  let bestSlug = '';
-  for (const slug of projects) {
-    if (cwdSlug.startsWith(slug) && slug.length > bestSlug.length) {
-      bestSlug = slug;
-    }
-  }
-
-  if (!bestSlug) return null;
-
-  const memPath = path.join(projectsDir, bestSlug, 'memory', 'MEMORY.md');
-  return fs.readFile(memPath, 'utf-8').catch(() => null);
-}
-
-// ─── Routes ───────────────────────────────────────────────────────────────────
+import { getClaudeDir, claudeDirExists, cwdToSlug, findMemoryForCwd, loadClaudeProjectMemory } from '../../agent/context/project-memory.js';
+export * from '../../agent/context/project-memory.js';
 
 export async function claudeLocalRoutes(fastify: FastifyInstance): Promise<void> {
 
@@ -94,7 +30,8 @@ export async function claudeLocalRoutes(fastify: FastifyInstance): Promise<void>
 
     try {
       const statsPath = path.join(getClaudeDir(), 'stats-cache.json');
-      const raw = await fs.readFile(statsPath, 'utf-8');
+      assertNoProtectedDatabaseAlias(statsPath);
+      const raw = (await readRegularFile(statsPath,8*1024*1024)).data.toString('utf8');
       const stats = JSON.parse(raw);
       return reply.send({ available: true, stats });
     } catch (err: any) {
@@ -218,7 +155,8 @@ export async function claudeLocalRoutes(fastify: FastifyInstance): Promise<void>
 
       const filePath = path.join(getClaudeDir(), 'projects', slug, `${id}.jsonl`);
       try {
-        const raw = await fs.readFile(filePath, 'utf-8');
+        assertNoProtectedDatabaseAlias(filePath);
+      const raw = (await readRegularFile(filePath,32*1024*1024)).data.toString('utf8');
         // Parse each line as JSON
         const messages = raw
           .split('\n')
@@ -281,7 +219,8 @@ export async function claudeLocalRoutes(fastify: FastifyInstance): Promise<void>
 
       try {
         const filePath = path.join(getClaudeDir(), 'plans', name);
-        const content = await fs.readFile(filePath, 'utf-8');
+        assertNoProtectedDatabaseAlias(filePath);
+        const content = (await readRegularFile(filePath,32*1024*1024)).data.toString('utf8');
         return reply.send({ available: true, name, content });
       } catch {
         return reply.status(404).send({ error: 'Plan not found' });
@@ -308,7 +247,8 @@ export async function claudeLocalRoutes(fastify: FastifyInstance): Promise<void>
       const filePath = path.join(getClaudeDir(), 'projects', slug, `${id}.jsonl`);
       let raw: string;
       try {
-        raw = await fs.readFile(filePath, 'utf-8');
+        assertNoProtectedDatabaseAlias(filePath);
+        raw = (await readRegularFile(filePath,32*1024*1024)).data.toString('utf8');
       } catch {
         return reply.status(404).send({ error: 'Session not found' });
       }
@@ -395,18 +335,4 @@ export async function claudeLocalRoutes(fastify: FastifyInstance): Promise<void>
       }
     }
   );
-}
-
-// ─── Exported helper for agentic-chat.ts ───────────────────────────────────────
-
-/**
- * Load the MEMORY.md for the current working directory from Claude Code's projects.
- * Returns null silently if not found — agent still works without it.
- */
-export async function loadClaudeProjectMemory(): Promise<string | null> {
-  try {
-    return await findMemoryForCwd(process.cwd());
-  } catch {
-    return null;
-  }
 }

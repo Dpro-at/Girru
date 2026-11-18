@@ -618,7 +618,7 @@ Before publishing, verify:
 See these extensions for reference:
 
 - **WAF Security** (`extensions/waf-security/`) - Full example with routes, tool, migrations, frontend
-- **Agent Connect** (`extensions/agent-connect/`) - Channel integration: every chat channel on one shared host (`extensions/shared/channel-host.js`)
+- **Agent Connect** (Girru Store app `agent-connect`) - Channel integration: every chat channel on one shared host (`extensions/shared/channel-host.js`)
 
 ## 12. Support
 

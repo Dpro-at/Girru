@@ -1,3 +1,4 @@
+import {assertNoDefaultMemoryAccess} from '../encryption/execution-context.js';
 /**
  * Back-flow (MEM-BRIDGE-01): what Claude Code, Codex, Gemini CLI or
  * Antigravity write into their OWN memory files for a known project comes
@@ -16,6 +17,7 @@
  * that contradicts an approved memory becomes a conflict proposal. A chunk
  * is proposed once (its hash is remembered under an opaque file key).
  */
+import { isOutsideProject } from '../project-trust.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -24,6 +26,7 @@ import type { Project } from '../../repositories/chat-conversations.js';
 import { redactImportText } from '../import/redact.js';
 import { chunkMarkdown } from '../import/pipeline.js';
 import { learn } from '../learning.js';
+import { storeP6Enabled } from '../../services/store-p6.js';
 import { projectDrawer } from './brief.js';
 import { claudeProjectDir, type BridgeClient } from './clients.js';
 import { outsideManaged, MAX_MANAGED_FILE_BYTES } from './managed-files.js';
@@ -63,8 +66,11 @@ const pointerOnly = (s: string) => s.split('\n').every((l) => !l.trim() || /^@\S
 export interface BackflowResult { files: number; proposed: number; known: number; skipped: number; proposalIds: string[] }
 
 export async function runBackflow(ownerId: string, project: Project, opts: { home?: string } = {}): Promise<BackflowResult> {
+  assertNoDefaultMemoryAccess();
   const out: BackflowResult = { files: 0, proposed: 0, known: 0, skipped: 0, proposalIds: [] };
   if (!project.folder) return out;
+  // REPO-TRUST-01: someone else's CLAUDE.md / AGENTS.md never become memory proposals.
+  if (await isOutsideProject(ownerId, project.id)) return out;
   let folder: string;
   try { folder = fs.realpathSync.native(project.folder); } catch { return out; }
   for (const src of backflowSources(folder, opts.home)) {
@@ -84,7 +90,8 @@ export async function runBackflow(ownerId: string, project: Project, opts: { hom
       const h = sha(norm(content));
       if (seen.has(h)) continue;
       if (out.proposed >= MAX_BACKFLOW_PROPOSALS) return out;
-      const r = await learn({ userId: ownerId, actor: `bridge:${src.client}`, review: true,
+      // P6 (SEC2-5): labelled "from a repository file", never routine and never decided by a rule.
+      const r = await learn({ userId: ownerId, actor: `bridge:${src.client}`, review: true, ...(storeP6Enabled() ? { reviewReason: 'repository-file' as const } : {}),
         candidates: [{ content, type: 'fact', importance: 5, drawer: projectDrawer(project), origin: 'extraction' }] });
       const proposal = r.proposed[0];
       if (proposal) {

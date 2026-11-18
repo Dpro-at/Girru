@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url';
 // MEM-OWNER-01: memories an agent saves during a board task run belong to the
 // run's owner (user_id = owner); the agent is recorded as source_agent_id, as
 // in the owner's chats. Every access check stays: open drawers, write kinds,
@@ -15,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-const backendDir = process.cwd();
+const backendDir = fileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-task-mem-owner-'));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });
 process.chdir(dir);

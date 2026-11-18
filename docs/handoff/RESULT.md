@@ -110,3 +110,95 @@ and the Android test classes once (`./gradlew :app:testDebugUnitTest`).
 - The owner's feature requests (microphone, photos, files, share into Girru,
   quick actions, widget) and the typed-code proposal are in
   [`PHONE_FEATURES.md`](PHONE_FEATURES.md).
+
+## Test round: Task 5 (3 November 2026, evening)
+
+Tested `phone/app` at `a4e8f71a` on the build Mac (macOS 26.6.2, Xcode 27.2,
+iPhone 18 Pro simulator with iOS 27.2, Node 24.22.2, JDK 17). This Mac did
+testing only. The one code fix is a test-file escape, listed below.
+
+### Test 1: shared checks
+
+| Check | Result | Expected |
+|---|---|---|
+| relay | **29 pass** | 29 |
+| backend `test/phone-*.test.mjs` | **43 pass** | 42 |
+| core-ui `tests/phone-shell.test.cjs` | **3 pass** (after `npm ci` in core-ui) | 3 |
+| `swift run CoreChecks` | **366 passed, 0 failed** | 359 |
+
+### Test 2: builds
+
+- iPhone simulator build: **BUILD SUCCEEDED**, no fixes needed.
+- Android: `PageBridgeTest.kt:91` did not compile. The expected text had real
+  line breaks and bare quotes where `\n` and `\"` were meant. I restored the
+  escapes; the expected value is the same. Fix: `930177de` "Escape the expected
+  event text in PageBridgeTest so the Android tests compile". After it:
+  **100 unit tests pass** (new: PageBridgeTest 7, PhoneScreensTest 3), and `assembleDebug` builds.
+
+### Test 3: the simulator through `wss://relay.girru.net/v1`
+
+Pairing always worked (the same check code on both screens, every time).
+The rest of this round ran against `pair-harness.mjs --manual`, which is
+**not the full app**. The owner then had me start the real desktop app
+(`packages/desktop`, `npm start`, `AGENT_TERMINAL=true`), but pairing with it
+did not finish before the session ended. **Redo Test 3 against the real app.**
+
+**Findings (in order of importance):**
+
+1. **Page files over about 600 KiB never reach the phone. The chat page stays
+   blank.** `ui-bridge.ts` sends 600 KiB parts (`UI_PART_BYTES`). In a part,
+   the base64 inside the JSON is about 800 KiB, and after sealing and the
+   envelope's own base64 it is **about 1,067 KiB**. That is over the relay's
+   1 MiB envelope limit, so the relay refuses it. The phone logs
+   `RelayError error 5` (refused). The computer's own size check
+   (`service.ts` `reply()`, `MAX_ENVELOPE - 4096`) measures the JSON before
+   sealing (800 KiB), so it does not catch this. The chat page's
+   `index-*.js` is 2.5 MB and `index-*.css` 668 KB. With a local, uncommitted
+   `UI_PART_BYTES = 512 * 1024` (envelope about 910 KiB) the page loaded.
+   **Fix on the main computer:** a part size that fits after both base64 steps,
+   and the size check on the sealed envelope.
+2. **The chat page loads signed in and the chat works, but the layout does not
+   fit the phone.** On the 402 pt screen the desktop side panel (Details /
+   Changes / Files) fills the view and the chat column is off screen. A
+   message sent from the page reached the computer, and the reply came back
+   (`user: Hi from the phone simulator`, `assistant: Hello from the computer`
+   in `chat_messages`). As NEXT.md says, the owner makes the pages responsive.
+3. **The page asks for routes the phone list refuses**, and keeps asking:
+   `GET /api/approvals?status=pending&limit=100` → 403, `GET /api/health` → 403.
+   Either the page must not ask for them on the phone, or the list needs them.
+4. **The terminal cannot start on a Mac after `npm ci`.** node-pty 1.1.0's
+   `prebuilds/darwin-*/spawn-helper` is installed without execute permission,
+   so `POST /api/terminal/sessions` answers 500 (`posix_spawnp failed`). With a
+   local `chmod +x` it started ("zsh on your computer"). The installer or a
+   postinstall step must set it, or every Mac install has no terminal.
+5. **The terminal then lost its connection on the first command** (`echo hi;
+   date`): "Lost the connection to the terminal. Start again". Not traced;
+   it was on the harness, so check it on the real app.
+6. **The keyboard's toolbar (⌃ ⌄ ✓) stays on top of the lock screen** when the
+   app re-locks while the terminal keyboard is up.
+7. My harness gap, fixed here: `pair-harness.mjs` did not call
+   `bindPhoneApi(app)` as `server.ts` does, so every `api.call` answered
+   `ui_unavailable` (503) and the page showed "Sign in · engine not answering".
+   Fixed in the commit with this report.
+
+**What worked as designed:** the bottom bar with Chat / Tasks / Approvals /
+Team after pairing; Tasks (Now / Scheduled / Done, empty state, terminal
+button, plus button); the terminal asks Face ID first; its slim header and
+the key row (Paste, ^C, ^D, Esc, Tab, Ctrl, arrows) above a lowercase keyboard.
+
+**Not tested yet:** Approvals, Team, dark mode, locking during use, the
+paste check, ^C on `sleep 30`, the Android app on an emulator, and all of
+Test 3 on the real desktop app.
+
+### Notes for the next test round
+
+- Start the real app from source: build core-ui with
+  `node scripts/build.cjs --candidate --live-entry`, then run `npm ci` in
+  `packages/desktop`. npm blocks install scripts, so run
+  `node node_modules/electron/install.js` once. Then start it:
+  `DPRO_DESKTOP_NODE=/opt/homebrew/opt/node@24/bin/node AGENT_TERMINAL=true npm start`.
+- The simulator has no camera. Read the computer's QR from a screenshot
+  (`screencapture`, then `zbarimg` on the QR area) and pass it with
+  `-GirruPairLink`. A code lasts 2 minutes, so launch straight away.
+- Inspect the phone's web view with `ios_webkit_debug_proxy` on the
+  simulator's `webinspectord_sim.socket` (the view is inspectable in debug).

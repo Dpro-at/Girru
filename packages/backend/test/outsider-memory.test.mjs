@@ -1,5 +1,4 @@
-// S0-A.14: replies to outsiders (channel senders, anonymous / non-owner
-// public-room visitors) are built without the agent's private MEMORY.md.
+// S0-A.14: replies to outsiders (channel senders) are built without the agent's private MEMORY.md.
 // PERSONALITY.md is still used. OUTSIDER_AGENT_MEMORY=true opts back in.
 // Run: node --import tsx --test test/outsider-memory.test.mjs
 // No model server is contacted: global fetch is stubbed and records the prompt.
@@ -58,22 +57,13 @@ mkdirSync(agentDir, { recursive: true,mode:0o700 });
 writeFileSync(join(agentDir, 'PERSONALITY.md'), `You are the test agent. ${PERSONALITY_MARK}`);
 writeFileSync(join(agentDir, 'MEMORY.md'), `Owner bank is X. ${MEMORY_MARK}`,{mode:0o600});
 
-db.prepare(`INSERT INTO public_chat_rooms (id, name, owner_user_id, model, agent_id, is_public, require_auth)
-  VALUES ('room-1', 'Lobby', 'u-owner', 'llama3', ?, 1, 0)`).run(agentId);
-
 const { default: Fastify } = await import('fastify');
 const { chatRoutes } = await import('../src/api/routes/chat.ts');
-const { registerPublicChatRoutes } = await import('../src/api/routes/public-chat.ts');
 const { generateToken } = await import('../src/auth/jwt.ts');
 const policy = await import('../src/tools/channel-policy.ts');
 
-// CL-07: anonymous public-room access is off by default; on for this test.
-const { getSettingsManager } = await import('../src/settings/index.ts');
-await getSettingsManager().updateSettings({ publicRooms: { allowAnonymous: true } });
-
 const app = Fastify();
 await app.register(chatRoutes);
-await app.register(registerPublicChatRoutes);
 await app.ready();
 console.log = quiet.log; console.info = quiet.info; console.warn = quiet.warn;
 
@@ -94,10 +84,6 @@ const channelChat = async (extra) => {
   const turn = policy.beginChannelTurn({ channel: 'telegram', conversationId: 'chat-1' }, 'u-owner');
   try { return await chat({ [policy.CHANNEL_TURN_HEADER]: turn.token }, extra); } finally { turn.end(); }
 };
-const roomPost = (headers = {}) => app.inject({
-  method: 'POST', url: '/api/public-chat/rooms/room-1/messages', headers,
-  payload: { content: 'hello', username: 'visitor' },
-});
 /** Runs fn, returns the prompts it sent to the model. */
 const sent = async (fn) => {
   prompts.length = 0;
@@ -120,21 +106,10 @@ test('channel turn: no MEMORY.md and no body memoryContext by default; personali
   assert.ok(p.includes(PERSONALITY_MARK), 'personality still used');
 });
 
-test('public room: no sender including the owner exposes private MEMORY.md by default', async () => {
-  const anon = await sent(() => roomPost());
-  assert.ok(!anon.includes(MEMORY_MARK), 'anonymous');
-  assert.ok(anon.includes(PERSONALITY_MARK));
-  const member = await sent(() => roomPost(bearer('u-member')));
-  assert.ok(!member.includes(MEMORY_MARK), 'non-owner member');
-  const owner = await sent(() => roomPost(bearer('u-owner')));
-  assert.ok(!owner.includes(MEMORY_MARK), 'owner replies are public too');
-});
-
-test('OUTSIDER_AGENT_MEMORY=true opts back in for channels and public rooms', async () => {
+test('OUTSIDER_AGENT_MEMORY=true opts back in for channels', async () => {
   process.env.OUTSIDER_AGENT_MEMORY = 'true';
   try {
     assert.ok((await sent(() => channelChat())).includes(MEMORY_MARK), 'channel');
-    assert.ok((await sent(() => roomPost())).includes(MEMORY_MARK), 'anonymous room');
   } finally { delete process.env.OUTSIDER_AGENT_MEMORY; }
 });
 

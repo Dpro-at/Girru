@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // CORE-MEM-GRAPH: memory knowledge graph. Entities + typed links are built on
 // every memory save (local model, deterministic fallback); recall follows
 // links from the names in a request; drawers apply at every step; forgetting
@@ -11,9 +12,12 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+/** A backend module as an import URL (a bare C: path is not a valid ESM specifier on Windows). */
+const mod = (rel) => pathToFileURL(join(backendDir, rel)).href;
 import { randomBytes } from 'node:crypto';
 
-const backendDir = process.cwd();
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-memgraph-'));
 mkdirSync(join(dir, '.data'), { recursive: true });
 process.chdir(dir);
@@ -31,23 +35,23 @@ const quiet = { log: console.log, warn: console.warn };
 console.log = () => {};
 console.warn = () => {};
 
-const { getDatabase, closeDatabase } = await import(join(backendDir, 'src/db/database.ts'));
+const { getDatabase, closeDatabase } = await import(mod('src/db/database.ts'));
 const db = getDatabase();
 await db.initialize();
 const addUser = (id, role) => db.prepare(`INSERT INTO users (id, email, username, password_hash, role, status) VALUES (?, ?, ?, 'x', ?, 'active')`).run(id, `${id}@example.test`, id, role);
 addUser('gr-owner', 'owner');
 addUser('gr-user', 'user');
 
-const { registerAuthGate } = await import(join(backendDir, 'src/auth/auth-gate.ts'));
-const { memoryRoutes } = await import(join(backendDir, 'src/api/routes/memory.ts'));
-const { memoryGraphRoutes } = await import(join(backendDir, 'src/api/routes/memory-graph.ts'));
-const { getMemoryStorage } = await import(join(backendDir, 'src/memory/storage.ts'));
-const { forgetMemory } = await import(join(backendDir, 'src/memory/forget.ts'));
-const G = await import(join(backendDir, 'src/memory/graph/index.ts'));
-const { memorySearchTool } = await import(join(backendDir, 'src/tools/memory/search.ts'));
-const { memorySaveTool } = await import(join(backendDir, 'src/tools/memory/save.ts'));
-const { memoryGraphTool } = await import(join(backendDir, 'src/tools/memory/graph.ts'));
-const { generateToken } = await import(join(backendDir, 'src/auth/jwt.ts'));
+const { registerAuthGate } = await import(mod('src/auth/auth-gate.ts'));
+const { memoryRoutes } = await import(mod('src/api/routes/memory.ts'));
+const { memoryGraphRoutes } = await import(mod('src/api/routes/memory-graph.ts'));
+const { getMemoryStorage } = await import(mod('src/memory/storage.ts'));
+const { forgetMemory } = await import(mod('src/memory/forget.ts'));
+const G = await import(mod('src/memory/graph/index.ts'));
+const { memorySearchTool } = await import(mod('src/tools/memory/search.ts'));
+const { memorySaveTool } = await import(mod('src/tools/memory/save.ts'));
+const { memoryGraphTool } = await import(mod('src/tools/memory/graph.ts'));
+const { generateToken } = await import(mod('src/auth/jwt.ts'));
 const { default: Fastify } = await import('fastify');
 
 const app = Fastify();
@@ -245,8 +249,8 @@ test('a member account\'s important new link is not stored', async () => {
   const ex = G.fallbackExtraction('The Ledger Service replaces the Legacy Router.');
   const m = { id: 'gr-user-mem', userId: 'gr-user', content: 'The Ledger Service replaces the Legacy Router.', type: 'fact', metadata: { source: 'agent', learned: 'routine' }, drawer: { kind: 'owner' } };
   db.prepare(`INSERT INTO memories (id, user_id, type, content, created_at) VALUES (?, 'gr-user', 'fact', ?, ?)`).run(m.id, m.content, new Date().toISOString());
-  const { sql } = await import(join(backendDir, 'src/repositories/sql-steps.ts'));
-  const { writeMemoryGraphStep, contentHash } = await import(join(backendDir, 'src/memory/graph/store.ts'));
+  const { sql } = await import(mod('src/repositories/sql-steps.ts'));
+  const { writeMemoryGraphStep, contentHash } = await import(mod('src/memory/graph/store.ts'));
   const r = await sql().tx(() => writeMemoryGraphStep(m, contentHash(m.content), ex, false));
   assert.equal(r.links, 0);
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM memory_graph_links WHERE user_id = 'gr-user' AND type = 'replaces'`).get().n, 0);

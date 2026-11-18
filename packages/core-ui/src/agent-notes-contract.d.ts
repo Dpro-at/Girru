@@ -1,0 +1,12 @@
+export const NOTES_BYTES: number;
+export const PACKAGE_BYTES: number;
+export const PACKAGES_STATUS_PATH: '/api/agent-packages/status';
+export function notesPath(id: string, part?: '' | '/status' | '/history' | '/outside'): string;
+export function packagePath(id: string): string;
+export function notesRoute(path: string): boolean;
+export function allowedNotes(method: string, path: string, body?: unknown): boolean;
+export function notesResponse(path: string, status: number, body: unknown): unknown;
+export type NotesVersion = { version: number; change: string; createdAt: string; by: string; reason: string | null; content: string | null };
+export type NotesOutside = { file: string; fileHash: string; notes: string; notesHash: string };
+export type PackagePlan = { packageHash: string; schemaVersion: number; alreadyImported: string | null; agent: { name: string; description: string; emoji: string }; instructions: string; personality: { text: string };
+  specialties: { name: string }[]; skills: { name: string }[]; knowledge: { name: string; bytes: number; read: boolean }[]; refused: { field: string; why: string }[]; missing: { kind: string; name: string }[] };

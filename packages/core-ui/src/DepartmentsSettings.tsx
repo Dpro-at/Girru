@@ -6,7 +6,10 @@ import {Notice,Sheet} from './desktop-ui';
 import {PreferenceGroup} from './Preferences';
 import {DepartmentTile} from './StaffDirectory';
 import {departmentName as shownName} from './agent-look';
-import {DEPARTMENT_RENAME_PATH,departmentName as validDepartment} from './departments-contract.js';
+import {DEPARTMENT_RENAME_PATH,DEPARTMENTS_PATH,departmentName as validDepartment} from './departments-contract.js';
+import type {DepartmentEntry,DepartmentQuestion} from './departments-contract.js';
+import {useStoreP3} from './store-switches';
+import {Avatar,Tile,useMenu,ContextMenu,IconButton} from './desktop-ui';
 
 type Toast={id:number;text:string;undo:boolean}|null;
 /** The department value as the agent page saves it: lowercase, single spaces. */
@@ -27,6 +30,11 @@ export function groupDepartments(agents:readonly PublicAgent[]){
  * set_department).
  */
 export function DepartmentsSettings({client,onAgent}:{client:SessionClient;onAgent?:(id:string)=>void}){
+ // STORE-MAP-01 P3 (FD2a): one list of departments for agents and projects, by id.
+ return useStoreP3(client)?<OneDepartmentList client={client} onAgent={onAgent}/>:<AgentDepartments client={client} onAgent={onAgent}/>;
+}
+
+function AgentDepartments({client,onAgent}:{client:SessionClient;onAgent?:(id:string)=>void}){
  const [agents,setAgents]=useState<PublicAgent[]|null>(null),[error,setError]=useState(false),[busy,setBusy]=useState(false);
  const [renaming,setRenaming]=useState<{from:string;to:string}|null>(null),[creating,setCreating]=useState<{name:string;ids:string[]}|null>(null);
  const [toast,setToast]=useState<Toast>(null),[problem,setProblem]=useState('');const undo=useRef<(()=>Promise<void>)|null>(null);
@@ -88,4 +96,99 @@ export function DepartmentsSettings({client,onAgent}:{client:SessionClient;onAge
   </Sheet>}
   <Notice toast={toast} onUndo={()=>{const u=undo.current;undo.current=null;setToast(null);if(u)void u();}} onDone={id=>setToast(t=>t?.id===id?null:t)}/>
  </>;
+}
+
+const LOOKS=['#2F8A5B','#B5487A','#B07A1E','#1E7FA0','#6E4BC2','#8A5A2E','#3F6FD8','#A33A3A'] as const;
+type Del={id:string;name:string;effects:{projects:number;agents:number;pinnedFacts:number;accessRules:number};previewHash:string};
+const count=(n:number,one:string,many:string)=>n===1?`1 ${one}`:`${n} ${many}`;
+
+/**
+ * STORE-MAP-01 P3 (FD2a): Settings › Departments as the one list. A department
+ * groups agents and projects; renaming or merging it follows everywhere (rules,
+ * boards, specialties, hire, memory) because places keep its id. The selected
+ * department shows in the inspector. A merge can be undone; deleting asks once
+ * and says what moves where.
+ */
+function OneDepartmentList({client,onAgent}:{client:SessionClient;onAgent?:(id:string)=>void}){
+ const [list,setList]=useState<DepartmentEntry[]|null>(null),[questions,setQuestions]=useState<DepartmentQuestion[]>([]),[error,setError]=useState(false);
+ const [selected,setSelected]=useState<string|null>(null),[busy,setBusy]=useState(false),[problem,setProblem]=useState('');
+ const [creating,setCreating]=useState<string|null>(null),[renaming,setRenaming]=useState<string|null>(null),[merging,setMerging]=useState<string|null>(null),[deleting,setDeleting]=useState<Del|null>(null);
+ const [toast,setToast]=useState<Toast>(null);const undo=useRef<(()=>Promise<void>)|null>(null);const {menu,at:open,close}=useMenu();
+ const req=useCallback((method:string,path:string,body?:unknown)=>client.request({method,path,...(body===undefined?{}:{body})} as never),[client]);
+ const load=useCallback(async()=>{setError(false);try{const r=await req('GET',DEPARTMENTS_PATH);if(r.status!==200)throw Error();const b=r.body as {departments:DepartmentEntry[];questions:DepartmentQuestion[]};setList(b.departments);setQuestions(b.questions);setSelected(id=>id&&b.departments.some(d=>d.id===id)?id:b.departments[0]?.id??null);}catch{setError(true);}},[req]);
+ useEffect(()=>{void load();},[load]);
+ const say=(text:string,back?:()=>Promise<void>)=>{undo.current=back??null;setToast({id:Date.now(),text,undo:!!back});};
+ const act=async(fn:()=>Promise<{status:number;body:unknown}>,okText?:string,back?:()=>Promise<void>)=>{
+  setBusy(true);setProblem('');
+  try{const r=await fn();if(r.status!==200){const reason=(r.body as {reason?:string})?.reason;setProblem(reason==='name_taken'?'That department already exists.':reason==='version_conflict'?'The department changed meanwhile. The list is read again; try once more.':'That did not work. Try again.');return null;}
+   if(okText)say(okText,back);return r.body;}
+  catch{setProblem('That did not work (no connection).');return null;}
+  finally{setBusy(false);await load();}
+ };
+ const d=list?.find(x=>x.id===selected)??null;
+ const patch=(x:DepartmentEntry,body:Record<string,unknown>,text?:string)=>act(()=>req('PATCH',`${DEPARTMENTS_PATH}/${encodeURIComponent(x.id)}`,{version:x.version,...body}),text);
+ const create=async()=>{const name=(creating??'').trim();if(!name)return;const out=await act(()=>req('POST',DEPARTMENTS_PATH,{name}),`${name} is ready.`) as {department?:{id:string}}|null;setCreating(null);if(out?.department)setSelected(out.department.id);};
+ const merge=async(from:DepartmentEntry,into:DepartmentEntry)=>{setMerging(null);
+  const out=await act(()=>req('POST',`${DEPARTMENTS_PATH}/${encodeURIComponent(from.id)}/merge`,{into:into.id})) as {mergeId?:string}|null;
+  if(out?.mergeId){const mergeId=out.mergeId;setSelected(into.id);say(`${from.name} joined ${into.name}.`,async()=>{await act(()=>req('POST',`${DEPARTMENTS_PATH}/merges/${encodeURIComponent(mergeId)}/undo`),`${from.name} is back.`);setSelected(from.id);});}
+ };
+ const askDelete=async(x:DepartmentEntry)=>{const out=await act(()=>req('POST',`${DEPARTMENTS_PATH}/${encodeURIComponent(x.id)}/delete-preview`)) as Omit<Del,'id'>|null;if(out)setDeleting({...out,id:x.id});};
+ const doDelete=async()=>{if(!deleting)return;const x=deleting;setDeleting(null);await act(()=>req('POST',`${DEPARTMENTS_PATH}/${encodeURIComponent(x.id)}/delete`,{expectedPreviewHash:x.previewHash}),`${x.name} was deleted.`);};
+ const answer=(q:DepartmentQuestion,departmentId:string|null)=>act(()=>req('POST',`${DEPARTMENTS_PATH}/questions/${encodeURIComponent(q.id)}`,{departmentId}),'The rule was updated.');
+ if(error)return <div className="dept-empty" role="alert"><p>Departments could not be read.</p><button type="button" onClick={()=>void load()}>Try again</button></div>;
+ if(!list)return <p className="dept-empty" role="status">Reading departments…</p>;
+ const tile=(x:{name:string;letter:string|null;color:string|null},size=22)=>x.color||x.letter?<span className="dept-look" style={{inlineSize:size,blockSize:size,background:x.color??undefined}} aria-hidden="true">{x.letter??x.name.charAt(0).toUpperCase()}</span>:<DepartmentTile department={x.name.toLowerCase()} size={size}/>;
+ const itemMenu=(x:DepartmentEntry)=>[{label:'Rename',run:()=>{setSelected(x.id);setRenaming(x.name);}},{label:'Merge into another department…',run:()=>setMerging(x.id),disabled:list.length<2},{label:'Delete…',run:()=>void askDelete(x),danger:true}];
+ return <div className="specialty-workspace dept-one has-inspector">
+  <div className="specialty-window-toolbar dept-toolbar-one"><span className="dept-toolbar-note">One list for agents and projects. Renaming or merging follows everywhere.</span>
+   <button type="button" className="primary" disabled={busy} onClick={()=>{setProblem('');setCreating('');}}><UiIcon name="plus" size={14}/>New department</button>
+  </div>
+  {problem&&<p className="specialty-notice" role="alert">{problem}</p>}
+  {questions.map(q=><div key={q.id} className="specialty-notice dept-question" role="status"><span>A rule names “{q.name}”, which no agent or project uses.</span>
+   <select aria-label={`Department for the rule that names ${q.name}`} defaultValue="" disabled={busy} onChange={e=>{if(e.target.value)void answer(q,e.target.value);}}><option value="" disabled>Choose a department…</option>{list.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>
+   <button type="button" disabled={busy} onClick={()=>void answer(q,null)}>Leave it for all agents</button></div>)}
+  <div className="specialty-panes">
+   <div className="specialty-list-pane">
+    {!list.length&&<p className="dept-empty">No department yet. Make one, then add agents and projects to it.</p>}
+    <ul className="specialty-quiet-list" aria-label="Departments">{list.map(x=><li key={x.id}>
+     <button type="button" className="specialty-row" aria-pressed={x.id===selected} onClick={()=>setSelected(x.id)} onContextMenu={e=>{e.preventDefault();setSelected(x.id);open(e,itemMenu(x));}}>
+      {tile(x,28)}<span className="specialty-row-copy"><strong>{x.name}</strong></span>
+      <span className="specialty-row-people">{x.agents.slice(0,4).map(a=><Avatar key={a.id} name={a.name||'?'} size={22}/>)}</span>
+      <span className="dept-projects">{x.projects.slice(0,3).map(p=><Tile key={p.key} name={p.name} size={16}/>)}</span>
+     </button></li>)}</ul>
+   </div>
+   {d?<aside className="specialty-inspector" aria-label="Selected department">
+    <header className="specialty-inspector-header"><div className="specialty-title-line">{tile(d,44)}
+     {renaming!==null?<form className="dept-rename" onSubmit={e=>{e.preventDefault();const name=renaming.trim();setRenaming(null);if(name&&name!==d.name)void patch(d,{name},`${d.name} is now ${name}. Rules, boards and projects follow.`);}}>
+       <input aria-label={`New name for ${d.name}`} autoFocus maxLength={80} value={renaming} onChange={e=>setRenaming(e.target.value)} onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();setRenaming(null);}}}/><button type="submit" className="primary">Rename</button></form>
+     :<div><h3>{d.name}</h3><small>{count(d.agents.length,'agent','agents')} · {count(d.projects.length,'project','projects')}</small></div>}
+     <span className="dept-insp-tools"><IconButton icon="pencil" label="Rename (everything follows)" onClick={()=>setRenaming(d.name)} disabled={busy}/><IconButton icon="more" label="More" onClick={e=>open(e,itemMenu(d))}/></span>
+    </div></header>
+    <details open><summary><UiIcon name="palette" size={14}/>Look<UiIcon name="chevron" size={12}/></summary><div className="specialty-detail-body">
+     <div className="dept-swatches" role="radiogroup" aria-label="Colour">{LOOKS.map(c=><button key={c} type="button" role="radio" aria-checked={d.color===c} aria-label={`Colour ${c}`} className="dept-swatch" style={{background:c}} disabled={busy} onClick={()=>void patch(d,{color:c})}/>)}</div>
+     <label>Letter<input maxLength={1} defaultValue={d.letter??''} key={d.id+d.version} onBlur={e=>{const v=e.target.value.trim();if(v!==(d.letter??''))void patch(d,{letter:v||null});}}/></label>
+    </div></details>
+    <details open><summary><UiIcon name="users" size={14}/>Agents<UiIcon name="chevron" size={12}/></summary><div className="specialty-detail-body">
+     {d.agents.length?d.agents.map(a=><div key={a.id} className="specialty-linked-agent"><Avatar name={a.name||'?'} size={22}/><div><strong>{a.name}</strong>{d.leadAgentId===a.id&&<small>Lead</small>}</div><button type="button" disabled={!onAgent} onClick={()=>onAgent?.(a.id)}>Open</button></div>):<p>No agent yet. Choose this department on an agent's page.</p>}
+     {d.agents.length>0&&<label>Lead<select value={d.leadAgentId??''} disabled={busy} onChange={e=>void patch(d,{leadAgentId:e.target.value||null})}><option value="">No lead</option>{d.agents.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label>}
+    </div></details>
+    <details open><summary><UiIcon name="folder" size={14}/>Projects<UiIcon name="chevron" size={12}/></summary><div className="specialty-detail-body">
+     {d.projects.length?d.projects.map(p=><div key={p.key} className="specialty-linked-agent"><Tile name={p.name} size={18}/><div><strong>{p.name}</strong></div></div>):<p>No project yet. Move a project here from Memory (⋯ › Move to another department…).</p>}
+    </div></details>
+   </aside>:<div className="specialty-selection-empty"><p>Select a department to see its agents and projects.</p></div>}
+  </div>
+  {creating!==null&&<Sheet title="New department" onClose={()=>setCreating(null)} actions={<><button type="button" onClick={()=>setCreating(null)}>Cancel</button><button type="button" className="primary" disabled={busy||!creating.trim()} onClick={()=>void create()}>Make department</button></>}>
+   <label className="dk-field">Name<input autoFocus maxLength={80} value={creating} onChange={e=>setCreating(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')void create();}} placeholder="for example Research"/></label>
+   <p className="fine-print">Any language. Agents and projects join it from their own pages.</p>
+  </Sheet>}
+  {merging&&(()=>{const from=list.find(x=>x.id===merging);if(!from)return null;return <Sheet title={`Merge ${from.name} into…`} onClose={()=>setMerging(null)} actions={<button type="button" onClick={()=>setMerging(null)}>Cancel</button>}>
+   <p className="fine-print">{from.name} has {count(from.agents.length,'agent','agents')} and {count(from.projects.length,'project','projects')}. They, its rules and its board move; you can undo it.</p>
+   <ul className="dept-pick" aria-label="Merge into">{list.filter(x=>x.id!==from.id).map(x=><li key={x.id}><button type="button" className="specialty-row" disabled={busy} onClick={()=>void merge(from,x)}>{tile(x)}<span className="specialty-row-copy"><strong>{x.name}</strong></span></button></li>)}</ul>
+  </Sheet>;})()}
+  {deleting&&<Sheet title={`Delete ${deleting.name}?`} onClose={()=>setDeleting(null)} actions={<><button type="button" onClick={()=>setDeleting(null)}>Cancel</button><button type="button" className="danger" disabled={busy} onClick={()=>void doDelete()}>Delete</button></>}>
+   <p>{[deleting.effects.agents?`${count(deleting.effects.agents,'agent','agents')} will have no department`:'',deleting.effects.projects?`${count(deleting.effects.projects,'project','projects')} move to General`:'',deleting.effects.pinnedFacts?`${count(deleting.effects.pinnedFacts,'pinned fact','pinned facts')} go`:''].filter(Boolean).join('; ')||'No agent or project is in it'}. A rule left without a department is paused; its board moves to Past departments.</p>
+  </Sheet>}
+  <ContextMenu menu={menu} onClose={close}/>
+  <Notice toast={toast} onUndo={()=>{const u=undo.current;undo.current=null;setToast(null);if(u)void u();}} onDone={id=>setToast(t=>t?.id===id?null:t)}/>
+ </div>;
 }

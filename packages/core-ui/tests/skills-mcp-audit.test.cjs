@@ -25,7 +25,8 @@ test('M-9 MCP "This computer" is one at a time with J / K and keeps Credentials 
  const taken=renderToStaticMarkup(React.createElement(SkillFoundPlace,{c:controller({...s,view:{roots:[],items:[item('a','calendar','mcp','imported')]},preview:{...s.preview,state:'imported'}}),active:true,kind:'mcp'}));
  assert.match(taken,/>Take out</);assert.doesNotMatch(taken,/Leave it/);
  const skills=renderToStaticMarkup(React.createElement(SkillFoundPlace,{c:controller({...s,preview:null}),active:false}));assert.match(skills,/Skills found on this computer/);assert.match(skills,/Writer/);assert.doesNotMatch(skills,/Credentials/);
- assert.match(src('ToolSections.tsx'),/<SkillFoundPlace c=\{d\} active=\{active\} kind="mcp"\/>/);
+ // MCP-ONE-01: the MCP section's one found place is McpFoundPlace (every app, project and Store app).
+ assert.match(src('ToolSections.tsx'),/<McpFoundPlace client=\{client\} found=\{found\}/);
 });
 test('S-12 agent connection tool chips show the description and "asks first" like built-in chips',()=>{
  const line=src('AgentPermissions.tsx').split('\n').find(l=>l.includes('t.name.slice(prefix.length)}'));

@@ -1,7 +1,7 @@
 {
   "name": "@agent-player/desktop",
   "productName": "Girru",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "private": true,
   "description": "Girru desktop app",
   "license": "MIT",
@@ -12,6 +12,10 @@
     "test": "node --import ../../scripts/test-temp-root.mjs --test test/*.test.cjs",
     "stage": "node scripts/stage-payload.cjs",
     "stage:code": "node scripts/stage-nabu.cjs",
+    "predist:mac": "node scripts/check-bundle-inputs.cjs",
+    "predist:dir": "node scripts/check-bundle-inputs.cjs",
+    "predist:win": "node scripts/check-bundle-inputs.cjs",
+    "predist:linux": "node scripts/check-bundle-inputs.cjs",
     "dist:mac": "electron-builder --mac dmg zip --publish never",
     "dist:dir": "electron-builder --dir --publish never",
     "dist:win": "electron-builder --win nsis --publish never",
@@ -52,6 +56,15 @@
         "to": "nabu-runtime",
         "filter": [
           "**/*"
+        ]
+      },
+      {
+        "from": "../identity/src",
+        "to": "identity/src",
+        "filter": [
+          "google.cjs",
+          "memory-native-proof.cjs",
+          "memory-native-owner-wire.cjs"
         ]
       }
     ],

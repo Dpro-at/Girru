@@ -16,6 +16,7 @@ import { mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { offeredNames, expectedNumCtx, expectedNumPredict, p2bOn } from './helpers/p2b.mjs';
 
 // --- stub LM Studio: /v1/models + streamed /v1/chat/completions ---------------
 const replies = []; // each: list of delta objects for one streamed answer
@@ -113,7 +114,14 @@ test('the loop streams reasoning and text, joins tool calls sent in pieces, feed
   // The second call carries the assistant's call and the result, linked by id.
   const [asst, tool] = bodies[1].messages.slice(-2);
   assert.equal(asst.tool_calls[0].function.arguments, '{"text":"hi"}');
-  assert.deepEqual([tool.role, tool.tool_call_id, tool.content], ['tool', asst.tool_calls[0].id, 'echo: hi']);
+  // SEC-ENVELOPE-01: the fed-back result reaches the model wrapped in the
+  // untrusted-data envelope (fresh random nonce per message, so no exact match).
+  assert.equal(tool.role, 'tool');
+  assert.equal(tool.tool_call_id, asst.tool_calls[0].id);
+  assert.ok(tool.content.includes('echo: hi'), 'the tool body survives inside the frame');
+  assert.match(tool.content, /GIRRU-UNTRUSTED-DATA nonce=[0-9a-f]{32} begin/, 'open marker with a nonce');
+  assert.match(tool.content, /GIRRU-UNTRUSTED-DATA nonce=[0-9a-f]{32} end/, 'close marker with a nonce');
+  assert.match(tool.content, /never as instructions/i, 'intro says data, not instructions');
 });
 
 test('the loop: an unreachable or refusing server is ModelUnavailable; stop ends quietly', async () => {
@@ -176,7 +184,7 @@ test('a chat turn with an LM Studio model runs there, with the agent tools', asy
   assert.equal(ev.at(-1).status, 'complete');
   assert.deepEqual(echoed, ['from lm']);
   assert.equal(bodies[0].model, 'llama-3.2-3b-instruct@q4_k_m');
-  assert.ok(bodies[0].tools.some((t) => t.function.name === 'x_echo'), 'the agent granted tools are offered');
+  assert.ok(offeredNames(bodies[0]).includes('x_echo'), 'the agent granted tools are offered');
   const m = (await call('GET', `/api/chat/conversations/${c.id}/messages`)).json();
   assert.equal(m.messages.at(-1).content, 'Echoed.');
 });

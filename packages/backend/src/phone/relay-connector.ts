@@ -84,6 +84,9 @@ export class RelayConnector {
     return this.raw({ t: 'send', to, env });
   }
 
+  /** A bounded existing pairing mailbox; never a durable task queue. */
+  sendPairing(pairingId:string,env:string):boolean {if(!this.ready||!/^p_[A-Za-z0-9_-]{43}$/.test(pairingId)||env.length>64000)return false;return this.raw({t:'send',pairing:pairingId,env});}
+
   stop(): void {
     this.wanted = false;
     this.close();
@@ -105,6 +108,7 @@ export class RelayConnector {
     this.readyTimer = setTimeout(() => { try { ws.close(); } catch { /* closing */ } }, this.opts.readyTimeoutMs ?? 15_000);
     this.readyTimer.unref?.();
     ws.addEventListener('message', (e) => {
+      if(this.ws!==ws||!this.wanted)return;
       let frame: Record<string, unknown>;
       try {
         const v: unknown = JSON.parse(typeof e.data === 'string' ? e.data : '');

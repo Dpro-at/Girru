@@ -1,3 +1,4 @@
+import {assertNoProtectedDatabaseAlias,assertProtectedMemoryFileDescriptor,closeProtectedMemoryFileDescriptor} from '../memory/encryption/protected-filesystem.js';
 import fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
@@ -6,9 +7,11 @@ export class FileReadError extends Error {}
 
 /** Read bounded bytes from the same regular file that was inspected. Never writes. */
 export async function readRegularFile(file: string, limit: number, options: { truncate?: boolean; root?: string } = {}) {
+  assertNoProtectedDatabaseAlias(file);
   const root = options.root ? await fs.realpath(options.root) : null;
   const handle = await fs.open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
   try {
+    assertProtectedMemoryFileDescriptor(handle.fd);
     const stat = await handle.stat();
     if (!stat.isFile()) throw new FileReadError('Not a regular file');
     const entry = await fs.lstat(file);
@@ -29,6 +32,6 @@ export async function readRegularFile(file: string, limit: number, options: { tr
     if (used > limit && !options.truncate) throw new FileReadError('File is too large');
     return { data: buffer.subarray(0, Math.min(used, limit)), stat, truncated: stat.size > limit || used > limit };
   } finally {
-    await handle.close();
+    await closeProtectedMemoryFileDescriptor(handle.fd,()=>handle.close());
   }
 }

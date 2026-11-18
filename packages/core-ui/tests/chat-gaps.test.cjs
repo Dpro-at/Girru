@@ -108,7 +108,7 @@ test('terminal: Stop sends ⌃C, ⌃⇧` opens a new tab, your own shell says "�
   const t = src('TerminalPane.tsx');
   assert.match(t, /aria-label="Stop" title="Stop what runs here \(⌃C\)" disabled=\{!active\} onClick=\{\(\) => active\?\.terminal\.write\('\\x03'\)\}/);
   assert.match(t, /'New terminal \(⌃⇧`\)'/);
-  assert.match(t, / · you\{folder/);
+  assert.match(t, / · you<\/>\}\{folder/);
   const v = src('ChatView.tsx');
   assert.ok(v.indexOf("e.ctrlKey && e.shiftKey && !e.metaKey && e.code === 'Backquote'") < v.indexOf("e.ctrlKey && !e.metaKey && e.code === 'Backquote'"), 'the new-tab key is checked before the toggle');
 });
@@ -146,7 +146,7 @@ test('changed files row shows +N −N; the summary notice can be read and starte
 test('small gaps: Esc closes the panel in a narrow window, a rail icon opens its part, the edge dot, Running now via Edit, waits in Tasks', () => {
   const v = src('ChatView.tsx'), d = src('ChatDetails.tsx'), l = src('ConversationList.tsx'), m = src('ChatMoments.tsx');
   assert.match(v, /e\.key === 'Escape' && !e\.defaultPrevented && window\.innerWidth <= 1100 && !document\.querySelector\('\[role="dialog"\], \.dk-menu'\)\) setPane/);
-  assert.match(v, /<DetailsRail controller=\{controller\} onOpen=\{openPart\}\/>/);
+  assert.match(v, /<DetailsRail controller=\{controller\} client=\{client\} onOpen=\{openPart\}\/>/);
   assert.match(v, /const openPart = \(id: PanelPart\) => \{ setPane\('details'\); setFocusPart\(f => \(\{ id, n: \(f\?\.n \?\? 0\) \+ 1 \}\)\); \};/);
   assert.match(d, /className="details-part" data-part=\{id\}/);
   assert.match(d, /onClick=\{\(\) => onOpen\(i\.id\)\}/);
@@ -266,7 +266,7 @@ test('CH3 + CH8: chips inside the box, a red chip per file that cannot be read; 
   const view = src('ChatView.tsx'), css = src('styles.css');
   assert.ok(view.indexOf('className="chat-attachments"') > view.indexOf('<form className="chat-composer"'), 'files sit inside the box');
   assert.match(view, /className="attach-chip bad" role="alert"/);
-  assert.match(view, /const errors = files\.map\(f => controller\.attach\(\[f\]\)\)/);
+  assert.match(view, /const errors = \[\.\.\.pdfErrors, \.\.\.files\.map\(f => controller\.attach\(\[f\]\)\)/);
   assert.doesNotMatch(view, /className="fine-print">Uses your signed-in coding app/);
   assert.match(view, /<section className="git-rows"/);
   assert.match(css, /\.app-shell \.chat-composer \.round-button \{ inline-size:30px; block-size:30px;/);

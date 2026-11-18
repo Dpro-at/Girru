@@ -1,0 +1,439 @@
+{
+  "schema": 1,
+  "packages": [
+    {
+      "name": "asynckit",
+      "version": "0.4.0",
+      "path": "node_modules/asynckit",
+      "url": "https://registry.npmjs.org/asynckit/-/asynckit-0.4.0.tgz",
+      "sha256": "8c254f30f70792645042e4d71f590ec49f8e386a475772f7430c73b964b57dcf",
+      "size": 8111
+    },
+    {
+      "name": "axios",
+      "version": "1.20.0",
+      "path": "node_modules/axios",
+      "url": "https://registry.npmjs.org/axios/-/axios-1.20.0.tgz",
+      "sha256": "5aa2dc9a5d6ced926e4b6ca8ef8e0253b118867e240db8650c49379e972c12ac",
+      "size": 554708
+    },
+    {
+      "name": "agent-base",
+      "version": "6.0.2",
+      "path": "node_modules/axios/node_modules/agent-base",
+      "url": "https://registry.npmjs.org/agent-base/-/agent-base-6.0.2.tgz",
+      "sha256": "bc6da06f2a2e6bc80fa5878bd7227bd0318812976d45f47f17e1aafcec2be831",
+      "size": 9273
+    },
+    {
+      "name": "https-proxy-agent",
+      "version": "5.0.1",
+      "path": "node_modules/axios/node_modules/https-proxy-agent",
+      "url": "https://registry.npmjs.org/https-proxy-agent/-/https-proxy-agent-5.0.1.tgz",
+      "sha256": "6da16fb44331f2e5d30bd21bf880aa934c1ad4fe7da7187910ef2b2509712019",
+      "size": 8412
+    },
+    {
+      "name": "buffer-equal-constant-time",
+      "version": "1.0.1",
+      "path": "node_modules/buffer-equal-constant-time",
+      "url": "https://registry.npmjs.org/buffer-equal-constant-time/-/buffer-equal-constant-time-1.0.1.tgz",
+      "sha256": "8f455159e342103e7854ed6a4cc73edbab144d857917c88edefea862f09fe75a",
+      "size": 3125
+    },
+    {
+      "name": "call-bind-apply-helpers",
+      "version": "1.0.2",
+      "path": "node_modules/call-bind-apply-helpers",
+      "url": "https://registry.npmjs.org/call-bind-apply-helpers/-/call-bind-apply-helpers-1.0.2.tgz",
+      "sha256": "073e9ff9dbabedf5c128020a677381e9f92c90188d118830b30a7656a7c37d2c",
+      "size": 6067
+    },
+    {
+      "name": "call-bound",
+      "version": "1.0.4",
+      "path": "node_modules/call-bound",
+      "url": "https://registry.npmjs.org/call-bound/-/call-bound-1.0.4.tgz",
+      "sha256": "32086f492fedf1b9b34811f2ee50ca2cca53da5c783f7cd5f939d3f1e86bbd32",
+      "size": 6382
+    },
+    {
+      "name": "combined-stream",
+      "version": "1.0.8",
+      "path": "node_modules/combined-stream",
+      "url": "https://registry.npmjs.org/combined-stream/-/combined-stream-1.0.8.tgz",
+      "sha256": "b6be5aabe53e90635beb77cd0e0ba7ae6a25c8cf903b15fcc342353e732e1512",
+      "size": 4068
+    },
+    {
+      "name": "dayjs",
+      "version": "1.11.23",
+      "path": "node_modules/dayjs",
+      "url": "https://registry.npmjs.org/dayjs/-/dayjs-1.11.23.tgz",
+      "sha256": "7da0ff55ddb6d4050b91ea0a11a8e9d92c048305155039387373f20be080e594",
+      "size": 148204
+    },
+    {
+      "name": "debug",
+      "version": "4.4.3",
+      "path": "node_modules/debug",
+      "url": "https://registry.npmjs.org/debug/-/debug-4.4.3.tgz",
+      "sha256": "89c1ac9c946ee8905a875837114528e97eeae35e03be3190584b2216af43e4a7",
+      "size": 13449
+    },
+    {
+      "name": "delayed-stream",
+      "version": "1.0.0",
+      "path": "node_modules/delayed-stream",
+      "url": "https://registry.npmjs.org/delayed-stream/-/delayed-stream-1.0.0.tgz",
+      "sha256": "ac38fce4217dfb1d772427c7d8d0d073e35ecd832915e97a61d9ab5c504129d3",
+      "size": 3464
+    },
+    {
+      "name": "dunder-proto",
+      "version": "1.0.1",
+      "path": "node_modules/dunder-proto",
+      "url": "https://registry.npmjs.org/dunder-proto/-/dunder-proto-1.0.1.tgz",
+      "sha256": "ed1342228c82c10df9921c59d684df516a0cd6ed25b61e5f9d6330895326cfdb",
+      "size": 5049
+    },
+    {
+      "name": "ecdsa-sig-formatter",
+      "version": "1.0.11",
+      "path": "node_modules/ecdsa-sig-formatter",
+      "url": "https://registry.npmjs.org/ecdsa-sig-formatter/-/ecdsa-sig-formatter-1.0.11.tgz",
+      "sha256": "487cb94dff2414772c3bb648a5e4e41c03cbbcc64263d08a56e36d735fc848fe",
+      "size": 7104
+    },
+    {
+      "name": "es-define-property",
+      "version": "1.0.1",
+      "path": "node_modules/es-define-property",
+      "url": "https://registry.npmjs.org/es-define-property/-/es-define-property-1.0.1.tgz",
+      "sha256": "5986b8b13121340a8b0d5c7d8f0f961aa80ef3a74515ca9cb7a78d86ed0385f7",
+      "size": 4431
+    },
+    {
+      "name": "es-errors",
+      "version": "1.3.0",
+      "path": "node_modules/es-errors",
+      "url": "https://registry.npmjs.org/es-errors/-/es-errors-1.3.0.tgz",
+      "sha256": "d14dd1c35b4bd3b8aca3219fd3627eb7f3eb49cf6b4c8a7ca58b91fd7a190993",
+      "size": 5338
+    },
+    {
+      "name": "es-object-atoms",
+      "version": "1.1.2",
+      "path": "node_modules/es-object-atoms",
+      "url": "https://registry.npmjs.org/es-object-atoms/-/es-object-atoms-1.1.2.tgz",
+      "sha256": "f295c5df6751c65b4b9492b03c88fab5e13419de28a51ecdf17e693b4a421af0",
+      "size": 4820
+    },
+    {
+      "name": "es-set-tostringtag",
+      "version": "2.1.0",
+      "path": "node_modules/es-set-tostringtag",
+      "url": "https://registry.npmjs.org/es-set-tostringtag/-/es-set-tostringtag-2.1.0.tgz",
+      "sha256": "5675f51a5c33ee402bff8a2a341a0390f85e82d3c199859244d2f67091b0b93d",
+      "size": 5583
+    },
+    {
+      "name": "follow-redirects",
+      "version": "1.16.2",
+      "path": "node_modules/follow-redirects",
+      "url": "https://registry.npmjs.org/follow-redirects/-/follow-redirects-1.16.2.tgz",
+      "sha256": "97926c99452df68ec21aa3d518101b6d93a803652d6e1e7d70b273a8930224c8",
+      "size": 10606
+    },
+    {
+      "name": "form-data",
+      "version": "4.0.6",
+      "path": "node_modules/form-data",
+      "url": "https://registry.npmjs.org/form-data/-/form-data-4.0.6.tgz",
+      "sha256": "fc4d94e9b629f5378367ba46da7d96115696c01e25c99cd57c2c9a3d098bb557",
+      "size": 24198
+    },
+    {
+      "name": "mime-db",
+      "version": "1.52.0",
+      "path": "node_modules/form-data/node_modules/mime-db",
+      "url": "https://registry.npmjs.org/mime-db/-/mime-db-1.52.0.tgz",
+      "sha256": "b8e70bb4d52acd5d0d1ed848c0e6e3c903a533aa500acffbe003f011b18f9e3b",
+      "size": 26992
+    },
+    {
+      "name": "mime-types",
+      "version": "2.1.35",
+      "path": "node_modules/form-data/node_modules/mime-types",
+      "url": "https://registry.npmjs.org/mime-types/-/mime-types-2.1.35.tgz",
+      "sha256": "49734fc98906e9baaacf8034923470a4c84de72943a7c005face63360701d1c3",
+      "size": 5591
+    },
+    {
+      "name": "function-bind",
+      "version": "1.1.2",
+      "path": "node_modules/function-bind",
+      "url": "https://registry.npmjs.org/function-bind/-/function-bind-1.1.2.tgz",
+      "sha256": "704402651b02a1454f17d445fc7dd716efc282d059407126d58ef30a47e807aa",
+      "size": 9799
+    },
+    {
+      "name": "get-intrinsic",
+      "version": "1.3.0",
+      "path": "node_modules/get-intrinsic",
+      "url": "https://registry.npmjs.org/get-intrinsic/-/get-intrinsic-1.3.0.tgz",
+      "sha256": "662e27e54e00fe46fbb08f9f4aacb054e3695dbe72cc14b436613fbcfb780544",
+      "size": 13800
+    },
+    {
+      "name": "get-proto",
+      "version": "1.0.1",
+      "path": "node_modules/get-proto",
+      "url": "https://registry.npmjs.org/get-proto/-/get-proto-1.0.1.tgz",
+      "sha256": "eb2cc52afb1f1fd82c5fc2a58c2380f0f16fdcdb5631538f3c66887435d70681",
+      "size": 4474
+    },
+    {
+      "name": "gopd",
+      "version": "1.2.0",
+      "path": "node_modules/gopd",
+      "url": "https://registry.npmjs.org/gopd/-/gopd-1.2.0.tgz",
+      "sha256": "d536d0de4dd285dc1468fbb7f39334a47ee0eec9c27f9b626a6e71466c9fda82",
+      "size": 4584
+    },
+    {
+      "name": "has-symbols",
+      "version": "1.1.0",
+      "path": "node_modules/has-symbols",
+      "url": "https://registry.npmjs.org/has-symbols/-/has-symbols-1.1.0.tgz",
+      "sha256": "4460c7532f28b8df2ddc9a1ec17816d43c24d4b9591dc6c5936b82f7f86ae7c5",
+      "size": 8059
+    },
+    {
+      "name": "has-tostringtag",
+      "version": "1.0.2",
+      "path": "node_modules/has-tostringtag",
+      "url": "https://registry.npmjs.org/has-tostringtag/-/has-tostringtag-1.0.2.tgz",
+      "sha256": "dc1c74e3f1179a6271f84747d72c89f258aa46ad3e6464fae0e41737a7f0ef7b",
+      "size": 6465
+    },
+    {
+      "name": "hasown",
+      "version": "2.0.4",
+      "path": "node_modules/hasown",
+      "url": "https://registry.npmjs.org/hasown/-/hasown-2.0.4.tgz",
+      "sha256": "e9d2b03f95573600e1c13124ce618e3142ed2c538d164595bedcd4408b8a4e4c",
+      "size": 4608
+    },
+    {
+      "name": "jsonwebtoken",
+      "version": "9.0.3",
+      "path": "node_modules/jsonwebtoken",
+      "url": "https://registry.npmjs.org/jsonwebtoken/-/jsonwebtoken-9.0.3.tgz",
+      "sha256": "d9af2628a7a4dda25acf1e19c7ecc2468e1e9e8d4619fe2cae829e89d96f6b82",
+      "size": 12253
+    },
+    {
+      "name": "jwa",
+      "version": "2.0.1",
+      "path": "node_modules/jwa",
+      "url": "https://registry.npmjs.org/jwa/-/jwa-2.0.1.tgz",
+      "sha256": "c8bc0cf9fbbdc9d2f1b6f3f97ab9c1f70130eec6b153f29fd69baa5a6aa8341d",
+      "size": 4720
+    },
+    {
+      "name": "jws",
+      "version": "4.0.1",
+      "path": "node_modules/jws",
+      "url": "https://registry.npmjs.org/jws/-/jws-4.0.1.tgz",
+      "sha256": "ed3a5fb027f8ce1006c8e30a37e88e7cd49824d4873efca8765304b20fe92e12",
+      "size": 6190
+    },
+    {
+      "name": "lodash.includes",
+      "version": "4.3.0",
+      "path": "node_modules/lodash.includes",
+      "url": "https://registry.npmjs.org/lodash.includes/-/lodash.includes-4.3.0.tgz",
+      "sha256": "ad1fb3f7aa3c53d2aa7b5fd006507404d71fcccb341162b6423645d997c808d7",
+      "size": 6191
+    },
+    {
+      "name": "lodash.isboolean",
+      "version": "3.0.3",
+      "path": "node_modules/lodash.isboolean",
+      "url": "https://registry.npmjs.org/lodash.isboolean/-/lodash.isboolean-3.0.3.tgz",
+      "sha256": "11a52014f5d33bdc0b58a79fd10355b8209aeb1b2c57f2c13b7395ca57dcee9d",
+      "size": 2109
+    },
+    {
+      "name": "lodash.isinteger",
+      "version": "4.0.4",
+      "path": "node_modules/lodash.isinteger",
+      "url": "https://registry.npmjs.org/lodash.isinteger/-/lodash.isinteger-4.0.4.tgz",
+      "sha256": "7885443a78d4400274bf42a5929f6aaab23ca5d7e303deee76fe702ffe873b7d",
+      "size": 3464
+    },
+    {
+      "name": "lodash.isnumber",
+      "version": "3.0.3",
+      "path": "node_modules/lodash.isnumber",
+      "url": "https://registry.npmjs.org/lodash.isnumber/-/lodash.isnumber-3.0.3.tgz",
+      "sha256": "73e5167e1e06f496cbad0f96afda0590302c0867f9840730e2600edf03c29b63",
+      "size": 2187
+    },
+    {
+      "name": "lodash.isplainobject",
+      "version": "4.0.6",
+      "path": "node_modules/lodash.isplainobject",
+      "url": "https://registry.npmjs.org/lodash.isplainobject/-/lodash.isplainobject-4.0.6.tgz",
+      "sha256": "986420e1ce139727af84069d7b88912facac64e5ca1281efd9f55b228fad72d0",
+      "size": 3031
+    },
+    {
+      "name": "lodash.isstring",
+      "version": "4.0.1",
+      "path": "node_modules/lodash.isstring",
+      "url": "https://registry.npmjs.org/lodash.isstring/-/lodash.isstring-4.0.1.tgz",
+      "sha256": "45fd48aeca41f05f44fd413471f254c472e1e7a811ab84ea41448d2e7155cd5f",
+      "size": 2177
+    },
+    {
+      "name": "lodash.once",
+      "version": "4.1.1",
+      "path": "node_modules/lodash.once",
+      "url": "https://registry.npmjs.org/lodash.once/-/lodash.once-4.1.1.tgz",
+      "sha256": "0d67808f6f1d4c35c65e0e34c19e0a2de02727616cc8e276535f3eae98ce23b5",
+      "size": 3903
+    },
+    {
+      "name": "math-intrinsics",
+      "version": "1.1.0",
+      "path": "node_modules/math-intrinsics",
+      "url": "https://registry.npmjs.org/math-intrinsics/-/math-intrinsics-1.1.0.tgz",
+      "sha256": "b8c2c35575493dc086df88cfc468a9e2651b6617336480ab3f00fcf853f443a7",
+      "size": 6355
+    },
+    {
+      "name": "ms",
+      "version": "2.1.3",
+      "path": "node_modules/ms",
+      "url": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
+      "sha256": "f6616e15e530ed552f9daa2d3ce71963947c6bc7c98c9b64fd3e673fd02622c6",
+      "size": 2967
+    },
+    {
+      "name": "object-inspect",
+      "version": "1.13.4",
+      "path": "node_modules/object-inspect",
+      "url": "https://registry.npmjs.org/object-inspect/-/object-inspect-1.13.4.tgz",
+      "sha256": "8324967a3afd8a45b0401e3554aebc1843f493bec46a89a7ce8cf072e62e90bf",
+      "size": 28026
+    },
+    {
+      "name": "proxy-from-env",
+      "version": "2.1.0",
+      "path": "node_modules/proxy-from-env",
+      "url": "https://registry.npmjs.org/proxy-from-env/-/proxy-from-env-2.1.0.tgz",
+      "sha256": "e9c52dbf1e382319d5da00b8d964805859b7eb1424450e049d12743d7e19fc9a",
+      "size": 5358
+    },
+    {
+      "name": "qs",
+      "version": "6.16.1",
+      "path": "node_modules/qs",
+      "url": "https://registry.npmjs.org/qs/-/qs-6.16.1.tgz",
+      "sha256": "bdb0e06e5cde7b4d7e0117faa678416bbc2c9287b0672c35c04da2b9de1d3cbf",
+      "size": 85495
+    },
+    {
+      "name": "safe-buffer",
+      "version": "5.2.1",
+      "path": "node_modules/safe-buffer",
+      "url": "https://registry.npmjs.org/safe-buffer/-/safe-buffer-5.2.1.tgz",
+      "sha256": "5d181804516c4a693a384272a7bd0e42d17e0d4b301ccfbe408669ccafdcb3e8",
+      "size": 9972
+    },
+    {
+      "name": "scmp",
+      "version": "2.1.0",
+      "path": "node_modules/scmp",
+      "url": "https://registry.npmjs.org/scmp/-/scmp-2.1.0.tgz",
+      "sha256": "ca171d56ce95e138f0bc28ceb4db8e0b5e71710b702efbad338a8bdddd906050",
+      "size": 3245
+    },
+    {
+      "name": "semver",
+      "version": "7.8.5",
+      "path": "node_modules/semver",
+      "url": "https://registry.npmjs.org/semver/-/semver-7.8.5.tgz",
+      "sha256": "d85045d4300d7d57c891336b95df532e73f34c22ffcd222452b6d08b9d127d5d",
+      "size": 29399
+    },
+    {
+      "name": "side-channel",
+      "version": "1.1.1",
+      "path": "node_modules/side-channel",
+      "url": "https://registry.npmjs.org/side-channel/-/side-channel-1.1.1.tgz",
+      "sha256": "e6edbc8f203901612a3cd938f940ed520333923986d5427b95c87aa1882e7bd5",
+      "size": 8083
+    },
+    {
+      "name": "side-channel-list",
+      "version": "1.0.1",
+      "path": "node_modules/side-channel-list",
+      "url": "https://registry.npmjs.org/side-channel-list/-/side-channel-list-1.0.1.tgz",
+      "sha256": "793c94ac215be772757045f8804406578b8cbc1bda7e1cde23011f9145af74f7",
+      "size": 6135
+    },
+    {
+      "name": "side-channel-map",
+      "version": "1.0.1",
+      "path": "node_modules/side-channel-map",
+      "url": "https://registry.npmjs.org/side-channel-map/-/side-channel-map-1.0.1.tgz",
+      "sha256": "3b256b6421300bcc962d891b1588fd4b64e84e339b9c29f78c61b72f2a7116d6",
+      "size": 5280
+    },
+    {
+      "name": "side-channel-weakmap",
+      "version": "1.0.2",
+      "path": "node_modules/side-channel-weakmap",
+      "url": "https://registry.npmjs.org/side-channel-weakmap/-/side-channel-weakmap-1.0.2.tgz",
+      "sha256": "3b2a54f0c5e7ad898c8f0ffda2a6805fb2cc5d68f53addf0b4a9ec0db9d0d06e",
+      "size": 5442
+    },
+    {
+      "name": "twilio",
+      "version": "5.13.1",
+      "path": "node_modules/twilio",
+      "url": "https://registry.npmjs.org/twilio/-/twilio-5.13.1.tgz",
+      "sha256": "395f96023981a3bbacfdbc85890e520b817210d1c4b021046621286a8643ccdd",
+      "size": 1013072
+    },
+    {
+      "name": "agent-base",
+      "version": "6.0.2",
+      "path": "node_modules/twilio/node_modules/agent-base",
+      "url": "https://registry.npmjs.org/agent-base/-/agent-base-6.0.2.tgz",
+      "sha256": "bc6da06f2a2e6bc80fa5878bd7227bd0318812976d45f47f17e1aafcec2be831",
+      "size": 9273
+    },
+    {
+      "name": "https-proxy-agent",
+      "version": "5.0.1",
+      "path": "node_modules/twilio/node_modules/https-proxy-agent",
+      "url": "https://registry.npmjs.org/https-proxy-agent/-/https-proxy-agent-5.0.1.tgz",
+      "sha256": "6da16fb44331f2e5d30bd21bf880aa934c1ad4fe7da7187910ef2b2509712019",
+      "size": 8412
+    },
+    {
+      "name": "xmlbuilder",
+      "version": "13.0.2",
+      "path": "node_modules/xmlbuilder",
+      "url": "https://registry.npmjs.org/xmlbuilder/-/xmlbuilder-13.0.2.tgz",
+      "sha256": "93d700ab75f49f53b2b7c48e82cdbeb3603ffbdb168092061bb713d57303112d",
+      "size": 40333
+    }
+  ],
+  "host": "call-center",
+  "protocolVersion": 1
+}

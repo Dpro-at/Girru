@@ -92,11 +92,10 @@ if (URL_) {
     routes: {
       evolution: (await import('../src/api/routes/evolution.ts')).default,
       webhooks: (await import('../src/api/routes/webhooks.ts')).webhooksRoutes,
-      telephony: (await import('../src/api/routes/telephony.ts')).registerTelephonyRoutes,
+      telephony: (await import('./fixtures/legacy-apps/src/api/routes/telephony.ts')).registerTelephonyRoutes,
       dashboard: (await import('../src/api/routes/dashboard.ts')).registerDashboardRoutes,
       worldBots: (await import('../src/api/routes/world-bots.ts')).worldBotsRoutes,
       multiverse: (await import('../src/api/routes/multiverse.ts')).multiverseRoutes,
-      publicChat: (await import('../src/api/routes/public-chat.ts')).registerPublicChatRoutes,
       avatar: (await import('../src/api/routes/avatar.ts')).registerAvatarRoutes,
       database: (await import('../src/api/routes/database.ts')).databaseRoutes,
       databaseStats: (await import('../src/api/routes/database-stats.ts')).databaseStatsRoutes,
@@ -476,81 +475,6 @@ test('multiverse: world create/update/delete with owner checks, bots added concu
 
 // ---------------------------------------------------------------------------
 // Public chat
-// ---------------------------------------------------------------------------
-
-test('public chat: anonymous visitor in a public room gets no MEMORY.md (S0-A.14); the room owner does; counters and joins are exact', { skip }, async () => {
-  const agentId = `pc-agent-${tag}`;
-  await pgRun(`INSERT INTO agents_config (id, name) VALUES (?, ?)`, agentId, `Room agent ${tag}`);
-  const agentDir = m.agentFiles.getAgentDir(agentId);
-  mkdirSync(agentDir, { recursive: true });
-  writeFileSync(join(agentDir, 'PERSONALITY.md'), `You are the room agent. ${PERSONALITY_MARK}`);
-  writeFileSync(join(agentDir, 'MEMORY.md'), `Owner notes. ${MEMORY_MARK}`);
-  const app = await appWith(m.routes.publicChat);
-  const created = await inject(app, { method: 'POST', url: '/api/public-chat/rooms', headers: bearer(u.owner.id), payload: { name: `Lobby ${tag}`, model: 'llama3', agent_id: agentId, is_public: true, rate_limit_seconds: 0 } });
-  assert.equal(created.statusCode, 200, created.body);
-  const room = created.json().room;
-  assert.equal(room.is_public, 1);
-  const msgUrl = `/api/public-chat/rooms/${room.id}/messages`;
-
-  // Q-14: anonymous visitors only when the owner turned it on.
-  await m.settings.getSettingsManager().updateSettings({ publicRooms: { allowAnonymous: false } });
-  assert.equal((await inject(app, { method: 'GET', url: `/api/public-chat/rooms/${room.id}` })).statusCode, 404);
-  await m.settings.getSettingsManager().updateSettings({ publicRooms: { allowAnonymous: true } });
-
-  prompts.length = 0;
-  const anon = await inject(app, { method: 'POST', url: msgUrl, payload: { content: 'hello', username: 'visitor' } });
-  assert.equal(anon.statusCode, 200, anon.body);
-  assert.match(anon.body, /stub reply/);
-  const anonPrompt = prompts.join('\n');
-  assert.ok(anonPrompt.includes(PERSONALITY_MARK), 'personality used');
-  assert.ok(!anonPrompt.includes(MEMORY_MARK), 'no MEMORY.md for an anonymous visitor');
-
-  prompts.length = 0;
-  const member = await inject(app, { method: 'POST', url: msgUrl, headers: bearer(u.member.id), payload: { content: 'hi from member' } });
-  assert.equal(member.statusCode, 200, member.body);
-  assert.ok(!prompts.join('\n').includes(MEMORY_MARK), 'no MEMORY.md for a non-owner member');
-
-  prompts.length = 0;
-  const owner = await inject(app, { method: 'POST', url: msgUrl, headers: bearer(u.owner.id), payload: { content: 'hi from owner' } });
-  assert.equal(owner.statusCode, 200, owner.body);
-  assert.ok(prompts.join('\n').includes(MEMORY_MARK), 'the room owner gets MEMORY.md');
-
-  // Messages and counters: every message counted once; order kept.
-  const msgs = await inject(app, { method: 'GET', url: msgUrl });
-  assert.equal(msgs.statusCode, 200, msgs.body);
-  const list = msgs.json().messages;
-  assert.equal(list.length, 6);
-  assert.deepEqual(list.map((x) => x.role), ['user', 'assistant', 'user', 'assistant', 'user', 'assistant']);
-  assert.deepEqual(list.filter((x) => x.role === 'user').map((x) => x.content), ['hello', 'hi from member', 'hi from owner']);
-  assert.match(list[0].created_at, TEXT_TS);
-  assert.equal((await one('SELECT message_count FROM public_chat_rooms WHERE id = ?', room.id)).message_count, 6);
-
-  // Three concurrent joins with the same name: one participant, counted once.
-  const joins = await Promise.all([1, 2, 3].map(() => inject(app, { method: 'POST', url: `/api/public-chat/rooms/${room.id}/join`, payload: { username: `guest-${tag}` } })));
-  assert.deepEqual(joins.map((r) => r.statusCode), [200, 200, 200]);
-  assert.equal((await one('SELECT COUNT(*) AS n FROM public_chat_participants WHERE room_id = ?', room.id)).n, 1);
-  assert.equal((await one('SELECT participant_count FROM public_chat_rooms WHERE id = ?', room.id)).participant_count, 1);
-  const leave = await inject(app, { method: 'POST', url: `/api/public-chat/rooms/${room.id}/leave`, headers: bearer(u.member.id) });
-  assert.equal(leave.statusCode, 200);
-  assert.equal((await one('SELECT participant_count FROM public_chat_rooms WHERE id = ?', room.id)).participant_count, 0);
-  const leave2 = await inject(app, { method: 'POST', url: `/api/public-chat/rooms/${room.id}/leave`, headers: bearer(u.member.id) });
-  assert.equal(leave2.statusCode, 200);
-  assert.equal((await one('SELECT participant_count FROM public_chat_rooms WHERE id = ?', room.id)).participant_count, 0, 'never below zero (greatest)');
-
-  // Owner-only update and delete.
-  assert.equal((await inject(app, { method: 'PUT', url: `/api/public-chat/rooms/${room.id}`, headers: bearer(u.member.id), payload: { name: 'x' } })).statusCode, 403);
-  const put = await inject(app, { method: 'PUT', url: `/api/public-chat/rooms/${room.id}`, headers: bearer(u.owner.id), payload: { name: `Lobby2 ${tag}`, embed_enabled: false } });
-  assert.equal(put.statusCode, 200, put.body);
-  assert.equal(put.json().room.name, `Lobby2 ${tag}`);
-  assert.equal(put.json().room.embed_enabled, 0);
-  await m.settings.getSettingsManager().updateSettings({ publicRooms: { allowAnonymous: false } });
-  assert.equal((await inject(app, { method: 'POST', url: msgUrl, payload: { content: 'again' } })).statusCode, 404, 'anonymous off again');
-  assert.equal((await inject(app, { method: 'DELETE', url: `/api/public-chat/rooms/${room.id}`, headers: bearer(u.owner.id) })).statusCode, 200);
-  assert.equal((await one('SELECT COUNT(*) AS n FROM public_chat_messages WHERE room_id = ?', room.id)).n, 0, 'messages cascade');
-});
-
-// ---------------------------------------------------------------------------
-// Avatars
 // ---------------------------------------------------------------------------
 
 test('avatars: CRUD with camelCase fields; concurrent first adds activate exactly one; activate and delete hand over', { skip }, async () => {

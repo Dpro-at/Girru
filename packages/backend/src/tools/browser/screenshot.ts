@@ -1,3 +1,4 @@
+import {loadBrowserRuntime} from '../../services/browser-runtime.js';
 /**
  * Browser Screenshot Tool
  *
@@ -93,6 +94,7 @@ Returns the path to the saved screenshot image.`,
 
   async execute(rawParams): Promise<ToolResult> {
     const params = rawParams as BrowserScreenshotParams;
+    if(!await loadBrowserRuntime())return {error:'app_not_enabled',content:[{type:'text',text:'Add and enable Browser from the Store, then restart Girru.'}]};
     const controller = getBrowserController();
     let sessionId: string | null = null;
 

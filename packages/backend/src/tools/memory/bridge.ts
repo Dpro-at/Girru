@@ -21,6 +21,7 @@ import {
 } from '../../memory/bridge/service.js';
 import { BRIDGE_CLIENTS, type BridgeClient } from '../../memory/bridge/clients.js';
 import { listBridgeHandoffs } from '../../memory/bridge/store.js';
+import { groupByPeriod, periodSummary } from '../../memory/handoff/periods.js';
 
 const fail = (msg: string): ToolResult => ({ content: [{ type: 'text', text: `Memory bridge refused: ${msg}` }], error: msg });
 const ok = (text: string, data: unknown): ToolResult => ({ content: [{ type: 'text', text }], data: { success: true, ...(data as object) } } as ToolResult);
@@ -91,10 +92,13 @@ To apply a preview, call memory_bridge_apply with its previewHash (the owner app
         const limit = typeof params.limit === 'number' ? Math.max(1, Math.min(200, Math.floor(params.limit))) : 20;
         const notes = await listBridgeHandoffs(owner, { projectId: params.project_id as string | undefined, client: params.client as BridgeClient | undefined, limit });
         const line = (xs: string[]) => xs.join('; ') || '-';
+        const one = (n: (typeof notes)[number]) => `- ${n.createdAt} [${n.client}] project ${n.projectId}: done ${line(n.done)} | left ${line(n.left)} | next ${line(n.next)}${n.questions.length ? ` | questions ${line(n.questions)}` : ''}`;
+        // HANDOFF-PERIOD-01: months of notes read as "what happened this week", not one long list.
+        const groups = groupByPeriod(notes);
         const text = notes.length
-          ? notes.map((n) => `- ${n.createdAt} [${n.client}] project ${n.projectId}: done ${line(n.done)} | left ${line(n.left)} | next ${line(n.next)}${n.questions.length ? ` | questions ${line(n.questions)}` : ''}`).join('\n')
+          ? [periodSummary(notes), '', ...groups.flatMap((g) => [`${g.label}:`, ...g.items.map(one), ''])].join('\n').trimEnd()
           : 'No handoff notes from coding apps yet.';
-        return ok(text, { handoffs: notes });
+        return ok(text, { handoffs: notes, periods: groups.map((g) => ({ period: g.period, label: g.label, count: g.items.length, ids: g.items.map((n) => n.id) })) });
       }
       return fail('unknown action');
     });

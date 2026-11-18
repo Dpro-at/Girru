@@ -48,6 +48,8 @@ import {
 import { repositories } from '../../repositories/index.js';
 import { ScopeError, actorOrReply, requireOwner } from '../../repositories/scope.js';
 import { ScopeInputError, acceptRoutine, previewAcceptRoutine, reviewGroups } from '../../memory/scopes/index.js';
+import { privacyFlags } from '../../memory/personal-data.js';
+import { storeP9Enabled } from '../../services/store-p9.js';
 
 const STATUSES = new Set(['pending', 'approved', 'rejected', 'stale', 'cancelled']);
 
@@ -69,10 +71,17 @@ function fail(reply: FastifyReply, err: unknown) {
   throw err;
 }
 
+/** STORE-MAP-01 P9 (board P9d): the personal-data kinds and sensitive topics of a flagged proposal's new text (never the values). */
+function withPrivacy<T extends object>(p: MemoryProposal, out: T): T {
+  if (!storeP9Enabled()) return out;
+  const flags = privacyFlags(p.reasons ?? [], p.changes.map((c) => ('after' in c && c.after ? c.after.content : '')));
+  return flags ? { ...out, privacy: flags } : out;
+}
+
 function summary(p: MemoryProposal) {
   const count = (op: string) => p.changes.filter((c) => c.op === op).length;
   const { changes: _changes, ...rest } = p;
-  return { ...rest, counts: { add: count('add'), update: count('update'), delete: count('delete') } };
+  return withPrivacy(p, { ...rest, counts: { add: count('add'), update: count('update'), delete: count('delete') } });
 }
 
 type DrawerParams = { Params: { drawer: string } };
@@ -194,7 +203,8 @@ export async function memoryFilesRoutes(fastify: FastifyInstance) {
     const ownerId = ownerOf(request, reply);
     if (ownerId === null) return reply;
     try {
-      return await repositories.memory.proposal(actorOf(request), request.params.id);
+      const p = await repositories.memory.proposal(actorOf(request), request.params.id);
+      return withPrivacy(p, p);
     } catch (err) { return fail(reply, err); }
   });
 

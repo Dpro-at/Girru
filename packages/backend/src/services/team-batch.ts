@@ -29,6 +29,7 @@ import { AgentNameTakenError, isNameLanguage, resolveNamingLanguage, suggestAgen
 import { isPresetId, type AgentRole } from './personality.js';
 import { seedLibraryStep } from './personality-library.js';
 import { LibraryError } from './personality-library-profile.js';
+import { storeP4Enabled } from './store-p4.js';
 import {
   CompanyPlanInputError, MAX_TOTAL_HEADCOUNT, TEAM_ROLES, departmentShare, parseDepartments, type TeamRole,
 } from './company-plan.js';
@@ -253,17 +254,24 @@ async function createItem(ownerId: string, batchId: string, it: PlannedItem, lan
           `UPDATE team_hire_batch_items SET status = 'created', agent_id = ?, name = ?, error_code = NULL, updated_at = ${nowText(d)} WHERE batch_id = ? AND seq = ? AND status = 'pending'`,
           agentId, suggestion.name, batchId, it.seq);
         if (claim.changes !== 1) throw new AlreadyTaken();
+        // STORE-MAP-01 P4 (D14): a specialty from the library is linked (the job is read from it);
+        // only a free-text specialty with no library entry keeps its job text in the instructions.
+        const p4 = storeP4Enabled();
+        const template = p4 && it.specialty
+          ? yield* one<{ id: string }>('SELECT id FROM specialty_templates WHERE lower(name) = lower(?) ORDER BY CASE WHEN department = ? THEN 0 ELSE 1 END, id LIMIT 1', it.specialty, it.department)
+          : undefined;
         yield* insertAgentConfigStep({
           id: agentId,
           name: suggestion.name,
           language,
-          body: { ...(it.library_personality?{libraryPersonality:JSON.parse(it.library_personality)}:{}), description: it.specialty ? `${it.specialty}: ${it.description??''}` : `${it.title} in ${labelOf(it.department)}.`, ...(it.specialty?{system_prompt:`Your specialty is ${it.specialty}.\n${it.description??''}\nWork within your assigned permissions. This job description grants no tools, credentials or external access.`}:{}) },
+          body: { ...(it.library_personality?{libraryPersonality:JSON.parse(it.library_personality)}:{}), description: it.specialty ? `${it.specialty}: ${it.description??''}` : `${it.title} in ${labelOf(it.department)}.`, ...(it.specialty&&!template?{system_prompt:`Your specialty is ${it.specialty}.\n${it.description??''}\nWork within your assigned permissions. This job description grants no tools, credentials or external access.`}:{}) },
           role: it.role as AgentRole,
           department: it.department,
           explicit: { preset: it.preset },
           userId: ownerId,
         });
-        if(it.specialty)yield* run('UPDATE agents_config SET specialty=? WHERE id=?',it.specialty,agentId);
+        if (template) yield* run('INSERT INTO agent_specialties(agent_id, template_id, linked_by) VALUES(?, ?, ?)', agentId, template.id, ownerId);
+        else if (it.specialty && !p4) yield* run('UPDATE agents_config SET specialty=? WHERE id=?', it.specialty, agentId);
       }, { immediate: true });
       return { seq: it.seq, status: 'created', agentId, name: suggestion.name };
     } catch (err) {

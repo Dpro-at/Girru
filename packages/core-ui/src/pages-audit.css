@@ -13,3 +13,19 @@
 /* "‹ Agents" / "‹ Apps" on top of a place's sidebar (board SH1). */
 .sidebar > .place-return { display:flex; align-items:center; justify-content:flex-start; gap:6px; margin:8px 8px 0; padding:4px 8px; border:0; border-radius:6px; background:transparent; color:var(--text-2); font-size:12px; cursor:default; }
 .sidebar > .place-return:hover { background:var(--row-hover); color:var(--text); }
+
+/* STORE-MAP-01 P5 (boards P5a–P5c): its own notes, MEMORY.md changed outside Girru, Import agent. */
+.ag-notes{margin:0 0 10px}
+.ag-notes-head{font-size:11px;font-weight:600;color:var(--muted, currentColor);text-transform:uppercase;letter-spacing:.04em;margin:0 0 4px}
+.ag-notes-row{border:1px solid var(--border);border-radius:8px;cursor:default}
+.ag-notes-row[aria-expanded="true"]{background:var(--select,rgba(0,122,255,.10))}
+.ag-notes-insp{margin-top:6px;position:static;max-width:none}
+.ag-notes-text{white-space:pre-wrap;max-height:240px;overflow:auto}
+.ag-notes-compare{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.ag-notes-compare h4{margin:0 0 4px;font-size:12px}
+.ag-notes-compare pre{white-space:pre-wrap;max-height:320px;overflow:auto;margin:0;padding:8px;border:1px solid var(--border);border-radius:6px;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
+.af-outside{display:flex;align-items:center;gap:6px}
+.ag-import-cols{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.ag-import-cols h4{display:flex;align-items:center;gap:6px;margin:0 0 4px;font-size:12px}
+.ag-import-cols ul{margin:0;padding-left:16px;font-size:12px;line-height:1.5}
+@media (max-width:720px){.ag-notes-compare,.ag-import-cols{grid-template-columns:1fr}}

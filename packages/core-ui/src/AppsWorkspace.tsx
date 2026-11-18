@@ -10,7 +10,7 @@ import type {FooterPrefs,FooterSection} from './footer-prefs';
 /** The place other pages can open. The Store is its own section; coding app plugins are in Settings › Models and replies. */
 export type AppsPlace='mine';
 /** Apps that also have a footer section (SH3b: "can be pinned from Apps"). */
-const FOOTER_TOOLS:ReadonlyArray<string>=['genvr','terminal','code'];
+const FOOTER_TOOLS:ReadonlyArray<string>=['genvr','terminal','code','browser'];
 /** The checked "Show in the footer" item for an app tile; it uses the same footer choice as Settings › Footer. */
 export function footerToolItem(prefs:FooterPrefs,id:string,toggle:(id:FooterSection)=>void):MenuItem|null{if(!FOOTER_TOOLS.includes(id))return null;const shown=!prefs.hidden.includes(id as FooterSection);return {label:'Show in the footer',icon:'pin',checked:shown,run:()=>toggle(id as FooterSection)};}
 
@@ -21,7 +21,7 @@ export function footerToolItem(prefs:FooterPrefs,id:string,toggle:(id:FooterSect
  * Settings › Models and replies (board AP1). MCP connections, Channels and Accounts are
  * places in Settings.
  */
-export function AppsWorkspace({client,active,sidebarSlot,onOpen,onSettings,onPermissions,onCode,onStore}:{client:SessionClient;active:boolean;sidebarSlot?:HTMLElement|null;onOpen:(id:'terminal'|'genvr'|'trading')=>void;onConnections:(id?:string)=>void;onSettings?:(place:'accounts')=>void;onChat?:()=>void;onPermissions:()=>void;onCode?:()=>void;onSkills?:()=>void;onStore?:()=>void;placeRequest?:{place:AppsPlace;n:number}}){
+export function AppsWorkspace({client,active,sidebarSlot,onOpen,onSettings,onPermissions,onCode,onStore}:{client:SessionClient;active:boolean;sidebarSlot?:HTMLElement|null;onOpen:(id:'channels'|'terminal'|'genvr'|'trading')=>void;onConnections:(id?:string)=>void;onSettings?:(place:'accounts')=>void;onChat?:()=>void;onPermissions:()=>void;onCode?:()=>void;onSkills?:()=>void;onStore?:()=>void;placeRequest?:{place:AppsPlace;n:number}}){
  const searchInput=useRef<HTMLInputElement>(null),footer=footerFor(client),{prefs:footerPrefs}=useSyncExternalStore(footer.subscribe,footer.getSnapshot,footer.getSnapshot);
  const owner=client.getSnapshot().user?.role==='owner';
  const [query,setQuery]=useState(''),[refresh,setRefresh]=useState(0);

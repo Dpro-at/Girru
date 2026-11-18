@@ -1,0 +1,12 @@
+{
+  "name": "@girru/display-renderer",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./contract": "./src/contract.ts"
+  },
+  "peerDependencies": {
+    "react": ">=19 <20"
+  }
+}

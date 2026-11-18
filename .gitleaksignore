@@ -78,3 +78,50 @@ f49fb6d6ddb1922becc5f7372d2c2679e4422eaf:backend/test/agents/OLLAMA_TESTING_GUID
 12ab002a04d50adeed3d77c3706f4d9f4c98a88c:packages/backend/test/agent-memory-files.test.mjs:generic-api-key:10
 # Synthetic reviewer masking fixture, never an issued credential.
 dc3990b4fc87278adb35da36ad4f036bde140d9d:packages/backend/test/reviewer-votes-api.test.mjs:generic-api-key:98
+
+# Synthetic secret-redaction test input; the test verifies masking, not external authentication.
+115fd36ca35da7cbea5dac1bf6466c743e348adb:packages/backend/test/store-p8-links.test.mjs:generic-api-key:318
+
+# Throwaway protocol reference-vector bytes used only by cross-platform tests.
+c0ce40e75450453f97a8096abfaf1d25d178dcbb:packages/mobile/ios/Tests/CoreChecks/ReferenceVectors.swift:generic-api-key:16
+
+# Throwaway protocol reference-vector bytes used only by cross-platform tests.
+c0ce40e75450453f97a8096abfaf1d25d178dcbb:packages/mobile/ios/Tests/CoreChecks/ReferenceVectors.swift:generic-api-key:30
+
+# Disposable signup fixture, not a production credential.
+e5ffc7b7aa9380ab0a2a312210754a8d49e12e0c:packages/core-ui/tests/company-kind-signup.test.cjs:generic-api-key:17
+
+# Synthetic secret-redaction test input; the test verifies masking, not external authentication.
+960b0141ff0c6da694d1d4157cd046d2a44addad:packages/backend/test/store-p5.test.mjs:generic-api-key:81
+
+# Throwaway protocol reference-vector bytes used only by cross-platform tests.
+72a7a08be932b43c132bd2836a7fa2bafb323bd4:packages/mobile/android/app/src/test/java/dev/girru/app/crypto/ReferenceVectors.kt:generic-api-key:33
+
+# Throwaway protocol reference-vector bytes used only by cross-platform tests.
+72a7a08be932b43c132bd2836a7fa2bafb323bd4:packages/mobile/android/app/src/test/java/dev/girru/app/crypto/ReferenceVectors.kt:generic-api-key:41
+
+# Throwaway protocol reference-vector bytes used only by cross-platform tests.
+72a7a08be932b43c132bd2836a7fa2bafb323bd4:packages/mobile/android/app/src/test/java/dev/girru/app/crypto/ReferenceVectors.kt:generic-api-key:42
+
+# Throwaway protocol reference-vector bytes used only by cross-platform tests.
+72a7a08be932b43c132bd2836a7fa2bafb323bd4:packages/mobile/android/app/src/test/java/dev/girru/app/crypto/ReferenceVectors.kt:generic-api-key:43
+
+# Swift private-key type declaration, with no embedded key material.
+fc96fa78b1cf028380f1f6c68157f8fb56521254:packages/mobile/ios/Sources/GirruCore/PairingCrypto.swift:generic-api-key:68
+
+# Swift private-key type declaration, with no embedded key material.
+fc96fa78b1cf028380f1f6c68157f8fb56521254:packages/mobile/ios/Sources/GirruCore/PairingCrypto.swift:generic-api-key:137
+
+# Synthetic secret-redaction test input; the test verifies masking, not external authentication.
+608f96f08f067c5b80508398386c7a66f0307d01:packages/backend/test/agent-file-library.test.mjs:generic-api-key:31
+
+# Synthetic secret-redaction test input; the test verifies masking, not external authentication.
+608f96f08f067c5b80508398386c7a66f0307d01:packages/backend/test/agent-file-library.test.mjs:generic-api-key:95
+# Synthetic secret-detection fixture: "sk-live-" prefix, sequential digits and alphabet, written to a temp project to prove it stays behind.
+82a4d6be3903b656cca910e132bbe830b0c412af:packages/backend/test/device-coop.test.mjs:generic-api-key:66
+# Synthetic secret-detection fixture: "sk-live-" prefix, sequential digits and alphabet, written to a temp project to prove it stays behind.
+a536b729febec9294239b27b5cb2590eea637fb5:packages/backend/test/device-coop.test.mjs:generic-api-key:66
+# Source code, not a credential: the variable assignment receiptKey=verificationKey matched the generic detector.
+08fb58e3fd82d33e99861b070784b185378f5eee:packages/backend/src/memory/encryption/rotation-copy.ts:generic-api-key:17
+# Source code, not a credential: the variable assignment receiptKey=verificationKey matched the generic detector.
+2f632ed4ae052845e7e03393d0556fad2e255f16:packages/backend/src/memory/encryption/rotation-copy.ts:generic-api-key:17

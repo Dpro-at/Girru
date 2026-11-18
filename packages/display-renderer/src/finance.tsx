@@ -1,0 +1,30 @@
+import {useState} from 'react';
+import {rows,str,num,bounded,record} from './utils';
+import {SpecTable,XYChart,PieChart} from './charts';
+export function Candles({p}:{p:Record<string,unknown>}){
+ const [table,setTable]=useState(false);const data=rows(p.data).filter(r=>['open','high','low','close'].every(k=>num(r[k])!==null)&&Number(r.high)>=Math.max(Number(r.open),Number(r.close))&&Number(r.low)<=Math.min(Number(r.open),Number(r.close))).slice(0,60);
+ if(!data.length)return <p role="status">No valid OHLC data available.</p>;
+ if(data.some(r=>['open','high','low','close'].some(k=>Math.abs(Number(r[k]))>1e15)))return <p role="status">OHLC values exceed the supported numeric range.</p>;
+ const min=Math.min(...data.map(r=>Number(r.low))),max=Math.max(...data.map(r=>Number(r.high))),span=max-min||1,step=500/data.length,y=(v:number)=>15+(max-v)/span*150,volume=Math.max(1,...data.map(r=>num(r.volume)??0));
+ return <figure><figcaption>{str(p.symbol)} · {str(p.timeframe)}<button type="button" onClick={()=>setTable(!table)}>{table?'Chart':'Table'}</button></figcaption>{table?<SpecTable props={{data}}/>:<svg viewBox="0 0 540 240" role="img" aria-label={str(p.symbol)+' OHLC candlestick chart'} style={{width:'100%',height:bounded(p.height,120,600,240)}}>{data.map((r,i)=>{const x=20+i*step+step/2,up=Number(r.close)>=Number(r.open),c=up?'#22a06b':'#d94848';return <g key={i}><title>{`${str(r.timestamp)}: open ${str(r.open)}, high ${str(r.high)}, low ${str(r.low)}, close ${str(r.close)}`}</title><line x1={x} x2={x} y1={y(Number(r.high))} y2={y(Number(r.low))} stroke={c}/><rect x={x-Math.min(12,step*.3)} y={y(Math.max(Number(r.open),Number(r.close)))} width={Math.min(24,step*.6)} height={Math.max(1,Math.abs(y(Number(r.open))-y(Number(r.close))))} fill={c}/>{p.showVolume!==false&&<rect x={x-step*.3} y={225-Math.max(0,num(r.volume)??0)/volume*40} width={step*.6} height={Math.max(0,num(r.volume)??0)/volume*40} fill={c} opacity={.4}/>}</g>;})}</svg>}</figure>;
+}
+export function Options({p}:{p:Record<string,unknown>}){
+ const data=rows(p.chains);const price=num(p.currentPrice),nearest=price===null?null:data.map(r=>num(r.strike)).filter((v):v is number=>v!==null).sort((a,b)=>Math.abs(a-price)-Math.abs(b-price))[0];
+ return <section><strong>{str(p.symbol)} options · {str(p.expirationDate)}</strong><div style={{overflow:'auto',maxHeight:bounded(p.height,120,600,400)}}><table><thead><tr>{['Strike','Call bid','Call ask','Call volume','Call IV','Call delta','Put bid','Put ask','Put volume','Put IV','Put delta'].map(x=><th key={x}>{x}</th>)}</tr></thead><tbody>{data.map((r,i)=>{const calls=record(r.calls)?r.calls:{},puts=record(r.puts)?r.puts:{};return <tr key={i} data-selected={p.highlightATM!==false&&num(r.strike)===nearest||undefined}><th>{str(r.strike)}</th>{[calls,puts].flatMap((side,s)=>['bid','ask','volume','iv','delta'].map(k=><td key={s+k}>{str(side[k])}</td>))}</tr>;})}</tbody></table>{!data.length&&<p>No options data available.</p>}</div></section>;
+}
+export function Portfolio({p}:{p:Record<string,unknown>}){
+ const [table,setTable]=useState(false);const data=rows(p.data).filter(r=>num(r.portfolioValue)!==null).slice(0,60),initial=num(data[0]?.portfolioValue),benchmark=num(data[0]?.benchmarkValue);
+ if(!data.length||initial===null||initial<=0)return <p role="status">A positive initial portfolio value is required for return comparison.</p>;
+ let peak=initial;const points=data.map(r=>{const value=Number(r.portfolioValue);peak=Math.max(peak,value);return {date:str(r.date),portfolio:(value-initial)/initial*100,benchmark:p.showBenchmark!==false&&benchmark!==null&&benchmark>0&&num(r.benchmarkValue)!==null?(Number(r.benchmarkValue)-benchmark)/benchmark*100:null,drawdown:(value-peak)/peak*100};});
+ if(points.some(r=>[r.portfolio,r.benchmark,r.drawdown].some(v=>v!==null&&(!Number.isFinite(v)||Math.abs(v)>1e15))))return <p role="status">Return data exceeds the supported numeric range.</p>;
+ const values=points.flatMap(r=>[r.portfolio,...(r.benchmark!==null?[r.benchmark]:[])]),low=Math.min(0,...values),high=Math.max(0,...values),span=high-low||1,x=(i:number)=>30+i*480/Math.max(1,points.length-1),y=(v:number)=>175-(v-low)/span*150;
+ const path=(key:'portfolio'|'benchmark')=>{let previous=false;return points.map((r,i)=>{const value=r[key];if(value===null){previous=false;return '';}const command=previous?'L':'M';previous=true;return command+x(i)+','+y(value);}).join(' ');};
+ return <section><strong>Portfolio return (%)</strong><button type="button" onClick={()=>setTable(!table)}>{table?'Chart':'Table'}</button>{table?<SpecTable props={{data:points}}/>:<svg viewBox="0 0 540 210" role="img" aria-label="Portfolio and benchmark percentage returns" style={{width:'100%',height:bounded(p.height,120,600,240)}}><line x1={30} x2={510} y1={y(0)} y2={y(0)} stroke="#788594"/><path d={path('portfolio')} fill="none" stroke="#4d8dca" strokeWidth={2}/>{p.showBenchmark!==false&&points.some(r=>r.benchmark!==null)&&<path d={path('benchmark')} fill="none" stroke="#e8a040" strokeWidth={2}/>}<text x={30} y={200} fill="currentColor">{points[0].date}</text><text x={390} y={200} fill="currentColor">{points.at(-1)?.date}</text></svg>}<p>Portfolio{p.showBenchmark!==false?' · '+(str(p.benchmarkName)||'Benchmark'):''} · returns from supplied initial values</p>{p.showDrawdown===true&&<XYChart kind="AreaChart" props={{title:'Drawdown (%)',data:points,xKey:'date',yKey:'drawdown'}}/>}</section>;
+}
+export function Allocation({p}:{p:Record<string,unknown>}){
+ const holdings=rows(p.holdings),hasPercent=holdings.length>0&&holdings.every(r=>num(r.percentage)!==null&&Number(r.percentage)>=0);
+ const sum=hasPercent?holdings.reduce((v,r)=>v+Number(r.percentage),0):null;
+ if(sum!==null&&(!Number.isFinite(sum)||Math.abs(sum-100)>.05))return <p role="status">Supplied allocation percentages must total 100.</p>;
+ const data=holdings.map(r=>({name:str(r.name)||str(r.symbol),value:hasPercent?Number(r.percentage):num(r.value)??0}));
+ return <PieChart props={{title:'Asset allocation',data,nameKey:'name',valueKey:'value',height:p.height,interactive:p.interactive,showPercentages:p.showPercentages}}/>;
+}
