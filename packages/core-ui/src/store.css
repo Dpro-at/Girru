@@ -134,6 +134,12 @@
 .st-progress li[data-state=done]{color:var(--text)}.st-progress li[data-state=done] svg{color:#3FB97B}
 .st-progress li[data-state=now] svg{color:var(--accent)}
 .st-progress li[data-state=wait]{color:var(--muted)}
+.st-progress-bar{display:block;width:100%;height:4px;margin:0 0 10px;appearance:none;border:0;border-radius:2px;background:var(--border);overflow:hidden}
+.st-progress-bar::-webkit-progress-bar{background:var(--border)}.st-progress-bar::-webkit-progress-value{background:var(--accent)}.st-progress-bar::-moz-progress-bar{background:var(--accent)}
+.st-progress-result{display:flex;align-items:flex-start;gap:8px;margin:0 0 10px;font-size:13px;line-height:1.45}
+.st-progress[data-result=ok] .st-progress-result svg{color:#3FB97B;flex:none;margin-top:2px}
+.st-progress[data-result=failed] .st-progress-result svg{color:#E5A04B;flex:none;margin-top:2px}
+.st-progress-actions{display:flex;justify-content:flex-end;gap:8px}
 .st-local-label{margin:14px 8px 4px}
 
 /* SA6: long lists load the next part near the end; the button does the same from the keyboard. */

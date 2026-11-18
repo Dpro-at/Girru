@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
+import { clearEnv } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-one-section-')));
 mkdirSync(join(dir, '.data'), { recursive: true });
@@ -27,12 +28,13 @@ process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway, test
 process.env.NODE_ENV = 'test';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_PILOT', 'AGENT_PLAYER_DATA_DIR']) delete process.env[k];
+for (const k of ['GIRRU_STORE_P2', 'GIRRU_STORE_PILOT', 'AGENT_PLAYER_DATA_DIR']) clearEnv(k);
 globalThis.fetch = async (url) => { throw new Error(`unexpected network call in test: ${url}`); };
 const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
 
 const { getDatabase } = await import(join(backendDir, 'src/db/database.ts'));
+const { projectKeyOf } = await import(join(backendDir, 'src/memory/project-keys.ts')); // project memory key (id while GIRRU_STORE_P3 is on)
 const db = getDatabase();
 await db.initialize();
 const OWNER = 'os-owner';
@@ -48,7 +50,7 @@ const folder = join(dir, 'alpha');
 mkdirSync(folder, { recursive: true });
 const project = await createProject(OWNER, { name: 'Alpha', folder });
 await createRule({ text: 'In Alpha, release only on Tuesdays.', when: null, projectId: project.id, who: 'all', targets: [], paused: false }, OWNER);
-await saveVersioned(newMemory(OWNER, { kind: 'project', key: project.slug }, { type: 'fact', importance: 7, content: 'Alpha deploys with scripts/release.sh.' }, {}), 'test', 'test');
+await saveVersioned(newMemory(OWNER, { kind: 'project', key: projectKeyOf(project) }, { type: 'fact', importance: 7, content: 'Alpha deploys with scripts/release.sh.' }, {}), 'test', 'test');
 
 const OWNER_TOP = '# Alpha\n\nMy own notes: tabs, not spaces.\n\n';
 const OWNER_END = '\n## Owner footer\nKeep this.\n';
@@ -56,7 +58,7 @@ const OLD_MEMORY = '<!-- dpro-memory:start — managed by Dpro: old -->\n## Girr
 const OLD_RULES = '<!-- girru:rules · written by Girru from Agents › Rules; change the rules there -->\n# Rules\n1. old rule\n<!-- /girru:rules -->';
 const read = (n) => readFileSync(join(folder, n), 'utf8');
 const count = (text, re) => (text.match(re) ?? []).length;
-const p2 = async (fn) => { process.env.GIRRU_STORE_P2 = '1'; try { return await fn(); } finally { delete process.env.GIRRU_STORE_P2; } };
+const p2 = async (fn) => { process.env.GIRRU_STORE_P2 = '1'; try { return await fn(); } finally { process.env.GIRRU_STORE_P2 = '0'; } };
 
 test('rules files on: one section replaces both old ones in place; owner text kept; rules once', async () => {
   writeFileSync(join(folder, 'AGENTS.md'), `${OWNER_TOP}${OLD_MEMORY}\n${OLD_RULES}${OWNER_END}`);

@@ -25,6 +25,7 @@ export interface ToolParameter {
 
 export interface ToolParameters {
   type: 'object';
+  additionalProperties?: boolean;
   properties: Record<string, ToolParameter>;
   required?: string[];
   examples?: Array<Record<string, any>>; // Professional examples for better AI understanding
@@ -72,6 +73,8 @@ export interface Tool {
 
 export interface ToolExecutionContext {
   workspaceDir: string;
+  /** Trusted server injection only; memory tool calls must never fall back to plaintext while bound. */
+  encryptedMemory?:{execute:(toolName:string,params:Record<string,unknown>,context:ToolExecutionContext)=>Promise<ToolResult>};
   timeout?: number;
   userId?: string;
   /**
@@ -116,8 +119,23 @@ export interface ToolExecutionContext {
   /** CORE-MEM-HANDOFF: false = the handoff tools are not offered (a task contract that names its tools). */
   handoffTools?: boolean;
   /**
+   * STORE-MAP-01 P8: the run's model is not on this computer (the Claude API or a
+   * coding app). Only then are the P8 tool variants offered (run_note; blockers and
+   * files on handoff_save; a handoff on team_delegate): a local model's tool list
+   * never grows (LOCAL-ONLY-01). Set by trusted server code only.
+   */
+  remoteModel?: boolean;
+  /**
+   * STORE-MAP-01 P8 (D26): this run is a part a lead handed to this agent. Its
+   * handoff names the lead (from_agent_id) and the task; its notes are kept under
+   * the hand-off's run id. Set by team_delegate only.
+   */
+  delegation?: { leadAgentId: string; runId: string; cardId: string | null; taskNo: string | null; conversationId: string | null };
+  /**
    * B1-core: the actor of this tool call, attached by the tools registry
    * (repositories/actor.ts actorFromToolContext). Repositories take it first.
    */
   actor?: import('../repositories/actor.js').Actor;
+  /** Server-derived offering hint only; execution revalidates the owner and primary chat. */
+  teamAdminAvailable?: boolean;
 }

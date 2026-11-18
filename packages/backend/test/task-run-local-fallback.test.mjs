@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url';
 // A board task run of an agent without a Claude key runs on the local model
 // (like a chat turn), instead of failing: an agent set to Claude uses the
 // default local model (or another installed one); an agent set to the local
@@ -11,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-const backendDir = process.cwd();
+const backendDir = fileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-task-local-'));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });
 process.chdir(dir);

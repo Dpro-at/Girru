@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath, pathToFileURL} from 'node:url';
 // STORE-MAP-01 P2 contract (CX6, AG1, AG6): what every entry point gives the same agent.
 // With GIRRU_STORE_P2 off nothing changes (the known gaps are pinned here: chat drops the hired
 // instructions, task runs drop the owner rules, skills go in as full text). With it on:
@@ -15,8 +16,10 @@ import { mkdtempSync, mkdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { offeredNames, expectedNumCtx, expectedNumPredict, p2bOn } from './helpers/p2b.mjs';
 
-const backendDir = process.cwd();
+import { switchValueOn, clearEnv } from './helpers/switches.mjs';
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-context-contract-')));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });
 process.chdir(dir);
@@ -29,7 +32,7 @@ process.env.NODE_ENV = 'test';
 process.env.OLLAMA_URL = 'http://127.0.0.1:11434';
 process.env.MEMORY_EMBEDDINGS = 'hash';
 process.env.MEMORY_GRAPH_MODEL = 'off';
-for (const k of ['AGENT_EXEC_TOOLS', 'OLLAMA_THINK', 'DEFAULT_MODEL', 'OUTSIDER_AGENT_MEMORY', 'GIRRU_STORE_P2', 'GIRRU_STORE_PILOT', 'GIRRU_STORE_PILOT_AGENT']) delete process.env[k];
+for (const k of ['AGENT_EXEC_TOOLS', 'OLLAMA_THINK', 'DEFAULT_MODEL', 'OUTSIDER_AGENT_MEMORY', 'GIRRU_STORE_P2', 'GIRRU_STORE_P8', 'GIRRU_STORE_P9B', 'GIRRU_STORE_PILOT', 'GIRRU_STORE_PILOT_AGENT']) clearEnv(k);
 
 const bodies = [];
 globalThis.fetch = async (url, init = {}) => {
@@ -45,12 +48,13 @@ globalThis.fetch = async (url, init = {}) => {
 const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
 
-const { getDatabase } = await import(join(backendDir, 'src/db/database.ts'));
+const { getDatabase } = await import(pathToFileURL(join(backendDir, 'src/db/database.ts')).href);
+const { projectKeyOf } = await import(pathToFileURL(join(backendDir, 'src/memory/project-keys.ts')).href); // project memory key (id while GIRRU_STORE_P3 is on)
 const db = getDatabase();
 await db.initialize();
-const { getCredentialStorage } = await import(join(backendDir, 'src/credentials/storage.ts'));
+const { getCredentialStorage } = await import(pathToFileURL(join(backendDir, 'src/credentials/storage.ts')).href);
 await getCredentialStorage().initialize();
-const { getOrchestrator } = await import(join(backendDir, 'src/multi-agent/index.ts'));
+const { getOrchestrator } = await import(pathToFileURL(join(backendDir, 'src/multi-agent/index.ts')).href);
 await getOrchestrator().initialize(join(dir, '.data', 'multi-agent', 'orchestrator.db'));
 const OWNER = 'cc-owner';
 db.prepare(`INSERT INTO users (id, email, username, password_hash, role, status, email_verified) VALUES (?, ?, ?, 'x', 'owner', 'active', 1)`).run(OWNER, `${OWNER}@example.test`, OWNER);
@@ -58,18 +62,18 @@ const HIRED = 'Your specialty is release engineering. Always test before you say
 db.prepare(`INSERT INTO agents_config (id, name, provider, model, is_primary, system_prompt, department) VALUES ('cc-agent', 'Rafid', 'ollama', 'qwen-test', 1, ?, 'engineering')`).run(HIRED);
 db.prepare(`INSERT INTO agents_config (id, name, provider, model, is_primary) VALUES ('cc-other', 'Nora', 'ollama', 'qwen-test', 0)`).run();
 
-const { generateToken } = await import(join(backendDir, 'src/auth/jwt.ts'));
-const { buildServer } = await import(join(backendDir, 'src/api/app.ts'));
-const { createProject, createConversation } = await import(join(backendDir, 'src/repositories/chat-conversations.ts'));
-const { addStarterRules, createRule, rulesByPrecedence } = await import(join(backendDir, 'src/services/agent-rules.ts'));
-const { centralSkills } = await import(join(backendDir, 'src/skills/central-store.ts'));
-const { addPinnedFact, parsePinnedScope } = await import(join(backendDir, 'src/memory/scopes/pinned.ts'));
-const { taskRunBasePrompt } = await import(join(backendDir, 'src/services/task-run-executor.ts'));
-const { resolveAgentContext } = await import(join(backendDir, 'src/services/agent-context/resolve.ts'));
-const { renderCodingAppInstructions, renderMemoryData } = await import(join(backendDir, 'src/services/agent-context/render.ts'));
-const { guideReadTool } = await import(join(backendDir, 'src/tools/skills/guide-read.ts'));
-const { createAgentToolsRegistry } = await import(join(backendDir, 'src/tools/index.ts'));
-const { beginChannelTurn, CHANNEL_TURN_HEADER } = await import(join(backendDir, 'src/tools/channel-policy.ts'));
+const { generateToken } = await import(pathToFileURL(join(backendDir, 'src/auth/jwt.ts')).href);
+const { buildServer } = await import(pathToFileURL(join(backendDir, 'src/api/app.ts')).href);
+const { createProject, createConversation } = await import(pathToFileURL(join(backendDir, 'src/repositories/chat-conversations.ts')).href);
+const { addStarterRules, createRule, rulesByPrecedence } = await import(pathToFileURL(join(backendDir, 'src/services/agent-rules.ts')).href);
+const { centralSkills } = await import(pathToFileURL(join(backendDir, 'src/skills/central-store.ts')).href);
+const { addPinnedFact, parsePinnedScope } = await import(pathToFileURL(join(backendDir, 'src/memory/scopes/pinned.ts')).href);
+const { taskRunBasePrompt } = await import(pathToFileURL(join(backendDir, 'src/services/task-run-executor.ts')).href);
+const { resolveAgentContext } = await import(pathToFileURL(join(backendDir, 'src/services/agent-context/resolve.ts')).href);
+const { renderCodingAppInstructions, renderMemoryData } = await import(pathToFileURL(join(backendDir, 'src/services/agent-context/render.ts')).href);
+const { guideReadTool } = await import(pathToFileURL(join(backendDir, 'src/tools/skills/guide-read.ts')).href);
+const { createAgentToolsRegistry } = await import(pathToFileURL(join(backendDir, 'src/tools/index.ts')).href);
+const { beginChannelTurn, CHANNEL_TURN_HEADER } = await import(pathToFileURL(join(backendDir, 'src/tools/channel-policy.ts')).href);
 
 const app = await buildServer({ logger: false });
 await app.ready();
@@ -80,7 +84,7 @@ const conv = await createConversation(OWNER, { title: 'Release', agentId: 'cc-ag
 await addStarterRules(OWNER);
 await createRule({ text: 'In Alpha, release only on Tuesdays.', when: null, projectId: project.id, who: 'all', targets: [], paused: false }, OWNER);
 await createRule({ text: 'Engineering writes tests first.', when: null, projectId: null, who: 'departments', targets: ['engineering'], paused: false }, OWNER);
-await addPinnedFact(OWNER, parsePinnedScope(`project:${project.slug}`), 'Alpha is for Al-Zawraa Trading.', OWNER);
+await addPinnedFact(OWNER, parsePinnedScope(`project:${projectKeyOf(project)}`), 'Alpha is for Al-Zawraa Trading.', OWNER);
 const STEP = 'Keep each release step reversible and write the decision down with its reason.';
 const skill = await centralSkills().installMarkdown(`---\nname: release-check\ndescription: How we check a release before it ships.\n---\n\n# Release check\n\n${STEP}\n`, 'release-check', 'contract-test');
 const skillId = skill.id ?? skill.skill?.id;
@@ -98,15 +102,23 @@ async function chatPrompt(channel = false) {
   }
   try {
     const res = await app.inject({ method: 'POST', url: '/api/chat', headers,
-      payload: { stream: false, sessionId: conv.id, ...(channel ? {} : { agentId: 'cc-agent', memoryScope: { project: project.slug } }), messages: [{ role: 'user', content: QUESTION }] } });
+      payload: { stream: false, sessionId: conv.id, ...(channel ? {} : { agentId: 'cc-agent', memoryScope: { project: projectKeyOf(project) } }), messages: [{ role: 'user', content: QUESTION }] } });
     assert.ok(bodies.length, `no model call: ${res.statusCode} ${res.body.slice(0, 200)}`);
     const body = bodies[0];
-    return { system: body.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n'), tools: (body.tools ?? []).map((t) => t.function?.name ?? t.name) };
+    return { system: body.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n'), tools: offeredNames(body) };
   } finally { turn?.end(); }
 }
-const withP2 = async (fn) => { process.env.GIRRU_STORE_P2 = '1'; try { return await fn(); } finally { delete process.env.GIRRU_STORE_P2; } };
+const withP2 = async (fn) => { process.env.GIRRU_STORE_P2 = '1'; try { return await fn(); } finally { process.env.GIRRU_STORE_P2 = '0'; } };
 
 test('switch off: every entry point is unchanged (known gaps pinned)', async () => {
+  // P4 also turns the one context on (oneContextEnabled); this test pins the state with both off.
+  const p4 = process.env.GIRRU_STORE_P4;
+  process.env.GIRRU_STORE_P4 = '0';
+  process.env.GIRRU_STORE_P2 = '0';
+  try { await knownGaps(); } finally { if (p4 !== undefined) process.env.GIRRU_STORE_P4 = p4; else delete process.env.GIRRU_STORE_P4; }
+});
+
+async function knownGaps() {
   const chat = await chatPrompt();
   assert.ok(!chat.system.includes(HIRED), 'today chat drops the hired instructions');
   assert.ok(chat.system.includes(STEP), 'today the full skill text goes into chat');
@@ -114,7 +126,7 @@ test('switch off: every entry point is unchanged (known gaps pinned)', async () 
   const task = await taskRunBasePrompt({ id: 'cc-agent', name: 'Rafid', system_prompt: HIRED }, { user_id: OWNER });
   assert.ok(task.includes(HIRED));
   assert.ok(!task.includes('release only on Tuesdays'), 'today task runs drop the owner rules');
-});
+}
 
 test('switch on: chat, task run and coding app carry the name, hired instructions and owner rules, rules first', async () => {
   await withP2(async () => {
@@ -172,34 +184,39 @@ test('rules by precedence: groups in order, numbered across groups', async () =>
 });
 
 test('MD4 and MD9: save criteria lead memory_save and the brief; recalled memories carry their date and place', async () => {
-  const { memorySaveTool } = await import(join(backendDir, 'src/tools/memory/save.ts'));
-  const { SAVE_CRITERIA } = await import(join(backendDir, 'src/services/agent-context/switch.ts'));
-  const { standingRules } = await import(join(backendDir, 'src/memory/bridge/brief.ts'));
-  const { messageRecall } = await import(join(backendDir, 'src/memory/context/pack.ts'));
-  const { newMemory, saveVersioned } = await import(join(backendDir, 'src/memory/learning.ts'));
+  const { memorySaveTool } = await import(pathToFileURL(join(backendDir, 'src/tools/memory/save.ts')).href);
+  const { SAVE_CRITERIA } = await import(pathToFileURL(join(backendDir, 'src/services/agent-context/switch.ts')).href);
+  const { standingRules } = await import(pathToFileURL(join(backendDir, 'src/memory/bridge/brief.ts')).href);
+  const { messageRecall } = await import(pathToFileURL(join(backendDir, 'src/memory/context/pack.ts')).href);
+  const { newMemory, saveVersioned } = await import(pathToFileURL(join(backendDir, 'src/memory/learning.ts')).href);
   assert.ok(!memorySaveTool.description.startsWith(SAVE_CRITERIA), 'off: unchanged');
   assert.ok(!standingRules().includes(SAVE_CRITERIA));
-  await saveVersioned(newMemory(OWNER, { kind: 'project', key: project.slug }, { type: 'fact', importance: 6, content: 'Alpha staging is restored every Sunday night.' }, {}), 'test', 'test');
-  const drawers = [{ kind: 'project', key: project.slug }];
+  await saveVersioned(newMemory(OWNER, { kind: 'project', key: projectKeyOf(project) }, { type: 'fact', importance: 6, content: 'Alpha staging is restored every Sunday night.' }, {}), 'test', 'test');
+  const drawers = [{ kind: 'project', key: projectKeyOf(project) }];
   const pack = { key: 'contract', text: '', memoryChars: 0, items: [], hit: false, memoryIds: [] };
   const off = await messageRecall({ userId: OWNER, drawers, query: 'When is alpha staging restored?', pack });
-  assert.match(off.text, /restored every Sunday night\.\n/);
+  // P9b (MD3): the line also carries its confidence.
+  assert.match(off.text, switchValueOn(process.env.GIRRU_STORE_P9B) ? /restored every Sunday night\. \(confidence \w+\)\n/ : /restored every Sunday night\.\n/);
   await withP2(async () => {
     assert.ok(memorySaveTool.description.startsWith(SAVE_CRITERIA));
     assert.equal(standingRules()[0], SAVE_CRITERIA);
     const on = await messageRecall({ userId: OWNER, drawers, query: 'When is the alpha staging data restored on Sunday?', pack });
-    assert.match(on.text, new RegExp(`restored every Sunday night\\. \\(as of \\d{4}-\\d{2}-\\d{2} · project:${project.slug}\\)`));
+    assert.match(on.text, new RegExp(`restored every Sunday night\\. \\(as of \\d{4}-\\d{2}-\\d{2} · project:${projectKeyOf(project)}${switchValueOn(process.env.GIRRU_STORE_P9B) ? ' · confidence \\w+' : ''}\\)`));
   });
 });
 
 test('routes for the app: the switch, and the eye list strongest group first with groups', async () => {
   const get = (url) => app.inject({ method: 'GET', url, headers: auth });
-  assert.deepEqual((await get('/api/store-switches')).json(), { p2: false });
+  // The route lists p6, p8, p9 and p9b only while they are on.
+  process.env.GIRRU_STORE_P2 = '0';
+  const switches = (p2) => ({ p2, p3: switchValueOn(process.env.GIRRU_STORE_P3), p4: switchValueOn(process.env.GIRRU_STORE_P4),
+    ...Object.fromEntries(['p6', 'p8', 'p9', 'p9b'].filter((k) => switchValueOn(process.env[`GIRRU_STORE_${k.toUpperCase()}`] ?? '')).map((k) => [k, true])) });
+  assert.deepEqual((await get('/api/store-switches')).json(), switches(false));
   assert.equal((await get('/api/agent-rules')).json().precedence, false);
   const before = (await get(`/api/agent-rules/effective?agentId=cc-agent&projectId=${project.id}`)).json();
   assert.ok(!('precedence' in before) && before.rules.every((r) => !('group' in r)), 'off: unchanged');
   await withP2(async () => {
-    assert.deepEqual((await get('/api/store-switches')).json(), { p2: true });
+    assert.deepEqual((await get('/api/store-switches')).json(), switches(true));
     assert.equal((await get('/api/agent-rules')).json().precedence, true);
     const eye = (await get(`/api/agent-rules/effective?agentId=cc-agent&projectId=${project.id}`)).json();
     assert.equal(eye.precedence, true);

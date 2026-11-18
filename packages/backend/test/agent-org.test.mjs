@@ -178,7 +178,7 @@ test('team_list shows each coordinator only whom it may give work to; quick help
   assert.ok(listed.every(a => !('api_key' in a)));
   const dev = await teamContext(ids.dev);
   assert.match(dev, /- You: "Fictional Dev Lead", manager, department "development"\.\n- You report to "Fictional Lead" \(main agent, no department\)\./);
-  assert.match(dev, /You may hand work to .*\n  - "Fictional Coder" \(specialist, department "development"\)/);
+  assert.match(dev, /You may hand work to .*\n(  - .*\n)*  - "Fictional Coder" \(specialist, department "development"\)/);
   assert.match(dev, /"Fictional Writer" \(specialist, department "research"\)/);
   assert.doesNotMatch(dev, /Fictional Helper/, 'another agent\'s sub-agent is never listed');
   assert.match(await teamContext(ids.coder), /"Fictional Helper" \(sub-agent, department "development"\) \[your sub-agent\]/);

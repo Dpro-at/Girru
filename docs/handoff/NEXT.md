@@ -1,11 +1,17 @@
 # Next: the phone app, from 3 November 2026 on
 
-Tasks for the agent that builds the phone app. Work on the branch below, do
-the tasks in order, and report back as described at the end. Background,
+Security work completed (14 November): Codex merged PR #215 after all PR checks
+passed. The full post-merge Tests workflow and Security Scanning on main also
+passed; Dependabot, code scanning and secret scanning each have zero open
+alerts. Results: [SECURITY_ALERTS.md](SECURITY_ALERTS.md). The phone/build agent
+should continue the phone tasks below.
+
+Tasks for the computer that builds and tests the phone app. Work on the
+branch below and report back as described at the end. Background,
 decisions and the build guide: [`packages/mobile/BUILDING.md`](../../packages/mobile/BUILDING.md).
 What the build Mac found and built so far: [`RESULT.md`](RESULT.md). The
 owner's feature list and the typed-code proposal: [`PHONE_FEATURES.md`](PHONE_FEATURES.md).
-Phone design boards (P1–P23, D1–D8): the owner's "Girru phone app" design
+Phone design boards (P1–P32, D1–D9): the owner's "Girru phone app" design
 canvas (ask the owner for the link).
 
 - **Branch:** `phone/app`. Pull before you start: Part 1 below was added on the main computer.
@@ -15,6 +21,125 @@ canvas (ask the owner for the link).
   desktop, so a chat change is written once, on the computer, and the phone
   shows it without an app update. Only native parts (lock, pairing, push,
   widget, share, permissions) live in the apps.
+
+## Test round 3 (11 November 2026): the chat page fitted to the phone
+
+Branch: `phone/chat-fit` (based on `phone/app` at `804678dd`). Pull it, then
+run the shared checks, the builds and the simulator test as in round 2. The
+chat page now follows boards P27–P29 (canvas row "Phone chat at 402 pt"):
+
+- **One column at 402 pt.** The chat list is a drawer from the left, the
+  details a drawer from the right, both closed when the chat opens; a tap
+  outside closes them. Check with the owner's real chats: the conversation
+  must be readable (round 2: `.chat-column` was 0 px).
+- **Header:** Chats · title · Terminal · ⋯ · Details, no overlap. No
+  Commands button, no desktop voice row, no sidebar footer.
+- **Composer:** one row, Send inside the box at the end.
+- **Keyboard:** with the keyboard up the page must not slide sideways and Send
+  must stay visible (the page height follows the visible part of the screen).
+- **Terminal:** the terminal button (Face ID first) opens it as its own full
+  page; Back returns to the same chat with its messages (round 2: empty chat).
+- **Meetings:** no "The meeting could not be updated" notice. A chat with a
+  meeting shows a small bar above the conversation; tap it for a read-only
+  sheet. No "Reload specialties" notice.
+- **Side panel:** Details, Changes and Files work; ⋯ has Rename, Pin, Move,
+  Export, Add to board, Remember the whole chat and Delete (owner's decision).
+  Choosing a folder on the computer is not on the phone yet.
+- Still open from round 2: the key row (^C, Ctrl, Tab) and the terminal
+  dropping after about two minutes. Report them again if they still fail.
+
+Expected checks: core-ui phone tests 19, backend `test/phone-*.test.mjs` 43.
+
+## Test round 2 (4 November 2026): what changed since the Task 5 report
+
+The findings in `RESULT.md` › "Test round: Task 5" are fixed on the main
+computer, and `main` (memory P0–P10, Code Store, footer) is merged in. Pull
+first; the phone migration is now **183** (it was 164, which `main` also used).
+
+| Finding | Fix |
+|---|---|
+| 1. Page files over ~600 KiB never arrive (blank chat) | Parts are 512 KiB (a sealed part is ~910 KiB); the computer checks the sealed size. |
+| 3. `/api/approvals?status=pending…` refused | Allowed on the phone (read only, the badge count). `/api/health` stays refused: nothing in this page asks for it, and the computer's own gate refuses it too. If you still see it, note which screen. |
+| 4. Terminal fails after `npm ci` (spawn-helper) | The backend gives node-pty's `spawn-helper` its run permission before the first shell. No `chmod` by hand any more. |
+| 5. Terminal "Lost the connection" on the first command | Both apps now read the terminal's output as a stream (it went through `api.call`, which refuses streams). |
+| 6. Keyboard bar over the lock screen | Locking closes the keyboard in both apps. |
+
+Test again, on the **real desktop app** this time (see "Notes for the next
+test round" in `RESULT.md`): the chat page loads (not blank) and a reply
+streams in; the terminal runs `echo hi; date`, then `sleep 30` and ^C, Ctrl
+then `l`, the paste check, lock while typing (no keyboard bar over the lock);
+Approvals, Team, dark mode; then the Android app on an emulator.
+
+## Now: test only (owner's decision, 3 November 2026)
+
+**All the code is written on the main computer. This computer builds, runs and
+reports; it does not write features.** Fix only what stops a build, with the
+smallest change, one commit per fix, and say so in `RESULT.md`.
+
+What was added for you to test (pull `phone/app` first):
+
+| Commit | What |
+|---|---|
+| `d6ed4aaf`, `79949bf9` | Computer side: `ui.get`, `api.call`, `api.stream` (the chat page through the session), with audit rows. |
+| `ca0dacde` | iPhone: the four places (Chat, Tasks, Approvals, Team) after pairing; Chat loads the computer's chat page through the session; Tasks, Approvals, Team are the app's own screens (boards Tasks, Approvals, ApprovalsDark, Team, Empty). Commands are signed in counter order. |
+| `97d0bf1a` | Computer's chat page: on `girru-app://computer` with the app's shell object it starts signed in and sends no token. |
+| `e46fd990` | Android: the relay session (`RelaySessionClient`), the same four places, the chat page through the session; requests with a body go through the bridge (`api.call`). |
+
+**Never compiled:** the new iPhone screens were type-checked against macOS
+SwiftUI only (no iOS SDK on the main computer), and the Android code was not
+compiled at all (no JDK there). Expect small build fixes.
+
+### Test 1: shared checks
+
+```bash
+cd packages/relay && node --import tsx --test test/*.test.mjs                 # 29
+cd ../backend && node --import tsx --test test/phone-*.test.mjs                # 42
+cd ../core-ui && node --test tests/phone-shell.test.cjs                        # 3
+cd ../mobile/ios && swift run CoreChecks                                       # 359
+```
+
+### Test 2: builds
+
+```bash
+cd packages/mobile/ios && xcodegen generate && xcodebuild -scheme Girru -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' build
+cd packages/mobile/android && ./gradlew :app:testDebugUnitTest :app:assembleDebug   # new: PageBridgeTest, PhoneScreensTest
+```
+
+### Test 3: the simulator (and an Android phone or emulator), paired through the real relay
+
+Start the test computer with `pair-harness.mjs --manual` (see "Things the next
+agent must know"), pair, then check and write down each:
+
+1. **Chat**: the computer's chat page opens inside the app (no sign-in screen),
+   the chat list shows, a chat opens, a message sends and the reply streams in
+   word by word. Note every part of the page that shows an error or stays empty:
+   the computer answers only the chat page's requests (`ui-bridge.ts` list), so
+   a missing request is a finding, not a fix for you.
+2. **Tasks**: Now / Scheduled / Done; "Waiting for you" opens Approvals; the
+   plus button opens Chat. There is no terminal button on purpose.
+3. **Approvals**: the first request is open with Deny and Approve; Approve asks
+   Face ID (Android: the confirm screen); a cut-short request opens the full
+   view first; the badge on the tab shows the count; the empty state appears
+   when nothing waits.
+4. **Team**: main agent first, then who needs you, who works, who is free;
+   search and the chips filter; tapping an agent opens Chat.
+5. **Terminal** (owner's decision: it is on the phone, behind the fingerprint):
+   the terminal button in Tasks asks Face ID / Touch ID / fingerprint, then
+   Chat opens the computer's terminal full size; type `echo hi; date` and see
+   the real output. Without the check nothing opens. After locking and
+   unlocking the app, the next terminal use asks again. The computer needs
+   `AGENT_TERMINAL=true`. Boards P24–P26: the keyboard stays hidden until you
+   tap the terminal; a tap while it shows hides it (and so does ⌄ at the end of
+   the key row). With the keyboard: the key row (Paste, ^C, ^D, Esc, Tab, Ctrl,
+   arrows, | ~ / -) sits above it; `sleep 30` then ^C stops it; Ctrl then `l`
+   clears the screen; `ls` is not changed by autocorrect or a capital letter.
+   Pasting several lines (Paste key or the long-press Paste) asks "Paste N
+   lines?" first; one line pastes at once. Back returns to the chat; ⋯ has new
+   terminal, clear, settings, close.
+6. Dark mode on each screen; locking the app hides everything and nothing
+   loads until the unlock.
+
+Report as before in `RESULT.md`, with screenshots of each place.
 
 ## Where things stand
 
@@ -61,7 +186,7 @@ canvas (ask the owner for the link).
   account cannot sign push notifications (`aps-environment`): for a test build
   on a free account, leave push out of a local, uncommitted build.
 
-## Task 5: the desktop chat page in the phone app (Part 1 done; do Part 3 next)
+## Task 5: the desktop chat page in the phone app (written on the main computer; test it with the list above)
 
 The phone's web host already exists (`ios/Web/WebHostView.swift`,
 `CoreUISchemeHandler.swift`: `girru-app://computer/…` requests go to a

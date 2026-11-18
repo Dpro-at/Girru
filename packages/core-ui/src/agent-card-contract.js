@@ -37,7 +37,7 @@ const traits = x => record(x) && Object.keys(x).length === traitNames.length && 
 /** The card or memory path this request names, or null. */
 export function cardPath(path) {
   if (/^\/api\/memory\/page(?:\?cursor=[A-Za-z0-9_-]{1,1024})?$/.test(path)) return { kind: 'memory-page' };
-  let m = /^\/api\/agents\/([^/?#]+)\/personality\/(current|versions|lock|unlock|rollback)$/.exec(path);
+  let m = /^\/api\/agents\/([^/?#]+)\/personality\/(current|versions|lock|unlock|rollback|text)$/.exec(path);
   if (m) return validAgentId(m[1]) ? { kind: `persona-${m[2]}`, agent: m[1] } : null;
   // AG1: make main agent and duplicate (owner actions on an existing agent).
   m = /^\/api\/agents\/([^/?#]+)\/(set-primary|duplicate)$/.exec(path);
@@ -56,8 +56,9 @@ export function cardRoute(path) { return cardPath(path) !== null; }
 
 /** PUT /api/agents/:id from the card: the version plus at least one profile field. */
 export function validProfileEdit(b) {
-  if (!record(b) || !onlyKeys(b, ['expectedVersion', 'role', 'department', 'description', 'model', 'provider']) || !version(b.expectedVersion) || Object.keys(b).length < 2) return false;
+  if (!record(b) || !onlyKeys(b, ['expectedVersion', 'role', 'department', 'description', 'model', 'provider', 'modelSelection']) || !version(b.expectedVersion) || Object.keys(b).length < 2) return false;
   if ((b.model === undefined) !== (b.provider === undefined)) return false;
+  if (b.modelSelection !== undefined && (!modelId(b.modelSelection) || b.model !== undefined || b.provider !== undefined)) return false;
   return (b.role === undefined || b.role === null || roles.includes(b.role))
     && (b.model === undefined || modelId(b.model)) && (b.provider === undefined || providers.includes(b.provider))
     && (b.department === undefined || b.department === null || department(b.department))
@@ -74,6 +75,8 @@ export function allowedAgentCard(method, path, body) {
     case 'memory-page': return method === 'GET' && body === undefined;
     case 'models': return method === 'GET' && body === undefined;
     case 'persona-current': return method === 'GET' && body === undefined;
+    // STORE-MAP-01 P4 (T7c): the personality text, saved over the version read.
+    case 'persona-text': return method === 'PUT' && record(body) && onlyKeys(body, ['text', 'expectedVersion']) && Object.keys(body).length === 2 && typeof body.text === 'string' && body.text.length <= MAX_PERSONA_TEXT && version(body.expectedVersion);
     case 'persona-versions':
       if (method === 'GET') return body === undefined;
       return method === 'POST' && record(body) && onlyKeys(body, ['preset', 'traits', 'dialect', 'note']) && Object.keys(body).length > 0
@@ -90,8 +93,9 @@ export function allowedAgentCard(method, path, body) {
     case 'drawers': return method === 'GET' && body === undefined;
     case 'search': return method === 'POST' && record(body) && onlyKeys(body, ['query', 'limit']) && line(body.query, 500) && (body.limit === undefined || (Number.isInteger(body.limit) && body.limit >= 1 && body.limit <= 50));
     case 'memory': return (method === 'DELETE' && body === undefined)
-      || (method === 'PUT' && record(body) && onlyKeys(body, ['content', 'importance', 'type']) && Object.keys(body).length > 0
-        && (body.content === undefined || text(body.content, MAX_MEMORY, true)) && (body.importance === undefined || importance(body.importance)) && (body.type === undefined || memoryTypes.includes(body.type)));
+      || (method === 'PUT' && record(body) && onlyKeys(body, ['content', 'importance', 'type', 'expectedVersion']) && Object.keys(body).filter(k => k !== 'expectedVersion').length > 0
+        && (body.content === undefined || text(body.content, MAX_MEMORY, true)) && (body.importance === undefined || importance(body.importance)) && (body.type === undefined || memoryTypes.includes(body.type))
+        && (body.expectedVersion === undefined || (Number.isSafeInteger(body.expectedVersion) && body.expectedVersion >= 0)));
     case 'memory-forget': return method === 'POST' && body === undefined;
     case 'memory-versions': return method === 'GET' && body === undefined;
   }
@@ -124,7 +128,9 @@ export function memoryItem(x) {
     ...(topicKey(x.topicKey) ? { topicKey: x.topicKey } : {}) };
 }
 
-const ERRORS = { 400: ['invalid_role', 'invalid_version', 'no_change'], 403: ['reserved_agent'], 404: [], 409: ['version_conflict', 'personality_locked'] };
+const ERRORS = { 400: ['invalid_role', 'invalid_version', 'no_change'], 403: ['reserved_agent'], 404: [], 409: ['version_conflict', 'personality_locked', 'changed'] };
+/** The longest personality text shown or saved (the record's limit). */
+const MAX_PERSONA_TEXT = 1024 * 1024;
 
 /** Reviewed fields only. Throws on a malformed success body. */
 export function agentCardResponse(path, status, body) {
@@ -132,7 +138,12 @@ export function agentCardResponse(path, status, body) {
   if (!p) fail();
   if (status !== 200 && status !== 201) {
     const code = record(body) ? body.code : undefined;
-    return (ERRORS[status] ?? []).includes(code) ? { code } : null;
+    if (!(ERRORS[status] ?? []).includes(code)) return null;
+    // STORE-MAP-01 P3 (FD3e): a memory changed while it was edited; the editor shows the newer text.
+    const c = p.kind === 'memory' && code === 'version_conflict' && record(body.current) ? body.current : null;
+    return c && typeof c.content === 'string' && Number.isSafeInteger(c.version)
+      ? { code, current: { content: c.content.slice(0, MAX_MEMORY), version: c.version, importance: Number.isInteger(c.importance) ? Math.min(10, Math.max(1, c.importance)) : null } }
+      : { code };
   }
   if (!record(body)) fail();
   switch (p.kind) {
@@ -149,19 +160,20 @@ export function agentCardResponse(path, status, body) {
           // CORE-PICKER-02: a coding app's own models (Claude Code aliases, the Codex account's list).
           // CH3: think = the model can think longer (the Thinking choice shows); a variant may carry a short note.
           ...(m.think === true ? { think: true } : {}),
+          ...(m.provider === 'subscription' && ['subscription:claude','subscription:codex'].includes(m.id) && m.sessionPrefix === m.id + ':' ? { sessionPrefix: m.sessionPrefix } : {}),
           ...(m.provider === 'subscription' && Array.isArray(m.variants) ? { variants: m.variants.filter(v => record(v) && typeof v.id === 'string' && /^[a-z0-9][a-z0-9.-]{0,40}$/.test(v.id)).slice(0, 20).map(v => ({ id: v.id, label: str(v.label ?? v.id, 40), ...(typeof v.note === 'string' && v.note.trim() ? { note: str(v.note, 60) } : {}) })) } : {}) }));
       return { models: list };
     }
     case 'persona-current': {
       const v = persona(body);
-      return { ...v, traitNames: [...traitNames],
+      return { ...v, ...(typeof body.text === 'string' ? { text: body.text.slice(0, MAX_PERSONA_TEXT) } : {}), traitNames: [...traitNames],
         dialects: Array.isArray(body.dialects) ? body.dialects.filter(d => typeof d === 'string').slice(0, 40).map(d => d.slice(0, 8)) : [],
         presets: Array.isArray(body.presets) ? body.presets.filter(x => record(x) && typeof x.id === 'string' && traits(x.traits)).slice(0, 30).map(x => ({ id: str(x.id, 40), label: str(x.label, 60), traits: { ...x.traits } })) : [] };
     }
     case 'persona-versions':
       if (Array.isArray(body.versions)) return { versions: body.versions.slice(0, 500).map(persona) };
       return persona(body);
-    case 'persona-lock': case 'persona-unlock': case 'persona-rollback': return persona(body);
+    case 'persona-lock': case 'persona-unlock': case 'persona-rollback': case 'persona-text': return persona(body);
     case 'agent-set-primary': return { ok: body.success === true };
     case 'agent-duplicate': return record(body.agent) && validAgentId(body.agent.id) ? { agent: { id: body.agent.id } } : fail();
     case 'memories':

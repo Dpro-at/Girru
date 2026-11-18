@@ -1,5 +1,7 @@
+import {isEncryptedMemoryServer} from '../memory/encryption/server-mode.js';
 import { backendPath } from '../config/backend-root.js';
-import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { genvrRuntime } from '../config/genvr-runtime.js';
 /**
  * Backend startup chain (moved out of server.ts so it can be tested).
  *
@@ -11,7 +13,6 @@ import { fileURLToPath } from 'node:url';
 
 import type { FastifyInstance } from 'fastify';
 import { processScheduledNotifications } from '../services/notification-service.js';
-import { startCalendarSyncScheduler } from '../services/calendar-sync.js';
 import { config } from '../config/index.js';
 import { backgroundEnabled } from '../config/background.js';
 import { dataPathOr } from '../config/data-root.js';
@@ -40,7 +41,6 @@ export const BACKGROUND_JOBS: ReadonlyArray<{ id: string; off: string }> = [
   { id: 'memory-files-sync', off: 'startMemoryFilesSync not called (exported memory files follow the database only on owner request)' },
   { id: 'login-pruning', off: 'startLoginRecordPruning not called' },
   { id: 'scheduled-notifications', off: '60 s interval not started' },
-  { id: 'calendar-sync', off: 'startCalendarSyncScheduler not called' },
   { id: 'extension-stats', off: 'hourly interval not started' },
   { id: 'memory-consolidation', off: 'startScheduler not called' },
   { id: 'gateway-session-cleanup', off: 'SessionManager starts no 5 min cleanup interval' },
@@ -57,8 +57,22 @@ export const BACKGROUND_JOBS: ReadonlyArray<{ id: string; off: string }> = [
 ];
 
 export async function initializeBackend(fastify: FastifyInstance): Promise<StartupSummary> {
+  // Explicit encrypted runtimes supply their already-selected runner/custody and start through
+  // app hooks. Legacy bootstrap must not initialize defaults, replay a permissive ledger,
+  // import agent notes, backfill vectors, or start plaintext projection/summary workers.
+  if(isEncryptedMemoryServer(fastify))return{background:false,skills:0,jobs:0,channels:0,dockerAvailable:false};
   const background = backgroundEnabled();
   if (!background) console.log('[Server] AGENT_PLAYER_BACKGROUND=off: no schedulers, timers, watchers or probes\n');
+  {
+    // STORE-MAP-01: the memory switches are on by default; say which ones a variable turned off,
+    // and (OPS9) which are past their removal date, so an old path does not live on unnoticed.
+    const { memorySwitchStates } = await import('../services/memory-switches.js');
+    const states = memorySwitchStates();
+    const off = states.filter((s) => !s.on).map((s) => s.env);
+    if (off.length) console.warn(`[Memory] switches turned off: ${off.join(', ')}`);
+    const expired = states.filter((s) => s.expired).map((s) => s.env);
+    if (expired.length) console.warn(`[Memory] switches past their removal date (remove the off path): ${expired.join(', ')}`);
+  }
 
   // Initialize Database
   const { initializeDatabase, getDatabase } = await import('../db/index.js');
@@ -70,6 +84,34 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
   // BACKUP-01: the owner's backup folder, so the agent tools' protected folders include it from the start.
   await (await import('../services/backups.js')).loadBackupsFolder();
   console.log('[Server] ✅ Database initialized\n');
+
+  // STORE-MAP-01 P3: project memory keys follow the switch (ids while on, slugs again when it goes off),
+  // before anything reads memory. Refuse startup on failure: writers must not use a new
+  // key mode while durable projection holds or project rows still use the old mode.
+  const { moveProjectKeys } = await import('../memory/project-keys.js');
+  await moveProjectKeys();
+  // STORE-MAP-01 P3: the one list of departments and its ids (small tables; idempotent; before the first request).
+  if ((await import('../services/store-p3.js')).storeP3Enabled()) {
+    const { syncDepartments } = await import('../services/departments.js');
+    await syncDepartments().catch((err) => console.warn('[Store P3] departments backfill failed:', (err as Error)?.message));
+  }
+  // STORE-MAP-01 P4 (D7): older coding-app notes into the one handoff table (idempotent; readers use it).
+  if ((await import('../services/store-p4.js')).storeP4Enabled()) {
+    const { copyAppHandoffs } = await import('../memory/bridge/store.js');
+    await copyAppHandoffs().catch((err) => console.warn('[Store P4] handoff notes not copied:', (err as Error)?.message));
+    // T7: each agent's PERSONALITY.md text into its one personality record (once; the file becomes a view).
+    const { backfillPersonalityRecords, agentsWithoutRecordText } = await import('../services/personality-record.js');
+    await backfillPersonalityRecords()
+      .then(async (n) => { const left = await agentsWithoutRecordText(); if (n || left) console.log(`[Store P4] personality texts imported: ${n}, still without a text: ${left}`); })
+      .catch((err) => console.warn('[Store P4] personality texts not imported:', (err as Error)?.message));
+  }
+  // STORE-MAP-01 P5: each agent's MEMORY.md (and its history) into its own drawer, once.
+  if ((await import('../services/store-p5.js')).storeP5Enabled()) {
+    const { importAllAgentMemory, agentsWithoutImportedMemory } = await import('../memory/agent-drawer.js');
+    await importAllAgentMemory()
+      .then(async (n) => { const left = await agentsWithoutImportedMemory(); if (n || left) console.log(`[Store P5] agent notes imported: ${n}, not yet imported: ${left}`); })
+      .catch((err) => console.warn('[Store P5] agent notes not imported:', (err as Error)?.message));
+  }
 
   // APPS-06: apps moved to the Girru Store keep their data under their Store table names (once, after a backup).
   try { await (await import('../services/legacy-app-tables.js')).moveLegacyAppTables(); }
@@ -88,7 +130,8 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
   const { getSkillsRegistry } = await import('../skills/registry.js');
   const skillsRegistry = getSkillsRegistry();
   // GenVR SDK skills first: an SDK skill wins over an older Girru copy of the same name.
-  await skillsRegistry.load([fileURLToPath(new URL('../../../core-ui/vendor/genvr/package/skills/', import.meta.url)), backendPath('skills')]);
+  const genvr=genvrRuntime();
+  await skillsRegistry.load([...(genvr?[path.join(genvr.packageDir,'skills')]:[]), backendPath('skills')]);
   if (background) skillsRegistry.watch(); // Enable hot reload
   console.log(`[Server] ✅ Loaded ${skillsRegistry.getAll().length} skills\n`);
 
@@ -102,6 +145,17 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
   const memoryStorage = getMemoryStorage();
   await memoryStorage.initialize();
   console.log('[Server] ✅ Memory system initialized\n');
+
+  // STORE-MAP-01 P9 (PRIV4): after a restore, every forget of the ledger is applied again
+  // (the marker exists only when a ledger did; a failed replay runs on the next start).
+  {
+    const { replayPending, replayForgetLedger } = await import('../memory/forget-ledger.js');
+    if (replayPending()) {
+      await replayForgetLedger()
+        .then((r) => console.log(`[Store P9] forget ledger re-applied: ${r.forgotten} forgotten again, ${r.failed} failed`))
+        .catch((err) => console.warn('[Store P9] forget ledger not re-applied:', (err as Error)?.message));
+    }
+  }
 
   // Initialize Credentials System
   const { getCredentialStorage } = await import('../credentials/index.js');
@@ -135,10 +189,7 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
   await gateway.start();
   console.log('[Server] ✅ Gateway initialized with 2 channels\n');
 
-  // Initialize Telephony Service (Twilio + Google Voice)
-  const { initializeTelephonyService } = await import('../services/telephony-service.js');
-  await initializeTelephonyService();
-  console.log('[Server] ✅ Telephony service initialized\n');
+  // Telephony providers initialize only through the enabled Store app.
 
   // Initialize Inbox System
   const { createInboxSystem } = await import('../inbox/index.js');
@@ -237,6 +288,16 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
     const { startTaskRunRecovery } = await import('../services/task-run-executor.js');
     startTaskRunRecovery();
 
+    // AGENT-BTW-01: a side question left `running` by a restart cannot still be
+    // in flight; mark it `interrupted`, keeping its partial answer.
+    try {
+      const { interruptLeftovers } = await import('../services/side-question/store.js');
+      const n = await interruptLeftovers();
+      if (n > 0) console.log(`[SideQuestion] Marked ${n} interrupted after restart`);
+    } catch (err) {
+      console.warn('[SideQuestion] Could not reconcile leftover side questions:', (err as Error)?.message);
+    }
+
     // BACKUP-01: the daily backup at 03:00 (or on waking after it).
     const { startDailyBackups } = await import('../services/backups.js');
     startDailyBackups();
@@ -254,6 +315,31 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
     // STORE-MAP-01 pilot: change log + brief projection for GIRRU_STORE_PILOT only.
     const { startStorePilot } = await import('../memory/outbox/start.js');
     await startStorePilot().catch((err) => console.warn('[Store pilot] start failed:', (err as Error)?.message));
+    // STORE-MAP-01 P6: the same, debounced, for every project with its memory files on (GIRRU_STORE_P6 only).
+    const { startStoreP6 } = await import('../memory/outbox/p6.js');
+    await startStoreP6().catch((err) => console.warn('[Store P6] start failed:', (err as Error)?.message));
+
+    // STORE-MAP-01 P3 data jobs (GIRRU_STORE_P3 only; background work, so not while AGENT_PLAYER_BACKGROUND=off).
+    const { storeP3Enabled } = await import('../services/store-p3.js');
+    if (storeP3Enabled()) {
+      // Source and trust of existing memories: in the background, small batches, resumes after a restart.
+      const { backfillProvenance } = await import('../memory/validity.js');
+      // Packed vectors (faster recall): after the sources, same small batches, resumable.
+      const { backfillVectors } = await import('../memory/vectors.js');
+      setImmediate(() => {
+        backfillProvenance().catch((err) => console.warn('[Store P3] memory source backfill failed:', (err as Error)?.message))
+          .then(() => backfillVectors()).catch((err) => console.warn('[Store P3] vector backfill failed:', (err as Error)?.message));
+      });
+    }
+
+    // STORE-MAP-01 P4 (D8): the old memory index file goes after a verified backup (GIRRU_STORE_P4 only).
+    if ((await import('../services/store-p4.js')).storeP4Enabled()) {
+      const { retireLegacyIndex } = await import('../memory/legacy-index.js');
+      setImmediate(() => {
+        retireLegacyIndex().then((r) => { if (r.state !== 'none') console.log(`[Store P4] old memory index: ${r.state}${r.state === 'retired' ? ` (backup ${r.backupId})` : r.state === 'kept' ? ` (${r.reason})` : ''}`); })
+          .catch((err) => console.warn('[Store P4] old memory index not retired:', (err as Error)?.message));
+      });
+    }
 
     // MEM-UX-02: exported memory files follow the database (untouched files only).
     const { startMemoryFilesSync } = await import('../memory/files-sync.js');
@@ -269,10 +355,6 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
     setInterval(() => {
       processScheduledNotifications().catch(() => { /* non-fatal */ });
     }, 60_000);
-
-    // Initialize Calendar Sync Scheduler
-    startCalendarSyncScheduler();
-    console.log('[Server] ✅ Calendar sync scheduler started\n');
 
     // Initialize Extension Storage Stats Scheduler (hourly updates)
     const { updateAllExtensionStorageStats } = await import('../services/extension-analytics.js');
@@ -300,6 +382,14 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
       }
     } catch (err) {
       console.warn('[Server] Memory jobs not scheduled:', (err as Error).message);
+    }
+
+    // MODELS-01-INSTALL: the memory helper gets ready in the background (never awaited; OPS3).
+    try {
+      const { memoryHelperEnabled } = await import('../services/memory-helper-switch.js');
+      if (memoryHelperEnabled()) (await import('../memory/helper.js')).startMemoryHelper();
+    } catch (err) {
+      console.warn('[Server] Memory helper not scheduled:', (err as Error).message);
     }
 
     // Initialize Agent Evolution Scheduler
@@ -349,10 +439,6 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
 
   console.log('[Server] ✅ Extension analytics middleware registered\n');
 
-  // Email Sync Service moved to email-client extension
-  // const { emailSyncService } = await import('../services/email-sync-service.js');
-  // await emailSyncService.startAllAutoSync();
-  // console.log('[Server] ✅ Email sync service initialized\n');
 
   // MCP-01b: per-install identity next to the CLI token, so the MCP server
   // can verify this backend before it sends the owner's token.

@@ -46,6 +46,7 @@ const store = await import(join(backendDir, 'src/services/personality-store.ts')
 const evo = await import(join(backendDir, 'src/services/personality-evolution.ts'));
 const { evolveAgent } = await import(join(backendDir, 'src/services/agent-evolution-orchestrator.js'));
 const { generateToken } = await import(join(backendDir, 'src/auth/jwt.ts'));
+const { storeP4Enabled } = await import(join(backendDir, 'src/services/store-p4.ts'));
 const { default: Fastify } = await import('fastify');
 
 const app = Fastify();
@@ -68,6 +69,8 @@ const auth = (id) => (id ? { authorization: `Bearer ${generateToken(id, 1)}` } :
 const base = (id) => `/api/agents/${id}/personality`;
 const quietly = async (fn) => { const s = { ...console }; console.log = () => {}; console.warn = () => {}; console.info = () => {}; console.error = () => {}; try { return await fn(); } finally { Object.assign(console, s); } };
 const versionsOf = (id) => db.prepare('SELECT version FROM agent_personality_versions WHERE agent_id = ? ORDER BY version').all(id).map((r) => r.version);
+// STORE-MAP-01 P4: with the switch on, the record also gets one system 'import' version (the PERSONALITY.md text, once).
+const changesOf = (id) => db.prepare("SELECT version FROM agent_personality_versions WHERE agent_id = ? AND source <> 'import' ORDER BY version").all(id).map((r) => r.version);
 const proposalsOf = (id, source) => db.prepare(`SELECT * FROM personality_proposals WHERE agent_id = ?${source ? ' AND source = ?' : ''} ORDER BY rowid`).all(...[id, ...(source ? [source] : [])]);
 
 /** A finished contract run with its verification rounds (R1 columns). */
@@ -257,14 +260,14 @@ test('PUT /api/agents/:id edits role/department with create validation; the pers
   assert.deepEqual({ ...row }, { role: null, department: null, version: current.version });
 });
 
-test('duplicate copies role and department, not personality versions', async () => {
+test('duplicate copies role and department, not personality versions (P4: the record as version 1)', async () => {
   const created = await quietly(() => app.inject({ method: 'POST', url: '/api/agents', headers: auth('pe-owner'), payload: { name: 'Dup Source Agent', role: 'specialist', department: 'Finance' } }));
   const src = created.json().agent;
   const dup = await quietly(() => app.inject({ method: 'POST', url: `/api/agents/${src.id}/duplicate`, headers: auth('pe-admin') }));
   assert.equal(dup.statusCode, 201, dup.body);
   assert.equal(dup.json().agent.role, 'specialist');
   assert.equal(dup.json().agent.department, 'finance');
-  assert.deepEqual(versionsOf(dup.json().agent.id), []);
+  assert.deepEqual(versionsOf(dup.json().agent.id), storeP4Enabled() ? [1] : []);
   assert.deepEqual(versionsOf(src.id), [1]);
 });
 
@@ -278,7 +281,7 @@ test('cancel: owner cancels any pending proposal; creator admin cancels own; oth
     return res.json();
   };
   const cancel = (pid, payload, who) => app.inject({ method: 'POST', url: `${base('pe-cancel')}/proposals/${pid}/cancel`, headers: auth(who), payload });
-  const before = versionsOf('pe-cancel');
+  const before = changesOf('pe-cancel');
 
   // Owner cancels an admin's proposal.
   const a = await propose('pe-admin', 'admin idea');
@@ -312,7 +315,7 @@ test('cancel: owner cancels any pending proposal; creator admin cancels own; oth
   const late = await cancel(c.id, { expectedReviewHash: c.reviewHash }, 'pe-owner');
   assert.equal(late.statusCode, 409);
   assert.equal(late.json().code, 'already_decided');
-  assert.equal(versionsOf('pe-cancel').length, before.length + 1, 'only the approval wrote a version');
+  assert.equal(changesOf('pe-cancel').length, before.length + 1, 'only the approval wrote a version');
   assert.equal((await cancel('00000000-0000-0000-0000-000000000000', { expectedReviewHash: c.reviewHash }, 'pe-admin')).statusCode, 404);
 
   const audit = db.prepare(`SELECT user_id FROM audit_logs WHERE action = 'agent_personality.proposal.cancel' AND success = 1 ORDER BY rowid`).all();

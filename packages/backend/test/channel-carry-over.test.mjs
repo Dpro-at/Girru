@@ -1,3 +1,4 @@
+import './fixtures/channel-library.mjs';
 // CHANNELS-01: the old telegram/discord extension settings move once to agent-connect → channels.<id>,
 // after a before-update backup (no backup, no change), in one transaction: never over a channel
 // already configured there, agent-connect on when either old one was on, old rows deleted, empty

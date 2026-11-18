@@ -50,7 +50,7 @@ export function createBackendClient(env: NodeJS.ProcessEnv = process.env, timeou
       if (!verified) {
         throw new BackendError(`The service at ${session.backendUrl} could not prove it is this machine's Girru backend, so the token was not sent. If the backend was reinstalled, restart it; otherwise check what is listening on that port.`, 0);
       }
-      const headers: Record<string, string> = { Authorization: `Bearer ${session.token}`, Accept: 'application/json' };
+      const headers: Record<string, string> = { Authorization: `Bearer ${session.token}`, Accept: 'application/json', 'X-Girru-Memory-Reader': 'coding-app' };
       if (body !== undefined) headers['Content-Type'] = 'application/json';
       let res: Response;
       try {

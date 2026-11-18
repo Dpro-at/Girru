@@ -21,6 +21,8 @@ import { addAssistantMessage, type ToolCallPart, type TurnPart, type TurnStatus 
 import { vaultRunSecrets } from './chat-secrets.js';
 import { chunkText } from './chat-sse.js';
 import { redactImportText } from '../memory/import/redact.js';
+import { q } from '../repositories/sql-steps.js';
+import { storeP8Enabled } from './store-p8.js';
 
 /** CHAT-BUILD-01 stage 5: how often a running reply sends its live preview. */
 export const PREVIEW_MS = 250;
@@ -37,15 +39,46 @@ export function previewText(text: string): string {
   return redactImportText(stable.slice(-PREVIEW_CHARS)).text;
 }
 
-export type RunFrame = Record<string, unknown> & { type: string };
-export interface RunEvent { seq: number; frame: RunFrame }
+/** CHAT-LIVE-01: steps one live preview lists (the newest ones). */
+export const PREVIEW_STEPS = 12;
+const PLAN_TOOL = 'plan_steps';
+const LIVE_HIDDEN = new Set([PLAN_TOOL]);
+type LiveStep = { name: string; input: string; done: boolean; failed: boolean; ms?: number };
+type LivePlanStep = { title: string; status: string; parent?: number };
+/**
+ * CHAT-LIVE-01 (LW1/LW3): what the reply is doing, for the live preview only:
+ * its tool steps (inputs redacted and short) and its newest plan. Never
+ * stored and never numbered; the checked events replace it at the end.
+ */
+export function liveWork(parts: readonly TurnPart[]): { steps?: LiveStep[]; plan?: LivePlanStep[] } {
+  const calls = parts.flatMap((p) => (p.kind === 'tools' ? p.calls : []));
+  const steps = calls.filter((c) => !LIVE_HIDDEN.has(c.name)).slice(-PREVIEW_STEPS).map((c) => ({
+    name: c.name.slice(0, 64), input: redactImportText(String(c.input ?? '').slice(0, 300)).text, done: c.output !== undefined, failed: c.isError === true, ...(Number.isFinite(c.ms) ? { ms: c.ms } : {}),
+  }));
+  let plan: LivePlanStep[] | undefined;
+  for (const c of calls) {
+    if (c.name !== PLAN_TOOL || c.isError) continue;
+    let raw: unknown; try { raw = JSON.parse(String(c.input ?? '')); } catch { continue; }
+    const list = (raw as { steps?: unknown })?.steps;
+    if (!Array.isArray(list) || !list.length) continue;
+    plan = list.slice(0, 20).filter((x) => x && typeof x === 'object' && typeof (x as { title?: unknown }).title === 'string').map((x: any) => ({
+      title: redactImportText(String(x.title).replace(/\s+/g, ' ').trim().slice(0, 120)).text,
+      status: ['pending', 'active', 'done', 'skipped'].includes(x.status) ? x.status : 'pending',
+      ...(Number.isInteger(x.parent) && x.parent > 0 ? { parent: x.parent } : {}),
+    }));
+  }
+  return { ...(steps.length ? { steps } : {}), ...(plan?.length ? { plan } : {}) };
+}
+
+export type { AgentRunFrame as RunFrame, AgentRunEvent as RunEvent } from '../agent/contracts/events.js';
+import type { AgentRunFrame as RunFrame, AgentRunEvent as RunEvent } from '../agent/contracts/events.js';
 export type RunStatus = 'running' | TurnStatus;
 
 /** Notices a turn may show (CHAT-BUILD-01). */
 export const NOTICE_SUMMARY_CHARS = 2400;
-export const NOTICE_CODES = new Set(['rate_limited', 'claude_key_missing', 'local_model_slow', 'injection', 'summarized', 'plan_limit', 'images_not_seen']);
+export const NOTICE_CODES = new Set(['rate_limited', 'claude_key_missing', 'local_model_slow', 'injection', 'summarized', 'plan_limit', 'images_not_seen', 'not_signed_in']);
 /** Notices kept with the stored reply (CH10): the owner sees them again when the chat opens. */
-const KEPT_NOTICES = new Set(['injection', 'summarized', 'plan_limit', 'images_not_seen']);
+const KEPT_NOTICES = new Set(['injection', 'summarized', 'plan_limit', 'images_not_seen', 'not_signed_in']);
 /** Runs one user may have running at the same time. */
 export const MAX_RUNNING_PER_USER = 3;
 /** How long a finished run stays attachable in memory. */
@@ -116,7 +149,7 @@ export class ChatRun {
       if (type === 'text' && frame.content) this.addText('text', String(frame.content));
       return; // the run's own 'end' event closes the stream
     }
-    if (type === 'error') { this.error = ['model_unavailable', 'local_model_missing', 'lmstudio_not_running'].includes(String(frame.code)) ? String(frame.code) : 'failed'; return; }
+    if (type === 'error') { this.error = ['model_unavailable', 'local_model_missing', 'lmstudio_not_running', 'usage_limit'].includes(String(frame.code)) ? String(frame.code) : 'failed'; return; }
     if (type === 'text' || type === 'reasoning') {
       const content = typeof frame.content === 'string' ? frame.content : '';
       if (!content) return;
@@ -166,6 +199,8 @@ export class ChatRun {
 
   /** The newest text part, shown live while the run works (CHAT-BUILD-01 stage 5). */
   private lastPreview = 0;
+  /** CHAT-LIVE-01: the newest preview, sent at once to a reader that (re)attaches while the run works. */
+  latestPreview?: Record<string, unknown>;
   private previewTimer?: ReturnType<typeof setTimeout>;
   private previewSoon() {
     if (this.previewTimer || this.published) return;
@@ -176,7 +211,8 @@ export class ChatRun {
       this.lastPreview = this.clock();
       const last = this.parts.at(-1);
       const tool = [...this.parts].reverse().find((p): p is Extract<TurnPart, { kind: 'tools' }> => p.kind === 'tools');
-      this.emitter.emit('preview', { type: 'preview', content: last?.kind === 'text' ? previewText(last.text) : '', ...(tool && last?.kind === 'tools' ? { tool: tool.calls.at(-1)?.name ?? '' } : {}) });
+      this.latestPreview = { type: 'preview', content: last?.kind === 'text' ? previewText(last.text) : '', ...(tool && last?.kind === 'tools' ? { tool: tool.calls.at(-1)?.name ?? '' } : {}), ...liveWork(this.parts) };
+      this.emitter.emit('preview', this.latestPreview);
     }, wait);
     this.previewTimer.unref?.();
   }
@@ -379,7 +415,7 @@ export class ChatRunRegistry {
       const status: TurnStatus = run.error ? 'error' : run.stopping ? 'stopped' : 'complete';
       let durableStatus = status;
       try {
-        await this.persist(run.sessionId, { runId: run.id, content: run.answer, parts: run.parts, status, durationMs: this.now() - run.startedAt, agentId: input.agentId ?? null });
+        await this.persist(run.sessionId, { runId: run.id, content: run.answer, parts: run.parts, status, durationMs: this.now() - run.startedAt, agentId: input.agentId ?? null, ...(run.error ? { errorCode: run.error } : {}) });
         await input.onPersisted?.(status);
       } catch (err) {
         durableStatus = 'error';
@@ -388,6 +424,8 @@ export class ChatRunRegistry {
       }
       run.raw.end();
       run.finish(status, this.now());
+      // STORE-MAP-01 P8 (D27): the reply's working notes become its handoff (when it wrote none) and lesson suggestions.
+      if (storeP8Enabled()) await distillChatRun(run.id, input.userId, input.sessionId, input.agentId ?? null).catch(() => console.warn('[ChatRuns] Working notes not distilled', { runId: run.id }));
       try { await input.onFinished?.(durableStatus); }
       catch { console.error('[ChatRuns] Follow-up paused', { runId: run.id }); }
     })();
@@ -399,6 +437,17 @@ export class ChatRunRegistry {
     const t = this.now();
     for (const [id, r] of this.runs) if (r.endedAt !== undefined && t - r.endedAt > FINISHED_TTL_MS) this.runs.delete(id);
   }
+}
+
+/** P8: a chat reply's working notes, distilled without a model (memory/handoff/run-notes.ts). */
+async function distillChatRun(runId: string, userId: string, sessionId: string, agentId: string | null): Promise<void> {
+  const { distillRun } = await import('../memory/handoff/run-notes.js');
+  if (!(await q.one('SELECT 1 AS x FROM run_notes WHERE owner_id = ? AND run_kind = ? AND run_id = ? LIMIT 1', userId, 'chat', runId))) return;
+  const { conversationScope } = await import('../memory/handoff/scope.js');
+  const scope = await conversationScope(userId, sessionId, agentId);
+  const project = scope?.projectId ? await q.one<{ id: string; slug: string }>('SELECT id, slug FROM chat_projects WHERE id = ? AND user_id = ?', scope.projectId, userId) : undefined;
+  const { projectDrawer } = await import('../memory/bridge/brief.js');
+  await distillRun({ ownerId: userId, runKind: 'chat', runId }, { scope, agentId: scope?.agentId ?? agentId ?? '_main', drawer: project ? projectDrawer(project) : null });
 }
 
 export const chatRuns = new ChatRunRegistry();

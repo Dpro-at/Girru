@@ -36,15 +36,23 @@ npm start
 ## Local app build
 
 ```sh
-npm run stage      # copies Node, backend + modules, UI build into payload/
-npm run stage:code # copies the Code editor (Nabu, ../../../nabu-code) into nabu-runtime/; optional
+npm run stage      # compiles the backend and copies Node, runtime modules and UI into payload/
+npm run stage:code # optional: bundles the Code editor (Nabu, ../../../nabu-code) into nabu-runtime/
 npm run dist:mac   # DMG + ZIP in release/  (dist:win = NSIS, dist:linux = AppImage)
 ```
 
-Without `nabu-runtime/` the app builds without the Code editor. `stage:code` copies only what the editor needs at run time (~1.6 GB of a several-GB checkout): its production packages, and the built-in extensions minus the ones Girru does not use (assistant, account sign-ins, the editor's own tests).
+Every `dist:*` build first runs `scripts/check-bundle-inputs.cjs`. Code and GenVR are Store apps: core releases build without either runtime. Girru downloads a reviewed archive, checks its exact size and SHA-256, and unpacks it into its own app runtime folder. Removing GenVR removes its program files while keeping projects, worlds and account settings. A manual restart is required when the running host cannot restart automatically. Developer checkouts may still use `core-ui/scripts/prepare-genvr.cjs` for the pinned local SDK; it is not copied by `stage`. The input check refuses a partially staged optional runtime. `npm run stage:code` remains available for developer editor builds.
 
-The local payload copies every installed module (large). Release bundles with
-a pinned, checksummed Node and production-only modules come later. macOS builds
+The payload compiles backend TypeScript to JavaScript at build time and preserves
+its adjacent runtime assets. Packaged startup needs no TypeScript loader. Only
+production packages listed in the backend lockfile are copied; TypeScript, tsx
+and esbuild stay out of the payload, as do stale installed packages and native
+prebuilds for other platforms. Staging requires an already installed TypeScript
+compiler in the backend or core-ui development dependencies; it downloads nothing.
+Installed runtime package paths and versions must match the lockfile; staging
+refuses drift before replacing the previous payload. The bridge uses Node built-ins
+only. Extension Node entries must be JavaScript; their frontend source files are
+build inputs and are not executed by the backend. macOS builds
 use ad-hoc signing only; they are not notarized. Windows builds are unsigned.
 
 ### First open after downloading
@@ -55,6 +63,21 @@ use ad-hoc signing only; they are not notarized. Windows builds are unsigned.
   that has not been notarized; do not remove system protections globally.
 - **Windows:** On SmartScreen, choose **More info → Run anyway** for the Girru
   installer only if it came from the official Girru release page.
+
+### Updates
+
+The installed app looks for a new published Girru release once a day and never
+updates by itself. When one is ready, an **Update** button appears in the top bar.
+Pressing it asks once, then Girru downloads the release file for this computer from
+the official Girru releases on GitHub, checks it against the release's
+`SHA256SUMS-<platform>.txt`, and makes a backup of your data first.
+
+- **macOS:** the new Girru.app replaces the running one and Girru starts again.
+- **Windows:** Girru closes, the installer runs silently into the same folder and
+  opens Girru again.
+- **Linux, or a run from source:** the update page links to the release instead.
+
+Release files are checked by checksum only; the builds are not code-signed (see above).
 
 The installer does not report a fabricated percentage. When Girru launches, its
 Starting window names the current checks (“Checking the installation files…”,
@@ -87,3 +110,21 @@ Browser opens inside the normal Girru workspace with Girru tabs, address/navigat
 `/api/browser/app` is handled by the local UI bridge after an authenticated-owner check. Its closed command schema does not accept executable paths, connection credentials, arbitrary scripts or agent identities. Credentials stay in the dedicated private browser profile. The backend receives only the fixed `DPRO_BROWSER_CONNECTION_FILE` location through trusted desktop startup configuration.
 
 Installing the separate Browser extension registers `browser_workspace`. Existing agent tool grants and approval rules still apply; installation never enables it for all staff. Pairing uses the backend's actual agent/chat context, and each agent's MCP scope contains only its assigned tabs. Actual Chrome profile discovery does not automatically import credentials or delegate imported owner sessions to agents.
+
+### Optional GenVR runtime
+
+GenVR opens its existing Store page when its runtime is absent. The desktop host supplies `GIRRU_APP_RUNTIMES_DIR`; a source/web deployment must explicitly configure the same absolute runtime folder for its backend and local UI bridge. Such deployments need a manual restart after adding or removing the runtime. Remote backends do not install a runtime on the viewing computer.
+
+Only the SDK version pinned by the running Girru build is accepted. A newer incompatible Store archive requires updating Girru. Archive integrity is checked before installation; program files are protected from agent filesystem edits. Account settings and worlds survive removal. Re-adding or relocating the managed MCP launch resets agent tool grants, which must be reviewed again.
+
+On AppImage or translocated macOS installations whose Node executable path changes at each launch, the managed MCP launch is re-approved and its agent grants are reset on each restart. Review GenVR agent permissions again in those environments.
+
+### Agent Connect channels
+
+Channels use the existing Agent Connect package as a separate Store app. The core includes the web channel and a small configuration/security host, with no Agent Connect, Telegram, WhatsApp or Graph provider dependencies in its production payload. Settings › Channels opens the Store when the app is missing. The Store uses pinned npm archives and no install scripts; optional Python providers still need their own explicit setup. Removal stops channels while retaining settings, credentials, delivery history and provider state. Re-adding keeps channel choices and does not switch disabled channels on.
+
+### Optional Call Center, Trading and Browser
+
+The core payload omits Twilio and Puppeteer. Call Center installs its reviewed provider program from the Store; it preserves old phone data through the existing backup-first namespace migration. Trading installs its existing practice renderer while the trusted paper proof and ledger host remain in Girru. Browser installs the existing Puppeteer engine; API/tool grants and public-network restrictions stay in the core. All three use owner-controlled activation in My apps and require a restart when indicated. Removal retains data and permissions and retires active hosts.
+
+Trading renderer code is trusted same-origin application code, not an isolated third-party sandbox. Adding the app does not by itself grant paper execution authority. Browser Get installs only the program and pinned SDK archives, without downloading Chrome or importing browser profiles. A compatible cached browser or absolute operator `GIRRU_BROWSER_EXECUTABLE` is required. The native browser workspace evaluation remains separate.

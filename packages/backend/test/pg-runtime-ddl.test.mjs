@@ -176,7 +176,7 @@ test('flushAuditWritesWithin: true when the writes finish, false after the bound
 });
 
 test('server shutdown path calls the bounded flush after fastify.close()', () => {
-  const src = readFileSync(join(backendDir, 'src', 'api', 'server.ts'), 'utf8');
+  const src = readFileSync(join(backendDir, 'src', 'api', 'server-main.ts'), 'utf8');
   const close = src.indexOf('await fastify.close();');
   const flush = src.indexOf('await flushAuditWritesWithin(SHUTDOWN_AUDIT_FLUSH_MS)');
   // BACKUP-01: the exit code is 0, or the restart code a restore asks for.

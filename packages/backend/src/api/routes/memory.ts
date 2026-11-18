@@ -5,6 +5,7 @@
  */
 
 import { actorOf } from '../../auth/auth-gate.js';
+import { hideKeysInText, recordHiddenKeys } from '../../memory/hidden-keys.js';
 import type { FastifyInstance } from 'fastify';
 import { v4 as uuidv4 } from 'uuid';
 import { getMemoryStorage } from '../../memory/storage.js';
@@ -17,6 +18,7 @@ import { ScopeError, sendScopeError } from '../../repositories/scope.js';
 import { MemoryCursorError } from '../../memory/display-page.js';
 import { TopicKeyError, normalizeTopicKey, suggestTopicKey } from '../../memory/topic-key.js';
 import { TopicKeyTakenError } from '../../memory/storage.js';
+import { MemoryVersionConflictError } from '../../memory/learning.js';
 
 const MAX_CONTENT = 50_000;
 const MAX_METADATA_JSON = 64 * 1024;
@@ -96,9 +98,9 @@ function memoryError(reply: import('fastify').FastifyReply, err: unknown) {
   return sendScopeError(reply, err);
 }
 
-export async function memoryRoutes(fastify: FastifyInstance) {
+export async function memoryRoutes(fastify: FastifyInstance,options:{skipLegacyInitialization?:boolean}={}) {
   // Initialize storage
-  await getMemoryStorage().initialize();
+  if(!options.skipLegacyInitialization)await getMemoryStorage().initialize();
 
   // Encapsulated to this plugin: applies to the memory routes only.
   fastify.addHook('preHandler', async (request, reply) => {
@@ -218,6 +220,14 @@ export async function memoryRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'Invalid metadata' });
     }
 
+    // MEM-READ-01 MR2: keys in what the owner remembers are hidden (key store + lock chip).
+    let hiddenNew: Array<{ id: string; type: string }> = [];
+    const keyOwner = actorOf(request)?.userId ?? null;
+    if (keyOwner) {
+      const h = await hideKeysInText(keyOwner, body.content, drawer ? (drawer.key ? `${drawer.kind}:${drawer.key}` : drawer.kind) : 'memory').catch(() => null);
+      if (h) { body.content = h.text; hiddenNew = h.hidden; }
+    }
+
     // Determine memory layer based on importance (same logic as memory_save tool)
     const importance = body.importance || 5;
     let memoryLayer: MultiTierLayer = 'working';
@@ -261,6 +271,7 @@ export async function memoryRoutes(fastify: FastifyInstance) {
         ? await memoryRepo.createOrUpdateTopic(actorOf(request), draft, 'api')
         : { memory: await memoryRepo.create(actorOf(request), draft, 'api'), updated: false };
     } catch (err) { return memoryError(reply, err); }
+    if (hiddenNew.length && keyOwner) await recordHiddenKeys(keyOwner, result.memory.id, drawer ? (drawer.key ? `${drawer.kind}:${drawer.key}` : drawer.kind) : 'memory', hiddenNew).catch(() => undefined);
 
     return {
       success: true,
@@ -285,6 +296,13 @@ export async function memoryRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({ error: picked.error });
       }
       const { updates } = picked;
+      // MEM-READ-01 MR2: a key typed into a memory is hidden (key store + lock chip), never stored in plain text.
+      let hiddenNow: Array<{ id: string; type: string }> = [];
+      const keyOwner = actorOf(request)?.userId ?? null;
+      if (typeof updates.content === 'string' && keyOwner) {
+        const h = await hideKeysInText(keyOwner, updates.content, 'memory').catch(() => null);
+        if (h) { updates.content = h.text; hiddenNow = h.hidden; }
+      }
       // CORE-MEM-TOPIC: `topicKey` sets the key; null or '' clears it.
       const rawTopic = isPlainObject(request.body) ? request.body.topicKey : undefined;
       let topicKey: string | null | undefined;
@@ -302,15 +320,20 @@ export async function memoryRoutes(fastify: FastifyInstance) {
         }
       }
 
+      // STORE-MAP-01 P3 (FD3e): `expectedVersion` refuses an edit made on an older version.
+      const rawVersion = isPlainObject(request.body) ? request.body.expectedVersion : undefined;
+      if (rawVersion !== undefined && !(Number.isInteger(rawVersion) && (rawVersion as number) >= 0)) return reply.code(400).send({ error: 'expectedVersion must be a whole number' });
       try {
         // CORE-05: baseline + new version, actor = the caller.
-        const updated = await memoryRepo.update(actorOf(request), id, updates, 'api');
+        const updated = await memoryRepo.update(actorOf(request), id, updates, 'api', rawVersion as number | undefined);
+        if (hiddenNow.length && keyOwner) await recordHiddenKeys(keyOwner, id, 'memory', hiddenNow).catch(() => undefined);
 
         return {
           success: true,
           memory: updated
         };
       } catch (err: any) {
+        if (err instanceof MemoryVersionConflictError) return reply.code(409).send({ error: err.message, code: 'version_conflict', current: err.current });
         return reply.code(404).send({ error: 'Memory not found' });
       }
     }

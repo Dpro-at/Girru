@@ -1,0 +1,1 @@
+export default {id:'trading',name:'Trading practice',version:'1.0.0',register(api){api.log('info','Trading practice is available through the reviewed owner-only paper host. No broker or live-order tools are registered.');}};

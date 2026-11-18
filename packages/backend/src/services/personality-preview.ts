@@ -1,4 +1,4 @@
-import {runOllamaAgentLoop} from './ollama-agent-loop.js';
+import {runOllamaAgentLoop} from '../agent/providers/ollama-agent-loop.js';
 import {DEFAULT_OLLAMA_MODEL} from '../llm/ollama.js';
 import {defaultOllamaUrl} from '../config/ollama-url.js';
 import {traitsToBehavior} from './personality.js';

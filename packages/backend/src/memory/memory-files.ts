@@ -1,3 +1,4 @@
+import {assertNoDefaultMemoryAccess} from './encryption/execution-context.js';
 import { readRegularFile, FileReadError } from '../services/read-regular-file.js';
 /**
  * Memory files (CORE-04): the database is canonical; every drawer can be
@@ -44,6 +45,10 @@ import { getMemoryStorage } from './storage.js';
 import { drawerRevisionStep, lastVersionStep, lockMemoryHistory, trashSnapshot } from './versions.js';
 import { isMemoryType, type Memory, type MemoryType, type ImportanceLevel, type MultiTierLayer } from './types.js';
 import { drawerId, normalizeDrawer, parseDrawerId, type DrawerRef } from './drawers.js';
+import { replaceStep } from './validity.js';
+import { storeP9Enabled } from '../services/store-p9.js';
+import { storeP9bEnabled } from '../services/store-p9b.js';
+import { sourceOfProposal, stored } from './quality/pipeline.js';
 
 export const MAX_FILE_BYTES = 1024 * 1024;
 export const MAX_CHANGES = 500;
@@ -70,7 +75,7 @@ export type MemoryChange =
 export interface MemoryProposal {
   id: string;
   userId: string;
-  agentId: string;
+  agentId: string|null;
   drawer: DrawerRef;
   drawerId: string;
   baseHash: string;
@@ -78,7 +83,7 @@ export interface MemoryProposal {
   changes: MemoryChange[];
   status: 'pending' | 'approved' | 'rejected' | 'stale' | 'cancelled';
   /** upload/file: edited export (CORE-04); learning/agent: important learned item or agent change (CORE-05); import: imported text (CLI-02). */
-  source: 'upload' | 'file' | 'learning' | 'agent' | 'import';
+  source: 'upload' | 'file' | 'learning' | 'agent' | 'import' | 'owner';
   note: string | null;
   createdBy: string;
   createdAt: string;
@@ -333,7 +338,7 @@ function currentMemories(userId: string, drawer: DrawerRef): Step<Memory[]> {
  * Transaction lock for one drawer of one user (PostgreSQL): a change that
  * reads the drawer's content or revision and then writes runs alone.
  */
-function* lockDrawer(userId: string, drawer: DrawerRef): Step<void> {
+export function* lockDrawer(userId: string, drawer: DrawerRef): Step<void> {
   yield* lockName(`memory-drawer:${userId}:${drawerId(drawer)}`);
 }
 
@@ -350,6 +355,7 @@ export interface DrawerFileView {
 
 /** The export text of a drawer (no write). */
 export function viewDrawerFile(userId: string, agentId: string, drawer: DrawerRef): Promise<DrawerFileView> {
+  assertNoDefaultMemoryAccess();
   return sql().read(viewDrawerFileStep(userId, agentId, drawer));
 }
 
@@ -378,6 +384,7 @@ async function refuseNonRegular(file: string): Promise<boolean> {
 
 /** Write a drawer's export file (DB -> file only). */
 export async function exportDrawerFile(userId: string, agentId: string, drawer: DrawerRef): Promise<DrawerFileView> {
+  assertNoDefaultMemoryAccess();
   const view = await viewDrawerFile(userId, agentId, drawer);
   const file = drawerFilePath(agentId, userId, view.drawer);
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -394,6 +401,7 @@ export async function exportDrawerFile(userId: string, agentId: string, drawer: 
  * Best effort: the database stays canonical. Returns the agents re-exported.
  */
 export async function exportDrawerFileIfPresent(userId: string, drawer: DrawerRef): Promise<string[]> {
+  assertNoDefaultMemoryAccess();
   const done: string[] = [];
   let agents: string[] = [];
   try { agents = await fs.readdir(agentsRoot()); } catch { return done; }
@@ -418,6 +426,7 @@ export async function exportDrawerFileIfPresent(userId: string, drawer: DrawerRe
  * re-exported and the files left alone because they were edited.
  */
 export async function refreshUntouchedExports(userId: string, drawer: DrawerRef): Promise<{ reexported: string[]; edited: string[] }> {
+  assertNoDefaultMemoryAccess();
   const out = { reexported: [] as string[], edited: [] as string[] };
   let agents: string[] = [];
   try { agents = await fs.readdir(agentsRoot()); } catch { return out; }
@@ -439,6 +448,7 @@ export async function refreshUntouchedExports(userId: string, drawer: DrawerRef)
 
 /** Read the exported file of a drawer as it is on disk (owner edited it). */
 export async function readDrawerFile(userId: string, agentId: string, drawer: DrawerRef): Promise<string> {
+  assertNoDefaultMemoryAccess();
   const file = drawerFilePath(agentId, userId, drawer);
   if (!(await refuseNonRegular(file))) throw new MemoryFileError('This drawer has not been exported yet', 404);
   try {
@@ -521,8 +531,14 @@ export interface ChangeProposalInput {
   conflictWith?: string | null;
 }
 
-export function createChangeProposal(input: ChangeProposalInput): Promise<MemoryProposal> {
-  return sql().tx(() => createChangeProposalStep(input));
+export async function createChangeProposal(input: ChangeProposalInput): Promise<MemoryProposal> {
+  // MEM-READ-01 MR2: keys in proposed text are hidden (key store + lock chip) before anyone reviews or stores it.
+  const { hideKeysInChanges, recordHiddenKeys } = await import('./hidden-keys.js');
+  const where = drawerId(normalizeDrawer(input.drawer));
+  const prepared = await hideKeysInChanges(input.userId, input.changes, where);
+  const proposal = await sql().tx(() => createChangeProposalStep({ ...input, changes: prepared.changes }));
+  await recordHiddenKeys(input.userId, null, where, prepared.hidden).catch(() => undefined);
+  return proposal;
 }
 
 /** createChangeProposal as a SQL step (inside a transaction: the import commit). */
@@ -624,7 +640,11 @@ function layerFor(importance: number): { memoryLayer: MultiTierLayer; expiryTime
   return { memoryLayer: 'working', expiryTimestamp: Date.now() + 24 * 60 * 60 * 1000 };
 }
 
-export interface ApplyResult { proposal: MemoryProposal; revision: number; applied: { added: string[]; updated: string[]; deleted: string[] } }
+export interface ApplyResult {
+  proposal: MemoryProposal; revision: number;
+  /** `replaced` (P9, M4): old facts a kept-new conflict superseded; their new rows are in `added`. */
+  applied: { added: string[]; updated: string[]; deleted: string[]; replaced?: string[] };
+}
 
 const REVIEW_HASH = /^[0-9a-f]{64}$/;
 
@@ -693,6 +713,10 @@ export async function approveProposal(
   const changes: MemoryChange[] = opts.keepBoth
     ? proposal.changes.map((c) => (c.op === 'update' ? { op: 'add', after: c.after } : c))
     : proposal.changes;
+  // STORE-MAP-01 P9 (M4): keep new supersedes the contradicted fact. The new text
+  // is its own row (same topic); the old row stops being true (valid_to,
+  // superseded_by) and stays in History instead of being written over.
+  const supersede = decision === 'keep_new' && storeP9Enabled() ? proposal.conflictWith : null;
 
   // Embeddings first (async); the database work below is one transaction (SQL steps).
   const embeddings = new Map<number, number[]>();
@@ -701,7 +725,7 @@ export async function approveProposal(
   }
 
   if (opts.beforeCommit && !await opts.beforeCommit()) throw new MemoryFileError('Automatic import is disabled', 400);
-  const applied = { added: [] as string[], updated: [] as string[], deleted: [] as string[] };
+  const applied: ApplyResult['applied'] = { added: [], updated: [], deleted: [], ...(supersede ? { replaced: [] as string[] } : {}) };
   const written: Memory[] = [];
   const removed: Memory[] = [];
   let revision = 0;
@@ -739,6 +763,8 @@ export async function approveProposal(
         if (c.op === 'add') continue;
         const now = byId.get(c.id);
         if (!now || JSON.stringify(entryOf(now)) !== JSON.stringify(c.before)) { stale = true; break; }
+        // P3: a memory replaced since the review (a newer fact took its topic) is no longer what was reviewed.
+        if (String(now.status ?? 'active') === 'replaced') { stale = true; break; }
       }
     }
     // CORE-MEM-TOPIC: a new memory's topic key must still be free in the drawer.
@@ -766,6 +792,26 @@ export async function approveProposal(
         yield* storage.writeRowStep(mem);
         yield* record(mem.id, 'create', c.after, revision);
         applied.added.push(mem.id);
+        written.push(mem);
+      } else if (c.op === 'update' && c.id === supersede) {
+        const old = byId.get(c.id);
+        if (!old) throw new MemoryFileError('Proposal does not match the drawer', 409, 'stale');
+        yield* recordBaseline(old, prev);
+        const now = Date.now();
+        const mem: Memory = {
+          id: uuidv4(), userId, type: c.after.type as MemoryType, content: c.after.content,
+          importance: c.after.importance as ImportanceLevel, importanceScore: c.after.importance / 10,
+          ...layerFor(c.after.importance), consolidationStatus: 'pending', status: 'active',
+          metadata: { source: proposal.source, proposalId: proposal.id, supersedes: old.id }, createdAt: new Date(now), lastAccessedAt: now,
+          accessCount: 0, embedding: embeddings.get(i), drawer, topicKey: old.topicKey ?? null,
+          sourceAgentId: proposalSourceAgent(proposal.createdBy),
+        };
+        // The old row first: it frees the topic key for the new one.
+        yield* replaceStep(userId, old.id, mem.id);
+        yield* storage.writeRowStep(mem);
+        yield* record(mem.id, 'create', c.after, revision);
+        applied.added.push(mem.id);
+        applied.replaced!.push(old.id);
         written.push(mem);
       } else if (c.op === 'update') {
         const old = byId.get(c.id);
@@ -800,7 +846,15 @@ export async function approveProposal(
   // the approval is committed, so a file problem never fails the response).
   for (const m of removed) await bestEffort('removing a memory copy', () => storage.removeMarkdownCopy(m));
   for (const m of written) await bestEffort('writing a memory copy', () => storage.writeMarkdownCopy(m));
-  await bestEffort('re-exporting the drawer', () => exportDrawerFile(userId, proposal.agentId, drawer));
+  if(proposal.agentId!==null){const exportAgentId=proposal.agentId;await bestEffort('re-exporting the drawer', () => exportDrawerFile(userId, exportAgentId, drawer));}
+  // STORE-MAP-01 P9b (MD1, MD3): the text's own source, plus the owner's approval when the owner
+  // decided it (not a scope rule, a reviewer agent or an automatic import).
+  if (storeP9bEnabled()) {
+    const ownerApproved = decidedBy === userId && !opts.beforeCommit;
+    await bestEffort('recording memory trust', () => stored(written, [
+      sourceOfProposal(proposal, userId), ...(ownerApproved ? [{ kind: 'approved' as const, key: 'owner-approval', label: 'owner approved' }] : []),
+    ]));
+  }
 
   return { proposal: (await getProposal(userId, proposal.id))!, revision, applied };
 }
@@ -817,6 +871,8 @@ export async function rejectProposal(userId: string, id: string, decidedBy: stri
 /**
  * Decide a conflict proposal (CORE-MEM-CONFLICT), owner only (callers check):
  *   keep_new   the existing memory gets the new text as a new version
+ *              (GIRRU_STORE_P9, M4: the new text is a new row that supersedes
+ *              the existing one, which keeps valid_to + superseded_by in History)
  *   keep_old   nothing changes (= reject)
  *   keep_both  the new text is added as its own memory; the existing one stays
  * Same review-hash checks, claim and transaction as approve/reject (CORE-04b):
@@ -850,3 +906,6 @@ export async function drawerVersions(userId: string, drawer: DrawerRef, limit = 
   `, userId, drawer.kind, drawer.key || '', Math.max(1, Math.min(1000, limit))));
   return rows.map((r: any) => ({ ...r, createdAt: isoUtc(r.createdAt) }));
 }
+
+/** Internal adapter for already authenticated/decrypted proposal rows. */
+export {rowToProposal as memoryProposalFromRow};

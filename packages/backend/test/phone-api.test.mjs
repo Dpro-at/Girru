@@ -1,5 +1,5 @@
 // MOB-PAIR-01: Settings › Phone on the computer, without a relay.
-//  - migration 164 tables; the computer identity's private key is stored only encrypted;
+//  - migration 183 tables; the computer identity's private key is stored only encrypted;
 //  - owner-only API with exact bodies and plain error codes (user, admin, no token refused);
 //  - a pairing renews its QR code (new pairing id, secret and expiry; the old id stops working);
 //  - device patch / forget / forget-all, sliding lifetime, the read-only phone_devices tool;
@@ -71,7 +71,7 @@ async function requestFrom(phone, name = 'Phone', opts = {}) {
   return { p, qr };
 }
 
-test('migration 164 creates the phone tables', () => {
+test('migration 183 creates the phone tables', () => {
   for (const t of ['phone_identity', 'phone_devices', 'phone_settings', 'phone_approvals_shown']) {
     assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(t), t);
   }

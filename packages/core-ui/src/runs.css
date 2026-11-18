@@ -116,3 +116,5 @@
 .task-group input[type=checkbox][role=switch]::after{content:"";position:absolute;inset-block-start:2px;inset-inline-start:2px;inline-size:16px;block-size:16px;border-radius:50%;background:#fff;transition:transform .15s}
 .task-group input[type=checkbox][role=switch]:checked{background:var(--accent)}
 .task-group input[type=checkbox][role=switch]:checked::after{transform:translateX(14px)}
+.runs-computers{display:flex;flex-direction:column;gap:6px;padding:8px 12px}
+.runs-computers .computer-task{text-align:left;color:inherit;font:inherit;cursor:pointer}

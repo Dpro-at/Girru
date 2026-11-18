@@ -11,8 +11,10 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { randomBytes } from 'node:crypto';
 
+import { switchValueOn } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const dir = mkdtempSync(join(tmpdir(), 'ap-chat-memory-'));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });
@@ -38,12 +40,13 @@ globalThis.fetch = async (url, init = {}) => {
 const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
 
-const { getDatabase } = await import(join(backendDir, 'src/db/database.ts'));
+const { getDatabase } = await import(pathToFileURL(join(backendDir, 'src/db/database.ts')).href);
+const { projectKeyOf } = await import(pathToFileURL(join(backendDir, 'src/memory/project-keys.ts')).href); // project memory key (id while GIRRU_STORE_P3 is on)
 const db = getDatabase();
 await db.initialize();
-const { getCredentialStorage } = await import(join(backendDir, 'src/credentials/storage.ts'));
+const { getCredentialStorage } = await import(pathToFileURL(join(backendDir, 'src/credentials/storage.ts')).href);
 await getCredentialStorage().initialize();
-const { getOrchestrator } = await import(join(backendDir, 'src/multi-agent/index.ts'));
+const { getOrchestrator } = await import(pathToFileURL(join(backendDir, 'src/multi-agent/index.ts')).href);
 await getOrchestrator().initialize(join(dir, '.data', 'multi-agent', 'orchestrator.db'));
 for (const [id, role] of [['cm-owner', 'owner'], ['cm-admin', 'admin'], ['cm-user', 'user']]) {
   db.prepare(`INSERT INTO users (id, email, username, password_hash, role, status, email_verified) VALUES (?, ?, ?, 'x', ?, 'active', 1)`).run(id, `${id}@example.test`, id, role);
@@ -52,10 +55,10 @@ db.prepare(`INSERT INTO agents_config (id, name, provider, model, is_primary) VA
 db.prepare(`INSERT INTO agents_config (id, name, provider, model, is_primary) VALUES ('cm-writer', 'Writer', 'ollama', 'qwen-test', 0)`).run();
 db.prepare(`INSERT INTO agents_config (id, name, provider, model, is_primary) VALUES ('cm-coder', 'Coder', 'ollama', 'qwen-test', 0)`).run();
 
-const { generateToken } = await import(join(backendDir, 'src/auth/jwt.ts'));
-const { buildServer } = await import(join(backendDir, 'src/api/app.ts'));
-const { chatRuns } = await import(join(backendDir, 'src/services/chat-runs.ts'));
-const { addAssistantMessage, createProject } = await import(join(backendDir, 'src/repositories/chat-conversations.ts'));
+const { generateToken } = await import(pathToFileURL(join(backendDir, 'src/auth/jwt.ts')).href);
+const { buildServer } = await import(pathToFileURL(join(backendDir, 'src/api/app.ts')).href);
+const { chatRuns } = await import(pathToFileURL(join(backendDir, 'src/services/chat-runs.ts')).href);
+const { addAssistantMessage, createProject } = await import(pathToFileURL(join(backendDir, 'src/repositories/chat-conversations.ts')).href);
 const app = await buildServer({ logger: false });
 await app.ready();
 const as = (id) => ({ authorization: `Bearer ${generateToken(id, 1)}` });
@@ -126,7 +129,7 @@ test('the project drawer only for a project conversation; bad requests are refus
   const pm = await addAssistantMessage(pc.id, { runId: 'run-cm-0003', content: 'Use the blue logo.', parts: [], status: 'complete', durationMs: 1 });
   const r = await call('cm-owner', 'POST', `/api/chat/conversations/${pc.id}/memories`, { messageId: pm.id, content: 'Use the blue logo.', drawer: 'project', type: 'preference', importance: 9 });
   assert.equal(r.statusCode, 201, r.body);
-  assert.equal(r.json().memory.drawerId, `project:${project.slug}`);
+  assert.equal(r.json().memory.drawerId, `project:${projectKeyOf(project)}`);
 });
 
 test('an agent proposes a memory in the chat; nothing is saved until the owner accepts (review hash)', async () => {
@@ -187,7 +190,8 @@ test('a conflict proposed in the chat and kept new shows as saved with the new t
   assert.equal(d.statusCode, 200, d.body);
   const after = (await call('cm-owner', 'GET', url)).json().memories.find((x) => x.id === p.id);
   assert.equal(after.status, 'saved');
-  assert.equal(after.memoryId, full.conflictWith);
+  // STORE-MAP-01 P9 (M4): keep new supersedes; the link shows the new current memory.
+  assert.equal(after.memoryId, switchValueOn(process.env.GIRRU_STORE_P9) ? db.prepare('SELECT superseded_by FROM memories WHERE id = ?').get(full.conflictWith).superseded_by : full.conflictWith);
   assert.equal(after.text, 'The team does not meet every Monday at 9');
 });
 

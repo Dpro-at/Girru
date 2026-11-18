@@ -1,0 +1,13 @@
+{
+  "name": "@agent-player/account-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Dpro account and device metadata service; no work content storage",
+  "engines": { "node": ">=24.0.0" },
+  "scripts": {
+    "start": "node --import tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.mjs"
+  }
+}

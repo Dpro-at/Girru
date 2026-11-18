@@ -57,6 +57,8 @@ export const EXTENSIONS_SQLITE_ONLY = Object.freeze({
 
 export class ExtensionRunner {
   private loadedExtensions = new Map<string, Extension>();
+  /** The folder each loaded extension was read from: a request names an extension, never its folder. */
+  private loadedPaths = new Map<string, string>();
   private extensionsDir: string;
 
   constructor(extensionsDir: string = extensionsRoot()) {
@@ -196,6 +198,7 @@ export class ExtensionRunner {
 
     // Store loaded extension
     this.loadedExtensions.set(id, extension);
+    this.loadedPaths.set(id, extensionPath);
     console.log(`[ExtensionRunner] ✅ Extension loaded: ${name} v${version}\n`);
   }
 
@@ -227,13 +230,14 @@ export class ExtensionRunner {
       extensionId);
 
     // Call onDisable() hook if extension is loaded
-    const extension = this.loadedExtensions.get(extensionId);
-    if (extension?.onDisable) {
-      const api = createExtensionApi(extensionId, {} as any, getDatabase().getDb(), {} as any, join(this.extensionsDir, extensionId));
+    const extension = this.loadedExtensions.get(extensionId), extensionPath = this.loadedPaths.get(extensionId);
+    if (extension?.onDisable && extensionPath) {
+      const api = createExtensionApi(extensionId, {} as any, getDatabase().getDb(), {} as any, extensionPath);
       await extension.onDisable(api);
     }
 
     this.loadedExtensions.delete(extensionId);
+    this.loadedPaths.delete(extensionId);
 
     safeConsole.log(`[ExtensionRunner] ❌ Extension "${extensionId}" disabled`);
   }

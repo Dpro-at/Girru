@@ -1,3 +1,4 @@
+import {assertNoDefaultMemoryAccess} from './encryption/execution-context.js';
 /**
  * A project's design (DESIGN-FIND-01), kept per project of the owner.
  *
@@ -25,6 +26,9 @@ import path from 'node:path';
 import { all, one, run, sql } from '../repositories/sql-steps.js';
 import { ManagedFileError, writeSection, type Marks } from './bridge/managed-files.js';
 import { DESIGN_MARK_END, DESIGN_MARK_START, mainColourCandidates, type DesignColour, type DesignFound } from '../discovery/project-tech.js';
+import { currentProjectKey } from './project-keys.js';
+import { withBriefProjectionBarrier } from './outbox/projection.js';
+import { encryptedProjectionHeldStep } from './encryption/projection-hold.js';
 import { ScopeInputError, assertProjectSlug, projectStep } from './scopes/store.js';
 
 export const DESIGN_MARKS: Marks = {
@@ -120,6 +124,7 @@ function viewOf(slug: string, row: Row | undefined, home: string, problem: strin
 
 /** The design view of a project (empty lists when nothing was found yet). */
 export async function getDesign(ownerId: string, slug: string, home = os.homedir()): Promise<DesignView> {
+  assertNoDefaultMemoryAccess();
   await requireProject(ownerId, slug);
   return viewOf(slug, await sql().read(rowStep(ownerId, slug)), home);
 }
@@ -149,10 +154,13 @@ export function designBlock(v: DesignView): string {
 
 /** Write DESIGN.md (switch on, folder known). Never throws: a problem is stored and shown. */
 async function writeFile(ownerId: string, slug: string, home: string): Promise<{ action: string | null; problem: string | null }> {
+  const scope = `project:${await currentProjectKey(ownerId, slug)}`;
+  return withBriefProjectionBarrier(scope, async () => {
   const row = await sql().read(rowStep(ownerId, slug));
   const found = foundOf(row);
   if (!row || !found || Number(row.write_file) !== 1) return { action: null, problem: null };
   try {
+    if (await sql().read(encryptedProjectionHeldStep(scope))) return { action: null, problem: 'Encrypted memory projection hold' };
     const out = writeSection(found.root, DESIGN_FILE, designBlock(viewOf(slug, row, home)), DESIGN_MARKS);
     if (out.action !== 'unchanged') await sql().read(run('UPDATE memory_project_design SET file_written_at = ? WHERE owner_id = ? AND slug = ?', new Date().toISOString(), ownerId, slug));
     return { action: out.action, problem: null };
@@ -160,6 +168,7 @@ async function writeFile(ownerId: string, slug: string, home: string): Promise<{
     if (e instanceof ManagedFileError) return { action: null, problem: e.message };
     return { action: null, problem: 'DESIGN.md could not be written' };
   }
+  });
 }
 
 /**
@@ -168,6 +177,7 @@ async function writeFile(ownerId: string, slug: string, home: string): Promise<{
  * rewritten when the switch is on.
  */
 export async function recordFoundDesign(ownerId: string, slug: string, found: DesignFound, home = os.homedir()): Promise<{ changed: boolean; conflicts: number; file: string | null; problem: string | null }> {
+  assertNoDefaultMemoryAccess();
   const row = await sql().read(rowStep(ownerId, slug));
   const old = foundOf(row);
   // Scanning never grants approval. Retain only exact previously approved source/text pairs.
@@ -184,6 +194,7 @@ export async function recordFoundDesign(ownerId: string, slug: string, found: De
 
 /** Undo the last automatic change (the previous design comes back). */
 export async function undoDesign(ownerId: string, slug: string, home = os.homedir()): Promise<DesignView> {
+  assertNoDefaultMemoryAccess();
   await requireProject(ownerId, slug);
   const row = await sql().read(rowStep(ownerId, slug));
   if (!row?.previous) throw new ScopeInputError('Nothing to undo', 409, 'no_change');
@@ -200,6 +211,7 @@ export interface DesignPatch { mainLogo?: unknown; notLogo?: unknown; mainColour
 
 /** The owner's choices: main logo, not a logo, main colour (answers the conflict), DESIGN.md switch. */
 export async function patchDesign(ownerId: string, slug: string, input: DesignPatch, home = os.homedir()): Promise<DesignView> {
+  assertNoDefaultMemoryAccess();
   await requireProject(ownerId, slug);
   const unknown = Object.keys(input).find((k) => !['mainLogo', 'notLogo', 'mainColour', 'writeFile', 'approvedRules', 'confirmRules'].includes(k));
   if (unknown) throw new ScopeInputError(`Unknown field "${unknown.slice(0, 40)}"`);
@@ -263,6 +275,7 @@ export async function designConflicts(ownerId: string): Promise<Array<{ project:
 
 /** A logo image of the project for preview: only a file in its found logos. */
 export async function logoFile(ownerId: string, slug: string, id: string): Promise<{ file: string; type: string }> {
+  assertNoDefaultMemoryAccess();
   await requireProject(ownerId, slug);
   const found = foundOf(await sql().read(rowStep(ownerId, slug)));
   const hit = found?.logos.find((l) => logoId(l.path) === id);

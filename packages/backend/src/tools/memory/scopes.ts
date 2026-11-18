@@ -27,6 +27,8 @@
  * the run; tree and search carry names and counts only.
  */
 
+import { isOutsideProject } from '../../memory/project-trust.js';
+import { q } from '../../repositories/sql-steps.js';
 import type { Tool, ToolResult, ToolExecutionContext } from '../types.js';
 import { toolMemoryDrawers, toolMemoryUser, toolOwnerTurn } from './scope.js';
 import { one, sql } from '../../repositories/sql-steps.js';
@@ -304,7 +306,13 @@ Actions:
         case 'pinned_add': {
           const refused = pinnedWriteRefusal(context, typeof params.scope === 'string' ? params.scope : '');
           if (refused) return fail('memory_scope_apply', refused);
-          const fact = await addPinnedFact(ownerId, parsePinnedScope(params.scope), params.text, by);
+          const scope = parsePinnedScope(params.scope);
+          // REPO-TRUST-01: an agent never pins a fact on a project from someone else's repository (the owner still can, in Girru).
+          if (scope.kind === 'project') {
+            const proj = await q.one<{ id: string }>('SELECT id FROM chat_projects WHERE user_id = ? AND (id = ? OR slug = ?)', ownerId, scope.id, scope.id);
+            if (proj && await isOutsideProject(ownerId, proj.id)) return fail('memory_scope_apply', 'This project is on the Outside projects list: agents cannot pin facts to it.');
+          }
+          const fact = await addPinnedFact(ownerId, scope, params.text, by);
           invalidateScopeTree(ownerId);
           auditTool(context, 'memory_scope.pinned_add', 'memory_pinned_fact', fact.id, { scope: fact.scope });
           return ok(`Pinned to ${fact.scope}.`, { fact });

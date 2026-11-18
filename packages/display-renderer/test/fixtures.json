@@ -1,0 +1,611 @@
+{
+  "Card": {
+    "title": "Summary",
+    "description": null
+  },
+  "Stack": {
+    "gap": "md",
+    "direction": "vertical"
+  },
+  "Grid": {
+    "columns": 2,
+    "gap": "md"
+  },
+  "Separator": {},
+  "Heading": {
+    "text": "Overview",
+    "level": "h2"
+  },
+  "Text": {
+    "content": "Here is the summary.",
+    "muted": null,
+    "size": null
+  },
+  "Link": {
+    "text": "Open website",
+    "href": "https://example.com"
+  },
+  "Metric": {
+    "label": "Temperature",
+    "value": "25°C",
+    "detail": "Feels like 23°C",
+    "trend": "up"
+  },
+  "Badge": {
+    "text": "Active",
+    "variant": "success"
+  },
+  "Table": {
+    "data": [
+      {
+        "name": "Alice",
+        "score": 95
+      }
+    ],
+    "columns": [
+      {
+        "key": "name",
+        "label": "Name"
+      },
+      {
+        "key": "score",
+        "label": "Score"
+      }
+    ],
+    "emptyMessage": null
+  },
+  "Callout": {
+    "type": "tip",
+    "title": "Did you know?",
+    "content": "The sky is blue."
+  },
+  "Timeline": {
+    "items": [
+      {
+        "title": "Start",
+        "description": "Project kickoff",
+        "date": "2026-01-01",
+        "status": "completed"
+      },
+      {
+        "title": "Review",
+        "description": null,
+        "date": "2026-02-01",
+        "status": "current"
+      }
+    ]
+  },
+  "Accordion": {
+    "items": [
+      {
+        "title": "What is this?",
+        "content": "An accordion component."
+      }
+    ]
+  },
+  "BarChart": {
+    "title": "Sales by Month",
+    "data": [
+      {
+        "month": "Jan",
+        "sales": 120
+      },
+      {
+        "month": "Feb",
+        "sales": 180
+      }
+    ],
+    "xKey": "month",
+    "yKey": "sales",
+    "color": null,
+    "height": null
+  },
+  "LineChart": {
+    "title": "Temperature over Week",
+    "data": [
+      {
+        "day": "Mon",
+        "temp": 22
+      },
+      {
+        "day": "Tue",
+        "temp": 25
+      }
+    ],
+    "xKey": "day",
+    "yKey": "temp",
+    "color": null,
+    "height": null
+  },
+  "PieChart": {
+    "title": "Market Share",
+    "data": [
+      {
+        "company": "A",
+        "share": 60
+      },
+      {
+        "company": "B",
+        "share": 40
+      }
+    ],
+    "nameKey": "company",
+    "valueKey": "share",
+    "height": null
+  },
+  "StockCandlestickChart": {
+    "symbol": "AAPL",
+    "data": [
+      {
+        "timestamp": "2024-01-01",
+        "open": 150,
+        "high": 155,
+        "low": 148,
+        "close": 153,
+        "volume": 1000000
+      },
+      {
+        "timestamp": "2024-01-02",
+        "open": 153,
+        "high": 158,
+        "low": 152,
+        "close": 156,
+        "volume": 1200000
+      }
+    ],
+    "timeframe": "1D",
+    "showVolume": true,
+    "height": 500
+  },
+  "OptionsChainTable": {
+    "symbol": "AAPL",
+    "expirationDate": "2024-03-15",
+    "currentPrice": 150,
+    "chains": [
+      {
+        "strike": 150,
+        "calls": {
+          "bid": 5.2,
+          "ask": 5.3,
+          "volume": 1200,
+          "iv": 0.28,
+          "delta": 0.65
+        },
+        "puts": {
+          "bid": 2.1,
+          "ask": 2.15,
+          "volume": 800,
+          "iv": 0.26,
+          "delta": -0.35
+        }
+      }
+    ],
+    "highlightATM": true,
+    "height": 600
+  },
+  "PortfolioPerformanceChart": {
+    "data": [
+      {
+        "date": "2024-01-01",
+        "portfolioValue": 10000,
+        "benchmarkValue": 10000
+      },
+      {
+        "date": "2024-02-01",
+        "portfolioValue": 10500,
+        "benchmarkValue": 10200
+      },
+      {
+        "date": "2024-03-01",
+        "portfolioValue": 11000,
+        "benchmarkValue": 10400
+      }
+    ],
+    "showBenchmark": true,
+    "benchmarkName": "S&P 500",
+    "showDrawdown": false,
+    "height": 400
+  },
+  "AssetAllocationPie": {
+    "holdings": [
+      {
+        "symbol": "AAPL",
+        "name": "Apple Inc.",
+        "value": 5000,
+        "percentage": 25
+      },
+      {
+        "symbol": "TSLA",
+        "name": "Tesla Inc.",
+        "value": 3000,
+        "percentage": 15
+      },
+      {
+        "symbol": "MSFT",
+        "name": "Microsoft",
+        "value": 4000,
+        "percentage": 20
+      },
+      {
+        "symbol": "BTC",
+        "name": "Bitcoin",
+        "value": 8000,
+        "percentage": 40
+      }
+    ],
+    "showPercentages": true,
+    "interactive": true,
+    "height": 400
+  },
+  "Tabs": {
+    "defaultValue": "tab1",
+    "tabs": [
+      {
+        "value": "tab1",
+        "label": "Overview"
+      },
+      {
+        "value": "tab2",
+        "label": "Details"
+      }
+    ]
+  },
+  "TabContent": {
+    "value": "tab1"
+  },
+  "Button": {
+    "label": "View Details",
+    "variant": "outline",
+    "size": null
+  },
+  "ProgressBar": {
+    "label": "Upload Progress",
+    "value": 65,
+    "max": null,
+    "color": "success",
+    "showPercent": true
+  },
+  "Alert": {
+    "title": "Heads up!",
+    "description": "Something needs your attention.",
+    "variant": "default"
+  },
+  "UserCard": {
+    "name": "Alice Smith",
+    "role": "Engineer",
+    "email": "alice@example.com",
+    "src": null,
+    "size": null
+  },
+  "SwitchRow": {
+    "label": "Dark Mode",
+    "description": "Toggle dark theme",
+    "checked": false
+  },
+  "AreaChart": {
+    "title": "Daily Active Users",
+    "data": [
+      {
+        "day": "Mon",
+        "users": 120
+      },
+      {
+        "day": "Tue",
+        "users": 180
+      }
+    ],
+    "xKey": "day",
+    "yKey": "users",
+    "color": null,
+    "height": null,
+    "gradient": true
+  },
+  "InputField": {
+    "label": "Email",
+    "placeholder": "you@example.com",
+    "value": null,
+    "type": "email",
+    "description": null
+  },
+  "SelectField": {
+    "label": "Country",
+    "options": [
+      {
+        "value": "us",
+        "label": "United States"
+      },
+      {
+        "value": "uk",
+        "label": "United Kingdom"
+      }
+    ],
+    "value": null,
+    "placeholder": "Select a country",
+    "description": null
+  },
+  "TextArea": {
+    "label": "Notes",
+    "placeholder": "Write your notes here...",
+    "value": null,
+    "rows": 4,
+    "description": null
+  },
+  "CheckboxList": {
+    "items": [
+      {
+        "id": "1",
+        "label": "Buy groceries",
+        "checked": true,
+        "disabled": null
+      },
+      {
+        "id": "2",
+        "label": "Write tests",
+        "checked": false,
+        "disabled": null
+      },
+      {
+        "id": "3",
+        "label": "Deploy to prod",
+        "checked": false,
+        "disabled": true
+      }
+    ]
+  },
+  "RadioGroup": {
+    "label": "Choose plan",
+    "options": [
+      {
+        "value": "free",
+        "label": "Free"
+      },
+      {
+        "value": "pro",
+        "label": "Pro"
+      },
+      {
+        "value": "enterprise",
+        "label": "Enterprise"
+      }
+    ],
+    "value": "free",
+    "description": null
+  },
+  "SliderRow": {
+    "label": "Volume",
+    "value": 70,
+    "min": null,
+    "max": null,
+    "step": null,
+    "showValue": true
+  },
+  "SkeletonBlock": {
+    "lines": 3,
+    "type": "text"
+  },
+  "CalendarView": {
+    "title": "Schedule",
+    "selectedDates": [
+      "2026-02-18",
+      "2026-02-20"
+    ]
+  },
+  "ToggleButton": {
+    "label": "Bold",
+    "pressed": true,
+    "variant": "outline",
+    "size": null
+  },
+  "ToggleGroup": {
+    "label": "View",
+    "options": [
+      {
+        "value": "day",
+        "label": "Day"
+      },
+      {
+        "value": "week",
+        "label": "Week"
+      },
+      {
+        "value": "month",
+        "label": "Month"
+      }
+    ],
+    "value": "week",
+    "variant": "outline"
+  },
+  "CollapsibleSection": {
+    "title": "Advanced Options",
+    "defaultOpen": false
+  },
+  "ScrollBox": {
+    "maxHeight": 200
+  },
+  "TooltipText": {
+    "text": "Latency",
+    "tooltip": "Time from request to first byte",
+    "muted": null
+  },
+  "Breadcrumb": {
+    "items": [
+      {
+        "label": "Home",
+        "href": "/"
+      },
+      {
+        "label": "Projects",
+        "href": "/projects"
+      },
+      {
+        "label": "Agent Player",
+        "href": null
+      }
+    ]
+  },
+  "PaginationBar": {
+    "currentPage": 3,
+    "totalPages": 10,
+    "showLabel": true
+  },
+  "Carousel": {
+    "items": [
+      {
+        "title": "Slide 1",
+        "description": "First slide",
+        "imageUrl": null
+      },
+      {
+        "title": "Slide 2",
+        "description": "Second slide",
+        "imageUrl": null
+      }
+    ],
+    "autoPlay": null
+  },
+  "HoverCard": {
+    "triggerText": "@alice",
+    "title": "Alice Smith",
+    "description": "Lead Engineer — alice@example.com"
+  },
+  "OTPDisplay": {
+    "length": 6,
+    "label": "Enter verification code",
+    "placeholder": null
+  },
+  "SidePanel": {
+    "title": "Details",
+    "description": "View item details",
+    "side": "right"
+  },
+  "DrawerCard": {
+    "title": "Quick Actions",
+    "description": null
+  },
+  "AlertDialogCard": {
+    "title": "Delete Project",
+    "description": "This action cannot be undone. All data will be permanently removed.",
+    "confirmLabel": "Delete",
+    "cancelLabel": "Cancel",
+    "variant": "destructive"
+  },
+  "DialogCard": {
+    "title": "Edit Profile",
+    "description": "Update your personal information."
+  },
+  "DropdownList": {
+    "label": "File",
+    "items": [
+      {
+        "label": "New File",
+        "shortcut": "Ctrl+N",
+        "disabled": null,
+        "separator": null
+      },
+      {
+        "label": "Open",
+        "shortcut": "Ctrl+O",
+        "disabled": null,
+        "separator": null
+      },
+      {
+        "label": "Delete",
+        "shortcut": null,
+        "disabled": false,
+        "separator": true
+      }
+    ]
+  },
+  "CommandSearch": {
+    "placeholder": "Search commands...",
+    "groups": [
+      {
+        "heading": "Navigation",
+        "items": [
+          {
+            "label": "Go to Dashboard",
+            "shortcut": "G D"
+          },
+          {
+            "label": "Go to Settings",
+            "shortcut": "G S"
+          }
+        ]
+      },
+      {
+        "heading": "Actions",
+        "items": [
+          {
+            "label": "New Chat",
+            "shortcut": "Ctrl+K"
+          },
+          {
+            "label": "Refresh",
+            "shortcut": null
+          }
+        ]
+      }
+    ]
+  },
+  "ResizablePanel": {
+    "direction": "horizontal",
+    "leftLabel": "Editor",
+    "rightLabel": "Preview",
+    "defaultSplit": 50
+  },
+  "AspectBox": {
+    "ratio": 1.78,
+    "label": "16:9 Video",
+    "bg": null
+  },
+  "JsonViewer": {
+    "title": "API Response",
+    "data": {
+      "status": "ok",
+      "user": {
+        "id": 1,
+        "name": "Alice"
+      },
+      "tags": [
+        "admin",
+        "editor"
+      ]
+    },
+    "maxHeight": null,
+    "defaultExpanded": true
+  },
+  "MarkdownBlock": {
+    "content": "## Hello\n\nThis is **bold** and *italic*.\n\n- Item one\n- Item two\n\n```js\nconsole.log(\"hello\")\n```",
+    "prose": null
+  },
+  "MDCBlock": {
+    "content": "## Summary\n\nHere are the results:\n\n::Metric{label=\"Score\" value=\"98%\" trend=\"up\"}\n\nAnd here is the status:\n\n::Badge{text=\"Active\" variant=\"success\"}"
+  },
+  "AvatarCard": {
+    "title": null,
+    "size": "md",
+    "removable": true
+  },
+  "SupportChatBlock": {
+    "agentName": "Assistant",
+    "height": 500,
+    "removable": true,
+    "bgColor": null
+  },
+  "AgentSupportPortal": {
+    "height": 560,
+    "bgColor": null,
+    "title": "Choose your assistant"
+  },
+  "WeatherCard": {
+    "location": "Dubai",
+    "condition": "sunny",
+    "temperature": 38,
+    "unit": "C",
+    "humidity": 45,
+    "wind": 18,
+    "feelsLike": 41,
+    "size": "md",
+    "forecast": null
+  }
+}

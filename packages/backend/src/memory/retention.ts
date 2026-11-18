@@ -30,6 +30,8 @@ import { newMemory, saveVersioned } from './learning.js';
 import { importanceOf } from './versions.js';
 import type { Memory } from './types.js';
 import { orchestratorTablesFor } from '../multi-agent/orchestrator.js';
+import { storeP9Enabled } from '../services/store-p9.js';
+import { PEOPLE_REPLACED_DAYS, stalePeopleFacts } from './person.js';
 
 export interface RetentionConfig {
   enabled: boolean;
@@ -143,6 +145,8 @@ export interface RetentionResult {
   config: RetentionConfig;
   actions: RetentionAction[];
   forgotten: number;
+  /** P9 (PRIV5): replaced facts about people forgotten (or, in a dry run, that would be). */
+  people?: { forgotten: number; afterDays: number };
 }
 
 const ACTOR = 'retention';
@@ -205,10 +209,21 @@ export async function runRetention(userId: string, opts: { now?: Date; dryRun?: 
       }
       result.actions.push(action);
     }
+
+    // 4. STORE-MAP-01 P9 (PRIV5): a fact about a person that was replaced long ago is forgotten
+    // (the current fact stays; the person's drawer is otherwise never touched).
+    if (storeP9Enabled()) {
+      const stale = await stalePeopleFacts(userId, new Date(now));
+      result.people = { forgotten: stale.length, afterDays: PEOPLE_REPLACED_DAYS };
+      if (!dryRun) {
+        result.people.forgotten = 0;
+        for (const f of stale) if (await forgetMemory(userId, f.id, actor)) { result.people.forgotten++; result.forgotten++; }
+      }
+    }
   }
 
   await sql().read(run('INSERT INTO memory_retention_runs (id, user_id, dry_run, actor, result) VALUES (?, ?, ?, ?, ?)',
-    result.id, userId, dryRun ? 1 : 0, actor, JSON.stringify({ skipped: result.skipped ?? null, actions: result.actions, forgotten: result.forgotten, config })));
+    result.id, userId, dryRun ? 1 : 0, actor, JSON.stringify({ skipped: result.skipped ?? null, actions: result.actions, forgotten: result.forgotten, ...(result.people ? { people: result.people } : {}), config })));
   return result;
 }
 

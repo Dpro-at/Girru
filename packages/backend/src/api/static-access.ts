@@ -1,3 +1,4 @@
+import {assertMemoryFilesystemAccess} from '../memory/encryption/protected-filesystem.js';
 /**
  * Which files under the repo `public/` folder the backend serves without a
  * token (S0-A.7).
@@ -70,6 +71,7 @@ export function isPublicStaticPath(pathName: string, root: string): boolean {
   if (!real) return false;
   const rel = path.relative(realRoot, real);
   if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return false;
+  try{assertMemoryFilesystemAccess(real);}catch{return false;}
   return allowedRelative(rel);
 }
 

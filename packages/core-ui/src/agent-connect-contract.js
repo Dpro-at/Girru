@@ -18,7 +18,8 @@ export function channelResponse(path,status,body){
  if(!record(body))throw Error('protocol');
  if(path===AGENT_CONNECT_PATH+'/catalog'){
   if(!Array.isArray(body.channels)||body.channels.length>64)throw Error('protocol');const seen=new Set();
-  return {configurable:body.configurable===true,channels:body.channels.map(c=>{
+  if(body.app!==undefined&&(!record(body.app)||typeof body.app.installed!=='boolean'||typeof body.app.ready!=='boolean'))throw Error('protocol');
+  return {...(body.app===undefined?{}:{app:{installed:body.app.installed,ready:body.app.ready}}),configurable:body.configurable===true,channels:body.channels.map(c=>{
    const s=state(c);if(seen.has(s.id)||typeof c.label!=='string'||c.label.length>100||!['node','python'].includes(c.runtime)||!Array.isArray(c.requiredEnv)||c.requiredEnv.length>64||!c.requiredEnv.every(v=>typeof v==='string'&&/^[A-Z][A-Z0-9_]{0,127}$/.test(v))||typeof c.prerequisites!=='string'||c.prerequisites.length>2000)throw Error('protocol');seen.add(s.id);return {...s,label:c.label,runtime:c.runtime,requiredEnv:c.requiredEnv,prerequisites:c.prerequisites};
   })};
  }

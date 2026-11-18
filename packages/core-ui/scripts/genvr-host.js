@@ -11,9 +11,14 @@ window.addEventListener('message',async event=>{
    if(typeof data.storageNamespace!=='string'||!data.storageNamespace)throw Error();
    await isolateBrowserCache(data.storageNamespace);
    const sdk=await import('/genvr/dist/studio.js');mountStudio=sdk.mountStudio;
+   // GV1 B: Girru's create page made the choices; the package makes the space, Girru saves it, the Studio opens on it.
+   let projectId=data.projectId;if(data.create)projectId=await createFromSpec(data.create);
    const host=await studioHost(typeof data.privateLibrary==='string'&&/^[a-f0-9]{64}$/.test(data.privateLibrary)?data.privateLibrary:null);
-   studio=mountStudio(document.getElementById('studio'),{filmExample:'/film-examples/island-languages.genvrfilm',forceWebGL:true,initialProjectId:data.projectId,...host,agents:id=>request('agents',id),catalog:{list:()=>request('catalog-list'),asset:id=>request('catalog-asset',id)},storage:{list:()=>request('list'),read:id=>request('read',id),write:project=>request('write',project)}});
-   send({operation:'mounted'});if(sdk.STUDIO_HOST_VERSION!==1&&typeof data.projectId==='string')openExisting(data.projectId);
+   // A space opens as it is: the example film is only for the Studio opened without a space (Mohamed, 2026-11-12).
+   studio=mountStudio(document.getElementById('studio'),{filmExample:typeof projectId==='string'||data.lab===true?false:'/film-examples/island-languages.genvrfilm',forceWebGL:true,
+    // Girru keeps the place list: My projects (after saving) goes back to it; Motion lab opens the lab itself.
+    onHome:()=>send({operation:'home'}),desktopLayout:true,...(typeof data.placeItem==='string'&&/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(data.placeItem)&&typeof projectId==='string'?{placeItem:data.placeItem}:{}),...(data.lab===true&&typeof projectId!=='string'?{openLab:true}:{}),initialProjectId:projectId,...host,...(data.chat===true?hostChat():{}),agents:id=>request('agents',id),catalog:{list:()=>request('catalog-list'),asset:id=>request('catalog-asset',id)},storage:{list:()=>request('list'),read:id=>request('read',id),write:project=>request('write',project)}});
+   send({operation:'mounted'});
   }catch{send({operation:'unavailable'});}
  }
  if(data.operation==='notify'&&studio&&data.notification&&typeof data.notification==='object'){
@@ -21,9 +26,43 @@ window.addEventListener('message',async event=>{
   const token=document.querySelector('meta[name="genvr-studio-token"]')?.content;const n=data.notification;
   if(token&&n.type==='approval'&&typeof n.title==='string'&&typeof n.body==='string')void fetch('/studio-bridge/call',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({tool:'present_avatar',arguments:{event:{kind:'notification',notification:{type:'approval',title:n.title.slice(0,200),body:n.body.slice(0,500),...(typeof n.sourceId==='string'?{sourceId:n.sourceId.slice(0,200)}:{}),needsApproval:true}}}})}).catch(()=>{});
  }
+ // Board W1: Girru's own chat. The parent streams the answer, sends what the chat shows, and asks to undo
+ // (the Studio's own Ctrl/Cmd+Z on the Build and Items tabs, sent from an element so its key handler reads it).
+ if(data.operation==='chat-delta'&&typeof data.id==='string'&&typeof data.delta==='string'&&data.delta.length<=65536){try{chats.get(data.id)?.events.onDelta(data.delta);}catch{}}
+ if(data.operation==='chat-tool'&&typeof data.id==='string'&&typeof data.name==='string'){try{chats.get(data.id)?.events.onTool?.(data.name.slice(0,64),data.ok===true,String(data.result??'').slice(0,2000));}catch{}}
+ if(data.operation==='chat-end'&&typeof data.id==='string'){const work=chats.get(data.id);if(work){if(data.ok)work.resolve();else work.reject(Error(typeof data.error==='string'?data.error.slice(0,300):'Girru could not answer.'));}}
+ if(data.operation==='chat-info'&&studio?.setChat&&data.info&&typeof data.info==='object'&&JSON.stringify(data.info).length<=1000000){try{studio.setChat(data.info);}catch{/* an older Studio without the chat option */}}
+ if(data.operation==='undo'&&Number.isInteger(data.count)&&data.count>0&&data.count<=50){for(let i=0;i<data.count;i++)document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'z',code:'KeyZ',ctrlKey:!/Mac/.test(navigator.platform),metaKey:/Mac/.test(navigator.platform),bubbles:true,cancelable:true}));}
  if(data.operation==='close'){try{send({operation:'closed',ok:await studio?.dispose()===true});}catch{send({operation:'closed',ok:false});}}
 });
 send({operation:'ready'});
+
+// Board W1: Girru answers the Studio chat. Tools still run in the Studio; Girru only gets the
+// conversation and the tool list, and gives back text and tool calls.
+const PLACE_TABS=['build','items','avatar','filming','lab'];
+/** The folder button opens the folder only where Girru can show it (the desktop app). */
+function canOpenFolder(){try{return typeof parent.dproApp?.revealFolder==='function';}catch{return false;}}
+/** GV1e (Mohamed): the Studio chat is the place's real Girru chat. A message goes to Girru's chat run; the
+ * reply streams back here; the agent builds with the place's tools over the live MCP connection. */
+const chats=new Map();
+function sendToGirru(text,events,signal){
+ return new Promise((resolve,reject)=>{
+  if(typeof text!=='string'||!text.trim()||text.length>100000){reject(Error('This message cannot be sent.'));return;}
+  const id='c'+(++sequence);
+  const finish=()=>{chats.delete(id);signal?.removeEventListener('abort',abort);};
+  const abort=()=>{finish();send({operation:'chat-cancel',id});reject(Object.assign(Error('Stopped.'),{name:'AbortError'}));};
+  if(signal?.aborted){abort();return;}signal?.addEventListener('abort',abort,{once:true});
+  chats.set(id,{events,resolve:()=>{finish();resolve();},reject:error=>{finish();reject(error);}});
+  send({operation:'chat-send',id,text});
+ });
+}
+function hostChat(){
+ return {
+  onContext:context=>{if(!context||typeof context!=='object'||typeof context.projectId!=='string'||typeof context.name!=='string')return;send({operation:'context',context:{projectId:context.projectId.slice(0,100),name:context.name.slice(0,200),tab:PLACE_TABS.includes(context.tab)?context.tab:'build',look:String(context.look??'').slice(0,40),kind:String(context.kind??'').slice(0,40)}});},
+  // GV1e: the Studio chat is the place's Girru chat: Open in Chat goes to Girru Chat; earlier lines come with chat-info.
+  chat:{chooseAnswerer:()=>send({operation:'choose-answerer'}),openChat:()=>send({operation:'open-chat'}),send:sendToGirru,...(window.parent&&canOpenFolder()?{openFolder:()=>send({operation:'open-folder'})}:{})},
+ };
+}
 
 // Adapt the SDK's platform exit link to this local host without navigating away.
 document.addEventListener('click',event=>{
@@ -57,10 +96,6 @@ async function isolateBrowserCache(account){
 }
 
 // Compatibility for the frozen SDK until the reviewed host API version is consumed.
-function openExisting(id){
- const choose=()=>{const select=document.querySelector('select[aria-label="Open project"]');if(!(select instanceof HTMLSelectElement)||!Array.from(select.options).some(option=>option.value===id))return false;select.value=id;select.dispatchEvent(new Event('change',{bubbles:true}));return true;};
- if(choose())return;const observer=new MutationObserver(()=>{if(choose()){observer.disconnect();clearTimeout(timer);}});observer.observe(document.getElementById('studio'),{childList:true,subtree:true});const timer=setTimeout(()=>{observer.disconnect();send({operation:'open-failed'});},10000);
-}
 
 // Live bridge (live MCP + local voice) and, for the owner, the private library.
 // The token is injected into this frame's shell by the local application server.
@@ -83,4 +118,16 @@ async function studioHost(ticket){
  }};
  try{const {motions}=await call('motions');if(motions.length)options.motionLibrary={entries:motions.map(m=>({id:m.id,name:m.name,category:m.category,loop:m.loop,load:()=>call('motion',{id:m.id},true)}))};}catch{/* no private motion library on this computer */}
  return options;
+}
+
+const CREATE_STYLES=['realistic','blocky','anime','voxel'],CREATE_SIZES=['small','medium','large','huge','max'],CREATE_DEVICES=['phone','tablet','computer','tv','vr'];
+/** GV1 B: a new private space from the create page: empty land of the chosen size, look and play settings. */
+async function createFromSpec(spec){
+ if(!spec||typeof spec!=='object'||typeof spec.title!=='string'||!spec.title.trim()||spec.title.length>120||!CREATE_STYLES.includes(spec.style)||!CREATE_SIZES.includes(spec.sizeTier)||!['free','side'].includes(spec.view)||!['landscape','portrait','any'].includes(spec.orientation)||!Array.isArray(spec.devices)||!spec.devices.length||!spec.devices.every(d=>CREATE_DEVICES.includes(d)))throw Error('create');
+ const {createStudioProject,readStudioProject}=await import('/genvr/dist/studio-project.js');
+ const play={orientation:spec.orientation,view:spec.view,moves:[],devices:CREATE_DEVICES.filter(d=>spec.devices.includes(d))};
+ const made=createStudioProject(spec.style,'empty',play);
+ const project=readStudioProject({...made,title:spec.title.trim(),world:{...made.world,sizeTier:spec.sizeTier}});
+ await request('write',project);
+ return project.id;
 }

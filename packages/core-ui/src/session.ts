@@ -1,3 +1,10 @@
+import {googleAuthRoute,allowedGoogleAuth,googleAuthResponse} from './google-auth-contract.js';
+/** CP13: the theme saved in the program. */
+export const THEME_PATH = '/api/me/theme';
+import {computerRoute,allowedComputer,computerResponse} from './computer-contract.js';
+import {reportsRoute,allowedReports,reportsResponse} from './reports-contract.js';
+import {encryptionRoute,allowedEncryption,encryptionResponse} from './memory-encryption-contract.js';
+import {hostAppRoute,allowedHostApp,hostAppResponse} from './store-host-app-contract.js';
 import {BROWSER_APP_PATH,allowedBrowserApp,browserAppResponse} from './browser-app-contract.js';
 import {VOICE_LIBRARY_PATH,allowedVoiceLibrary,voiceLibraryResponse} from './voice-library-contract.js';
 import { CHAT_VOICE_PATH, allowedChatVoice, chatVoiceResponse } from './chat-voice-contract.js';
@@ -26,8 +33,9 @@ import {approvalRoute,allowedApproval,approvalResponse} from './approvals-contra
 import { allowedConnections, connectionsRoute, connectionsResponse } from './connections-contract.js';
 import {allowedTemplates,templatePath,templatesResponse} from './specialty-contract.js';
 import { allowedMcpImport, mcpImportPath, mcpImportResponse } from './mcp-import-contract.js';
+import { allowedSshKeys, sshKeysRoute, sshKeysResponse } from './ssh-keys-contract.js';
 import { allowedSkillLibrary, skillLibraryPath, skillLibraryResponse } from './skill-library-contract.js';
-import { allowedGenVR, genvrRoute, genvrResponse, GENVR_BYTES } from './genvr-contract.js';
+import { allowedGenVR, genvrRoute, genvrResponse, GENVR_BYTES, worldRoute } from './genvr-contract.js';
 import { allowedChannel, channelRoute, channelResponse } from './agent-connect-contract.js';
 import { allowedPersonality, personalityRoute, personalityResponse } from './personality-contract.js';
 import { allowedBoard, boardRoute, boardResponse, BOARDS_PATH } from './board-contract.js';
@@ -42,10 +50,18 @@ import { allowedChatSecrets, chatSecretsRoute, chatSecretsResponse, CLEANUP_PATH
 import { allowedMemoryPages, memoryPagesRoute, memoryPagesResponse } from './memory-pages-contract.js';
 import { allowedMemoryRecall, memoryRecallRoute, memoryRecallResponse } from './memory-recall-contract.js';
 import { allowedMemoryBridge, memoryBridgeRoute, memoryBridgeResponse } from './memory-bridge-contract.js';
+import { allowedProjectFiles, projectFilesRoute, projectFilesResponse } from './project-files-contract.js';
+import { allowedTaskLinks, taskLinksPathResponse, taskLinksRoute } from './task-links-contract.js';
+import { allowedPerson, personPathResponse, personRoute } from './memory-people-contract.js';
+import { allowedTrust, trustPathResponse, trustRoute } from './memory-trust-contract.js';
+import { allowedCodeOpen, codeOpenResponse, codeOpenRoute } from './code-open-contract.js';
 import { allowedDiscovery, discoveryRoute, discoveryResponse } from './discovery-contract.js';
 import { allowedMemoryDesktop, memoryDesktopRoute, memoryDesktopResponse } from './memory-desktop-contract.js';
 import { allowedTerminal, terminalPath, terminalRoute, terminalResponse, TerminalEventParser, TERMINAL_STREAM_MS } from './terminal-contract.js';
 import { allowedFooter, footerRoute, footerResponse } from './footer-contract.js';
+import { allowedMemoryHelper, memoryHelperRoute, memoryHelperResponse } from './memory-helper-contract.js';
+import { allowedDocIndex, docIndexResponse, docIndexRoute } from './doc-index-contract.js';
+import { allowedProjectTrust, projectTrustResponse, projectTrustRoute } from './project-trust-contract.js';
 import { allowedStoreSwitches, storeSwitchesResponse, storeSwitchesRoute } from './store-switches-contract.js';
 import { allowedBackups, backupsRoute, backupsResponse } from './backups-contract.js';
 import { allowedChartPrefs, chartPrefsRoute, chartPrefsResponse } from './chart-prefs-contract.js';
@@ -55,6 +71,7 @@ import { allowedPhone, phoneRoute, phoneResponse } from './phone-contract.js';
 import { allowedAgentRules, agentRulesRoute, agentRulesResponse } from './agent-rules-contract.js';
 import { allowedOrg, orgRoute, orgResponse } from './org-contract.js';
 import { allowedLibrary as allowedAgentLibrary, libraryRoute as agentLibraryRoute, libraryResponse as agentLibraryResponse } from './agent-library-contract.js';
+import { allowedNotes, notesRoute, notesResponse } from './agent-notes-contract.js';
 import { allowedAccountSettings, accountSettingsResponse, sessionsRoute, updatesRoute } from './account-settings-contract.js';
 import type { TerminalFrame } from './terminal-contract.js';
 import { allowedConversation, conversationPath, conversationRoute, conversationResponse, RunEventParser, RUN_IDLE_MS, RUN_STREAM_MS } from './conversation-contract.js';
@@ -83,7 +100,7 @@ export type User = Readonly<{ id: string; email: string; username: string; role:
 /** What the UI calls the account: the name typed at setup, else the user name. */
 export const displayName = (u: User): string => u.name ?? u.username;
 type BoundaryNotice = 'published_password' | 'account_inactive' | 'rate_limited' | 'origin_not_allowed' | 'host_not_allowed';
-export type SessionState = Readonly<{ mode: Mode; epoch: number; retryAfterSeconds?: number; setup?: 'checking' | 'required' | 'login' | 'unavailable'; phase: 'signed-out' | 'signing-in' | 'verifying' | 'recovery-codes' | 'authenticated' | 'signing-out'; verification?:Readonly<{method:'totp'|'recovery';expiresAt:number}>; user?: User; notice?: BoundaryNotice | 'invalid' | 'denied' | 'limited' | 'unavailable' | 'expired' | 'logout-confirmed' | 'logout-unknown' | 'recovered' }>;
+export type SessionState = Readonly<{ mode: Mode; epoch: number; retryAfterSeconds?: number; setup?: 'checking' | 'required' | 'login' | 'unavailable'; phase: 'signed-out' | 'signing-in' | 'verifying' | 'recovery-codes' | 'authenticated' | 'signing-out'; verification?:Readonly<{method:'totp'|'recovery';expiresAt:number;provider?:'google'}>; user?: User; notice?: BoundaryNotice | 'invalid' | 'denied' | 'limited' | 'unavailable' | 'expired' | 'logout-confirmed' | 'logout-unknown' | 'recovered' }>;
 import { SessionFailure } from './session-failure';
 export { SessionFailure } from './session-failure';
 export interface WireRequest { method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; path: string; body?: unknown; headers: Readonly<Record<string, string>>; signal: AbortSignal }
@@ -105,6 +122,8 @@ function user(value: unknown): User {
 }
 // Reject before URL normalization. No generic URL, header, key or mutation escape hatch.
 export function allowedRequest(method: string, path: string, body?: unknown): boolean {
+  if(googleAuthRoute(path))return allowedGoogleAuth(method,path,body);
+  if(computerRoute(path))return allowedComputer(method,path,body);
   if(path===VOICE_LIBRARY_PATH)return allowedVoiceLibrary(method,path,body);
   if(upgradeRoute(path))return allowedUpgrade(method,path,body);
   if(packRoute(path))return allowedPack(method,path,body);
@@ -119,6 +138,7 @@ export function allowedRequest(method: string, path: string, body?: unknown): bo
   if(scheduleAuthorizationRoute(path))return allowedScheduleAuthorization(method,path,body);
   if(reviewerRoute(path))return allowedReviewer(method,path,body);
   if(verificationRoute(path))return allowedVerification(method,path,body);
+  if(encryptionRoute(path))return allowedEncryption(method,path,body);
   if(coverageRoute(path))return allowedCoverage(method,path,body);
   if(tradingPaperRoute(path))return allowedTradingPaper(method,path,body);
   if(schedulerRoute(path))return allowedScheduler(method,path,body);
@@ -126,30 +146,44 @@ export function allowedRequest(method: string, path: string, body?: unknown): bo
   if(sourceCatalogueRoute(path))return allowedSourceCatalogue(method,path,body);
   if(workspaceAppsRoute(path))return allowedWorkspaceApps(method,path,body);
   if(appsCatalogueRoute(path))return allowedAppsCatalogue(method,path,body);
+  if(hostAppRoute(path))return allowedHostApp(method,path,body);
   if(storeRoute(path))return allowedStore(method,path,body);
   if(chatAddonsRoute(path))return allowedChatAddons(method,path,body);
   if (approvalRoute(path)) return allowedApproval(method,path,body);
   if (connectionsRoute(path)) return allowedConnections(method,path,body);
   if (mcpImportPath(path)) return allowedMcpImport(method,path,body);
+  if (sshKeysRoute(path)) return allowedSshKeys(method,path,body);
   if (libraryPath(path)) return allowedLibrary(method,path,body);
   if (templatePath(path)) return allowedTemplates(method,path,body);
   if (skillLibraryPath(path)) return allowedSkillLibrary(method,path,body);
   if (footerRoute(path)) return allowedFooter(method, path, body);
+  if (path === '/api/me/agent-commands') return method === 'GET' ? body === undefined : method === 'PUT' && record(body) && Object.keys(body).join() === 'on' && typeof body.on === 'boolean';
+  if (path === THEME_PATH) return method === 'GET' ? body === undefined : method === 'PUT' && record(body) && Object.keys(body).join() === 'theme' && ['system', 'light', 'dark'].includes(body.theme as string);
+  if (memoryHelperRoute(path)) return allowedMemoryHelper(method, path, body);
+  if (docIndexRoute(path)) return allowedDocIndex(method, path, body);
+  if (projectTrustRoute(path)) return allowedProjectTrust(method, path, body);
   if (storeSwitchesRoute(path)) return allowedStoreSwitches(method, path, body);
   if (backupsRoute(path)) return allowedBackups(method, path, body);
   if (chartPrefsRoute(path)) return allowedChartPrefs(method, path, body);
   if (departmentsRoute(path)) return allowedDepartments(method, path, body);
+  if(reportsRoute(path))return allowedReports(method,path,body);
   if (meetingsRoute(path)) return allowedMeetings(method, path, body);
   if (firstRunRoute(path)) return allowedFirstRun(method, path, body);
   if (phoneRoute(path)) return allowedPhone(method, path, body);
   if (agentRulesRoute(path)) return allowedAgentRules(method, path, body);
   if (orgRoute(path)) return allowedOrg(method, path, body);
   if (agentLibraryRoute(path)) return allowedAgentLibrary(method, path, body);
+  if (notesRoute(path)) return allowedNotes(method, path, body);
   if (sessionsRoute(path) || updatesRoute(path)) return allowedAccountSettings(method, path, body);
   if (memoryDesktopRoute(path)) return allowedMemoryDesktop(method, path, body);
   if (memoryPagesRoute(path)) return allowedMemoryPages(method, path, body);
   if (memoryRecallRoute(path)) return allowedMemoryRecall(method, path, body);
   if (memoryBridgeRoute(path)) return allowedMemoryBridge(method, path, body);
+  if (projectFilesRoute(path)) return allowedProjectFiles(method, path, body);
+  if (taskLinksRoute(path)) return allowedTaskLinks(method, path, body);
+  if (personRoute(path)) return allowedPerson(method, path, body);
+  if (trustRoute(path)) return allowedTrust(method, path, body);
+  if (codeOpenRoute(path)) return allowedCodeOpen(method, path, body);
   if (discoveryRoute(path)) return allowedDiscovery(method, path, body);
   if (allowedBrowserApp(method,path,body)) return true;
   if (allowedChatVoice(method, path, body)) return true;
@@ -192,6 +226,8 @@ function boundaryNotice(response: WireResponse): BoundaryNotice | undefined {
 
 // Preserve only reviewed machine codes at the decision endpoint, never error text.
 function safeResponse(path: string, response: WireResponse): WireResponse {
+  if(googleAuthRoute(path))return {status:response.status,body:googleAuthResponse(path,response.status,response.body)};
+  if(computerRoute(path))return {status:response.status,body:computerResponse(path,response.status,response.body)};
   const projected = projectResponse(path, response);
   const delay = response.status === 429 ? retryAfterSeconds(response.retryAfterSeconds) : undefined;
   return delay === undefined ? projected : { ...projected, retryAfterSeconds: delay };
@@ -213,6 +249,7 @@ function projectResponse(path: string, response: WireResponse): WireResponse {
   if(scheduleAuthorizationRoute(path))return {status:response.status,body:scheduleAuthorizationResponse(path,response.status,response.body)};
   if(reviewerRoute(path))return {status:response.status,body:reviewerResponse(path,response.status,response.body)};
   if(verificationRoute(path))return {status:response.status,body:verificationResponse(path,response.status,response.body)};
+  if(encryptionRoute(path))return {status:response.status,body:encryptionResponse(response.status,response.body,path)};
   if(coverageRoute(path))return {status:response.status,body:coverageResponse(response.status,response.body)};
   if(tradingPaperRoute(path))return {status:response.status,body:tradingPaperResponse(path,response.status,response.body)};
   if(schedulerRoute(path))return {status:response.status,body:schedulerResponse(path,response.status,response.body)};
@@ -220,6 +257,7 @@ function projectResponse(path: string, response: WireResponse): WireResponse {
   if(sourceCatalogueRoute(path))return {status:response.status,body:sourceCatalogueResponse(response.status,response.body)};
   if(workspaceAppsRoute(path))return {status:response.status,body:workspaceAppsResponse(response.status,response.body)};
   if(appsCatalogueRoute(path))return {status:response.status,body:appsCatalogueResponse(response.status,response.body)};
+  if(hostAppRoute(path))return {status:response.status,body:hostAppResponse(path,response.status,response.body)};
   if(storeRoute(path))return {status:response.status,body:storeResponse(path,response.status,response.body)};
   if(chatAddonsRoute(path))return {status:response.status,body:chatAddonsResponse(response.status,response.body)};
   if (path === '/api/setup/status') return { status: response.status, body: setupStatus(response.status, response.body) };
@@ -235,19 +273,27 @@ function projectResponse(path: string, response: WireResponse): WireResponse {
   if (cardRoute(path)) return { status: response.status, body: agentCardResponse(path, response.status, response.body) };
   if (terminalRoute(path)) return { status: response.status, body: terminalResponse(path, response.status, response.body) };
   if (footerRoute(path)) return { status: response.status, body: footerResponse(response.status, response.body) };
+  if (path === '/api/me/agent-commands') return { status: response.status, body: record(response.body) && typeof response.body.on === 'boolean' ? { on: response.body.on } : {} };
+  if (path === THEME_PATH) return { status: response.status, body: record(response.body) && ['system', 'light', 'dark', null].includes(response.body.theme as string) ? { theme: response.body.theme } : {} };
+  if (memoryHelperRoute(path)) return { status: response.status, body: memoryHelperResponse(path, response.status, response.body) };
+  if (docIndexRoute(path)) return { status: response.status, body: docIndexResponse(path, response.status, response.body) };
+  if (projectTrustRoute(path)) return { status: response.status, body: projectTrustResponse(path, response.status, response.body) };
   if (storeSwitchesRoute(path)) return { status: response.status, body: storeSwitchesResponse(response.status, response.body) };
   if (backupsRoute(path)) return { status: response.status, body: backupsResponse(path, response.status, response.body) };
   if (chartPrefsRoute(path)) return { status: response.status, body: chartPrefsResponse(response.status, response.body) };
-  if (departmentsRoute(path)) return { status: response.status, body: departmentsResponse(response.status, response.body) };
+  if (departmentsRoute(path)) return { status: response.status, body: departmentsResponse(response.status, response.body, path) };
+  if(reportsRoute(path))return {status:response.status,body:reportsResponse(path,response.status,response.body)};
   if (meetingsRoute(path)) return { status: response.status, body: meetingsResponse(path, response.status, response.body) };
   if (firstRunRoute(path)) return { status: response.status, body: firstRunResponse(path, response.status, response.body) };
   if (phoneRoute(path)) return { status: response.status, body: phoneResponse(path, response.status, response.body) };
   if (agentRulesRoute(path)) return { status: response.status, body: agentRulesResponse(path, response.status, response.body) };
   if (orgRoute(path)) return { status: response.status, body: orgResponse(path, response.status, response.body) };
   if (agentLibraryRoute(path)) return { status: response.status, body: agentLibraryResponse(path, response.status, response.body) };
+  if (notesRoute(path)) return { status: response.status, body: notesResponse(path, response.status, response.body) };
   if (sessionsRoute(path) || updatesRoute(path)) return { status: response.status, body: accountSettingsResponse(path, response.status, response.body) };
   if (connectionsRoute(path)) return { status: response.status, body: connectionsResponse(path, response.status, response.body) };
   if (mcpImportPath(path)) return { status: response.status, body: mcpImportResponse(path,response.status,response.body) };
+  if (sshKeysRoute(path)) return { status: response.status, body: sshKeysResponse(path,response.status,response.body) };
   if (libraryPath(path)) return {status:response.status,body:libraryResponse(path,response.status,response.body)};
   if (templatePath(path)) return {status:response.status,body:templatesResponse(path,response.status,response.body)};
   if (skillLibraryPath(path)) return { status: response.status, body: skillLibraryResponse(path,response.status,response.body) };
@@ -264,6 +310,11 @@ function projectResponse(path: string, response: WireResponse): WireResponse {
   if (memoryPagesRoute(path)) return { status: response.status, body: memoryPagesResponse(path, response.status, response.body) };
   if (memoryRecallRoute(path)) return { status: response.status, body: memoryRecallResponse(path, response.status, response.body) };
   if (memoryBridgeRoute(path)) return { status: response.status, body: memoryBridgeResponse(path, response.status, response.body) };
+  if (projectFilesRoute(path)) return { status: response.status, body: projectFilesResponse(path, response.status, response.body) };
+  if (taskLinksRoute(path)) return { status: response.status, body: taskLinksPathResponse(path, response.status, response.body) };
+  if (personRoute(path)) return { status: response.status, body: personPathResponse(path, response.status, response.body) };
+  if (trustRoute(path)) return { status: response.status, body: trustPathResponse(path, response.status, response.body) };
+  if (codeOpenRoute(path)) return { status: response.status, body: codeOpenResponse(response.status, response.body) };
   if (discoveryRoute(path)) return { status: response.status, body: discoveryResponse(path, response.status, response.body) };
   if (path === '/api/agents' || (path.startsWith('/api/agents/') && path !== '/api/agents/name-suggestion')) return agentResponse(path, response);
   if (response.status === 200 && (path === '/api/auth/login' || path === '/api/auth/me')) {
@@ -288,24 +339,37 @@ export function isAppOrigin(origin: string): boolean {
   return match !== null && Number(match[1]) <= 65535;
 }
 
+/** The Girru phone app's origin for the computer's chat page. The app answers
+ * it itself through its end-to-end session with the computer (never the
+ * network) and sets `window.girruShell` before the page loads. */
+export const SHELL_ORIGIN = 'girru-app://computer';
+export function isShellOrigin(origin: string, shell: unknown = (globalThis as { girruShell?: unknown }).girruShell): boolean {
+  return origin === SHELL_ORIGIN && !!shell && typeof shell === 'object';
+}
+/** Inside the phone app the computer runs each request as the owner the phone
+ * was paired for: the page holds this placeholder, never a token, and the
+ * transport sends no Authorization header from there. */
+export const SHELL_SESSION = 'girru-phone-session';
+
 /** Deployment must serve these routes on this exact origin from the reviewed backend.
  * This is a client boundary, not a proxy. Static fixture preview does not implement it. */
 export function createSameOriginTransport(origin: string, fetcher: typeof fetch): WireTransport {
-  if (!isAppOrigin(origin)) throw new SessionFailure('blocked');
+  const shell = isShellOrigin(origin);
+  if (!isAppOrigin(origin) && !shell) throw new SessionFailure('blocked');
   return async request => {
     if (!allowedRequest(request.method, request.path, request.body)) throw new SessionFailure('blocked');
     const keys = Object.keys(request.headers);
     const chat = request.path === '/api/chat';
     const runEvents = request.method === 'GET' && (conversationPath(request.path)?.kind === 'events' || terminalPath(request.path)?.kind === 'stream');
-    const expected = ['/api/auth/login', '/api/setup/status', OWNER_SETUP_PATH].includes(request.path) ? [] : chat ? ['Authorization', 'Idempotency-Key'] : ['Authorization'];
+    const expected = (googleAuthRoute(request.path)&&!request.path.startsWith('/api/auth/google/link') || ['/api/auth/login', '/api/setup/status', OWNER_SETUP_PATH].includes(request.path)) ? [] : chat ? ['Authorization', 'Idempotency-Key'] : ['Authorization'];
     if (keys.length !== expected.length || keys.some(k => !expected.includes(k)) || expected.some(k => !Object.prototype.hasOwnProperty.call(request.headers, k))
       || (expected.includes('Authorization') && (request.headers.Authorization.length > 8200 || !/^Bearer [A-Za-z0-9._~-]+$/.test(request.headers.Authorization)))
       || (chat && !validKey(request.headers['Idempotency-Key']))) throw new SessionFailure('blocked');
     try {
       const response = await fetcher(origin + request.path, {
         method: request.method, body: request.body === undefined ? undefined : JSON.stringify(request.body),
-        headers: { Accept: chat || runEvents ? 'text/event-stream' : 'application/json', ...(request.body === undefined ? {} : { 'Content-Type': 'application/json' }), ...request.headers },
-        signal: request.signal, credentials: ['/api/auth/login', '/api/auth/logout'].includes(request.path) || request.headers.Authorization === 'Bearer dpro-remembered-session' ? 'same-origin' : 'omit', mode: 'same-origin', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer',
+        headers: { Accept: chat || runEvents ? 'text/event-stream' : 'application/json', ...(request.body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(shell ? {} : request.headers) },
+        signal: request.signal, credentials: !shell && (['/api/auth/login', '/api/auth/logout','/api/auth/google/finish'].includes(request.path) || request.headers.Authorization === 'Bearer dpro-remembered-session') ? 'same-origin' : 'omit', mode: 'same-origin', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer',
       });
       if (response.redirected || response.type === 'opaqueredirect' || (response.url && response.url !== origin + request.path) || (response.status >= 300 && response.status < 400)) throw new SessionFailure('blocked');
       if (runEvents && response.status === 200) {
@@ -386,7 +450,8 @@ export class SessionClient {
     this.#device = undefined; this.#deviceBinding = undefined; this.#nextKeep = undefined;
     this.#reset(mode, 'signed-out');
   }
-  cancel() { this.#reset(this.#state.mode, 'signed-out', this.#state.phase === 'signing-out' ? 'logout-unknown' : undefined,this.#state.setup==='login'?'login':undefined); }
+  cancel() {const flow=this.#googleFlow,pendingNonce=this.#googlePendingNonce;this.#googleFlow=undefined;this.#googlePendingNonce=undefined;this.#reset(this.#state.mode,'signed-out',this.#state.phase==='signing-out'?'logout-unknown':undefined,this.#state.setup==='login'?'login':undefined);if(flow||pendingNonce)void this.transports.live?.({method:'POST',path:'/api/auth/google/cancel',body:{...(flow?{flowId:flow.flowId}:{}),clientNonce:flow?.clientNonce??pendingNonce},headers:{},signal:AbortSignal.timeout(10000)}).catch(()=>{});}
+
   async #send(method: WireRequest['method'], path: string, body: unknown, token: string | undefined, epoch: number, signal?: AbortSignal, observeResponse?: (response: WireResponse) => void): Promise<WireResponse> {
     const mode = this.#state.mode;
     if (mode === 'fixture' || !allowedRequest(method, path, body)) throw new SessionFailure('blocked');
@@ -438,7 +503,7 @@ export class SessionClient {
     const epoch = this.#state.epoch;
     let result: ReturnType<typeof ownerSetupResponse>;
     try {
-      const response = await this.#send('POST', OWNER_SETUP_PATH, { name: input.name, email: input.email, password: input.password, setupToken: input.setupToken, ...(input.workspaceType ? { workspaceType: input.workspaceType } : {}), ...(input.workspaceType === 'company' ? { companyName: input.companyName } : {}) }, undefined, epoch);
+      const response = await this.#send('POST', OWNER_SETUP_PATH, { name: input.name, email: input.email, password: input.password, setupToken: input.setupToken, ...(input.workspaceType ? { workspaceType: input.workspaceType } : {}), ...(input.workspaceType === 'company' ? { companyName: input.companyName } : {}), ...(input.workspaceType === 'company' && input.companyKind !== undefined ? { companyKind: input.companyKind } : {}) }, undefined, epoch);
       result = ownerSetupResponse(response.status, response.body);
     } catch { return { ok: false, code: 'unavailable' }; }
     if (!result) return { ok: false, code: 'unavailable' };
@@ -453,16 +518,39 @@ export class SessionClient {
     }
     return { ok: true };
   }
+  /** Whether Google sign-in works on this installation (the desktop app's key store is there). */
+  async googleAvailable():Promise<boolean>{if(this.#state.mode!=='live')return false;try{const r=await this.#send('GET','/api/auth/google/status',undefined,undefined,this.#state.epoch);return r.status===200&&record(r.body)&&r.body.available===true;}catch{return false;}}
+  #googlePendingNonce:string|undefined;
+  #googleFlow:{flowId:string;clientNonce:string;setupToken?:string}|undefined;
+  async loginGoogle(setup?:{setupToken:string;name?:string;workspaceType?:'individual'|'company';companyName?:string;companyKind?:string}){
+    if(this.#state.mode!=='live'||this.#state.phase!=='signed-out'||(setup?this.#state.setup!=='required':this.#state.setup!=='login'))return;
+    const keep=this.#nextKeep;this.#reset('live','signing-in',undefined,this.#state.setup);const epoch=this.#state.epoch;
+    const bytes=new Uint8Array(32);crypto.getRandomValues(bytes);const clientNonce=btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replaceAll('=','');
+    this.#googlePendingNonce=clientNonce;try{const started=await this.#send('POST','/api/auth/google/start',{kind:setup?'setup':'signin',clientNonce,...setup},undefined,epoch);
+      if(started.status!==200||!record(started.body)||typeof started.body.flowId!=='string')throw Error();
+      const flow={flowId:started.body.flowId,clientNonce,...(setup?{setupToken:setup.setupToken}:{})};this.#googleFlow=flow;this.#googlePendingNonce=undefined;
+      for(let n=0;n<240;n++){if(epoch!==this.#state.epoch)return;const status=await this.#send('POST','/api/auth/google/status',{flowId:flow.flowId,clientNonce},undefined,epoch);if(status.status!==200||!record(status.body)||status.body.state==='failed')throw Error();if(status.body.state==='ready'){await this.#finishGoogle(flow,epoch,keep);return;}await new Promise(resolve=>setTimeout(resolve,1000));}throw Error();
+    }catch{if(epoch===this.#state.epoch)this.#reset('live','signed-out','unavailable',this.#state.setup);}
+  }
+  async #finishGoogle(flow:{flowId:string;clientNonce:string;setupToken?:string},epoch:number,keep:TokenKeep|undefined,verification?:{challenge:string;nonce:string;code:string},recovery=false){
+    const response=await this.#send('POST','/api/auth/google/finish',{...flow,...(verification?{verification}:{}),...(recovery?{recovery:true}:{})},undefined,epoch);
+    if(epoch!==this.#state.epoch)return;if(response.status!==200)throw Error();const continuation=loginContinuation(response.body);
+    if(continuation){if('verificationRequired' in continuation){if(continuation.expiresAt<=Date.now()||continuation.expiresAt>Date.now()+305000||continuation.verificationMethod!==(recovery?'recovery':'totp'))throw Error();this.#verification={email:'',challenge:continuation.challenge,nonce:continuation.nonce,method:continuation.verificationMethod,expiresAt:continuation.expiresAt};this.#googleFlow=flow;this.#publish({...this.#state,phase:'verifying',verification:{method:continuation.verificationMethod,expiresAt:continuation.expiresAt,provider:'google'}});return;}if(!recovery||!verification)throw Error();this.#googleFlow=undefined;keep?.save(null);this.#reset('live','signed-out','recovered','login');return;}
+    if(recovery||!record(response.body)||typeof response.body.token!=='string'||!validDeviceToken(response.body.deviceToken))throw Error();const loginUser=user(response.body.user),token=response.body.token;const me=await this.#send('GET','/api/auth/me',undefined,token,epoch);if(epoch!==this.#state.epoch)return;if(me.status!==200||!record(me.body))throw Error();const current=user(me.body.user);if(current.id!==loginUser.id)throw Error();this.#googleFlow=undefined;this.#token=token;this.#keep=keep;keep?.save(token);this.#publish({mode:'live',phase:'authenticated',epoch,user:current});
+  }
+  async #continueGoogle(verification?:{challenge:string;nonce:string;code:string},recovery=false){const flow=this.#googleFlow;if(!flow)return;const keep=this.#nextKeep;this.#publish({...this.#state,phase:'signing-in'});const epoch=this.#state.epoch;try{await this.#finishGoogle(flow,epoch,keep,verification,recovery);}catch{if(epoch===this.#state.epoch)this.#reset('live','signed-out','unavailable','login');}}
   async login(email:string,password:string){return this.#login(email,password);}
   async startRecovery(password:string){
     const pending=this.#verification;
     if(!pending||this.#state.phase!=='verifying')return;
+    if(this.#state.verification?.provider==='google')return this.#continueGoogle(undefined,true);
     return this.#login(pending.email,password,undefined,true);
   }
   async completeVerification(password:string,code:string){
     const pending=this.#verification;
     if(!pending||this.#state.phase!=='verifying')return;
     if(pending.expiresAt<=Date.now()){this.#reset(this.#state.mode,'signed-out','expired',this.#state.setup);return;}
+    if(this.#state.verification?.provider==='google')return this.#continueGoogle({challenge:pending.challenge,nonce:pending.nonce,code},pending.method==='recovery');
     return this.#login(pending.email,password,{challenge:pending.challenge,nonce:pending.nonce,code},pending.method==='recovery');
   }
   async #login(email: string, password: string,verification?:{challenge:string;nonce:string;code:string},recovery=false) {
@@ -544,7 +632,7 @@ export class SessionClient {
   request = async (request: Request, signal?: AbortSignal): Promise<WireResponse> => {
     if (!this.#token || this.#state.phase !== 'authenticated') throw new SessionFailure('blocked');
     // The public adapter transport cannot call login/logout or add arbitrary request fields.
-    if (request.path === '/api/setup/status' || request.path === OWNER_SETUP_PATH || request.path === '/api/chat' || request.path === '/api/auth/login' || request.path === '/api/auth/logout' || Object.keys(request).some(k => !['method', 'path', 'body'].includes(k))) throw new SessionFailure('blocked');
+    if (googleAuthRoute(request.path)&&!request.path.startsWith('/api/auth/google/link') || request.path === '/api/setup/status' || request.path === OWNER_SETUP_PATH || request.path === '/api/chat' || request.path === '/api/auth/login' || request.path === '/api/auth/logout' || Object.keys(request).some(k => !['method', 'path', 'body'].includes(k))) throw new SessionFailure('blocked');
     if((verificationRoute(request.path)||reviewerRoute(request.path))&&this.#state.user?.role==='guest')throw new SessionFailure('blocked');
     if(upgradeRoute(request.path)&&this.#state.user?.role!=='owner')throw new SessionFailure('blocked');
     if(skillInstallRoute(request.path)&&this.#state.user?.role!=='owner')throw new SessionFailure('blocked');
@@ -560,15 +648,16 @@ export class SessionClient {
     if (conversationPath(request.path)?.kind === 'approval' && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if ((conversationRoute(request.path) || chatSearchRoute(request.path) || chatExportRoute(request.path) || chatSecretsRoute(request.path)) && this.#state.user?.role === 'guest') throw new SessionFailure('blocked');
     if (request.path === CLEANUP_PATH && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
-    if ((meetingsRoute(request.path) || marketRoute(request.path) || practiceRoute(request.path) || packRoute(request.path) || workspaceAppsRoute(request.path) || sourceCatalogueRoute(request.path) || appsCatalogueRoute(request.path) || storeRoute(request.path) || chatAddonsRoute(request.path) || request.path === '/api/chat/project-folders' || approvalRoute(request.path) || connectionsRoute(request.path) || libraryPath(request.path) || templatePath(request.path) || mcpImportPath(request.path) || channelRoute(request.path) || connectorRoute(request.path) || localImportRoute(request.path) || chatBoardRoute(request.path) || chatMemoryRoute(request.path)) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
-    if ((memoryDesktopRoute(request.path) || memoryPagesRoute(request.path) || memoryRecallRoute(request.path) || memoryBridgeRoute(request.path) || discoveryRoute(request.path)) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
+    if (worldRoute(request.path) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
+    if ((reportsRoute(request.path) || meetingsRoute(request.path) || marketRoute(request.path) || practiceRoute(request.path) || packRoute(request.path) || workspaceAppsRoute(request.path) || sourceCatalogueRoute(request.path) || appsCatalogueRoute(request.path) || storeRoute(request.path) || hostAppRoute(request.path) || chatAddonsRoute(request.path) || request.path === '/api/chat/project-folders' || approvalRoute(request.path) || connectionsRoute(request.path) || libraryPath(request.path) || templatePath(request.path) || mcpImportPath(request.path) || sshKeysRoute(request.path) || channelRoute(request.path) || connectorRoute(request.path) || localImportRoute(request.path) || chatBoardRoute(request.path) || chatMemoryRoute(request.path)) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
+    if ((memoryDesktopRoute(request.path) || memoryPagesRoute(request.path) || memoryRecallRoute(request.path) || memoryBridgeRoute(request.path) || projectFilesRoute(request.path) || taskLinksRoute(request.path) || personRoute(request.path) || trustRoute(request.path) || docIndexRoute(request.path) || projectTrustRoute(request.path) || codeOpenRoute(request.path) || discoveryRoute(request.path)) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if (terminalRoute(request.path) && (this.#state.user?.role !== 'owner' || terminalPath(request.path)?.kind === 'stream')) throw new SessionFailure('blocked');
     if (request.method === 'PUT' && !conversationRoute(request.path) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if (request.method === 'POST' && request.path.startsWith('/api/memory/') && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if ((personalityRoute(request.path) || cardRoute(request.path) || (request.method === 'DELETE' && !conversationRoute(request.path) && !chatSecretsRoute(request.path))) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if (orgRoute(request.path) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if (phoneRoute(request.path) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
-    if (agentLibraryRoute(request.path) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
+    if ((agentLibraryRoute(request.path) || notesRoute(request.path)) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     if (((request.method === 'POST' && request.path === '/api/agents') || grantsAgentId(request.path) || request.path === CATALOGUE_PATH || request.path === PLAN_PATH || request.path === DISTRIBUTION_PATH || request.path === BATCHES_PATH || batchPath(request.path) || permissionsAgentId(request.path) || request.path === BOARDS_PATH || request.path.startsWith(`${BOARDS_PATH}/`)) && this.#state.user?.role !== 'owner') throw new SessionFailure('blocked');
     const epoch = this.#state.epoch;
     const result = await this.#send(request.method, request.path, 'body' in request ? request.body : undefined, this.#token, epoch, signal);

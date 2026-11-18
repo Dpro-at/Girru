@@ -10,7 +10,7 @@ export class TestClient {
     this.closed = new Promise((resolve) => ws.addEventListener('close', (e) => resolve(e.code)));
     ws.addEventListener('message', (e) => {
       const frame = JSON.parse(e.data);
-      const i = this.waiters.findIndex((w) => w.match(frame));
+      const i = this.waiters.findIndex((w) => w.accept(frame));
       if (i >= 0) this.waiters.splice(i, 1)[0].resolve(frame);
       else this.inbox.push(frame);
     });
@@ -23,7 +23,7 @@ export class TestClient {
     const i = this.inbox.findIndex(match);
     if (i >= 0) return Promise.resolve(this.inbox.splice(i, 1)[0]);
     return new Promise((resolve, reject) => {
-      const waiter = { match, resolve: (f) => { clearTimeout(timer); resolve(f); } };
+      const waiter = { accept: match, resolve: (f) => { clearTimeout(timer); resolve(f); } };
       const timer = setTimeout(() => {
         this.waiters.splice(this.waiters.indexOf(waiter), 1);
         reject(new Error('timed out waiting for a frame'));

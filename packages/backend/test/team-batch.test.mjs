@@ -32,6 +32,7 @@ addUser('tb-user', 'user');
 
 const plan = await import(join(backendDir, 'src/services/company-plan.ts'));
 const batch = await import(join(backendDir, 'src/services/team-batch.ts'));
+const { storeP4Enabled } = await import(join(backendDir, 'src/services/store-p4.ts'));
 const { q } = await import(join(backendDir, 'src/repositories/sql-steps.ts'));
 const { registerAuthGate } = await import(join(backendDir, 'src/auth/auth-gate.ts'));
 const { teamPlanRoutes } = await import(join(backendDir, 'src/api/routes/team-plan.ts'));
@@ -157,11 +158,13 @@ teamBatchScenario(test, () => ({ q, batch }), { tag: randomBytes(4).toString('he
 
 
 test('specialty counts, descriptions and identity survive partial batch execution without changing existing agents',async()=>{
+ // STORE-MAP-01 P4 (D14): with the switch on the specialty is the linked library entry (or, with no entry, the job text in the instructions), not the old column.
+ const specialtyOf=(row)=>storeP4Enabled()?(db.prepare('select t.name from agent_specialties s join specialty_templates t on t.id=s.template_id where s.agent_id=?').get(row.id)?.name??/Your specialty is (.+)\./.exec(row.system_prompt??'')?.[1]??null):row.specialty;
  const existing=db.prepare('select * from agents_config order by id').all();
  const input={id:'specialties-acceptance-01',departments:[{department:'infrastructure',count:2,specialties:[{name:'Server administrator',count:1,description:'Maintain fictional Linux servers.'},{name:'Custom data guardian',count:1,description:'Review fictional data access.'}]}]};
  const saved=await batch.createBatch('tb-owner',input);assert.equal(saved.progress.total,2);assert.equal((await batch.createBatch('tb-owner',input)).created,false);
  await batch.runBatch('tb-owner',input.id,{max:1});assert.equal((await batch.batchStatus(input.id,'tb-owner')).created,1);await batch.runBatch('tb-owner',input.id);assert.equal((await batch.runBatch('tb-owner',input.id)).results.length,0);
- const rows=db.prepare("select a.* from agents_config a join team_hire_batch_items i on i.agent_id=a.id where i.batch_id=? order by i.seq").all(input.id);assert.equal(rows.length,2);assert.equal(rows[0].specialty,'Server administrator');assert.match(rows[0].description,/fictional Linux/);assert.match(rows[1].system_prompt,/Custom data guardian/);assert.match(rows[1].system_prompt,/grants no tools/);
+ const rows=db.prepare("select a.* from agents_config a join team_hire_batch_items i on i.agent_id=a.id where i.batch_id=? order by i.seq").all(input.id);assert.equal(rows.length,2);assert.equal(specialtyOf(rows[0]),'Server administrator');assert.match(rows[0].description,/fictional Linux/);assert.match(rows[1].system_prompt,/Custom data guardian/);assert.match(rows[1].system_prompt,/grants no tools/);
  for(const row of existing)assert.deepEqual(db.prepare('select * from agents_config where id=?').get(row.id),row);
  const changed=structuredClone(input);changed.departments[0].specialties[0].description='Changed';await assert.rejects(()=>batch.createBatch('tb-owner',changed),/different batch/i);
  for(const specialties of [[{name:'Missing allocation',count:1,description:''}],[{name:'Repeat',count:1,description:''},{name:'repeat',count:1,description:''}],[{name:'Overflow',count:3,description:''}],[{name:'Bad',count:2,description:'',grantAll:true}]])assert.throws(()=>batch.expandBatch([{department:'data',count:2,specialties}]));

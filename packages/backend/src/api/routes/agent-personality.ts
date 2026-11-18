@@ -49,6 +49,8 @@ import {
   type PersonalityVersion,
   type ProposalStatus,
 } from '../../services/personality-store.js';
+import { storeP4Enabled } from '../../services/store-p4.js';
+import { PersonalityVersionConflict, recordText, savePersonalityText, writePersonalityView } from '../../services/personality-record.js';
 
 const AGENT_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
 
@@ -106,6 +108,7 @@ export async function agentPersonalityRoutes(fastify: FastifyInstance) {
       if (err instanceof PersonalityInputError) { audit(false, { error_message: err.message }); return reply.code(400).send({ error: err.message }); }
       if (err instanceof PersonalityLockedError) { audit(false, { error_message: err.message }); return reply.code(409).send({ error: err.message }); }
       if (err instanceof PersonalityNotFoundError) return reply.code(404).send({ error: err.message });
+      if (err instanceof PersonalityVersionConflict) { audit(false, { error_message: 'changed' }); return reply.code(409).send({ error: 'The personality changed since you opened it', code: 'changed' }); }
       return internalError(reply, action, err);
     }
     audit(true, { metadata: { version: result.version, source: result.source, traits: result.traits, dialect: result.dialect, locked: result.locked } });
@@ -124,8 +127,11 @@ export async function agentPersonalityRoutes(fastify: FastifyInstance) {
     try {
       const current = await repositories.agents.currentPersonality(actorOf(request), request.params.id);
       if (!current) return reply.code(404).send({ error: 'Agent not found' });
+      // STORE-MAP-01 P4 (T7): the text is part of the one personality record.
+      const record = storeP4Enabled() ? await recordText(request.params.id) : null;
       return {
         ...view(current),
+        ...(record ? { text: record.text } : {}),
         traitNames: TRAIT_NAMES,
         dialects: DIALECTS,
         presets: Object.entries(PRESETS).map(([id, p]) => ({ id, label: p.label, traits: p.traits })),
@@ -164,6 +170,24 @@ export async function agentPersonalityRoutes(fastify: FastifyInstance) {
 
   fastify.post<Params & { Body: { version?: unknown } }>('/api/agents/:id/personality/rollback', { config }, async (request, reply) =>
     change(request, reply, 'agent_personality.rollback', (agentId) => repositories.agents.rollbackPersonality(actorOf(request), agentId, request.body?.version)));
+
+  // STORE-MAP-01 P4 (T7, D15): the owner edits the personality text; saved at once as a new version
+  // (Undo = rollback to the version before). Body { text, expectedVersion } — the version the editor showed.
+  fastify.put<Params & { Body: { text?: unknown; expectedVersion?: unknown } }>('/api/agents/:id/personality/text', { config }, async (request, reply) => {
+    if (!storeP4Enabled()) return reply.code(404).send({ error: 'Not found' });
+    const body = request.body && typeof request.body === 'object' && !Array.isArray(request.body) ? request.body : null;
+    if (!body || Object.keys(body).some((k) => k !== 'text' && k !== 'expectedVersion')) {
+      if (ownerOf(request, reply) === null) return reply;
+      return reply.code(400).send({ error: 'Body must be { text, expectedVersion }' });
+    }
+    if (body.expectedVersion === undefined) {
+      if (ownerOf(request, reply) === null) return reply;
+      return reply.code(400).send({ error: 'expectedVersion is required (the version you read)', code: 'expected_version_required' });
+    }
+    const ownerId = ownerOf(request, reply);
+    if (ownerId === null) return reply;
+    return change(request, reply, 'agent_personality.text', (agentId) => savePersonalityText(agentId, body.text, body.expectedVersion, ownerId));
+  });
   // --- drift proposals (CORE-01c) -------------------------------------------
 
   const ownerConfig = { access: 'owner' as const };
@@ -276,6 +300,8 @@ export async function agentPersonalityRoutes(fastify: FastifyInstance) {
       const b = bodyOf(request);
       const proposal = await repositories.agents.rejectPersonalityProposal(actorOf(request), agentId, pid, b.expectedReviewHash, b.note);
       proposalAudit(request, ownerId, 'agent_personality.proposal.reject', true, agentId, summary(proposal));
+      // T7b: "No" to a change made outside Girru writes the record back into PERSONALITY.md.
+      if (proposal.origin === 'file') await writePersonalityView(agentId).catch((err) => request.log.warn(safeErrorFields(err), '[Personality] PERSONALITY.md write-back failed'));
       return proposal;
     } catch (err) {
       const handled = proposalError(err, reply);

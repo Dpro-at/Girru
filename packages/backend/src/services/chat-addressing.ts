@@ -1,6 +1,6 @@
 /** Resolve conversational addresses against the current chat, never the whole workspace. */
 export type ChatParticipant = { id: string; name: string; department: string | null; role?: string | null };
-type Selection = { ids: string[] | null; ambiguous?: ChatParticipant[]; others?: boolean; followup?: boolean };
+type Selection = { ids: string[] | null; ambiguous?: ChatParticipant[]; others?: boolean; followup?: boolean; address?: 'names' | 'group' };
 
 export function addressText(value: string): string {
   return value.replace(/```[\s\S]*?```/g, ' ').replace(/^>.*$/gm, ' ').replace(/"[^"]*"|«[^»]*»/g, ' ')
@@ -61,8 +61,8 @@ export function conversationalSelection(message: string, participants: ChatParti
     if (selected && candidates.some(person => person.id === selected)) return { ids: [selected] };
     return { ids: null, ambiguous: candidates };
   }
-  if (candidates.length) return { ids: candidates.map(person => person.id) };
-  if (addressesGroup(message)) return { ids: participants.map(person => person.id) };
+  if (candidates.length) return { ids: candidates.map(person => person.id), address: 'names' };
+  if (addressesGroup(message)) return { ids: participants.map(person => person.id), address: 'group' };
   const text = tokens.join(' ');
   return { ids: null, ...(/^(?:و?انت|كيفك|شلونك|جاهز|مستعد|وانتي|and you|are you ready|how about you)(?: |$)/u.test(text) ? { followup: true } : {}) };
 }

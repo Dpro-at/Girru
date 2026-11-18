@@ -55,7 +55,7 @@ test('who sees images: Codex and Claude Code the chat\'s files; Gemini none (the
  assert.deepEqual(await chatImagesSeenBy('subscription:gemini',files),[]);
  const fake=join(dataDir,'chat-images',chat,`${'f'.repeat(32)}.png`);writeFileSync(fake,'not an image');
  assert.deepEqual(await chatImagesSeenBy('subscription:claude',[fake]),[],'a file that is not an image is not shown');
- const route=readFileSync(new URL('../src/api/routes/chat.ts',import.meta.url),'utf8');
+ const route=readFileSync(new URL('../src/agent/execution/chat-turn.ts',import.meta.url),'utf8');
  assert.match(route,/const seen=await chatImagesSeenBy\(subscriptionSource,input\.images\?\.map\(i=>i\.file\)\);\n\s*if\(input\.images\?\.length&&!seen\.length\)\{currentChatRun\(\)\?\.notice\?\.\('images_not_seen'/);
  assert.match(route,/images:seen,thinking/);
 });
@@ -67,7 +67,7 @@ const FAKE=`const fs=require('node:fs');let s='';process.stdin.on('data',x=>s+=x
  if(process.argv.includes('stream-json')){const m=JSON.parse(s.trim());const n=m.message.content.filter(c=>c.type==='image').length;
   for(const row of [{type:'system',subtype:'init'},{type:'assistant',message:{content:[{type:'text',text:'x'}]}},{type:'result',subtype:'success',is_error:false,result:'saw '+n+' images'}])process.stdout.write(JSON.stringify(row)+'\\n');}
  else process.stdout.write(JSON.stringify({type:'result',result:'text:'+s}));});`;
-async function fixture(code){writeFileSync(binary,'#!'+process.execPath+'\n'+FAKE,{mode:0o700});const result=await run(process.execPath,['--import','tsx','--input-type=module','-e',`const api=await import(${JSON.stringify(source)});try{${code}}finally{await api.stopSubscriptionProcesses();}`],{env:{PATH:process.env.PATH,HOME:home,DPRO_SUBSCRIPTION_CHAT:'1',AGENT_PLAYER_DATA_DIR:dataDir,DATABASE_PATH:join(dataDir,'fixture.db')},timeout:20000,maxBuffer:65536});return result.stdout.trim();}
+async function fixture(code){writeFileSync(binary,'#!'+process.execPath+'\n'+FAKE,{mode:0o700});const result=await run(process.execPath,['--import','tsx','--input-type=module','-e',`const api=await import(${JSON.stringify(source)});try{${code}}finally{await api.stopSubscriptionProcesses();}`],{env:{PATH:process.env.PATH,HOME:home,DPRO_SUBSCRIPTION_CHAT:'1',AGENT_PLAYER_DATA_DIR:dataDir,DATABASE_PATH:join(dataDir,'fixture.db')},timeout:20000,maxBuffer:65536});return result.stdout.trim().split("\n").pop();}
 
 test('fake Claude Code binary: an image turn sends one stream-json message and returns the result; a text turn is unchanged',async()=>{
  const sig='new AbortController().signal';

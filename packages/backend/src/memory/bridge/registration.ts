@@ -12,6 +12,9 @@
  * Formats (official docs, 2026-10-21): JSON `mcpServers` for Claude Code
  * (~/.claude.json, user scope, `type: "stdio"`), Gemini CLI (settings.json)
  * and Antigravity (mcp_config.json); TOML `[mcp_servers.<name>]` for Codex.
+ * With P7 also Cursor (~/.cursor/mcp.json) and GitHub Copilot CLI
+ * (~/.copilot/mcp-config.json, `type: "local"`), and every write goes through
+ * the one safe file writer, rooted at the config's own folder.
  * The TOML table goes between Girru's comment markers so undo can find it.
  * No token or secret is ever written: the server fetches its own token from
  * the backend at start (auth.ts).
@@ -22,7 +25,9 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { dataPath } from '../../config/data-root.js';
 import { CLIENT_NAMES, clientConfigFile, launchReady, SERVER_NAME, serverLaunch, type BridgeClient, type BridgeEnv, type ServerLaunch } from './clients.js';
-import { addRegistration, getRegistration, markUndone, type Registration } from './store.js';
+import { addRegistration, getRegistration, listRegistrations, markUndone, type Registration } from './store.js';
+import { storeP7Enabled } from '../../services/store-p7.js';
+import { safeWriteAt } from '../../services/safe-file.js';
 
 export class RegistrationError extends Error {
   constructor(message: string, readonly status = 400, readonly code = 'invalid_request') { super(message); }
@@ -50,7 +55,7 @@ export interface RegistrationPreview {
 }
 
 function readConfig(file: string): { bytes: Buffer | null; mode: number | null; problem?: string } {
-  try { return readRegularFile(file, MAX_CONFIG_BYTES); }
+  try { return readRegularFile(path.dirname(file), path.basename(file), MAX_CONFIG_BYTES); }
   catch (e: any) {
     return e.code === 'ENOENT' ? { bytes: null, mode: null } : { bytes: null, mode: null, problem: 'is unreadable, changed, oversized or not a regular file' };
   }
@@ -59,6 +64,7 @@ function readConfig(file: string): { bytes: Buffer | null; mode: number | null; 
 function jsonEntry(client: BridgeClient, l: ServerLaunch): Record<string, unknown> {
   if (client === 'claude-code') return { type: 'stdio', command: l.command, args: l.args, env: l.env };
   if (client === 'gemini-cli') return { command: l.command, args: l.args, env: l.env, timeout: 30000, trust: false };
+  if (client === 'copilot') return { type: 'local', command: l.command, args: l.args, env: l.env, tools: ['*'] };
   return { command: l.command, args: l.args, env: l.env };
 }
 
@@ -147,6 +153,12 @@ function backupDir(): string {
 }
 
 function writeAtomic(file: string, data: Buffer | string, mode: number): void {
+  if (storeP7Enabled()) {
+    // SEC2-6: no links, atomic, re-checked; a config may be larger than a project file.
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    safeWriteAt(path.dirname(file), path.basename(file), data, { mode, maxBytes: MAX_CONFIG_BYTES });
+    return;
+  }
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${randomUUID()}.tmp`);
   fs.writeFileSync(tmp, data, { flag: 'wx', mode });
@@ -221,4 +233,20 @@ export async function undoRegistration(ownerId: string, id: string): Promise<Und
   }
   await markUndone(ownerId, id);
   return { registration: (await getRegistration(ownerId, id))!, mode };
+}
+
+/**
+ * OPS8: leave the computer clean. Every applied registration (or one tool's)
+ * is undone: the backup comes back when the file is still Girru's text, else
+ * only Girru's entry is taken out. A file that cannot be undone is reported,
+ * the others still go on.
+ */
+export async function undoAllRegistrations(ownerId: string, client?: BridgeClient): Promise<{ undone: UndoResult[]; failed: Array<{ id: string; client: BridgeClient; error: string }> }> {
+  const out = { undone: [] as UndoResult[], failed: [] as Array<{ id: string; client: BridgeClient; error: string }> };
+  for (const r of await listRegistrations(ownerId)) {
+    if (r.status !== 'applied' || (client && r.client !== client)) continue;
+    try { out.undone.push(await undoRegistration(ownerId, r.id)); }
+    catch (e) { out.failed.push({ id: r.id, client: r.client, error: e instanceof Error ? e.message : String(e) }); }
+  }
+  return out;
 }

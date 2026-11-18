@@ -19,6 +19,7 @@ import { isoUtc } from '../api/timestamps.js';
 import { all, dialect, one, run, sql, type Step } from '../repositories/sql-steps.js';
 import { forUpdate, nowIsoText } from '../db/pg/dialect.js';
 import { orderedId } from '../repositories/ordered-id.js';
+import { storeP4Enabled } from './store-p4.js';
 import { readPersonality, writePersonality } from './agent-files.js';
 import {
   DEFAULT_DIALECT,
@@ -42,7 +43,7 @@ import {
   type Traits,
 } from './personality.js';
 
-export type PersonalitySource = 'default' | 'seed' | 'owner' | 'rollback' | 'lock' | 'unlock' | 'evolution';
+export type PersonalitySource = 'default' | 'seed' | 'owner' | 'rollback' | 'lock' | 'unlock' | 'evolution' | 'import';
 
 export interface PersonalityVersion {
   agentId: string;
@@ -58,6 +59,12 @@ export interface PersonalityVersion {
   note: string | null;
   createdBy: string | null;
   createdAt: string | null;
+  /**
+   * STORE-MAP-01 P4 (T7): sha256 of the personality text this version holds
+   * (personality_texts). Absent while the agent has no text in its record yet
+   * (so responses stay exactly as before with the switch off).
+   */
+  textHash?: string | null;
 }
 
 /** Thrown when a change is refused because the personality is locked. */
@@ -78,6 +85,7 @@ interface Row {
   note: string | null;
   created_by: string;
   created_at: string;
+  text_hash?: string | null;
 }
 
 function fromRow(row: Row): PersonalityVersion {
@@ -98,6 +106,7 @@ function fromRow(row: Row): PersonalityVersion {
     note: row.note,
     createdBy: row.created_by,
     createdAt: isoUtc(row.created_at), // BE-UI-01: ISO UTC with Z
+    ...(row.text_hash ? { textHash: row.text_hash } : {}),
   };
 }
 
@@ -155,6 +164,8 @@ interface NewVersion {
   source: Exclude<PersonalitySource, 'default'>;
   basedOnVersion: number | null;
   note: string | null;
+  /** The text of this version; undefined keeps the text of the version before (rollback: of the version rolled back to). */
+  textHash?: string | null;
 }
 
 /**
@@ -166,12 +177,18 @@ export function* appendVersion(agentId: string, createdBy: string, v: NewVersion
   if (!(yield* lockAgent(agentId))) throw new PersonalityNotFoundError('Agent not found');
   const max = (yield* one<{ v: number | null }>('SELECT MAX(version) AS v FROM agent_personality_versions WHERE agent_id = ?', agentId))?.v ?? 0;
   const version = max + 1;
+  // T7: text and adjustments share one history; a version that does not set a text keeps the previous one.
+  const textOf = function* (n: number | null) { return (yield* one<{ text_hash: string | null }>('SELECT text_hash FROM agent_personality_versions WHERE agent_id = ? AND version = ?', agentId, n))?.text_hash ?? null; };
+  // A rollback to a version from before the text was imported keeps the current text (never back to none).
+  const textHash = v.textHash !== undefined ? v.textHash
+    : v.source === 'rollback' ? ((yield* textOf(v.basedOnVersion)) ?? (yield* textOf(max)))
+    : yield* textOf(max);
   yield* run(`
     INSERT INTO agent_personality_versions
-      (agent_id, version, traits, preset, dialect, locked, locked_traits, source, based_on_version, note, created_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (agent_id, version, traits, preset, dialect, locked, locked_traits, source, based_on_version, note, created_by, text_hash)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, agentId, version, JSON.stringify(v.traits), v.preset, v.dialect, v.locked ? 1 : 0,
-    JSON.stringify(v.lockedTraits), v.source, v.basedOnVersion, v.note, createdBy);
+    JSON.stringify(v.lockedTraits), v.source, v.basedOnVersion, v.note, createdBy, textHash);
   const style = yield* one<{profile_json:string|null}>('SELECT profile_json FROM agent_personality_profile_versions WHERE agent_id=? AND version=?',agentId,v.source==='rollback'?v.basedOnVersion:max);
   yield* run('INSERT INTO agent_personality_profile_versions(agent_id,version,profile_json) VALUES(?,?,?)',agentId,version,style?.profile_json??null);
   const row = yield* one<Row>('SELECT * FROM agent_personality_versions WHERE agent_id = ? AND version = ?', agentId, version);
@@ -312,13 +329,15 @@ export function* seedPersonalityForNewAgent(
   if (!current) throw new PersonalityNotFoundError('Agent not found');
   if (current.version !== 0) throw new PersonalityInputError('The agent already has a personality');
   const seed = defaultPersonalityForRole({ role: opts.role, department: opts.department });
+  // P4 (T7): a new agent's record starts with an empty text (its file is only the template; nothing to import).
+  const textHash = storeP4Enabled() ? yield* putPersonalityTextStep('') : undefined;
   const start = { traits: seed.traits, preset: seed.preset as string | null, dialect: seed.dialect, lockedTraits: [] as TraitName[] };
   if (opts.explicit) {
     const merged = mergeOwnerInput(start, opts.explicit);
-    return yield* appendVersion(agentId, createdBy, { ...merged, locked: false, source: 'owner', basedOnVersion: null, note: merged.note ?? 'set at creation' });
+    return yield* appendVersion(agentId, createdBy, { ...merged, locked: false, source: 'owner', basedOnVersion: null, note: merged.note ?? 'set at creation', textHash });
   }
   const note = opts.role ? `default for role ${opts.role}${opts.department ? ` (${opts.department})` : ''}` : 'default';
-  return yield* appendVersion(agentId, createdBy, { ...start, locked: false, source: 'seed', basedOnVersion: null, note });
+  return yield* appendVersion(agentId, createdBy, { ...start, locked: false, source: 'seed', basedOnVersion: null, note, textHash });
 }
 
 // ---------------------------------------------------------------------------
@@ -365,6 +384,14 @@ export interface PersonalityProposal {
    * expectedReviewHash (the owner decides on exactly what they saw).
    */
   reviewHash: string;
+  /** T7: the text part, present only on a text suggestion (a trait drift looks exactly as before). */
+  baseTextHash?: string | null;
+  proposedTextHash?: string;
+  /** 'file' = PERSONALITY.md changed outside Girru; 'evolution_text' = an Evolution text suggestion. */
+  origin?: 'file' | 'evolution_text' | null;
+  /** The texts themselves, for the before → after view (only when the text changes). */
+  baseText?: string;
+  proposedText?: string;
 }
 
 export const MAX_DRIFT_STEP = 5;
@@ -376,13 +403,16 @@ export const MAX_DECISION_NOTE_CHARS = 500;
 export const MAX_PENDING_PROPOSALS = 50;
 
 export function personalityProposalReviewHash(
-  p: Pick<PersonalityProposal, 'id' | 'agentId' | 'baseVersion' | 'proposedTraits' | 'reason' | 'evidence'>,
+  p: Pick<PersonalityProposal, 'id' | 'agentId' | 'baseVersion' | 'proposedTraits' | 'reason' | 'evidence'>
+    & Partial<Pick<PersonalityProposal, 'baseTextHash' | 'proposedTextHash' | 'origin'>>,
 ): string {
   // Canonical trait order (TRAIT_NAMES), whatever order the object was built in.
   const traits = Object.fromEntries(TRAIT_NAMES.map((n) => [n, p.proposedTraits[n]]));
-  return createHash('sha256')
-    .update(JSON.stringify(['personality-proposal-review/v1', p.id, p.agentId, p.baseVersion, traits, p.reason, p.evidence]))
-    .digest('hex');
+  // A text suggestion (T7) also binds the text before and after; a trait drift keeps the v1 hash.
+  const body = p.proposedTextHash
+    ? ['personality-proposal-review/v2', p.id, p.agentId, p.baseVersion, traits, p.reason, p.evidence, p.baseTextHash ?? null, p.proposedTextHash, p.origin ?? null]
+    : ['personality-proposal-review/v1', p.id, p.agentId, p.baseVersion, traits, p.reason, p.evidence];
+  return createHash('sha256').update(JSON.stringify(body)).digest('hex');
 }
 
 interface ProposalRow {
@@ -390,6 +420,7 @@ interface ProposalRow {
   reason: string; evidence: string; source: string; status: string; review_hash: string;
   created_by: string; created_at: string; decided_by: string | null; decided_at: string | null;
   decision_note: string | null; applied_version: number | null;
+  base_text_hash?: string | null; proposed_text_hash?: string | null; origin?: string | null;
 }
 
 function parseTraits(json: string): Traits {
@@ -412,6 +443,10 @@ function proposalFromRow(row: ProposalRow): PersonalityProposal {
     createdBy: row.created_by, createdAt: isoUtc(row.created_at),
     decidedBy: row.decided_by, decidedAt: isoUtc(row.decided_at), decisionNote: row.decision_note,
     appliedVersion: row.applied_version,
+    ...(row.proposed_text_hash ? {
+      baseTextHash: row.base_text_hash ?? null, proposedTextHash: row.proposed_text_hash,
+      origin: (row.origin === 'file' || row.origin === 'evolution_text' ? row.origin : null) as PersonalityProposal['origin'],
+    } : {}),
   };
   // Recomputed from what is shown (not the stored column), so a reviewer always
   // approves exactly the content they were given.
@@ -468,9 +503,28 @@ function targetTraits(current: Traits, input: Record<string, unknown>): Partial<
   return out;
 }
 
+/** A stored personality text ('' for none). */
+export function* personalityTextStep(hash: string | null | undefined): Step<string> {
+  if (!hash) return '';
+  return (yield* one<{ body: string }>('SELECT body FROM personality_texts WHERE hash = ?', hash))?.body ?? '';
+}
+
+/** Store a text once by its sha256 (content-addressed) and return the hash. */
+export function* putPersonalityTextStep(body: string): Step<string> {
+  const hash = createHash('sha256').update(body, 'utf8').digest('hex');
+  yield* run('INSERT INTO personality_texts (hash, body) VALUES (?, ?) ON CONFLICT (hash) DO NOTHING', hash, body);
+  return hash;
+}
+
+/** The before → after texts of a text suggestion (only when the text changes). */
+function* withTexts(p: PersonalityProposal): Step<PersonalityProposal> {
+  if (!p.proposedTextHash) return p;
+  return { ...p, baseText: yield* personalityTextStep(p.baseTextHash ?? null), proposedText: yield* personalityTextStep(p.proposedTextHash) };
+}
+
 function* proposalStep(agentId: string, id: string): Step<PersonalityProposal | null> {
   const row = yield* one<ProposalRow>('SELECT * FROM personality_proposals WHERE id = ? AND agent_id = ?', id, agentId);
-  return row ? proposalFromRow(row) : null;
+  return row ? yield* withTexts(proposalFromRow(row)) : null;
 }
 
 export function getPersonalityProposal(agentId: string, id: string): Promise<PersonalityProposal | null> {
@@ -488,7 +542,9 @@ export function listPersonalityProposals(agentId: string, status?: ProposalStatu
     const rows = status
       ? yield* all<ProposalRow>('SELECT * FROM personality_proposals WHERE agent_id = ? AND status = ? ORDER BY created_at DESC, id DESC LIMIT 200', agentId, status)
       : yield* all<ProposalRow>('SELECT * FROM personality_proposals WHERE agent_id = ? ORDER BY created_at DESC, id DESC LIMIT 200', agentId);
-    return rows.map(proposalFromRow);
+    const out: PersonalityProposal[] = [];
+    for (const row of rows) out.push(yield* withTexts(proposalFromRow(row)));
+    return out;
   })());
 }
 
@@ -544,6 +600,54 @@ export async function createPersonalityProposal(agentId: string, raw: unknown, s
   });
 }
 
+/** Longest personality text kept in the record (the same limit as PERSONALITY.md). */
+export const MAX_PERSONALITY_TEXT_BYTES = 1024 * 1024;
+
+/**
+ * T7: a suggested change of the personality text (and optionally a bounded
+ * trait drift with it), from PERSONALITY.md edited outside Girru (origin
+ * 'file') or from Evolution / the agent. Nothing changes until the owner
+ * agrees; approval appends one version holding both. Refused while locked.
+ * The same text as now answers 400 `no_change`; an identical pending
+ * suggestion is returned instead of a second one.
+ */
+export async function createPersonalityTextProposal(
+  agentId: string,
+  input: { text: string; reason: string; evidence?: unknown; traits?: unknown; delta?: unknown },
+  source: ProposalSource, createdBy: string, origin: 'file' | 'evolution_text' | null,
+): Promise<PersonalityProposal> {
+  if (typeof input.text !== 'string' || Buffer.byteLength(input.text, 'utf8') > MAX_PERSONALITY_TEXT_BYTES) throw new PersonalityInputError('text must be at most 1 MB of text');
+  const reason = validReason(input.reason);
+  const evidence = validEvidence(input.evidence);
+  const id = orderedId();
+  return sql().tx(function* () {
+    const current = yield* currentPersonalityStep(agentId, { lock: true });
+    if (!current) throw new PersonalityNotFoundError('Agent not found');
+    if (current.locked) throw new PersonalityProposalError(409, 'Personality is locked; unlock it first', 'personality_locked');
+    const proposedTraits = input.traits === undefined && input.delta === undefined
+      ? { ...current.traits }
+      : boundedDrift(current.traits, targetTraits(current.traits, { traits: input.traits, delta: input.delta }), current.lockedTraits, MAX_DRIFT_STEP);
+    const proposedTextHash = yield* putPersonalityTextStep(input.text);
+    if (proposedTextHash === current.textHash && TRAIT_NAMES.every((n) => proposedTraits[n] === current.traits[n])) {
+      throw new PersonalityProposalError(400, 'Nothing would change', 'no_change');
+    }
+    const same = yield* one<ProposalRow>(`SELECT * FROM personality_proposals WHERE agent_id = ? AND status = 'pending' AND base_version = ? AND proposed_text_hash = ? AND source = ? LIMIT 1`,
+      agentId, current.version, proposedTextHash, source);
+    if (same) return yield* withTexts(proposalFromRow(same));
+    const pending = (yield* one<{ n: number }>(`SELECT COUNT(*) AS n FROM personality_proposals WHERE agent_id = ? AND status = 'pending'`, agentId))!.n;
+    if (pending >= MAX_PENDING_PROPOSALS) {
+      throw new PersonalityProposalError(429, 'Too many pending personality proposals for this agent; decide some first', 'too_many_pending');
+    }
+    const reviewHash = personalityProposalReviewHash({ id, agentId, baseVersion: current.version, proposedTraits, reason, evidence, baseTextHash: current.textHash ?? null, proposedTextHash, origin });
+    yield* run(`
+      INSERT INTO personality_proposals (id, agent_id, base_version, base_traits, proposed_traits, reason, evidence, source, review_hash, created_by, base_text_hash, proposed_text_hash, origin)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, id, agentId, current.version, JSON.stringify(current.traits), JSON.stringify(proposedTraits), reason,
+      JSON.stringify(evidence), source, reviewHash, createdBy, current.textHash ?? null, proposedTextHash, origin);
+    return (yield* proposalStep(agentId, id))!;
+  });
+}
+
 const REVIEW_HASH = /^[0-9a-f]{64}$/;
 
 /** Exists for this agent, still pending, and the caller reviewed exactly this content. */
@@ -588,6 +692,8 @@ function* applyPersonalityDrift(agentId: string, proposal: PersonalityProposal, 
     traits, preset: current.preset, dialect: current.dialect, locked: false,
     lockedTraits: current.lockedTraits, source: 'evolution', basedOnVersion: proposal.baseVersion || null,
     note: `approved proposal ${proposal.id}`,
+    // T7: a text suggestion brings its text; a trait drift keeps the current one.
+    ...(proposal.proposedTextHash ? { textHash: proposal.proposedTextHash } : {}),
   });
 }
 
@@ -659,6 +765,8 @@ export function pendingProposalFrom(agentId: string, source: ProposalSource): Pr
 
 /** Write the readable copy of the current version into PERSONALITY.md. */
 export async function exportPersonalityFile(p: PersonalityVersion): Promise<void> {
+  // STORE-MAP-01 P4 (T7): the file is a view of the whole record (text + settings), written by one writer.
+  if (storeP4Enabled()) return (await import('./personality-record.js')).writePersonalityView(p.agentId);
   const existing = await readPersonality(p.agentId);
   await writePersonality(p.agentId, upsertPersonalityExport(existing, renderPersonalityExport(p)));
 }

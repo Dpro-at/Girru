@@ -30,7 +30,7 @@ const db = getDatabase();
 await db.initialize();
 db.prepare(`INSERT INTO users (id, email, username, password_hash, role, status, email_verified) VALUES ('cc-owner', 'cc@example.test', 'cc', 'x', 'owner', 'active', 1)`).run();
 
-const { makeCallTool, hangupCallTool } = await import(join(backendDir, 'extensions/call-center/src/tools.js'));
+const { makeCallTool, hangupCallTool } = await import(join(backendDir, 'test/fixtures/legacy-apps/extensions/call-center/src/tools.js'));
 const { verifyToken } = await import(join(backendDir, 'src/auth/jwt.ts'));
 
 test.after(() => {

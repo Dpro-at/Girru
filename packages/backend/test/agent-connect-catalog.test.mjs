@@ -1,3 +1,4 @@
+import './fixtures/channel-library.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Fastify from 'fastify';
@@ -5,7 +6,7 @@ import Database from 'better-sqlite3';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import extension from '../extensions/agent-connect/index.js';
+import extension from './fixtures/agent-connect-legacy/index.js';
 
 test('expanded host protects all catalog routes, hides provider settings and preserves blank credential updates', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'agent-connect-host-'));

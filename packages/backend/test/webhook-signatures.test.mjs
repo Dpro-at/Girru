@@ -33,6 +33,9 @@ const { initializeWebhooks } = await import(join(backendDir, 'src/webhooks/index
 const { twilioSignature, verifyWebhookSignature, webhookSignature } = await import(join(backendDir, 'src/webhooks/verify.ts'));
 const { manager } = await initializeWebhooks();
 const app = await buildServer({ logger: false });
+// Run the archived telephony plugin explicitly; production no longer ships it.
+const {registerTelephonyRoutes}=await import(join(backendDir,'test/fixtures/legacy-apps/src/api/routes/telephony.ts'));
+await app.register(registerTelephonyRoutes);
 await app.ready();
 console.log = quiet.log; console.info = quiet.info; console.warn = quiet.warn;
 

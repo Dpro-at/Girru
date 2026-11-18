@@ -177,6 +177,15 @@ pnpm type-check
 
 ---
 
+### Data and privacy docs
+
+If your change adds a store, a copy of existing data, a new kind of data, or anything that leaves the computer, update the [storage map](docs/architecture/storage-map.md) in the same pull request. It is also the draft of the privacy page, so it must stay true.
+
+- Mark each row as built today, built behind a switch (name the `GIRRU_STORE_…` switch), or planned. Never describe planned work as built.
+- Quote only numbers you measured, and say where and how they were measured.
+- A new memory switch goes into the switch table in the storage map and the switch table in [docs/UPGRADING.md](docs/UPGRADING.md), together with what start-up does with existing data.
+- Public docs are in English only and name no other products as competitors.
+
 ## Extension Development
 
 **Create a new extension:**

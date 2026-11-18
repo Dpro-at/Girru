@@ -2,8 +2,6 @@
 //  - approvals carry an absolute `expiresAt`; approval, task-run, memory
 //    proposal, personality-version and small-agent timestamps are ISO-8601
 //    UTC with `Z` (DB format unchanged);
-//  - new public rooms are private by default; `GET /api/public-chat/policy`
-//    exposes publicRooms.allowAnonymous read-only to signed-in users;
 //  - optimistic concurrency: `version` + ETag on agents and tool grants,
 //    `expectedVersion` / If-Match -> 409 on mismatch; partial agent PUT;
 //  - chat: every SSE frame and JSON body carries runId + messageId; a
@@ -167,34 +165,6 @@ test('personality versions return ISO UTC createdAt', async () => {
 
 // --- public rooms ------------------------------------------------------------
 
-test('new public-chat rooms are private by default; explicit is_public still works', async () => {
-  const a = await inject({ method: 'POST', url: '/api/public-chat/rooms', headers: bearer('c-owner'), payload: { name: 'Default room' } });
-  assert.equal(a.statusCode, 200, a.body);
-  assert.equal(a.json().room.is_public, 0);
-  const b = await inject({ method: 'POST', url: '/api/public-chat/rooms', headers: bearer('c-owner'), payload: { name: 'Open room', is_public: true } });
-  assert.equal(b.json().room.is_public, 1);
-});
-
-test('GET /api/public-chat/policy: read-only allowAnonymous for signed-in users, owner-only change', async () => {
-  assert.equal((await inject({ method: 'GET', url: '/api/public-chat/policy' })).statusCode, 401);
-  for (const who of ['c-owner', 'c-member', 'c-guest']) {
-    const res = await inject({ method: 'GET', url: '/api/public-chat/policy', headers: bearer(who) });
-    assert.equal(res.statusCode, 200, `${who}: ${res.body}`);
-    assert.deepEqual(res.json(), { publicRooms: { allowAnonymous: false, newRoomsPublicByDefault: false } });
-  }
-  assert.equal((await inject({ method: 'PUT', url: '/api/settings', headers: bearer('c-member'), payload: { publicRooms: { allowAnonymous: true } } })).statusCode, 403);
-  const on = await inject({ method: 'PUT', url: '/api/settings', headers: bearer('c-owner'), payload: { publicRooms: { allowAnonymous: true } } });
-  assert.equal(on.statusCode, 200, on.body);
-  try {
-    const res = await inject({ method: 'GET', url: '/api/public-chat/policy', headers: bearer('c-member') });
-    assert.equal(res.json().publicRooms.allowAnonymous, true);
-  } finally {
-    await inject({ method: 'PUT', url: '/api/settings', headers: bearer('c-owner'), payload: { publicRooms: { allowAnonymous: false } } });
-  }
-});
-
-// --- optimistic concurrency ---------------------------------------------------
-
 test('agents: version + ETag; partial PUT {name}; stale expectedVersion / If-Match -> 409', async () => {
   const created = (await inject({ method: 'POST', url: '/api/agents', headers: bearer('c-owner'), payload: { name: 'Version One', description: 'first' } })).json().agent;
   assert.equal(created.version, 1);
@@ -338,4 +308,52 @@ test('idempotency state: a key still running answers in_progress; entries expire
   assert.equal(idem.beginChatTurn('u2', 'key-12345678', fp).kind, 'new', 'keys are per user');
   assert.equal(idem.beginChatTurn('u1', null, fp).kind, 'new', 'no key -> always new');
   assert.equal(idem.IDEMPOTENCY_TTL_MS, 600_000);
+});
+
+test('model selection intent resolves from backend catalogue after actor/version gates; legacy updates remain compatible', async () => {
+  const fetchBefore = globalThis.fetch, flag = process.env.DPRO_SUBSCRIPTION_CHAT;
+  const { clearLocalModelCache } = await import('../src/llm/local-models.ts');
+  process.env.DPRO_SUBSCRIPTION_CHAT = '0';
+  let probes = 0;
+  globalThis.fetch = async url => {
+    probes++;
+    const path = new URL(String(url)).pathname;
+    if (path === '/api/tags') return Response.json({ models: [{ name: 'catalogue-fixture:latest', size: 1000, digest: 'fixture' }] });
+    if (path === '/api/show') return Response.json({ capabilities: ['completion', 'thinking'] });
+    if (path.endsWith('/models')) return Response.json({ data: [] });
+    throw Error('unexpected fixture network');
+  };
+  clearLocalModelCache();
+  try {
+    const created = (await inject({ method: 'POST', url: '/api/agents', headers: bearer('c-owner'), payload: { name: 'Catalogue fixture' } })).json().agent;
+    const update = (payload, user = 'c-owner') => inject({ method: 'PUT', url: `/api/agents/${created.id}`, headers: bearer(user), payload });
+    probes = 0;
+    assert.equal((await update({ expectedVersion: 1, modelSelection: 'catalogue-fixture:latest' }, 'c-member')).statusCode, 403);
+    assert.equal(probes, 0);
+    assert.equal((await update({ expectedVersion: 999, modelSelection: 'catalogue-fixture:latest' })).statusCode, 409);
+    assert.equal(probes, 0);
+    assert.equal((await update({ modelSelection: 'catalogue-fixture:latest' })).statusCode, 400);
+    assert.equal(probes, 0);
+    assert.equal((await update({ expectedVersion: 1, modelSelection: 'catalogue-fixture:latest', provider: 'claude' })).statusCode, 400);
+    assert.equal(probes, 0);
+    const selected = await update({ expectedVersion: 1, modelSelection: 'catalogue-fixture:latest' });
+    assert.equal(selected.statusCode, 200, selected.body);
+    assert.equal(selected.json().agent.model, 'catalogue-fixture:latest');
+    assert.equal(selected.json().agent.provider, 'ollama');
+    const invalid = await update({ expectedVersion: 2, modelSelection: 'claude-missing-fixture' });
+    assert.equal(invalid.statusCode, 400);
+    assert.equal(invalid.json().code, 'invalid_model');
+    const legacy = await update({ expectedVersion: 2, model: 'legacy-offline-fixture', provider: 'ollama' });
+    assert.equal(legacy.statusCode, 200, legacy.body);
+    assert.equal(legacy.json().agent.model, 'legacy-offline-fixture');
+  } finally {
+    globalThis.fetch = fetchBefore; clearLocalModelCache();
+    if (flag === undefined) delete process.env.DPRO_SUBSCRIPTION_CHAT; else process.env.DPRO_SUBSCRIPTION_CHAT = flag;
+  }
+});
+
+test('canonical model descriptors refuse absent, ambiguous, unavailable and unsupported sources', async () => {
+  const { canonicalModelSelection } = await import('../src/services/model-catalogue.ts');
+  for (const provider of ['local', 'ollama', 'claude', 'lmstudio', 'subscription']) { const id = provider === 'lmstudio' ? 'lmstudio:fixture' : provider === 'subscription' ? 'subscription:codex' : 'fixture'; assert.equal(canonicalModelSelection(id, [{ id, provider }]).provider, provider === 'local' ? 'ollama' : provider); }
+  for (const models of [[{ id: 'fixture', provider: 'lmstudio' }], [{ id: 'fixture', provider: 'subscription' }], [], [{ id: 'fixture', provider: 'local', available: false }], [{ id: 'fixture', provider: 'openai' }], [{ id: 'fixture', provider: 'local' }, { id: 'fixture', provider: 'claude' }]]) assert.throws(() => canonicalModelSelection('fixture', models), /invalid_model/);
 });

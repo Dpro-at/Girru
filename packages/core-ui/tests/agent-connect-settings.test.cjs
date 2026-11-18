@@ -23,3 +23,13 @@ test('activation accepts only an explicit boolean and projects safe runtime stat
  const channel={...channels.find(c=>c.id==='slack'),state:'connected',enabled:true};
  const result=channelResponse(route,200,{saved:true,channel});assert.equal(result.channel.state,'connected');assert.ok(!JSON.stringify(result).includes('must-never-return'));
 });
+
+test('optional app readiness is projected without paths or provider fields and remains backward compatible',()=>{
+ const route='/api/agent-connect/catalog';
+ for(const app of [{installed:false,ready:false},{installed:true,ready:false},{installed:true,ready:true}]){
+  const result=channelResponse(route,200,{channels,configurable:app.ready,app:{...app,path:'PRIVATE-PATH',token:'PRIVATE-TOKEN'}});
+  assert.deepEqual(result.app,app);assert.ok(!JSON.stringify(result).includes('PRIVATE-'));assert.deepEqual(channelResponse(route,200,result),result);
+ }
+ assert.equal(channelResponse(route,200,{channels,configurable:true}).app,undefined);
+ assert.throws(()=>channelResponse(route,200,{channels,app:{installed:'yes',ready:true}}));
+});

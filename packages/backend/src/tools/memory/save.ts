@@ -5,6 +5,9 @@
  * Information persists across conversations and can be recalled later
  */
 
+import { recordHealthEvent } from '../../memory/health.js';
+import { hideKeysInText, recordHiddenKeys } from '../../memory/hidden-keys.js';
+import { drawerId } from '../../memory/drawers.js';
 import type { Tool, ToolResult } from '../types.js';
 import { SAVE_CRITERIA, storeP2Enabled } from '../../services/agent-context/switch.js';
 import type { MemoryType } from '../../memory/types.js';
@@ -175,8 +178,11 @@ export const memorySaveTool: Tool = {
       const importance = Math.max(1, Math.min(10, params.importance || 5));
       // CHAT-BUILD-01 (M1): high importance would put the memory in every reply's prompt: the owner decides it.
       const selfImportant = importance > AGENT_SELF_IMPORTANCE;
-      // CHAT-BUILD-01 (M2): secrets in what the agent saves are removed before the memory is stored.
-      const content = redactImportText(String(params.content ?? '')).text;
+      // CHAT-BUILD-01 (M2) + MEM-READ-01 MR2: keys in what the agent saves are hidden (key store + lock chip)
+      // before the memory is stored; if the key store fails, they are removed.
+      const raw = String(params.content ?? '');
+      const hidden = toolMemoryUser(context) ? await hideKeysInText(toolMemoryUser(context)!, raw, drawerId(drawer)).catch(() => null) : null;
+      const content = redactImportText(hidden?.text ?? raw).text;
       const metadata = Object.fromEntries(Object.entries(params.metadata && typeof params.metadata === 'object' && !Array.isArray(params.metadata) ? params.metadata : {}).filter(([k]) => !RESERVED_METADATA.has(k)));
       const type = params.type || 'conversation';
 
@@ -195,6 +201,7 @@ export const memorySaveTool: Tool = {
         ...(chat || boardTopic || selfImportant ? { review: true, ...(selfImportant && !chat && !boardTopic ? { reviewReason: 'high-importance' as const } : {}) } : {}),
       });
       const memory = outcome.saved[0];
+      if (hidden?.hidden.length) await recordHiddenKeys(toolMemoryUser(context)!, memory?.id ?? null, drawerId(drawer), hidden.hidden).catch(() => undefined);
       const proposal = outcome.proposed[0];
       const updated = outcome.updated[0];
 
@@ -268,6 +275,8 @@ export const memorySaveTool: Tool = {
         },
       };
     } catch (error: any) {
+      // STORE-MAP-01 P9 (FAIL6): a save that did not happen is counted for the local health view.
+      if (!/owner approval|drawer|invalid|required|too long|secret/i.test(String(error?.message))) void recordHealthEvent(context?.userId, 'save_failed', context?.agentId ?? null);
       return {
         content: [
           {

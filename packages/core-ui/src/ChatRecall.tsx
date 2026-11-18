@@ -2,18 +2,22 @@
 // a reply with what it used, in the order it was loaded and why (Correct →
 // Needs you, Move…, Move to Trash with Undo), the drawers open and not loaded; the Details cards
 // "Where we left off", how the context was built (summaries) and speed.
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { ChatRecallController } from './chat-recall';
 import { ago, drawerName, oneLine } from './memory-store';
 import { SpeedCard } from './MemoryHealth';
 import { UiIcon } from './ui-icons';
+import { IconButton } from './desktop-ui';
+import { citeLabel } from './doc-index';
+import { canRevealFile, codeOffered, finderWord, openInCode, revealFile } from './code-open';
 import type { RecallItem, RecallTrace } from './memory-recall-contract.js';
 
-const WHY: Record<string, string> = { pinned: 'Pinned', topic: 'Topic', graph: 'Map', meaning: 'Meaning', keyword: 'Words', handoff: 'Handoff' };
+const WHY: Record<string, string> = { pinned: 'Pinned', topic: 'Topic', graph: 'Map', meaning: 'Meaning', keyword: 'Words', handoff: 'Handoff', document: 'File' };
 const scopeWord = (d: string | null) => (!d || d === 'company' ? 'Company' : d.startsWith('department:') ? `Department · ${d.slice(11)}` : drawerName(d));
 /** Where a used item came from: a pinned scope fact, a handoff, or a memory drawer (with its score for a search hit). */
 function whereOf(i: RecallItem): string {
   if (i.kind === 'handoff') return 'Handoff · this chat';
+  if (i.kind === 'document') return `${i.cite ? citeLabel(i.cite, false) : 'A document'}${i.state === 'changed' ? ' · the file changed since' : ''}`;
   if (i.kind === 'fact') return `${scopeWord(i.drawer)} · pinned fact`;
   if (i.state === 'forgotten' || i.state === 'deleted') return i.drawer ? `was in ${drawerName(i.drawer)}` : 'gone';
   const where = i.drawer ? drawerName(i.drawer) : 'Memory';
@@ -30,7 +34,9 @@ export function RecallChip({ c, turn }: { c: ChatRecallController; turn: { key: 
   if (!t || (t.items.length === 0 && !t.notLoaded?.drawers.length && !t.context.drawers?.noAccess.length)) return null;
   const open = s.open === turn.key;
   // Board M28 H1: one quiet chip; it opens what the reply used.
-  return <button type="button" className="recall-chip" aria-expanded={open} title="What this reply used" onClick={() => c.toggle(turn.key)}><UiIcon name="layers" size={12}/>Used {t.items.length} {t.items.length === 1 ? 'memory' : 'memories'}<span className="recall-chevron" data-open={open || undefined}><UiIcon name="chevron" size={10}/></span></button>;
+  const docs = t.items.filter(i => i.kind === 'document').length, mems = t.items.length - docs;
+  const words = [mems || !docs ? `${mems} ${mems === 1 ? 'memory' : 'memories'}` : '', docs ? `${docs} ${docs === 1 ? 'document' : 'documents'}` : ''].filter(Boolean).join(' · ');
+  return <button type="button" className="recall-chip" aria-expanded={open} title="What this reply used" onClick={() => c.toggle(turn.key)}><UiIcon name="layers" size={12}/>Used {words}<span className="recall-chevron" data-open={open || undefined}><UiIcon name="chevron" size={10}/></span></button>;
 }
 
 /** "What this reply used" (boards M15, M28 H1): why · what · where, with Correct, Move… and Move to Trash (undo) as icons. */
@@ -57,6 +63,7 @@ export function RecallPanel({ c, turnKey, onWrongPlace }: { c: ChatRecallControl
             <button type="button" className="recall-icon" aria-label="Correct" title="Correct (the fix waits in Needs you)" onClick={() => c.startCorrect(turnKey, i.id, i.preview ?? '')}><UiIcon name="pencil" size={13}/></button>
             {onWrongPlace && i.drawer && <button type="button" className="recall-icon" aria-label="Move…" title="Wrong place: move it" onClick={() => onWrongPlace({ id: i.id, text: i.preview ?? '', drawerId: i.nowIn ?? i.drawer! })}><UiIcon name="move" size={13}/></button>}
             <button type="button" className="recall-icon" aria-label="Move to Trash" title="Move to Trash (undo)" disabled={s.busy} onClick={() => void c.trash(turnKey, i.id)}><UiIcon name="trash" size={13}/></button></>}
+          {i.kind === 'document' && i.cite?.path && <DocActions c={c} cite={i.cite}/>}
           {i.kind === 'memory' && i.state === 'deleted' && s.trashed?.key === turnKey && s.trashed.memoryId === i.id && <button type="button" className="link-button" disabled={s.busy} onClick={() => void c.untrash()}>Undo</button>}
         </span>
       </div>)}
@@ -134,3 +141,16 @@ export function SpeedDetails({ c }: { c: ChatRecallController }) {
 }
 const noop = () => () => {};
 const none = () => undefined;
+
+/** KNOW-INDEX-01: Open (a text file, in Code) and Show in Finder for a cited file; a PDF only shows in Finder. */
+function DocActions({ c, cite }: { c: ChatRecallController; cite: NonNullable<RecallItem['cite']> }) {
+  const [note, setNote] = useState('');
+  const path = cite.path!;
+  const pdf = /\.pdf$/i.test(path);
+  const say = (r: string) => setNote(r === 'outside' || r === 'not_allowed' ? 'This file can’t be opened from here.' : r === 'not_found' ? 'The file is no longer there.' : r === 'failed' || r === 'no_code' ? 'It could not be opened.' : '');
+  return <>
+    {!pdf && codeOffered() && <IconButton icon="eye" label="Open the file" onClick={() => void openInCode(c.requester, path, null, { readOnly: true }).then(say)}/>}
+    {canRevealFile() && <IconButton icon="folder" label={`Show in ${finderWord()}`} onClick={() => void revealFile(c.requester, path).then(say)}/>}
+    {note && <span className="fine-print" role="status">{note}</span>}
+  </>;
+}

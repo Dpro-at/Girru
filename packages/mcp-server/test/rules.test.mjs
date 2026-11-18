@@ -39,6 +39,6 @@ test('workspace_rules: suggest waits for the owner; every change and every decis
   const r=await callTool('workspace_rules',bad,{backend});assert.equal(r.isError,true,JSON.stringify(bad));
  }
  const def=TOOL_DEFINITIONS.find(t=>t.name==='workspace_rules');
- assert.deepEqual(def.inputSchema.properties.operation.enum,['list','effective','versions','files','suggest']);
+ assert.deepEqual(def.inputSchema.properties.operation.enum,['list','read','conflicts','effective','versions','files','suggest']);
  assert.match(def.description,/stay with the owner in the app/);
 });

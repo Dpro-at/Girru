@@ -8,10 +8,12 @@ import type { Requester } from './memory-store';
 import { queryString } from './memory-pages-contract.js';
 import type { CodingHandoff, Handoff, HandoffKind } from './memory-pages-contract.js';
 import { PROJECTS_PATH } from './conversation-contract.js';
+import { handoffPath } from './task-links-contract.js';
 
 export type HandoffFilter = 'all' | HandoffKind | 'coding';
 export type NoteRef = { kind: HandoffKind; scopeId: string; agentId: string } | { coding: string };
-export type HandoffDraft = { done: string; left: string; next: string; questions: string };
+/** STORE-MAP-01 P8: blockers join the draft only while the backend sends them (switch on); they are edited in place, not as a version. */
+export type HandoffDraft = { done: string; left: string; next: string; questions: string; blockers?: string };
 export type HandoffsState = Readonly<{
   phase: 'idle' | 'loading' | 'ready' | 'error'; notice?: string; busy: boolean;
   agent: string; project: string; kind: HandoffFilter;
@@ -21,7 +23,8 @@ export type HandoffsState = Readonly<{
 }>;
 
 const lines = (x: string) => x.split('\n').map(l => l.trim()).filter(Boolean).slice(0, 8).map(l => l.slice(0, 300));
-const toDraft = (h: Pick<Handoff, 'done' | 'left' | 'next' | 'questions'> | null): HandoffDraft => ({ done: (h?.done ?? []).join('\n'), left: (h?.left ?? []).join('\n'), next: (h?.next ?? []).join('\n'), questions: (h?.questions ?? []).join('\n') });
+const toDraft = (h: Pick<Handoff, 'done' | 'left' | 'next' | 'questions' | 'blockers'> | null): HandoffDraft => ({ done: (h?.done ?? []).join('\n'), left: (h?.left ?? []).join('\n'), next: (h?.next ?? []).join('\n'), questions: (h?.questions ?? []).join('\n'), ...(h?.blockers ? { blockers: h.blockers.join('\n') } : {}) });
+const TEXT_KEYS = ['done', 'left', 'next', 'questions'] as const;
 
 export class MemoryHandoffsController extends Store<HandoffsState> {
   #t = 0;
@@ -88,24 +91,36 @@ export class MemoryHandoffsController extends Store<HandoffsState> {
   }
 
   edit(p: Partial<HandoffDraft>) { const d = this.getSnapshot().draft; if (d) this.publish({ draft: { ...d, ...p }, saved: undefined }); }
-  changed(): boolean { const s = this.getSnapshot(); if (!s.draft) return false; const c = toDraft(s.current); return (Object.keys(c) as (keyof HandoffDraft)[]).some(k => lines(c[k]).join('\n') !== lines(s.draft![k]).join('\n')); }
+  changed(): boolean { const s = this.getSnapshot(); if (!s.draft) return false; const c = toDraft(s.current); return (Object.keys(c) as (keyof HandoffDraft)[]).some(k => lines(c[k] ?? '').join('\n') !== lines(s.draft![k] ?? '').join('\n')); }
+  /** True when Done / Left / Next / Questions changed (a new version); blockers alone are edited in place. */
+  textChanged(): boolean { const s = this.getSnapshot(); if (!s.draft) return false; const c = toDraft(s.current); return TEXT_KEYS.some(k => lines(c[k]).join('\n') !== lines(s.draft![k]).join('\n')); }
   discard() { this.publish({ draft: toDraft(this.getSnapshot().current), saved: undefined, notice: undefined }); }
   copyIntoEditor(version: number) { const h = this.getSnapshot().history.find(x => x.version === version); if (h) this.publish({ draft: toDraft(h), saved: undefined }); }
 
-  /** Saves the editor as the next version; the agent's next session starts from it. Keys and passwords are removed by the server. */
+  /** Saves the editor as the next version; the agent's next session starts from it. Keys and passwords are removed by the server.
+   * P8: changed blockers are written in place on the (new) newest note. */
   async save() {
     const s = this.getSnapshot();
     const o = s.open; const d = s.draft;
     if (!o || 'coding' in o || !d) return;
+    const blockersChanged = d.blockers !== undefined && lines(toDraft(s.current).blockers ?? '').join('\n') !== lines(d.blockers).join('\n');
     this.publish({ busy: true, notice: undefined, saved: undefined });
     try {
-      const r = await this.req('PUT', `/api/handoffs/${o.kind}/${encodeURIComponent(o.scopeId)}`, { agentId: o.agentId, done: lines(d.done), left: lines(d.left), next: lines(d.next), questions: lines(d.questions) });
-      if (r.status !== 200) { this.publish({ busy: false, notice: codeOf(r) === 'invalid_handoff' ? 'Keep each item one short line (at most 8 per list), and write at least one.' : codeOf(r) === 'not_found' ? 'This chat or task no longer exists.' : 'The note was not saved.' }); return; }
-      const h = (r.body as { handoff: Handoff }).handoff;
-      this.publish({ busy: false, saved: `Saved as version ${h.version}.` });
+      let h = s.current;
+      if (this.textChanged() || !h) {
+        const r = await this.req('PUT', `/api/handoffs/${o.kind}/${encodeURIComponent(o.scopeId)}`, { agentId: o.agentId, done: lines(d.done), left: lines(d.left), next: lines(d.next), questions: lines(d.questions) });
+        if (r.status !== 200) { this.publish({ busy: false, notice: codeOf(r) === 'invalid_handoff' ? 'Keep each item one short line (at most 8 per list), and write at least one.' : codeOf(r) === 'not_found' ? 'This chat or task no longer exists.' : 'The note was not saved.' }); return; }
+        h = (r.body as { handoff: Handoff }).handoff;
+      }
+      if (blockersChanged && h) {
+        const r = await this.req('PATCH', handoffPath(h.id), { blockers: lines(d.blockers!) });
+        if (r.status !== 200) { this.publish({ busy: false, notice: r.status === 404 ? 'Editing blockers is not available yet.' : 'The blockers were not saved.' }); return; }
+      }
+      const said = this.textChanged() || !s.current ? `Saved as version ${h!.version}.` : 'Blockers saved.';
+      this.publish({ busy: false, saved: said });
       await this.load();
       if (this.isOpen(o)) await this.openNote({ ref: o });
-      this.publish({ saved: `Saved as version ${h.version}.` });
+      this.publish({ saved: said });
     } catch { this.publish({ busy: false, notice: 'The note was not saved (no connection).' }); }
   }
 }

@@ -15,7 +15,10 @@ import { nowText } from '../../db/pg/dialect.js';
 
 export const CAPABILITY_HEADER = 'x-girru-capability';
 export const CAPABILITY_ENV = 'GIRRU_SESSION_CAPABILITY';
-export const CAPABILITY_SCOPES = ['brief:read', 'memory:read', 'memory:propose', 'handoff:write'] as const;
+export const CAPABILITY_SCOPES = ['brief:read', 'memory:read', 'memory:propose', 'handoff:write', 'company:read'] as const;
+/** What a session Girru starts for a coding app may do (P6); `company:read` only where the owner allowed it. */
+export const LAUNCH_SCOPES: readonly CapabilityScope[] = ['brief:read', 'memory:read', 'memory:propose', 'handoff:write'];
+export const LAUNCH_TTL_MS = 4 * 60 * 60 * 1000;
 export type CapabilityScope = (typeof CAPABILITY_SCOPES)[number];
 
 /** The scope each dpro-memory tool needs. */
@@ -27,6 +30,11 @@ export const TOOL_SCOPE: Record<string, CapabilityScope> = {
   memory_search: 'memory:read',
   memory_propose: 'memory:propose',
   handoff_write: 'handoff:write',
+  // STORE-MAP-01 P6: the one memory contract (AG2); writes through a coding app are reviewed, so save and supersede need propose.
+  memory_recall: 'memory:read',
+  memory_save: 'memory:propose',
+  memory_supersede: 'memory:propose',
+  memory_handoff: 'handoff:write',
 };
 
 export const DEFAULT_TTL_MS = 8 * 60 * 60 * 1000;
@@ -46,6 +54,8 @@ export interface Capability {
   scopes: CapabilityScope[];
   client: string | null;
   expiresAt: string;
+  /** P6 (AG5): the Girru agent this session works for, or null. */
+  agentId?: string | null;
 }
 
 const hashOf = (token: string): string => createHash('sha256').update(token).digest('hex');
@@ -58,6 +68,7 @@ export interface IssueInput {
   scopes: readonly string[];
   client?: string | null;
   ttlMs?: number;
+  agentId?: string | null;
 }
 
 /** Issue a capability. The raw token is returned once and never stored. */
@@ -76,6 +87,15 @@ export async function issueCapability(input: IssueInput): Promise<{ token: strin
     projectId: input.projectId, scopes: scopes as CapabilityScope[], client: input.client ?? null,
     expiresAt: new Date(Date.now() + ttl).toISOString(),
   };
+  if (input.agentId) {
+    const agent = await q.one('SELECT id FROM agents_config WHERE id = ?', input.agentId);
+    if (!agent) throw new CapabilityError('Unknown agent', 404, 'unknown_agent');
+    capability.agentId = input.agentId;
+    await q.run(`INSERT INTO session_capabilities (id, token_hash, owner_id, actor_id, actor_role, project_id, scopes, client, expires_at, agent_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, capability.id, hashOf(token), capability.ownerId, capability.actorId, capability.actorRole,
+      capability.projectId, JSON.stringify(capability.scopes), capability.client, capability.expiresAt, input.agentId);
+    return { token, capability };
+  }
   await q.run(`INSERT INTO session_capabilities (id, token_hash, owner_id, actor_id, actor_role, project_id, scopes, client, expires_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, capability.id, hashOf(token), capability.ownerId, capability.actorId, capability.actorRole,
     capability.projectId, JSON.stringify(capability.scopes), capability.client, capability.expiresAt);
@@ -96,7 +116,8 @@ export async function verifyCapability(token: unknown): Promise<Capability> {
   if (Date.parse(r.expires_at) <= Date.now()) throw new CapabilityError('This session expired', 401, 'expired');
   let scopes: CapabilityScope[] = [];
   try { scopes = JSON.parse(r.scopes); } catch { /* none */ }
-  return { id: r.id, ownerId: r.owner_id, actorId: r.actor_id, actorRole: r.actor_role, projectId: r.project_id, scopes, client: r.client ?? null, expiresAt: r.expires_at };
+  return { id: r.id, ownerId: r.owner_id, actorId: r.actor_id, actorRole: r.actor_role, projectId: r.project_id, scopes, client: r.client ?? null, expiresAt: r.expires_at,
+    ...(r.agent_id ? { agentId: r.agent_id } : {}) };
 }
 
 /** Throws 403 unless the capability allows the tool. */
@@ -119,4 +140,15 @@ export async function listCapabilities(ownerId: string, projectId?: string): Pro
     return { id: r.id, ownerId: r.owner_id, actorId: r.actor_id, actorRole: r.actor_role, projectId: r.project_id, scopes,
       client: r.client ?? null, expiresAt: r.expires_at, revokedAt: r.revoked_at ?? null, createdAt: String(r.created_at) };
   });
+}
+
+/**
+ * STORE-MAP-01 P6: the trusted launcher's capability for one coding-app run
+ * in one of the owner's projects (the caller resolves the project from
+ * Girru's own records, never from the coding app). The company's pinned facts
+ * are added only where the owner allowed them.
+ */
+export async function launchCapability(ownerId: string, projectId: string, client: string | null, companyFacts: boolean, agentId: string | null = null): Promise<{ token: string; capability: Capability }> {
+  return issueCapability({ ownerId, actorId: ownerId, actorRole: 'owner', projectId, client, agentId,
+    scopes: companyFacts ? [...LAUNCH_SCOPES, 'company:read'] : LAUNCH_SCOPES, ttlMs: LAUNCH_TTL_MS });
 }

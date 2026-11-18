@@ -121,7 +121,8 @@ test('a folder that exists inside another repository\'s worktree folder keeps it
 });
 
 test('import: project facts from a worktree conversation go to the project drawer; one imported under its earlier id is skipped', async () => {
-  await createProject('rt-owner', { name: 'Shop', folder: shop });
+  const created = await createProject('rt-owner', { name: 'Shop', folder: shop });
+  const { projectKeyOf } = await loadFile(join(backendDir, 'src/memory/project-keys.ts')); // id while GIRRU_STORE_P3 is on
   const extract = async () => [{ title: 'Branch', content: 'The shop fix is on its own branch.', scope: 'project', evidence: 'Shop worktree: the fix branch' }];
   const already = by('Blog: posts');
   db.prepare("INSERT INTO local_agent_imports (user_id, session_id, source, batch_id, proposed, archive_name) VALUES ('rt-owner', ?, 'claude-code', NULL, 0, 'x.md')").run(already.legacyId);
@@ -130,7 +131,7 @@ test('import: project facts from a worktree conversation go to the project drawe
   assert.equal(job.status, 'done', job.notice);
   assert.match(job.notice, /1 already imported/);
   const drawers = db.prepare("SELECT drawer_kind, drawer_key FROM memory_file_proposals WHERE status = 'pending'").all().map((r) => `${r.drawer_kind}:${r.drawer_key}`);
-  assert.deepEqual(drawers, ['project:shop']);
+  assert.deepEqual(drawers, [`project:${projectKeyOf(created)}`]);
 });
 
 test('a folder no project claims keeps its project facts in a project drawer named after it, never in the owner drawer', async () => {

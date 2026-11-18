@@ -1,0 +1,24 @@
+require('./load.cjs');const test=require('node:test'),assert=require('node:assert/strict'),React=require('react'),{renderToStaticMarkup}=require('react-dom/server');
+const P=require('../src/ComputerPeople.tsx'),client={request:async()=>({status:200,body:{}})};
+test('CP17: the bridge allows only the people fields',async()=>{const C=await import('../src/computer-contract.js'),path='/api/computers/account/people';
+ assert.equal(C.allowedComputer('POST',path,{action:'find',query:'sara.dev'}),true);
+ assert.equal(C.allowedComputer('POST',path,{action:'accept',linkId:'x',code:'12345678',confirmed:true}),true);
+ assert.equal(C.allowedComputer('POST',path,{action:'me',token:'x'}),false);});
+test('CP17 A: your nickname and fixed ID with Copy and one Add button',()=>{const html=renderToStaticMarkup(React.createElement(P.YouOnGirru,{client,me:{publicId:'GR-7K2D-9QF4',nickname:'mohamed.alarade'},onAdd(){},onChanged(){}}));
+ assert.match(html,/You on Girru/);assert.match(html,/GR-7K2D-9QF4/);assert.match(html,/mohamed\.alarade/);assert.match(html,/Copy/);assert.match(html,/>Add</);assert.match(html,/Nobody is added without your OK/);});
+test('CP17 C: a request shows the code and Same code, add / Not now / Block',()=>{const html=renderToStaticMarkup(React.createElement(P.PeopleRequests,{client,onChanged(){},incoming:[{linkId:'l1',person:{publicId:'GR-4M8P-2XW1',nickname:'sara.dev'},expiresAt:0,code:'58210937',codeExpiresAt:0}]}));
+ assert.match(html,/sara\.dev wants to work with you/);assert.match(html,/5821 0937/);assert.match(html,/Same code, add/);assert.match(html,/Not now/);assert.match(html,/Block/);});
+test('CP17 D: a person page shows tasks, never their computers, and says only tasks are shared',()=>{const html=renderToStaticMarkup(React.createElement(P.PersonPage,{onOpenChat(){},tasks:[{id:'t1',direction:'out',linkId:'l1',person:{publicId:'GR-4M8P-2XW1',name:'GR-4M8P-2XW1'},text:'Pull main',state:'done',answer:'main at ca24980e',sessionId:null,createdAt:1},{id:'t2',direction:'in',linkId:'l1',person:{publicId:'GR-4M8P-2XW1',name:'GR-4M8P-2XW1'},text:'Check tests',state:'running',answer:'',sessionId:'s1',createdAt:2}],person:{linkId:'l1',linkedAt:1,person:{publicId:'GR-4M8P-2XW1',nickname:null},computers:[{publicKey:'k',presence:'online'}]}}));
+ assert.doesNotMatch(html,/Their computers/);assert.match(html,/Pull main/);assert.match(html,/main at ca24980e/);assert.match(html,/Running here · from GR-4M8P-2XW1/);assert.match(html,/Open its chat/);assert.match(html,/Only tasks are shared with GR-4M8P-2XW1/);});
+test('CP17: plain words for refusals',()=>{assert.match(P.peopleWords('account_people_code_changed'),/code changed/);assert.match(P.peopleWords('something_else'),/did not work/);});
+test('CP17 D: a task from a person waits in Needs you with Allow and Decline',()=>{const html=renderToStaticMarkup(React.createElement(P.IncomingPersonTasks,{client,onChanged(){},onOpenChat(){},tasks:[{id:'t3',direction:'in',linkId:'l1',person:{publicId:'GR-4M8P-2XW1',name:'sara.dev'},text:'Report the branch',state:'waiting',answer:'',sessionId:null,createdAt:3}]}));
+ assert.match(html,/sara\.dev asks: Report the branch/);assert.match(html,/>Allow</);assert.match(html,/>Decline</);assert.match(html,/Only its answer goes back/);});
+test('CP17 D: the send sheet says where it runs and that it waits for their OK',()=>{const html=renderToStaticMarkup(React.createElement(P.SendToPersonSheet,{client,onClose(){},onSent(){},person:{linkId:'l1',linkedAt:1,person:{publicId:'GR-4M8P-2XW1',nickname:'sara.dev'},computers:[]}}));
+ assert.match(html,/Send a task to sara\.dev/);assert.match(html,/not on right now/);assert.match(html,/waits for their OK/);});
+test('CP17: an unconfirmed computer says so on your card, with a code box when two-step is on',()=>{
+ const on=renderToStaticMarkup(React.createElement(P.YouOnGirru,{client,onAdd(){},onChanged(){},me:{publicId:'GR-7K2D-9QF4',nickname:null,confirmed:false,twoFactor:true}}));
+ assert.match(on,/Not confirmed for people yet/);assert.match(on,/Confirm…/);
+ const off=renderToStaticMarkup(React.createElement(P.YouOnGirru,{client,onAdd(){},onChanged(){},onSettings(){},me:{publicId:'GR-7K2D-9QF4',nickname:null,confirmed:false,twoFactor:false}}));
+ assert.match(off,/Turn on two-step sign-in…/);
+ const ok=renderToStaticMarkup(React.createElement(P.YouOnGirru,{client,onAdd(){},onChanged(){},me:{publicId:'GR-7K2D-9QF4',nickname:null,confirmed:true}}));
+ assert.doesNotMatch(ok,/Not confirmed/);});

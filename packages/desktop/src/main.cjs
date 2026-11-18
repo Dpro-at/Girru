@@ -11,11 +11,13 @@
  * - Quit (menu, Cmd/Ctrl+Q, last window closed) stops the backend first.
  */
 const electron = require('electron');
+let desktopDeviceCustody=null;
 const { app, BrowserWindow, Menu, ipcMain, session, shell, dialog } = electron;
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { createLocalRuntime, openLog } = require('./local-runtime.cjs');
+const { createLocalRuntime, restartLocalRuntime, openLog } = require('./local-runtime.cjs');
+const { startProblemOf, failedParams } = require('./start-problem.cjs');
 const { resolvePayload, backendArgs, checkPayload } = require('./payload.cjs');
 const { loadSettings, saveSettings, remoteOrigin } = require('./settings.cjs');
 const { installNabuEditor } = require('./nabu-editor.cjs');
@@ -50,8 +52,19 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 /** Data for "this computer": <userData>/data (DPRO_DESKTOP_DATA_DIR overrides, e.g. for tests). */
+/** A separate profile for trials and development: GIRRU_PROFILE_DIR (or --user-data-dir=) must be an absolute path; the installed app's own settings are then never opened. */
+{const arg=process.argv.find(a=>a.startsWith('--user-data-dir='));const profile=process.env.GIRRU_PROFILE_DIR||(arg?arg.slice('--user-data-dir='.length):'');if(profile){if(!path.isAbsolute(profile))throw Error('GIRRU_PROFILE_DIR must be an absolute path');require('node:fs').mkdirSync(profile,{recursive:true,mode:0o700});app.setPath('userData',profile);}}
 const dataDir = () => selectedData || (process.env.DPRO_DESKTOP_DATA_DIR ? path.resolve(process.env.DPRO_DESKTOP_DATA_DIR) : path.join(app.getPath('userData'), 'data'));
 const settingsDir = () => app.getPath('userData');
+/**
+ * Working folders of local (stdio) MCP servers, e.g. GenVR's worlds. The backend refuses a folder inside
+ * the data folder, and its default is inside it, so without this every local MCP server stayed "blocked".
+ * One folder per workspace, beside the data (never inside it).
+ */
+const mcpServersDir = () => path.join(settingsDir(), 'mcp-servers', path.basename(dataDir()));
+/** CODE-STORE-01: Girru's per-computer app folder; the Code app from the Girru Store is unpacked here. */
+const appRuntimesDir = () => process.env.GIRRU_APP_RUNTIMES_DIR ? path.resolve(process.env.GIRRU_APP_RUNTIMES_DIR) : path.join(settingsDir(), 'app-runtimes');
+const codeRuntime = () => require('./code-runtime.cjs').resolveCodeRuntime({ bundled: process.env.DPRO_NABU_ROOT || path.join(process.resourcesPath, 'nabu-runtime'), runtimesDir: appRuntimesDir() });
 
 function hardenSession() {
   require('./meeting-screen.cjs').installMeetingScreenCapture({ electron, session: session.defaultSession, getOrigin: () => appOrigin, getWindows: () => [mainWindow, ...chatWindows].filter(Boolean) });
@@ -77,14 +90,55 @@ function createMainWindow() {
 }
 
 // Every window shows only the app's own origin; other links open in the normal browser.
+// WIN-01: one bar on Mac and Windows. Girru's own top bar is the window's bar; the system's window
+// buttons sit inside it (Mac: the three dots on the left; Windows: on the right, in the bar's colours).
+const BAR_HEIGHT = 40;
+// The window buttons stop 1 px above the bar's bottom line, so the line runs under them too.
+const BUTTONS_HEIGHT = BAR_HEIGHT - 1;
+function windowFrame() {
+  if (process.platform === 'darwin') return { titleBarStyle: 'hidden', trafficLightPosition: { x: 14, y: 13 } };
+  // The taskbar shows Girru's icon also when run from source (a packaged app has it in the program).
+  if (process.platform === 'win32') return { titleBarStyle: 'hidden', titleBarOverlay: { color: '#0F1114', symbolColor: '#D9E0E6', height: BUTTONS_HEIGHT }, icon: path.join(__dirname, '..', 'build', 'icon.ico') };
+  return {};
+}
+
+// Windows has no menu row now: pressing and releasing Alt alone opens the same menu under the top-left corner.
+function altOpensMenu(win) {
+  if (process.platform !== 'win32') return;
+  let altAlone = false;
+  win.webContents.on('before-input-event', (_event, input) => {
+    if (input.type === 'keyDown') altAlone = input.key === 'Alt' && !input.control && !input.shift && !input.meta && !input.isAutoRepeat;
+    else if (input.type === 'keyUp' && input.key === 'Alt' && altAlone) { altAlone = false; Menu.getApplicationMenu()?.popup({ window: win, x: 8, y: BAR_HEIGHT }); }
+  });
+}
+
+// The ☰ button at the left of the bar (Windows) opens the same menu as Alt.
+ipcMain.handle('dpro:app-menu', (event, at) => {
+  if (process.platform !== 'win32' || event.senderFrame !== event.sender.mainFrame) return null;
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || win === connectWindow) return null;
+  const x = Number.isFinite(at?.x) ? Math.max(0, Math.min(4000, Math.round(at.x))) : 8, y = Number.isFinite(at?.y) ? Math.max(0, Math.min(4000, Math.round(at.y))) : BAR_HEIGHT;
+  Menu.getApplicationMenu()?.popup({ window: win, x, y });
+  return null;
+});
+const HEX = /^#[0-9a-f]{6}$/i;
+// The page tells the window its bar colours (light or dark), so the Windows buttons match the bar.
+ipcMain.on('dpro:window-bar', (event, value) => {
+  if (process.platform !== 'win32' || !value || typeof value !== 'object' || !HEX.test(value.color) || !HEX.test(value.symbol)) return;
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || event.senderFrame !== event.sender.mainFrame || win === connectWindow) return;
+  try { win.setTitleBarOverlay({ color: value.color, symbolColor: value.symbol, height: BUTTONS_HEIGHT }); } catch { /* an older system without the overlay */ }
+});
+
 function createAppWindow() {
   const area = electron.screen.getPrimaryDisplay().workAreaSize;
   const win = new BrowserWindow({
     width: Math.min(1280, area.width), height: Math.min(860, area.height), minWidth: Math.min(800, area.width), minHeight: Math.min(600, area.height),
-    title: 'Girru', show: false, backgroundColor: '#111111',
+    title: 'Girru', show: false, backgroundColor: '#111111', ...windowFrame(),
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, webviewTag: false, spellcheck: true, preload: path.join(__dirname, 'preload.cjs') },
   });
   win.once('ready-to-show', () => win.show());
+  altOpensMenu(win);
   // Links to other sites open in the normal browser; the window stays on the app.
   win.webContents.setWindowOpenHandler(({ url }) => { openExternal(url); return { action: 'deny' }; });
   win.webContents.on('will-navigate', (event, url) => {
@@ -130,6 +184,7 @@ function startupStatus(status) {
   mainWindow.webContents.send('dpro:startup-status', status);
 }
 
+let nativeControlEnrollment=null,nativeControlAuthority=null,nativeControlRoot=null,nativeControlLease=null;
 async function startLocal() {
   await showPage('starting.html', { status: 'Checking the installation files…' });
   try {
@@ -139,19 +194,30 @@ async function startLocal() {
     startupStatus('Preparing your workspace…');
     log = log || openLog(path.join(app.getPath('userData'), 'logs', 'backend.log'));
     const { createApplicationServer } = require(path.join(payload.coreUiDir, 'scripts', 'application-server.cjs'));
-    browserRuntime = browserRuntime || require('./browser-runtime.cjs').createBrowserRuntime({root:process.env.DPRO_BROWSER_ROOT || path.join(process.resourcesPath,'browser'),node:payload.node,profile:process.env.DPRO_BROWSER_PROFILE || path.join(settingsDir(),'browser')});
+    browserRuntime = browserRuntime || require('./browser-runtime.cjs').createBrowserRuntime({root:process.env.DPRO_BROWSER_ROOT,bundled:path.join(process.resourcesPath,'browser'),runtimesDir:appRuntimesDir(),node:payload.node,profile:process.env.DPRO_BROWSER_PROFILE || path.join(settingsDir(),'browser')});
+    desktopDeviceCustody=desktopDeviceCustody||require('./device-custody.cjs').createDeviceCustody({root:path.join(settingsDir(),'device-custody'),safeStorage:electron.safeStorage});
+    const deviceBroker=require('./device-broker.cjs').createDeviceBroker({selectInstalledClient:async clientId=>{const selected=await dialog.showOpenDialog(mainWindow,{title:'Configure Dpro Google sign-in',message:'Select the Dpro Desktop OAuth JSON. It stays in this computer’s protected vault.',properties:['openFile'],filters:[{name:'Google Desktop OAuth JSON',extensions:['json']}]});if(selected.canceled||selected.filePaths.length!==1)return null;return require('./google-client-config.cjs').readInstalledClient(selected.filePaths[0],clientId);},accountOrigin:process.env.GIRRU_ACCOUNT_ORIGIN??'https://relay.girru.net/identity/v1',custody:desktopDeviceCustody,profileDataRoot:dataDir(),managedWitnessRoot:path.join(settingsDir(),'device-witness-metadata'),confirmLeaseRecovery:async()=>{const r=await dialog.showMessageBox(mainWindow,{type:'warning',buttons:['Cancel','Review stopped process lease'],defaultId:0,cancelId:0,message:'Recover device custody only after the other Girru process has stopped.',detail:'The app will refuse a live or unknown process. This does not restore device membership or resume tasks.'});return r.response===1;},openExternal:url=>shell.openExternal(url)});
+    if(nativeControlAuthority&&nativeControlRoot!==dataDir()){nativeControlAuthority.close();nativeControlAuthority=null;nativeControlRoot=null;nativeControlLease=null;}
+    if(!nativeControlAuthority){nativeControlAuthority=require('./memory-native-control.cjs').createNativeControlAuthority({root:dataDir(),settingsDirectory:settingsDir(),protector:electron.safeStorage,enrollment:nativeControlEnrollment,platform:process.platform,encryptNewWorkspaces:process.env.GIRRU_MEMORY_ENCRYPTION==='on'});nativeControlRoot=dataDir();}
+    const nativeControl=nativeControlLease??await nativeControlAuthority.resolve();nativeControlLease=nativeControl;nativeControlEnrollment=null;
+    const memoryCatalogPermission=nativeControl.kind==='new-app-owned-control'?nativeControlAuthority.catalogPermission():null;
+    const memoryOwnerFactory=nativeControl.kind==='new-app-owned-control'?require('./memory-native-owner-runtime.cjs').createMemoryNativeOwnerRuntime({dialog,protector:electron.safeStorage,getWindow:()=>mainWindow,platform:process.platform,catalogPermission:memoryCatalogPermission,catalogDirectory:memoryCatalogPermission.catalogDirectory,catalogWitnessDirectory:memoryCatalogPermission.catalogWitnessDirectory,forbiddenRoots:[...new Set([dataDir(),...discovered.map(entry=>entry.dir).filter(value=>typeof value==='string'&&path.isAbsolute(value)),path.join(settingsDir(),'device-custody'),path.join(settingsDir(),'browser'),appRuntimesDir()])]}):undefined;
+    const controlLaunchId=require('node:crypto').randomBytes(32).toString('base64url');
     runtime = createLocalRuntime({
+      deviceCustody:deviceBroker,
+      memoryOwnerFactory,
+      memoryControlBootstrap:async()=>{if(nativeControl.kind!=='new-app-owned-control')return {control:null,selection:{selected:false,profileId:null,mode:'none'}};if(!nativeControl.isCurrent())throw new Error('memory_control_bootstrap_unavailable');const selection=await memoryOwnerFactory.selectionState(),control=await nativeControlAuthority.bootstrap({launchId:controlLaunchId});if(!nativeControl.isCurrent())throw new Error('memory_control_bootstrap_unavailable');return {control,selection};},
       node: payload.node,
       readyTimeoutMs: 30000,
       args: backendArgs(payload.backendDir),
       cwd: path.basename(dataDir()) === '.data' ? path.dirname(dataDir()) : dataDir(),
       dataDir: dataDir(),
-      extraEnv: { DPRO_BROWSER_CONNECTION_FILE:browserRuntime.connectionFile, AGENT_TERMINAL: 'true', DPRO_SUBSCRIPTION_CHAT: '1', ...(path.basename(dataDir()) === '.data' ? { AGENT_PLAYER_DATA_DIR: undefined } : {}) },
-      createBridge: ({ upstreamPort, launchToken }) => createApplicationServer({ packageRoot: payload.coreUiDir, channel: 'candidate', upstreamPort, launchToken, browserController:browserRuntime }),
+      extraEnv: { MCP_SERVERS_DIR: mcpServersDir(), DPRO_BROWSER_CONNECTION_FILE:browserRuntime.connectionFile, AGENT_TERMINAL: 'true', DPRO_SUBSCRIPTION_CHAT: '1', GIRRU_APP_RUNTIMES_DIR: appRuntimesDir(), GIRRU_CODE_RUNTIME_BUNDLED: codeRuntime()?.source === 'bundled' ? '1' : '0', ...(path.basename(dataDir()) === '.data' ? { AGENT_PLAYER_DATA_DIR: undefined } : {}) },
+      createBridge: ({ upstreamPort, launchToken }) => createApplicationServer({ packageRoot: payload.coreUiDir, genvrRuntimesDir:appRuntimesDir(), storeAppsDataDir:dataDir(), channel: 'candidate', upstreamPort, launchToken, browserController:browserRuntime }),
       onLog: line => log.write(line),
       onBackendExit: ({ code, signal }) => {
-        // BACKUP-01: the program stops with 75 to put a backup in place; start it again.
-        if (code === 75 && !quitting) { log.write('backend restarting (restore)'); runtime = null; void startLocal(); return; }
+        // Restore and Store runtime changes rebuild both the engine and its UI bridge.
+        if (code === 75 && !quitting) { const previous=runtime;runtime=null;log.write('local runtime restarting');void restartLocalRuntime(previous,startLocal,()=>quitting).catch(()=>{if(!quitting)void showPage('failed.html',{reason:'Girru could not restart safely.'});});return; }
         log.write(`backend stopped unexpectedly (${signal || code})`);
         if (!quitting && mainWindow) showPage('failed.html', { reason: 'The Girru engine stopped unexpectedly.' });
         runtime = null;
@@ -162,11 +228,15 @@ async function startLocal() {
     appOrigin = started.origin;
     startupStatus('Opening your workspace…');
     await mainWindow.loadURL(started.url);
+    updater?.startedFine(); // STORE-MAP-01 P3: this version works, the one it replaced can go
   } catch (error) {
     runtime = null;
     log?.write(`start failed: ${error.message}`);
     for (const line of error.logTail || []) log?.write(`  ${line}`);
-    await showPage('failed.html', { reason: error.message });
+    // STORE-MAP-01 P3: an update step that failed, or data from a newer Girru, gets its own page.
+    const problem = startProblemOf(error.logTail || []);
+    const earlier = problem?.kind === 'migration_failed' ? updater?.previous() : null;
+    await showPage('failed.html', problem ? { ...failedParams(problem), ...(earlier ? { previous: earlier.version } : {}) } : { reason: error.message });
   }
 }
 
@@ -195,7 +265,7 @@ async function applyMode() {
       await scanData();
       let decision = discovery.decide(discovered, readSelection());
       try { const saved = JSON.parse(fs.readFileSync(path.join(settingsDir(), 'workspace.json'), 'utf8')); if (saved.newWorkspace === true && saved.dir.startsWith(path.join(settingsDir(), 'workspaces') + path.sep) && discovered.find(r => r.dir === saved.dir)?.state === 'unconfigured') decision = { kind: 'existing', dir: saved.dir }; } catch { /* no confirmed new workspace */ }
-      if (decision.kind === 'new') selectedData = require('./workspace-selection.cjs').createWorkspace(settingsDir());
+      if (decision.kind === 'new') {const allocated=require('./memory-native-control.cjs').allocateNativeControlWorkspace(settingsDir());selectedData=allocated.root;nativeControlEnrollment=allocated.proof;}
       else if (decision.kind === 'existing') selectedData = decision.dir;
       else return showPage('welcome.html');
       if (!readSelection()) {
@@ -210,7 +280,7 @@ async function applyMode() {
 function readSelection() { return require('./workspace-selection.cjs').readSelection(settingsDir()); }
 async function scanData(extra) {
   const payload = resolvePayload({ packaged: app.isPackaged, resourcesPath: process.resourcesPath });
-  const dirs = discovery.candidates({ defaultDir: path.join(settingsDir(), 'data'), home: app.getPath('home'), cwd: process.cwd(), backendDir: payload.backendDir, savedDir: readSelection(), workspaceRoot: path.join(settingsDir(), 'workspaces'), explicitDir: process.env.DPRO_DESKTOP_DATA_DIR });
+  const dirs = discovery.candidates({ defaultDir: path.join(settingsDir(), 'data'), home: app.getPath('home'), cwd: process.cwd(), backendDir: payload.backendDir, savedDir: readSelection(), workspaceRoot: path.join(settingsDir(), 'workspaces'), explicitDir: process.env.DPRO_DESKTOP_DATA_DIR, isolated: !!process.env.GIRRU_PROFILE_DIR || process.argv.some(a => a.startsWith('--user-data-dir=')) });
   if (extra && !dirs.includes(extra)) dirs.push(extra);
   discovered = await discovery.discover(payload.node, payload.backendDir, dirs, extra ? null : readSelection());
   fs.writeFileSync(path.join(settingsDir(), 'workspace-discovery.json'), JSON.stringify(discovered), { mode: 0o600 });
@@ -295,6 +365,18 @@ ipcMain.handle('dpro:reveal-folder', async (event, folder) => {
   shell.showItemInFolder(path.join(folder, '.'));
   return true;
 });
+// CODE-OPEN-01: one file in Finder / Explorer. The page checked it with the backend (inside a project or the data
+// folder); here again: an absolute path to a regular file whose real path is the path itself (no links).
+ipcMain.handle('dpro:reveal-file', async (event, file) => {
+  const sender = BrowserWindow.fromWebContents(event.sender);
+  if (!appOrigin || !sender || (sender !== mainWindow && !chatWindows.has(sender)) || event.senderFrame !== sender.webContents.mainFrame) return false;
+  let origin = null;
+  try { origin = new URL(event.senderFrame.url).origin; } catch { /* invalid */ }
+  if (origin !== appOrigin || typeof file !== 'string' || file.length > 4096 || !path.isAbsolute(file) || /[\x00-\x1f]/.test(file)) return false;
+  try { if (fs.realpathSync.native(file) !== path.resolve(file) || !fs.lstatSync(file).isFile()) return false; } catch { return false; }
+  shell.showItemInFolder(file);
+  return true;
+});
 ipcMain.handle('dpro:find-data', async event => {
   if (!fromWelcome(event)) return { ok: false };
   const result = await dialog.showOpenDialog(mainWindow, { title: 'Choose the folder containing agent-player.db', properties: ['openDirectory', 'showHiddenFiles'] });
@@ -312,8 +394,7 @@ ipcMain.handle('dpro:select-data', async (event, dir) => {
 });
 ipcMain.handle('dpro:new-workspace', async (event, confirmed) => {
   if (!fromWelcome(event) || confirmed !== true) return { ok: false };
-  selectedData = path.join(settingsDir(), 'workspaces', require('node:crypto').randomUUID());
-  fs.mkdirSync(selectedData, { recursive: true, mode: 0o700 });
+  const allocated=require('./memory-native-control.cjs').allocateNativeControlWorkspace(settingsDir());selectedData=allocated.root;nativeControlEnrollment=allocated.proof;
   const file = path.join(settingsDir(), 'workspace.json');
   fs.writeFileSync(file, JSON.stringify({ dir: selectedData, newWorkspace: true }), { mode: 0o600 });
   await startLocal(); return { ok: true };
@@ -363,6 +444,26 @@ ipcMain.handle('dpro:retry', async event => {
   return { ok: true };
 });
 
+// STORE-MAP-01 P3 (FD4b): from the start page of a workspace a newer Girru wrote.
+ipcMain.handle('dpro:failed-update', async event => {
+  if (!fromFailed(event)) return { ok: false };
+  const view = updater ? await updater.check().catch(() => null) : null;
+  await shell.openExternal(view?.update?.page || 'https://github.com/Dpro-at/Girru/releases');
+  return { ok: true };
+});
+// STORE-MAP-01 P3 (FD4a): restore the backup from before the update and open the version that made it.
+ipcMain.handle('dpro:failed-restore', async event => {
+  if (!fromFailed(event) || !updater?.previous()) return { ok: false };
+  await showPage('starting.html', { status: 'Putting your data back…' });
+  try { await stopLocal(); updater.restorePrevious(dataDir()); return { ok: true }; }
+  catch (error) { log?.write(`restore failed: ${error.message}`); await showPage('failed.html', { reason: `The earlier version could not be opened: ${error.message}` }); return { ok: false }; }
+});
+ipcMain.handle('dpro:failed-workspace', async event => {
+  if (!fromFailed(event)) return { ok: false };
+  await chooseWorkspace();
+  return { ok: true };
+});
+
 ipcMain.handle('dpro:open-connect', event => {
   if (!(mainWindow && event.sender === mainWindow.webContents && !appOrigin)) return { ok: false };
   openConnectWindow();
@@ -374,11 +475,18 @@ function navigate(destination) {
 }
 ipcMain.handle('dpro:app-info', event => {
   if (!mainWindow || event.sender !== mainWindow.webContents || !appOrigin) return null;
-  return { version: app.getVersion(), connection: loadSettings(settingsDir()).mode };
+  return { version: app.getVersion(), connection: loadSettings(settingsDir()).mode, memoryEncrypted: nativeControlLease ? nativeControlLease.kind === 'new-app-owned-control' : null };
 });
 // MACAPP-01: updates of the installed app (Settings › About and updates). Only the main
 // window's own Girru page may ask; installing backs up first and replaces the app.
 let updater = null;
+let installerAfterQuit = null;
+// WIN-UPD-01: after Girru has closed, the checked installer runs silently into the same place and opens Girru again.
+app.on('will-quit', () => {
+  if (!installerAfterQuit || process.platform !== 'win32') return;
+  try { require('node:child_process').spawn(installerAfterQuit, ['/S', '--updated', '--force-run'], { detached: true, stdio: 'ignore', windowsHide: true }).unref(); }
+  catch (error) { log?.write(`The update installer did not start: ${error.message}`); }
+});
 let systemTray = null;
 const fromAppPage = event => !!mainWindow && !!appOrigin && event.sender === mainWindow.webContents && event.senderFrame === mainWindow.webContents.mainFrame;
 function startUpdater() {
@@ -387,6 +495,8 @@ function startUpdater() {
     currentVersion: app.getVersion(), settingsDir: settingsDir(),
     backUp: () => runtime ? runtime.backUp() : Promise.resolve({ ok: false, error: 'Girru is not running here' }),
     relaunch: () => { app.relaunch(); app.quit(); },
+    // WIN-UPD-01: Girru closes as usual (its engine stops, keys are put away), then the installer runs.
+    runInstaller: file => { installerAfterQuit = file; app.quit(); },
   });
   updater.cleanOld();
   updater.onChange(view => { if (mainWindow && appOrigin) mainWindow.webContents.send('dpro:app-update', view); });
@@ -399,7 +509,7 @@ ipcMain.handle('dpro:app-update-check', event => fromAppPage(event) && updater ?
 ipcMain.handle('dpro:app-update-install', async event => {
   if (!fromAppPage(event) || !updater || !updater.view().update) return null;
   const v = updater.view().update.version;
-  const answer = await dialog.showMessageBox(mainWindow, { type: 'question', message: `Back up and update to Girru ${v}?`, detail: 'Girru makes a backup of your data, puts the new version in place and starts again. Your saved workspace is kept; valid sign-in sessions are restored.', buttons: ['Cancel', 'Back up and update'], defaultId: 1, cancelId: 0 });
+  const answer = await dialog.showMessageBox(mainWindow, { type: 'question', message: `Back up and update to Girru ${v}?`, detail: process.platform === 'win32' ? 'Girru makes a backup of your data, closes, installs the new version in the same place and opens again. Your saved workspace is kept; valid sign-in sessions are restored.' : 'Girru makes a backup of your data, puts the new version in place and starts again. Your saved workspace is kept; valid sign-in sessions are restored.', buttons: ['Cancel', 'Back up and update'], defaultId: 1, cancelId: 0 });
   return answer.response === 1 ? updater.install() : updater.view();
 });
 ipcMain.handle('dpro:app-update-page', event => { if (fromAppPage(event) && updater?.view().update) void shell.openExternal(updater.view().update.page); return null; });
@@ -445,15 +555,16 @@ async function boot() {
   const payload = resolvePayload({ packaged: app.isPackaged, resourcesPath: process.resourcesPath });
   nabuEditor = installNabuEditor({
     win: mainWindow, electron, getOrigin: () => appOrigin,
-    runtimeRoot: process.env.DPRO_NABU_ROOT || path.join(process.resourcesPath, 'nabu-runtime'),
+    resolveRuntime: codeRuntime,
     node: process.env.DPRO_DESKTOP_NODE || payload.node, dataDir: path.join(settingsDir(), 'nabu-editor'),
     onLog: line => { editorLog ||= openLog(path.join(settingsDir(), 'logs', 'editor.log')); editorLog.write(line); },
   });
   const permissions = permissionStatus(electron.systemPreferences, process.platform);
   const firstMacLaunch = process.platform === 'darwin' && (!fs.existsSync(path.join(settingsDir(), 'permissions-reviewed-v3.json')));
+  // Before the first start: a start that fails after an update can offer the version it replaced (FD4a).
+  startUpdater();
   if (firstMacLaunch || (process.platform === 'win32' && permissions.microphone === 'denied' && !fs.existsSync(path.join(settingsDir(), 'permissions-reviewed-v3.json')))) await showPage('permissions.html');
   else await applyMode();
-  startUpdater();
 }
 
 // The app lives in one window: closing it quits (and stops the backend) on every OS.
@@ -469,7 +580,10 @@ app.on('before-quit', event => {
     try { await nabuEditor?.stop(); } finally {
       try { await session.defaultSession.cookies.flushStore(); session.defaultSession.flushStorageData(); }
       catch { log?.write('Session storage could not be flushed before shutdown.'); }
-      await stopLocal();
+      // Each step runs even when an earlier one fails, so this computer's keys are always unlocked for the next start.
+      try { await stopLocal(); } catch (error) { log?.write(`Local stop failed before quit: ${error.message}`); }
+      try { await desktopDeviceCustody?.close(); } catch (error) { log?.write(`Device keys could not be released: ${error.message}`); }
+      try { nativeControlAuthority?.close(); } catch { /* closing anyway */ } nativeControlAuthority=null;nativeControlRoot=null;nativeControlLease=null;
     }
     return true;
   })

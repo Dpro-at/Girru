@@ -5,7 +5,7 @@ const React = require('../node_modules/react');
 const { renderToStaticMarkup } = require('../node_modules/react-dom/server');
 const { allowedRequest } = require('../src/session.ts');
 const { allowedFirstRun, firstRunResponse, firstRunRoute } = require('../src/first-run-contract.js');
-const { SetupSteps } = require('../src/FirstRunSetup.tsx');
+const { SetupSteps, setupTab } = require('../src/FirstRunSetup.tsx');
 const { NoticeCard, MomentsContext } = require('../src/ChatMoments.tsx');
 
 test('FIRSTRUN-01 contract: only the reviewed paths and their exact shapes pass', () => {
@@ -149,4 +149,17 @@ test('typed discovery samples expose display names only and reject path-shaped l
   assert.deepEqual(once.samples, [{kind:'ssh', name:'id_ed25519'}, {kind:'skill', name:'Design review'}]);
   assert.deepEqual(firstRunResponse(path, 200, once), once);
   assert.doesNotMatch(JSON.stringify(once), /never-project-this|private\/server|Unknown/);
+});
+
+test('a setup command never goes into a tab that already ran one (a sign-in still waiting there)', () => {
+  let n = 0; const state = { tabs: [], active: null };
+  const tabs = { getSnapshot: () => state, add() { const tab = { key: `t${++n}` }; state.tabs = [...state.tabs, tab]; state.active = tab.key; return tab; }, select(key) { state.active = key; } };
+  const used = new Set();
+  const first = setupTab(tabs, used); used.add(first.key);
+  assert.equal(first.key, 't1', 'the first command opens the first tab');
+  const second = setupTab(tabs, used); used.add(second.key);
+  assert.equal(second.key, 't2', 'Install after Sign in gets its own tab, not the one running claude');
+  assert.equal(state.active, 't2');
+  state.tabs = [...state.tabs, { key: 'mine' }];
+  assert.equal(setupTab(tabs, used).key, 'mine', 'a tab the owner opened and nothing typed in is used first');
 });

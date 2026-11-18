@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath, pathToFileURL} from 'node:url';
 // MEM-BRIDGE-01: Girru memory is the one brain for Claude Code, Codex, Gemini CLI and Antigravity.
 //  - a fact approved in Girru appears in the managed AGENTS.md brief and in the MCP read tools;
 //  - owner text outside Girru's markers stays byte for byte; no secret reaches any written file;
@@ -11,10 +12,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, statSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-const backendDir = process.cwd();
+import { switchValueOn } from './helpers/switches.mjs';
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-bridge-')));
 mkdirSync(join(dir, '.data', 'multi-agent'), { recursive: true });
 process.chdir(dir);
@@ -32,31 +34,35 @@ globalThis.fetch = async (url) => { throw new Error(`unexpected network call in 
 const quiet = () => {};
 console.log = quiet; console.info = quiet; console.warn = quiet;
 
-const { getDatabase } = await import(join(backendDir, 'src/db/database.ts'));
+const { getDatabase } = await import(pathToFileURL(join(backendDir, 'src/db/database.ts')).href);
+const { projectKeyOf } = await import(pathToFileURL(join(backendDir, 'src/memory/project-keys.ts')).href); // project memory key (id while GIRRU_STORE_P3 is on)
 const db = getDatabase();
 await db.initialize();
-const { getCredentialStorage } = await import(join(backendDir, 'src/credentials/storage.ts'));
+const { getCredentialStorage } = await import(pathToFileURL(join(backendDir, 'src/credentials/storage.ts')).href);
 await getCredentialStorage().initialize();
-const { getOrchestrator } = await import(join(backendDir, 'src/multi-agent/index.ts'));
+const { getOrchestrator } = await import(pathToFileURL(join(backendDir, 'src/multi-agent/index.ts')).href);
 await getOrchestrator().initialize(join(dir, '.data', 'multi-agent', 'orchestrator.db'));
 for (const [id, role] of [['br-owner', 'owner'], ['br-user', 'user']]) {
   db.prepare(`INSERT INTO users (id, email, username, password_hash, role, status, email_verified) VALUES (?, ?, ?, 'x', ?, 'active', 1)`).run(id, `${id}@example.test`, id, role);
 }
 db.prepare(`INSERT INTO agents_config (id, name, provider, model, is_primary) VALUES ('br-main', 'Main', 'ollama', 'qwen-test', 1)`).run();
 
-const { generateToken } = await import(join(backendDir, 'src/auth/jwt.ts'));
-const { buildServer } = await import(join(backendDir, 'src/api/app.ts'));
-const { createProject } = await import(join(backendDir, 'src/repositories/chat-conversations.ts'));
-const { learn } = await import(join(backendDir, 'src/memory/learning.ts'));
-const { publishInstanceIdentity, getInstanceIdentity } = await import(join(backendDir, 'src/services/instance-identity.ts'));
-const { createBridgeMcpServer, httpBackend } = await import(join(backendDir, 'src/memory/bridge/mcp-server.ts'));
-const { sessionProof } = await import(join(backendDir, 'src/memory/bridge/proof.ts'));
-const { setBridgeEnv } = await import(join(backendDir, 'src/memory/bridge/service.ts'));
-const { syncMemoryBridge } = await import(join(backendDir, 'src/memory/bridge/sync.ts'));
-const { MARK_START, MARK_END } = await import(join(backendDir, 'src/memory/bridge/managed-files.ts'));
-const { claudeProjectDir } = await import(join(backendDir, 'src/memory/bridge/clients.ts'));
-const { memoryBridgeTool, memoryBridgeApplyTool } = await import(join(backendDir, 'src/tools/memory/bridge.ts'));
-const { APPROVAL_REQUIRED_TOOLS } = await import(join(backendDir, 'src/tools/approvals.ts'));
+const { generateToken } = await import(pathToFileURL(join(backendDir, 'src/auth/jwt.ts')).href);
+const { buildServer } = await import(pathToFileURL(join(backendDir, 'src/api/app.ts')).href);
+const { createProject } = await import(pathToFileURL(join(backendDir, 'src/repositories/chat-conversations.ts')).href);
+const { learn } = await import(pathToFileURL(join(backendDir, 'src/memory/learning.ts')).href);
+const { publishInstanceIdentity, getInstanceIdentity } = await import(pathToFileURL(join(backendDir, 'src/services/instance-identity.ts')).href);
+const { createBridgeMcpServer, httpBackend } = await import(pathToFileURL(join(backendDir, 'src/memory/bridge/mcp-server.ts')).href);
+const { sessionProof } = await import(pathToFileURL(join(backendDir, 'src/memory/bridge/proof.ts')).href);
+const { setBridgeEnv } = await import(pathToFileURL(join(backendDir, 'src/memory/bridge/service.ts')).href);
+const { syncMemoryBridge } = await import(pathToFileURL(join(backendDir, 'src/memory/bridge/sync.ts')).href);
+const { MARK_START: OLD_START, MARK_END: OLD_END, GIRRU_START, GIRRU_END } = await import(pathToFileURL(join(backendDir, 'src/memory/bridge/managed-files.ts')).href);
+// P2: the one Girru section replaces the dpro-memory markers.
+const P2 = switchValueOn(process.env.GIRRU_STORE_P2 ?? '');
+const [MARK_START, MARK_END] = P2 ? [GIRRU_START, GIRRU_END] : [OLD_START, OLD_END];
+const { claudeProjectDir } = await import(pathToFileURL(join(backendDir, 'src/memory/bridge/clients.ts')).href);
+const { memoryBridgeTool, memoryBridgeApplyTool } = await import(pathToFileURL(join(backendDir, 'src/tools/memory/bridge.ts')).href);
+const { APPROVAL_REQUIRED_TOOLS } = await import(pathToFileURL(join(backendDir, 'src/tools/approvals.ts')).href);
 const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
 const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
 
@@ -77,9 +83,16 @@ const injectFetch = async (url, init = {}) => {
   const r = await app.inject({ method: init.method ?? 'GET', url: u.pathname + u.search, headers: init.headers, payload: init.body });
   return new Response(r.body, { status: r.statusCode, headers: { 'Content-Type': 'application/json' } });
 };
+// STORE-MAP-01 P6 (SEC2-1): with the switch on, a coding app reaches a project only with the session
+// capability Girru's launcher gives it. Here the owner allowed company facts for the project.
+const P6 = switchValueOn(process.env.GIRRU_STORE_P6 ?? '');
+const { launchCapability } = await import(pathToFileURL(join(backendDir, 'src/memory/bridge/capability.ts')).href);
+const capabilityFor = async (client, cwd) =>
+  P6 && (cwd === folder || cwd.startsWith(folder + sep)) ? (await launchCapability(OWNER, project.id, client, true)).token : null;
 /** An MCP client connected to the dpro-memory server as `client`, running in `cwd`. */
 async function mcp(client, cwd) {
-  const server = createBridgeMcpServer(httpBackend({ client, cwd, backendUrl: 'http://127.0.0.1:41522', configDir: process.env.AGENT_PLAYER_CONFIG_DIR, fetchImpl: injectFetch }));
+  const capability = await capabilityFor(client, cwd);
+  const server = createBridgeMcpServer(httpBackend({ client, cwd, backendUrl: 'http://127.0.0.1:41522', configDir: process.env.AGENT_PLAYER_CONFIG_DIR, fetchImpl: injectFetch, capability }));
   const [a, b] = InMemoryTransport.createLinkedPair();
   await server.connect(a);
   const c = new Client({ name: `test-${client}`, version: '1' });
@@ -119,13 +132,14 @@ test('owner API: only the owner; status lists the CLIs (all off) and the project
   assert.equal((await call('br-user', 'GET', '/api/memory-bridge')).statusCode, 403);
   assert.equal((await app.inject({ method: 'GET', url: '/api/memory-bridge' })).statusCode, 401);
   const s = (await call(OWNER, 'GET', '/api/memory-bridge')).json();
-  assert.deepEqual(s.clients.map((c) => [c.client, c.enabled]), [['claude-code', false], ['codex', false], ['gemini-cli', false], ['antigravity', false]]);
+  // With GIRRU_STORE_P7 on, Cursor and Copilot follow these four (test/store-p7-clients.test.mjs).
+  assert.deepEqual(s.clients.filter((c) => ['claude-code', 'codex', 'gemini-cli', 'antigravity'].includes(c.client)).map((c) => [c.client, c.enabled]), [['claude-code', false], ['codex', false], ['gemini-cli', false], ['antigravity', false]]);
   assert.equal(s.projects[0].projectId, project.id);
   assert.equal(s.projects[0].filesEnabled, false);
 });
 
 test('a fact approved in Girru appears in the managed brief; owner text outside the markers is untouched', async () => {
-  await learn({ userId: OWNER, actor: `owner:${OWNER}`, review: true, candidates: [{ content: 'Alpha deploys with the release script in scripts/release.sh', type: 'fact', drawer: { kind: 'project', key: project.slug }, origin: 'owner' }] });
+  await learn({ userId: OWNER, actor: `owner:${OWNER}`, review: true, candidates: [{ content: 'Alpha deploys with the release script in scripts/release.sh', type: 'fact', drawer: { kind: 'project', key: projectKeyOf(project) }, origin: 'owner' }] });
   assert.equal(await approveAll(), 1);
   const pv = await call(OWNER, 'GET', `/api/memory-bridge/projects/${project.id}/files`);
   assert.equal(pv.statusCode, 200, pv.body);
@@ -160,7 +174,7 @@ test('the owner edits outside the markers, a new fact (with a secret) is approve
   const path = join(folder, 'AGENTS.md');
   const edited = readFileSync(path, 'utf8') + '\nOwner later note.\n';
   writeFileSync(path, edited);
-  await learn({ userId: OWNER, actor: `owner:${OWNER}`, review: true, candidates: [{ content: `Alpha CI token is ${SECRET} and runs on push`, type: 'fact', drawer: { kind: 'project', key: project.slug }, origin: 'owner' }] });
+  await learn({ userId: OWNER, actor: `owner:${OWNER}`, review: true, candidates: [{ content: `Alpha CI token is ${SECRET} and runs on push`, type: 'fact', drawer: { kind: 'project', key: projectKeyOf(project) }, origin: 'owner' }] });
   await approveAll();
   const r = await syncMemoryBridge();
   assert.ok(r.written >= 1, JSON.stringify(r));
@@ -169,7 +183,7 @@ test('the owner edits outside the markers, a new fact (with a secret) is approve
   assert.ok(after.endsWith('\nOwner later note.\n'), 'text after the section unchanged');
   assert.match(after, /runs on push/);
   for (const f of ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']) assert.ok(!readFileSync(join(folder, f), 'utf8').includes(SECRET), `no secret in ${f}`);
-  assert.match(after, /\[REDACTED:/);
+  assert.match(after, /\[(?:REDACTED|SECRET):/); // MEM-READ-01 MR2: kept hidden as a reference
   // Nothing changed -> nothing written again.
   assert.equal((await syncMemoryBridge()).written, 0);
 });
@@ -187,7 +201,7 @@ test('MCP: switched off -> refused; on -> read tools serve the project of the fo
   // pinned_facts = the owner's scope facts (MEM-SCALE-01), not the drawer's memories.
   assert.match((await claude.tool('pinned_facts')).text, /not pinned facts for this project yet/);
   assert.equal((await call(OWNER, 'POST', '/api/memory/scopes/pinned', { scope: 'company', text: 'We review every change.' })).statusCode, 201);
-  assert.equal((await call(OWNER, 'POST', '/api/memory/scopes/pinned', { scope: `project:${project.slug}`, text: `Alpha ships weekly. ${SECRET}` })).statusCode, 201);
+  assert.equal((await call(OWNER, 'POST', '/api/memory/scopes/pinned', { scope: `project:${projectKeyOf(project)}`, text: `Alpha ships weekly. ${SECRET}` })).statusCode, 201);
   const pinned = (await claude.tool('pinned_facts')).text;
   assert.match(pinned, /We review every change\.[\s\S]*Alpha ships weekly\./);
   assert.ok(!pinned.includes('release script') && !pinned.includes(SECRET));
@@ -198,7 +212,8 @@ test('MCP: switched off -> refused; on -> read tools serve the project of the fo
   const elsewhere = await mcp('claude-code', other);
   const r = await elsewhere.tool('project_brief');
   assert.ok(r.isError);
-  assert.match(r.text, /does not know this folder/);
+  // With P6 a folder that is no project gets no session, so the call is refused before the folder lookup.
+  assert.match(r.text, P6 ? /needs a session started from Girru/ : /does not know this folder/);
   await elsewhere.close();
 });
 
@@ -243,10 +258,12 @@ test('MCP auth: loopback only, install proof once per nonce, token required, kil
   const token = ok.json().token;
   assert.equal((await app.inject({ method: 'POST', url: '/api/memory-bridge/mcp/session', payload: { client: 'gemini-cli', nonce: n2, proof: sessionProof(ident.secret, ident.id, 'gemini-cli', n2) } })).statusCode, 401, 'nonce works once');
   assert.equal((await app.inject({ method: 'POST', url: '/api/memory-bridge/mcp/session', payload: { client: 'gemini-cli', nonce: randomBytes(24).toString('hex'), proof: 'ab'.repeat(32) } })).statusCode, 401);
-  const callWith = (t) => app.inject({ method: 'POST', url: '/api/memory-bridge/mcp/call', headers: { 'x-dpro-bridge-token': t }, payload: { client: 'gemini-cli', cwd: folder, tool: 'pinned_facts' } });
+  const cap = await capabilityFor('gemini-cli', folder);
+  const capHeader = cap ? { 'x-girru-capability': cap } : {};
+  const callWith = (t) => app.inject({ method: 'POST', url: '/api/memory-bridge/mcp/call', headers: { 'x-dpro-bridge-token': t, ...capHeader }, payload: { client: 'gemini-cli', cwd: folder, tool: 'pinned_facts' } });
   assert.equal((await callWith(token)).statusCode, 200);
   assert.equal((await callWith('0'.repeat(64))).statusCode, 401);
-  assert.equal((await app.inject({ method: 'POST', url: '/api/memory-bridge/mcp/call', headers: { 'x-dpro-bridge-token': token }, payload: { client: 'codex', cwd: folder, tool: 'pinned_facts' } })).statusCode, 401, 'token is per CLI');
+  assert.equal((await app.inject({ method: 'POST', url: '/api/memory-bridge/mcp/call', headers: { 'x-dpro-bridge-token': token, ...capHeader }, payload: { client: 'codex', cwd: folder, tool: 'pinned_facts' } })).statusCode, 401, 'token is per CLI');
   await call(OWNER, 'PUT', '/api/memory-bridge/clients/gemini-cli', { enabled: false });
   assert.equal((await callWith(token)).statusCode, 401, 'kill switch deleted the token');
 });
@@ -287,7 +304,7 @@ test('registration: preview -> confirm -> undo restores each CLI config byte for
     tokens.push(reg);
   }
   const s = (await call(OWNER, 'GET', '/api/memory-bridge')).json();
-  assert.ok(s.clients.every((c) => c.enabled && c.registrationId), 'registration switches the CLI on');
+  assert.ok(s.clients.filter((c) => ['claude-code', 'codex', 'gemini-cli', 'antigravity'].includes(c.client)).every((c) => c.enabled && c.registrationId), 'registration switches the CLI on');
 
   for (const reg of tokens) {
     const u = await call(OWNER, 'POST', `/api/memory-bridge/registrations/${reg.id}/undo`);
@@ -358,7 +375,9 @@ test('folder settings: files can be stopped, turning them on needs preview + con
   assert.ok(!JSON.stringify(audit).includes(SECRET));
   // M11: reads are in the activity log by tool name only (never the query text), and each app shows its last call.
   const reads = audit.filter((e) => e.action === 'mcp-read' && e.client === 'claude-code');
-  assert.ok(reads.some((e) => e.detail === 'memory_search') && reads.some((e) => e.detail === 'project_brief'));
+  // P6: the session's id goes with the tool name (ids only).
+  const read = (tool) => P6 ? new RegExp(`^${tool} session:[0-9a-f-]+$`) : new RegExp(`^${tool}$`);
+  assert.ok(reads.some((e) => read('memory_search').test(e.detail)) && reads.some((e) => read('project_brief').test(e.detail)), JSON.stringify(reads.map((e) => e.detail)));
   assert.ok(!JSON.stringify(audit).includes('release script'), 'the search text is not logged');
   const status = (await call(OWNER, 'GET', '/api/memory-bridge')).json();
   const cc = status.clients.find((c) => c.client === 'claude-code');
@@ -367,7 +386,7 @@ test('folder settings: files can be stopped, turning them on needs preview + con
 });
 
 test('the real stdio server starts the way a CLI starts it, lists its tools and only talks to loopback', async () => {
-  const { serverLaunch } = await import(join(backendDir, 'src/memory/bridge/clients.ts'));
+  const { serverLaunch } = await import(pathToFileURL(join(backendDir, 'src/memory/bridge/clients.ts')).href);
   const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
   const launch = serverLaunch('codex');
   const transport = new StdioClientTransport({ command: launch.command, args: launch.args, cwd: folder,
@@ -377,8 +396,10 @@ test('the real stdio server starts the way a CLI starts it, lists its tools and 
   const tools = (await c.listTools()).tools.map((t) => t.name).sort();
   assert.deepEqual(tools, ['handoff_write', 'latest_handoff', 'memory_propose', 'memory_search', 'pinned_facts', 'project_brief', 'project_design']);
   const r = await c.callTool({ name: 'project_brief', arguments: {} });
-  assert.ok(r.isError);
-  assert.match(r.content[0].text, /Cannot reach Girru/);
+  // The CLI's process starts with the memory switches at their defaults (on): with P9 a read
+  // while Girru is away answers that memory is offline instead of failing (handoff-queue.ts).
+  assert.ok(!r.isError);
+  assert.match(r.content[0].text, /Girru memory is offline right now/);
   await c.close();
 });
 

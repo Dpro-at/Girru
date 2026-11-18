@@ -39,6 +39,7 @@ import { scanProjectDocuments, previewProjectDocument } from '../../memory/impor
 import { MAX_SESSIONS_PER_IMPORT, getJob, importedSessions, latestImportJob, pauseImport, resumeImport, startImport } from '../../memory/import/local-import.js';
 import { isLoopbackPeer } from './terminal.js';
 import { redactImportText } from '../../memory/import/redact.js';
+import { projectKeyOf } from '../../memory/project-keys.js';
 
 /** base64 of the total limit plus JSON overhead. */
 const PREVIEW_BODY_LIMIT = Math.ceil(MAX_TOTAL_BYTES * 4 / 3) + 1024 * 1024;
@@ -144,7 +145,7 @@ export async function memoryImportRoutes(fastify: FastifyInstance) {
       const k = `${cwd}\0${root}`;
       if (!projectOf.has(k)) {
         const p = matchProject(cwd, root, projects); const key = p ? null : rootDrawerKey(root);
-        projectOf.set(k, p ? { slug: p.slug, name: p.name, linked: true } : key ? { slug: key, name: rootName ?? key, linked: false } : null);
+        projectOf.set(k, p ? { slug: projectKeyOf(p), name: p.name, linked: true } : key ? { slug: key, name: rootName ?? key, linked: false } : null);
       }
       return projectOf.get(k)!;
     };

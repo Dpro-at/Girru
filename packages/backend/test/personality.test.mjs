@@ -7,6 +7,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { offeredNames, expectedNumCtx, expectedNumPredict, p2bOn } from './helpers/p2b.mjs';
 
 const backendDir = process.cwd();
 const dir = mkdtempSync(join(tmpdir(), 'ap-personality-'));
@@ -52,6 +53,9 @@ const { chatRoutes } = await import(join(backendDir, 'src/api/routes/chat.ts'));
 const P = await import(join(backendDir, 'src/services/personality.ts'));
 const store = await import(join(backendDir, 'src/services/personality-store.ts'));
 const { writePersonality } = await import(join(backendDir, 'src/services/agent-files.ts'));
+const { storeP4Enabled } = await import(join(backendDir, 'src/services/store-p4.ts'));
+// STORE-MAP-01 P4: with the switch on, the first save also imports the hand-written PERSONALITY.md text once (one 'import' version).
+const IMPORTED = storeP4Enabled() ? 1 : 0;
 const { generateToken } = await import(join(backendDir, 'src/auth/jwt.ts'));
 const { default: Fastify } = await import('fastify');
 
@@ -135,8 +139,8 @@ test('saved, reloaded and versioned; PERSONALITY.md keeps a readable copy', asyn
   const r2 = await save('pe-agent', { traits: { verbosity: 10, warmth: 90 }, lockedTraits: ['doubt'] });
   assert.equal(r2.statusCode, 200, r2.body);
   const v2 = r2.json();
-  assert.equal(v2.version, 2);
-  assert.equal(v2.basedOnVersion, 1);
+  assert.equal(v2.version, 2 + IMPORTED);
+  assert.equal(v2.basedOnVersion, 1 + IMPORTED);
   assert.equal(v2.preset, 'careful-auditor');
   assert.equal(v2.dialect, 'de'); // kept from v1
   assert.equal(v2.traits.verbosity, 10);
@@ -145,16 +149,17 @@ test('saved, reloaded and versioned; PERSONALITY.md keeps a readable copy', asyn
 
   // Reload (fresh read from the database).
   const cur = (await app.inject({ method: 'GET', url: `${base('pe-agent')}/current`, headers: auth('pe-owner') })).json();
-  assert.equal(cur.version, 2);
+  assert.equal(cur.version, 2 + IMPORTED);
   assert.deepEqual(cur.traits, v2.traits);
   assert.deepEqual(cur.lockedTraits, ['doubt']);
   const list = (await app.inject({ method: 'GET', url: `${base('pe-agent')}/versions`, headers: auth('pe-owner') })).json();
-  assert.deepEqual(list.versions.map((v) => v.version), [2, 1]);
-  assert.equal(list.versions[1].note, 'start');
+  assert.deepEqual(list.versions.map((v) => v.version), IMPORTED ? [3, 2, 1] : [2, 1]);
+  assert.equal(list.versions.at(-1).note, 'start');
+  if (IMPORTED) assert.equal(list.versions[1].source, 'import');
 
   const file = readFileSync(join(dir, '.data', 'agents', 'pe-agent', 'PERSONALITY.md'), 'utf-8');
   assert.match(file, /Hand-written notes stay\./);
-  assert.match(file, /Personality settings \(version 2\)/);
+  assert.match(file, new RegExp(`Personality settings \\(version ${2 + IMPORTED}\\)`));
   assert.match(file, /\| verbosity \| 10 \|/);
   assert.match(file, /\| doubt \| \d+ \(locked\) \|/);
   assert.equal(file.match(/personality-settings:begin/g).length, 1, 'block replaced, not duplicated');
@@ -191,7 +196,7 @@ test('lock blocks saves and rollbacks; unlock + rollback restores an old version
   assert.equal(rb.json().version, locked + 2);
   assert.deepEqual(rb.json().traits, P.PRESETS['careful-auditor'].traits);
   // History is never rewritten.
-  assert.deepEqual(versionsOf('pe-agent'), [1, 2, 3, 4, 5]);
+  assert.deepEqual(versionsOf('pe-agent'), IMPORTED ? [1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5]);
 });
 
 test('slow drift is bounded per step and never moves locked traits (via an approved proposal)', async () => {
@@ -257,7 +262,7 @@ test('traits change the parameters sent to the model, never the tools', async ()
   assert.equal(callA.options.temperature, 0.1);
   assert.equal(callA.options.num_predict, 512);
   assert.equal(callB.options.temperature, 1);
-  assert.equal(callB.options.num_predict, 4096);
+  assert.equal(callB.options.num_predict, expectedNumPredict(4096));
   const sysA = callA.messages[0].content;
   const sysB = callB.messages[0].content;
   assert.match(sysA, /Hand-written notes stay\./);

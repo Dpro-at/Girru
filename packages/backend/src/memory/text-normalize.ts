@@ -329,21 +329,55 @@ export function stemLatin(word: string): string {
 }
 
 /**
+ * MEM-LANG-01: scripts written without spaces between words (Chinese, Japanese, Thai, Lao, Khmer,
+ * Burmese). A run of them becomes overlapping two-character tokens (the usual way to index these
+ * languages without a dictionary), so a word inside a long run still matches.
+ */
+const NO_SPACE_RUN = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}ー]+/gu;
+
+function noSpaceBigrams(run: string): string[] {
+  const chars = [...run];
+  if (chars.length === 1) return chars;
+  const out: string[] = [];
+  for (let i = 0; i + 1 < chars.length; i++) out.push(chars[i] + chars[i + 1]);
+  return out;
+}
+
+/**
  * Lexical tokens of a text: normalized (steps 1–2), lower case, umlauts
  * folded, stop words dropped, light stemming. Used for BM25 and the offline
- * hash embedding.
+ * hash embedding. Combining marks are kept (MEM-LANG-01: Hindi and other Indic
+ * words were cut at every vowel sign); runs of Chinese, Japanese, Thai, Lao,
+ * Khmer or Burmese become two-character tokens.
  */
 export function lexicalTokens(text: string): string[] {
   const norm = normalizeMemoryText(text).toLowerCase();
   const out: string[] = [];
-  for (const raw of norm.split(/[^\p{L}\p{N}]+/u)) {
-    if (!raw) continue;
-    const isArabic = ARABIC_LETTER.test(raw);
-    const word = isArabic ? raw : foldLatin(raw);
-    if (STOP_WORDS.has(word)) continue;
-    const stem = isArabic ? stemArabic(word) : stemLatin(word);
-    if (stem.length < 2 || STOP_WORDS.has(stem)) continue;
-    out.push(stem);
+  for (const piece of norm.split(/[^\p{L}\p{N}\p{M}]+/u)) {
+    if (!piece) continue;
+    NO_SPACE_RUN.lastIndex = 0;
+    if (!NO_SPACE_RUN.test(piece)) { pushToken(out, piece); continue; }
+    // Mixed text ("GPT模型的数据"): each no-space run gives bigrams, the rest stays a word.
+    let last = 0;
+    NO_SPACE_RUN.lastIndex = 0;
+    for (const m of piece.matchAll(NO_SPACE_RUN)) {
+      if (m.index! > last) pushToken(out, piece.slice(last, m.index));
+      out.push(...noSpaceBigrams(m[0]));
+      last = m.index! + m[0].length;
+    }
+    if (last < piece.length) pushToken(out, piece.slice(last));
   }
   return out;
+}
+
+function pushToken(out: string[], raw: string): void {
+  {
+    if (!raw) return;
+    const isArabic = ARABIC_LETTER.test(raw);
+    const word = isArabic ? raw : foldLatin(raw);
+    if (STOP_WORDS.has(word)) return;
+    const stem = isArabic ? stemArabic(word) : stemLatin(word);
+    if (stem.length < 2 || STOP_WORDS.has(stem)) return;
+    out.push(stem);
+  }
 }

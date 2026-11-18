@@ -1,3 +1,4 @@
+import { chatReplyText } from './chat-response.js';
 /**
  * API Client
  *
@@ -212,8 +213,7 @@ export class ApiClient {
       },
       timeoutMs: 240_000,
     });
-    const content = data?.message?.content;
-    return typeof content === 'string' ? content : '';
+    return chatReplyText(data);
   }
 }
 

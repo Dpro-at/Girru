@@ -3,6 +3,8 @@
 // Pause, Duplicate, Earlier versions and Delete in ⋯ and the right-click menu; Delete has Undo.
 // The eye shows the exact list one agent gets in one project, in order (the later one wins; with the
 // STORE-MAP-01 P2 switch, strongest precedence group first and the later one wins inside a group).
+import { OpenInCodeIcon, fileKeys, fileMenu, openFile } from './CodeOpen';
+import { joinPath } from './code-open';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
 import { UiIcon } from './ui-icons';
@@ -104,7 +106,7 @@ export function AgentRules({ client, agents, active, onCount }: { client: Sessio
     <ContextMenu menu={menu.menu} onClose={menu.close}/>
     {sees && <AgentSees c={c} agents={agents} projects={s.projects} initial={filter} onClose={() => setSees(false)}/>}
     {history && <VersionsSheet c={c} id={history} onClose={() => setHistory(null)}/>}
-    {filesFor && <FilesSheet c={c} projectId={filesFor} name={s.projects.find(p => p.id === filesFor)?.name ?? 'Project'} onClose={() => setFilesFor(null)}/>}
+    {filesFor && <FilesSheet c={c} client={client} folder={s.projects.find(p => p.id === filesFor)?.folder ?? null} projectId={filesFor} name={s.projects.find(p => p.id === filesFor)?.name ?? 'Project'} onClose={() => setFilesFor(null)}/>}
     <Notice toast={s.toast} onUndo={() => void c.undo()} onDone={id => c.dismiss(id)}/>
   </section>;
 }
@@ -263,8 +265,12 @@ const ACTION_WORDS: Record<FilesState['files'][number]['action'], string> = {
   tracked: 'already in Git: left as it is while the files are private', link: 'is a link: never written through',
 };
 /** RULES-03: one project's coding app files: what writing does, private or with the project, then Write the files. */
-function FilesSheet({ c, projectId, name, onClose }: { c: RulesController; projectId: string; name: string; onClose: () => void }) {
+function FilesSheet({ c, client, folder, projectId, name, onClose }: { c: RulesController; client: SessionClient; folder: string | null; projectId: string; name: string; onClose: () => void }) {
   const s = useSyncExternalStore(c.subscribe, c.getSnapshot, c.getSnapshot);
+  // CODE-OPEN-01: each file opens in Code (a task problem at its line); results in one short line.
+  const [said, say] = useState<string | null>(null);
+  const fm = useMenu();
+  const at = (f: string) => (folder ? joinPath(folder, f) : null);
   const [state, setState] = useState<FilesState | null>(s.files[projectId] ?? null);
   const [mode, setMode] = useState<'private' | 'project'>(s.files[projectId]?.mode ?? 'private');
   useEffect(() => { void c.filesState(projectId).then(f => { if (f) { setState(f); setMode(f.mode); } }); }, [projectId]);
@@ -273,7 +279,11 @@ function FilesSheet({ c, projectId, name, onClose }: { c: RulesController; proje
     <button type="button" className="primary" disabled={s.busy || !state?.hasFolder} onClick={() => void write()}>{state?.written ? 'Write the files again' : 'Write the files'}</button></>}>
     <p className="fine-print rules-files-intro">The rules are written once, to .girru/rules.md. CLAUDE.md and GEMINI.md get one line that points to it. Codex and Antigravity read AGENTS.md and do not follow that line, so AGENTS.md gets the rules themselves. A rule change re-writes them by itself. Inside Girru the apps already get the rules; these files are for when an app runs on its own in this folder.</p>
     {!state ? <p className="fine-print" role="status">Reading the folder…</p> : !state.hasFolder ? <p className="dk-inline-notice">This project has no folder yet.</p>
-      : <ul className="rules-files">{state.files.map(f => <li key={f.name} data-action={f.action}><UiIcon name="file" size={13}/><code>{f.name}</code><span className="fine-print">{ACTION_WORDS[f.action]}</span></li>)}</ul>}
+      : <ul className="rules-files">{state.files.map(f => { const path = at(f.name); return <li key={f.name} data-action={f.action} className="dk-file-row" tabIndex={path && f.action !== 'create' ? 0 : undefined}
+        onContextMenu={path && f.action !== 'create' ? e => fm.at(e, fileMenu(client, path, null, say)) : undefined} onKeyDown={path && f.action !== 'create' ? e => fileKeys(e, client, path, null, say) : undefined}>
+        <UiIcon name="file" size={13}/><code>{f.name}</code><span className="fine-print">{ACTION_WORDS[f.action]}</span>{path && f.action !== 'create' && <OpenInCodeIcon client={client} path={path} say={say}/>}</li>; })}</ul>}
+    {said && <p className="fine-print" role="status">{said}</p>}
+    <ContextMenu menu={fm.menu} onClose={fm.close}/>
     {state?.rules && <pre className="rules-files-preview" dir="auto">{state.rules.split('\n').slice(1).join('\n').trim()}</pre>}
     <div className="dk-field">Keep these files
       <span className="dk-segmented" role="group" aria-label="Keep these files">
@@ -285,7 +295,7 @@ function FilesSheet({ c, projectId, name, onClose }: { c: RulesController; proje
         <label className="rules-switch" title={state.tasks?.on ? 'On: every agent and app keeps its tasks in it' : 'Off: the file stays; nobody is asked to keep it'}><span>{state.tasks?.on ? 'On' : 'Off'}</span>
           <input type="checkbox" role="switch" aria-label="Task file" checked={!!state.tasks?.on} disabled={s.busy} onChange={e => void c.setTasks(projectId, e.target.checked).then(f => { if (f) setState(f); })}/></label></span>
       <small className="fine-print">One file in the project for every task, edit and continuation, kept by Girru’s agents, Claude Code, Codex and Gemini. The board shows each task on its department’s board with its agent, and any of them can continue it. {state.tasks?.on ? `${state.tasks.open} open on the board.` : 'Off keeps the file and stops the rule that asks the apps to keep it.'}</small>
-      {state.tasks?.on && (state.tasks.problems.length ?? 0) > 0 && <ul className="rules-task-problems">{state.tasks.problems.map(p => <li key={p.line}><UiIcon name="alert" size={12}/>Line {p.line}: {p.message}</li>)}</ul>}
+      {state.tasks?.on && (state.tasks.problems.length ?? 0) > 0 && <ul className="rules-task-problems">{state.tasks.problems.map(p => <li key={p.line}><UiIcon name="alert" size={12}/>Line {p.line}: {p.message}{at('.girru/tasks.md') && <button type="button" className="link-button" onClick={() => void openFile(client, at('.girru/tasks.md')!, p.line, say)}>Open in Code</button>}</li>)}</ul>}
     </div>}
   </Sheet>;
 }

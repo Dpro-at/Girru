@@ -6,7 +6,8 @@
 
 import { one, sql } from '../../repositories/sql-steps.js';
 import type { ToolExecutionContext } from '../../tools/types.js';
-import { handoffBlock, handoffFor, MAIN_AGENT, type HandoffScope } from './store.js';
+import { handoffBlock, handoffFor, MAIN_AGENT, type HandoffLinks, type HandoffScope } from './store.js';
+import { storeP8Enabled } from '../../services/store-p8.js';
 
 /** Small-agent runs are one-off delegated lookups: they keep no handoff. */
 export const NO_HANDOFF_AGENTS = new Set(['small-local-agent']);
@@ -45,8 +46,10 @@ export async function taskRunScope(run: { task_id: string; agent_id: string; use
  * turn) or the board task of a durable task run. A channel (outside) turn,
  * a delegated small agent or any other context gets an error text.
  */
-export async function toolHandoffScope(context: ToolExecutionContext | undefined): Promise<{ scope: HandoffScope; runId: string | null } | string> {
+export async function toolHandoffScope(context: ToolExecutionContext | undefined): Promise<{ scope: HandoffScope; runId: string | null; links?: HandoffLinks } | string> {
   if (!context || context.toolPolicy) return 'handoff notes are kept only in the owner\'s own chats and board tasks';
+  // STORE-MAP-01 P8 (D26): a part a lead handed over: the task's note when it has one, else the chat's, naming the lead.
+  if (context.delegation && storeP8Enabled()) return delegationScope(context);
   if (context.taskId) {
     if (!context.taskRun || !context.agentId) return 'handoff notes are kept only inside a durable task run';
     const row = await sql().read(one<{ task_id: string; agent_id: string; user_id: string | null }>('SELECT task_id, agent_id, user_id FROM task_runs WHERE id = ?', context.taskRun.runId));
@@ -59,6 +62,17 @@ export async function toolHandoffScope(context: ToolExecutionContext | undefined
   if (!scope) return 'handoff notes are kept only in the owner\'s own saved conversations';
   const running = await sql().read(one<{ run_id: string }>("SELECT run_id FROM chat_run_journal WHERE session_id = ? AND user_id = ? AND state = 'running' ORDER BY started_at DESC LIMIT 1", context.sessionId, context.userId)).catch(() => undefined);
   return { scope, runId: running?.run_id ?? null };
+}
+
+/** P8: the scope of a delegated part (the specialist's own note of the task or the chat), or an error text. */
+async function delegationScope(context: ToolExecutionContext): Promise<{ scope: HandoffScope; runId: string | null; links: HandoffLinks } | string> {
+  const d = context.delegation!;
+  if (!context.userId || !context.agentId || !context.sessionId) return 'handoff notes are kept only in the owner\'s own chats and board tasks';
+  const links: HandoffLinks = { cardId: d.cardId, taskNo: d.taskNo, conversationId: d.conversationId ?? context.sessionId, fromAgentId: d.leadAgentId };
+  const task = d.cardId ? (await sql().read(one<{ task_id: string | null }>('SELECT task_id FROM board_cards WHERE id = ?', d.cardId)))?.task_id : null;
+  if (task) return { scope: { ownerId: context.userId, agentId: context.agentId, kind: 'task', scopeId: task, projectId: null }, runId: d.runId, links };
+  const scope = await conversationScope(context.userId, context.sessionId, context.agentId);
+  return scope ? { scope, runId: d.runId, links } : 'handoff notes are kept only in the owner\'s own saved conversations';
 }
 
 /** The prompt block of the agent's newest note for an owner's own conversation (or its project), or ''. */

@@ -3,12 +3,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFile } = require('node:child_process');
 
-function candidates({ defaultDir, home, cwd, backendDir, savedDir, explicitDir, workspaceRoot }) {
+/** `isolated`: a separate profile (GIRRU_PROFILE_DIR) only looks at its own folders, never an old install or a checkout's `.data`. */
+function candidates({ defaultDir, home, cwd, backendDir, savedDir, explicitDir, workspaceRoot, isolated = false }) {
   const insideWorkspaces = workspaceRoot && savedDir && (() => {
     try { const relative = path.relative(fs.realpathSync(workspaceRoot), fs.realpathSync(savedDir)); return relative !== '' && !relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative); } catch { return false; }
   })();
-  const values = explicitDir ? [insideWorkspaces ? savedDir : null, explicitDir] : [savedDir, defaultDir, path.join(home, '.agent-player'), path.join(home, '.dpro')];
-  if (!explicitDir) for (const start of [cwd, backendDir]) {
+  const values = explicitDir ? [insideWorkspaces ? savedDir : null, explicitDir] : isolated ? [savedDir, defaultDir] : [savedDir, defaultDir, path.join(home, '.agent-player'), path.join(home, '.dpro')];
+  if (!explicitDir && !isolated) for (const start of [cwd, backendDir]) {
     let dir = path.resolve(start);
     for (let i = 0; i < 7; i++) {
       values.push(path.join(dir, '.data'), path.join(dir, 'packages', 'backend', '.data'));

@@ -42,8 +42,10 @@ function resolvePayload({ packaged, resourcesPath, env = process.env }) {
   };
 }
 
-/** Node arguments that run the backend entry (TypeScript through tsx until INSTALLER-03/04 ship a compiled build). */
+/** Packaged JavaScript needs no loader; source development retains its tsx entry. */
 function backendArgs(backendDir) {
+  const compiled = path.join(backendDir, 'src', 'api', 'server.js');
+  if (!fs.existsSync(path.join(backendDir, 'src', 'api', 'server.ts')) && fs.existsSync(compiled)) return [compiled];
   const loader = path.join(backendDir, ...TSX_LOADER);
   return ['--import', pathToFileURL(loader).href, path.join(backendDir, 'src', 'api', 'server.ts')];
 }
@@ -52,8 +54,9 @@ function backendArgs(backendDir) {
 function checkPayload(payload) {
   const problems = [];
   if (!payload.node || !fs.existsSync(payload.node)) problems.push('Node runtime not found');
-  if (!fs.existsSync(path.join(payload.backendDir, 'src', 'api', 'server.ts'))) problems.push('backend not found');
-  else if (!fs.existsSync(path.join(payload.backendDir, ...TSX_LOADER))) problems.push('backend modules not installed');
+  if (fs.existsSync(path.join(payload.backendDir, 'src', 'api', 'server.ts'))) {
+    if (!fs.existsSync(path.join(payload.backendDir, ...TSX_LOADER))) problems.push('backend modules not installed');
+  } else if (!fs.existsSync(path.join(payload.backendDir, 'src', 'api', 'server.js'))) problems.push('backend not found');
   if (!fs.existsSync(path.join(payload.coreUiDir, 'dist', 'candidate.json'))) problems.push('app UI not built');
   return problems;
 }

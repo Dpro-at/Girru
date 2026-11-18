@@ -6,6 +6,8 @@ export interface PersonalityProposal {
  id: string; agentId: string; baseVersion: number; baseTraits: Traits; proposedTraits: Traits; delta: Partial<Traits>;
  reason: string; evidence: string[]; source: 'agent'|'evolution'|'owner'; status: 'pending'|'approved'|'rejected'|'stale'|'cancelled';
  createdBy: string; createdAt: string|null; decidedBy: string|null; decidedAt: string|null; decisionNote: string|null; appliedVersion: number|null; reviewHash: string;
+ /** STORE-MAP-01 P4: present only on a text suggestion ('file' = PERSONALITY.md changed outside Girru). */
+ baseTextHash?: string|null; proposedTextHash?: string; origin?: 'file'|'evolution_text'|null; baseText?: string; proposedText?: string;
 }
 export function personalityAgentId(x: unknown): x is string;
 export function personalityProposalId(x: unknown): x is string;

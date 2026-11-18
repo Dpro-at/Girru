@@ -10,6 +10,7 @@ import { getSkillsExecutor } from '../../skills/executor.js';
 import { handleError } from '../error-handler.js';
 import { anthropicSkillsService } from '../../services/anthropic-skills-service.js';
 import { q } from '../../repositories/sql-steps.js';
+import { storeP4Enabled } from '../../services/store-p4.js';
 import {
   authenticateActiveUser,
   authorizeActiveRole,
@@ -343,6 +344,16 @@ export async function skillsRoutes(fastify: FastifyInstance) {
   // ========================================
 
   // GET /api/skills/marketplace/sources - List skill sources
+  // STORE-MAP-01 P4 (G1): the old skill marketplace is retired while GIRRU_STORE_P4 is on; skills come from
+  // the central library and reviewed installs. Its tables stay until a later step (backup, owner OK).
+  fastify.addHook('onRequest', async (request, reply) => {
+    if (storeP4Enabled() && request.url.startsWith('/api/skills/marketplace')) {
+      // P10: sign-in is checked first, so an anonymous or forged request still gets 401, never the route's state.
+      if (requireUser(request, reply) === null) return reply;
+      return reply.code(410).send({ error: 'The old skill marketplace is retired. Use the skill library.', code: 'retired' });
+    }
+  });
+
   fastify.get('/api/skills/marketplace/sources', async (request, reply) => {
     if (requireUser(request, reply) === null) return reply;
     try {

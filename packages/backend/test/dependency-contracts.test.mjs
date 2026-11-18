@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAlpacaRest } from '../extensions/trading/src/alpaca-rest.js';
+import { createAlpacaRest } from './fixtures/legacy-apps/extensions/trading/src/alpaca-rest.js';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,7 +8,6 @@ import Fastify from 'fastify';
 import staticFiles from '@fastify/static';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
-import nodemailer from 'nodemailer';
 import puppeteer from 'puppeteer';
 
 test('patched Fastify plugins serve files and OpenAPI through Fastify 5', async () => {
@@ -44,17 +43,6 @@ test('trading client retains authenticated paper requests without the legacy SDK
   assert.equal(requests[0].url, 'https://paper-api.alpaca.markets/v2/account');
   assert.equal(requests[0].headers['APCA-API-KEY-ID'], 'fixture-key');
   assert.equal(requests[0].headers['APCA-API-SECRET-KEY'], 'fixture-secret');
-});
-
-test('patched mailer generates MIME without sending mail', async () => {
-  const transport = nodemailer.createTransport({ streamTransport: true, buffer: true, newline: 'unix' });
-  try {
-    const result = await transport.sendMail({ from: 'sender@example.invalid', to: 'recipient@example.invalid', subject: 'Synthetic fixture', text: 'Contract check' });
-    assert.match(result.message.toString(), /Subject: Synthetic fixture/);
-    assert.match(result.message.toString(), /Contract check/);
-  } finally {
-    transport.close();
-  }
 });
 
 test('patched browser driver accepts the supported headless option', async () => {

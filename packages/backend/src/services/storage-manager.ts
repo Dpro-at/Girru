@@ -1,3 +1,4 @@
+import {createUnprotectedReadStream,assertMemoryFilesystemAccess} from '../memory/encryption/protected-filesystem.js';
 /**
  * Storage Manager — unified Cache + CDN system
  *
@@ -358,7 +359,8 @@ export class StorageManager {
     // If cloud provider returns null, check if it's an external file (absolute path)
     if (!stream) {
       if (path.isAbsolute(file.filepath) && fs.existsSync(file.filepath)) {
-        return { stream: fs.createReadStream(file.filepath), file };
+        assertMemoryFilesystemAccess(file.filepath);
+        return { stream: createUnprotectedReadStream(file.filepath), file };
       }
       return null;
     }

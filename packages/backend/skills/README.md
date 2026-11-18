@@ -114,22 +114,10 @@ mkdir skills/my-skill/scripts
 | `communication` | Messaging and chat |
 | `media` | Audio, video, images |
 
-## Settings Types
+## How these skills are used
 
-| Type | Description | Example |
-|------|-------------|---------|
-| `string` | Text input | API keys, paths |
-| `number` | Numeric input | Limits, counts |
-| `boolean` | True/false toggle | Enable/disable |
-| `select` | Dropdown options | Choose format |
-| `secret` | Encrypted storage | Tokens, passwords |
+At start-up Girru adds the bundled skills to its central skill library (`<data>/skill-library/`, one file per text, named by its hash). From there the owner gives skills to agents in the Skills window. A skill is guidance only: it never grants tools, connections, memory or permissions.
 
-## API
+With `GIRRU_STORE_P2` on, an agent sees each of its skills by name and the first line of its `description`, and loads the full text with `guide_read` when it needs it. Keep that first line one clear sentence about what the skill is for.
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/skills` | List all skills |
-| GET | `/api/skills/:name` | Get skill details |
-| POST | `/api/skills/:name/execute` | Execute skill |
-| PUT | `/api/skills/:name/settings` | Update settings |
-| POST | `/api/skills/install` | Install new skill |
+The old skill marketplace routes (`/api/skills/marketplace/*`) are retired; with `GIRRU_STORE_P4` on they answer `410`. The library routes are listed in [docs/SKILLS.md](../../../docs/SKILLS.md).

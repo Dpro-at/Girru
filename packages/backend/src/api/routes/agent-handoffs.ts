@@ -10,16 +10,22 @@
  *   GET /api/handoffs/:kind/:scopeId?agentId=          { handoff, history } (kind: conversation | task)
  *   PUT /api/handoffs/:kind/:scopeId                   { agentId, done?, left?, next?, questions? } -> { handoff }
  *
+ * STORE-MAP-01 P8 (switch on): each note also has blockers, files, cardId, taskNo, conversationId, fromAgentId and boardId;
+ * PATCH /api/handoffs/:id { blockers } is in store-p8.ts.
+ *
  * 400 { code: 'invalid_handoff' }, 404 { code: 'not_found' } (also for a scope of another owner).
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { authorizeActiveRole } from '../../auth/route-guards.js';
 import { cleanHandoff, handoffHistory, handoffTitles, HandoffInputError, HANDOFF_KINDS, listHandoffs, saveHandoff, type HandoffKind, type HandoffScope } from '../../memory/handoff/store.js';
+import { groupByPeriod } from '../../memory/handoff/periods.js';
 import { conversationScope } from '../../memory/handoff/scope.js';
 import { one, sql } from '../../repositories/sql-steps.js';
 import { listBridgeHandoffs } from '../../memory/bridge/store.js';
 import { BRIDGE_CLIENTS, type BridgeClient } from '../../memory/bridge/clients.js';
+import { storeP8Enabled } from '../../services/store-p8.js';
+import { boardsOfCards } from '../../memory/handoff/links.js';
 
 const OWNER_ONLY = ['owner'] as const;
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
@@ -60,7 +66,12 @@ export async function agentHandoffRoutes(fastify: FastifyInstance) {
     if (projectId !== undefined && !(await ownProject(ownerId, projectId))) return notFound(reply);
     const handoffs = await listHandoffs(ownerId, { agentId, kind: kind as HandoffKind | undefined, projectId, limit: n });
     const titles = await handoffTitles(ownerId, handoffs);
-    return { handoffs: handoffs.map((h) => ({ ...h, title: titles.get(`${h.kind}:${h.scopeId}`) ?? null })) };
+    // STORE-MAP-01 P8: each note names its task (cardId, taskNo, boardId) for "Open the task T-12" (P8 on only).
+    const boards = storeP8Enabled() ? await boardsOfCards(handoffs.map((h) => h.cardId ?? '')) : null;
+    const out = handoffs.map((h) => ({ ...h, title: titles.get(`${h.kind}:${h.scopeId}`) ?? null, ...(boards ? { boardId: h.cardId ? boards.get(h.cardId) ?? null : null } : {}) }));
+    // HANDOFF-PERIOD-01: the same notes, also grouped by when they were written, so a screen can show
+    // "Today / Earlier this week / …" without regrouping them itself. The list above is unchanged.
+    return { handoffs: out, periods: groupByPeriod(out).map((g) => ({ period: g.period, label: g.label, ids: g.items.map((h) => h.id) })) };
   });
 
   // MEM-GAPS-02 (board M12): notes coding apps wrote through the memory bridge, read only here.

@@ -8,18 +8,20 @@ const view={scannedAt:'2026-10-26T10:00:00.000Z',roots:[{id:root,name:'agent_pla
 function fixture(preview={name:'files',transport:'stdio',command:'npx',args:['files-mcp'],url:null,envNames:[],headerNames:[],hash,existingId:null}){
  const calls=[];const backend={async request(method,path,body){calls.push({method,path,body});
   if(path==='/api/memory/import/discovery')return view;
+  if(path==='/api/mcp-import/found')return {rows:[{key:'c'.repeat(64),name:'calendar',transport:'stdio',target:'npx calendar',secretNames:['KEY'],sources:[{origin:'Claude',file:'/Users/x/.claude.json',key:'calendar'},{origin:'Codex',file:'/Users/x/.codex/config.toml',key:'calendar'}],state:'added',serverId:null,issue:null,env:{KEY:'sk-live-value'}}],girru:[{name:'dpro-memory',title:'Girru memory',apps:['Claude']}],skipped:0};
   if(path==='/api/mcp-import/scan')return {id:scanId,skipped:0,sources:[{id:sourceId,name:'files',origin:'claude',supported:true,issue:null}]};
   if(path==='/api/mcp-import/preview')return preview;
   if(path==='/api/mcp-import/import')return {id:'00000000-0000-0000-0000-000000000009',duplicate:false};
   throw Error('unexpected '+path);}};return {backend,calls};}
-test('found lists what the folder scan found: names, place and state only, read only',async()=>{
+test('found lists what was found elsewhere: names, places and state only, read only',async()=>{
  const f=fixture();
  const skills=await callTool('skill_library',{operation:'found'},{backend:f.backend});assert.notEqual(skills.isError,true);
  assert.deepEqual(skills.structuredContent.items,[{name:'content-studio',place:'agent_player',state:'new'}]);
  const mcp=await callTool('workspace_apps',{operation:'found'},{backend:f.backend});assert.notEqual(mcp.isError,true);
- assert.deepEqual(mcp.structuredContent.items,[{name:'calendar',place:'This computer',state:'in Girru'}]);
+ assert.deepEqual(mcp.structuredContent.rows,[{name:'calendar',state:'added',kind:'program',from:['Claude','Codex'],secretNames:['KEY']}]);
+ assert.deepEqual(mcp.structuredContent.girru,[{name:'Girru memory',writtenInto:['Claude']}]);
  const text=JSON.stringify([skills,mcp]);assert.doesNotMatch(text,/SKILL\.md|\.claude|private|SECRET-TEXT|sk-live|hidden-one|prod/);
- assert.ok(f.calls.every(c=>c.method==='GET'&&c.path==='/api/memory/import/discovery'));
+ assert.ok(f.calls.every(c=>c.method==='GET'&&['/api/memory/import/discovery','/api/mcp-import/found'].includes(c.path)));
  for(const [tool,args] of [['skill_library',{operation:'found',id:'x'}],['workspace_apps',{operation:'found',scanId}]]){const n=f.calls.length;assert.equal((await callTool(tool,args,{backend:f.backend})).isError,true);assert.equal(f.calls.length,n);}
 });
 test('adding what the folder scan found is refused with a clear owner-in-the-app message',async()=>{

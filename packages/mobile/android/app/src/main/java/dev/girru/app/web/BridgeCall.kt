@@ -29,8 +29,17 @@ sealed class BridgeCall {
     /** `pair.remove` → {removed}. The phone removes itself after a fresh unlock; this deletes its keys. */
     data class RemovePairing(override val id: String) : BridgeCall()
 
+    /**
+     * `api.call` {method, path, body} → {status, type, body}: one request of the
+     * chat page with a body, sent to the computer as a signed `api.call`.
+     * `body` is the request's text (JSON or empty).
+     */
+    data class ApiCall(override val id: String, val method: String, val path: String, val body: String) : BridgeCall()
+
     companion object {
         const val MAX_MESSAGE_CHARS = 4096
+        /** An `api.call` carries a request body (the computer takes up to 256 KiB). */
+        const val MAX_API_MESSAGE_CHARS = 300_000
         const val MAX_REASON_CHARS = 120
         val RELOCK_SECONDS = setOf(0, 15, 30, 60)
 
@@ -56,6 +65,13 @@ sealed class BridgeCall {
                 "pair.scan" -> if (args.isEmpty()) OpenScanner(id) else null
                 "notifications.permission" -> if (args.isEmpty()) NotificationPermission(id) else null
                 "pair.remove" -> if (args.isEmpty()) RemovePairing(id) else null
+                "api.call" -> {
+                    if (args.keys != setOf("method", "path", "body")) return null
+                    val m = (args["method"] as? String)?.takeIf { it in setOf("POST", "PUT", "PATCH", "DELETE") } ?: return null
+                    val path = (args["path"] as? String)?.takeIf { it.startsWith("/api/") && it.length <= 2048 && it.none { c -> c.isISOControl() } } ?: return null
+                    val body = args["body"] as? String ?: return null
+                    ApiCall(id, m, path, body)
+                }
                 else -> null
             }
         }

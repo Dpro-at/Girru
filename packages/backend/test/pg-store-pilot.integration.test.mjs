@@ -43,6 +43,7 @@ if (URL_) {
     events: await import('../src/memory/outbox/events.ts'),
     projection: await import('../src/memory/outbox/projection.ts'),
     cap: await import('../src/memory/bridge/capability.ts'),
+    keys: await import('../src/memory/project-keys.ts'),
   };
 }
 
@@ -77,7 +78,7 @@ test.after(async () => {
 const save = (content, drawer) => m.learning.saveVersioned(m.learning.newMemory(S.owner, drawer, { type: 'fact', importance: 6, content }, {}), 'test', 'test');
 
 test('triggers: events in the same transaction, none before opt-in, none after a rollback', { skip }, async () => {
-  const drawer = { kind: 'project', key: S.project.slug };
+  const drawer = { kind: 'project', key: m.keys.projectKeyOf(S.project) }; // the slug, or the id with GIRRU_STORE_P3 on
   await save('before opt-in', drawer);
   const scope = await m.events.enableScope(S.owner, S.project);
   S.scope = scope;
@@ -92,7 +93,7 @@ test('triggers: events in the same transaction, none before opt-in, none after a
   const storage = m.storage;
   await assert.rejects(m.steps.sql().tx(function* () { yield* storage.writeRowStep(doomed); throw new Error('boom'); }), /boom/);
   assert.equal((await all('SELECT seq FROM change_events WHERE scope = ?', scope)).length, 2);
-  await save('Beta fact', { kind: 'project', key: S.other.slug });
+  await save('Beta fact', { kind: 'project', key: m.keys.projectKeyOf(S.other) });
   assert.equal((await all('SELECT seq FROM change_events WHERE scope = ?', scope)).length, 2);
 });
 

@@ -57,6 +57,7 @@ test('backend env: loopback, random port, data dir, token; no unrelated variable
   assert.equal(env.PATH, '/bin');
   assert.equal(env.OPENAI_API_KEY, undefined);
   assert.equal(env.DATABASE_PATH, undefined);
+  assert.match(env.GIRRU_APP_VERSION, /^[A-Za-z0-9.+_-]{1,40}$/);
 });
 
 test('redactor removes secrets from log lines', () => {
@@ -238,4 +239,14 @@ test('stop during silent startup cancels without launching a retry', async t => 
   t.after(() => runtime.stop());
   const pending=assert.rejects(runtime.start(),/cancelled/);await launch;await runtime.stop();assert.ok(pids.every(pid=>!alive(pid)));await pending;
   assert.equal(pids.length,1);assert.ok(pids.every(pid=>!alive(pid)));
+});
+
+test('restart closes the old bridge and optional hosts before starting their replacements',async t=>{
+ const {restartLocalRuntime}=require('../src/local-runtime.cjs');
+ const dir=tmp();let hostClosed=false;
+ const runtime=createLocalRuntime({node:process.execPath,args:[FAKE],cwd:dir,dataDir:path.join(dir,'data'),baseEnv:{PATH:process.env.PATH},createBridge:options=>{const bridge=fakeBridge(options);bridge.on('close',()=>{hostClosed=true;});return bridge;}});
+ t.after(()=>runtime.stop());const started=await runtime.start(),pid=runtime.backendPid;
+ await restartLocalRuntime(runtime,async()=>{assert.equal(hostClosed,true);assert.equal(alive(pid),false);await assert.rejects(get(Number(new URL(started.url).port)));});
+ let starts=0;await restartLocalRuntime({stop:async()=>{}},()=>{starts++;},()=>true);assert.equal(starts,0);
+ await assert.rejects(restartLocalRuntime({stop:async()=>{throw Error('fixture stop failed');}},()=>{starts++;}));assert.equal(starts,0);
 });

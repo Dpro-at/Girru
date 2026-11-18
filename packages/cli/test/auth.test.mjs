@@ -21,8 +21,8 @@ let respond = () => ({ status: 200, body: {} });
 globalThis.fetch = async (url, init = {}) => {
   const call = { url: String(url), method: init.method, headers: init.headers || {}, body: init.body ? JSON.parse(init.body) : undefined };
   calls.push(call);
-  const { status, body } = respond(call);
-  return new Response(body === undefined ? '' : JSON.stringify(body), { status });
+  const { status, body, raw } = respond(call);
+  return new Response(raw ?? (body === undefined ? '' : JSON.stringify(body)), { status });
 };
 
 // Capture everything printed.
@@ -98,6 +98,17 @@ test('chat and other calls send the bearer token; chat uses the messages API', a
   assert.deepEqual(calls[0].body.messages, [{ role: 'user', content: 'hi' }]);
   assert.equal(calls[0].body.stream, false);
   for (const c of calls) assert.equal(c.headers.Authorization, `Bearer ${TOKEN}`);
+  noTokenPrinted();
+});
+
+test('chat projects completed SSE through the authenticated request adapter and rejects partial replies', async () => {
+  calls.length = 0;
+  const client = new ApiClient();
+  respond = () => ({ status: 200, raw: 'data: {"type":"text","content":"fixture answer"}\n\ndata: {"type":"done"}\n\n' });
+  assert.equal(await client.sendMessage('hi'), 'fixture answer');
+  assert.equal(calls[0].headers.Authorization, `Bearer ${TOKEN}`);
+  respond = () => ({ status: 200, raw: 'data: {"type":"text","content":"partial"}\n\n' });
+  await assert.rejects(client.sendMessage('hi'), /interrupted/);
   noTokenPrinted();
 });
 

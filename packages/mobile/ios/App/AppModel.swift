@@ -18,8 +18,9 @@ struct CommandReply: @unchecked Sendable {
 /// `run.end`; `RunEnd.reread` (`slow_link`) means read the rest with
 /// `chat.messages`, `RunEnd.failed` is shown as a plain failure.
 protocol ComputerLink: Sendable {
-    /// Sends a signed command and returns the computer's reply to it.
-    func call(_ command: SignedCommand, to computer: PairedComputer, signer: IdentitySigner) async throws -> CommandReply
+    /// Signs (with `sign`, right before sealing, so counters leave in order) and
+    /// sends one command; `stream` gets an `api.stream`'s events.
+    func call(signing sign: @escaping @Sendable () throws -> SignedCommand, to computer: PairedComputer, signer: IdentitySigner, stream: (@Sendable (StreamEvent) -> Void)?) async throws -> CommandReply
     /// Asks the computer whether this approval is still waiting for this phone.
     /// The answer comes over the session, so a forged push cannot fake it.
     func isPending(approvalId: String, on computer: PairedComputer, signer: IdentitySigner) async throws -> Bool
@@ -29,8 +30,13 @@ struct NotConnectedLink: ComputerLink {
     struct NotBuilt: LocalizedError {
         var errorDescription: String? { "Not sent: this version of Girru cannot reach your computer yet." }
     }
-    func call(_ command: SignedCommand, to computer: PairedComputer, signer: IdentitySigner) async throws -> CommandReply { throw NotBuilt() }
+    func call(signing sign: @escaping @Sendable () throws -> SignedCommand, to computer: PairedComputer, signer: IdentitySigner, stream: (@Sendable (StreamEvent) -> Void)?) async throws -> CommandReply { throw NotBuilt() }
     func isPending(approvalId: String, on computer: PairedComputer, signer: IdentitySigner) async throws -> Bool { throw NotBuilt() }
+}
+
+/// The app is locked: nothing is signed or sent.
+struct AppLocked: LocalizedError {
+    var errorDescription: String? { "Unlock Girru first." }
 }
 
 /// What the computer can answer that ends a pairing.
@@ -229,10 +235,45 @@ final class AppModel: ObservableObject {
     /// Signs `body` behind the app lock and sends it. The id is inside the
     /// signed body; the computer's gate checks it is pending and was sent to
     /// this phone before acting.
-    private func call(_ body: String, computer: PairedComputer, context: LAContext) async throws -> CommandReply {
+    private func call(_ body: String, computer: PairedComputer, context: LAContext, stream: (@Sendable (StreamEvent) -> Void)? = nil) async throws -> CommandReply {
         let signer = try DeviceIdentity.loadOrCreate(context: context)
-        let command = try CommandSigner(signer: signer, counter: MonotonicCounter(store: KeychainCounterStore()), crypto: crypto)
-            .sign(body: body, to: computer.computerId)
-        return try await link.call(command, to: computer, signer: signer)
+        let commandSigner = try CommandSigner(signer: signer, counter: MonotonicCounter(store: KeychainCounterStore()), crypto: crypto)
+        let to = computer.computerId
+        return try await link.call(signing: { try commandSigner.sign(body: body, to: to) }, to: computer, signer: signer, stream: stream)
+    }
+
+    // MARK: The app's own screens and the chat page
+
+    /// Signs `body` behind the app lock and sends it. A refusal that ends the
+    /// pairing ends it here; every accepted command renews the lifetime.
+    func send(_ body: String, stream: (@Sendable (StreamEvent) -> Void)? = nil) async throws -> CommandReply {
+        guard let computer else { throw LinkRefusal.unknownDevice }
+        guard lock.isUnlocked, let context = lock.context else { throw AppLocked() }
+        let r = try await call(body, computer: computer, context: context, stream: stream)
+        if r.ok {
+            recordAuthenticatedUse()
+        } else {
+            switch r.error {
+            case "expired": computerRefused(.expired)
+            case "revoked": computerRefused(.revoked)
+            case "unknown_device": computerRefused(.unknownDevice)
+            default: break
+            }
+        }
+        return r
+    }
+
+    /// Approve or Deny on the Approvals screen: the same steps as a notification
+    /// button (full view first when the preview was cut short), and Approve asks
+    /// Face ID again right before the key signs.
+    func decide(_ summary: ApprovalSummary, approve: Bool) async {
+        guard let computer else { return }
+        do {
+            try await run(ApprovalFlow.start(summary, approve: approve), approve: approve, sensitive: true, computer: computer)
+        } catch let e as LocalizedError where e.errorDescription != nil {
+            notice = e.errorDescription
+        } catch {
+            notice = "Could not send. Try again."
+        }
     }
 }

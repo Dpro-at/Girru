@@ -489,7 +489,8 @@ export class AgentOrchestrator {
     if (input.parentId) {
       const parent = this.tasks.get(input.parentId);
       if (parent) {
-        spawnDepth = (parent as any).spawnDepth + 1;
+        if(!Number.isSafeInteger(parent.spawnDepth)||parent.spawnDepth===undefined||parent.spawnDepth<0)throw new Error('Parent task provenance is unavailable');
+        spawnDepth = parent.spawnDepth + 1;
       }
     }
 
@@ -518,9 +519,9 @@ export class AgentOrchestrator {
     };
 
     // Add spawn metadata
-    (task as any).spawnDepth = spawnDepth;
-    (task as any).spawnedBy = input.spawnedBy;
-    (task as any).origin = input.origin;
+    task.spawnDepth = spawnDepth;
+    task.spawnedBy = input.spawnedBy;
+    task.origin = input.origin;
 
     this.tasks.set(id, task);
 
@@ -932,7 +933,7 @@ export class AgentOrchestrator {
   getActiveChildrenCount(agentId: string): number {
     return Array.from(this.tasks.values()).filter(
       (t) =>
-        (t as any).spawnedBy === agentId &&
+        t.spawnedBy === agentId &&
         !['completed', 'failed', 'cancelled'].includes(t.status)
     ).length;
   }
@@ -1025,9 +1026,9 @@ export class AgentOrchestrator {
       task.error || null,
       task.retryCount,
       task.maxRetries,
-      (task as any).spawnDepth || 0,
-      (task as any).spawnedBy || null,
-      (task as any).origin || null
+      task.spawnDepth || 0,
+      task.spawnedBy || null,
+      task.origin || null
     );
   }
 
@@ -1058,7 +1059,7 @@ export class AgentOrchestrator {
       spawnDepth: row.spawn_depth || 0,
       spawnedBy: row.spawned_by || undefined,
       origin: row.origin || undefined,
-    } as Task;
+    };
   }
 
   /**

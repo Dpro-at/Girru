@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // DESIGN-FIND-01 + PROJECT-TECH-01 backend and the discovery split: a scan finds
 // a project's design (Tailwind, CSS variables, brand kit, DESIGN.md rules, logos)
 // and its local databases (SQLite table names from a copy, .env DB_* names,
@@ -16,7 +17,7 @@ import { pathToFileURL } from 'node:url';
 import Database from 'better-sqlite3';
 
 const loadFile = (file) => import(pathToFileURL(file).href);
-const backendDir = process.cwd();
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ap-design-db-')));
 const home = join(dir, 'home');
 mkdirSync(join(dir, '.data'), { recursive: true });
@@ -307,4 +308,43 @@ test('discovered rules require exact owner confirmation and changed text loses a
   assert.equal((await D.getDesign(OWNER, SLUG, home)).rules[0].confirmed, false); assert.equal(decisions, 2); withdrawal.cancel();
 
   assert.ok(!out.content[0].text.includes('\n# SYSTEM:'));
+});
+
+test('durable encrypted hold blocks design projection without disabling the owner switch',async()=>{
+ const D=await loadFile(join(backendDir,'src/memory/project-design.ts'));
+ const E=await loadFile(join(backendDir,'src/memory/outbox/events.ts'));
+ const H=await loadFile(join(backendDir,'src/memory/encryption/projection-hold.ts'));
+ const {sqliteStepsOn}=await loadFile(join(backendDir,'src/repositories/sql-steps.ts'));
+ const runner=sqliteStepsOn(db.getDb()),scope=await E.enableScope(OWNER,{id:SLUG,slug:SLUG});
+ await D.patchDesign(OWNER,SLUG,{writeFile:true},home);
+ const before=designFile(),hold=await runner.tx(()=>H.claimEncryptedProjectionHoldStep(OWNER,scope));
+ try{
+  const result=await D.patchDesign(OWNER,SLUG,{writeFile:true},home);
+  assert.equal(result.file.problem,'Encrypted memory projection hold');
+  assert.equal(result.writeFile,true);
+  assert.equal(designFile(),before);
+ }finally{await runner.tx(()=>H.releaseEncryptedProjectionHoldStep(OWNER,scope,hold.id,hold.generation));}
+ assert.equal((await D.patchDesign(OWNER,SLUG,{writeFile:true},home)).file.problem,null);
+});
+
+test('P3 design hold resolves a legacy slug to a distinct project id; key migration refuses held owner',async()=>{
+ const old=process.env.GIRRU_STORE_P3;process.env.GIRRU_STORE_P3='1';
+ const D=await loadFile(join(backendDir,'src/memory/project-design.ts'));
+ const E=await loadFile(join(backendDir,'src/memory/outbox/events.ts'));
+ const H=await loadFile(join(backendDir,'src/memory/encryption/projection-hold.ts'));
+ const K=await loadFile(join(backendDir,'src/memory/project-keys.ts'));
+ const {sqliteStepsOn}=await loadFile(join(backendDir,'src/repositories/sql-steps.ts'));
+ const runner=sqliteStepsOn(db.getDb()),id='synthetic-distinct-design-id';let hold,scope;
+ try{
+  db.prepare('INSERT INTO chat_projects(id,user_id,name,slug) VALUES(?,?,?,?)').run(id,OWNER,'Synthetic design',SLUG);
+  scope=await E.enableScope(OWNER,{id,slug:SLUG});hold=await runner.tx(()=>H.claimEncryptedProjectionHoldStep(OWNER,scope));
+  const before=designFile();
+  assert.equal((await D.patchDesign(OWNER,SLUG,{writeFile:true},home)).file.problem,'Encrypted memory projection hold');
+  assert.equal(designFile(),before);
+  await assert.rejects(runner.tx(()=>K.moveProjectKeysStep(OWNER,'id')),/encrypted projections are held/);
+ }finally{
+  if(hold)await runner.tx(()=>H.releaseEncryptedProjectionHoldStep(OWNER,scope,hold.id,hold.generation));
+  db.prepare('DELETE FROM chat_projects WHERE id=?').run(id);
+  if(old===undefined)delete process.env.GIRRU_STORE_P3;else process.env.GIRRU_STORE_P3=old;
+ }
 });

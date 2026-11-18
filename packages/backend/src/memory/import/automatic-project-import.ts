@@ -55,10 +55,12 @@ async function run(user:string,opts:Options){
   const previous=await latestImportJob(user);
   if(previous&&previous.done<previous.total){await patch(user,s=>({...s,status:'review',lastImported:memoryCount,lastProposed:memoryCount,notice:`${memoryCount} structured memory files saved. Project notes wait for the current import or local model; saved progress is retained.`}));return;}
   const saved=await read(user),known=await importedSessions(user),ids=new Set<string>((saved.pending??[]).filter(id=>!known.has(id)));let cursor=saved.cursor;
+  // Every note seen so far comes back on each page: a turned-down note (someone else's repository) is checked once per run.
+  const checked=new Set<string>(ids);
   if(!saved.scanningComplete)do{
    if(!await allowed())return;
    const page:ScanPage=opts.scan?await opts.scan(user,cursor):await scanProjectDocuments(user,{auto:true,...(cursor?{cursor}:{})},{purpose:'watch',...(opts.home?{home:opts.home}:{})});
-   for(const id of page.allDocumentIds??page.documents.map(doc=>doc.id))if(!known.has(id)&&!ids.has(id)&&await structured.automaticNoteSource(user,id,opts.home??os.homedir()))ids.add(id);
+   for(const id of page.allDocumentIds??page.documents.map(doc=>doc.id))if(!known.has(id)&&!checked.has(id)){checked.add(id);if(await structured.automaticNoteSource(user,id,opts.home??os.homedir()))ids.add(id);}
    for(const home of page.memoryHomes??[])memoryHomes.add(home);
    denied=page.deniedRoots??0;unavailable=page.unavailableRoots??0;skipped=page.skippedFiles??0;
    cursor=page.nextCursor??undefined;
@@ -87,9 +89,17 @@ export async function runDueAutomaticImports(opts:Options={}){
  const jobs:Promise<void>[]=[];
  for(const name of files){if(!/^[a-f0-9]{64}\.json$/.test(name))continue;const s=JSON.parse(await fs.readFile(path.join(folder(),name),'utf8')) as Saved;
   if(!s.enabled||(s.nextRun>(opts.now??Date.now())&&!['scanning','importing'].includes(s.status))||active.has(s.userId))continue;
+  // MEM-READ-01 MR9: while night work is on it runs this import at night; the 15/30/60-minute timer leaves it alone (a running import still finishes).
+  if(!['scanning','importing'].includes(s.status)&&await import('../night-work.js').then(n=>n.nightWorkOn(s.userId)).catch(()=>false))continue;
   const promise=(async()=>{const owner=await q.one<{role:string;status:string}>('SELECT role,status FROM users WHERE id=?',s.userId);if(owner?.role==='owner'&&owner.status==='active')await run(s.userId,opts);})().finally(()=>active.delete(s.userId));active.set(s.userId,promise);jobs.push(promise);
  }
  await Promise.allSettled(jobs);
+}
+/** MR9: night work runs this owner's import now (the same batches and cursor; only when the owner turned this import on). */
+export async function runAutomaticImportNow(user:string,opts:Options={}){
+ if(active.has(user)){await active.get(user);return;}
+ const s=await read(user);if(!s.enabled)return;
+ const promise=run(user,opts).finally(()=>active.delete(user));active.set(user,promise);await promise;
 }
 export function startAutomaticProjectImports(){if(timer)return;stopped=false;timer=setInterval(()=>{void runDueAutomaticImports().catch(()=>{});},15000);timer.unref();void runDueAutomaticImports().catch(()=>{});}
 export async function stopAutomaticProjectImports(){stopped=true;clearInterval(timer);timer=undefined;await Promise.allSettled([...active.values()]);}

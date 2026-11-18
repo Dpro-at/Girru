@@ -10,6 +10,8 @@
 
 import type { Tool, ToolResult, ToolExecutionContext } from '../types.js';
 import { toolMemoryUser, toolOwnerTurn } from './scope.js';
+import { hideKeysInText, recordHiddenKeys } from '../../memory/hidden-keys.js';
+import { redactImportText } from '../../memory/import/redact.js';
 import { one, sql } from '../../repositories/sql-steps.js';
 import type { AgentChangeResult } from '../../memory/learning.js';
 import { repositories } from '../../repositories/index.js';
@@ -22,7 +24,7 @@ import { ScopeError } from '../../repositories/scope.js';
  */
 async function boardRunRefusal(context: ToolExecutionContext | undefined, memoryId: string): Promise<string | null> {
   if (toolOwnerTurn(context)) return null;
-  const row = await sql().read(one<{ source_agent_id: string | null }>('SELECT source_agent_id FROM memories WHERE id = ? AND user_id = ?', memoryId, toolMemoryUser(context)));
+  const row = await sql().read(one<{ source_agent_id: string | null }>("SELECT source_agent_id FROM memories WHERE id = ? AND user_id = ? AND COALESCE(drawer_kind, '') <> 'agent'", memoryId, toolMemoryUser(context)));
   return row && row.source_agent_id && row.source_agent_id === context?.agentId ? null
     : "in a board task run only memories this agent saved can be changed; ask the owner";
 }
@@ -37,6 +39,13 @@ async function change(context: ToolExecutionContext | undefined, input: Paramete
     if (err instanceof ScopeError) return { status: 'refused', reason: err.message };
     throw err;
   }
+}
+
+/** MEM-VER-01: the version the agent read ("v3", "3" or 3); undefined when not given; null when malformed. */
+function versionParam(v: unknown): number | undefined | null {
+  if (v === undefined || v === null || v === '') return undefined;
+  const n = typeof v === 'number' ? v : Number(String(v).trim().replace(/^v/i, ''));
+  return Number.isInteger(n) && n >= 0 ? n : null;
 }
 
 function text(t: string, data?: Record<string, unknown>, error?: string): ToolResult {
@@ -71,10 +80,11 @@ later memory_save with that topic_key updates this memory.`,
       importance: { type: 'number', description: 'New importance 1-10' },
       reason: { type: 'string', description: 'Why the memory changes (kept in the history)' },
       topic_key: { type: 'string', description: 'Stable topic key, e.g. "favorite-editor" ("" removes it)' },
+      version: { type: 'string', description: 'The version memory_search showed (e.g. "v3"); the edit is refused if the memory changed since' },
     },
     required: ['id'],
   },
-  async execute(params: { id?: unknown; content?: unknown; importance?: unknown; reason?: unknown; topic_key?: unknown }, context?: ToolExecutionContext): Promise<ToolResult> {
+  async execute(params: { id?: unknown; content?: unknown; importance?: unknown; reason?: unknown; topic_key?: unknown; version?: unknown }, context?: ToolExecutionContext): Promise<ToolResult> {
     if (!toolMemoryUser(context)) return text('Error: no user for this memory', undefined, 'No user for this memory');
     if (typeof params.id !== 'string' || !params.id) return text('Error: id is required', undefined, 'id is required');
     if (params.content !== undefined && (typeof params.content !== 'string' || !params.content.trim())) {
@@ -83,15 +93,22 @@ later memory_save with that topic_key updates this memory.`,
     if (params.topic_key !== undefined && params.topic_key !== null && typeof params.topic_key !== 'string') {
       return text('Error: topic_key must be text', undefined, 'Invalid topic key');
     }
+    const version = versionParam(params.version);
+    if (version === null) return text('Error: version must look like "v3"', undefined, 'Invalid version');
+    // MEM-READ-01 MR2: keys in the new text are hidden (key store + lock chip), never stored in plain text.
+    const user = toolMemoryUser(context)!;
+    const hidden = typeof params.content === 'string' ? await hideKeysInText(user, params.content, 'memory').catch(() => null) : null;
     const result = await change(context, {
-      memoryId: params.id, op: 'update',
+      memoryId: params.id, op: 'update', ...(version !== undefined ? { expectedVersion: version } : {}),
       updates: {
-        content: params.content as string | undefined,
+        // If the key store failed, the keys are removed instead (never kept in plain text).
+        content: typeof params.content === 'string' ? redactImportText(hidden?.text ?? params.content).text : undefined,
         importance: typeof params.importance === 'number' ? params.importance : undefined,
         ...(params.topic_key !== undefined ? { topicKey: params.topic_key as string | null } : {}),
       },
       reason: typeof params.reason === 'string' ? params.reason : null,
     });
+    if (hidden?.hidden.length && (result as { status?: string }).status !== 'refused') await recordHiddenKeys(user, params.id, 'memory', hidden.hidden).catch(() => undefined);
     return answer(result, 'update', params.id);
   },
 };
@@ -107,14 +124,17 @@ To erase something completely because the owner said "forget this", use memory_f
     properties: {
       id: { type: 'string', description: 'Memory id' },
       reason: { type: 'string', description: 'Why the memory is deleted (kept in the history)' },
+      version: { type: 'string', description: 'The version memory_search showed (e.g. "v3"); the delete is refused if the memory changed since' },
     },
     required: ['id'],
   },
-  async execute(params: { id?: unknown; reason?: unknown }, context?: ToolExecutionContext): Promise<ToolResult> {
+  async execute(params: { id?: unknown; reason?: unknown; version?: unknown }, context?: ToolExecutionContext): Promise<ToolResult> {
     if (!toolMemoryUser(context)) return text('Error: no user for this memory', undefined, 'No user for this memory');
     if (typeof params.id !== 'string' || !params.id) return text('Error: id is required', undefined, 'id is required');
+    const version = versionParam(params.version);
+    if (version === null) return text('Error: version must look like "v3"', undefined, 'Invalid version');
     const result = await change(context, {
-      memoryId: params.id, op: 'delete',
+      memoryId: params.id, op: 'delete', ...(version !== undefined ? { expectedVersion: version } : {}),
       reason: typeof params.reason === 'string' ? params.reason : null,
     });
     return answer(result, 'delete', params.id);

@@ -18,6 +18,8 @@ import { orderedId } from '../repositories/ordered-id.js';
 import { all, dialect, one, run, sql, type Step } from '../repositories/sql-steps.js';
 import { nowText } from '../db/pg/dialect.js';
 import { normalizeDepartment } from './personality.js';
+import { departmentTable, storeP3Enabled } from './store-p3.js';
+import { syncDepartmentsStep } from './departments.js';
 import { BOARD_COLORS, BOARD_TEMPLATES, DEFAULT_TEMPLATE, boardTemplate, templateForDepartment } from './board-templates.js';
 
 export const PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const;
@@ -398,6 +400,21 @@ export function addColumn(ownerId: string, boardId: string, body: Record<string,
   }, { immediate: true });
 }
 
+/** CP13: the column with this name, made as the first column when the board has none yet (where tasks from the owner's other computers land). */
+export function ensureFirstColumn(ownerId: string, boardId: string, name: string): Promise<string> {
+  const title = line(name, 'name', 60);
+  return sql().tx(function* () {
+    yield* boardRow(ownerId, boardId);
+    const found = yield* one<{ id: string }>('SELECT id FROM board_columns WHERE board_id = ? AND lower(name) = lower(?)', boardId, title);
+    if (found) return found.id;
+    const r = yield* one<{ n: number; p: number | null }>('SELECT COUNT(*) AS n, MIN(position) AS p FROM board_columns WHERE board_id = ?', boardId);
+    if (Number(r?.n ?? 0) >= MAX_COLUMNS) throw bad(`A board can have at most ${MAX_COLUMNS} columns`);
+    const id = randomUUID();
+    yield* run('INSERT INTO board_columns (id, board_id, name, position) VALUES (?, ?, ?, ?)', id, boardId, title, (r?.p === null || r?.p === undefined ? 0 : Number(r.p)) - 1000);
+    return id;
+  }, { immediate: true });
+}
+
 export function renameColumn(ownerId: string, boardId: string, columnId: string, body: Record<string, unknown>): Promise<Board> {
   onlyKeys(body, ['name']);
   const name = line(body.name, 'name', 60);
@@ -409,11 +426,11 @@ export function renameColumn(ownerId: string, boardId: string, columnId: string,
   }, { immediate: true });
 }
 
-export function createCard(ownerId: string, boardId: string, body: Record<string, unknown>, opts: { conversationId?: string } = {}): Promise<BoardCard> {
+export function createCard(ownerId: string, boardId: string, body: Record<string, unknown>, opts: { conversationId?: string; guard?:()=>Step<void> } = {}): Promise<BoardCard> {
   return sql().tx(() => createCardSteps(ownerId, boardId, body, opts), { immediate: true });
 }
 
-export function* createCardSteps(ownerId: string, boardId: string, body: Record<string, unknown>, opts: { conversationId?: string } = {}): Step<BoardCard> {
+export function* createCardSteps(ownerId: string, boardId: string, body: Record<string, unknown>, opts: { conversationId?: string; guard?:()=>Step<void> } = {}): Step<BoardCard> {
   onlyKeys(body, ['columnId', 'title', 'description', 'priority', 'dueDate', 'agents', 'departments', 'type', 'startDate', 'cover', 'labels']);
   const title = line(body.title, 'title', MAX_TITLE);
   const type = body.type === undefined ? 'task' : cardType(body.type);
@@ -427,6 +444,7 @@ export function* createCardSteps(ownerId: string, boardId: string, body: Record<
   const deps = body.departments === undefined ? [] : departments(body.departments);
   datesOk(start, due);
     const d = yield* dialect();
+    if(opts.guard)yield* opts.guard();
     yield* boardRow(ownerId, boardId);
     const col = yield* columnOf(boardId, body.columnId);
     const total = yield* one<{ n: number }>('SELECT COUNT(*) AS n FROM board_cards WHERE board_id = ?', boardId);
@@ -446,7 +464,7 @@ export function* createCardSteps(ownerId: string, boardId: string, body: Record<
  * with the current card. Moving: `columnId` and optional `beforeCardId`
  * (null or absent = end of the column).
  */
-export function updateCard(ownerId: string, boardId: string, cardId: string, body: Record<string, unknown>): Promise<BoardCard> {
+export function updateCard(ownerId: string, boardId: string, cardId: string, body: Record<string, unknown>, effectGuard?:()=>Step<void>): Promise<BoardCard> {
   onlyKeys(body, ['expectedVersion', 'title', 'description', 'priority', 'dueDate', 'agents', 'departments', 'columnId', 'beforeCardId', 'archived', 'type', 'startDate', 'cover', 'labels']);
   const expected = body.expectedVersion;
   if (typeof expected !== 'number' || !Number.isInteger(expected) || expected < 1) throw new BoardError(400, 'invalid_version', 'expectedVersion is required');
@@ -468,7 +486,7 @@ export function updateCard(ownerId: string, boardId: string, cardId: string, bod
   const agents = body.agents === undefined ? undefined : idList(body.agents, 'agents', MAX_CARD_AGENTS);
   const deps = body.departments === undefined ? undefined : departments(body.departments);
   if (body.beforeCardId !== undefined && body.beforeCardId !== null && typeof body.beforeCardId !== 'string') throw bad('beforeCardId must be a card id or null');
-  return sql().tx(function* () {
+  return sql().tx(function* () {if(effectGuard)yield* effectGuard();
     const d = yield* dialect();
     yield* boardRow(ownerId, boardId);
     const card = yield* one<{ version: number; column_id: string; start_date: string | null; due_date: string | null; archived: number }>('SELECT version, column_id, start_date, due_date, archived FROM board_cards WHERE id = ? AND board_id = ?', cardId, boardId);
@@ -739,7 +757,8 @@ function boardDepartmentName(raw:string,key:string){
 export function syncDepartmentBoards(ownerId:string){
  return sql().tx(function*(){
   const sources=new Map<string,{key:string;name:string;display:string}>();
-  const registered=yield* all<{id:string;name:string}>('SELECT id,name FROM memory_departments WHERE owner_id = ? ORDER BY id',ownerId);
+  if(storeP3Enabled())yield* syncDepartmentsStep(ownerId); // P3: the one list first (memory's and the agents' departments)
+  const registered=yield* all<{id:string;name:string}>(`SELECT id,name FROM ${departmentTable()} WHERE owner_id = ? ORDER BY id`,ownerId);
   for(const d of registered){const key='registry:'+d.id;let name=boardDepartmentName(d.name,key);if(sources.has(name))name=name.slice(0,48)+'-'+createHash('sha256').update(key).digest('hex').slice(0,8);sources.set(name,{key,name,display:d.name});}
   // Agent configuration is the installation's company-wide team catalogue.
   const assigned=yield* all<{department:string}>('SELECT DISTINCT department FROM agents_config WHERE department IS NOT NULL AND department <> ? ORDER BY department','');

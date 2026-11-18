@@ -18,7 +18,7 @@ import { dirname, join, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const backend = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const ENTRIES = ['src/repositories/index.ts', 'src/api/app.ts', 'src/api/server.ts'].map((p) => join(backend, p));
+const ENTRIES = ['src/repositories/index.ts', 'src/api/app.ts', 'src/api/server.ts', 'src/api/server-main.ts'].map((p) => join(backend, p));
 const PG_PACKAGES = /^(pg|pg-pool|pg-types|pg-protocol|pg-connection-string|pg-cloudflare|pgpass)(\/|$)/;
 
 function stripComments(src) {

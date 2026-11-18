@@ -2,6 +2,7 @@ import { PersonalityPicker } from './PersonalityLibrary';
 import { DepartmentTile } from './StaffDirectory';
 import { libraryRpc, P, type Entry } from './personality-library';
 import { UiIcon } from './ui-icons';
+import { SetupOrb } from './SetupOrb';
 import { departmentIcon, departmentTone, tileStyle } from './agent-look';
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { PointerEvent as PointerEv, KeyboardEvent as KeyEv } from 'react';
@@ -22,7 +23,7 @@ const STARTERS = ['marketing', 'sales', 'support', 'development'];
  * FIRSTRUN-01 (FR3, FR4c): how many → departments → the split → hire. The same flow is the
  * Team step of setup and Agents › ⋯ › Plan a bigger company.
  */
-export function TeamFlow({ controller, mode, workspaceType, onBack, onHired, onClose }: { controller: CompanyController; workspaceType?: WorkspaceType; mode: 'setup' | 'planner'; onBack?: () => void; onHired?: () => void; onClose?: () => void }) {
+export function TeamFlow({ controller, mode, workspaceType, companyKind, onBack, onHired, onClose }: { controller: CompanyController; workspaceType?: WorkspaceType; companyKind?: string; mode: 'setup' | 'planner'; onBack?: () => void; onHired?: () => void; onClose?: () => void }) {
   const s = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const [query, setQuery] = useState('');
   const [other, setOther] = useState('');
@@ -47,7 +48,10 @@ export function TeamFlow({ controller, mode, workspaceType, onBack, onHired, onC
     const want = n <= 3 ? 1 : n <= 10 ? 3 : 4;
     const ids = s.catalogue?.departments.map(d => d.id) ?? [];
     if (!controller.getSnapshot().departments.length) for (const id of STARTERS.filter(x => ids.includes(x)).slice(0, want)) controller.toggleDepartment(id);
+    // ONBOARD-COMPANYTYPE-01: a kind answered at sign-up ticks the departments at once.
+    if (companyKind !== undefined) applyKind(companyKind);
   };
+  const applyKind = (id: string) => { if (id.startsWith('custom:')) { if (!controller.addCustom(id.slice(7))) return; } else if (id) controller.chooseKind(id); setKind(id); };
   const back = onBack ?? onClose;
 
   if (s.step === 'hiring' || s.step === 'done') {
@@ -112,7 +116,7 @@ export function TeamFlow({ controller, mode, workspaceType, onBack, onHired, onC
     const shown = q || allKinds ? found : found.slice(0, 13);
     return <KindStep workspaceType={workspaceType} kinds={shown} more={!q && !allKinds ? found.length - shown.length : 0} query={kindQuery} busy={busy}
       onQuery={setKindQuery} onMore={() => setAllKinds(true)} onBack={() => controller.back()}
-      onDone={id => { if (id.startsWith('custom:')) { if (!controller.addCustom(id.slice(7))) return; } else if (id) controller.chooseKind(id); setKind(id); }}/>;
+      onDone={applyKind}/>;
   }
 
   if (s.step === 'departments' && s.catalogue) {
@@ -122,8 +126,9 @@ export function TeamFlow({ controller, mode, workspaceType, onBack, onHired, onC
     return <section className="setup-pane" aria-label="Which departments?">
       <h2>Which departments?</h2>
       <p>{mainWork ? `Girru ticked what ${mainWork.label.toLowerCase()} work usually needs. Change it as you like.` : `Pick the work you need. Girru splits your ${s.total} ${s.total === 1 ? 'agent' : 'agents'} by what each department usually needs.`}</p>
-      {mainWork && <button type="button" className="setup-mainwork" aria-pressed disabled={busy} onClick={() => controller.toggleDepartment(mainWork.id)}>
-        <DepartmentTile department={mainWork.label} size={26}/><span><b>{mainWork.label}</b><small>Your main work</small></span><span className="badge setup-recommended">Your main work</span><UiIcon name="check" size={15}/></button>}
+      {mainWork && <div className="setup-mainwork-row"><button type="button" className="setup-mainwork" aria-pressed disabled={busy} onClick={() => controller.toggleDepartment(mainWork.id)}>
+        <DepartmentTile department={mainWork.label} size={26}/><span><b>{mainWork.label}</b><small>Your main work</small></span><UiIcon name="check" size={15}/></button>
+        {workspaceType === 'company' && <button type="button" className="link-button setup-mainwork-change" disabled={busy} onClick={() => setKind(null)}>Change</button>}</div>}
       <ul className="setup-departments">{list.map(d => { const on = s.departments.includes(d.id);
         return <li key={d.id}><button type="button" aria-pressed={on} disabled={busy} onClick={() => controller.toggleDepartment(d.id)}>
           <DepartmentTile department={d.label} size={26}/><span><b>{d.label}</b><small>{d.summary}</small></span>{on && <UiIcon name="check" size={15}/>}</button></li>; })}
@@ -254,12 +259,13 @@ export function personalityLine(share: Share, entries: readonly Pick<Entry, 'id'
 
 
 /** FR7a: one optional question before the departments, for a company or one person. */
-export function KindStep({ workspaceType, kinds, more, query, busy, onQuery, onMore, onBack, onDone }: { workspaceType?: WorkspaceType; kinds: readonly CompanyKind[]; more: number; query: string; busy: boolean;
-  onQuery: (q: string) => void; onMore: () => void; onBack: () => void; onDone: (id: string) => void }) {
-  const [pick, setPick] = useState('');
-  const [customKind, setCustomKind] = useState('');
+export function KindStep({ workspaceType, kinds, more, query, busy, orb, value, onQuery, onMore, onBack, onDone }: { workspaceType?: WorkspaceType; kinds: readonly Pick<CompanyKind, 'id' | 'label'>[]; more: number; query: string; busy: boolean;
+  orb?: boolean; value?: string; onQuery: (q: string) => void; onMore: () => void; onBack: () => void; onDone: (id: string) => void }) {
+  const [pick, setPick] = useState(value?.startsWith('custom:') ? '__custom' : value ?? '');
+  const [customKind, setCustomKind] = useState(value?.startsWith('custom:') ? value.slice(7) : '');
   const customValid = /^[\p{L}\p{N} _-]{1,64}$/u.test(customKind.trim());
-  return <section className="setup-pane" aria-label="What is your work?">
+  return <section className={orb ? 'setup-pane setup-intro' : 'setup-pane'} aria-label="What is your work?">
+    {orb && <SetupOrb/>}
     <h2>{workspaceType === 'company' ? 'What does your company do?' : workspaceType === 'individual' ? 'What do you do?' : 'What is your work?'}</h2>
     <p>Choose your main work. Girru suggests departments to help with it. You can change them or skip this.</p>
     <label className="setup-search"><UiIcon name="search" size={13}/><input type="search" aria-label="Search kinds of work" placeholder="Search" value={query} onChange={e => onQuery(e.target.value)}/></label>

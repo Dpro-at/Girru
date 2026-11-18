@@ -1,3 +1,4 @@
+import './fixtures/channel-library.mjs';
 // S0-Q.8: channel-originated chat turns (Telegram/Discord/Agent Connect senders)
 // get a restricted tool set, not the owner's full tools.
 // Run: node --import tsx --test test/channel-tools.test.mjs

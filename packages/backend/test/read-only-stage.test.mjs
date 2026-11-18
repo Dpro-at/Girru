@@ -288,7 +288,6 @@ test('writes are refused: chat POST (and SSE chat), memory approve, agents PUT, 
   assertReadOnly(await req('DELETE', '/api/agents/a1'), 'agents DELETE');
   assertReadOnly(await req('PATCH', '/api/agents/a1', { payload: {} }), 'PATCH');
   assertReadOnly(await req('POST', '/api/no-such-route', { payload: {} }), 'unknown POST');
-  assertReadOnly(await req('POST', '/api/public-chat/rooms', { payload: {}, auth: false }), 'anonymous public chat');
 });
 
 test('websocket upgrades and event streams are refused even on GET', async () => {

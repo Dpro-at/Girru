@@ -6,7 +6,7 @@
 import { Store, codeOf } from './memory-store';
 import type { Requester } from './memory-store';
 import { queryString } from './memory-pages-contract.js';
-import type { AccessOverview, AccessRule, DoctorReport, EffectiveAccess, ExplorerItem, ExplorerPage, PinnedFact, ProjectAction, ProjectApplied, ProjectExport, ProjectPreview, ScopeTree, TreeProject, WeeklySummary } from './memory-pages-contract.js';
+import type { AccessMode, PeriodSummary, ProjectDocuments, ProjectSize, AccessOverview, AccessRule, DoctorReport, EffectiveAccess, ExplorerItem, ExplorerPage, PinnedFact, ProjectAction, ProjectApplied, ProjectExport, ProjectPreview, ScopeTree, TreeProject, WeeklySummary } from './memory-pages-contract.js';
 import type { CacheMetrics } from './memory-recall-contract.js';
 
 export type Waiting = { total: number; important: number; conflicts: number; links: number; imported: number; files: number };
@@ -27,6 +27,8 @@ export type ScopeState = Readonly<{
   // A department or a project (M8)
   facts: readonly PinnedFact[]; factsBusy: boolean; topicKeys: readonly string[]; scopeWeek: number | null;
   usage: readonly Usage[] | null; usageChecked: number; rules: readonly AccessRule[];
+  /** MEM-READ-01 MR7: the open project's size in tokens (estimates). */
+  size?: ProjectSize | null;
   // Project actions
   action: ProjectAction | null; preview: ProjectPreview | null; previewBusy: boolean; previewNotice?: string; applied?: ProjectApplied;
 }>;
@@ -35,11 +37,18 @@ const WEEK = 7 * 86_400_000;
 const recentIn = (items: readonly { createdAt: string }[], now: number) => items.filter(i => now - Date.parse(`${i.createdAt}Z`) < WEEK).length;
 const record = (x: unknown): x is Record<string, any> => !!x && typeof x === 'object' && !Array.isArray(x);
 
+/** MR5: plain words for why an ask did not start. */
+const ASK_ERRORS: Record<string, string> = {
+  stays_local: 'This place stays on this computer. Ask an agent that uses a local model.',
+  model_unavailable: 'This agent has no model it can use now.', busy: 'Three asks are already running. Wait for one to finish.',
+  invalid_request: 'Say what should change in one line.', not_found: 'That agent is not there any more.',
+};
+
 export class MemoryScopesController extends Store<ScopeState> {
   #ticket = 0;
   constructor(client: Requester, private readonly now = () => Date.now()) {
     super({ phase: 'idle', tree: null, scope: 'company', find: '', open: [], agents: {}, recent: [], weekCount: null, weekMore: false, topics: null, mapEntities: null, mapLinks: null,
-      waiting: null, weekly: null, doctor: null, cacheHit: null, importStatus: null, readers: {}, facts: [], factsBusy: false, topicKeys: [], scopeWeek: null, usage: null, usageChecked: 0, rules: [],
+      waiting: null, weekly: null, doctor: null, cacheHit: null, importStatus: null, readers: {}, facts: [], factsBusy: false, topicKeys: [], scopeWeek: null, usage: null, usageChecked: 0, rules: [], size: null,
       action: null, preview: null, previewBusy: false }, client);
   }
 
@@ -50,12 +59,53 @@ export class MemoryScopesController extends Store<ScopeState> {
     try {
       const r = await this.req('GET', '/api/memory/scopes/tree' + (fresh ? '?fresh=1' : ''));
       if (r.status !== 200) { this.publish({ phase: 'error', notice: r.status === 401 || r.status === 403 ? 'Only the owner can open the memory here.' : 'Memory could not be loaded.' }); return; }
-      const tree = r.body as ScopeTree;
+      const raw = r.body as ScopeTree;
+      // MR3: library folders are never projects. They leave every project list and wait under Settings › Memory › Projects › Not projects.
+      const tree: ScopeTree = { ...raw, projects: raw.projects.filter(p => !p.notProject), notProjects: raw.projects.filter(p => p.notProject) };
       const open = first ? tree.departments.filter(d => d.projects > 0).slice(0, 1).map(d => d.id) : [...this.getSnapshot().open];
       this.publish({ phase: 'ready', tree, open });
       if (!Object.keys(this.getSnapshot().agents).length) void this.loadAgents();
       await this.loadScope();
     } catch { this.publish({ phase: 'error', notice: 'Memory could not be loaded (no connection).' }); }
+  }
+
+  /** MR3: "It's a project" (kind 'project') or "Not a project" (kind 'library'). True when saved; the tree reloads. */
+  async setProjectKind(slug: string, kind: 'project' | 'library'): Promise<boolean> {
+    try {
+      const r = await this.req('POST', `/api/memory/scopes/projects/${encodeURIComponent(slug)}/kind`, { kind });
+      if (r.status !== 200) return false;
+      await this.load(true);
+      return true;
+    } catch { return false; }
+  }
+
+  /** MEM-READ-01 MR6: Today / This week / Month from the project's handoffs (only periods with work). */
+  async summaries(slug: string): Promise<PeriodSummary[] | null> {
+    const r = await this.read<{ summaries: PeriodSummary[] }>(`/api/memory/scopes/projects/${encodeURIComponent(slug)}/summaries`);
+    return r ? r.summaries : null;
+  }
+  /** MEM-READ-01 MR6: the project's documents, Key files first. */
+  async documents(slug: string): Promise<ProjectDocuments | null> {
+    return this.read<ProjectDocuments>(`/api/memory/scopes/projects/${encodeURIComponent(slug)}/documents`);
+  }
+
+  /** MEM-READ-01 MR5: Ask an agent to change a document. A proposal only; nothing is saved. */
+  async askAgent(agentId: string, request: string, text: string, drawer?: string): Promise<{ text: string; note: string } | { error: string }> {
+    try {
+      const r = await this.req('POST', '/api/memory/scopes/ask-agent', { agentId, request, text, ...(drawer ? { drawer } : {}) });
+      if (r.status !== 200) return { error: ASK_ERRORS[(r.body as { code?: string } | null)?.code ?? ''] ?? 'The agent could not answer. Try again.' };
+      // A model can take minutes: read the job until its answer is there (at most 5 minutes).
+      const id = (r.body as { jobId: string }).jobId;
+      for (let i = 0; i < 200; i++) {
+        await new Promise(res => setTimeout(res, i < 5 ? 600 : 1500));
+        const j = await this.req('GET', `/api/memory/scopes/ask-agent/${encodeURIComponent(id)}`);
+        if (j.status !== 200) return { error: 'The agent could not answer. Try again.' };
+        const b = j.body as { state: string; text?: string; note?: string; error?: string };
+        if (b.state === 'done') return { text: b.text ?? '', note: b.note ?? '' };
+        if (b.state === 'error') return { error: b.error ?? 'The agent could not answer. Try again.' };
+      }
+      return { error: 'The agent took too long. Try again.' };
+    } catch { return { error: 'The agent could not answer (no connection).' }; }
   }
 
   async loadAgents() {
@@ -146,7 +196,31 @@ export class MemoryScopesController extends Store<ScopeState> {
       facts: facts?.facts ?? [], topicKeys: keys, scopeWeek: page ? recentIn(page.items, now) : null,
       rules: (access?.rules ?? []).filter(r => r.scope === scope || (scope.startsWith('project:') && r.scope === `department:${this.project()?.departmentId}`)),
     });
-    if (scope.startsWith('project:')) void this.loadUsage(t, scope.slice(8));
+    if (scope.startsWith('project:')) { void this.loadUsage(t, scope.slice(8)); void this.loadSize(t, scope.slice(8)); }
+  }
+
+  private async loadSize(t: number, slug: string) {
+    const size = await this.read<ProjectSize>(`/api/memory/scopes/projects/${encodeURIComponent(slug)}/size`);
+    if (t === this.#ticket) this.publish({ size: size ?? null });
+  }
+
+  /**
+   * MR7: a reader's level here, Read only or Read + write: the same project exception Settings › Memory › Access
+   * makes (previewed, then applied). Returns the undo, or null when it was not changed.
+   */
+  async setReaderWrite(slug: string, agentId: string, write: boolean): Promise<(() => Promise<boolean>) | null> {
+    const change = (w: boolean) => [{ op: 'set_rule' as const, scope: `project:${slug}`, agentId, drawerKind: 'project' as const, write: (w ? 'allow' : 'deny') as AccessMode }];
+    const run = async (w: boolean): Promise<boolean> => {
+      try {
+        const p = await this.req('POST', '/api/memory/access/preview', { changes: change(w) });
+        if (p.status !== 200) return false;
+        const a = await this.req('POST', '/api/memory/access/apply', { changes: change(w), expectedPreviewHash: (p.body as { previewHash: string }).previewHash, confirm: true });
+        if (a.status !== 200) return false;
+        this.publish({ usage: (this.getSnapshot().usage ?? []).map(u => (u.agentId === agentId ? { ...u, write: w, why: 'exception here' } : u)) });
+        return true;
+      } catch { return false; }
+    };
+    return (await run(write)) ? () => run(!write) : null;
   }
 
   /** Who may read this project's memory: effective access of the first agents (server checks each). */

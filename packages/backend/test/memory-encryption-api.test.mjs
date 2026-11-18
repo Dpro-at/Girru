@@ -1,0 +1,5 @@
+// Source-only API fixture, deferred until whole-task verification.
+import test from 'node:test';import assert from 'node:assert/strict';import Fastify from 'fastify';
+import {registerEncryptedMemoryLegacyGuard} from '../src/api/routes/encrypted-memory.ts';
+test('injected encrypted profile refuses legacy plaintext memory route handlers',async()=>{const app=Fastify();let legacyRan=false;registerEncryptedMemoryLegacyGuard(app);app.get('/api/memory/items',async()=>{legacyRan=true;return[];});try{const response=await app.inject('/api/memory/items');assert.equal(response.statusCode,503);assert.equal(legacyRan,false);}finally{await app.close();}});
+test('isolated encrypted runtime blocks indirect legacy bridge and chat fallbacks',async()=>{const app=Fastify();registerEncryptedMemoryLegacyGuard(app);let ran=false;for(const path of ['/api/memory-bridge/mcp/call','/api/chat','/api/import'])app.post(path,async()=>{ran=true;return{};});try{for(const path of ['/api/memory-bridge/mcp/call','/api/chat','/api/import'])assert.equal((await app.inject({method:'POST',url:path,payload:{}})).statusCode,503);assert.equal(ran,false);}finally{await app.close();}});

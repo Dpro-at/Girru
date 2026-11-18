@@ -46,8 +46,15 @@ button:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
 .failed h1 { margin:4px 0 0; font-size:24px; }
 .failed .reason { margin:0; }
 .failed .links { border-top:1px solid var(--line); padding-top:10px; }
+.failed .lead { margin:0; }
+.failed .error-id { margin:0; font-size:13px; }
+.failed [hidden] { display:none; }
 .progress-track { height:3px; overflow:hidden; border-radius:99px; background:var(--line); }
 .progress-track span { display:block; width:35%; height:100%; border-radius:inherit; background:var(--accent); animation:progress 1.6s ease-in-out infinite alternate; }
 @keyframes progress { from { transform:translateX(0); } to { transform:translateX(185%); } }
 @media (max-width:560px) { .welcome { width:calc(100vw - 36px); } .welcome h1 { font-size:24px; } }
 @media (prefers-reduced-motion:reduce) { .progress-track span { animation:none; width:100%; } }
+
+/* WIN-01: the window has no system bar; these pages can be dragged anywhere, their controls stay clickable. */
+html[data-desktop] body { -webkit-app-region: drag; }
+html[data-desktop] :is(button, a, input, select, textarea, label, summary, [role=button], [contenteditable=true]) { -webkit-app-region: no-drag; }

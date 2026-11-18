@@ -1,3 +1,5 @@
+import {meetingAudience} from './meeting-reply-intent.js';
+import { mentionedAgents } from '../agent/context/target.js';
 /** Group replies use the original agent runtime, one writer at a time. */
 import { randomUUID } from 'node:crypto';
 import { q } from '../repositories/sql-steps.js';
@@ -10,7 +12,7 @@ const MAX_PARTICIPANTS = 20;
 type Participant = { id: string; runId: string };
 type Row = { id: string; owner_id: string; session_id: string; participants: string; cursor: number; state: string; active_run_id: string; model: string | null };
 type Result = { code: number; body: Record<string, unknown>; retryAfter?: string };
-export type RoundTurn = { userId: string; role: string; c: Conversation; runId: string; message: string; model?: string; agentId?: string; images?: string[]; continuationMessageId?: string; onFinished?: (status: string) => Promise<void>; participantReply?: boolean; participantContext?: string; canStart?: () => Promise<boolean> };
+export type RoundTurn = { userId: string; role: string; c: Conversation; runId: string; message: string; queuedKey?: string; model?: string; agentId?: string; images?: string[]; continuationMessageId?: string; onFinished?: (status: string) => Promise<void>; participantReply?: boolean; participantContext?: string; canStart?: () => Promise<boolean> };
 type Starter = (input: RoundTurn) => Promise<Result>;
 const locks = new Map<string, Promise<unknown>>();
 const starting = new Set<string>();
@@ -46,25 +48,20 @@ async function requestedParticipants(input: RoundTurn): Promise<{ ids: string[] 
     + '\nOnly the selected participant is answering this turn. Other participants can be addressed by name; the application dispatches their own turns. Never claim you will let somebody reply merely by saying so, never impersonate a colleague, and do not invent offline/online presence. If the intended participant is ambiguous, ask the owner which name and department they mean.';
   if (input.message.includes('@')) {
     const agents = await q.all<{ id: string; name: string }>('SELECT id,name FROM agents_config ORDER BY id LIMIT 5001');
-    const text = input.message.toLowerCase();
-    const named = agents.flatMap(a => {
-      const name = a.name?.trim().toLowerCase(); if (!name) return [];
-      const needle = `@${name}`; let from = 0;
-      while (from < text.length) {
-        const at = text.indexOf(needle, from); if (at < 0) break;
-        const next = text[at + needle.length];
-        if ((at === 0 || /\s/.test(text[at - 1])) && (!next || !/[\p{L}\p{N}_]/u.test(next))) return [{ id: a.id, name, at }];
-        from = at + needle.length;
-      }
-      return [];
-    }).sort((a, b) => a.at - b.at || b.name.length - a.name.length);
-    const unambiguous = named.filter(a => !named.some(b => b.at === a.at && b.name.length > a.name.length));
-    if (unambiguous.some((a, index) => unambiguous.some((b, other) => other !== index && b.at === a.at && b.name === a.name))) throw Error('ambiguous_group_mentions');
-    const ids = [...new Set(unambiguous.map(a => a.id))];
+    const ids = [...new Set(mentionedAgents(input.message, agents).map(a => a.id))];
     if (ids.length) return { ids, context };
   }
   if (collectiveReply(input.message)) return { ids: roster.map(person => person.id), context };
   const selection = conversationalSelection(input.message, roster, input.agentId);
+  if ((!selection.ids || selection.address==='group') && !selection.ambiguous) {
+    const meeting=await q.one<{id:string}>("SELECT id FROM meetings WHERE owner_id=? AND conversation_id=? AND state='active'",input.userId,input.c.id);
+    if(meeting){
+      const specialties=await q.all<{agent_id:string;name:string}>('SELECT s.agent_id,t.name FROM agent_specialties s JOIN specialty_templates t ON t.id=s.template_id JOIN meeting_participants p ON p.agent_id=s.agent_id WHERE p.meeting_id=? AND p.attending=1',meeting.id);
+      const audience=meetingAudience(input.message,roster.map(person=>({...person,specialties:specialties.filter(s=>s.agent_id===person.id).map(s=>s.name)})));
+      if(audience?.ambiguous)return {ids:[],context:context+'\nAsk which of these present participants the owner means; do not start several model replies for a singular job title (data): '+JSON.stringify(audience.ambiguous)};
+      if(audience)return {ids:audience.ids,context:context+(audience.ids.length?'\nThe owner explicitly invited these current meeting participants to reply. The coordinator answers first when included, then each selected attendee once in turn. For a presence check give a brief acknowledgement; for an opinion give your own concise contribution. Do not claim somebody is absent merely because they have not spoken yet. Do not request another automatic round.':'\nNo current attendee matches this department or job. Explain that; do not invite absent agents or pretend to speak for them.')};
+    }
+  }
   if (selection.ambiguous) return { ids: null, context: context + '\nAsk the owner to choose between these matching participants (data): ' + JSON.stringify(selection.ambiguous) };
   if (selection.others || selection.followup) {
     const questions=await q.all<{id:string;run_id:string;content:string}>("SELECT id,run_id,content FROM chat_messages WHERE session_id=? AND role='user' ORDER BY id DESC LIMIT 21",input.c.id);
@@ -111,7 +108,13 @@ export async function dispatchReplyRound(input: RoundTurn, start: Starter): Prom
     try {
       await q.run('INSERT INTO chat_reply_rounds(id,owner_id,session_id,participants,active_run_id,model) VALUES(?,?,?,?,?,?)', input.runId, input.userId, input.c.id, JSON.stringify(participants), input.runId, input.model ?? null);
       const result = await start({ ...input, agentId: participants[0].id, participantReply: true, canStart: () => roundAllows(input.runId, participants[0].runId), onFinished: status => finishMember(input.runId, participants[0].runId, status, start) });
-      if (result.code !== 202) await q.run("UPDATE chat_reply_rounds SET state='paused' WHERE id=?", input.runId);
+      if (result.code !== 202) {
+        if (input.queuedKey) {
+          // A pre-admission refusal may be retried with the same queue key.
+          // Discard only a fresh active reservation with no receipt; an owner Stop stays paused.
+          await q.run("DELETE FROM chat_reply_rounds WHERE id=? AND owner_id=? AND state='active' AND active_run_id=? AND NOT EXISTS (SELECT 1 FROM chat_run_journal WHERE run_id=?) AND NOT EXISTS (SELECT 1 FROM chat_messages WHERE run_id=? AND role='user')", input.runId, input.userId, input.runId, input.runId, input.runId);
+        } else await q.run("UPDATE chat_reply_rounds SET state='paused' WHERE id=?", input.runId);
+      }
       return { ...result, body: { ...result.body, replyRound: await replyRoundStatus(input.userId, input.c.id) } };
     } finally { starting.delete(input.runId); }
   });

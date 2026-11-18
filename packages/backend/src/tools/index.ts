@@ -1,5 +1,14 @@
+import { runCommandTool, runCommandOwnerTool } from './core/run-command.js';
+import {computerNativeTools} from '../devices/native.js';
+import {computerSyncApplyTool} from '../devices/sync-tool.js';
+import {syntheticComputerTools} from '../devices/tool.js';
+import {workspaceControlApplyTool,teamControlApplyTool} from './tasks/workspace-control.js';
+import {displayCatalogueTool} from './display-catalogue.js';
+import {reportPublishTool} from './tasks/report-publication.js';
+import {teamAdminTools} from './tasks/team-admin.js';
+import {mainAdminEligible,mainAdminEligibleSync} from './tasks/team-admin-authority.js';
 import {specialtyLibraryTool,specialtyApplyTool} from './specialties.js';
-import { teamListTool, teamDelegateTool, teamResultsTool } from './tasks/team.js';
+import { teamListTool, teamDelegateTool, teamDelegateToolP8, teamResultsTool } from './tasks/team.js';
 import { quickHelperTool, quickHelperResultTool } from './tasks/quick-helper.js';
 import {narrowProjectMemory,narrowProjectMemorySync} from './memory/project-access.js';
 /**
@@ -65,17 +74,22 @@ import {
   memoryMoveTool,
   memoryBridgeTool,
   memoryBridgeApplyTool,
+  projectSyncTool,
+  projectSyncApplyTool,
   memoryReviewTool,
   memoryReviewDecideTool,
   memoryReviewRoutineTool,
+  memoryPersonExportTool, memoryPersonForgetTool, memoryPrivacyReviewTool, memoryPrivacyDecideTool, memoryTrustReviewTool, memoryCorrectedCheckedTool, memoryQuestionAnswerTool, memoryQuestionForgetTool, projectTrustReviewTool, projectTrustApplyTool,
   memoryGraphReviewTool,
   memoryGraphTopicTool,
   memoryGraphSyncTool,
+  memoryLessonsTool,
+  memoryLessonsReviewTool,
   memoryRecallTool,
 } from './memory/index.js';
 
 import {
-  desktopControlTool,
+  desktopControlTool, openInCodeTool,
 } from './desktop/index.js';
 
 import {
@@ -98,10 +112,15 @@ import {
 } from './credentials/index.js';
 
 import { planStepsTool } from './plan/plan-steps.js';
+import { askChoiceTool } from './plan/ask-choice.js';
+import { sessionTools } from './tasks/sessions.js';
 import { askCodingAppTool } from './cli/ask-coding-app.js';
 import { boardSuggestCardTool } from './board/board-suggest.js';
+import { computerOfferTool } from './computer-offer.js';
 import { ruleSuggestTool } from './rules/rule-suggest.js';
-import { handoffReadTool, handoffSaveTool } from './handoff/handoff.js';
+import { handoffReadTool, handoffSaveTool, handoffSaveToolP8 } from './handoff/handoff.js';
+import { runNoteTool } from './handoff/run-note.js';
+import { storeP8Enabled } from '../services/store-p8.js';
 import { guideReadTool } from './skills/guide-read.js';
 import { storeP2Enabled } from '../services/agent-context/switch.js';
 import { boardCheckTool, boardChecklistTool, boardCommentTool, boardMoveTool, boardMyCardsTool, boardTaskUpdateTool } from './board/board-tools.js';
@@ -122,8 +141,9 @@ const extensionTools: Tool[] = [];
 /** Built-in tools, in registration order. */
 const CORE_TOOLS: Tool[] = [
   teamListTool, teamDelegateTool, teamResultsTool, quickHelperTool, quickHelperResultTool,
+  ...teamAdminTools,workspaceControlApplyTool,teamControlApplyTool,reportPublishTool,displayCatalogueTool,
   specialtyLibraryTool, specialtyApplyTool,
-  execTool, readTool, writeTool, editTool, webFetchTool, executeCodeTool,
+  execTool, runCommandTool, runCommandOwnerTool, readTool, writeTool, editTool, webFetchTool, executeCodeTool, // CP15: commands in the chat's project folder
   browserNavigateTool, browserScreenshotTool, browserExtractTool, browserInteractTool,
   memorySaveTool, memorySearchTool, memoryReflectTool, memoryStatsTool, memoryEditTool, memoryDeleteTool, memoryForgetTool, memoryGraphTool,
   memoryDoctorTool, memoryDoctorFixTool, memoryMoveTool,
@@ -131,9 +151,14 @@ const CORE_TOOLS: Tool[] = [
   projectDesignTool, projectDesignApplyTool, projectDatabasesTool, projectDatabasesApplyTool, // DESIGN-FIND-01 / PROJECT-TECH-01: reads for the project's runs; changes need owner approval
   memoryTrashTool, memoryRestoreTool, memoryTrashEmptyTool, memoryProjectTrashTool, memoryGroupsTool, memoryGroupApplyTool, // MEM-UX-02: owner-only Trash + groups; empty / project trash / group changes need owner approval
   memoryBridgeTool, memoryBridgeApplyTool, // MEM-BRIDGE-01: owner-only; apply needs owner approval
+  projectSyncTool, projectSyncApplyTool, // PROJECT-SYNC-01: one preview for files + handoff + facts; apply needs owner approval
   discoveryTool, discoveryApplyTool, // DISCOVER-01: what coding agents left on this computer; owner-only; apply needs owner approval
   phoneDevicesTool, // MOB-PAIR-01: the paired phones, read only and owner-only; no tool pairs, allows or forgets a phone
   memoryReviewTool, memoryReviewDecideTool, memoryReviewRoutineTool, memoryGraphReviewTool, memoryGraphTopicTool, memoryGraphSyncTool, memoryRecallTool, // owner's review inbox, topics + reply trace; decisions need owner approval
+  memoryLessonsTool, memoryLessonsReviewTool, // MEM-RSI-01: owner-only evidence-gated lessons; review (reverse/confirm/forget) needs owner approval
+  memoryPersonExportTool, memoryPersonForgetTool, memoryPrivacyReviewTool, memoryPrivacyDecideTool, // STORE-MAP-01 P9: one person, personal-data review (P9 only); export / forget / decide need owner approval
+  memoryTrustReviewTool, memoryCorrectedCheckedTool, memoryQuestionAnswerTool, memoryQuestionForgetTool, projectTrustReviewTool, projectTrustApplyTool, // STORE-MAP-01 P9b screens (P9b only): corrected after use, open questions; changes need owner approval
+  openInCodeTool, // CODE-OPEN-01: a file in a project or the data folder, at a line; needs owner approval
   desktopControlTool,
   storageSaveTool, storageSearchTool, storageDeleteTool,
   createReminderTool,
@@ -141,8 +166,11 @@ const CORE_TOOLS: Tool[] = [
   skillInstallTool,
   boardMyCardsTool, boardCommentTool, boardMoveTool, boardChecklistTool, boardCheckTool, boardTaskUpdateTool, // BOARD-02/03: only the agent's own board cards; TASKLOG-01: their task in the project's task file
   planStepsTool, // CHAT-PRO-02 H: the agent's own live task plan (self-only, no grant)
+  askChoiceTool, // CHAT-LIVE-01: the agent asks the owner to choose, with buttons (self-only, no grant)
+  ...sessionTools, // CHAT-ORCH-01: sub-sessions (start asks the owner; only coordinators in the owner's chat)
   ruleSuggestTool, // RULES-01: suggests a rule; only the owner turns it into one (self-only, no grant)
   boardSuggestCardTool, // CHAT-PRO-02 I step 2: suggests a board card; only the owner creates it (self-only, no grant)
+  computerOfferTool, // CP11a: offers steps for other computers; only the owner sends them (self-only, no grant)
   handoffSaveTool, handoffReadTool, // CORE-MEM-HANDOFF: the agent's own done/left/next note for its next session (self-only, no grant)
   askCodingAppTool, // CORE-ROUTE-01: ask the owner's Claude Code / Codex (granted per agent, approved per call, desktop app only)
 ];
@@ -207,7 +235,7 @@ function runScope(context: ToolExecutionContext): RunScope {
  * throws when an agentId is given; use createAgentToolsRegistry).
  */
 export function createToolsRegistry(context: ToolExecutionContext): ToolsRegistry {
-  context={...context,memoryDrawers:narrowProjectMemorySync(context)};
+  context={...context,memoryDrawers:narrowProjectMemorySync(context),teamAdminAvailable:mainAdminEligibleSync(context)};
   // MCP tools: the cache or a synchronous SQLite read; on PostgreSQL the
   // cache only (B2.2c; use createAgentToolsRegistry to get them for sure).
   const registry = buildToolsRegistry(context, getMcpToolsSync());
@@ -231,7 +259,7 @@ export function createToolsRegistry(context: ToolExecutionContext): ToolsRegistr
  * drivers; B2.2b-3). Use it wherever the caller can await.
  */
 export async function createAgentToolsRegistry(context: ToolExecutionContext): Promise<ToolsRegistry> {
-  context={...context,memoryDrawers:await narrowProjectMemory(context)};
+  context={...context,memoryDrawers:await narrowProjectMemory(context),teamAdminAvailable:await mainAdminEligible(context)};
   const registry = buildToolsRegistry(context, await getMcpTools());
   if (!context.grants) {
     registry.updateContext({
@@ -246,16 +274,31 @@ export async function createAgentToolsRegistry(context: ToolExecutionContext): P
   return registry;
 }
 
+/**
+ * STORE-MAP-01 P8: the run's model is not on this computer (the Claude API, a
+ * coding app). While P8 is on it also gets run_note, handoff_save with blockers
+ * and files, and team_delegate with a structured handoff; a local model keeps
+ * today's tools byte for byte (LOCAL-ONLY-01). Nothing happens with P8 off.
+ */
+export function useRemoteModelTools(registry: ToolsRegistry): void {
+  if (!storeP8Enabled()) return;
+  registry.updateContext({ remoteModel: true });
+  for (const tool of [handoffSaveToolP8, runNoteTool, teamDelegateToolP8]) registry.register(tool);
+}
+
 function buildToolsRegistry(context: ToolExecutionContext, mcpTools: Tool[]): ToolsRegistry {
   const registry = new ToolsRegistry(context);
 
   // Register core tools (CLI bridges gemini_cli/claude_cli stay unregistered)
-  for (const tool of CORE_TOOLS) {
+  for (const tool of [...CORE_TOOLS,...syntheticComputerTools(),computerSyncApplyTool,...computerNativeTools]) {
     registry.register(tool);
   }
 
   // STORE-MAP-01 P2 (AG1): skills and specialties by name, the full text on demand.
   if (storeP2Enabled()) registry.register(guideReadTool);
+
+  // STORE-MAP-01 P8: the P8 tool variants, only for a model that is not on this computer (LOCAL-ONLY-01).
+  if (context.remoteModel) useRemoteModelTools(registry);
 
   // Register extension-provided tools
   for (const tool of extensionTools) {

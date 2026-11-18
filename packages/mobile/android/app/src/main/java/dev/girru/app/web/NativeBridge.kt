@@ -27,6 +27,8 @@ class NativeBridge(private val origin: WebOrigin, private val handler: Handler) 
         fun openScanner(): Boolean
         fun requestNotificationPermission(done: (Boolean) -> Unit)
         fun removePairing(done: (Boolean) -> Unit)
+        /** One chat page request with a body; [done] gets {status, type, body text}. */
+        fun apiCall(method: String, path: String, body: String, done: (Int, String, String) -> Unit)
     }
 
     fun install(webView: WebView): Boolean {
@@ -49,7 +51,7 @@ class NativeBridge(private val origin: WebOrigin, private val handler: Handler) 
     private fun onMessage(message: WebMessageCompat, sourceOrigin: Uri, isMainFrame: Boolean, reply: JavaScriptReplyProxy) {
         if (!isMainFrame || !origin.matches(sourceOrigin.toString())) return
         val text = message.data ?: return
-        if (text.length > BridgeCall.MAX_MESSAGE_CHARS) return
+        if (text.length > BridgeCall.MAX_API_MESSAGE_CHARS) return
         val obj = try {
             JSONObject(text)
         } catch (e: JSONException) {
@@ -64,6 +66,8 @@ class NativeBridge(private val origin: WebOrigin, private val handler: Handler) 
             else -> return fail(reply, id, "bad_request")
         }
         val call = BridgeCall.parse(obj.opt("method") as? String, id, args) ?: return fail(reply, id, "bad_request")
+        // Only a page request may be large; every other call stays small.
+        if (call !is BridgeCall.ApiCall && text.length > BridgeCall.MAX_MESSAGE_CHARS) return fail(reply, call.id, "bad_request")
         val locked = handler.isLocked()
         // While locked only the lock state is answered; everything else is refused.
         if (locked && call !is BridgeCall.LockState) return fail(reply, call.id, "locked")
@@ -85,6 +89,9 @@ class NativeBridge(private val origin: WebOrigin, private val handler: Handler) 
             }
             is BridgeCall.RemovePairing -> handler.removePairing { removed ->
                 ok(reply, call.id, JSONObject().put("removed", removed))
+            }
+            is BridgeCall.ApiCall -> handler.apiCall(call.method, call.path, call.body) { status, type, body ->
+                ok(reply, call.id, JSONObject().put("status", status).put("type", type).put("body", body))
             }
         }
     }

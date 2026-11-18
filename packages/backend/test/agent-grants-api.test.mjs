@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
+import { switchValueOn } from './helpers/switches.mjs';
 const backendDir = process.cwd();
 const dir = mkdtempSync(join(tmpdir(), 'ap-grants-api-'));
 mkdirSync(join(dir, '.data'), { recursive: true });
@@ -82,6 +83,9 @@ test('owner views grants with the available tool list', async () => {
   assert.equal((await app.inject({ method: 'GET', url: url('no-agent'), headers: auth('ga-owner') })).statusCode, 404);
 });
 
+// STORE-MAP-01 P2 (AG1): an agent may read its own guides (guide_read) wherever it runs; it is prompt text on demand, not a grant.
+const P2_ON = switchValueOn(process.env.GIRRU_STORE_P2 ?? '');
+const noGuide = (list) => list.filter((n) => n !== 'guide_read');
 test('owner changes grants; the change is audited and takes effect', async () => {
   const before = audits().length;
   const res = await put('ga-agent', { grants: ['read', { tool: 'telegram_send', scopes: { destinations: ['chat-1'] } }] });
@@ -99,7 +103,8 @@ test('owner changes grants; the change is audited and takes effect', async () =>
   assert.ok(meta.removed.includes('memory_search'));
 
   const reg = tools.createToolsRegistry({ workspaceDir: dir, agentId: 'ga-agent' });
-  assert.deepEqual(reg.getToolsForAPI().map((t) => t.name), ['read']);
+  assert.deepEqual(noGuide(reg.getToolsForAPI().map((t) => t.name)), ['read']);
+  assert.equal(reg.getToolsForAPI().some((t) => t.name === 'guide_read'), P2_ON);
 });
 
 test('invalid input is refused (and audited as a failure)', async () => {

@@ -7,7 +7,11 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 const columns = (sql) => {
   const out = {};
   for (const m of sql.replace(/--[^\n]*/g, '').matchAll(/CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\(([\s\S]*?)\);/gi)) {
-    out[m[1]] = m[2].split('\n').map((l) => l.trim()).filter((l) => /^[a-z_]\w*\s+\w/i.test(l) && !/^(PRIMARY|FOREIGN|UNIQUE|CHECK|CONSTRAINT)\b/i.test(l)).map((l) => l.split(/\s+/)[0].toLowerCase()).sort();
+    // Split on top-level commas (a table may keep all its columns on one line), not on lines.
+    const parts = []; let depth = 0, part = '';
+    for (const ch of m[2]) { if (ch === '(') depth++; if (ch === ')') depth--; if (ch === ',' && depth === 0) { parts.push(part); part = ''; } else part += ch; }
+    parts.push(part);
+    out[m[1]] = parts.map((l) => l.replace(/\s+/g, ' ').trim()).filter((l) => /^[a-z_]\w*\s+\w/i.test(l) && !/^(PRIMARY|FOREIGN|UNIQUE|CHECK|CONSTRAINT)\b/i.test(l)).map((l) => l.split(/\s+/)[0].toLowerCase()).sort();
   }
   return out;
 };

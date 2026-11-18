@@ -95,7 +95,7 @@ test('wiring: Allow once / Deny in the chat, a decision on the Approvals page an
   assert.match(m, /if \(r\.status === 200\) \{ setState\('allowed'\); onDecided\?\.\(\); return; \}/);
   assert.match(m, /if \(r\.status === 200\) onDecided\?\.\(\); \}/);
   const v = src('ChatView.tsx');
-  assert.match(v, /onDecided: \(\) => void controller\.pickUpContinuation\(\)/);
+  assert.match(v, /onDecided: \(\) => \{ void controller\.pickUpContinuation\(\); void controller\.refreshList\(\); \}/); // CP15: the waiting count follows the decision
   assert.match(v, /if \(mode === 'live' && active && s\.activeId\) void controller\.refreshActive\(\);/);
   const shell = src('SignedInShell.tsx');
   assert.match(shell, /const decided=useCallback\(\(\)=>\{reloadApprovals\(\);void chat\?\.pickUpContinuation\(\);\},\[reloadApprovals,chat\]\);/);

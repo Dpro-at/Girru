@@ -19,6 +19,9 @@ if (window.location.protocol === 'file:') {
     connect: url => ipcRenderer.invoke('dpro:connect', String(url)),
     useLocal: () => ipcRenderer.invoke('dpro:use-local'),
     retry: () => ipcRenderer.invoke('dpro:retry'),
+    updateFromFailed: () => ipcRenderer.invoke('dpro:failed-update'),
+    restoreFromFailed: () => ipcRenderer.invoke('dpro:failed-restore'),
+    otherWorkspace: () => ipcRenderer.invoke('dpro:failed-workspace'),
     openConnect: () => ipcRenderer.invoke('dpro:open-connect'),
     showLogs: () => ipcRenderer.invoke('dpro:show-log-folder'),
     onStartupStatus: callback => {
@@ -38,7 +41,8 @@ contextBridge.exposeInMainWorld('dproApp', {
     onReviewDecision: callback => { const listener = (_event,value) => callback(value); ipcRenderer.on('dpro:nabu-review-decision',listener); return () => ipcRenderer.removeListener('dpro:nabu-review-decision',listener); },
     status: () => ipcRenderer.invoke('dpro:nabu-status'),
     showCommands: () => ipcRenderer.invoke('dpro:nabu-commands'),
-    open: (folder, file, top, bottom, right = 0) => ipcRenderer.invoke('dpro:nabu-open', { folder, file: file ?? null, top, bottom, right }),
+    // CODE-OPEN-01: options { line?, note?, readOnly? } (sent only when given).
+    open: (folder, file, top, bottom, right = 0, options) => ipcRenderer.invoke('dpro:nabu-open', options && typeof options === 'object' && Object.keys(options).length ? { folder, file: file ?? null, top, bottom, right, options } : { folder, file: file ?? null, top, bottom, right }),
     select: (mode, top, bottom, right = 0) => ipcRenderer.invoke('dpro:nabu-select', { mode, top, bottom, right }),
     layout: (top, bottom, right = 0) => ipcRenderer.send('dpro:nabu-layout', { top, bottom, right }),
     onState: callback => {
@@ -50,7 +54,11 @@ contextBridge.exposeInMainWorld('dproApp', {
   chooseProjectFolders: options => ipcRenderer.invoke('dpro:choose-project-folders', options),
   openChatWindow: id => ipcRenderer.invoke('dpro:open-chat-window', String(id)),
   setSetupWindow: compact => ipcRenderer.invoke('dpro:setup-window', compact === true),
+  // WIN-01: the app menu (File, Edit, View, Window, Help) under the bar's ☰ button on Windows.
+  openAppMenu: (x, y) => ipcRenderer.invoke('dpro:app-menu', { x: Number(x), y: Number(y) }),
   revealFolder: folder => ipcRenderer.invoke('dpro:reveal-folder', String(folder)),
+  // CODE-OPEN-01: one file in Finder / Explorer (the fallback when Code is not installed).
+  revealFile: file => ipcRenderer.invoke('dpro:reveal-file', String(file)),
   info: () => ipcRenderer.invoke('dpro:app-info'),
   // MACAPP-01: updates of the installed app. The page reads and asks; installing is confirmed by the app itself.
   appUpdate: {
@@ -79,3 +87,30 @@ ipcRenderer.on('dpro:code-footer', (_event, id) => {
   const button = Array.from(document.querySelectorAll('.shell-footer button[aria-label]')).find(b => b.getAttribute('aria-label') === name || b.getAttribute('aria-label')?.startsWith(name + ','));
   button?.click();
 });
+
+// WIN-01: the page knows it is the window's bar (Mac or Windows), so its top bar can be dragged and leaves
+// room for the window buttons. On Windows the buttons take the bar's colours, light or dark.
+const desktopKind = process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'win' : '';
+if (desktopKind) {
+  const mark = () => { if (document.documentElement) document.documentElement.dataset.desktop = desktopKind; };
+  mark();
+  window.addEventListener('DOMContentLoaded', () => {
+    mark();
+    if (desktopKind !== 'win') return;
+    const hex = value => { const m = /^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)$/.exec(value || ''); if (!m || (m[4] !== undefined && Number(m[4]) === 0)) return null; return '#' + [m[1], m[2], m[3]].map(n => Number(n).toString(16).padStart(2, '0')).join(''); };
+    let last = '', queued = false;
+    const send = () => {
+      queued = false;
+      const bar = document.querySelector('.titlebar');
+      const color = hex(getComputedStyle(bar || document.body).backgroundColor) || hex(getComputedStyle(document.body).backgroundColor);
+      const symbol = hex(getComputedStyle(bar || document.body).color);
+      if (!color || !symbol || color + symbol === last) return;
+      last = color + symbol;
+      ipcRenderer.send('dpro:window-bar', { color, symbol });
+    };
+    const later = () => { if (!queued) { queued = true; requestAnimationFrame(send); } };
+    new MutationObserver(later).observe(document.documentElement, { attributes: true, subtree: true, childList: true, attributeFilter: ['data-theme', 'class'] });
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', later);
+    later();
+  });
+}

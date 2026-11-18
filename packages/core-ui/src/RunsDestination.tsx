@@ -1,3 +1,5 @@
+import {ComputerRunsRows} from './ComputerActivity';
+import {ComputerExecutionBadge} from './ComputerDevices';
 import {useCallback,useEffect,useMemo,useRef,useState,useSyncExternalStore} from 'react';
 import type {ReactNode} from 'react';
 import {createPortal} from 'react-dom';
@@ -8,6 +10,9 @@ import {ScheduledJobInspector} from './ScheduledTasks';
 import {ScheduleTaskSheet} from './ScheduleTaskSheet';
 import type {AgentChoice,ModelOption,Project} from './conversations';
 import {ScheduleSheet} from './ScheduleSheet';
+import {useStoreP8} from './store-switches';
+import {runNotesRef} from './task-links';
+import {RunWorkingNotes} from './RunNotes';
 
 /**
  * RUNS-01 (boards RN1–RN5): everything that runs in Girru, in one footer section. The sidebar
@@ -45,9 +50,10 @@ const hue=(id:string|null)=>{let h=0;for(const c of id??'girru')h=(h*31+c.charCo
 function Face({id,name,size=20}:{id:string|null;name:string|null;size?:number}){return id?<span className="runs-face" title={name??'Agent'} style={{inlineSize:size,blockSize:size,background:`hsl(${hue(id)} 45% 42%)`,fontSize:Math.round(size*.45)}} aria-hidden="true">{initial(name)}</span>:<span className="runs-face runs-face-girru" title="Girru" aria-hidden="true" style={{inlineSize:size,blockSize:size}}><UiIcon name="gear" size={Math.round(size*.6)}/></span>;}
 function State({state}:{state:RunState}){const s=STATE[state];return <span className="st-state runs-state" data-state={s.tone}><i aria-hidden="true"/>{s.label}</span>;}
 
-export function RunsDestination({client,active,sidebarSlot,request,agents=[],projects=[],models=[],onOpenChat,onOpenCard,onOpenAgent,onOpenApprovals,onOpenConnections}:{client:SessionClient;active:boolean;sidebarSlot?:HTMLElement|null;request?:{place:RunsPlace;n:number}|null;agents?:readonly AgentChoice[];projects?:readonly Project[];models?:readonly ModelOption[];onOpenChat:(id:string)=>void;onOpenCard:(boardId:string,cardId:string)=>void;onOpenAgent:(id:string)=>void;onOpenApprovals:()=>void;onOpenConnections?:()=>void}){
+export function RunsDestination({client,active,sidebarSlot,request,agents=[],projects=[],models=[],onOpenChat,onOpenCard,onOpenAgent,onOpenApprovals,onOpenConnections,onOpenComputers}:{onOpenComputers?:()=>void;client:SessionClient;active:boolean;sidebarSlot?:HTMLElement|null;request?:{place:RunsPlace;n:number}|null;agents?:readonly AgentChoice[];projects?:readonly Project[];models?:readonly ModelOption[];onOpenChat:(id:string)=>void;onOpenCard:(boardId:string,cardId:string)=>void;onOpenAgent:(id:string)=>void;onOpenApprovals:()=>void;onOpenConnections?:()=>void}){
  const session=useSyncExternalStore(client.subscribe,client.getSnapshot,client.getSnapshot);
  const owner=session.phase==='authenticated'&&session.user?.role==='owner';
+ const p8=useStoreP8(client);
  const [place,setPlace]=useState<RunsPlace>('running');
  useEffect(()=>{if(request)setPlace(request.place);},[request]);
  const [filter,setFilter]=useState<{agent?:string;project?:string}>({});
@@ -141,6 +147,7 @@ export function RunsDestination({client,active,sidebarSlot,request,agents=[],pro
    </header>
    {error&&<p role="alert" className="runs-error">{error}</p>}
    {(filter.agent||filter.project)&&<p className="runs-filter-note">Only {[filter.agent&&seen.agents.get(filter.agent),filter.project&&seen.projects.get(filter.project)].filter(Boolean).join(' · ')} <button type="button" className="link" onClick={()=>setFilter({})}>Show all</button></p>}
+   {(place==='running'||place==='waiting')&&<ComputerRunsRows waiting={place==='waiting'} onOpen={()=>onOpenComputers?.()}/>}
    <div className="runs-list" ref={list} role="listbox" aria-label={placeLabel}>
     {scheduled?(schedules===null?(!error&&<p role="status" className="fine-print">Loading schedules…</p>):!shownSchedules.length?<Empty place={place} searching={!!debounced||showPaused!=='all'} onClear={()=>{setQuery('');setShowPaused('all');}} onNew={owner?()=>setNewSchedule(true):undefined}/>:
      shownSchedules.map(s=><button key={s.id} type="button" role="option" aria-selected={selected===s.id} aria-current={selected===s.id?'true':undefined} className="runs-row runs-row-two" onClick={()=>setSelected(s.id)}>
@@ -166,7 +173,7 @@ export function RunsDestination({client,active,sidebarSlot,request,agents=[],pro
      sched.kind==='job'&&sched.link.jobId?<ScheduledJobInspector client={client} jobId={sched.link.jobId} active={active} onChanged={refresh} onOpenConnections={onOpenConnections} lastRuns={<LastRuns client={client} id={sched.id} tick={tick} onOpen={openRun}/>}/>:
      <OtherSchedule client={client} s={sched} tick={tick} onChanged={refresh} say={say} onOpenRun={openRun} onEditChat={id=>setChatSheet(id)} onOpenChat={onOpenChat} onOpenCard={onOpenCard} onOpenAgent={onOpenAgent}/>):
     !run?<p className="fine-print">{runs?.length?'Choose a run to see its steps and log.':'Details of a run show here.'}</p>:
-    <RunInspector run={run} detail={detail?.run.id===run.id?detail:null} failed={detailError} onOpenRun={id=>{const r=runs?.find(x=>x.id===id);if(r)setSelected(id);else openRunAny(id);}} onStop={()=>setStopping(run)} onRetry={()=>void retry(run)} onOpen={()=>open(run)} onApprovals={onOpenApprovals} onAgent={onOpenAgent} onCopy={t=>void copy(t)} canStop={canStop(run)} canRetry={canRetry(run)}/>}
+    <RunInspector notes={p8&&owner&&runNotesRef(run)?<RunWorkingNotes key={run.id} client={client} at={runNotesRef(run)!} live={run.state==='working'} onCopy={t=>void copy(t)}/>:null} run={run} detail={detail?.run.id===run.id?detail:null} failed={detailError} onOpenRun={id=>{const r=runs?.find(x=>x.id===id);if(r)setSelected(id);else openRunAny(id);}} onStop={()=>setStopping(run)} onRetry={()=>void retry(run)} onOpen={()=>open(run)} onApprovals={onOpenApprovals} onAgent={onOpenAgent} onCopy={t=>void copy(t)} canStop={canStop(run)} canRetry={canRetry(run)}/>}
   </aside>}
   {menu&&run&&!scheduled&&<div className="runs-menu" role="menu" style={{left:menu.x,top:menu.y}} onClick={e=>e.stopPropagation()}>
    {run.link.sessionId&&<button role="menuitem" onClick={()=>{setMenu(null);open(run);}}>Open chat<kbd>↩</kbd></button>}
@@ -196,11 +203,11 @@ function Why({reason}:{reason:Reason}){
  return <div className="runs-why" data-tone={tone}><p className="runs-why-title"><UiIcon name={reason.code==='needs_ok'?'hourglass':reason.code==='timed_out'?'clock':reason.bug?'bug':'alert'} size={15}/>{plain?reason.title:`Why it stopped: ${reason.title.toLowerCase()}`}</p><p>{reason.text}</p></div>;
 }
 
-function RunInspector({run,detail,failed,onOpenRun,onStop,onRetry,onOpen,onApprovals,onAgent,onCopy,canStop,canRetry}:{run:RunItem;detail:Detail|null;failed:boolean;onOpenRun:(id:string)=>void;onStop:()=>void;onRetry:()=>void;onOpen:()=>void;onApprovals:()=>void;onAgent:(id:string)=>void;onCopy:(t:string)=>void;canStop:boolean;canRetry:boolean}){
+function RunInspector({notes,run,detail,failed,onOpenRun,onStop,onRetry,onOpen,onApprovals,onAgent,onCopy,canStop,canRetry}:{notes?:ReactNode;run:RunItem;detail:Detail|null;failed:boolean;onOpenRun:(id:string)=>void;onStop:()=>void;onRetry:()=>void;onOpen:()=>void;onApprovals:()=>void;onAgent:(id:string)=>void;onCopy:(t:string)=>void;canStop:boolean;canRetry:boolean}){
  const opens=run.link.sessionId?'Open chat':run.agentId?'Open agent':null;
  return <div className="runs-insp">
   <p className="runs-insp-kind">{KIND[run.kind].label} · {STATE[run.state].label}<span className="runs-insp-tools">{detail&&<button type="button" className="tool" aria-label="Copy details" title="Copy details (⌘⇧C)" onClick={()=>onCopy(detail.copy)}><UiIcon name="copy" size={14}/></button>}</span></p>
-  <h3>{run.title}</h3>
+  <h3>{run.title}</h3><ComputerExecutionBadge sessionId={run.link.sessionId} runId={run.id}/>
   <dl className="runs-facts">
    <dt>Started by</dt><dd>{STARTED[run.startedBy]??'You'}</dd>
    {(run.agentName||run.agentId)&&<><dt>Agent</dt><dd><Face id={run.agentId} name={run.agentName} size={18}/>{run.agentId?<button type="button" className="link" onClick={()=>onAgent(run.agentId!)}>{run.agentName??'Agent'}</button>:run.agentName}</dd></>}
@@ -217,6 +224,7 @@ function RunInspector({run,detail,failed,onOpenRun,onStop,onRetry,onOpen,onAppro
    <section className="runs-sect"><h4>Steps</h4>{!detail.steps.length&&<p className="fine-print">No steps were saved for this run.</p>}<ol className="runs-steps">{detail.steps.map((s,i)=><li key={i} data-state={s.state}><span className="runs-step-dot" aria-hidden="true"><UiIcon name={s.state==='fail'?'close':s.state==='wait'?'hourglass':s.state==='now'?'play':s.state==='skip'?'minus':'check'} size={11}/></span><span><span>{s.title}</span><small>{s.meta}</small></span></li>)}</ol></section>
    <section className="runs-sect"><h4>Log<span className="runs-insp-tools"><button type="button" className="tool" aria-label="Copy the log" title="Copy the log" onClick={()=>onCopy(detail.log.map(l=>`${l.at} ${l.text}`.trim()).join('\n'))}><UiIcon name="copy" size={13}/></button></span></h4>
     <pre className="runs-log">{detail.log.map((l,i)=><span key={i}><b>{l.at}</b>{l.text}{'\n'}</span>)}{run.state==='working'&&<span className="runs-live"><i aria-hidden="true"/>live</span>}</pre></section>
+   {notes}
    {!!(detail.result.text||detail.result.tokensIn||detail.result.costCents)&&<section className="runs-sect"><h4>Result</h4>{detail.result.text&&<p className="runs-result">{detail.result.text}</p>}{!!(detail.result.tokensIn||detail.result.tokensOut)&&<p className="fine-print">{(detail.result.tokensIn??0).toLocaleString()} tokens in · {(detail.result.tokensOut??0).toLocaleString()} out{detail.result.costCents?` · ${(detail.result.costCents/100).toFixed(2)} EUR`:''}</p>}</section>}
    {run.reason?.detail&&<details className="runs-tech"><summary><UiIcon name="chevron" size={11}/>Technical details</summary><code>{run.reason.detail}</code></details>}
   </>}

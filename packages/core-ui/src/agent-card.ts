@@ -13,7 +13,7 @@ export type CardTab = 'profile' | 'persona' | 'permissions' | 'memory' | 'skills
 export type Grants = { version: number; granted: readonly string[]; available: readonly { name: string; description: string; requiresApproval: boolean; allowedByServer: boolean; execClass: boolean }[] };
 export type Permissions = { memoryRead: string[]; memoryWrite: string[]; sharedMemory: boolean; modes: Record<string, string>; version: number };
 export type ProfileDraft = { role: string; department: string; description: string; model: string };
-export type ModelOption = { id: string; provider: 'ollama' | 'claude' | 'lmstudio'; label: string; size: string };
+export type ModelOption = { id: string; provider: 'ollama' | 'claude' | 'lmstudio' | 'subscription'; label: string; size: string; available?: boolean };
 export type CardState = Readonly<{
   agentId: string; tab: CardTab; phase: 'loading' | 'ready' | 'saving' | 'error';
   agent?: PublicAgent; profile: ProfileDraft; models?: readonly ModelOption[];
@@ -32,7 +32,7 @@ export const TOOL_GROUPS = ['Memory', 'Board', 'Files', 'Internet and browser', 
 export type ToolGroup = (typeof TOOL_GROUPS)[number];
 /** Which group a tool belongs to, by its name. */
 export function toolGroup(name: string): ToolGroup {
-  if (/^mcp:/.test(name)) return 'Connectors';
+  if (/^mcp(?::|__)/.test(name)) return 'Connectors';
   if (/^memory_/.test(name)) return 'Memory';
   if (/^board_/.test(name)) return 'Board';
   if (/^(read|write|storage_)/.test(name)) return 'Files';
@@ -85,8 +85,8 @@ export class AgentCardController {
   private async loadModels() {
     try {
       const r = await this.get('/api/models');
-      // An agent's default model is Ollama or Claude; LM Studio models are picked per reply in the chat.
-      if (r.status === 200 && record(r.body) && Array.isArray(r.body.models)) this.publish({ models: (r.body.models as ModelOption[]).filter(m => m.provider === 'ollama'||m.provider==='claude') });
+      // An agent's default model is a signed-in coding app (Claude Code, Codex, Gemini), Ollama or Claude; LM Studio models are picked per reply in the chat.
+      if (r.status === 200 && record(r.body) && Array.isArray(r.body.models)) this.publish({ models: (r.body.models as ModelOption[]).filter(m => (m.provider === 'ollama'||m.provider==='claude'||m.provider==='subscription') && m.available !== false) });
     } catch { /* the model stays as it is */ }
   }
 
@@ -105,7 +105,8 @@ export class AgentCardController {
     if (d.description !== before.description) body.description = d.description;
     if (d.model !== before.model && d.model) {
       const m = this.#state.models?.find(x => x.id === d.model);
-      body.model = d.model; body.provider = m?.provider ?? (/^claude-/.test(d.model) ? 'claude' : 'ollama');
+      if (!m) { this.publish({ notice: 'That model is no longer in the backend catalogue. Reload the model list before saving.' }); return; }
+      body.modelSelection = m.id;
     }
     this.publish({ phase: 'saving' });
     try {
@@ -116,7 +117,7 @@ export class AgentCardController {
         this.publish({ phase: 'ready', agent, notice: 'Someone changed this agent meanwhile. The latest values are shown; your draft is kept — save again to apply it.' });
         return;
       }
-      this.publish({ phase: 'ready', notice: r.status === 400 ? 'The department must be lowercase letters, numbers, spaces, _ or - (up to 64).' : 'The profile was not saved.' });
+      this.publish({ phase: 'ready', notice: record(r.body) && r.body.code === 'invalid_model' ? 'The selected model is no longer available. Reload this page and choose again.' : r.status === 400 ? 'The department must be lowercase letters, numbers, spaces, _ or - (up to 64).' : 'The profile was not saved.' });
     } catch { this.publish({ phase: 'ready', notice: 'The profile was not saved (no connection).' }); }
   }
 

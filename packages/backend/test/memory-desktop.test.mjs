@@ -1,3 +1,4 @@
+import {fileURLToPath as backendFixtureFileURLToPath} from 'node:url';
 // MEM-UX-02 backend: memory Trash (MEM-TRASH-01) and groups of projects.
 // Delete moves a memory to the Trash (never recalled), Restore brings it back
 // whole, Empty forgets, the daily job forgets after trashDays; a project can
@@ -11,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-const backendDir = process.cwd();
+const backendDir = backendFixtureFileURLToPath(new URL('../',import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'ap-memdesk-'));
 mkdirSync(join(dir, '.data'), { recursive: true });
 process.chdir(dir);

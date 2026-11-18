@@ -1,382 +1,77 @@
-# Skills System
+# Skills
 
-Install AI skills from Skill Hub to extend your agents' capabilities.
+A skill is written guidance for an agent: a Markdown file (`SKILL.md`) that explains how to do one kind of work. A skill never grants tools, connections, memory or permissions. Those stay with the agent's grants and the owner's rules.
 
----
+## Where skills live
 
-## What are Skills?
+| Part | Where | Notes |
+|---|---|---|
+| Skill text | `<data>/skill-library/` | Content-addressed: the file name is the hash of its text, so one text is stored once and never changes in place |
+| The library list | the main database | One row per skill, pointing to the version in use |
+| Which agent follows which skill | the main database (assignments, with a revision number) | A change names the revision it read; a stale change is refused |
+| Skills that come with a specialty | the specialty's version | An agent with that specialty follows its skills too |
 
-Skills are structured AI prompts (`.md` files) that teach AI new capabilities.
+Everything is on the computer that runs Girru. See the [storage map](architecture/storage-map.md).
 
-**Example:** Email Writer skill teaches AI to write professional emails with proper structure.
+## Where skills come from
 
----
+- **Bundled:** Girru ships a set of skills and puts them in the library at start-up.
+- **The Store:** official skills come from the public Girru Store repository. Adding one from the Store asks for the owner's authenticator code, and every file is checked before it is added.
+- **Found on this computer:** the Skills window can look for skill packages that coding tools keep on this computer. Nothing there changes. The owner previews a package and adds it with its hash; an added skill stays unassigned.
 
-## Skill Sources
+The old skill marketplace (`/api/skills/marketplace/*`) is retired. With `GIRRU_STORE_P4` on it answers `410`.
 
-- **bundled** - Built into Girru
-- **managed** - Downloaded from Skill Hub
-- **workspace** - User-created in `.data/skills/`
+## Using skills
 
----
+The Skills window uses four words:
 
-## Skill Hub
+- **Add** a skill to Girru.
+- **Give** a skill to an agent.
+- **Update** an installed copy to a newer version.
+- **Take back** a skill from an agent.
 
-**Website:** https://www.skillhub.club/
+Giving, taking back and updating change what agents follow, so only the owner does them, in the app. An agent or a coding tool can read the library and add a found package on the owner's explicit instruction; it cannot give or take back skills. A skill that agents or specialties still use cannot be removed.
 
-**Thousands of community skills available:**
-- Coding & Development (Python, JavaScript, SQL, etc.)
-- Writing & Content (emails, articles, documentation)
-- Data Analysis (Excel, charts, statistics)
-- Business & Marketing (strategy, SEO, campaigns)
-- Design & Creative (UI/UX, branding, copy)
-- Research & Learning (summaries, Q&A, tutoring)
+### How an agent reads a skill
 
----
+With `GIRRU_STORE_P2` on, an agent's instructions list each of its skills and specialties by name and the first line of its description. The agent loads one skill's full text with the `guide_read` tool when its work needs it, and only its own skills. This keeps every turn small, which matters most for local models.
 
-## Installing Skills
+So the first line of a skill's description should be one clear sentence about what the skill is for.
 
-### Method 1: Via API
-
-```bash
-POST /api/skills/install
-Content-Type: application/json
-
-{
-  "content": "...(skill content from Skill Hub)...",
-  "name": "email-writer",
-  "source": "managed"
-}
-```
-
-### Method 2: Via File System
-
-```bash
-# Copy skill file to:
-.data/skills/managed/email-writer.md
-
-# Backend auto-detects and loads
-```
-
-### Method 3: From Skill Hub
-
-1. Go to https://www.skillhub.club/
-2. Browse skills by category
-3. Click on skill you want
-4. Copy the skill content
-5. Use API or file system method above
-
----
-
-## Skill File Format
+## Skill file format
 
 ```markdown
 ---
-name: Email Writer
-version: 1.0.0
-description: Write professional emails
-triggers: [email, write email, compose message]
-settings:
-  tone:
-    type: select
-    options: [formal, casual, friendly]
-    default: formal
+name: email-writer
+description: Write clear, polite business emails with a subject, a short body and one request.
 ---
 
-# Email Writer Skill
+# Email writer
 
-You are an expert email writer. When asked to write an email:
-
-1. Ask for:
-   - Recipient
-   - Purpose
-   - Key points
-
-2. Use {{ settings.tone }} tone
-
-3. Structure:
-   - Clear subject line
-   - Greeting
-   - Body (3-5 paragraphs)
-   - Professional closing
-
-4. Review for:
-   - Grammar
-   - Clarity
-   - Appropriate tone
+1. Start with the reason for the email in one sentence.
+2. ...
 ```
 
----
-
-## Using Skills
-
-### In Chat
-
-```
-User: Write an email to my manager about project delay
-
-AI: [Uses email-writer skill automatically if trigger matches]
-```
-
-### Via API
-
-```bash
-GET /api/skills
-# Lists all installed skills
-
-GET /api/skills/:id
-# Get specific skill details
-
-POST /api/skills/install
-# Install new skill
-
-PUT /api/skills/:id/enable
-# Enable skill
-
-PUT /api/skills/:id/disable
-# Disable skill
-
-DELETE /api/skills/:id
-# Delete skill
-```
-
----
-
-## Skill Settings
-
-Each skill can have customizable settings:
-
-```javascript
-// Get skill settings for user
-GET /api/skills/:skillId/settings?userId=xxx
-
-// Update settings
-PUT /api/skills/:skillId/settings
-{
-  "userId": "xxx",
-  "settings": {
-    "tone": "formal",
-    "language": "en"
-  }
-}
-```
-
----
-
-## Creating Your Own Skills
-
-### 1. Create Skill File
-
-`.data/skills/workspace/my-skill.md`:
-
-```markdown
----
-name: My Custom Skill
-version: 1.0.0
-description: My custom AI capability
-triggers: [my skill, custom action]
-settings:
-  option1:
-    type: text
-    default: "value"
----
-
-# My Custom Skill
-
-[Your skill instructions here...]
-```
-
-### 2. Backend Auto-Loads
-
-Backend watches `.data/skills/` and auto-loads new files.
-
-### 3. Test Skill
-
-Go to `/dashboard/chat` and trigger your skill:
-
-```
-User: Use my skill to do something
-```
-
----
-
-## Skill Categories on Skill Hub
-
-**Popular categories:**
-
-### Coding & Development
-- Code review and refactoring
-- Bug fixing assistant
-- API documentation generator
-- Test case writer
-- Database query optimizer
-
-### Writing & Content
-- Blog post writer
-- Email composer
-- Social media posts
-- Technical documentation
-- Creative storytelling
-
-### Data Analysis
-- Excel formula helper
-- Chart and graph creator
-- Statistical analysis
-- Data cleaning
-- Report generator
-
-### Business & Marketing
-- SWOT analysis
-- Marketing strategy
-- SEO optimizer
-- Business plan writer
-- Competitor analysis
-
-### Design & Creative
-- UI/UX feedback
-- Color palette generator
-- Branding ideas
-- Copywriting
-- Design critique
-
----
-
-## Best Practices
-
-### Choosing Skills
-
-✅ **Do:**
-- Read skill description carefully
-- Check triggers (what activates it)
-- Review settings available
-- Test with simple inputs first
-
-❌ **Don't:**
-- Install skills you won't use
-- Use conflicting skills (same triggers)
-- Ignore skill version updates
-
-### Managing Skills
-
-✅ **Do:**
-- Keep skills organized by category
-- Disable unused skills
-- Update skills regularly
-- Customize settings per user
-
-❌ **Don't:**
-- Install duplicate skills
-- Leave broken skills enabled
-- Ignore skill errors
-
----
-
-## Examples
-
-### Email Writer Skill
-
-**Trigger:** "write email", "compose message"
-**Settings:** tone (formal/casual), length (short/medium/long)
-**Use:** "Write an email to client about project update"
-
-### Code Review Skill
-
-**Trigger:** "review code", "check this code"
-**Settings:** language (python/javascript/etc), strictness (low/medium/high)
-**Use:** "Review this Python function for bugs"
-
-### Data Analysis Skill
-
-**Trigger:** "analyze data", "create chart"
-**Settings:** chart_type (bar/line/pie), format (simple/detailed)
-**Use:** "Analyze this sales data and create a chart"
-
----
-
-## Troubleshooting
-
-### Skill not triggering
-
-- Check trigger words match your input
-- Ensure skill is enabled
-- Verify skill loaded (check `/api/skills`)
-
-### Skill errors
-
-- Check skill file format (valid YAML frontmatter)
-- Verify settings schema is correct
-- Check backend logs for errors
-
-### Skill conflicts
-
-- Two skills with same triggers
-- Disable one or change triggers
-- More specific triggers win
-
----
-
-## API Reference
-
-### List Skills
-```bash
-GET /api/skills
-```
-
-### Get Skill
-```bash
-GET /api/skills/:id
-```
-
-### Install Skill
-```bash
-POST /api/skills/install
-{
-  "content": "...",
-  "name": "skill-name",
-  "source": "managed"
-}
-```
-
-### Enable/Disable
-```bash
-PUT /api/skills/:id/enable
-PUT /api/skills/:id/disable
-```
-
-### Delete Skill
-```bash
-DELETE /api/skills/:id
-```
-
-### Get Settings
-```bash
-GET /api/skills/:id/settings?userId=xxx
-```
-
-### Update Settings
-```bash
-PUT /api/skills/:id/settings
-{
-  "userId": "xxx",
-  "settings": { ... }
-}
-```
-
----
-
-## Resources
-
-**Skill Hub:** https://www.skillhub.club/
-- Browse thousands of community skills
-- Search by category
-- Free to use
-- Regular updates
-
-**Skill File Location:**
-- Bundled: `packages/backend/skills/bundled/`
-- Managed: `.data/skills/managed/`
-- Workspace: `.data/skills/workspace/`
-
----
-
-**Next:** Visit https://www.skillhub.club/ and install your first skill!
+- `name`: lower case with dashes.
+- `description`: the first line is what agents see before they load the skill.
+- The body is plain Markdown. A skill may have extra reference files next to `SKILL.md`.
+
+Skill text from outside Girru is treated as data: it is reviewed before it is added, and it never overrides the owner's rules.
+
+## API
+
+| Route | Who | What |
+|---|---|---|
+| `GET /api/skill-library` | members | The library |
+| `GET /api/skill-library/items/:id` | owner | One skill's text |
+| `POST /api/skill-library/scan`, `GET /api/skill-library/scans/:id` | owner | Look for skill packages on this computer |
+| `POST /api/skill-library/preview` | owner | Read a found package before adding it |
+| `POST /api/skill-library/import` | owner | Add a found package by its hash |
+| `GET`, `PUT /api/skill-library/agents/:id` | owner or admin | An agent's skills (`PUT` sends the revision it read) |
+| `DELETE /api/skill-library/items/:id` | owner | Remove an unused skill (asks first) |
+
+## Related pages
+
+- [Agent personality](AGENT_PERSONALITY.md)
+- [Storage map](architecture/storage-map.md)
+- [Bundled skills](../packages/backend/skills/README.md)

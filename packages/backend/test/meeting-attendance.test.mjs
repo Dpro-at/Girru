@@ -62,3 +62,20 @@ test('5000 attendees remain paged and can leave without invoking 5000 models or 
  const joined=await command(m,'invite',everyone);assert.equal(joined.statusCode,200,joined.body);m=joined.json().meeting;assert.equal(m.count,5000);const page=await M.meetingRoster('owner-a',{meetingId:m.id,limit:100});assert.equal(page.agents.length,100);assert.equal(page.total,5000);
  const left=await command(m,'dismiss',everyone);assert.equal(left.statusCode,200,left.body);assert.equal(left.json().meeting.count,1);assert.equal(db.prepare('SELECT COUNT(*) n FROM meeting_participants WHERE meeting_id=?').get(m.id).n,5000);assert.equal(starts,before);
 });
+
+test('queued attendance consumes its message atomically with the idempotent receipt', async () => {
+  const m = await create(), key = 'queued-attendance-' + randomUUID(), text = 'Only the main agent stays';
+  const { patchConversation } = await load('src/repositories/chat-conversations.ts');
+  await patchConversation('owner-a', m.conversationId, { queued: [{ key, text }] });
+  const result = await A.meetingAttendanceChat('owner-a', m.conversationId, key, text, key);
+  assert.equal(result.code, 202);
+  assert.equal(db.prepare('SELECT queued FROM chat_sessions WHERE id=?').get(m.conversationId).queued, null);
+  const again = await A.meetingAttendanceChat('owner-a', m.conversationId, key, text, key);
+  assert.equal(again.code, 202);
+  await patchConversation('owner-a', m.conversationId, { queued: [{ key, text }] });
+  assert.equal(db.prepare('SELECT queued FROM chat_sessions WHERE id=?').get(m.conversationId).queued, null);
+  const count = (await M.getMeeting('owner-a', m.id)).count;
+  const removed = 'removed-queue-' + randomUUID();
+  await assert.rejects(A.meetingAttendanceChat('owner-a', m.conversationId, removed, text, removed), /queued_turn_changed/);
+  assert.equal((await M.getMeeting('owner-a', m.id)).count, count);
+});

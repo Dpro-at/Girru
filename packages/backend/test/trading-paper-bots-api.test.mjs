@@ -1,3 +1,4 @@
+import './fixtures/trading-runtime.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {randomBytes,randomUUID,createHash} from 'node:crypto';import Database from 'better-sqlite3';
 const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'paper-bots-api-')));process.chdir(root);Object.assign(process.env,{AGENT_PLAYER_DATA_DIR:root,DATABASE_PATH:path.join(root,'main.db'),JWT_SECRET:randomBytes(64).toString('hex'),ENCRYPTION_KEY:randomBytes(32).toString('hex'),AGENT_PLAYER_BACKGROUND:'off',EXTENSIONS_DISABLED:'true',MEMORY_EMBEDDINGS:'hash',ALLOWED_ORIGINS:'http://127.0.0.1:42522'});delete process.env.AGENT_PLAYER_LAUNCH_TOKEN;delete process.env.AGENT_PLAYER_DB;delete process.env.AGENT_PLAYER_READONLY;const realFetch=globalThis.fetch;globalThis.fetch=async()=>{throw Error('network disabled in fixture');};
 const {buildServer}=await import('../src/api/app.ts'),{getDatabase,closeDatabase}=await import('../src/db/database.ts');const main=getDatabase();await main.initialize();const db=main.getDb();
@@ -61,10 +62,10 @@ test('real SessionClient and TradingBotController complete owner TOTP review bef
 });
 
 test('real saved-bot SELECT runs inside the same read snapshot and query-only request writes nothing',async()=>{
- const f=await person();await provision(f);const original=db.prepare,observed=[];
- db.prepare=function(sql,...args){if(sql.startsWith('SELECT b.*,a.currency,a.mode FROM paper_bots b JOIN paper_accounts'))observed.push(this.inTransaction);return original.call(this,sql,...args);};
- const before=original.call(db,'SELECT total_changes() n').get().n;db.pragma('query_only=ON');
- try{const response=await call(f,'GET',base);assert.equal(response.statusCode,200,response.body);assert.deepEqual(observed,[true]);assert.equal(original.call(db,'SELECT total_changes() n').get().n,before);}finally{db.pragma('query_only=OFF');db.prepare=original;}
+ const f=await person();await provision(f);const original=Object.getPrototypeOf(db).prepare,observed=[];
+ Object.getPrototypeOf(db).prepare=function(sql,...args){if(sql.startsWith('SELECT b.*,a.currency,a.mode FROM paper_bots b JOIN paper_accounts'))observed.push(this.inTransaction);return original.call(this,sql,...args);};
+ const before=db.prepare('SELECT total_changes() n').get().n;db.pragma('query_only=ON');
+ try{const response=await call(f,'GET',base);assert.equal(response.statusCode,200,response.body);assert.deepEqual(observed,[true]);assert.equal(db.prepare('SELECT total_changes() n').get().n,before);}finally{db.pragma('query_only=OFF');Object.getPrototypeOf(db).prepare=original;}
 });
 
 test('missing or broken review tables and a flooded list do not block owner stop',async()=>{const f=await person(),flow=await reviewed(f),applied=await call(f,'POST',base+'/reviews/'+flow.stage.id+'/apply',{receipt:flow.proof.receipt});assert.equal(applied.statusCode,200);const botId=applied.json().botId;for(let i=0;i<100;i++)await call(f,'GET',base);assert.equal((await call(f,'GET',base)).statusCode,429);db.exec('ALTER TABLE paper_bot_activation_reviews RENAME TO fixture_saved_reviews');try{assert.equal((await call(f,'POST',base+'/'+botId+'/stop',{})).statusCode,200);assert.equal((await call(f,'POST',base+'/'+botId+'/revoke',{})).statusCode,200);}finally{db.exec('ALTER TABLE fixture_saved_reviews RENAME TO paper_bot_activation_reviews');}});

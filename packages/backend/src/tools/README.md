@@ -28,11 +28,10 @@ tools/
 │   ├── interact.ts
 │   └── index.ts
 │
-├── memory/                     # 4 tools: save, search, reflect, stats
-│   ├── save.ts
-│   ├── search.ts
-│   ├── memory-reflect.tool.ts
-│   ├── memory-stats.tool.ts
+├── memory/                     # the agent's memory tools (see "Memory Tools" below)
+│   ├── save.ts, search.ts, recall.ts, edit.ts, forget.ts, move.ts
+│   ├── review.ts, scopes.ts, graph.ts, doctor.ts, desktop.ts
+│   ├── bridge.ts, project-tech.ts, project-access.ts
 │   └── index.ts
 │
 ├── desktop/                    # 1 tool: desktop_control
@@ -104,20 +103,53 @@ return weather.join('\n');
 | `browser_extract` | browser/extract.ts | Extract structured data from pages | 3 examples |
 | `browser_interact` | browser/interact.ts | Click, type, fill forms | 2 examples |
 
-### Memory Tools (4)
+### Memory Tools — one memory contract
 
-| Tool | File | Description | Examples |
-|------|------|-------------|----------|
-| `memory_save` | memory/save.ts | Persist facts to agent memory | 3 examples |
-| `memory_search` | memory/search.ts | Search stored memories | 3 examples |
-| `memory_reflect` | memory/memory-reflect.tool.ts | Analyze patterns in memories | 2 examples |
-| `memory_stats` | memory/memory-stats.tool.ts | Show memory usage statistics | 1 example |
+Every caller (Girru's own agents, API and local models, and coding apps over MCP) uses the
+same five verbs, defined once in [`memory/contract.ts`](../memory/contract.ts). Both doors are
+generated from that one definition, and the server checks every argument itself:
+
+| Verb | Tool name | Meaning |
+|------|-----------|---------|
+| recall | `memory_recall` | Search the memory this caller may read |
+| save | `memory_save` | A lasting fact, with an optional topic key (one fact per topic) |
+| supersede | `memory_supersede` | A new text that replaces one memory; the old one stays as history |
+| handoff | `memory_handoff` | Done / left / next / questions for the next agent |
+| propose | `memory_propose` | A fact, decision or correction the owner reviews first |
+
+- **Coding apps (MCP, `dpro-memory`):** the five verbs plus the read tools `project_brief`,
+  `pinned_facts`, `latest_handoff`, `memory_search` and `project_design`, and the write tools
+  `memory_propose` and `handoff_write`. See [`memory/bridge/mcp-server.ts`](../memory/bridge/mcp-server.ts).
+- **Native tools:** the contract's native definitions are not added to every turn (that would
+  grow the prompt of local models); they load on demand.
+- **Tools on demand (`GIRRU_STORE_P2B`, [`on-demand.ts`](on-demand.ts)):** a turn carries the
+  memory verbs in full (`memory_search`, `memory_save`, `memory_edit`, `handoff_save`), the
+  `tool_load` tool and a short index of the agent's other tools (name and one line). `tool_load`
+  returns the full form of granted tools by name or group; a tool that was not loaded can still be
+  called and its arguments are checked against its full schema. Models with a window of 16k tokens
+  or less get fewer and simpler tools. One definition ([`tool-doors.ts`](tool-doors.ts)) feeds the
+  native tools, the subscription JSON protocol and MCP. Grants, policies and approvals are unchanged.
+- **Guides (`GIRRU_STORE_P2`):** `guide_read` loads the full text of one of the agent's own skills
+  or specialties; the prompt lists them by name and first line only.
+- **Memory quality (`GIRRU_STORE_P9B`, [`memory/trust.ts`](memory/trust.ts)):** `memory_trust_review`
+  (read only: memories corrected after use and open questions, in the owner's own turns and open
+  drawers only), `memory_corrected_checked`, `memory_question_answer` and `memory_question_forget`.
+  When filters a model added hide every match, `memory_search` searches the same words without them
+  and says so.
+- **The project brief** (`.girru/brief.md`, the Girru section of `AGENTS.md`, the `project_brief`
+  answer) explains the task file, when to resume with `project_brief` / `latest_handoff`, when to
+  call `handoff_write`, and lists the project's topics by title only; details come from
+  `memory_search`.
+- **Owner tools** in `memory/` (review, scopes, graph, doctor, trash, move, edit, forget) manage the
+  memory from the Memory window and stay owner-only or ask for approval.
+- Owner, people and personal memory never go into project files.
 
 ### Desktop Tool (1) — requires pyautogui
 
 | Tool | File | Description | Examples |
 |------|------|-------------|----------|
 | `desktop_control` | desktop/desktop.ts | OS-level mouse, keyboard, screenshots | 4 examples |
+| `open_in_code` | desktop/open-in-code.ts | Open a file inside a project or the data folder in the Code app, at a line. Every call needs the owner's approval. Code itself is installed from the Store | — |
 
 ### Storage Tools (3)
 
@@ -242,4 +274,35 @@ export const myTool: Tool = {
 
 - Full tool reference: [docs/TOOLS.md](../../../../docs/TOOLS.md)
 - Tool template: [TOOL_TEMPLATE.ts](./TOOL_TEMPLATE.ts)
-- System architecture: [MEMORY.md](../../../../../../.claude/projects/c--MAMP-htdocs-agent/memory/MEMORY.md)
+- Storage map: [docs/architecture/storage-map.md](../../../../docs/architecture/storage-map.md)
+
+
+## Owner-approved team administration
+
+`team_admin_read` reads safe agent settings, available model/department choices,
+personality and specialty libraries, current assignments and impact previews.
+`team_agent_create` creates a permanent agent, and `team_agent_update` updates a
+safe configuration subset with `expectedVersion`. Both use the same repository
+commands as the owner UI. Model selection resolves through the server catalogue.
+Credentials, grants, primary status, schedules and reserved local-agent settings
+are not accepted.
+
+`team_personality_apply` creates/edits library templates and assigns/tunes them.
+`team_specialty_apply` creates/edits templates and links/unlinks specialties using
+the existing specialty service. Existing `specialty_apply` is also restricted to
+this management scope. Linked-template changes retain the existing revision,
+impact-confirmation and locked-personality checks. Assignments never grant tools.
+There are no management delete or archive actions.
+
+Management is offered only to the live primary agent in the owner's own active
+chat, with explicit grants. Delegations, background tasks, sub-agents, archived
+chats and channel turns cannot administer the team. Execution revalidates these
+facts even when an offering hint is stale. Every mutation always consumes a
+one-time owner approval, including when Settings mode is Allow. A registry-bound,
+nonserialized owner-command capability allows only that approved command to use
+the owner UI repository authority; the original agent actor is retained for audit.
+Ordinary agent actors and global repository scope rules are unchanged.
+
+No new management grants are assigned automatically. The owner enables them for
+the primary agent through the existing tool-permissions UI. In chat and the
+Approvals page, requests use the existing review cards and show the exact draft.

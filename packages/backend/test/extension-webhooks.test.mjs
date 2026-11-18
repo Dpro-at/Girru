@@ -15,7 +15,8 @@ import { randomBytes } from 'node:crypto';
 const dir = mkdtempSync(join(tmpdir(), 'ap-extension-webhooks-'));
 const backendDir = process.cwd();
 process.chdir(dir);
-symlinkSync(join(backendDir, 'extensions'), join(dir, 'extensions'), 'dir'); // permission check reads <cwd>/extensions
+const legacyRoot=join(backendDir,'test/fixtures/legacy-apps/extensions');process.env.GIRRU_EXTENSIONS_DIR=legacyRoot;
+symlinkSync(legacyRoot, join(dir, 'extensions'), 'dir'); // permission check reads <cwd>/extensions
 process.env.HOME = dir;
 process.env.DATABASE_PATH = join(dir, '.data', 'agent-player.db');
 process.env.JWT_SECRET = randomBytes(64).toString('hex'); // throwaway, test only
@@ -62,7 +63,7 @@ for (const id of ['call-center', 'trading']) {
 }
 const app = Fastify();
 app.decorate('db', db);
-const runner = new ExtensionRunner(join(backendDir, 'extensions'));
+const runner = new ExtensionRunner(legacyRoot);
 await runner.initialize(app, { register() {}, unregister() {} });
 await app.ready();
 
@@ -126,4 +127,17 @@ test('tools calling their own routes send a short-lived token for the turn user'
   assert.throws(() => internalAuthHeaders('u-suspended'));
   assert.throws(() => internalAuthHeaders(undefined));
   assert.equal((await inject({ method: 'GET', url: '/api/ext/trading/accounts', headers: { authorization: internalAuthHeaders('u-user').Authorization } })).statusCode, 403);
+});
+
+test('code scanning: disabling uses the folder the extension was loaded from; a made-up id touches nothing', async () => {
+  const before = [...runner.getLoadedExtensions().keys()].sort();
+  for (const id of ['../call-center', 'call-center/../trading', 'no-such-extension']) await runner.disableExtension(id);
+  assert.deepEqual([...runner.getLoadedExtensions().keys()].sort(), before);
+  const trading = runner.getLoadedExtensions().get('trading');
+  let disabledWith = null;
+  const original = trading.onDisable;
+  trading.onDisable = async (api) => { disabledWith = api.extensionId; };
+  try { await runner.disableExtension('trading'); } finally { trading.onDisable = original; }
+  assert.equal(disabledWith, 'trading');
+  assert.equal(runner.getLoadedExtensions().has('trading'), false);
 });

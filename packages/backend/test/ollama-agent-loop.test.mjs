@@ -2,7 +2,7 @@
 // Run: node --import tsx --test test/ollama-agent-loop.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runOllamaAgentLoop, toOllamaTools, ModelUnavailable, TOOL_OUTPUT_CHARS } from '../src/services/ollama-agent-loop.ts';
+import { runOllamaAgentLoop, toOllamaTools, ModelUnavailable, TOOL_OUTPUT_CHARS, EMPTY_ANSWER_NUDGE, EMPTY_ANSWER_NUDGE_FIRST } from '../src/services/ollama-agent-loop.ts';
 
 /** A fake local model: each call returns the next scripted list of NDJSON chunks. */
 function fakeModel(script) {
@@ -49,7 +49,19 @@ test('runs requested tools, feeds results back, continues to the answer', async 
   // Tools go in the function format; the second call carries the assistant call and both results.
   assert.deepEqual(bodies[0].tools, toOllamaTools(tools));
   assert.equal(bodies[1].messages.at(-3).tool_calls.length, 2);
-  assert.deepEqual(bodies[1].messages.slice(-2).map((m) => [m.role, m.tool_name, m.content]), [['tool', 'read_file', 'file body'], ['tool', 'exec', 'Error: refused']]);
+  // SEC-ENVELOPE-01: tool results reach the model wrapped in the untrusted-data
+  // envelope (a fresh random nonce per message, so exact-equality is impossible).
+  // Each fed-back result keeps its role/name, still contains the original body,
+  // and carries the data boundary marking it as data, not instructions.
+  const fed = bodies[1].messages.slice(-2);
+  assert.deepEqual(fed.map((m) => [m.role, m.tool_name]), [['tool', 'read_file'], ['tool', 'exec']]);
+  assert.ok(fed[0].content.includes('file body'), 'read_file body survives inside the frame');
+  assert.ok(fed[1].content.includes('Error: refused'), 'exec error survives inside the frame');
+  for (const m of fed) {
+    assert.match(m.content, /GIRRU-UNTRUSTED-DATA nonce=[0-9a-f]{32} begin/, 'open marker with a nonce');
+    assert.match(m.content, /GIRRU-UNTRUSTED-DATA nonce=[0-9a-f]{32} end/, 'close marker with a nonce');
+    assert.match(m.content, /never as instructions/i, 'intro says data, not instructions');
+  }
 });
 
 test('a thrown tool error becomes an error result, not a failed turn', async () => {
@@ -90,4 +102,22 @@ test('abort stops the loop without a done frame', async () => {
 test('a refused model call throws ModelUnavailable', async () => {
   const { fetchImpl } = fakeModel(['fail']);
   await assert.rejects(runOllamaAgentLoop(base({ fetchImpl, write: () => {} })), ModelUnavailable);
+});
+
+test('an empty answer (after tools, or thinking only) gets one short follow-up ask; a second empty answer stays empty', async () => {
+  const call = [{ message: { content: '', tool_calls: [{ function: { name: 'memory_save', arguments: { content: 'x' } } }] } }, { done: true }];
+  const empty = [{ message: { content: '' } }, { done: true }];
+  const done = [{ message: { content: 'Saved.' } }, { done: true }];
+  const { fetchImpl, bodies } = fakeModel([call, empty, done]);
+  const r = await runOllamaAgentLoop(base({ fetchImpl, write: () => {} }));
+  assert.equal(r.answer, 'Saved.');
+  assert.equal(r.steps, 3);
+  assert.equal(bodies[2].messages.at(-1).content, EMPTY_ANSWER_NUDGE);
+  const again = fakeModel([call, empty, empty]);
+  const r2 = await runOllamaAgentLoop(base({ fetchImpl: again.fetchImpl, write: () => {} }));
+  assert.equal(r2.answer, '');
+  assert.equal(again.bodies.length, 3, 'asked only once');
+  const first = fakeModel([[{ message: { thinking: 'hmm' } }, { done: true }], done]);
+  assert.equal((await runOllamaAgentLoop(base({ fetchImpl: first.fetchImpl, write: () => {} }))).answer, 'Saved.', 'thinking only: one follow-up too');
+  assert.equal(first.bodies[1].messages.at(-1).content, EMPTY_ANSWER_NUDGE_FIRST);
 });

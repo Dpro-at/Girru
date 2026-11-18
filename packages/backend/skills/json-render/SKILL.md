@@ -69,3 +69,9 @@ See [components.md](references/components.md) for full props and examples.
 {"op":"add","path":"/elements/c4","value":{"type":"Card","props":{"title":"Errors"},"children":["m4"]}}
 {"op":"add","path":"/elements/m4","value":{"type":"Metric","props":{"label":"Today","value":"3","trend":"down"},"children":[]}}
 ```
+
+## Shared display contract
+
+The shared renderer supports the 61 types described by the explicitly granted `display_catalogue` tool. Use its list/validate actions to inspect current props and validate supplied data. The tool never saves a report, fetches a source, executes a button or grants permission. If no catalogue tool is granted, follow the display subset advertised by the current chat system prompt; do not invent capabilities. Existing core prompt composition is not changed by this display migration.
+
+Use real supplied data only. Full `{schemaVersion:1,root,elements}` documents and bounded JSON Patch streams are supported. Unknown components show an explicit unavailable state. Form controls change local presentation only. Buttons, dialogs, support actions and media/avatar slots require explicit host adapters and their existing permission/approval checks; never imply OTPDisplay verifies a login or a confirmation card grants an approval. Saved Reports are display snapshots, not source refresh requests.

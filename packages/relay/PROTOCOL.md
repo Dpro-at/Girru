@@ -583,6 +583,21 @@ this phone), `approval.pending {id}`, `approval.detail {id}`, `approval.decide`,
 `verification_required` for an approval: the phone sends the owner to the
 computer and nothing runs.
 
+### Phone Settings (`settings.read`, `settings.change`)
+
+The phone's own Settings screens (native, boards P33–P39) ask with two commands:
+`settings.read {section}` and `settings.change {section, change, confirmed?}`.
+Sections: `general`, `account`, `replies`, `permissions`, `approval-rules`,
+`computers`, `phones`. The computer answers each with a small reviewed view and
+makes each change through its own fixed route as the owner; the phone never
+names a path. Changes to `permissions`, signing a session out (`account`) and
+forgetting a phone (`phones`) need `confirmed: true`, which the app sends only
+right after a fresh Face ID check (`confirmation_required` otherwise); allowing
+money, installs or deleting also needs `change.risky: true`
+(`risky_confirmation_required`). `approval-rules` and `computers` are read only
+on the phone (`on_the_computer`). The `confirmed` flag is the app's word, not a
+proof: a key that only Face ID can use is future work.
+
 ### The computer's pages on the phone (`ui.get`, `api.call`, `api.stream`)
 
 The phone shows the computer's own chat page (the same built core-ui the
@@ -598,7 +613,8 @@ through the session, never from the network. Three signed commands carry them:
   the verified build are served (its manifest and hashes are checked; no
   source maps, no paths outside it). The answer is
   `{status:200, type, size, parts, part, build, body}`: `body` is base64, at most
-  600 KiB of the file per answer; a bigger file is fetched part by part
+  512 KiB of the file per answer (it is base64 twice on the way, and the
+  sealed envelope must stay under the relay's 1 MiB); a bigger file is fetched part by part
   (`part` 0 … `parts`−1). `build` names the build, so a phone never mixes two.
 - **`api.call {method, path, body?}`**: one request of the pages, run inside
   the computer **as the owner** without any token reaching the phone. `path`
@@ -609,8 +625,10 @@ through the session, never from the network. Three signed commands carry them:
   desktop gate refuses is `{status:400, body:null}`. Request bodies are at
   most 256 KiB, answers at most 700 KiB (`too_large`).
 - **`api.stream {path}`**: a run's live events
-  (`/api/chat/runs/<runId>/events?after=N`, the only stream the phone gets).
-  The reply is `{ok:true}`; then `{type:"stream", ref, data}` for each event,
+  (`/api/chat/runs/<runId>/events?after=N`) or a terminal's output
+  (`/api/terminal/sessions/<id>/stream?after=N`), the only streams the phone gets.
+  The reply is `{ok:true}`; then `{type:"stream", ref, data}` for each event
+  (a terminal's also carry `event`: `output` or `exit`, the stream's `event:` line),
   where `data` is the event as the page reads it (`seq` and the run frame,
   projected as on the desktop; live previews have no `seq`), and one
   `{type:"stream.end", ref, status}` with `status` `"complete"` or
@@ -622,10 +640,16 @@ through the session, never from the network. Three signed commands carry them:
 the agents (read); conversations (list, open, create, rename, one page of
 messages, the side panel's usage, team and schedule, stop); sending a turn and
 steering or stopping a run; the chat sidebar, panel and settings (read, and
-the sidebar and panel layout). Tasks, approvals and the team are the phone's
-own screens and use their own commands above. **Never** on the phone, whatever
-the desktop gate allows: phones and the relay (`/api/phone/*`), the terminal,
-files and folders of projects, project variables, credentials, keys and
+the sidebar and panel layout; the count of pending approvals for its badge);
+and, by the owner's decision, the terminal
+(open, type, resize, close, its settings; its output through `api.stream`).
+**The phone opens or joins a terminal only after its own biometric check**
+(Face ID, Touch ID, fingerprint or the phone's passcode), every time after a
+lock; opening and closing are audited by the terminal itself, and keystrokes
+from a phone get one audit row per terminal a minute. Tasks, approvals and the
+team are the phone's own screens and use their own commands above. **Never**
+on the phone, whatever the desktop gate allows: phones and the relay
+(`/api/phone/*`), files and folders of projects, project variables, credentials, keys and
 secrets, sign-in, users, roles, two-step sign-in and security settings,
 backups, exports and audit logs, extensions, plugins, skills and MCP servers,
 deleting conversations, and uploads (microphone clips and images wait for

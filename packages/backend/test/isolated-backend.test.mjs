@@ -16,7 +16,7 @@ import assert from 'node:assert/strict';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative, sep } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 
 const backendDir = process.cwd();
 const repoRoot = join(backendDir, '..', '..');
@@ -220,6 +220,14 @@ test('BUG-01: backup names are single safe segments', async () => {
   }
 });
 
+test('code scanning: a backup path is resolved and checked to stay directly inside the backup folder', async () => {
+  const { backupFilePath } = await import(join(backendDir, 'src/api/routes/database.ts'));
+  const dir = join(dataDir, 'backups');
+  assert.equal(backupFilePath(dir, 'database_2026-10-14_10-00-00.db'), join(resolve(dir), 'database_2026-10-14_10-00-00.db'));
+  assert.equal(backupFilePath(dir + sep, 'a.db'), join(resolve(dir), 'a.db'), 'a trailing separator on the folder is fine');
+  for (const bad of ['../agent-player.db', 'a/b.db', 'a\\b.db', '..db', '', null, undefined, 42]) assert.equal(backupFilePath(dir, bad), null, String(bad));
+});
+
 test('every store resolves under AGENT_PLAYER_DATA_DIR', async () => {
   const under = (p) => { const r = relative(dataDir, p); return r === '' || (!r.startsWith('..') && !r.startsWith(sep)); };
   const { getUploadsRoot } = await import(join(backendDir, 'src/services/uploads.ts'));
@@ -253,8 +261,9 @@ test('every file created lands under the data root; cwd, HOME and TMPDIR stay em
   const created = filesUnder(dataDir).map((p) => relative(dataDir, p));
   for (const expected of ['agent-player.db', 'secrets.env', join('audit', 'audit.db'), join('encryption', 'keys.db'),
     join('encryption', 'credentials.db'), 'memory', join('multi-agent', 'orchestrator.db'), join('webhooks', 'webhooks.db'),
-    'gateway', 'credentials', 'uploads', join('browser', 'screenshots'), 'audio']) {
+    'gateway', 'credentials', 'uploads', 'audio']) {
     assert.ok(created.includes(expected), `${expected} in the data root (got ${created.join(', ')})`);
   }
+  assert.equal(existsSync(join(dataDir,'browser','screenshots')),false,'a missing optional Browser app creates no engine storage');
   checkoutData.forEach((dir, i) => assert.deepEqual(snapshot(dir), before[i], `${dir} unchanged`));
 });

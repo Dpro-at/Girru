@@ -2,6 +2,7 @@
 // Run: node --import tsx --test test/store.test.mjs  (throwaway DB, cwd and home; no network)
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {randomBytes} from 'node:crypto';
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'store-'));process.chdir(root);process.env.AGENT_PLAYER_DATA_DIR=root;process.env.DATABASE_PATH=path.join(root,'test.db');process.env.JWT_SECRET=randomBytes(64).toString('hex');process.env.ENCRYPTION_KEY=randomBytes(32).toString('hex');delete process.env.AGENT_PLAYER_DB;delete process.env.GIRRU_STORE_FEATURED;process.env.GIRRU_STORE_REPO='off'; // the local catalogue only: never the live Girru Store
+process.env.HOME=root;process.env.USERPROFILE=root;process.env.GIRRU_GENVR_BUNDLED='0';delete process.env.GIRRU_APP_RUNTIMES_DIR;
 const home=path.join(root,'home'),market=path.join(home,'.claude/plugins/marketplaces/acme/.claude-plugin');fs.mkdirSync(market,{recursive:true});
 fs.writeFileSync(path.join(market,'marketplace.json'),JSON.stringify({name:'acme',plugins:[{name:'seo-audit',description:'Checks a site for search problems. More words.'}]}));
 const quiet=console.log;console.log=()=>{};
@@ -25,7 +26,7 @@ test('the store is owner-only and takes no query',async()=>{
 test('one index joins the apps that come with Girru, the registry and the coding apps, with no invented numbers',async()=>{
  const s=await read();
  assert.equal(s.featured,'girru:genvr');
- assert.deepEqual(s.items.filter(x=>x.state==='included').map(x=>x.id),['girru:genvr','girru:trading','girru:terminal','girru:code']);
+ assert.deepEqual(s.items.filter(x=>x.state==='included').map(x=>x.id),['girru:terminal','girru:code']);
  const w=s.items.find(x=>x.id==='registry:weather');assert.equal(w.state,'available');assert.equal(w.category,'productivity');assert.deepEqual(w.permissions,['Read the weather']);assert.match(w.hash,/^[a-f0-9]{64}$/);
  const a=s.items.find(x=>x.id==='claude-code:seo-audit@acme');assert.equal(a.state,'elsewhere');assert.equal(a.summary,'Checks a site for search problems.');
  assert.deepEqual(s.categories.map(c=>c.id),['marketing','sales','developer','worlds','trading','productivity'],'one fixed row; More only when used');
@@ -47,4 +48,11 @@ test('the index contract refuses anything outside it',()=>{
  const p=parseStoreIndex(ok);assert.equal(p.featured,'x');assert.deepEqual(p.collections[0].items,['x']);assert.equal(p.items[0].icon,null);
  for(const bad of [{...ok,schema:2},{...ok,items:[{...ok.items[0],kind:'binary'}]},{...ok,items:[ok.items[0],ok.items[0]]},{...ok,items:[{...ok.items[0],category:'casino'}]},{...ok,items:[{...ok.items[0],icon:'<svg>'}]},{...ok,items:[{...ok.items[0],permissions:'all'}]}])assert.throws(()=>parseStoreIndex(bad));
  assert.equal(parseStoreIndex({...ok,featured:'nobody'}).featured,null);
+});
+
+test('GenVR runtime metadata is owner-only, local-only and does not reveal filesystem paths',async()=>{
+ const good=await app.inject({url:'/api/apps/genvr',headers:owner});assert.equal(good.statusCode,200);assert.equal(good.json().state,'unavailable');assert.doesNotMatch(good.body,/packageDir|archiveSha256|entrySha256|installedAt/);
+ assert.equal((await app.inject({url:'/api/apps/genvr',headers:h('store-admin')})).statusCode,403);
+ assert.equal((await app.inject({url:'/api/apps/genvr?other=1',headers:owner})).statusCode,400);
+ assert.equal((await app.inject({url:'/api/apps/genvr',headers:owner,remoteAddress:'203.0.113.10'})).statusCode,403);
 });

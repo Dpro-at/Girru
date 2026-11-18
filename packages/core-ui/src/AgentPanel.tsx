@@ -47,7 +47,7 @@ export function AgentPanelBody({ card, onAddConnector, expandedAccess = false, p
               onChange={e => { card.setTools(tools.map(t => t.name), e.target.checked); void save(); }}/><span aria-hidden="true"/></label>
           {open === name && <ul className="panel-tools">{tools.map(t => <li key={t.name}>
             <label title={t.description}><input type="checkbox" checked={granted.has(t.name)} disabled={busy || (!t.allowedByServer && !granted.has(t.name))}
-              onChange={() => { card.toggleTool(t.name); void save(); }}/><span dir="ltr">{t.name.replace(/^mcp:/, '')}</span>{t.requiresApproval && <small className="muted">asks first</small>}</label></li>)}</ul>}
+              onChange={() => { card.toggleTool(t.name); void save(); }}/><span dir="ltr">{t.name.replace(/^mcp(?::|__)/, '').replace(/__/, ' · ')}</span>{t.requiresApproval && <small className="muted">asks first</small>}</label></li>)}</ul>}
         </li>;
       })}</ul>}
     </section>}

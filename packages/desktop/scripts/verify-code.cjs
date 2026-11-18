@@ -23,6 +23,8 @@ async function verifyCodeRuntime({runtime,node}){
  try{
   const env={PATH:process.env.PATH,HOME:cwd,USERPROFILE:cwd,SystemRoot:process.env.SystemRoot,TMPDIR:cwd,TEMP:cwd,TMP:cwd};
   execFileSync(node,['-e',`const r=require('node:module').createRequire(process.argv[1]);for(const name of ['@parcel/watcher','@vscode/spdlog','@vscode/sqlite3','node-pty'])r(name);console.log('Native Code modules loaded');`,path.join(root,'editor/remote/package.json')],{cwd,env,encoding:'utf8',timeout:60000,stdio:['ignore','pipe','pipe']});
+  // The git extension loads its own native copier; without it Source Control fails to start (Code 1.0.0).
+  execFileSync(node,['-e',`require('node:module').createRequire(process.argv[1])('@vscode/fs-copyfile');console.log('Git extension native module loaded');`,path.join(root,'editor/extensions/git/package.json')],{cwd,env,encoding:'utf8',timeout:60000,stdio:['ignore','pipe','pipe']});
   const factory=await import(pathToFileURL(path.join(root,'nabu/dpro/editor-runtime.mjs')).href);
   host=factory.createEditorHost({node,dataDir:path.join(cwd,'profile'),runtimeRoot:root});
   const result=await host.start();const response=await fetchCodeEntry(result.url);const html=await response.text();

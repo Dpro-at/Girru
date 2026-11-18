@@ -32,6 +32,8 @@ import type { DrawerRef } from '../drawers.js';
 import type { Memory } from '../types.js';
 import { bumpAccessVersionStep, invalidateAccess, previewSnapshotEditStep } from './access.js';
 import { invalidateScopeTree } from './tree.js';
+import { departmentTable, storeP3Enabled } from '../../services/store-p3.js';
+import { detachDepartmentStep, mirrorLegacyStep } from '../../services/departments.js';
 import {
   GENERAL_DEPARTMENT, ScopeInputError, assertProjectSlug, departmentStep, listProjectsStep, projectStep, upsertProjectRowStep, type ProjectScope,
 } from './store.js';
@@ -342,7 +344,9 @@ function* departmentPreviewStep(ownerId: string, id: string) {
     s.rules = s.rules.filter((r) => !(r.scope_kind === 'department' && r.scope_id === id));
     return s;
   });
-  const effects = { projectsToGeneral: projects.length, pinnedFactsRemoved: pinnedFacts, accessRulesRemoved: accessRules, agentsAffected: access.agentsAffected, widened: access.widened, narrowed: access.narrowed };
+  // P3: the one list also holds agents; they keep working with no department.
+  const agentsToNone = storeP3Enabled() ? Number((yield* one<{ n: number }>('SELECT COUNT(*) AS n FROM agents_config WHERE department_id = ?', id))?.n ?? 0) : 0;
+  const effects = { projectsToGeneral: projects.length, pinnedFactsRemoved: pinnedFacts, accessRulesRemoved: accessRules, agentsAffected: access.agentsAffected, widened: access.widened, narrowed: access.narrowed, ...(storeP3Enabled() ? { agentsToNone } : {}) };
   const previewHash = createHash('sha256').update(JSON.stringify({ ownerId, id, name: d.name, projects, effects })).digest('hex');
   return { department: d, effects, previewHash };
 }
@@ -359,7 +363,10 @@ export async function deleteDepartment(ownerId: string, id: string, expectedPrev
     yield* run('UPDATE memory_project_scopes SET department_id = NULL WHERE owner_id = ? AND department_id = ?', ownerId, id);
     yield* run("DELETE FROM memory_pinned_facts WHERE owner_id = ? AND scope_kind = 'department' AND scope_id = ?", ownerId, id);
     yield* deleteScopeRulesStep(ownerId, 'department', id);
-    yield* run('DELETE FROM memory_departments WHERE owner_id = ? AND id = ?', ownerId, id);
+    // P3: the one list also holds the agents' departments; they, their boards and rules let go first.
+    if (storeP3Enabled()) yield* detachDepartmentStep(ownerId, id);
+    yield* run(`DELETE FROM ${departmentTable()} WHERE owner_id = ? AND id = ?`, ownerId, id);
+    if (storeP3Enabled()) yield* mirrorLegacyStep(ownerId);
     yield* bumpAccessVersionStep(ownerId);
     return preview;
   }, { immediate: true });
@@ -377,10 +384,12 @@ export async function exportProject(ownerId: string, slug: string): Promise<{ pr
   const project = await sql().read(projectStep(ownerId, slug));
   if (!project) throw new ScopeInputError('Project not found', 404, 'not_found');
   const drawer = projectDrawer(slug);
+  // File names carry the project's name, never its stored key (P3 keys are ids).
+  const stem = (project?.chatProjectId ? (await sql().read(one<{ slug: string }>('SELECT slug FROM chat_projects WHERE id = ? AND user_id = ?', project.chatProjectId, ownerId)))?.slug : null) ?? slug;
   const memories = await getMemoryStorage().getByDrawers(ownerId, [drawer]);
-  const files = [{ name: `project-${slug}-memory.md`, content: renderDrawerFile(drawer, memories, await drawerRevision(ownerId, drawer)) }];
+  const files = [{ name: `project-${stem}-memory.md`, content: renderDrawerFile(drawer, memories, await drawerRevision(ownerId, drawer)) }];
   const facts = await sql().read(all<{ text: string }>("SELECT text FROM memory_pinned_facts WHERE owner_id = ? AND scope_kind = 'project' AND scope_id = ? ORDER BY position, created_at, id", ownerId, slug));
-  files.push({ name: `project-${slug}-pinned-facts.md`, content: [`# Pinned facts: ${project.name}`, '', ...(facts.length ? facts.map((f) => `- ${f.text}`) : ['(none)']), ''].join('\n') });
+  files.push({ name: `project-${stem}-pinned-facts.md`, content: [`# Pinned facts: ${project.name}`, '', ...(facts.length ? facts.map((f) => `- ${f.text}`) : ['(none)']), ''].join('\n') });
   if (project.chatProjectId) {
     const notes = await sql().read(all<{ agent_id: string; scope_kind: string; scope_id: string; version: number; done: string; remaining: string; next_steps: string; open_questions: string; created_at: string }>(
       `SELECT h.agent_id, h.scope_kind, h.scope_id, h.version, h.done, h.remaining, h.next_steps, h.open_questions, h.created_at FROM agent_handoffs h
@@ -388,7 +397,7 @@ export async function exportProject(ownerId: string, slug: string): Promise<{ pr
         ORDER BY h.created_at DESC`, ownerId, project.chatProjectId));
     const list = (title: string, json: string) => { let v: unknown; try { v = JSON.parse(json); } catch { v = []; } const a = Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []; return a.length ? [`${title}:`, ...a.map((x) => `- ${x}`)] : []; };
     files.push({
-      name: `project-${slug}-handoffs.md`,
+      name: `project-${stem}-handoffs.md`,
       content: [`# Handoff notes: ${project.name}`, '', ...(notes.length ? notes.flatMap((n) => [`## ${n.agent_id} (${n.scope_kind} ${n.scope_id}, v${n.version}, ${n.created_at})`,
         ...list('Done', n.done), ...list('Left', n.remaining), ...list('Next', n.next_steps), ...list('Open questions', n.open_questions), '']) : ['(none)', ''])].join('\n'),
     });

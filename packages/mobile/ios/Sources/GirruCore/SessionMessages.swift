@@ -53,6 +53,50 @@ public enum CommandBody {
         if let paramsHash { f["paramsHash"] = paramsHash }
         return try make("approval.decide", f, ref: ref)
     }
+
+    /// `place`: running, waiting, finished or failed.
+    public static func tasksList(place: String, ref: String? = nil) throws -> String {
+        try make("tasks.list", ["place": place], ref: ref)
+    }
+
+    public static func schedulesList(ref: String? = nil) throws -> String { try make("schedules.list", ref: ref) }
+
+    public static func teamList(ref: String? = nil) throws -> String { try make("team.list", ref: ref) }
+
+    /// Phone Settings (boards P33–P39). Sections: general, account, replies, permissions,
+    /// approval-rules, computers, phones.
+    public static let settingsSections: Set<String> = ["general", "account", "replies", "permissions", "approval-rules", "computers", "phones"]
+
+    public static func settingsRead(section: String, ref: String? = nil) throws -> String {
+        guard settingsSections.contains(section) else { throw ProtocolError.badFormat }
+        return try make("settings.read", ["section": section], ref: ref)
+    }
+
+    /// `confirmed` only right after a fresh Face ID check (AppLock.confirmSensitive).
+    public static func settingsChange(section: String, change: [String: Any], confirmed: Bool = false, ref: String? = nil) throws -> String {
+        guard settingsSections.contains(section), !change.isEmpty else { throw ProtocolError.badFormat }
+        var f: [String: Any] = ["section": section, "change": change]
+        if confirmed { f["confirmed"] = true }
+        return try make("settings.change", f, ref: ref)
+    }
+
+    /// One file of the computer's chat page (PROTOCOL.md "The computer's pages on the phone").
+    public static func uiGet(path: String, part: Int, ref: String) throws -> String {
+        var f: [String: Any] = ["path": path]
+        if part > 0 { f["part"] = part }
+        return try make("ui.get", f, ref: ref)
+    }
+
+    /// One request of the chat page; `body` is its JSON, nil for none.
+    public static func apiCall(method: String, path: String, body: Any?, ref: String) throws -> String {
+        var f: [String: Any] = ["method": method, "path": path]
+        if let body { f["body"] = body }
+        return try make("api.call", f, ref: ref)
+    }
+
+    public static func apiStream(path: String, ref: String) throws -> String {
+        try make("api.stream", ["path": path], ref: ref)
+    }
 }
 
 /// How a run ended, as the phone acts on it.
@@ -84,6 +128,11 @@ public enum ComputerMessage {
     case runEnd(ref: String?, runId: String, end: RunEnd, code: String?)
     /// The answer to the unsigned `approval.pending {id}` query.
     case approvalPending(id: String, pending: Bool)
+    /// One event of an `api.stream`, as the chat page reads it.
+    /// `event` names the stream's `event:` line (a terminal's `output` / `exit`); nil for a run.
+    case stream(ref: String?, data: [String: Any], event: String?)
+    /// The end of an `api.stream`: `complete`, or `dropped` (re-attach with `after`).
+    case streamEnd(ref: String?, complete: Bool)
 
     public static func parse(_ plaintext: Data) throws -> ComputerMessage {
         guard let obj = try? JSONSerialization.jsonObject(with: plaintext), let m = obj as? [String: Any], let type = m["type"] as? String else {
@@ -106,6 +155,13 @@ public enum ComputerMessage {
         case "approval.pending":
             guard let id = m["id"] as? String, let p = bool(m["pending"]) else { throw ProtocolError.badFormat }
             return .approvalPending(id: id, pending: p)
+        case "stream":
+            guard let data = m["data"] as? [String: Any] else { throw ProtocolError.badFormat }
+            let event = (m["event"] as? String).flatMap { e in e.range(of: "^[a-z][a-z0-9_]{0,31}$", options: .regularExpression) != nil ? e : nil }
+            return .stream(ref: ref, data: data, event: event)
+        case "stream.end":
+            guard let status = m["status"] as? String else { throw ProtocolError.badFormat }
+            return .streamEnd(ref: ref, complete: status == "complete")
         default:
             throw ProtocolError.badFormat
         }
@@ -135,6 +191,12 @@ public enum CommandFailure {
             return "This is no longer on your computer."
         case "expired", "unknown_device", "revoked":
             return "Your computer no longer accepts this phone. Pair again."
+        case "confirmation_required", "risky_confirmation_required":
+            return "This change needs Face ID first. Try again."
+        case "on_the_computer":
+            return "Change this in Girru on your computer."
+        case "changed":
+            return "This changed on your computer meanwhile. The latest values are shown; choose again."
         default:
             // internal_error and anything unexpected.
             return "Something went wrong on your computer. Try again."

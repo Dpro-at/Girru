@@ -1,3 +1,4 @@
+import './fixtures/channel-library.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import Fastify from 'fastify';

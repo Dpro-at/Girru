@@ -56,3 +56,17 @@ test('permission manifests cannot escape the extensions root or grant string-sha
   fs.writeFileSync(path.join(safe, 'agentplayer.plugin.json'), JSON.stringify({ permissions: 'network,process,storage' }));
   assert.deepEqual(getExtensionPermissions('safe'), []);
 });
+
+test('code scanning: a sibling folder that shares the root name as a prefix is outside', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dpro-extension-prefix-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
+  const extension = path.join(root, 'ext');
+  const sibling = path.join(root, 'ext-evil');
+  fs.mkdirSync(extension); fs.mkdirSync(sibling);
+  fs.writeFileSync(path.join(sibling, 'en.json'), '{}');
+  assert.throws(() => extensionResourcePath(extension, '../ext-evil/en.json'), /outside its directory/);
+  fs.symlinkSync(path.join(sibling, 'en.json'), path.join(extension, 'linked.json'));
+  assert.throws(() => extensionResourcePath(extension, 'linked.json'), /link is outside/);
+  assert.equal(extensionResourcePath(extension, '.'), fs.realpathSync(extension));
+  assert.equal(extensionResourcePath(extension, 'missing/file.json'), path.join(path.resolve(extension), 'missing', 'file.json'));
+});
