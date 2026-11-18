@@ -10,6 +10,7 @@ import {PersonalityLibrary} from './PersonalityLibrary';
 import {isPhoneShell,openPhoneSettings} from './phone-terminal-keys';
 import {WorkspaceModes,editorBounds,useNabuRuntime} from './WorkspaceModes';
 import {StoreTradingView} from './StoreTradingView';
+import {SecurityWorkspace} from './SecurityWorkspace';
 import {footerToolItem} from './AppsWorkspace';
 import {StoreWorkspace} from './StoreView';
 import {SpecialtyLibrary} from './SpecialtyLibrary';
@@ -58,12 +59,12 @@ import type { Command } from './CommandPalette';
 import { accountRoleLabel, isDeveloperBuild } from './developer-build';
 import { setCodeHost, setCodeInstall } from './code-open';
 
-type Page = 'computers' | 'reports' | 'browser' | 'rules' | 'code' | 'trading' | 'library' | 'apps' | 'store' | 'approvals' | 'chat' | 'genvr' | 'agents' | 'board' | 'runs' | 'memory' | 'skills' | 'mcp' | 'terminal' | 'account' | 'settings' | 'about' | 'specialties' | 'personalities';
+type Page = 'computers' | 'reports' | 'browser' | 'rules' | 'code' | 'trading' | 'library' | 'apps' | 'store' | 'approvals' | 'chat' | 'genvr' | 'agents' | 'board' | 'runs' | 'memory' | 'skills' | 'mcp' | 'terminal' | 'account' | 'settings' | 'about' | 'specialties' | 'personalities' | 'security';
 /** The section a page is a place of: its "← back" on top of the sidebar goes there. */
 const placeParent: Partial<Record<Page, 'library' | 'store' | 'settings'>> = { personalities: 'library', specialties: 'library', skills: 'library', rules: 'library', terminal: 'store' };
 const PARENT_LABEL: Record<'library' | 'store' | 'settings', string> = { library: 'Library', store: 'Store', settings: 'Settings' };
 /** Sections that own the sidebar with their own places (the chat list shows only in Chat). */
-const OWN_SIDEBAR: ReadonlyArray<Page> = ['computers', 'rules', 'memory', 'settings', 'agents', 'library', 'skills', 'mcp', 'terminal','specialties','personalities','board','runs','reports','approvals','apps','store','trading','genvr'];
+const OWN_SIDEBAR: ReadonlyArray<Page> = ['computers', 'rules', 'memory', 'settings', 'agents', 'library', 'skills', 'mcp', 'terminal','specialties','personalities','board','runs','reports','approvals','apps','store','trading','genvr','security'];
 const pages: ReadonlyArray<{ key: Page; label: string; icon: IconName | 'board' | 'book' | 'play' }> = [
   { key: 'chat', label: 'Chat', icon: 'message-circle' },
   { key: 'agents', label: 'Agents', icon: 'user' },
@@ -252,7 +253,7 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
   const active = chatState?.conversations.find(c => c.id === chatState.activeId);
   // CHAT-BUILD-01 stage 2 (CH1): the top bar names the chat and, muted, its project (hover = full path; a click opens Details › Place).
   const activeProject = active?.projectId ? chatState?.projects.find(p => p.id === active.projectId) : undefined;
-  const pageTitle = page === 'computers'?'Computers':page === 'browser'?'Browser':page === 'rules'?'Rules':page === 'code'?'Code':page === 'store'?'Store':page === 'library'?'Library':page === 'personalities'?'Personalities':page === 'trading'?'Trading':page === 'specialties'?'Specialties':page === 'chat' && active ? (active.title || 'Chat') : page === 'skills' ? 'Skills' : page === 'mcp' ? 'MCP connections' : page === 'terminal' ? 'Terminal' : pages.find(p => p.key === page)?.label ?? '';
+  const pageTitle = page === 'computers'?'Computers':page === 'browser'?'Browser':page === 'rules'?'Rules':page === 'code'?'Code':page === 'store'?'Store':page === 'library'?'Library':page === 'personalities'?'Personalities':page === 'trading'?'Trading':page === 'security'?'Security':page === 'specialties'?'Specialties':page === 'chat' && active ? (active.title || 'Chat') : page === 'skills' ? 'Skills' : page === 'mcp' ? 'MCP connections' : page === 'terminal' ? 'Terminal' : pages.find(p => p.key === page)?.label ?? '';
   const footer=footerFor(client);
   const {prefs:footerPrefsNow}=useSyncExternalStore(footer.subscribe,footer.getSnapshot,footer.getSnapshot);
   const browser=useBrowserApp(client,user.role==='owner');
@@ -321,8 +322,9 @@ function Workspace({ client, notice }: { client: SessionClient; notice: ReactNod
       </>}
       <section className="page page-ui" hidden={page!=='code'||!!chat}><p role="status" className="fine-print">Select Code in the bottom bar to open or reconnect the project editor.</p></section>
       <section className="page page-browser" hidden={page!=='browser'}><BrowserWorkspace client={client} active={page==='browser'}/></section>
-      <section className="page page-store" hidden={page!=='store'}><StoreWorkspace client={client} active={page==='store'} sidebarSlot={slot} request={storeRequest} canBrowser={browser.available&&owner} canCode={nativeEditor&&owner} codeMissing={codeMissing&&owner} onOpenApp={id=>{if(id==='browser')setPage('browser');else if(id==='code')void (nativeEditor?openCode():openCodeInStore());else if(id==='terminal')openTerminal();else if(id==='genvr')void openGenvr();else if(id==='channels')openSettings('channels');else setPage(id);}} onAccounts={()=>openSettings('accounts')} footerItem={owner?id=>footerToolItem(footerPrefsNow,id,x=>footer.toggle(x)):undefined} onPermissions={()=>{if(user.role!=='owner'){setPage('agents');return;}setApprovalsPlace(r=>({place:'perms',n:(r?.n??0)+1}));setPage('approvals');}}/></section>
+      <section className="page page-store" hidden={page!=='store'}><StoreWorkspace client={client} active={page==='store'} sidebarSlot={slot} request={storeRequest} canBrowser={browser.available&&owner} canCode={nativeEditor&&owner} codeMissing={codeMissing&&owner} onOpenApp={id=>{if(id==='browser')setPage('browser');else if(id==='code')void (nativeEditor?openCode():openCodeInStore());else if(id==='terminal')openTerminal();else if(id==='genvr')void openGenvr();else if(id==='channels')openSettings('channels');else if(id==='security')setPage('security');else setPage(id);}} onAccounts={()=>openSettings('accounts')} footerItem={owner?id=>footerToolItem(footerPrefsNow,id,x=>footer.toggle(x)):undefined} onPermissions={()=>{if(user.role!=='owner'){setPage('agents');return;}setApprovalsPlace(r=>({place:'perms',n:(r?.n??0)+1}));setPage('approvals');}}/></section>
       {user.role==='owner'&&<section className="page page-trading" hidden={page!=='trading'}><StoreTradingView client={client} active={page==='trading'} sidebarSlot={slot} onBack={openMyApps} onOpenStore={()=>{setStoreRequest(r=>({updates:false,item:'store:trading',n:(r?.n??0)+1}));setPage('store');}} onPermissions={()=>{setApprovalsPlace(r=>({place:'perms',n:(r?.n??0)+1}));setPage('approvals');}}/></section>}
+      {user.role==='owner'&&<section className="page page-security" hidden={page!=='security'}><SecurityWorkspace client={client} active={page==='security'} sidebarSlot={slot} onBack={openMyApps}/></section>}
       {user.role==='owner'&&mode==='live'&&<section className="page page-computers" hidden={page!=='computers'}><ComputersSection client={client} active={page==='computers'} sidebarSlot={slot} onOpenChat={id=>{void chat?.open(id);setPage('chat');}} onApprovals={()=>setPage('approvals')} onSettings={()=>openSettings('computers')} onUpdates={()=>openSettings('about')}/></section>}
       <section className="page page-genvr" hidden={page !== 'genvr'}>{genvrOpened&&<GenVRPage key={user.id} client={client} active={page === 'genvr'} sidebarSlot={slot} request={genvrRequest} onOpenChat={id=>{void (async()=>{await chat?.loadProjects();await chat?.refreshList();await chat?.open(id);})();setPage('chat');}}/>}</section>
       {page === 'settings' && <section className="page page-settings"><AppSettings onOpenDeviceChat={id=>{void chat?.open(id);setPage('chat');}} key={settingsVisit} mcpOpenId={mcpOpen} onOpenChannelsStore={()=>{setStoreRequest(r=>({updates:false,item:'store:agent-connect',n:(r?.n??0)+1}));setPage('store');}} onOpenStore={local=>openStore(false,local)} initialTab={settingsTab} initialMemoryPane={memoryPane} sidebarSlot={slot} active signedIn client={client} preference={appearance.preference} onTheme={appearance.setPreference} onAccount={() => openSettings('account')} onAgents={() => setPage('agents')} onOpenMemory={() => setPage('memory')} onOpenChat={() => setPage('chat')} onOpenApps={openMyApps} onOpenTool={tool => setPage(tool)} onOpenGenvr={()=>void openGenvr()} onApprovals={() => setPage('approvals')} onBoard={() => setPage('board')} onAgent={id => { setAgentFocus(f => ({ id, n: (f?.n ?? 0) + 1 })); setPage('agents'); }}/></section>}

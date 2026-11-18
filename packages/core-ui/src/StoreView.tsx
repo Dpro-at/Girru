@@ -39,13 +39,15 @@ export const addedItem=(app:Pick<WorkspaceApp,'name'|'sourceId'|'origin'>&Partia
 /** SA5: the coding apps whose add-ons get a place of their own ("On this computer"). */
 export const LOCAL_APPS:ReadonlyArray<['claude-code'|'codex',string]>=[['claude-code','Claude Code'],['codex','Codex']];
 export type StoreSort='new'|'az';
-export type IncludedApp='channels'|'genvr'|'trading'|'terminal'|'code'|'browser';
+export type IncludedApp='channels'|'genvr'|'trading'|'terminal'|'code'|'browser'|'security';
 /** Where an item comes from, in the words of its chip. */
 export const sourceChip=(x:Pick<StoreItem,'id'|'source'>)=>x.source==='girru'?(x.id.startsWith('girru:')?'Made by Girru':'Girru’s registry'):x.source==='codex'?'Codex add-on':'Claude Code add-on';
 const TINT:Record<string,string>={marketing:'#E07AB0',sales:'#5FB37A',developer:'#9AA4B2',worlds:'#6FD3C7',trading:'#F0C27A',productivity:'#7AA5FF',more:'#B49AF0'};
 const ICONS=new Set<string>(['globe','chart','terminal','code','send','headset','calendar','puzzle','store']);
 // CODE-STORE-01: a Girru app added from the Store (Code) opens like one that comes with Girru.
-const includedApp=(x:StoreItem)=>x.id==='store:browser'&&x.state==='installed'?'browser':x.id==='store:trading'&&x.state==='installed'?'trading':x.id==='store:agent-connect'&&x.state==='installed'?'channels':(x.state==='included'||(x.state==='installed'&&x.id.startsWith('girru:')))&&x.kind==='app'?x.id.slice(6) as IncludedApp:null;
+// The Security app (store id 'waf-security') opens as a built-in page (its UI is served by its own
+// backend and embedded by the shell), so it is treated as an included app whenever it is present.
+const includedApp=(x:StoreItem)=>x.kind==='app'&&x.id==='waf-security'?'security' as IncludedApp:x.id==='store:browser'&&x.state==='installed'?'browser':x.id==='store:trading'&&x.state==='installed'?'trading':x.id==='store:agent-connect'&&x.state==='installed'?'channels':(x.state==='included'||(x.state==='installed'&&x.id.startsWith('girru:')))&&x.kind==='app'?x.id.slice(6) as IncludedApp:null;
 /** Search: every kind and source; names that match first, then the rest of the words. */
 export const matchStore=(items:StoreItem[],query:string)=>{const q=query.trim().toLowerCase();if(!q)return [];const named=(x:StoreItem)=>itemName(x).toLowerCase().includes(q)||x.name.toLowerCase().includes(q);return [...items.filter(named),...items.filter(x=>!named(x)&&`${x.summary} ${x.maker} ${x.description}`.toLowerCase().includes(q))];};
 /** New first (the newest update date; items without one keep the store's order after them), or A–Z by name. */

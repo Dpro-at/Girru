@@ -128,6 +128,16 @@ const agent = x => {
     : { id: x.id, version: x.version, nameUnavailable: true, ...profile(x) };
 };
 function allowed(method, target, body) {
+  // Extension data (S0-EXT-UI): an installed app's own data routes under
+  // /api/ext/<id>/<path> (never the /ui subtree, which is served by its own branch
+  // above), with an optional query string. These are ordinary fetch()es carrying the
+  // owner bearer; the backend's route guard enforces owner-admin, so the bridge only
+  // shape-checks here: a GET has no body, a write carries an object or nothing. The
+  // app's JSON is passed through unprojected (project()).
+  if (/^\/api\/ext\/[a-z0-9][a-z0-9-]{0,62}\/(?!ui(?:\/|$))[A-Za-z0-9][A-Za-z0-9/_:.-]{0,255}(?:\?[A-Za-z0-9=&_.:%-]{0,256})?$/.test(target)) {
+    if (method === 'GET') return body === undefined;
+    return ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && (body === undefined || record(body));
+  }
   if(target===BROWSER_APP_PATH)return allowedBrowserApp(method,target,body);
   if(target===VOICE_LIBRARY_PATH)return allowedVoiceLibrary(method,target,body);
   if (target === CHAT_VOICE_PATH) return allowedChatVoice(method,target,body);
@@ -230,6 +240,10 @@ function stage1Route(method, target) {
   return read && allowed('GET', target, undefined);
 }
 function project(target, status, body) {
+  // Extension data (S0-EXT-UI): pass the installed app's own JSON through unchanged.
+  // The response gate already bounded it (application/json, size limit) and the app
+  // owns this data for its own embedded UI, so there is no fixed shape to whitelist.
+  if (/^\/api\/ext\/[a-z0-9][a-z0-9-]{0,62}\/(?!ui(?:\/|$))/.test(target)) return body === undefined ? null : body;
   if(upgradeRoute(target))return upgradeResponse(target,status,body);
   if(packRoute(target))return packResponse(target,status,body);
   if(marketRoute(target))return marketResponse(target,status,body);
@@ -447,6 +461,52 @@ function createApplicationServer({ healthCheck = null, browserController = null,
       const data = assets.files.get(name);
       if (!data) return send(404);
       return send(200, data, name.endsWith('.html') ? 'text/html; charset=utf-8' : name.endsWith('.js') ? 'text/javascript; charset=utf-8' : name.endsWith('.css') ? 'text/css; charset=utf-8' : name.endsWith('.gif') ? 'image/gif' : name.endsWith('.webp') ? 'image/webp' : 'text/plain; charset=utf-8');
+    }
+    // Extension UI (S0-EXT-UI): an installed owner-admin app ships its own small
+    // front-end. The backend serves it unauthenticated under /api/ext/<id>/ui
+    // (the manifest's publicRoutes). A framed document, its one script and its one
+    // stylesheet are navigations/subresources, not fetch(): they carry no bearer and
+    // a Sec-Fetch-Dest other than 'empty', so the ordinary /api gates below would
+    // reject them. This narrow branch proxies ONLY GET/HEAD of
+    // /api/ext/<id>/ui[/<file>.js|css], returns ONLY html/js/css under a tight size
+    // bound, strips cookies/redirects, and frames same-origin. The app's data stays
+    // owner-gated (see allowed()); the app's own code runs sandboxed on the embed side.
+    //
+    // CodeQL js/user-controlled-bypass flags that the URL (user input) selects a branch
+    // that skips the auth gate below. That is by design and safe: the only thing this
+    // branch serves is a public UI subtree the backend already exposes unauthenticated;
+    // the id/file are allow-listed by the regex, the method is GET/HEAD, no bearer is
+    // forwarded, the response is restricted to html/js/css, and the frame is same-origin.
+    // No private data is reachable here, so the "bypass" grants nothing beyond the public
+    // assets. Suppressed in source; the data routes stay owner-gated in allowed().
+    const extUi = /^\/api\/ext\/([a-z0-9][a-z0-9-]{0,62})\/ui(?:\/([a-z0-9][a-z0-9._-]{0,63}\.(js|css)))?$/.exec(raw);
+    if (extUi) { // codeql[js/user-controlled-bypass]
+      if (!['GET', 'HEAD'].includes(req.method)) return send(405);
+      if (req.headers.authorization || req.headers['transfer-encoding'] || Number(req.headers['content-length'] || 0)) return send(400);
+      const kind = extUi[3] === 'js' ? 'text/javascript' : extUi[3] === 'css' ? 'text/css' : 'text/html';
+      const port = typeof upstreamPort === 'function' ? upstreamPort() : upstreamPort;
+      if (!validPort(port)) return send(503);
+      const limit = 2 * 1024 * 1024;
+      upstream = http.request({ hostname: HOST, port, path: raw, method: req.method, agent: false, maxHeaderSize: 16384, headers: { Host: `${HOST}:${port}`, Accept: kind, ...(launchToken ? { [LAUNCH_HEADER]: launchToken } : {}) } }, response => {
+        const status = response.statusCode;
+        if (status !== 200 || response.headers.location || response.headers['set-cookie'] || response.headers['content-encoding']
+          || !new RegExp('^' + kind.replace('/', '\\/') + '(?:\\s*;|$)', 'i').test(response.headers['content-type'] || '')
+          || Number(response.headers['content-length'] || 0) > limit) { response.destroy(); return send(502); }
+        const parts = []; let count = 0;
+        response.on('data', c => { count += c.length; if (count > limit) { response.destroy(); send(502); } else parts.push(c); });
+        response.on('error', () => send(502));
+        response.on('end', () => {
+          // This document may be framed only within this same-origin window; it may
+          // load nothing off-origin and its own code is sandboxed by the embed.
+          res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+          res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'self'; form-action 'none'");
+          send(200, Buffer.concat(parts), kind + '; charset=utf-8');
+        });
+      });
+      upstream.on('error', () => send(502));
+      upstream.on('upgrade', (_response, socket) => { socket.destroy(); send(502); });
+      upstream.end();
+      return;
     }
     if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return send(405);
     const chat = raw === '/api/chat' && req.method === 'POST';
