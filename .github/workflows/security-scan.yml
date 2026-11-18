@@ -30,8 +30,11 @@ jobs:
         with:
           node-version: '24.21.0'
       - name: Audit locked dependencies
-        working-directory: packages/${{ matrix.package }}
-        run: npm audit --package-lock-only --audit-level=low
+        # Blocks on every advisory (down to low), with one exception: a documented,
+        # development-only advisory that has no patched release and never reaches the
+        # runtime (production) tree, listed in scripts/audit-allowlist.json. If such an
+        # advisory ever appears in the runtime tree, the gate blocks again.
+        run: node scripts/audit-gate.cjs packages/${{ matrix.package }}
 
   dependency-graph:
     name: Resolved dependency graph
