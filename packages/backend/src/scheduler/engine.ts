@@ -283,6 +283,40 @@ export class CronEngine extends EventEmitter implements ICronEngine {
     }
   }
 
+  /**
+   * Register an ad-hoc handler job (extensions, via the plugin SDK). Unlike
+   * scheduleJob these are not DB-backed CronJobs with an actionType; they run a
+   * plain handler the caller owns. The id is the caller's (e.g. ext:<id>:<job>)
+   * and must not collide with a DB job id. Like scheduleJob, the job stays known
+   * but never fires in a paper-only engine or with AGENT_PLAYER_BACKGROUND=off;
+   * its task lives in `this.tasks`, so stop()/unregister() clean it up.
+   */
+  register(jobId: string, cronExpression: string, handler: () => Promise<void> | void): void {
+    if (typeof jobId !== 'string' || !jobId) throw new Error('A cron job id is required');
+    if (typeof handler !== 'function') throw new Error('A cron handler is required');
+    if (!cron.validate(cronExpression)) throw new Error(`Invalid cron expression: ${cronExpression}`);
+    // Replace any task already at this id.
+    this.unregister(jobId);
+    if (this.#paperOnly || !backgroundEnabled()) return;
+    const task = cron.schedule(cronExpression, async () => {
+      try { await handler(); }
+      catch (error: any) { safeConsole.error(`[CronEngine] ❌ Registered job "${jobId}" error:`, error?.message ?? 'error'); }
+    });
+    this.tasks.set(jobId, task);
+    safeConsole.log(`[CronEngine] 📅 Registered job: ${jobId} (${cronExpression})`);
+  }
+
+  /** Stop and drop an ad-hoc handler job registered with register(). Missing id is fine. */
+  unregister(jobId: string): void {
+    const task = this.tasks.get(jobId);
+    if (task) {
+      task.stop();
+      task.destroy?.();
+      this.tasks.delete(jobId);
+      safeConsole.log(`[CronEngine] ⏹️  Unregistered job: ${jobId}`);
+    }
+  }
+
   /** Remember a persisted draft without starting a cron task. */
   rememberPausedJob(job: CronJob): void {
     if(this.#paperOnly&&job.actionType!=='paper-runtime-cycle')throw Error('Paper job required');
