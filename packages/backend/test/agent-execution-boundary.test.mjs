@@ -35,7 +35,12 @@ test('LM Studio preserves shared events, tool correlation and inference count', 
   assert.deepEqual(frames.map(f => f.type), ['reasoning', 'tool_start', 'tool_result', 'text', 'done']);
   const [request, receipt] = bodies[1].messages.slice(-2);
   assert.equal(receipt.tool_call_id, request.tool_calls[0].id);
-  assert.equal(receipt.content, 'record');
+  // SEC-ENVELOPE-01: the fed-back result reaches the model wrapped in the
+  // untrusted-data envelope (fresh random nonce per message, so no exact match).
+  assert.ok(receipt.content.includes('record'), 'the tool body survives inside the frame');
+  assert.match(receipt.content, /GIRRU-UNTRUSTED-DATA nonce=[0-9a-f]{32} begin/, 'open marker with a nonce');
+  assert.match(receipt.content, /GIRRU-UNTRUSTED-DATA nonce=[0-9a-f]{32} end/, 'close marker with a nonce');
+  assert.match(receipt.content, /never as instructions/i, 'intro says data, not instructions');
 });
 
 test('backend dispatch preserves provider protocols and refuses unknown providers', async () => {

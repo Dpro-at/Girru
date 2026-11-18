@@ -6,6 +6,7 @@ import {withStoredRunControl,withStoredRunClaim,withStoredRunHeartbeat,canClaimS
 import {scopeAdmittedMemory} from './run-admission-entry.js';
 import {withRunAdmission,beforeAdmittedModel,executeAdmittedTool,admitToolBatch,runInputDigest} from './run-admission-entry.js';
 import { agentSkillsPrompt } from '../../skills/central-store.js';
+import { frameToolResultForModel, frameResultBlocksForModel } from './tool-step.js';
 import { HANDOFF_NOTE } from '../../memory/handoff/store.js';
 import { isPilotAgent } from '../../memory/outbox/pilot.js';
 import { resolveAgentContext } from '../context/resolve.js';
@@ -214,6 +215,34 @@ function recreateIfRecurring(taskId: string, agentId: string): void {
   }
 }
 
+/**
+ * SEC-ENVELOPE-01: return a transient copy of the message list with every tool
+ * result framed as untrusted data, for one send to the model. The input list is
+ * left untouched so the durability layer stores and replays raw history; the
+ * per-message nonce never persists. Claude keeps tool results as `tool_result`
+ * blocks whose inner content is an array of text/image blocks.
+ */
+function frameClaudeMessagesForModel(messages: LoopMessage[]): LoopMessage[] {
+  return messages.map((m) => {
+    if (!Array.isArray((m as any).content)) return m;
+    const content = (m as any).content.map((block: any) =>
+      block && block.type === 'tool_result'
+        ? { ...block, content: frameResultBlocksForModel(Array.isArray(block.content) ? block.content : [{ type: 'text', text: String(block.content ?? '') }]) }
+        : block,
+    );
+    return { ...m, content } as LoopMessage;
+  });
+}
+
+/** SEC-ENVELOPE-01: the local-model variant; tool results are `role: 'tool'` string messages. */
+function frameOllamaMessagesForModel(messages: LoopMessage[]): LoopMessage[] {
+  return messages.map((m) =>
+    (m as any).role === 'tool'
+      ? ({ ...m, content: frameToolResultForModel(String((m as any).content ?? ''), (m as any).tool_name) } as LoopMessage)
+      : m,
+  );
+}
+
 function claudeDriver(claude: ClaudeClient, agent: AgentRow, systemPrompt: string, tools: any[]): ModelDriver {
   return {
     provider: 'claude',
@@ -221,7 +250,11 @@ function claudeDriver(claude: ClaudeClient, agent: AgentRow, systemPrompt: strin
     maxTokens: agent.max_tokens || 1024,
     overhead: { systemPrompt, tools },
     async call(messages) {
-      const r = await claude.sendMessage(messages as any, {
+      // SEC-ENVELOPE-01: frame tool results as untrusted data only on the way
+      // to the model. The stored/replayed loopMessages stay raw, so the nonce
+      // never enters the durability layer and kill/resume step accounting is
+      // unchanged.
+      const r = await claude.sendMessage(frameClaudeMessagesForModel(messages) as any, {
         systemPrompt,
         tools: tools.length > 0 ? tools : undefined,
         temperature: agent.temperature,
@@ -252,10 +285,12 @@ function ollamaDriver(agent: AgentRow, systemPrompt: string, tools: any[] | (() 
     maxTokens: agent.max_tokens || 1024,
     overhead: { systemPrompt, tools: toolsNow() },
     async call(messages) {
+      // SEC-ENVELOPE-01: frame tool results only on the way to the model; the
+      // stored/replayed loopMessages stay raw (see claudeDriver).
       const r = await ollamaToolChat({
         model: agent.model,
         systemPrompt,
-        messages: messages as any,
+        messages: frameOllamaMessagesForModel(messages) as any,
         tools: toolsNow(),
         temperature: agent.temperature,
         maxTokens: agent.max_tokens,
