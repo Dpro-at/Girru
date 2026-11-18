@@ -108,11 +108,11 @@ const agent = x => {
 function allowed(method, target, body) {
   // Extension data (S0-EXT-UI): an installed app's own data routes under
   // /api/ext/<id>/<path> (never the /ui subtree, which is served by its own branch
-  // above). These are ordinary fetch()es carrying the owner bearer; the backend's
-  // route guard enforces owner-admin, so the bridge only shape-checks here: a GET
-  // has no body, a write carries an object or nothing. The app's JSON is passed
-  // through unprojected (project()).
-  if (/^\/api\/ext\/[a-z0-9][a-z0-9-]{0,62}\/(?!ui(?:\/|$))[A-Za-z0-9][A-Za-z0-9/_:.-]{0,255}$/.test(target)) {
+  // above), with an optional query string. These are ordinary fetch()es carrying the
+  // owner bearer; the backend's route guard enforces owner-admin, so the bridge only
+  // shape-checks here: a GET has no body, a write carries an object or nothing. The
+  // app's JSON is passed through unprojected (project()).
+  if (/^\/api\/ext\/[a-z0-9][a-z0-9-]{0,62}\/(?!ui(?:\/|$))[A-Za-z0-9][A-Za-z0-9/_:.-]{0,255}(?:\?[A-Za-z0-9=&_.:%-]{0,256})?$/.test(target)) {
     if (method === 'GET') return body === undefined;
     return ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && (body === undefined || record(body));
   }
