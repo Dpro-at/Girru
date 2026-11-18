@@ -555,7 +555,7 @@ export function cancelRun(runId: string, actor: string): Promise<TaskRunRow> {
       `, `cancelled by ${actor}`, runId);
     }
     yield* run(`
-      UPDATE tool_approvals SET status = 'denied', decided_at = ${nowText(d)}, decided_by = 'run-cancelled'
+      UPDATE tool_approvals SET status = 'denied', decided_at = ${nowText(d)}, decided_by = 'run-cancelled', decided_by_kind = 'system'
       WHERE run_id = ? AND status = 'pending'
     `, runId);
     return (yield* runRow(runId))!;

@@ -17,6 +17,9 @@ import os from 'node:os';
 import type {Tool, ToolExecutionContext, ToolResult} from '../types.js';
 import {minimalChildEnv, safeChildCwd} from '../exec-policy.js';
 import {getPref} from '../../repositories/user-prefs.js';
+import {splitCommand} from '../shell-split.js';
+
+export {splitCommand};
 
 export const AGENT_COMMANDS_PREF = 'agent-commands';
 const MAX_TIMEOUT = 120_000, MAX_OUTPUT = 64 * 1024;
@@ -27,20 +30,7 @@ export async function agentCommandsOn(userId: string | undefined | null): Promis
   try { return (await getPref(userId, AGENT_COMMANDS_PREF)) === true; } catch { return false; }
 }
 
-/** Splits a command into words with plain quotes; null when it uses any shell feature (pipes, redirects, $, `, ;, &…). */
-export function splitCommand(command: string): string[] | null {
-  const out: string[] = []; let cur = '', quote: string | null = null, has = false;
-  for (const ch of command) {
-    if (quote) { if (ch === quote) quote = null; else cur += ch; continue; }
-    if (ch === '"' || ch === "'") { quote = ch; has = true; continue; }
-    if (/\s/.test(ch)) { if (has || cur) out.push(cur); cur = ''; has = false; continue; }
-    if (/[|;&<>$`(){}\n\r]/.test(ch)) return null;
-    cur += ch; has = true;
-  }
-  if (quote) return null;
-  if (has || cur) out.push(cur);
-  return out.length ? out : null;
-}
+// splitCommand lives in ../shell-split.ts (dependency-free) and is re-exported above.
 
 // Security review: every command accepts only flags listed here (exact words); anything else needs the owner.
 const NUM = /^-\d{1,6}$|^-n\d{1,6}$|^--max-count=\d{1,6}$/;

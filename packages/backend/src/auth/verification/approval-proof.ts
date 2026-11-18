@@ -34,7 +34,7 @@ export async function completeApprovalProofChallenge(token:unknown,context:Opera
 export function* claimApprovalWithReceiptStep(receipt:unknown,context:OperationContext,id:string,paramsHash:string,now=Date.now()):Step<boolean>{
  const operation=yield* boundApproval(context,id,paramsHash,now);
  if(!(yield* consumeOperationReceiptStep(receipt,context,operation,now)))return false;
- const changed=yield* run("UPDATE tool_approvals SET status='approved',decided_at=?,decided_by=? WHERE id=? AND status='pending' AND params_hash=?",new Date(now).toISOString().slice(0,19).replace('T',' '),context.userId,id,paramsHash);
+ const changed=yield* run("UPDATE tool_approvals SET status='approved',decided_at=?,decided_by=?,decided_by_kind='human' WHERE id=? AND status='pending' AND params_hash=?",new Date(now).toISOString().slice(0,19).replace('T',' '),context.userId,id,paramsHash);
  if(changed.changes!==1)throw Error('Approval claim conflict');
  return true;
 }
@@ -46,6 +46,6 @@ export function* claimApprovalWithoutReceiptStep(ownerId:string,id:string,params
  if(!owner||owner.role!=='owner'||owner.status!=='active')return {kind:'forbidden',changes:0};
  const factor=yield* one<{enabled:number}>(`SELECT enabled FROM verification_factors WHERE user_id=?${forUpdate(d)}`,ownerId);
  if(factor&&Number(factor.enabled)===1)return {kind:'required',changes:0};
- const result=yield* run("UPDATE tool_approvals SET status='approved',decided_at=?,decided_by=? WHERE id=? AND status='pending' AND params_hash=?",new Date(now).toISOString().slice(0,19).replace('T',' '),ownerId,id,paramsHash);
+ const result=yield* run("UPDATE tool_approvals SET status='approved',decided_at=?,decided_by=?,decided_by_kind='human' WHERE id=? AND status='pending' AND params_hash=?",new Date(now).toISOString().slice(0,19).replace('T',' '),ownerId,id,paramsHash);
  return {kind:'claimed',changes:result.changes};
 }

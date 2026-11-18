@@ -3,6 +3,8 @@ import {claimApprovalWithReceiptStep,claimApprovalWithoutReceiptStep} from '../a
 import type {OperationContext} from '../auth/verification/operation-proof.js';
 import { redactImportText } from '../memory/import/redact.js';
 import {isToolExecClass} from './exec-policy.js';
+import {isDeciderKind, type DeciderKind} from './argv-gate.js';
+export type {DeciderKind} from './argv-gate.js';
 /**
  * One-time approvals for risky agent tool calls (S1.3).
  *
@@ -300,6 +302,8 @@ export interface ApprovalRecord {
   requestedAt: string;
   decidedAt: string | null;
   decidedBy: string | null;
+  /** SEC-GATE-02: how it was decided — human / rule / model / system. */
+  decidedByKind: DeciderKind | null;
   executedAt: string | null;
   resultPreview: string | null;
   error: string | null;
@@ -326,6 +330,7 @@ function toRecord(row: any): ApprovalRecord {
     requestedAt: row.requested_at,
     decidedAt: row.decided_at,
     decidedBy: row.decided_by,
+    decidedByKind: isDeciderKind(row.decided_by_kind) ? row.decided_by_kind : null,
     executedAt: row.executed_at,
     resultPreview: row.result_preview,
     error: row.error,
@@ -499,7 +504,7 @@ export async function denyApproval(id: string, ownerId: string): Promise<Approva
   await expireOld();
   const res = await sql().read((function* () {
     const d = yield* dialect();
-    return yield* run(`UPDATE tool_approvals SET status = 'denied', decided_at = ${nowText(d)}, decided_by = ? WHERE id = ? AND status = 'pending'`, ownerId, id);
+    return yield* run(`UPDATE tool_approvals SET status = 'denied', decided_at = ${nowText(d)}, decided_by = ?, decided_by_kind = 'human' WHERE id = ? AND status = 'pending'`, ownerId, id);
   })());
   const record = await getApproval(id);
   if (!record) throw new ApprovalStateError('Approval not found', 404);
