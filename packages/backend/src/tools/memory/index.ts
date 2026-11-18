@@ -11,6 +11,7 @@ export { memoryEditTool, memoryDeleteTool } from './edit.js';
 export { memoryForgetTool } from './forget.js';
 export { memoryDoctorTool, memoryDoctorFixTool } from './doctor.js';
 export { memoryGraphTool, memoryGraphTopicTool, memoryGraphSyncTool } from './graph.js';
+export { memoryLessonsTool, memoryLessonsReviewTool } from './rsi-lessons.js'; // MEM-RSI-01: evidence-gated lessons
 export { memoryScopesTool, memoryScopeApplyTool, memoryAccessApplyTool, memoryScopeForgetTool } from './scopes.js';
 export { memoryMoveTool } from './move.js';
 export { memoryBridgeTool, memoryBridgeApplyTool } from './bridge.js';

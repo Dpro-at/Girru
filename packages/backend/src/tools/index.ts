@@ -83,6 +83,8 @@ import {
   memoryGraphReviewTool,
   memoryGraphTopicTool,
   memoryGraphSyncTool,
+  memoryLessonsTool,
+  memoryLessonsReviewTool,
   memoryRecallTool,
 } from './memory/index.js';
 
@@ -153,6 +155,7 @@ const CORE_TOOLS: Tool[] = [
   discoveryTool, discoveryApplyTool, // DISCOVER-01: what coding agents left on this computer; owner-only; apply needs owner approval
   phoneDevicesTool, // MOB-PAIR-01: the paired phones, read only and owner-only; no tool pairs, allows or forgets a phone
   memoryReviewTool, memoryReviewDecideTool, memoryReviewRoutineTool, memoryGraphReviewTool, memoryGraphTopicTool, memoryGraphSyncTool, memoryRecallTool, // owner's review inbox, topics + reply trace; decisions need owner approval
+  memoryLessonsTool, memoryLessonsReviewTool, // MEM-RSI-01: owner-only evidence-gated lessons; review (reverse/confirm/forget) needs owner approval
   memoryPersonExportTool, memoryPersonForgetTool, memoryPrivacyReviewTool, memoryPrivacyDecideTool, // STORE-MAP-01 P9: one person, personal-data review (P9 only); export / forget / decide need owner approval
   memoryTrustReviewTool, memoryCorrectedCheckedTool, memoryQuestionAnswerTool, memoryQuestionForgetTool, projectTrustReviewTool, projectTrustApplyTool, // STORE-MAP-01 P9b screens (P9b only): corrected after use, open questions; changes need owner approval
   openInCodeTool, // CODE-OPEN-01: a file in a project or the data folder, at a line; needs owner approval
