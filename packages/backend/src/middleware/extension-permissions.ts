@@ -21,6 +21,7 @@ export type PermissionType =
   | 'tools'       // Register AI tools
   | 'cron'        // Schedule background jobs
   | 'storage'     // Extension storage API (always granted)
+  | 'ssh-hosts'   // Read the SSH servers discovered on this computer (names/addresses, never keys)
   | 'process';    // Execute shell commands
 
 /**
@@ -33,6 +34,7 @@ const PERMISSION_METADATA: Record<PermissionType, { risk: 'low' | 'medium' | 'hi
   network: { risk: 'medium', description: 'Make HTTP requests' },
   filesystem: { risk: 'high', description: 'Read/write files on disk' },
   database: { risk: 'high', description: 'Direct database access' },
+  'ssh-hosts': { risk: 'medium', description: 'Read the SSH servers found on this computer (names and addresses, never keys or passwords)' },
   process: { risk: 'high', description: 'Execute shell commands' },
 };
 

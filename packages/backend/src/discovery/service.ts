@@ -98,6 +98,17 @@ function init() {
   })().catch((e) => { ready = undefined; throw e; });
 }
 
+/**
+ * The SSH servers this user imported from ~/.ssh/config (discovery), for features that
+ * offer a known server instead of a blank form. Names and addresses only: the login is a
+ * username, never a key file's contents or a password — those are never stored here.
+ */
+export async function listSshHosts(userId: string): Promise<Array<{ alias: string; host: string | null; port: number | null; login: string | null }>> {
+  await init();
+  return q.all<{ alias: string; host: string | null; port: number | null; login: string | null }>(
+    'SELECT alias, host, port, login FROM ssh_hosts WHERE user_id = ? ORDER BY alias', userId);
+}
+
 const homeRel = (home: string, file: string) => { if (!path.isAbsolute(file)) return file; // a path from another system (e.g. C:\\… on a Mac) as it is
   const r = path.relative(home, file); return r && !r.startsWith('..') && !path.isAbsolute(r) ? `~${path.sep}${r}` : file; };
 const isDir = async (p: string) => (await discoveryFs.lstat(p).catch(() => null))?.isDirectory() === true;
