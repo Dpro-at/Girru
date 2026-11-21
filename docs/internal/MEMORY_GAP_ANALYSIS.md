@@ -144,3 +144,57 @@ text, and the index still never goes to disk.
 
 **Still open:** the same mechanism for PostgreSQL (item 18) — its search uses the older in-process path
 and has no change capture at all.
+
+## First real-project measurement, 2026-11-14
+
+Every accuracy figure above comes from a generated world of ten invented projects. This one does not:
+`scripts/memory-baseline/real-project.mjs` indexes **this repository's own documents** and asks ten
+real questions whose answers are written in them, each naming the file its answer lives in and a
+phrase that must come back. A miss is a real miss — the text exists and was not found.
+
+Windows i9, 500 files, 3,381 pieces of text, 122.9 s to index the first time:
+
+| | Meaning-based (`qwen3-embedding:0.6b`) | Words only (the offline fallback) |
+|---|---|---|
+| Answers in the retrieved text | **9 of 10** | 5 of 10 |
+| Right file retrieved | **9 of 10** | 6 of 10 |
+| Recall p50 / p95 | 85 / 298 ms | 4 / 89 ms |
+
+The gap between the two columns is what the embedding model is for: "does the recall index get written
+to disk" finds the line saying it **never goes to disk** only in the first column — words alone cannot
+join those.
+
+The one miss, both ways: "how are handoff notes grouped when you read them". The answer is the
+FEATURES.md row listing Today / Earlier this week / …, but the storage map's own *Handoffs* section and
+`API.md` outranked it. Not a retrieval failure so much as a ranking one — a plausible section about the
+same noun beat the section that answers the question. Worth a look if indirect questions are revisited.
+
+Run it on another machine, or on any folder, with `--repo <path>`; `--vectors hash` needs no model.
+
+### A second project, and a check nobody writes the questions for
+
+The ten questions above were written by someone who had read these documents, which flatters the
+result. `--known-item N` asks N real headings taken from the project's own documents instead and checks
+the passage under each one comes back: no hand-written questions, so it runs on a project nobody here
+has read and cannot be tuned by choosing questions that pass.
+
+Many documents repeat a heading ("Rules", "Notes"), so a passage under the SAME heading is not a wrong
+answer — it is the topic that was asked for. Both counts are reported.
+
+| 40 headings each | This repository | Flowxtra (a different project) |
+|---|---|---|
+| Files · pieces of text · first index | 500 · 3,389 · 101 s | 500 · 8,000 · 183 s |
+| That exact passage first | 43% | 28% |
+| That exact passage in the best four | 68% | 53% |
+| **A passage under the same heading first** | **60%** | **63%** |
+| **Same heading, in the best four** | **85%** | **80%** |
+| Headings the project repeats elsewhere | 43% | 45% |
+| Recall p50 / p95 | 67 / 88 ms | 79 / 93 ms |
+
+Read the "same heading" rows: 80–85% of topics are found in the best four on two unrelated real
+projects, which is close to the 90% of the hand-written questions and arrived at without anyone
+choosing the questions. The strict rows are lower mostly because about 45% of headings are ambiguous in
+both projects.
+
+Flowxtra is more than twice as dense (8,000 pieces of text from 500 files) and recall stays within a
+few milliseconds, so size is not what limits this — ranking is.
