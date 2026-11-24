@@ -1,8 +1,8 @@
-import {JoinStart, JoinReady, NameThisComputer, SetupRoad, quietDiscovery, readSetupEntry, writeSetupEntry, setupRoad, type QuietDiscoveryProgress} from './ComputerStart';
+import {JoinStart, NameThisComputer, SetupRoad, quietDiscovery, readSetupEntry, writeSetupEntry, setupRoad, type QuietDiscoveryProgress} from './ComputerStart';
 import {useAccountStatus} from './ComputerJoin';
 import { DiscoveryStream } from './DiscoveryStream';
 import { SetupOrb } from './SetupOrb';
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SessionClient } from './session';
 import { UiIcon } from './ui-icons';
 import { ClaudeCodeIcon, CodexIcon, GeminiIcon } from './brand-icons';
@@ -10,8 +10,6 @@ import { TerminalPane } from './TerminalPane';
 import { TerminalPrefsController, TerminalTabs } from './terminal';
 import { CompanyController } from './company';
 import { TeamFlow } from './CompanyWizard';
-import { DepartmentTile } from './StaffDirectory';
-import { AgentsController } from './agents';
 import { WorkspaceTypeStep, type WorkspaceType } from './WorkspaceTypeStep';
 import { useAppTheme } from './app-navigation';
 import { PhoneSetupStep } from './PhonePairing';
@@ -19,7 +17,7 @@ import { SetupHelperPill } from './MemoryHelper';
 
 /** FIRSTRUN-01 (boards FR2–FR3): the steps after the owner account, in the one setup window. */
 export type FirstRunStep = 'discovery' | 'tools' | 'model' | 'team' | 'phone';
-const STEPS = ['Account', 'Your files', 'AI tools', 'Local model', 'Team', 'Phone'] as const;
+const STEPS = ['Account', 'Your files', 'AI tools', 'Team', 'Phone'] as const;
 export type AiTool = { id: 'claude' | 'codex' | 'gemini'; name: string; installed: boolean; signedIn: boolean; install: string | null; signIn: string; needs?: 'node' };
 type LocalChoice = { id: string; label: string; sizeGb: number; note: string; minMemoryGb: number; installed?: boolean };
 type LocalStep = { memoryGb: number; recommended: string; choices: LocalChoice[]; ollama: boolean; installed: string[]; download: string | null; commands: Record<string, string | null> };
@@ -98,71 +96,57 @@ export function FirstRunSetup({ client, initialStep, workspaceType: initialType,
     } catch { setTypeNotice('Could not save your choice. Try again.'); }
     finally { setSavingType(false); }
   };
-  const [signedIn, setSignedIn] = useState(false);
   // DEVICES-PROJECT-01 (CP1–CP2): “Sign in” on the welcome joins an account that may already have computers.
   const [chosen, setEntry] = useState(readSetupEntry);
   const [alone, setAlone] = useState(false);
   const account = useAccountStatus(client);
   const entry = alone ? null : chosen ?? setupRoad(account);
   const [joined, setJoined] = useState<{ from: string; comes: string; name: string } | null>(null);
-  const [joinReady, setJoinReady] = useState(false);
   const [named, setNamed] = useState(false);
+  const [teamCompleted, setTeamCompleted] = useState(initialStep === 'phone');
+  const finishing = useRef(false);
   const [preparing, setPreparing] = useState(false);
   const [scan, setScan] = useState<QuietDiscoveryProgress | null>(null);
   const [scanFailed, setScanFailed] = useState(false);
-  const movedOn = useRef(false);
   // CP12 E: the files scan runs quietly in the background; the road goes straight on to AI tools.
   const startSame = async () => {
     setPreparing(true); setScanFailed(false);
-    movedOn.current = true;
-    void quietDiscovery(client, setScan).finally(() => setPreparing(false));
+    void quietDiscovery(client, setScan).then(ok => { if (!ok) setScanFailed(true); }).finally(() => setPreparing(false));
     await go('tools');
   };
   /* The scan runs in the backend, so the owner can go on and let it finish in the background. */
-  const continueInBackground = async () => { movedOn.current = true; await go('tools'); };
+  const continueInBackground = () => go('tools');
   useEffect(() => { if (entry === 'same' && step === 'discovery' && !preparing) void startSame(); }, [entry, step]);
   const terminal = useSetupTerminal(client);
   useEffect(() => { void window.dproApp?.setSetupWindow?.(true).catch(() => {}); }, []);
-  // "Skip" on the local model needs a signed-in subscription, also when setup continues at that step.
-  useEffect(() => { void get<{ tools: AiTool[] }>(client, '/api/first-run/tools').then(r => { if (r) setSignedIn(r.tools.some(t => t.signedIn)); }); }, [client]);
   const go = async (s: FirstRunStep) => {
     setStepNotice(undefined);
     const response = await save(client, s);
     if (response?.status === 200) setStep(s);
     else setStepNotice('Could not save this step. Try again before continuing.');
   };
-  // CP7a: where the system has no key store (Windows today), say once that memory is not encrypted yet.
-  const [plainNote, setPlainNote] = useState<'show' | 'seen' | null>(null);
   const finish = async () => {
-    if (plainNote === null) {
-      const info = await window.dproApp?.info?.().catch(() => null);
-      if (info?.memoryEncrypted === false) { setPlainNote('show'); return; }
+    if (finishing.current) return;
+    finishing.current = true;
+    try {
+      const r = await client.request({ method: 'POST', path: '/api/first-run/finish' } as never);
+      if (r.status !== 200) throw Error();
+      void window.dproApp?.setSetupWindow?.(false).catch(() => {});
+      writeSetupEntry(null);
+      onDone((r.body as { conversationId?: string } | null)?.conversationId ?? null);
+    } catch {
+      setStepNotice('Could not finish setup. Try again.');
+    } finally {
+      finishing.current = false;
     }
-    await finishAfterNote();
   };
-  const finishAfterNote = async () => {
-    let chatId: string | null = null;
-    try { const r = await client.request({ method: 'POST', path: '/api/first-run/finish' } as never); chatId = (r.body as { conversationId?: string } | null)?.conversationId ?? null; } catch { /* the workspace opens anyway */ }
-    void window.dproApp?.setSetupWindow?.(false).catch(() => {});
-    writeSetupEntry(null);
-    onDone(chatId);
-  };
-  // Team → Phone stays on this page: the backend does not store the phone step yet, so it is not saved.
-  const [teamReady, setTeamReady] = useState(false);
   const appearance = useAppTheme();
-  if (plainNote === 'show') return <div className="shell app-shell first-run-shell" data-theme={appearance.theme} lang="en" dir="ltr"><main className="first-run-setup" aria-label="Set up Girru">
-    <section className="computer-join" aria-label="Memory on this computer"><span className="computer-start-done"><UiIcon name="info" size={26}/></span>
-      <h2>Memory on this computer is not encrypted</h2>
-      <p>This system has no key store Girru can use yet. Your work runs normally; Girru will offer to encrypt when it can.</p>
-      <div className="setup-actions"><button type="button" className="primary" onClick={() => { setPlainNote('seen'); void finishAfterNote(); }}>OK</button></div></section>
-  </main></div>;
   return <div className="shell app-shell first-run-shell" data-theme={appearance.theme} lang="en" dir="ltr"><main className="first-run-setup" aria-label="Set up Girru">
     {!named ? <NameThisComputer client={client} onDone={() => setNamed(true)}/>
     : entry === 'signin' ? <JoinStart client={client} onFresh={() => { writeSetupEntry(null); setEntry(null); setAlone(true); }} onSame={(from, comes, name) => { writeSetupEntry('same'); setJoined({ from, comes, name }); setEntry('same'); }}/>
     : entry === 'same' ? <>
       {stepNotice && <p className="setup-note" role="alert">{stepNotice}</p>}
-      {joinReady ? <JoinReady name={joined?.name ?? 'This computer'} from={joined?.from ?? 'your other computer'} comes={joined?.comes ?? ''} onOpen={() => void finish()}/>
-        : step === 'discovery' ? <section className="setup-note join-scan" role="status" aria-live="polite">
+      {step === 'discovery' ? <section className="setup-note join-scan" role="status" aria-live="polite">
             <SetupRoad at={4}/>
             {scanFailed ? <><p>Looking through this computer did not finish.</p><div className="setup-actions"><button type="button" className="primary" onClick={() => void startSame()}>Try again</button></div></>
             : <><p><b>Getting this computer ready</b></p>
@@ -170,17 +154,16 @@ export function FirstRunSetup({ client, initialStep, workspaceType: initialType,
               {scan && scan.status === 'scanning' && <p>{scan.scanned.toLocaleString()} files looked at · {scan.projects} projects · {scan.notes} notes</p>}
               {scan && scan.status === 'scanning' && <div className="setup-actions"><button type="button" className="primary" onClick={() => void continueInBackground()}>Continue, keep looking in the background</button></div>}</>}
           </section>
-        : <><SetupRoad at={4}/><ToolsStep client={client} terminal={terminal} onSignedIn={setSignedIn} onNext={() => setJoinReady(true)}/></>}
+        : <><SetupRoad at={4}/><ToolsStep client={client} terminal={terminal} onNext={() => void finish()} transferSource={joined?.from}/></>}
     </>
     : !workspaceType || (workspaceType === 'company' && !companyName) ? <WorkspaceTypeStep value={workspaceType} companyName={companyName} busy={savingType} notice={typeNotice} onNext={(type, name) => void chooseType(type, name)}/> : <>
     {step !== 'discovery' && <SetupOrb/>}
-    <SetupSteps current={step === 'discovery' ? 'Your files' : step === 'tools' ? 'AI tools' : step === 'model' ? 'Local model' : step === 'phone' ? 'Phone' : 'Team'}/>
+    <SetupSteps current={step === 'discovery' ? 'Your files' : step === 'tools' || step === 'model' ? 'AI tools' : step === 'phone' ? 'Phone' : 'Team'}/>
     {stepNotice && <p className="setup-note" role="alert">{stepNotice}</p>}
     {step === 'discovery' && <DiscoveryStep client={client} onNext={() => go('tools')}/>}
-    {step === 'tools' && <ToolsStep client={client} terminal={terminal} onSignedIn={setSignedIn} onNext={() => go('model')}/>}
-    {step === 'model' && <ModelStep client={client} terminal={terminal} canSkip={signedIn} onBack={() => go('tools')} onNext={() => go('team')}/>}
-    {step === 'team' && <TeamStep client={client} workspaceType={workspaceType} companyKind={workspaceType === 'company' ? companyKind : undefined} ready={teamReady} onReady={() => setTeamReady(true)} onBack={() => go('model')} onDone={() => setStep('phone')}/>}
-    {step === 'phone' && <PhoneSetupStep client={client} onBack={() => { setTeamReady(true); setStep('team'); }} onDone={finish}/>}
+    {(step === 'tools' || step === 'model') && <ToolsStep client={client} terminal={terminal} onNext={() => go(teamCompleted ? 'phone' : 'team')}/>}
+    {step === 'team' && <TeamStep client={client} workspaceType={workspaceType} companyKind={workspaceType === 'company' ? companyKind : undefined} onReady={() => { setTeamCompleted(true); void go('phone'); }} onBack={() => go('tools')}/>}
+    {step === 'phone' && <PhoneSetupStep client={client} onBack={() => setStep('tools')} onDone={finish}/>}
     </>}
     {/* MODELS-01-INSTALL (M1–M2): the memory helper installs itself; one quiet pill in the step's bottom bar, no step and no choice. */}
     <SetupHelperPill client={client}/>
@@ -234,7 +217,6 @@ export function DiscoveryInventoryView({ result, error = false, onRetry, onNext 
     <dl className="setup-discovery-counts">{(Object.keys(labels) as Array<keyof typeof labels>).map(key => <div key={key}><UiIcon name={key === 'projects' ? 'folder' : key === 'ssh' ? 'key' : key === 'skills' ? 'sparkle' : key === 'mcp' ? 'tool' : 'file'} size={20}/><dt>{labels[key]}</dt><dd>{(result?.counts[key] ?? 0).toLocaleString('en-US')}</dd></div>)}</dl>
     <p className="fine-print">{result?.scanned ?? 0} entries checked{result?.denied ? ` · ${result.denied} ${result.denied === 1 ? 'folder' : 'folders'} denied access` : ''}{result?.unavailable ? ` · ${result.unavailable} ${result.unavailable === 1 ? 'folder' : 'folders'} unavailable` : ''}.</p>
     {result?.limited && <p className="setup-note">Some locations could not be fully searched. The results show what Girru could reach.</p>}
-    <p className="fine-print">Your source files stay unchanged. Memory imports begin after your team is ready. Review skills in Library → Skills → From my coding apps and MCP connections in Settings → MCP connections → Found, not added. Add only what you want; connections stay off. SSH keys are in Settings → SSH keys; saved hosts are in Terminal → Saved SSH hosts. Your private SSH key contents are never read or imported.</p>
     <div className="setup-actions">
       {(error || result?.status === 'error') && <button type="button" onClick={onRetry}>Try again</button>}
       <button type="button" className="primary" disabled={error || result?.status !== 'done'} onClick={onNext}>Next</button>
@@ -244,17 +226,17 @@ export function DiscoveryInventoryView({ result, error = false, onRetry, onNext 
 
 type Terminal = ReturnType<typeof useSetupTerminal>;
 
-function ToolsStep({ client, terminal, onSignedIn, onNext }: { client: SessionClient; terminal: Terminal; onSignedIn: (v: boolean) => void; onNext: () => void }) {
+function ToolsStep({ client, terminal, onNext, transferSource }: { client: SessionClient; terminal: Terminal; onNext: () => void; transferSource?: string }) {
   const [tools, setTools] = useState<AiTool[] | null>(null);
-  const read = async () => { const r = await get<{ tools: AiTool[] }>(client, '/api/first-run/tools'); if (r) { setTools(r.tools); onSignedIn(r.tools.some(t => t.signedIn)); } };
+  const [modelsOpen, setModelsOpen] = useState(false);
+  const read = async () => { const r = await get<{ tools: AiTool[] }>(client, '/api/first-run/tools'); if (r) setTools(r.tools); };
   useEffect(() => { void read(); }, [client]);
   // While the terminal is open, look again every few seconds: a row turns green by itself after sign-in.
   useEffect(() => { if (!terminal.open) return; const t = setInterval(() => void read(), 3000); return () => clearInterval(t); }, [terminal.open]);
-  const any = !!tools?.some(t => t.signedIn);
   const none = !!tools && !tools.some(t => t.installed);
   return <section className="setup-pane" aria-label="Your AI tools">
     <h2>Your AI tools</h2>
-    <p>{none ? 'None of them is on this computer yet.' : 'Your agents think with these. Sign in to at least one; your own subscription pays, Girru adds nothing.'}</p>
+    <p>{none ? 'None of them is on this computer yet.' : 'Choose which tools your agents can use.'}</p>
     {!tools ? <p role="status">Looking at this computer…</p> : <ul className="setup-rows">{tools.map(t => <li key={t.id} className="setup-row">
       <span className="setup-mark" data-tool={t.id} aria-hidden="true">{t.id === 'claude' ? <ClaudeCodeIcon size={18}/> : t.id === 'codex' ? <CodexIcon size={18}/> : <GeminiIcon size={18}/>}</span>
       <span className="setup-row-text"><b>{t.name}</b><small data-state={t.signedIn ? 'ok' : t.installed ? 'warn' : undefined}>
@@ -262,63 +244,43 @@ function ToolsStep({ client, terminal, onSignedIn, onNext }: { client: SessionCl
       {t.signedIn ? <UiIcon name="check" size={16}/>
         : t.installed ? <button type="button" onClick={() => terminal.type(t.name, t.signIn)}>Sign in</button>
         : t.install ? <button type="button" onClick={() => terminal.type(t.name, t.install!)}><UiIcon name="download" size={13}/>Install</button> : null}
-    </li>)}</ul>}
-    {terminal.pane ?? <p className="fine-print">"Install" and "Sign in" run in Girru's terminal here, so you can see what happens.</p>}
-    {tools && !any && <p className="setup-note" role="note"><UiIcon name="info" size={14}/>No subscription? Continue with only the free local model (next step). Agents will be slower and simpler.</p>}
+    </li>)}
+      <li>
+        <div className="setup-row">
+          <span className="setup-row-text"><b>Ollama</b><small>Local model · Optional</small></span>
+          <button type="button" aria-expanded={modelsOpen} onClick={() => setModelsOpen(!modelsOpen)}>{modelsOpen ? 'Hide models' : 'Choose model'}</button>
+        </div>
+        {modelsOpen && <LocalModelPicker client={client} terminal={terminal}/>}
+      </li>
+    </ul>}
+    {terminal.pane}
+    {transferSource && <p className="fine-print">In Computers on {transferSource}, approve the transfer. Then open Computers on this device and select Apply all.</p>}
     <div className="setup-actions"><button type="button" className="primary" disabled={!tools} onClick={onNext}>Continue</button></div>
   </section>;
 }
 
-function ModelStep({ client, terminal, canSkip, onBack, onNext }: { client: SessionClient; terminal: Terminal; canSkip: boolean; onBack: () => void; onNext: () => void }) {
+function LocalModelPicker({ client, terminal }: { client: SessionClient; terminal: Terminal }) {
   const [info, setInfo] = useState<LocalStep | null>(null);
   const [pick, setPick] = useState('');
   const [started, setStarted] = useState(false);
-  useEffect(() => { void get<LocalStep>(client, '/api/first-run/local-model').then(r => { if (r) { setInfo(r); setPick(r.recommended); } }); }, [client]);
+  useEffect(() => { void get<LocalStep>(client, '/api/first-run/local-model').then(r => { if (r) { setInfo(r); setPick(''); } }); }, [client]);
   const has = !!info?.choices.find(c => c.id === pick)?.installed;
   const command = info?.commands[pick] ?? null;
   const install = () => { if (command) { terminal.type('Local model', command); setStarted(true); } };
-  return <section className="setup-pane" aria-label="A free model on this computer">
-    <h2>A free model on this computer</h2>
-    <p>Private and offline. Girru uses it for small, frequent work (sorting tasks, short replies, memory) so your subscription lasts longer.{info ? ` This computer has ${info.memoryGb} GB of memory.` : ''}</p>
+  return <div aria-label="Ollama models">
     {!info ? <p role="status">Looking at this computer…</p> : <div role="radiogroup" aria-label="Local model" className="setup-rows">{info.choices.map(c =>
       <label key={c.id} className="setup-row setup-choice" data-on={pick === c.id || undefined}>
-        <input type="radio" name="local-model" aria-label={c.label} checked={pick === c.id} onChange={() => setPick(c.id)}/>
+        <input type="radio" name="local-model" aria-label={c.label} checked={pick === c.id} onChange={() => { setPick(c.id); setStarted(false); }}/>
         <span className="setup-row-text"><b>{c.label} {c.id === info.recommended && <span className="badge setup-recommended">Recommended for this computer</span>}</b><small>{c.installed ? 'Already on this computer.' : info.memoryGb < c.minMemoryGb ? `Too big for this computer: it can slow it down or make it stop. ${c.note}` : c.note}</small></span>
         {c.sizeGb > 0 && <span className="setup-size">{c.sizeGb} GB</span>}
       </label>)}</div>}
     {info?.download && !info.ollama && <p className="setup-note" role="note"><UiIcon name="info" size={14}/>Girru runs local models with Ollama, a free program. <a href={info.download} target="_blank" rel="noreferrer">Download Ollama</a>, open it once, then come back and press Install.</p>}
-    {terminal.pane ?? <p className="fine-print">Install opens the terminal here: it installs Ollama if needed and downloads the model. You can go on while it downloads.</p>}
-    <div className="setup-actions"><button type="button" onClick={onBack}>Back</button>{canSkip && !started && !has && <button type="button" className="link-button" onClick={onNext}>Skip</button>}
-      {has || started ? <button type="button" className="primary" onClick={onNext}>Continue</button>
-        : <button type="button" className="primary" disabled={!command} onClick={install}>Install</button>}</div>
-  </section>;
+    <div className="setup-actions"><button type="button" disabled={!command || has || started} onClick={install}>Install</button></div>
+  </div>;
 }
 
-function TeamStep({ client, workspaceType, companyKind, ready, onReady, onBack, onDone }: { client: SessionClient; workspaceType: WorkspaceType; companyKind?: string; ready: boolean; onReady: () => void; onBack: () => void; onDone: () => void }) {
+function TeamStep({ client, workspaceType, companyKind, onReady, onBack }: { client: SessionClient; workspaceType: WorkspaceType; companyKind?: string; onReady: () => void; onBack: () => void }) {
   const controller = useMemo(() => new CompanyController(client), [client]);
   useEffect(() => () => controller.dispose(), [controller]);
-  return ready ? <TeamReady client={client} onStart={onDone}/> : <TeamFlow controller={controller} workspaceType={workspaceType} companyKind={companyKind} mode="setup" onBack={onBack} onHired={onReady}/>;
-}
-
-/** A steady colour per name, so each person is told apart at a glance. */
-function faceColor(name: string) { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360; return `hsl(${h} 45% 42%)`; }
-
-/** After hiring: the people just hired, by department, then the phone step (board D1). */
-function TeamReady({ client, onStart }: { client: SessionClient; onStart: () => void }) {
-  const agents = useMemo(() => new AgentsController(client), [client]);
-  useEffect(() => { void agents.list(); return () => agents.dispose(); }, [agents]);
-  const a = useSyncExternalStore(agents.subscribe, agents.getSnapshot, agents.getSnapshot);
-  const main = a.agents.find(x => x.isPrimary);
-  const groups = new Map<string, typeof a.agents[number][]>();
-  for (const x of a.agents) if (!x.isPrimary) { const k = x.department || 'Team'; groups.set(k, [...(groups.get(k) ?? []), x]); }
-  return <section className="setup-pane" aria-label="Your team is ready">
-    <h2>Your team is ready</h2>
-    <p>{main ? `${main.name ?? 'Your Main agent'} leads them and talks to you first.` : 'Your Main agent leads them and talks to you first.'} Everyone asks you before doing anything outside Girru.</p>
-    {a.phase === 'listing' && !a.agents.length ? <p role="status">Reading your team…</p> : <ul className="setup-team">
-      {[...groups].map(([dep, people]) => <li key={dep}><span className="setup-team-dep"><DepartmentTile department={dep} size={20}/><b>{dep}</b></span>
-        <span className="setup-faces">{people.slice(0, 12).map(p => <span key={p.id} className="setup-face" title={p.name ?? ''}><span className="setup-face-dot" aria-hidden="true" style={{ background: faceColor(p.name ?? p.id) }}>{(p.name ?? '?').trim().slice(0, 1).toUpperCase()}</span><small>{p.name}</small></span>)}
-          {people.length > 12 && <small className="setup-more">+{people.length - 12}</small>}</span></li>)}
-    </ul>}
-    <div className="setup-actions"><button type="button" className="primary" onClick={onStart}>Continue</button></div>
-  </section>;
+  return <TeamFlow controller={controller} workspaceType={workspaceType} companyKind={companyKind} mode="setup" onBack={onBack} onHired={onReady}/>;
 }

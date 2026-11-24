@@ -4,12 +4,11 @@ import type {SessionClient} from './session';
 import {Sheet} from './desktop-ui';
 import {QrImage} from './PhonePairing';
 import {UiIcon} from './ui-icons';
-import type {UiIconName} from './ui-icons';
 import {useContinuity, useShareByDefault, SetupRoad} from './ComputerStart';
 import {computerIcon} from './ComputerLook';
 import {useGoogleLink,GoogleLinkConfirm} from './GoogleAccountLink';
 
-/** Adding a computer (DEVICES-PROJECT-01 B2, boards CP1, CP2, CP7, CP9c): plain words, pictures instead of codes. */
+/** Adding a computer (DEVICES-PROJECT-01 B2, boards CP1, CP2, CP7, CP9c): plain words, matching device codes. */
 const root = '/api/computers/account';
 export type Status = {/** CP16 A: computers of this account this one does not trust yet, with the code to compare. */ trust?: {deviceId: string; label: string; code: string}[]; desktopAvailable?: boolean; configured?: boolean; mapping?: unknown; connected?: boolean; active?: boolean; googleLinked?: boolean; workspaces?: {id: string; label: string; mode: string; state: string; sourceDeviceId?: string | null}[]; coverage?: {category: string; label: string; available: boolean; continuity: boolean}[]; view?: {deviceId?: string; deviceStatus?: string; devices?: {id: string; label: string; status: string; presence?: string; osFamily?: string; publicKey?: string; appVersion?: string; registeredAt?: number}[]} | null; pairing?: {self: {waiting: boolean; approver: string | null; code: string | null; changed?: boolean} | null; requests: {deviceId: string; label: string; osFamily: string; code: string | null; publicKey?: string; elsewhere: boolean; changed?: boolean}[]; addedWithCode: {deviceId: string; label: string; publicKey: string; checkCode: string}[]; twoFactorFailuresToday?: number; thisComputerCheck?: string} | null};
 
@@ -25,7 +24,7 @@ export function computerAccountWords(code: string) {
     account_twofactor_off: 'Two-step sign-in is not on for your Dpro account. Say Yes on one of your other computers instead.',
     account_twofactor_unavailable: 'Two-step sign-in is not available on this Dpro service yet.',
     account_fresh_google_required: 'For safety, sign in with Google again on this computer, then try again.',
-    account_key_comparison_changed: 'The pictures did not match, or the request ended. Start again on the new computer.',
+    account_key_comparison_changed: 'The codes did not match, or the request ended. Start again on the new computer.',
     account_device_unavailable: 'That request has ended.',
     account_pairing_taken: 'Another of your computers is already answering this request.',
     account_device_pending: 'This computer is still waiting to be added.',
@@ -56,19 +55,9 @@ export function useAccountStatus(client: SessionClient, enabled = true) {
   return status;
 }
 
-const SHAPES: UiIconName[] = ['sun', 'moon', 'star', 'heart', 'home', 'book', 'bug', 'key', 'lock', 'bulb', 'globe', 'flask', 'dice', 'coin', 'palette', 'puzzle'];
-const SHAPE_NAMES = ['Sun', 'Moon', 'Star', 'Heart', 'House', 'Book', 'Bug', 'Key', 'Lock', 'Bulb', 'Globe', 'Flask', 'Dice', 'Coin', 'Palette', 'Puzzle'];
-const COLORS = [['Blue', '#3B7BF6'], ['Green', '#23945A'], ['Orange', '#C26A00'], ['Pink', '#B4316A']];
-/** Four pictures from the first 24 bits of the 12-character code, with the full code under them for a strict check. */
-export function ComputerPictures({code}: {code: string}) {
-  const first24 = parseInt(code.slice(0, 6), 16);
-  const pics = [0, 1, 2, 3].map(i => { const bits = (first24 >> (18 - i * 6)) & 63; return {icon: SHAPES[bits >> 2], name: `${COLORS[bits & 3][0]} ${SHAPE_NAMES[bits >> 2]}`, color: COLORS[bits & 3][1]}; });
-  return <div className="computer-pictures">
-    <div className="computer-pictures-row" role="img" aria-label={pics.map(p => p.name).join(', ')}>
-      {pics.map((p, i) => <span key={i} className="computer-picture" title={p.name} style={{color: p.color}}><UiIcon name={p.icon} size={28}/></span>)}
-    </div>
-    <small className="fine-print">Or compare the code: {code.slice(0, 4)} {code.slice(4, 8)} {code.slice(8, 12)}</small>
-  </div>;
+/** The matching code appears on both computers. */
+export function ComputerComparisonCode({code}: {code: string}) {
+  return <div className="computer-pictures"><small className="fine-print">Compare the code: {code.slice(0, 4)} {code.slice(4, 8)} {code.slice(8, 12)}</small></div>;
 }
 
 /** On a new computer (CP1b–CP1c): sign in, then wait for a Yes on another computer — or use the account's authenticator code. */
@@ -110,7 +99,7 @@ export function AddThisComputer({client, status, knownName}: {client: SessionCli
   if (ended && !flow) return <div className="computer-join" role="alert">
     <span className="computer-start-done is-warn"><UiIcon name={ended === 'late' ? 'clock' : 'close'} size={24}/></span>
     <h2>{ended === 'late' ? 'Nobody added this computer in time' : 'This computer was not added'}</h2>
-    <p>{ended === 'late' ? 'The request ended after 10 minutes. Open Girru on one of your other computers first, then try again.' : 'Your other computer said No, or the pictures were different. Start again; if it happens again, someone else may be using your account — change your Google password.'}</p>
+    <p>{ended === 'late' ? 'The request ended after 10 minutes. Open Girru on one of your other computers first, then try again.' : 'Your other computer said No, or the codes were different. Start again; if it happens again, someone else may be using your account — change your Google password.'}</p>
     <div className="setup-actions"><button type="button" className="primary" onClick={() => { setEnded(null); void start(); }}>{ended === 'late' ? 'Try again' : 'Start again'}</button></div>
   </div>;
   if (waiting) {
@@ -127,8 +116,8 @@ export function AddThisComputer({client, status, knownName}: {client: SessionCli
     return <div className="computer-join">
       <SetupRoad at={1}/>
       <h2>Now go to your other computer</h2>
-      <p>Open Girru there. It asks “Add this computer to your account?” If it shows the same pictures, press <b>Yes, add it</b>.</p>
-      {self?.changed ? <p role="alert">Something changed while you were adding this computer, so it stopped for safety. Sign in again to start over.</p> : self?.code ? <ComputerPictures code={self.code}/> : <p role="status" className="computer-waiting"><UiIcon name="clock" size={15}/> Waiting for your other computer…</p>}
+      <p>Open Girru there. It asks “Add this computer to your account?” If it shows the same code, press <b>Yes, add it</b>.</p>
+      {self?.changed ? <p role="alert">Something changed while you were adding this computer, so it stopped for safety. Sign in again to start over.</p> : self?.code ? <ComputerComparisonCode code={self.code}/> : <p role="status" className="computer-waiting"><UiIcon name="clock" size={15}/> Waiting for your other computer…</p>}
       {notice && <p role="status">{notice}</p>}{unlock}
       <p className="section-label">Can’t use your other computer?</p>
       <div className="computer-start-choices" role="group" aria-label="Other ways">
@@ -166,7 +155,7 @@ export function AddThisComputer({client, status, knownName}: {client: SessionCli
   </div>;
 }
 
-/** On a computer you already use (CP2a): Yes / No for a new computer, with the same pictures it shows. */
+/** On a computer you already use (CP2a): Yes / No for a new computer, with the same code it shows. */
 export function ComputerJoinRequests({client, status}: {client: SessionClient; status: Status | null | undefined}) {
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState('');
@@ -178,7 +167,7 @@ export function ComputerJoinRequests({client, status}: {client: SessionClient; s
   return <section aria-label="New computers" className="computer-join-requests">
     {reqs.map(r => <div key={r.deviceId} className="computer-task" role="group" aria-label={`Add ${r.label}`}>
       <UiIcon name={computerIcon(null, r.deviceId, r.osFamily)} size={16}/>
-      <span className="computer-task-text"><b>Add “{r.label}” to your account?</b><small>{r.changed ? 'This request changed after you answered it, so it stopped for safety. Start again on the new computer.' : r.elsewhere ? 'Another of your computers is answering this.' : r.code ? 'Check the new computer shows these same pictures. Only add a computer you own.' : 'Getting the pictures ready…'}</small>{r.code && <ComputerPictures code={r.code}/>}</span>
+      <span className="computer-task-text"><b>Add “{r.label}” to your account?</b><small>{r.changed ? 'This request changed after you answered it, so it stopped for safety. Start again on the new computer.' : r.elsewhere ? 'Another of your computers is answering this.' : r.code ? 'Check the new computer shows this same code. Only add a computer you own.' : 'Getting the code ready…'}</small>{r.code && <ComputerComparisonCode code={r.code}/>}</span>
       {!r.elsewhere && !r.changed && <span className="computer-task-actions"><button type="button" disabled={busy === r.deviceId} onClick={() => void answer(r, false)}>No, it’s not me</button><button type="button" className="primary" disabled={busy === r.deviceId || !r.code} onClick={() => void answer(r, true)}>Yes, add it</button></span>}
     </div>)}
     {(status?.pairing?.twoFactorFailuresToday ?? 0) >= 5 && <p role="alert" className="fine-print"><UiIcon name="alert" size={13}/> Someone tried {status?.pairing?.twoFactorFailuresToday} wrong authenticator codes on your Dpro account today. If it was not you, change your Google password.</p>}

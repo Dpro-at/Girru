@@ -35,7 +35,7 @@ export async function firstRunRoutes(fastify: FastifyInstance, options: {discove
   fastify.put('/api/first-run', async (request, reply) => {
     const userId = owner(request, reply); if (userId === null) return reply;
     const body = request.body as { step?: unknown; workspaceType?: unknown; companyName?: unknown } | null;
-    if (!body || typeof body !== 'object' || Object.keys(body).some(k => !['step', 'workspaceType', 'companyName'].includes(k)) || (Object.hasOwn(body, 'workspaceType') && !['individual', 'company'].includes(body.workspaceType as string)) || !(FIRST_RUN_STEPS as readonly unknown[]).includes(body.step)) return reply.code(400).send({ error: 'step must be discovery, tools, model or team' });
+    if (!body || typeof body !== 'object' || Object.keys(body).some(k => !['step', 'workspaceType', 'companyName'].includes(k)) || (Object.hasOwn(body, 'workspaceType') && !['individual', 'company'].includes(body.workspaceType as string)) || !(FIRST_RUN_STEPS as readonly unknown[]).includes(body.step)) return reply.code(400).send({ error: 'Invalid first-run step' });
     if (body.workspaceType === 'company' ? !validCompanyName(body.companyName) : Object.hasOwn(body, 'companyName')) return reply.code(400).send({ error: 'Invalid company name' });
     try { return await saveFirstRunStep(userId, body.step as FirstRunStep, body.workspaceType as 'individual' | 'company' | undefined, body.companyName as string | undefined); } catch (error) { if((error as any)?.code==='discovery_required')return reply.code(409).send({code:'discovery_required'});return handleError(reply, error, 'internal', '[FirstRun]'); }
   });

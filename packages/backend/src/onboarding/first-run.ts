@@ -27,7 +27,7 @@ import { enableFirstRunAutomaticImport } from '../memory/import/automatic-projec
 import { addAssistantMessage, createConversation } from '../repositories/chat-conversations.js';
 import { companyKind } from '../services/department-groups.js';
 
-export const FIRST_RUN_STEPS = ['discovery', 'tools', 'model', 'team'] as const;
+export const FIRST_RUN_STEPS = ['discovery', 'tools', 'model', 'team', 'phone'] as const;
 export type FirstRunStep = (typeof FIRST_RUN_STEPS)[number];
 export type WorkspaceType = 'individual' | 'company';
 export type FirstRunState = Readonly<{ pending: boolean; step: FirstRunStep; workspaceType?: WorkspaceType; companyName?: string; companyKind?: string }>;
