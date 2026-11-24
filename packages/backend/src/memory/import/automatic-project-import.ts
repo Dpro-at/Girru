@@ -53,7 +53,9 @@ async function run(user:string,opts:Options){
   const importMemory=async()=>{for(const home of memoryHomes){if(importedHomes.has(home)||!await allowed())continue;const result=await structured.importAutomaticMemoryFiles(user,home,allowed);memoryCount+=result.imported;memoryFailed+=result.failed;importedHomes.add(home);}};
   await importMemory();
   const previous=await latestImportJob(user);
-  if(previous&&previous.done<previous.total){await patch(user,s=>({...s,status:'review',lastImported:memoryCount,lastProposed:memoryCount,notice:`${memoryCount} structured memory files saved. Project notes wait for the current import or local model; saved progress is retained.`}));return;}
+  // An unfinished note import (usually: the local model is missing) holds back only the model step. The search still runs,
+  // so new projects, memory files and their homes keep showing up; the new notes wait in `pending` with the old ones.
+  const notesWaiting=!!(previous&&previous.done<previous.total);
   const saved=await read(user),known=await importedSessions(user),ids=new Set<string>((saved.pending??[]).filter(id=>!known.has(id)));let cursor=saved.cursor;
   // Every note seen so far comes back on each page: a turned-down note (someone else's repository) is checked once per run.
   const checked=new Set<string>(ids);
@@ -68,6 +70,8 @@ async function run(user:string,opts:Options){
    await importMemory();
    await new Promise<void>(resolve=>setImmediate(resolve));
   }while(cursor);
+  await importMemory();
+  if(notesWaiting){await patch(user,s=>({...s,status:'review',cursor:undefined,scanningComplete:false,lastImported:memoryCount,lastProposed:memoryCount,notice:`${memoryCount} structured memory files saved. ${ids.size} project notes wait for the current import or local model; saved progress is retained.`}));return;}
   const pending=[] as string[];for(const id of ids)if(await structured.automaticNoteSource(user,id,opts.home??os.homedir()))pending.push(id);let count=memoryCount,proposed=memoryCount;
   for(let offset=0;offset<pending.length;offset+=400){
    if(!await allowed())return;
@@ -89,8 +93,8 @@ export async function runDueAutomaticImports(opts:Options={}){
  const jobs:Promise<void>[]=[];
  for(const name of files){if(!/^[a-f0-9]{64}\.json$/.test(name))continue;const s=JSON.parse(await fs.readFile(path.join(folder(),name),'utf8')) as Saved;
   if(!s.enabled||(s.nextRun>(opts.now??Date.now())&&!['scanning','importing'].includes(s.status))||active.has(s.userId))continue;
-  // MEM-READ-01 MR9: while night work is on it runs this import at night; the 15/30/60-minute timer leaves it alone (a running import still finishes).
-  if(!['scanning','importing'].includes(s.status)&&await import('../night-work.js').then(n=>n.nightWorkOn(s.userId)).catch(()=>false))continue;
+  // New project files and memory files are found on the owner's interval in the day too; night work may also run it (one shared lock, `active`).
+  // Waiting for night alone meant a computer that sleeps at night never saw a new project again.
   const promise=(async()=>{const owner=await q.one<{role:string;status:string}>('SELECT role,status FROM users WHERE id=?',s.userId);if(owner?.role==='owner'&&owner.status==='active')await run(s.userId,opts);})().finally(()=>active.delete(s.userId));active.set(s.userId,promise);jobs.push(promise);
  }
  await Promise.allSettled(jobs);

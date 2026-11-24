@@ -100,7 +100,7 @@ export type User = Readonly<{ id: string; email: string; username: string; role:
 /** What the UI calls the account: the name typed at setup, else the user name. */
 export const displayName = (u: User): string => u.name ?? u.username;
 type BoundaryNotice = 'published_password' | 'account_inactive' | 'rate_limited' | 'origin_not_allowed' | 'host_not_allowed';
-export type SessionState = Readonly<{ mode: Mode; epoch: number; retryAfterSeconds?: number; setup?: 'checking' | 'required' | 'login' | 'unavailable'; phase: 'signed-out' | 'signing-in' | 'verifying' | 'recovery-codes' | 'authenticated' | 'signing-out'; verification?:Readonly<{method:'totp'|'recovery';expiresAt:number;provider?:'google'}>; user?: User; notice?: BoundaryNotice | 'invalid' | 'denied' | 'limited' | 'unavailable' | 'expired' | 'logout-confirmed' | 'logout-unknown' | 'recovered' }>;
+export type SessionState = Readonly<{ mode: Mode; epoch: number; retryAfterSeconds?: number; setup?: 'checking' | 'required' | 'login' | 'unavailable'; phase: 'signed-out' | 'signing-in' | 'verifying' | 'recovery-codes' | 'authenticated' | 'signing-out'; verification?:Readonly<{method:'totp'|'recovery';expiresAt:number;provider?:'google'}>; user?: User; notice?: BoundaryNotice | 'invalid' | 'denied' | 'limited' | 'unavailable' | 'expired' | 'logout-confirmed' | 'logout-unknown' | 'recovered' | 'google-not-linked' }>;
 import { SessionFailure } from './session-failure';
 export { SessionFailure } from './session-failure';
 export interface WireRequest { method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; path: string; body?: unknown; headers: Readonly<Record<string, string>>; signal: AbortSignal }
@@ -216,6 +216,9 @@ export function allowedRequest(method: string, path: string, body?: unknown): bo
 }
 
 
+/** Google proved who you are, but no account in this workspace is linked to that Google identity yet. */
+const GOOGLE_NOT_LINKED = 'google-not-linked';
+const googleNotice = (error: unknown): 'google-not-linked' | 'unavailable' => error instanceof Error && error.message === GOOGLE_NOT_LINKED ? GOOGLE_NOT_LINKED : 'unavailable';
 function boundaryNotice(response: WireResponse): BoundaryNotice | undefined {
   const code = record(response.body) ? response.body.code : undefined;
   if ((response.status === 403 && ['published_password', 'account_inactive', 'origin_not_allowed'].includes(code as string))
@@ -532,15 +535,15 @@ export class SessionClient {
       if(started.status!==200||!record(started.body)||typeof started.body.flowId!=='string')throw Error();
       const flow={flowId:started.body.flowId,clientNonce,...(setup?{setupToken:setup.setupToken}:{})};this.#googleFlow=flow;this.#googlePendingNonce=undefined;
       for(let n=0;n<240;n++){if(epoch!==this.#state.epoch)return;const status=await this.#send('POST','/api/auth/google/status',{flowId:flow.flowId,clientNonce},undefined,epoch);if(status.status!==200||!record(status.body)||status.body.state==='failed')throw Error();if(status.body.state==='ready'){await this.#finishGoogle(flow,epoch,keep);return;}await new Promise(resolve=>setTimeout(resolve,1000));}throw Error();
-    }catch{if(epoch===this.#state.epoch)this.#reset('live','signed-out','unavailable',this.#state.setup);}
+    }catch(error){if(epoch===this.#state.epoch)this.#reset('live','signed-out',googleNotice(error),this.#state.setup);}
   }
   async #finishGoogle(flow:{flowId:string;clientNonce:string;setupToken?:string},epoch:number,keep:TokenKeep|undefined,verification?:{challenge:string;nonce:string;code:string},recovery=false){
     const response=await this.#send('POST','/api/auth/google/finish',{...flow,...(verification?{verification}:{}),...(recovery?{recovery:true}:{})},undefined,epoch);
-    if(epoch!==this.#state.epoch)return;if(response.status!==200)throw Error();const continuation=loginContinuation(response.body);
+    if(epoch!==this.#state.epoch)return;if(response.status!==200)throw Error(response.status===409&&record(response.body)&&response.body.code==='google_account_not_linked'?GOOGLE_NOT_LINKED:'');const continuation=loginContinuation(response.body);
     if(continuation){if('verificationRequired' in continuation){if(continuation.expiresAt<=Date.now()||continuation.expiresAt>Date.now()+305000||continuation.verificationMethod!==(recovery?'recovery':'totp'))throw Error();this.#verification={email:'',challenge:continuation.challenge,nonce:continuation.nonce,method:continuation.verificationMethod,expiresAt:continuation.expiresAt};this.#googleFlow=flow;this.#publish({...this.#state,phase:'verifying',verification:{method:continuation.verificationMethod,expiresAt:continuation.expiresAt,provider:'google'}});return;}if(!recovery||!verification)throw Error();this.#googleFlow=undefined;keep?.save(null);this.#reset('live','signed-out','recovered','login');return;}
     if(recovery||!record(response.body)||typeof response.body.token!=='string'||!validDeviceToken(response.body.deviceToken))throw Error();const loginUser=user(response.body.user),token=response.body.token;const me=await this.#send('GET','/api/auth/me',undefined,token,epoch);if(epoch!==this.#state.epoch)return;if(me.status!==200||!record(me.body))throw Error();const current=user(me.body.user);if(current.id!==loginUser.id)throw Error();this.#googleFlow=undefined;this.#token=token;this.#keep=keep;keep?.save(token);this.#publish({mode:'live',phase:'authenticated',epoch,user:current});
   }
-  async #continueGoogle(verification?:{challenge:string;nonce:string;code:string},recovery=false){const flow=this.#googleFlow;if(!flow)return;const keep=this.#nextKeep;this.#publish({...this.#state,phase:'signing-in'});const epoch=this.#state.epoch;try{await this.#finishGoogle(flow,epoch,keep,verification,recovery);}catch{if(epoch===this.#state.epoch)this.#reset('live','signed-out','unavailable','login');}}
+  async #continueGoogle(verification?:{challenge:string;nonce:string;code:string},recovery=false){const flow=this.#googleFlow;if(!flow)return;const keep=this.#nextKeep;this.#publish({...this.#state,phase:'signing-in'});const epoch=this.#state.epoch;try{await this.#finishGoogle(flow,epoch,keep,verification,recovery);}catch(error){if(epoch===this.#state.epoch)this.#reset('live','signed-out',googleNotice(error),'login');}}
   async login(email:string,password:string){return this.#login(email,password);}
   async startRecovery(password:string){
     const pending=this.#verification;

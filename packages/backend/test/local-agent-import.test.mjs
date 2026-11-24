@@ -305,10 +305,8 @@ test('automatic import persists an opt-in schedule, catches up due work and save
  const docs=await scanProjectDocuments('auto-owner',[folder]),id=docs.documents[0].id;
  let calls=0,scans=0;const opts={now:1000,home:dir,pollMs:5,scan:async()=>{scans++;return {documents:[{id}],nextCursor:null}},extract:async()=>{calls++;return [{title:'Borealis evidence',content:fact,scope:'owner',evidence:fact}]}};
  await A.configureAutomaticImport('auto-owner',{enabled:true,intervalMinutes:60},1000);
- // MEM-READ-01 MR9: while night work is on (the default) the interval timer leaves the import to the night.
- const N=await loadFile(join(backendDir,'src/memory/night-work.ts'));
- await A.runDueAutomaticImports(opts);assert.equal(scans,0,'night work owns the import');
- await N.setNightSettings('auto-owner',{enabled:false});
+ // Night work is on by default; the interval timer still runs the import in the day, so a computer that sleeps at night
+ // keeps seeing new projects. Two ticks at once share one run.
  await Promise.all([A.runDueAutomaticImports(opts),A.runDueAutomaticImports(opts)]);
  let settings=await A.automaticImportSettings('auto-owner');assert.equal(settings.nextRun,3601000);assert.equal(settings.lastImported,1);assert.equal(settings.lastProposed,1);assert.equal(calls,1);assert.equal(scans,1);
  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM memories WHERE user_id='auto-owner'").get().n,1,'enabled automatic imports save their own facts without review');
@@ -360,16 +358,21 @@ test('whole-computer pages include mounted roots and recognized hidden app notes
  for(let i=0;i<105;i++)await write(join(volume,'docs',`page-${i}.md`),`Mounted project document ${i}.`);
  await write(join(volume,'Windows','docs','hidden.md'),'System documents are skipped.');
  await write(join(home,'docs','api_tokens.md'),'Secret-named documents are skipped.');
+ // XAMPP keeps web projects under /Applications/XAMPP/xamppfiles/htdocs: the Applications folder is walked, its .app bundles are not.
+ await write(join(base,'Applications','XAMPP','xamppfiles','htdocs','shop','CLAUDE.md'),'Web shop project in the XAMPP htdocs folder.');
+ await write(join(base,'Applications','Editor.app','Contents','Resources','README.md'),'Bundled application docs must not be imported.');
+ await write(join(base,'Applications','XAMPP','xamppfiles','licenses','README.md'),'Program licence notes must not be imported.');
+ await write(join(home,'Girru Backups','daily','project','CLAUDE.md'),'Backup copies must not be imported.');
  const roots=await R.computerRoots({roots:[home,join(home,'.codex'),volume,join(base,'missing')]});
  assert.equal(roots.roots.length,2);assert.equal(roots.unavailableRoots,1);
  let page=await P.scanProjectDocuments('whole-device-owner',{auto:true},{purpose:'watch',home,roots:[base]});
  assert.ok(page.nextCursor,'result pages are bounded');
  const all=[...page.documents];const homes=new Set(page.memoryHomes);let count=1;
  while(page.nextCursor){page=await P.scanProjectDocuments('whole-device-owner',{auto:true,cursor:page.nextCursor},{purpose:'watch',home});all.push(...page.documents);for(const h of page.memoryHomes)homes.add(h);count++;}
- assert.ok(count>1);assert.equal(all.length,109);assert.equal(all.find(doc=>doc.relative===join('.codex','AGENTS.md')).root,await f.realpath(home),'hidden notes belong to their containing home, not the device scan root');assert.equal(page.allDocumentIds.length,109,'durable page receipts retain every source for restart recovery');
+ assert.ok(count>1);assert.equal(all.length,110);assert.equal(all.find(doc=>doc.relative===join('.codex','AGENTS.md')).root,await f.realpath(home),'hidden notes belong to their containing home, not the device scan root');assert.equal(page.allDocumentIds.length,110,'durable page receipts retain every source for restart recovery');
  const text=(await Promise.all(all.map(async doc=>(await P.readProjectDocument('whole-device-owner',doc.id)).text))).join('\n');
- assert.match(text,/Codex durable project summary/);assert.match(text,/Global Gemini/);assert.match(text,/Mounted project document 104/);
- assert.doesNotMatch(text,/credential sentinel|Do not install|System documents|Secret-named|Bundled application docs/);
+ assert.match(text,/Codex durable project summary/);assert.match(text,/Global Gemini/);assert.match(text,/Mounted project document 104/);assert.match(text,/Web shop project in the XAMPP htdocs/);
+ assert.doesNotMatch(text,/credential sentinel|Do not install|System documents|Secret-named|Bundled application docs|Program licence|Backup copies/);
  assert.ok(homes.has(await f.realpath(home)),'Claude memory root is handed to the dedicated structured reader');
 });
 

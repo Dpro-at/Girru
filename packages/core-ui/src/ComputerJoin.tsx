@@ -7,6 +7,7 @@ import {UiIcon} from './ui-icons';
 import type {UiIconName} from './ui-icons';
 import {useContinuity, useShareByDefault, SetupRoad} from './ComputerStart';
 import {computerIcon} from './ComputerLook';
+import {useGoogleLink,GoogleLinkConfirm} from './GoogleAccountLink';
 
 /** Adding a computer (DEVICES-PROJECT-01 B2, boards CP1, CP2, CP7, CP9c): plain words, pictures instead of codes. */
 const root = '/api/computers/account';
@@ -40,14 +41,18 @@ export async function call(client: SessionClient, path: string, body?: unknown) 
   return r.body as any;
 }
 /** The Dpro account status, read every few seconds while shown. */
-/** This computer was added before: after Girru restarts it reconnects by itself (once per start), no “Resume” button. */
-let resumeTried = false;
+/**
+ * This computer was added before: after Girru restarts it reconnects by itself, no “Resume” button.
+ * Once per link: linking Google in Settings › Account makes a new link while this window is open, and that one is tried too,
+ * so the owner is never asked to sign in to Computers a second time.
+ */
+let resumeTriedFor: string | null = null;
 /** Set when that reconnect was refused (for example the account ended this computer's sign-in): the page then offers to sign in instead of waiting. */
 let resumeRefused = false;
 export function useAccountStatus(client: SessionClient, enabled = true) {
   // undefined while reading; null when this window cannot reach the account (a browser, or no desktop app).
   const [status, setStatus] = useState<Status | null | undefined>(undefined);
-  useEffect(() => { if (!enabled) return; let live = true; const load = async () => { try { let s = await call(client, root); if (s?.configured && !s.connected && s.mapping && !resumeTried) { resumeTried = true; try { await call(client, root + '/resume', {}); s = await call(client, root); } catch { resumeRefused = true; /* stays signed out; Computers offers to sign in */ } } if (s?.connected) resumeRefused = false; if (live) setStatus(s && resumeRefused && !s.connected ? {...s, resumeRefused: true} : s); } catch { if (live) setStatus(null); } }; void load(); const t = setInterval(() => void load(), 3000); return () => { live = false; clearInterval(t); }; }, [client, enabled]);
+  useEffect(() => { if (!enabled) return; let live = true; const load = async () => { try { let s = await call(client, root); if (s?.configured && !s.connected && s.mapping && resumeTriedFor !== JSON.stringify(s.mapping)) { resumeTriedFor = JSON.stringify(s.mapping); resumeRefused = false; try { await call(client, root + '/resume', {}); s = await call(client, root); } catch { resumeRefused = true; /* stays signed out; Computers offers to sign in */ } } if (s?.connected) resumeRefused = false; if (live) setStatus(s && resumeRefused && !s.connected ? {...s, resumeRefused: true} : s); } catch { if (live) setStatus(null); } }; void load(); const t = setInterval(() => void load(), 3000); return () => { live = false; clearInterval(t); }; }, [client, enabled]);
   return status;
 }
 
@@ -84,6 +89,13 @@ export function AddThisComputer({client, status, knownName}: {client: SessionCli
   // The name is optional: without one the computer registers with its own name (for example “Mohamed’s MacBook Pro”).
   const start = (kind: 'connect' | 'recover' = 'connect') => run(async () => { const bytes = crypto.getRandomValues(new Uint8Array(32)); const clientNonce = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); const r = await call(client, root + '/flow/start', {kind, clientNonce, ...(name.trim() ? {label: name.trim()} : {}), confirmed: true}); setFlow({flowId: r.flowId, clientNonce}); });
   const [firstAsk, setFirstAsk] = useState(false);
+  // Google not linked to this Girru account yet: link it right here (Google in the browser, then the Girru password once).
+  // Linking also signs this computer in to the Dpro account, so Computers connects by itself and never asks again;
+  // when no account link appears within a few seconds, the usual sign-in continues on its own.
+  const [linkedAt, setLinkedAt] = useState<number | null>(null);
+  const link = useGoogleLink(client, () => setLinkedAt(Date.now()));
+  const needsLink = status?.googleLinked === false && !linkedAt;
+  useEffect(() => { if (!linkedAt || status?.mapping || flow) return; const t = setTimeout(() => { if (!current.current) void start(); }, 6000); return () => clearTimeout(t); }, [linkedAt, !!status?.mapping, !!flow]);
   async function finish(f = current.current, verification?: {challenge: string; nonce: string; code: string}) { if (!f) return; await run(async () => { const r = await call(client, root + '/flow/finish', {flowId: f.flowId, clientNonce: f.clientNonce, ...(verification ? {verification} : {})}); if (r.verificationRequired) { setVerify({challenge: r.challenge, nonce: r.nonce}); return; } setVerify(null); setFlow(null); }); }
   const join = () => run(async () => { await call(client, root + '/join-with-code', {code: code.trim(), confirmed: true}); setCode(''); });
 
@@ -139,7 +151,13 @@ export function AddThisComputer({client, status, knownName}: {client: SessionCli
     <h2>{knownName ? 'Sign in again' : 'Add this computer to your account'}</h2>
     <p>{knownName ? <>Sign in with Google to put <b>{knownName}</b> back in your account.</> : 'Sign in with the same Google account you use for Girru on your other computer.'}</p>
     {/* Mohamed, 2026-11-11: never ask for a name here; the computer registers with its own name (renamed later in Computers). */}
-    {verify ? <div className="computer-join-code"><label className="phone-field"><span>Code from your authenticator app</span><input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))}/></label><button type="button" className="primary" disabled={busy || code.length !== 6} onClick={() => void finish(current.current, {...verify, code: code.trim()})}>Continue</button></div>
+    {needsLink ? <>
+      {link.ready ? <><p>Google confirmed it is you. Enter your Girru password once to link Google to this account. You won’t be asked again.</p><GoogleLinkConfirm link={link} label="Add this computer"/></>
+        : <button type="button" className="primary" disabled={link.busy || status?.desktopAvailable === false} onClick={() => void link.start()}>{link.busy ? 'Waiting for Google…' : 'Continue with Google'}</button>}
+      {link.started && <button type="button" className="link-button" onClick={link.cancel}>Cancel</button>}
+      {link.notice && !link.ready && <p role="status">{link.notice}</p>}
+    </> : linkedAt && !status?.mapping && !flow ? <p role="status">Google is linked. Adding this computer…</p>
+    : verify ? <div className="computer-join-code"><label className="phone-field"><span>Code from your authenticator app</span><input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))}/></label><button type="button" className="primary" disabled={busy || code.length !== 6} onClick={() => void finish(current.current, {...verify, code: code.trim()})}>Continue</button></div>
       : <button type="button" className="primary" disabled={busy || !!flow || status === null || status?.desktopAvailable === false} onClick={() => void start()}>{flow ? 'Waiting for Google…' : 'Continue with Google'}</button>}
     {(status === null || status?.desktopAvailable === false) && <p role="status">Open the Girru app on this computer to add it. A browser window can’t keep the computer’s key safe.</p>}
     {flow && <button type="button" className="link-button" onClick={() => { void call(client, root + '/flow/cancel', {flowId: flow.flowId, clientNonce: flow.clientNonce}).catch(() => {}); setFlow(null); }}>Cancel</button>}

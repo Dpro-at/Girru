@@ -17,7 +17,9 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { all, lockName, one, run, sql, type Step } from '../repositories/sql-steps.js';
-import { subscriptionSearchDirs } from '../services/subscription-chat.js';
+import { bundledCli, subscriptionSearchDirs } from '../services/subscription-chat.js';
+/** A path typed into the owner's shell: single quotes, so spaces in an app's folder name stay one word. */
+const shellQuote = (p: string) => `'${p.replace(/'/g, `'\\''`)}'`;
 import { storeP7Enabled } from '../services/store-p7.js';
 import { listLocalModels } from '../llm/local-models.js';
 import { firstRunDiscovery } from './discovery.js';
@@ -137,14 +139,16 @@ export async function aiTools(env?: Partial<Env>): Promise<AiTool[]> {
   // SUB1 (P7): the Google app is Antigravity (`agy`); the Gemini CLI no longer serves personal accounts.
   const agy = storeP7Enabled() ? await findBinary(e, ['agy']) : null;
   const google: AiTool = storeP7Enabled()
-    ? { id: 'gemini', name: 'Antigravity', installed: !!agy, signedIn: !!agy && await antigravitySignedIn(home), install: null, signIn: 'agy' }
+    // Google's own installers (antigravity.google › Docs › Getting started › CLI): `agy` lands in ~/.local/bin, or %LOCALAPPDATA%\\agy\\bin on Windows.
+    ? { id: 'gemini', name: 'Antigravity', installed: !!agy, signedIn: !!agy && await antigravitySignedIn(home),
+      install: agy ? null : win ? 'irm https://antigravity.google/cli/install.ps1 | iex' : 'curl -fsSL https://antigravity.google/cli/install.sh | bash', signIn: 'agy' }
     : { id: 'gemini', name: 'Gemini CLI', installed: !!gemini, signedIn: !!gemini && await exists(path.join(home, '.gemini', 'oauth_creds.json')),
       install: gemini ? null : pkg('@google/gemini-cli', 'gemini-cli'), signIn: 'gemini', ...(!gemini && !npm && !brew ? { needs: 'node' as const } : {}) };
   return [
     { id: 'claude', name: 'Claude Code', installed: !!claude, signedIn: !!claude && ((await (env?.claudeStatus ?? claudeAuthStatus)(claude, home)) ?? await claudeSignedIn(home, platform, env?.keychain ?? keychainItem)),
       install: claude ? null : win ? 'irm https://claude.ai/install.ps1 | iex' : 'curl -fsSL https://claude.ai/install.sh | bash', signIn: 'claude' },
     { id: 'codex', name: 'ChatGPT Codex', installed: !!codex, signedIn: !!codex && await exists(path.join(codexHome, 'auth.json')),
-      install: codex ? null : pkg('@openai/codex', 'codex'), signIn: 'codex login', ...(!codex && !npm && !brew ? { needs: 'node' as const } : {}) },
+      install: codex ? null : pkg('@openai/codex', 'codex'), signIn: codex && bundledCli(codex) ? `${shellQuote(codex)} login` : 'codex login', ...(!codex && !npm && !brew ? { needs: 'node' as const } : {}) },
     google,
   ];
 }

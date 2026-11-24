@@ -157,6 +157,8 @@ test('SUB1 (GIRRU_STORE_P7): the Google app is Antigravity (agy), signed in by i
   try {
     let g = (await aiTools({ home, platform: 'darwin', dirs: [bin] })).find(t => t.id === 'gemini');
     assert.deepEqual([g.name, g.installed, g.signedIn, g.signIn], ['Antigravity', false, false, 'agy'], 'the old gemini binary no longer counts');
+    assert.equal(g.install, 'curl -fsSL https://antigravity.google/cli/install.sh | bash', "not installed: Google's own installer for this system");
+    assert.equal((await aiTools({ home, platform: 'win32', dirs: [bin] })).find(t => t.id === 'gemini').install, 'irm https://antigravity.google/cli/install.ps1 | iex');
     writeFileSync(join(bin, 'agy'), '#!/bin/sh\n'); chmodSync(join(bin, 'agy'), 0o755);
     rmSync(join(home, '.gemini', 'oauth_creds.json'));
     g = (await aiTools({ home, platform: 'darwin', dirs: [bin] })).find(t => t.id === 'gemini');
@@ -215,4 +217,16 @@ test('the team summary counts exactly the agents hired (3 picked: no "more"; 250
 
 test('welcome text names the team in plain words', () => {
   assert.match(welcomeText('Mohamed', 'Sami', [{ name: 'Nora', department: 'marketing' }, { name: 'Omar', department: 'sales' }]), /\*\*Nora\*\* \(marketing\) and \*\*Omar\*\* \(sales\)/);
+});
+
+test('Codex inside the ChatGPT desktop app counts as installed; its sign-in names the full path', async () => {
+  const { subscriptionSearchDirs } = await import('../src/services/subscription-chat.ts');
+  const home = join(dir, 'bundled-codex-home'), bundle = join(home, 'Applications', 'ChatGPT.app', 'Contents', 'Resources', 'codex-cli', 'bin');
+  mkdirSync(bundle, { recursive: true }); mkdirSync(join(home, '.codex'), { recursive: true });
+  writeFileSync(join(bundle, 'codex'), '#!/bin/sh\n'); chmodSync(join(bundle, 'codex'), 0o755);
+  writeFileSync(join(home, '.codex', 'auth.json'), '{}');
+  if (process.platform === 'darwin') assert.ok((await subscriptionSearchDirs(home, '')).includes(bundle), 'the app bundle is searched on macOS');
+  const codex = (await aiTools({ home, platform: 'darwin', dirs: [bundle], keychain: async () => false })).find(t => t.id === 'codex');
+  assert.equal(codex.installed, true); assert.equal(codex.signedIn, true); assert.equal(codex.install, null);
+  assert.equal(codex.signIn, `'${join(bundle, 'codex')}' login`, 'a terminal does not have the bundle on PATH, so the command names the file');
 });

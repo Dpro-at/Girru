@@ -20,7 +20,7 @@ import { SetupHelperPill } from './MemoryHelper';
 /** FIRSTRUN-01 (boards FR2–FR3): the steps after the owner account, in the one setup window. */
 export type FirstRunStep = 'discovery' | 'tools' | 'model' | 'team' | 'phone';
 const STEPS = ['Account', 'Your files', 'AI tools', 'Local model', 'Team', 'Phone'] as const;
-type AiTool = { id: 'claude' | 'codex' | 'gemini'; name: string; installed: boolean; signedIn: boolean; install: string | null; signIn: string; needs?: 'node' };
+export type AiTool = { id: 'claude' | 'codex' | 'gemini'; name: string; installed: boolean; signedIn: boolean; install: string | null; signIn: string; needs?: 'node' };
 type LocalChoice = { id: string; label: string; sizeGb: number; note: string; minMemoryGb: number; installed?: boolean };
 type LocalStep = { memoryGb: number; recommended: string; choices: LocalChoice[]; ollama: boolean; installed: string[]; download: string | null; commands: Record<string, string | null> };
 
@@ -61,7 +61,7 @@ export function setupTab<T extends { key: string }>(tabs: { getSnapshot(): { tab
   return tabs.add();
 }
 /** Runs a fixed command in Girru's terminal when the owner presses Install or Sign in (Mohamed 2026-10-30: no extra Enter); the output stays in view. */
-function useSetupTerminal(client: SessionClient) {
+export function useSetupTerminal(client: SessionClient) {
   const t = useMemo(() => ({ tabs: new TerminalTabs(client), prefs: new TerminalPrefsController(client) }), [client]);
   const [shown, setShown] = useState<string | null>(null);
   const used = useMemo(() => new Set<string>(), [t]);
