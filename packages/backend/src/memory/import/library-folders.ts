@@ -40,10 +40,18 @@ export function libraryDirName(name: string, parent?: string): boolean {
   return false;
 }
 
+/** A web server's document folder: under an Applications folder (XAMPP, MAMP) only these hold the owner's projects. */
+const WEB_ROOTS = new Set(['htdocs', 'www', 'Sites']);
+
 /** True when a path is inside (or is) a library folder. */
 export function isLibraryPath(p: string | null | undefined): boolean {
   if (!p) return false;
   const parts = segments(p);
+  // Girru's own backups hold copies of the owner's files, never a project of their own.
+  if (parts.includes('Girru Backups')) return true;
+  // Installed programs: /Applications is walked to reach XAMPP/MAMP htdocs, but the programs' own READMEs and licences are not projects.
+  const apps = parts.indexOf('Applications');
+  if (apps >= 0 && !parts.slice(apps + 1, -1).some(x => WEB_ROOTS.has(x))) return true;
   for (let i = 0; i < parts.length; i++) {
     if (LIBRARY_DIR_NAMES.has(parts[i]) || GO_MODULE_DIR.test(parts[i])) return true;
     if (i > 0 && LIBRARY_PAIRS.some(([a, b]) => parts[i - 1] === a && parts[i] === b)) return true;
@@ -68,6 +76,8 @@ export function libraryKindOf(p: string | null | undefined, slug?: string): stri
   if (parts.includes('site-packages') || parts.includes('dist-packages')) return 'Python package';
   if (parts.includes('.cargo') || parts.includes('.rustup')) return 'Rust library';
   if (parts.includes('vendor')) return 'Vendored code';
+  if (parts.includes('Girru Backups')) return 'Girru backup';
+  if (parts.includes('Applications')) return 'Installed program';
   return 'Downloaded code';
 }
 

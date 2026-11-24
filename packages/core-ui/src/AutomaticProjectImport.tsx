@@ -17,9 +17,17 @@ export function AutomaticProjectImport({client}:{client:SessionClient}){
   catch{if(live.current)setNotice('Automatic import settings could not be saved.');}
   finally{saving.current=false;if(live.current)setBusy(false);}
  }
+ /** Scan now: search the computer for new or changed project files, memory files, SSH keys, skills and MCP servers right away. */
+ async function scanNow(){
+  if(busy)return;setBusy(true);setNotice('');
+  try{const r=await client.request({method:'POST',path:PATH+'/run',body:{}} as never);if(!live.current)return;if(r.status!==200)throw Error();setSettings((r.body as {settings:Settings}).settings);}
+  catch{if(live.current)setNotice('The scan could not start.');}
+  finally{if(live.current)setBusy(false);}
+ }
  return <section className="local-import-job" aria-label="Automatic project-file import">
   <div className="local-import-tools"><label><input type="checkbox" role="switch" checked={settings?.enabled??false} disabled={!settings||busy} onChange={e=>void save(e.target.checked,settings?.intervalMinutes??60)}/> Automatic import</label>
-   <label>Check for new files <select aria-label="Automatic import interval" value={settings?.intervalMinutes??60} disabled={!settings||busy} onChange={e=>void save(settings?.enabled??false,Number(e.target.value) as Settings['intervalMinutes'])}><option value={15}>Every 15 minutes</option><option value={30}>Every 30 minutes</option><option value={60}>Every hour</option></select></label></div>
+   <label>Check for new files <select aria-label="Automatic import interval" value={settings?.intervalMinutes??60} disabled={!settings||busy} onChange={e=>void save(settings?.enabled??false,Number(e.target.value) as Settings['intervalMinutes'])}><option value={15}>Every 15 minutes</option><option value={30}>Every 30 minutes</option><option value={60}>Every hour</option></select></label>
+   <button type="button" disabled={!settings?.enabled||busy||settings.status==='scanning'||settings.status==='importing'} onClick={()=>void scanNow()}>{settings?.status==='scanning'||settings?.status==='importing'?'Scanning…':'Scan now'}</button></div>
   <p className="fine-print">New or changed project files are imported automatically when enabled. When enabled, new memories are saved directly without an approval prompt. Previously imported files and existing facts are skipped. Manual imports still wait for your approval. Checks run while Girru is open, with missed checks picked up at the next start.</p>
   {!settings?<p role="status">Loading automatic import settings…</p>:<><p role="status">{settings.enabled?`Automatic import on · ${settings.status}`:'Automatic import off'}. {settings.notice}</p>
    {settings.enabled&&<p className="fine-print">Next check: {settings.nextRun>Date.now()?new Date(settings.nextRun).toLocaleString():'Due now'}. {settings.lastRun?`Last check: ${new Date(settings.lastRun).toLocaleString()} · ${settings.lastImported} files · ${settings.lastProposed} new memories processed.`:''}</p>}</>}

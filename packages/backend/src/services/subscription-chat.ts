@@ -50,11 +50,19 @@ export async function stopSubscriptionProcesses():Promise<void>{
 /** SUB2 (P7): Windows replies run through Job Objects (subscription-launcher-win.ts). */
 const windowsJobs=()=>process.platform==='win32'&&storeP7Enabled();
 export const subscriptionEnabled=()=>process.env.DPRO_SUBSCRIPTION_CHAT==='1'&&process.env.AGENT_PLAYER_ISOLATED!=='1'&&!processesStopping;
+/** CLIs that a desktop app keeps inside its own bundle (relative to an Applications folder). Searched last: a CLI on PATH wins. */
+export const BUNDLED_CLI_DIRS=['ChatGPT.app/Contents/Resources/codex-cli/bin','Codex.app/Contents/Resources/codex-cli/bin'];
+/** True when a CLI was found inside a desktop app's bundle, so a terminal command must name its full path. */
+export const bundledCli=(file:string)=>/\.app\/Contents\//.test(file);
 /** Where the CLIs are installed. An app opened from the Dock gets a short PATH, so the usual install folders are searched too (CORE-PICKER-01): Homebrew, npm under fnm/nvm/volta. */
 export async function subscriptionSearchDirs(home=os.homedir(),pathEnv=process.env.PATH??''):Promise<string[]>{
  const versions=async(dir:string,tail:string[])=>{try{return (await fs.readdir(dir)).sort((a,b)=>b.localeCompare(a,undefined,{numeric:true})).map(v=>path.join(dir,v,...tail));}catch{return [];}};
  const dirs=[path.join(home,'.local','bin'),...pathEnv.split(path.delimiter).filter(Boolean),'/opt/homebrew/bin','/usr/local/bin',path.join(home,'.volta','bin'),path.join(home,'.npm-global','bin'),
-  ...await versions(path.join(home,'.local','share','fnm','node-versions'),['installation','bin']),...await versions(path.join(home,'.nvm','versions','node'),['bin'])];
+  ...await versions(path.join(home,'.local','share','fnm','node-versions'),['installation','bin']),...await versions(path.join(home,'.nvm','versions','node'),['bin']),
+  // The Codex desktop app (ChatGPT.app, bundle com.openai.codex) carries its own `codex` CLI; it is never put on PATH.
+  ...(process.platform==='darwin'?BUNDLED_CLI_DIRS.flatMap(rel=>['/Applications',path.join(home,'Applications')].map(base=>path.join(base,rel))):[]),
+  // Google's Antigravity installer puts `agy` here on Windows; Girru's own PATH was read before an install from the settings page.
+  ...(process.platform==='win32'?[path.join(process.env.LOCALAPPDATA||path.join(home,'AppData','Local'),'agy','bin')]:[])];
  return [...new Set(dirs.filter(d=>path.isAbsolute(d)))];
 }
 /** Where a chat without a project folder lets a coding app work: one private, empty folder per conversation, outside Girru's data (CORE-PICKER-03). */

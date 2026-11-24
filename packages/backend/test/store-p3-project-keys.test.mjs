@@ -136,3 +136,15 @@ test('released encryption hold keeps generation through key rewrite; active hold
  assert.equal(moved.generation,hold.generation);assert.equal(moved.state,'released');
  assert.equal(get('SELECT * FROM memory_encryption_projection_holds WHERE owner_id=? AND scope=?',OWNER,scope),undefined);
 });
+
+test('a project row written again under its old slug does not stop the move (both keys present)', async () => {
+  const id = 'dup-' + Math.random().toString(16).slice(2), slug = 'dup-slug-' + Math.random().toString(16).slice(2);
+  db.prepare("INSERT INTO memory_project_scopes (owner_id, slug, name, updated_by) VALUES (?, ?, 'By id', 'test')").run(OWNER, id);
+  db.prepare("INSERT INTO memory_project_scopes (owner_id, slug, name, updated_by) VALUES (?, ?, 'By slug', 'discovery')").run(OWNER, slug);
+  db.prepare("INSERT INTO memory_project_kinds (owner_id, slug, kind, reason, updated_by, updated_at) VALUES (?, ?, 'library', 'x', 'test', ?)").run(OWNER, id, new Date().toISOString());
+  db.prepare("INSERT INTO memory_project_kinds (owner_id, slug, kind, reason, updated_by, updated_at) VALUES (?, ?, 'library', 'y', 'discovery', ?)").run(OWNER, slug, new Date().toISOString());
+  await sql().tx(() => keys.rewriteStep(OWNER, slug, id));
+  const rows = db.prepare('SELECT slug, name FROM memory_project_scopes WHERE owner_id = ? AND slug IN (?, ?)').all(OWNER, id, slug);
+  assert.deepEqual(rows, [{ slug: id, name: 'By id' }], 'the row under the new key wins; the old-key copy is dropped instead of failing the primary key');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM memory_project_kinds WHERE owner_id = ? AND slug IN (?, ?)').get(OWNER, id, slug).n, 1);
+});

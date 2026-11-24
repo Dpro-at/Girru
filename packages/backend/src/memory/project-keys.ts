@@ -28,26 +28,27 @@ export function chatProjectKeyColumn(): 'id' | 'slug' {
 }
 
 /** Every place that stores a project key: table, owner column, key column, and which rows. */
-interface Keyed { table: string; owner: string | null; col: string; where?: string; prefix?: string }
+/** `unique`: the other primary-key columns; the key column (with the owner) is part of that key, so a row under the new key may already exist. */
+interface Keyed { table: string; owner: string | null; col: string; where?: string; prefix?: string; unique?: readonly string[] }
 const KEYED: readonly Keyed[] = [
   { table: 'memories', owner: 'user_id', col: 'drawer_key', where: "drawer_kind = 'project'" },
   { table: 'memory_versions', owner: 'user_id', col: 'drawer_key', where: "drawer_kind = 'project'" },
   { table: 'chat_memory_links', owner: 'user_id', col: 'drawer_key', where: "drawer_kind = 'project'" },
   { table: 'memory_file_proposals', owner: 'user_id', col: 'drawer_key', where: "drawer_kind = 'project'" },
-  { table: 'memory_project_scopes', owner: 'owner_id', col: 'slug' },
+  { table: 'memory_project_scopes', owner: 'owner_id', col: 'slug', unique: [] },
   { table: 'memory_project_scopes', owner: 'owner_id', col: 'merged_into' },
   { table: 'memory_pinned_facts', owner: 'owner_id', col: 'scope_id', where: "scope_kind = 'project'" },
   { table: 'memory_access_rules', owner: 'owner_id', col: 'scope_id', where: "scope_kind = 'project'" },
   { table: 'memory_access_scope_rules', owner: 'owner_id', col: 'scope_id', where: "scope_kind = 'project'" },
   { table: 'memory_scope_rules', owner: 'owner_id', col: 'scope_id', where: "scope_kind = 'project'" },
-  { table: 'memory_project_group_members', owner: 'owner_id', col: 'slug' },
-  { table: 'memory_project_kinds', owner: 'owner_id', col: 'slug' },
-  { table: 'memory_project_design', owner: 'owner_id', col: 'slug' },
-  { table: 'memory_project_databases', owner: 'owner_id', col: 'slug' },
-  { table: 'memory_project_db_access', owner: 'owner_id', col: 'slug' },
+  { table: 'memory_project_group_members', owner: 'owner_id', col: 'slug', unique: [] },
+  { table: 'memory_project_kinds', owner: 'owner_id', col: 'slug', unique: [] },
+  { table: 'memory_project_design', owner: 'owner_id', col: 'slug', unique: [] },
+  { table: 'memory_project_databases', owner: 'owner_id', col: 'slug', unique: [] },
+  { table: 'memory_project_db_access', owner: 'owner_id', col: 'slug', unique: ['agent_id'] },
   { table: 'change_scopes', owner: 'owner_id', col: 'scope', prefix: 'project:' },
   { table: 'change_events', owner: 'user_id', col: 'scope', prefix: 'project:' },
-  { table: 'projection_state', owner: null, col: 'scope', prefix: 'project:' },
+  { table: 'projection_state', owner: null, col: 'scope', prefix: 'project:', unique: ['consumer'] },
 ];
 
 export function* keyStateStep(ownerId: string): Step<KeyedBy> {
@@ -71,6 +72,12 @@ export function* rewriteStep(ownerId: string, from: string, to: string): Step<nu
     const b = k.prefix ? k.prefix + to : to;
     const owned = k.owner ? ` AND ${k.owner} = ?` : '';
     const args = k.owner ? [ownerId] : [];
+    // A row already under the new key wins: the old-key copy would break the primary key (two rows for one project after
+    // something wrote the old key again; the start-up move then failed and the backend never started).
+    if (k.unique) {
+      const same = [k.owner, ...k.unique].filter(Boolean).map((c) => ` AND x.${c} = ${k.table}.${c}`).join('');
+      yield* run(`DELETE FROM ${k.table} WHERE ${k.col} = ?${owned}${k.where ? ` AND ${k.where}` : ''} AND EXISTS (SELECT 1 FROM ${k.table} x WHERE x.${k.col} = ?${same})`, a, ...args, b);
+    }
     n += (yield* run(`UPDATE ${k.table} SET ${k.col} = ? WHERE ${k.col} = ?${owned}${k.where ? ` AND ${k.where}` : ''}`, b, a, ...args)).changes;
   }
   if(yield* tableExists('memory_encryption_projection_holds')) {

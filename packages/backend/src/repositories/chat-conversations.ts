@@ -223,7 +223,7 @@ export async function addUserMessage(sessionId: string, content: string, runId: 
 
 /** Stores the assistant's turn of a run (once per run id). */
 /** CHAT-LIVE-01 (LW6): why a reply failed, kept with it so the chat shows the same plain text live and after reopening. */
-export const KEPT_ERROR_CODES = ['model_unavailable', 'local_model_missing', 'lmstudio_not_running', 'subscription_org_blocked'] as const;
+export const KEPT_ERROR_CODES = ['model_unavailable', 'local_model_missing', 'lmstudio_not_running', 'subscription_org_blocked', 'usage_limit'] as const;
 export async function addAssistantMessage(sessionId: string, input: { runId: string; content: string; parts: TurnPart[]; status: TurnStatus; durationMs: number; agentId?: string | null; errorCode?: string | null }): Promise<ConversationMessage> {
   const id = orderedId();
   return sql().tx(function* (): Step<ConversationMessage> {

@@ -1,5 +1,6 @@
 import { discoveryFs, isolatedReadRegularFile } from '../services/discovery-fs.js';
 import { outsideFile } from '../memory/project-trust.js';
+import { projectKeyOf } from '../memory/project-keys.js';
 import { isLibraryPath, libraryDirName } from '../memory/import/library-folders.js';
 import { publicKeyInfo } from '../services/ssh-keys.js';
 /**
@@ -508,7 +509,9 @@ function destination(f: Pick<Found, 'kind' | 'root' | 'memory' | 'mcp'> & { skil
   const group = f.root ? ctx.groupOf?.get(f.root) : undefined;
   // A merged project: the first of its folders that is a Girru project, else the merged project's own drawer.
   const project = group ? group.roots.map((r) => matchProject(r, r, ctx.projects)).find(Boolean) : f.root ? matchProject(f.root, f.root, ctx.projects) : undefined;
-  const key = project?.slug ?? (group ? group.slug : rootDrawerKey(f.root, ctx.home));
+  // A Girru project's drawer is its memory key (its id while GIRRU_STORE_P3 is on), never its slug: a slug drawer made a second
+  // project row that the start-up key move could not rename, and the backend stopped starting.
+  const key = (project ? projectKeyOf(project) : null) ?? (group ? group.slug : rootDrawerKey(f.root, ctx.home));
   const projectDrawer = key ? `project:${key}` : 'owner';
   const label = key ? `Projects · ${project?.name ?? key}` : 'About you';
   if (f.kind === 'memory') {
@@ -899,7 +902,8 @@ export async function setRootWatch(userId: string, id: string, watch: unknown) {
 let timer: ReturnType<typeof setInterval> | undefined;
 export async function runDueDiscoveryScans(now = Date.now()) {
   await init();
-  for (const r of await q.all<{ user_id: string; interval_minutes: number }>("SELECT s.user_id, s.interval_minutes FROM discovery_settings s JOIN users u ON u.id = s.user_id WHERE s.watch = 1 AND u.role = 'owner' AND u.status = 'active'")) {
+  // An owner who never changed the settings has no row: the defaults (watch on, every 30 minutes) apply, as settings() reports.
+  for (const r of await q.all<{ user_id: string; interval_minutes: number }>("SELECT u.id AS user_id, COALESCE(s.interval_minutes, 30) AS interval_minutes FROM users u LEFT JOIN discovery_settings s ON s.user_id = u.id WHERE COALESCE(s.watch, 1) = 1 AND u.role = 'owner' AND u.status = 'active'")) {
     const last = scans.get(r.user_id)?.at ?? 0;
     if (now - last >= r.interval_minutes * 60_000) await scan(r.user_id).catch(() => undefined);
   }

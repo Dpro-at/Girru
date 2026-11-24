@@ -34,7 +34,7 @@ import { ImportError, MAX_TOTAL_BYTES } from '../../memory/import/pipeline.js';
 import { MemoryFileError } from '../../memory/memory-files.js';
 import { listLocalSessions, findSession, readSession, matchProject, rootDrawerKey } from '../../memory/import/local-agents.js';
 import { listProjects } from '../../repositories/chat-conversations.js';
-import { automaticImportSettings, configureAutomaticImport, runDueAutomaticImports } from '../../memory/import/automatic-project-import.js';
+import { automaticImportSettings, configureAutomaticImport, runAutomaticImportNow, runDueAutomaticImports } from '../../memory/import/automatic-project-import.js';
 import { scanProjectDocuments, previewProjectDocument } from '../../memory/import/project-documents.js';
 import { MAX_SESSIONS_PER_IMPORT, getJob, importedSessions, latestImportJob, pauseImport, resumeImport, startImport } from '../../memory/import/local-import.js';
 import { isLoopbackPeer } from './terminal.js';
@@ -123,6 +123,16 @@ export async function memoryImportRoutes(fastify: FastifyInstance) {
     const owner=localOwner(request,reply);if(!owner)return reply;
     try{const settings=await configureAutomaticImport(owner.userId!,body(request));audit(request,owner,'memory_import.automatic','-',{enabled:settings.enabled,intervalMinutes:settings.intervalMinutes});if(settings.enabled)void runDueAutomaticImports().catch(()=>{});return {settings};}
     catch{return reply.code(400).send({code:'invalid_input'});}
+  });
+  // Scan now: the owner asks for the search right away instead of waiting for the interval. It runs in the background;
+  // the page polls the settings for progress. The computer inventory (SSH, skills, MCP) is read again as well.
+  fastify.post('/api/memory/import/local/automatic/run',{config},async(request,reply)=>{
+    const owner=localOwner(request,reply);if(!owner)return reply;
+    const settings=await automaticImportSettings(owner.userId!);if(!settings.enabled)return reply.code(409).send({code:'automatic_import_off'});
+    audit(request,owner,'memory_import.automatic_run','-',{});
+    void runAutomaticImportNow(owner.userId!).catch(()=>{});
+    void import('../../discovery/service.js').then(d=>d.view(owner.userId!,{rescan:true})).catch(()=>{});
+    return {settings:await automaticImportSettings(owner.userId!)};
   });
   fastify.post('/api/memory/import/local/documents', { config }, async (request, reply) => {
     const owner=localOwner(request,reply);if(!owner)return reply;

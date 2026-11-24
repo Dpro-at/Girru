@@ -15,7 +15,8 @@ const MAX_FILES = 400, MAX_ENTRIES = 30000;
 const hash = (s: string | Buffer) => createHash('sha256').update(s).digest('hex');
 type Entry = { id: string; root: string; file: string; digest: string; relative: string; bytes: number; updatedAt: string };
 export type ProjectDocument = Omit<Entry, 'file' | 'digest'>;
-const skip = /^(?:node_modules|vendor|dist|build|coverage|target|venv|__pycache__|Library|Applications|Pictures|Movies|Music|Caches|Trash|System|Windows|Program Files(?: \(x86\))?|ProgramData|AppData|usr|bin|sbin|etc|var|dev|proc|sys|boot|run|homebrew|Cellar|_migration|backups|archives|external-sources|reference|references)$/i;
+// /Applications is walked (XAMPP/MAMP keep projects in htdocs there); its program bundles (*.app) are still skipped where folders are visited.
+const skip = /^(?:node_modules|vendor|dist|build|coverage|target|venv|__pycache__|Library|Pictures|Movies|Music|Caches|Trash|System|Windows|Program Files(?: \(x86\))?|ProgramData|AppData|usr|bin|sbin|etc|var|dev|proc|sys|boot|run|homebrew|Cellar|_migration|backups|archives|external-sources|reference|references)$/i;
 const secret = /(?:^|[._-])(?:secret|secrets|credential|credentials|password|passwords|token|tokens|private[-_]key)(?:[._-]|$)/i;
 const named = /^(?:claude|agents|gemini|memory|readme|handoff|backlog|tasks|project_memory|architecture|decisions|design_brief)(?:[._-].*)?\.(?:md|txt|rst)$/i;
 /** Agent instruction files kept in a dot folder (DISCOVER-01): GitHub Copilot's and Cursor's rules. */

@@ -381,3 +381,25 @@ test('onboarding inventory finds nested plugin and built-in skills without impor
   assert.ok(inventory.samples.some(item => item.kind === 'skill' && item.name === 'plugin-inventory-trial'), 'plugin skills must not be silently omitted from onboarding');
   assert.ok(inventory.samples.some(item => item.kind === 'skill' && item.name === 'builtin-inventory-trial'), 'built-in skills match the library scanner');
 });
+
+test('watch runs on the defaults: an owner who never saved settings still sees a new SSH key on the next check', async () => {
+  db.prepare("DELETE FROM discovery_settings WHERE user_id = 'dc-owner'").run();
+  assert.deepEqual(await D.settings('dc-owner'), { watch: true, intervalMinutes: 30 });
+  D.resetDiscoveryCache();
+  const t0 = Date.now();
+  await D.runDueDiscoveryScans(t0);
+  assert.equal(find(await D.view('dc-owner'), 'ssh', 'id_watch_trial.pub'), undefined);
+  // A well-formed public key line (a throwaway ed25519 public part; no private key exists).
+  const blob = (t, d) => { const n = Buffer.alloc(4); n.writeUInt32BE(d.length); return Buffer.concat([n, d]); };
+  const pub = Buffer.concat([blob('', Buffer.from('ssh-ed25519')), blob('', randomBytes(32))]).toString('base64');
+  w(join(home, '.ssh', 'id_watch_trial.pub'), `ssh-ed25519 ${pub} watch-trial\n`);
+  await D.runDueDiscoveryScans(t0 + 10 * 60_000);
+  assert.equal(find(await D.view('dc-owner'), 'ssh', 'id_watch_trial.pub'), undefined, 'not due before 30 minutes');
+  await D.runDueDiscoveryScans(Date.now() + 31 * 60_000);
+  assert.ok(find(await D.view('dc-owner'), 'ssh', 'id_watch_trial.pub'), 'the 30-minute check found the new key without a saved settings row');
+  db.prepare("INSERT INTO discovery_settings (user_id, watch, interval_minutes) VALUES ('dc-owner', 0, 30)").run();
+  rmSync(join(home, '.ssh', 'id_watch_trial.pub'));
+  await D.runDueDiscoveryScans(Date.now() + 120 * 60_000);
+  assert.ok(find(await D.view('dc-owner'), 'ssh', 'id_watch_trial.pub'), 'an owner who turned watching off keeps the last result');
+  db.prepare("DELETE FROM discovery_settings WHERE user_id = 'dc-owner'").run();
+});

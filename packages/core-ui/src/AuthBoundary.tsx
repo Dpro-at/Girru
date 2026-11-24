@@ -1,6 +1,7 @@
 import { SetupOrb } from './SetupOrb';
 import { generatePassword, passwordStrength } from './password-tools.js';
 import {UiIcon} from './ui-icons';
+import { GoogleMark } from './GoogleMark';
 import { PublicShell } from './PublicShell';
 import { SignedInShell } from './SignedInShell';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -30,6 +31,7 @@ const notices = {
   host_not_allowed: 'The installation refused this host. Its connection configuration needs review.',
 
   invalid: 'Sign-in refused. Check your credentials.', denied: 'Account access denied.', limited: 'Too many attempts. Try again later.',
+  'google-not-linked': 'Google confirmed your account, but it is not linked to Girru yet. Sign in with your email and password, then link Google in Settings › Account.',
   unavailable: 'Request unavailable. No automatic retry was sent.', expired: 'Session expired or revoked. Sign in again.',
   'logout-confirmed': 'Server confirmed sign-out on all devices.', 'logout-unknown': 'Local session cleared. Server sign-out on other devices is unconfirmed. No retry was sent.',
 };
@@ -110,7 +112,7 @@ function SessionWorkspace({ client, setupCode, initialPage }: { client: SessionC
       <label htmlFor="auth-password">Password</label><input id="auth-password" type="password" name={state.mode === 'live' ? 'password' : undefined} autoComplete={state.mode === 'live' ? 'current-password' : 'off'} required value={password} onChange={e => setPassword(e.target.value)} disabled={state.phase === 'signing-in'}/>
       {state.mode === 'live' && <DevQuickLogin disabled={state.phase === 'signing-in'} onFill={(a) => { setEmail(a.email); setPassword(a.password); }}/>}
       <button className="primary" disabled={state.phase === 'signing-in'}>Sign in</button>
-      {state.mode==='live'&&<button type="button" disabled={state.phase==='signing-in'} onClick={()=>void client.loginGoogle()}>Sign in with Google</button>}
+      {state.mode==='live'&&<button type="button" className="google-button" disabled={state.phase==='signing-in'} onClick={()=>void client.loginGoogle()}><GoogleMark/>Sign in with Google</button>}
       {state.phase === 'signing-in' && <button type="button" onClick={() => client.cancel()}>Cancel sign-in</button>}
     </form>}
     {state.setup !== 'required' && <p>Settings credentials remain masked-only; no credential values are fetched.</p>}
@@ -192,11 +194,12 @@ function OwnerSetup({ client, setupCode, initialPage }: { client: SessionClient;
     <h1>Welcome to Girru</h1>
     <p>Your company of AI agents, on this computer.</p>
     <div className="setup-welcome-actions">
-      <button type="button" className="primary" disabled={google === false} onClick={() => withGoogle(false)}>Create account</button>
-      <button type="button" disabled={google === false} onClick={() => withGoogle(true)}>Sign in</button>
+      <button type="button" className="primary google-button" disabled={google === false} onClick={() => withGoogle(false)}><GoogleMark/>Create account</button>
+      <button type="button" className="google-button" disabled={google === false} onClick={() => withGoogle(true)}><GoogleMark/>Sign in</button>
     </div>
     <p className="fine-print">{google === false ? 'Google sign-in is not ready on this computer.' : 'Your browser opens for Google. Your chats, files and agents stay on your computers.'}</p>
-    {google === false && <button type="button" className="link-button" onClick={() => { writeSetupEntry(null); setWelcome(false); }}>Use an email and password instead</button>}
+    {/* A local account never needs Google or the Dpro account service: anyone running Girru from source can always use it. */}
+    <button type="button" className="link-button" onClick={() => { writeSetupEntry(null); setWelcome(false); }}>Use an email and password instead</button>
   </section>;
   if (chooseType) return <WorkspaceTypeStep value={workspaceType} companyName={companyName} onNext={(type, name) => { setWorkspaceType(type); setCompanyName(name); setChooseType(false); setAskKind(type === 'company'); if (type !== 'company') setCompanyKind(undefined); }}/>;
   if (askKind) return <KindStep orb workspaceType="company" value={companyKind} query={kindQuery} busy={false} more={0}
@@ -230,8 +233,8 @@ function OwnerSetup({ client, setupCode, initialPage }: { client: SessionClient;
     <p>You are the owner of this workspace. Your information stays on this computer.</p>
     {notice && !['invalid_email','weak_password','missing_fields'].includes(notice) && <p role="alert">{ownerSetupNotices[notice]}</p>}
     <label htmlFor="owner-name">Your name</label><input id="owner-name" required maxLength={100} autoComplete="name" value={name} onChange={e => setName(e.target.value)} disabled={busy}/>
-    <button type="button" disabled={busy||!name.trim()} onClick={()=>void client.loginGoogle({setupToken:code,name:name.trim(),workspaceType,...(workspaceType==='company'?{companyName,companyKind}:{})})}>Create account with Google</button>
-    <p>Google verifies your identity and email. Your workspace stays on this computer.</p>
+    {google !== false && <><button type="button" className="google-button" disabled={busy||!name.trim()} onClick={()=>void client.loginGoogle({setupToken:code,name:name.trim(),workspaceType,...(workspaceType==='company'?{companyName,companyKind}:{})})}><GoogleMark/>Create account with Google</button>
+    <p>Google verifies your identity and email. Your workspace stays on this computer.</p></>}
     <label htmlFor="owner-email">Email <span className="owner-field-hint">You sign in with it. Nothing is sent anywhere.</span></label><input id="owner-email" type="email" name="username" required maxLength={320} autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} disabled={busy}/>
     {notice === 'invalid_email' && <p className="owner-field-error" role="alert">{ownerSetupNotices[notice]}</p>}
     <label htmlFor="owner-password">Password <span className="owner-field-hint">At least 12 characters</span></label>

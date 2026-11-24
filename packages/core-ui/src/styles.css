@@ -424,6 +424,11 @@ form > label { display:block; margin-block-end:8px; }
 .auth-workspace h1 { font-size:16px; margin-block-end:12px; }
 .auth-workspace input:not([type="checkbox"]) { padding:6px 8px; border-radius:2.4px; border:1px solid var(--border); background:var(--canvas); }
 .auth-workspace button.primary { min-block-size:32px; border-radius:2.4px; font-weight:600; }
+/* Buttons that sign in with Google carry Google's "G" before the label. On a filled button it sits on a white disc. */
+button.google-button { display:inline-flex; align-items:center; justify-content:center; gap:8px; }
+button.google-button .google-mark { flex:none; }
+button.google-button.primary .google-mark { background:#fff; border-radius:50%; padding:2px; box-sizing:content-box; }
+button.google-button:disabled .google-mark { opacity:.5; }
 
 /* ONBOARD-TEAM-02: total headcount review and batch progress */
 .company-total { margin-top:12px; }
