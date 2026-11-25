@@ -3,7 +3,9 @@
  *
  *   GET  /api/first-run              -> { pending, step }
  *   PUT  /api/first-run              -> { step: 'tools' | 'model' | 'team' }
- *   GET  /api/first-run/tools        -> { tools: [{ id, name, installed, signedIn, install, signIn, needs? }] }
+ *   GET    /api/first-run/tools      -> { tools: [{ id, name, installed, signedIn, install, signIn, needs?, removable? }] }
+ *   POST   /api/first-run/tools/gemini  -> confirmed local install (owner + loopback)
+ *   DELETE /api/first-run/tools/gemini  -> confirmed local removal (owner + loopback)
  *   GET  /api/first-run/local-model  -> { memoryGb, recommended, choices, ollama, installed, install, download, commands }
  *   POST /api/first-run/finish       -> { conversationId } (the Welcome chat)
  *
@@ -15,7 +17,7 @@ import { firstRunDiscovery, startFirstRunDiscovery, stopFirstRunDiscovery } from
 import { isLoopbackPeer } from '../../auth/setup-token.js';
 import { authorizeActiveRole } from '../../auth/route-guards.js';
 import { handleError } from '../error-handler.js';
-import { validCompanyName, FIRST_RUN_STEPS, aiTools, finishFirstRun, firstRunState, localModelCommand, localModelStep, saveFirstRunStep, type FirstRunStep } from '../../onboarding/first-run.js';
+import { validCompanyName, FIRST_RUN_STEPS, aiTools, changeAiTool, finishFirstRun, firstRunState, localModelCommand, localModelStep, saveFirstRunStep, type FirstRunStep } from '../../onboarding/first-run.js';
 
 const owner = (request: FastifyRequest, reply: FastifyReply) => authorizeActiveRole(request, reply, ['owner'] as const);
 
@@ -44,6 +46,15 @@ export async function firstRunRoutes(fastify: FastifyInstance, options: {discove
     const userId = owner(request, reply); if (userId === null) return reply;
     try { return { tools: await aiTools() }; } catch (error) { if((error as any)?.code==='discovery_required')return reply.code(409).send({code:'discovery_required'});return handleError(reply, error, 'internal', '[FirstRun]'); }
   });
+
+  for(const method of ['POST','DELETE'] as const)fastify.route({method,url:'/api/first-run/tools/:id',handler:async(request,reply)=>{
+    const userId=owner(request,reply);if(userId===null)return reply;
+    if(!isLoopbackPeer(request.raw.socket?.remoteAddress))return reply.code(403).send({code:'not_loopback'});
+    const id=(request.params as {id?:unknown})?.id,body=request.body as {confirm?:unknown}|null;
+    if(id!=='gemini'||!body||body.confirm!==true||Object.keys(body).some(k=>k!=='confirm'))return reply.code(400).send({code:'invalid_input'});
+    try{return {tool:await changeAiTool('gemini',method==='POST'?'install':'uninstall')};}
+    catch(error){const code=(error as {code?:string}).code;return reply.code(code==='package_manager_required'||code==='tool_action_unsupported'?409:500).send({code:code??'tool_action_failed'});}
+  }});
 
   fastify.get('/api/first-run/local-model', async (request, reply) => {
     const userId = owner(request, reply); if (userId === null) return reply;

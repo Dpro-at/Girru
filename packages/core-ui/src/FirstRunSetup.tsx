@@ -18,7 +18,7 @@ import { SetupHelperPill } from './MemoryHelper';
 /** FIRSTRUN-01 (boards FR2–FR3): the steps after the owner account, in the one setup window. */
 export type FirstRunStep = 'discovery' | 'tools' | 'model' | 'team' | 'phone';
 const STEPS = ['Account', 'Your files', 'AI tools', 'Team', 'Phone'] as const;
-export type AiTool = { id: 'claude' | 'codex' | 'gemini'; name: string; installed: boolean; signedIn: boolean; install: string | null; signIn: string; needs?: 'node' };
+export type AiTool = { id: 'claude' | 'codex' | 'gemini'; name: string; installed: boolean; signedIn: boolean; install: string | null; signIn: string; needs?: 'node'; removable?: boolean };
 type LocalChoice = { id: string; label: string; sizeGb: number; note: string; minMemoryGb: number; installed?: boolean };
 type LocalStep = { memoryGb: number; recommended: string; choices: LocalChoice[]; ollama: boolean; installed: string[]; download: string | null; commands: Record<string, string | null> };
 

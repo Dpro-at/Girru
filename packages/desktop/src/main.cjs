@@ -489,6 +489,17 @@ app.on('will-quit', () => {
 });
 let systemTray = null;
 const fromAppPage = event => !!mainWindow && !!appOrigin && event.sender === mainWindow.webContents && event.senderFrame === mainWindow.webContents.mainFrame;
+ipcMain.handle('dpro:open-local-model-provider', async (event, provider) => {
+  if(!fromAppPage(event)||!['ollama','lmstudio'].includes(provider))return false;
+  const home=app.getPath('home'),candidates=process.platform==='darwin'
+    ? provider==='ollama'?['/Applications/Ollama.app',path.join(home,'Applications','Ollama.app')]:['/Applications/LM Studio.app',path.join(home,'Applications','LM Studio.app')]
+    : process.platform==='win32'
+      ? provider==='ollama'?[path.join(home,'AppData','Local','Programs','Ollama','ollama app.exe')]:[path.join(home,'AppData','Local','Programs','LM Studio','LM Studio.exe')]
+      : [];
+  for(const candidate of candidates)if(fs.existsSync(candidate)){const error=await shell.openPath(candidate);if(!error)return true;}
+  await shell.openExternal(provider==='ollama'?'https://ollama.com/download':'https://lmstudio.ai/download');
+  return false;
+});
 function startUpdater() {
   if (!app.isPackaged || updater) return;
   updater = require('./app-update.cjs').createUpdater({

@@ -26,7 +26,7 @@ const { default: setupRoutes } = await import('../src/api/routes/setup.ts');
 const { authRoutes } = await import('../src/api/routes/auth.ts');
 const { firstRunRoutes } = await import('../src/api/routes/first-run.ts');
 const { issueSetupToken } = await import('../src/auth/setup-token.ts');
-const { aiTools, localModelStep, localModelCommand, recommendedLocal, welcomeText, teamLine, firstRunState } = await import('../src/onboarding/first-run.ts');
+const { aiTools, changeAiTool, localModelStep, localModelCommand, recommendedLocal, welcomeText, teamLine, firstRunState } = await import('../src/onboarding/first-run.ts');
 const { sql, one } = await import('../src/repositories/sql-steps.js');
 const { listConversationMessages } = await import('../src/repositories/chat-conversations.ts');
 
@@ -103,6 +103,31 @@ test('AI tools: installed and signed-in states come from the tools\' own files, 
   assert.deepEqual([byId.codex.installed, byId.codex.signedIn, byId.codex.signIn], [true, false, 'codex login']);
   assert.deepEqual([byId.gemini.installed, byId.gemini.install], [false, 'npm install -g @google/gemini-cli']);
   assert.ok(!JSON.stringify(tools).includes('x@example.test'), 'no account detail is returned');
+});
+
+test('direct Gemini changes use only the fixed package-manager command', async () => {
+  const home = mkdtempSync(join(dir, 'home-gemini-action-')), bin = join(home, 'bin');
+  mkdirSync(bin); writeFileSync(join(bin, 'npm'), '#!/bin/sh\n'); chmodSync(join(bin, 'npm'), 0o755);
+  const previous = process.env.GIRRU_STORE_P7; process.env.GIRRU_STORE_P7 = '0';
+  const calls = [], env = {home, platform:'linux', dirs:[bin], runTool:async(file,args,toolHome,platform)=>{
+    calls.push({file,args:[...args],toolHome,platform});
+    if(args[0]==='install')writeFileSync(join(bin,'gemini'),'#!/bin/sh\n');else rmSync(join(bin,'gemini'));
+  }};
+  try {
+    assert.equal((await changeAiTool('gemini','install',env)).installed,true);
+    assert.equal((await changeAiTool('gemini','uninstall',env)).installed,false);
+  } finally { if(previous===undefined)delete process.env.GIRRU_STORE_P7;else process.env.GIRRU_STORE_P7=previous; }
+  assert.deepEqual(calls,[
+    {file:join(bin,'npm'),args:['install','-g','@google/gemini-cli'],toolHome:home,platform:'linux'},
+    {file:join(bin,'npm'),args:['uninstall','-g','@google/gemini-cli'],toolHome:home,platform:'linux'},
+  ]);
+});
+
+test('direct Gemini route requires owner, loopback and exact confirmation', async () => {
+  assert.equal((await app.inject({method:'POST',url:'/api/first-run/tools/gemini',payload:{confirm:true}})).statusCode,401);
+  assert.equal((await app.inject({method:'POST',url:'/api/first-run/tools/gemini',payload:{confirm:true},headers:{authorization:`Bearer ${token}`},remoteAddress:'203.0.113.9'})).statusCode,403);
+  assert.equal((await call('POST','/api/first-run/tools/gemini',{})).statusCode,400);
+  assert.equal((await call('POST','/api/first-run/tools/gemini',{confirm:true,command:'anything'})).statusCode,400);
 });
 
 test('Claude Code is not "signed in" when its login was not saved (account written, keychain item missing)', async () => {

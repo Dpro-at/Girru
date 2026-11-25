@@ -6,8 +6,9 @@
  * Only an owner created by the setup route gets that row, so owners who existed
  * before this feature never see the setup steps again.
  *
- * Nothing here runs an install or sign-in: those commands are fixed strings
- * the app runs in Girru's own terminal when the owner presses Install or Sign in.
+ * Most install and sign-in commands remain fixed strings opened in Girru's Terminal.
+ * Settings may install or remove Gemini CLI directly through the fixed, owner-only
+ * `changeAiTool` action; no command text is accepted from the page.
  * Sign-in is checked by the presence of each tool's own files (and, for Claude Code
  * on macOS, its keychain item); no file content or value that holds a credential is
  * read or returned.
@@ -75,8 +76,8 @@ export async function saveFirstRunStep(userId: string, step: FirstRunStep, works
 // ---- AI tools ---------------------------------------------------------------
 
 export type AiToolId = 'claude' | 'codex' | 'gemini';
-export type AiTool = Readonly<{ id: AiToolId; name: string; installed: boolean; signedIn: boolean; install: string | null; signIn: string; needs?: 'node' }>;
-type Env = { home: string; platform: NodeJS.Platform; dirs: string[]; keychain?: (service: string, home: string) => Promise<boolean>; claudeStatus?: (bin: string, home: string) => Promise<boolean | null> };
+export type AiTool = Readonly<{ id: AiToolId; name: string; installed: boolean; signedIn: boolean; install: string | null; signIn: string; needs?: 'node'; removable?: boolean }>;
+type Env = { home: string; platform: NodeJS.Platform; dirs: string[]; keychain?: (service: string, home: string) => Promise<boolean>; claudeStatus?: (bin: string, home: string) => Promise<boolean | null>; runTool?: (file:string,args:readonly string[],home:string,platform:NodeJS.Platform)=>Promise<void> };
 
 async function exists(file: string): Promise<boolean> { try { await fs.access(file); return true; } catch { return false; } }
 async function findBinary(env: Env, names: readonly string[]): Promise<string | null> {
@@ -142,7 +143,7 @@ export async function aiTools(env?: Partial<Env>): Promise<AiTool[]> {
     // Google's own installers (antigravity.google › Docs › Getting started › CLI): `agy` lands in ~/.local/bin, or %LOCALAPPDATA%\\agy\\bin on Windows.
     ? { id: 'gemini', name: 'Antigravity', installed: !!agy, signedIn: !!agy && await antigravitySignedIn(home),
       install: agy ? null : win ? 'irm https://antigravity.google/cli/install.ps1 | iex' : 'curl -fsSL https://antigravity.google/cli/install.sh | bash', signIn: 'agy' }
-    : { id: 'gemini', name: 'Gemini CLI', installed: !!gemini, signedIn: !!gemini && await exists(path.join(home, '.gemini', 'oauth_creds.json')),
+    : { id: 'gemini', name: 'Gemini CLI', installed: !!gemini, signedIn: !!gemini && await exists(path.join(home, '.gemini', 'oauth_creds.json')), removable: !!gemini,
       install: gemini ? null : pkg('@google/gemini-cli', 'gemini-cli'), signIn: 'gemini', ...(!gemini && !npm && !brew ? { needs: 'node' as const } : {}) };
   return [
     { id: 'claude', name: 'Claude Code', installed: !!claude, signedIn: !!claude && ((await (env?.claudeStatus ?? claudeAuthStatus)(claude, home)) ?? await claudeSignedIn(home, platform, env?.keychain ?? keychainItem)),
@@ -151,6 +152,31 @@ export async function aiTools(env?: Partial<Env>): Promise<AiTool[]> {
       install: codex ? null : pkg('@openai/codex', 'codex'), signIn: codex && bundledCli(codex) ? `${shellQuote(codex)} login` : 'codex login', ...(!codex && !npm && !brew ? { needs: 'node' as const } : {}) },
     google,
   ];
+}
+
+/**
+ * Install or remove the supported Gemini CLI without accepting a command from the page.
+ * The route is owner + loopback only; executable and arguments are resolved here and
+ * fixed, so this is not a general remote shell. Output is bounded and never returned.
+ */
+export async function changeAiTool(id: AiToolId, action: 'install'|'uninstall', env?: Partial<Env>): Promise<AiTool> {
+  if (id !== 'gemini' || storeP7Enabled()) throw Object.assign(new Error('Tool action is not supported'), {code:'tool_action_unsupported'});
+  const home=env?.home??os.homedir(),platform=env?.platform??process.platform,e:Env={home,platform,dirs:env?.dirs??await subscriptionSearchDirs(home)};
+  const npm=await findBinary(e,['npm']),brew=platform==='win32'?null:await findBinary(e,['brew']),gemini=await findBinary(e,['gemini']);
+  if(action==='install'&&gemini)return (await aiTools(env)).find(t=>t.id===id)!;
+  if(action==='uninstall'&&!gemini)return (await aiTools(env)).find(t=>t.id===id)!;
+  let file:string|null=null,args:string[]=[];
+  const brewed=!!gemini&&/(^|[\\/])(Cellar|homebrew)([\\/]|$)/i.test(gemini);
+  if(action==='install'){
+    if(npm){file=npm;args=['install','-g','@google/gemini-cli'];}
+    else if(brew){file=brew;args=['install','gemini-cli'];}
+  }else if(brewed&&brew){file=brew;args=['uninstall','gemini-cli'];}
+  else if(npm){file=npm;args=['uninstall','-g','@google/gemini-cli'];}
+  else if(brew){file=brew;args=['uninstall','gemini-cli'];}
+  if(!file)throw Object.assign(new Error('A package manager is required'),{code:'package_manager_required'});
+  const run=env?.runTool??((executable:string,fixedArgs:readonly string[],toolHome:string,toolPlatform:NodeJS.Platform)=>new Promise<void>((resolve,reject)=>execFile(executable,[...fixedArgs],{env:{...process.env,HOME:toolHome},timeout:10*60_000,maxBuffer:256*1024,windowsHide:true,shell:toolPlatform==='win32'&&/\.(cmd|bat)$/i.test(executable)},error=>error?reject(Object.assign(new Error('Tool action failed'),{code:'tool_action_failed'})):resolve())));
+  await run(file,args,home,platform);
+  return (await aiTools(env)).find(t=>t.id===id)!;
 }
 
 // ---- Local model --------------------------------------------------------------
