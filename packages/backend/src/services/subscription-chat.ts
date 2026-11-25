@@ -53,7 +53,7 @@ export const subscriptionEnabled=()=>process.env.DPRO_SUBSCRIPTION_CHAT==='1'&&p
 /** CLIs that a desktop app keeps inside its own bundle (relative to an Applications folder). Searched last: a CLI on PATH wins. */
 export const BUNDLED_CLI_DIRS=['ChatGPT.app/Contents/Resources/codex-cli/bin','Codex.app/Contents/Resources/codex-cli/bin'];
 /** True when a CLI was found inside a desktop app's bundle, so a terminal command must name its full path. */
-export const bundledCli=(file:string)=>/\.app\/Contents\//.test(file);
+export const bundledCli=(file:string)=>/\.app[\\/]Contents[\\/]/.test(file);
 /** Where the CLIs are installed. An app opened from the Dock gets a short PATH, so the usual install folders are searched too (CORE-PICKER-01): Homebrew, npm under fnm/nvm/volta. */
 export async function subscriptionSearchDirs(home=os.homedir(),pathEnv=process.env.PATH??''):Promise<string[]>{
  const versions=async(dir:string,tail:string[])=>{try{return (await fs.readdir(dir)).sort((a,b)=>b.localeCompare(a,undefined,{numeric:true})).map(v=>path.join(dir,v,...tail));}catch{return [];}};

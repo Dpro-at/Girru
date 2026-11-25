@@ -50,7 +50,7 @@
     "cron": "3.5.0",
     "dotenv": "^17.3.1",
     "fastify": "^5.0.0",
-    "i18next": "^25.8.19",
+    "i18next": "^26.3.4",
     "isomorphic-dompurify": "^2.36.0",
     "js-yaml": "^4.1.1",
     "jsonwebtoken": "^9.0.3",

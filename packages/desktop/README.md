@@ -33,6 +33,12 @@ on macOS); the redacted backend log in `…/Dpro/logs/backend.log`.
 npm start
 ```
 
+## First run
+
+On a new workspace, **Get started** opens Google verification. A new account requires confirmation before Girru creates it. When the account service recognizes an existing Google identity, Girru signs in and offers the existing device setup when a compatible computer is available. A service that cannot check account existence asks for confirmation before continuing.
+
+First run reviews discovered files, AI tools, the team, and optional phone pairing. To run a model on this computer, choose Ollama under **AI tools**, select a model, and use **Install** to start the command in the setup terminal. The second-computer path finishes at **AI tools** after choosing **Same as**. Approve the transfer on the source computer and apply it in **Computers**.
+
 ## Local app build
 
 ```sh

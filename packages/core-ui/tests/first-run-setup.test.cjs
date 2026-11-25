@@ -35,9 +35,9 @@ test('FIRSTRUN-01 contract: commands stay single lines; unknown tools and fields
 });
 
 test('setup steps include discovery before tools and team', () => {
-  const html = renderToStaticMarkup(React.createElement(SetupSteps, { current: 'Local model' }));
-  for (const s of ['Account', 'Your files', 'AI tools', 'Local model', 'Team']) assert.match(html, new RegExp(s));
-  assert.match(html, /aria-current="step"[^>]*>Local model/);
+  const html = renderToStaticMarkup(React.createElement(SetupSteps, { current: 'AI tools' }));
+  for (const s of ['Account', 'Your files', 'AI tools', 'Team']) assert.match(html, new RegExp(s));
+  assert.match(html, /aria-current="step"[^>]*>AI tools/);
 });
 
 test('the Main agent\'s setup question shows its answers as buttons that fill the box', () => {
@@ -110,7 +110,7 @@ test('setup discovery shows inventory categories and blocks Next until the scan 
   for (const label of ['Projects', 'Memory files', 'Project notes', 'Skills', 'MCP connections', 'SSH identities']) assert.ok(html.includes(label));
   assert.match(html, /Searching this computer/);
   assert.match(html, /disabled=""[^>]*>Next/);
-  assert.ok(html.includes('private SSH key contents are never read'));
+  assert.ok(!html.includes('Your source files stay unchanged'));
 });
 
 

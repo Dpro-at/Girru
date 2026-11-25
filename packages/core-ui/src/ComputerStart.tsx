@@ -47,9 +47,9 @@ export function whatComes(resources: Resource[]) {
 }
 const portable = (status: Status | null | undefined, resources: Resource[]) => resources.filter(r => (status?.coverage ?? []).some((c: {category: string; available: boolean; continuity: boolean}) => c.category === r.category && c.available && c.continuity));
 
-/** CP12 E: the five steps of a new computer, the same on every screen of that road. */
-const ROAD = ['Sign in', 'Name', 'New or Same as', 'AI tools', 'Ready'] as const;
-export function SetupRoad({at}: {at: 1 | 2 | 3 | 4 | 5}) {
+/** CP12 E: the four steps of a new computer, the same on every screen of that road. */
+const ROAD = ['Sign in', 'Name', 'New or Same as', 'AI tools'] as const;
+export function SetupRoad({at}: {at: 1 | 2 | 3 | 4}) {
   return <p className="computer-steps computer-join-steps" aria-label={`Step ${at} of ${ROAD.length}`}>{ROAD.map((s, i) => i + 1 === at ? <b key={s}>{i + 1} {s}</b> : <span key={s}>{i + 1} {s}</span>)}</p>;
 }
 
@@ -80,6 +80,10 @@ export function JoinStart({client, onFresh, onSame}: {client: SessionClient; onF
     else if (!others.length) leave(onFresh);
   }, [approved, status?.workspaces?.length, others.length]);
 
+  useEffect(() => {
+    if (status === null || status?.desktopAvailable === false || status?.configured === false) leave(onFresh);
+  }, [status]);
+
   // “Same as …”: ask the other computer what it shares, and ask again while it is off.
   // CP16 A: this computer does not trust the source yet: one code compare on both screens.
   const [pinNeeded, setPinNeeded] = useState(false);
@@ -108,11 +112,7 @@ export function JoinStart({client, onFresh, onSame}: {client: SessionClient; onF
   }, [approved, choice, from?.id, !!preview?.resources]);
 
   if (status === undefined) return <p role="status" className="setup-note">Reading your account…</p>;
-  if (status === null || status.desktopAvailable === false || status.configured === false) return <section className="computer-join" aria-label="Your account">
-    <h2>Can’t reach your Dpro account</h2>
-    <p>{status?.desktopAvailable === false ? 'Open the Girru app on this computer to add it to your account.' : 'Check the internet connection. You can also set this computer up on its own and add it to your account later in Computers.'}</p>
-    <div className="setup-actions"><button type="button" className="primary" onClick={() => leave(onFresh)}>Set up this computer on its own</button></div>
-  </section>;
+  if (status === null || status.desktopAvailable === false || status.configured === false) return null;
   if (!approved) return <>
     <AddThisComputer client={client} status={status}/>
     <p className="computer-join fine-print"><button type="button" className="link-button" onClick={() => leave(onFresh)}>Set up this computer on its own instead</button></p>
@@ -152,8 +152,7 @@ export function JoinStart({client, onFresh, onSame}: {client: SessionClient; onF
     </div>
     {choice === 'same' && others.length > 1 && <label className="phone-field"><span>From</span><select value={from?.id ?? ''} onChange={e => { setSource(e.target.value); setPreview(null); }}>{others.map(d => <option key={d.id} value={d.id}>{d.label}{d.presence === 'online' ? '' : ' (off)'}</option>)}</select></label>}
     {choice === 'same' && pinNeeded && from && status?.trust?.some(t => t.deviceId === from.id) ? <TrustCompare client={client} item={status.trust!.find(t => t.deviceId === from.id)!}
-      intro={<>Before copying, make sure this is your {from.label}. The same code shows on {from.label}, under Computers › Needs you.</>}
-      extra={<button type="button" onClick={() => setChoice('fresh')}>Start fresh instead</button>}/>
+      intro={<>Before copying, make sure this is your {from.label}. The same code shows on {from.label}, under Computers › Needs you.</>}/>
     : choice === 'same' && (preview?.waitingForSource || from?.presence !== 'online' && !preview?.resources
       ? <p role="status" className="fine-print"><UiIcon name="clock" size={13}/> {from?.label ?? 'Your other computer'} is off. Go to {from?.label ?? 'your other computer'}, open Girru and keep it open: it sends the list by itself.{others.some(d => d.presence === 'online' && d.id !== from?.id) ? ' Or choose a computer that is on above.' : ''}</p>
       : !preview ? <p role="status" className="fine-print">Asking {from?.label ?? 'your other computer'} what it shares…</p>
@@ -166,17 +165,6 @@ export function JoinStart({client, onFresh, onSame}: {client: SessionClient; onF
       </div>)}
     {notice && <p role="status">{notice}</p>}
     <div className="setup-actions"><button type="button" className="primary" disabled={busy || choice === 'same' && (!preview?.workspaceId || !resources.length)} onClick={() => void go()}>{busy ? 'Working…' : 'Continue'}</button></div>
-  </section>;
-}
-
-/** CP2d: the last screen on a computer that started “Same as …”. */
-export function JoinReady({name, from, comes, onOpen}: {name: string; from: string; comes: string; onOpen: () => void}) {
-  return <section className="computer-join computer-start" aria-label={`${name} is ready`}>
-    <SetupRoad at={5}/>
-    <span className="computer-start-done"><UiIcon name="check" size={28}/></span>
-    <h2>{name} is ready</h2>
-    <p>{comes ? `${comes[0].toUpperCase()}${comes.slice(1)} come from ${from}.` : `Your agents and projects come from ${from}.`} Now go to {from}: under Computers › Needs you press Allow. Then come back here: in Computers › this computer › Needs you press Apply all.</p>
-    <div className="setup-actions"><button type="button" className="primary" onClick={onOpen}>Open Girru</button></div>
   </section>;
 }
 
