@@ -11,3 +11,8 @@ Keep migrations forward-compatible, preserve owner scoping and bound filesystem/
 For desktop changes verify trusted IPC origins/frames, packaging resources and platform-specific behaviour. For UI changes cover empty/loading/error/reconnect states and keyboard/RTL layouts. Describe what was actually tested, and what still needs provider, device or platform acceptance.
 
 See [testing](testing.md) and the [shared workflow](agent-workflow.md).
+
+
+### Sandbox working directory
+
+The native sandbox executor is off by default. If an operator enables host execution with `SANDBOX_ALLOW_HOST_EXEC=true`, it uses the server-selected working directory. Requests that need a custom working directory require an initialized Docker sandbox.

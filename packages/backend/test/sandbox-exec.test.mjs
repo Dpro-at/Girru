@@ -39,6 +39,16 @@ test("mode 'off' runs on the host only when SANDBOX_ALLOW_HOST_EXEC=true", async
   });
 });
 
+test('host execution uses the server directory and refuses a custom working directory', async () => {
+  await withEnv('true', async () => {
+    const executor = new SandboxExecutor({ mode: 'off' });
+    const result = await executor.execute({ command: 'echo refused', cwd: '.' });
+    assert.equal(result.blocked, true);
+    assert.equal(result.stdout, '');
+    assert.match(result.blockReason, /require Docker isolation/);
+  });
+});
+
 test('the config API cannot switch off isolation or loosen limits', () => {
   const executor = new SandboxExecutor({ mode: 'all' });
   const before = executor.getConfig();
