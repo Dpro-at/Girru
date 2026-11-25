@@ -14,7 +14,7 @@ import {
   DANGEROUS_PATTERNS,
 } from './types.js';
 import { DEFAULT_SANDBOX_CONFIG } from './config.js';
-import { isInsideDataDir, minimalChildEnv, safeChildCwd } from '../tools/exec-policy.js';
+import { minimalChildEnv, safeChildCwd } from '../tools/exec-policy.js';
 
 const execAsync = promisify(exec);
 
@@ -110,11 +110,12 @@ export class SandboxExecutor {
     if (!hostExecAllowed()) {
       return this.refused(startTime, 'Host command execution is disabled (SANDBOX_ALLOW_HOST_EXEC is not true)');
     }
-    // SECURITY (S0-Q.5): host commands never run inside the data directory
-    if (request.cwd && isInsideDataDir(request.cwd)) {
-      return this.refused(startTime, 'Working directory inside the data directory is not allowed');
+    const hostCwd = safeChildCwd();
+    // Only the server chooses the host directory. API input never reaches the host spawn options.
+    if (request.cwd !== undefined && request.cwd !== hostCwd) {
+      return this.refused(startTime, 'Custom working directories require Docker isolation');
     }
-    return this.executeNative(request, startTime);
+    return this.executeNative(request, startTime, hostCwd);
   }
 
   private refused(startTime: number, reason: string): ExecutionResult {
@@ -228,7 +229,8 @@ export class SandboxExecutor {
    */
   private async executeNative(
     request: ExecutionRequest,
-    startTime: number
+    startTime: number,
+    hostCwd: string
   ): Promise<ExecutionResult> {
     try {
       const options: any = {
@@ -237,7 +239,7 @@ export class SandboxExecutor {
       };
 
       // SECURITY (S0-Q.5): cwd outside the data dir; minimal env, no server secrets
-      options.cwd = safeChildCwd(request.cwd);
+      options.cwd = hostCwd;
       options.env = minimalChildEnv(request.env ?? {});
 
       const { stdout, stderr } = await execAsync(request.command, options);
