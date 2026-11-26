@@ -4330,3 +4330,12 @@ html[data-desktop="win"] .titlebar-app-menu { margin-inline-start:-4px; }
 .titlebar-update:hover { background:var(--accent-hover); }
 .titlebar-update[data-busy] { background:color-mix(in srgb,var(--text) 9%,transparent); color:var(--text-2, var(--muted)); font-weight:500; }
 .titlebar-update + .titlebar-tools.end { margin-inline-start:6px; }
+
+/* START-SCREEN: an ambient ASCII-ember backdrop behind an empty chat (Girru, the fire). */
+.chat-layout .chat-thread { position:relative; }
+.chat-layout .chat-thread > .chat-empty { position:relative; z-index:1; }
+.chat-ember { position:absolute; inset:0; inline-size:100%; block-size:100%; pointer-events:none; z-index:0;
+  opacity:.14; animation:chat-ember-breathe 7.5s ease-in-out infinite; }
+.chat-ember[data-dim] { animation:none; opacity:.04; transition:opacity .6s ease; }
+@keyframes chat-ember-breathe { 0%, 100% { opacity:.1; } 50% { opacity:.4; } }
+@media (prefers-reduced-motion: reduce) { .chat-ember { animation:none; opacity:.22; } }
