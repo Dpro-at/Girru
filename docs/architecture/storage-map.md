@@ -33,6 +33,12 @@ Everything is stored on the computer that runs Girru, under one data folder: `AG
 
 Girru's own servers store none of this. Updates and the Store index come from the public repository; device-to-device traffic, when it exists, is relayed end-to-end encrypted and not kept.
 
+## Primary Google sign-in agreement
+
+The local backend reads approved Terms and Privacy content from `https://girru.dev/legal/policy.json` and its fixed content endpoint. Requests contain no account credentials or workspace content. Both documents are displayed before the Google flow starts; the backend checks the displayed version and SHA-256 again when agreement is submitted. Loading or cancelling the screen does not record an acceptance.
+
+After authentication, `user_legal_acceptances` in the selected workspace database owns the receipt: local user id, policy version, content digest, effective date, language, policy URLs, and acceptance timestamp. Repeating agreement to the same version and digest retains the first receipt. It contains no IP address, Google token, or conversation text. No receipt is sent to the central account service. The row remains with the local user until that user is deleted (`ON DELETE CASCADE`); database backups may retain their own copies. There is no dedicated receipt export endpoint. If policy verification or receipt storage fails, this flow does not return a login session.
+
 ## Three classes of information
 
 | Class | Examples | How it is kept |

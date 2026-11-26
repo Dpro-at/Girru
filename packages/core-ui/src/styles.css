@@ -4330,3 +4330,16 @@ html[data-desktop="win"] .titlebar-app-menu { margin-inline-start:-4px; }
 .titlebar-update:hover { background:var(--accent-hover); }
 .titlebar-update[data-busy] { background:color-mix(in srgb,var(--text) 9%,transparent); color:var(--text-2, var(--muted)); font-weight:500; }
 .titlebar-update + .titlebar-tools.end { margin-inline-start:6px; }
+
+/* Policy reading is part of primary account entry, before the native browser opens. */
+.legal-consent { width:min(740px,100%);max-width:100%; }
+.legal-consent-reader { height:min(42vh,360px);min-height:180px;overflow-y:auto;overscroll-behavior:contain;border:1px solid var(--border);border-radius:8px;padding:18px;text-align:start; }
+.legal-consent-reader h2 { font-size:19px;margin:12px 0 18px; }
+.legal-consent-reader h3 { font-size:15px;margin:22px 0 8px; }
+.legal-consent-reader p { font-size:13px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere; }
+.legal-consent-check { display:flex!important;align-items:flex-start;gap:10px;margin:18px 0;line-height:1.5; }
+.legal-consent-check input { width:18px!important;height:18px;flex:none;margin-top:2px; }
+.legal-consent-actions { display:flex;flex-wrap:wrap;gap:10px; }
+.legal-consent h1:focus { outline:none; }
+.legal-consent-reader:focus-visible { outline:2px solid var(--accent);outline-offset:3px; }
+@media(max-height:700px) { .legal-consent-reader { min-height:130px;height:30vh; } }

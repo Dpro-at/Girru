@@ -1,3 +1,4 @@
+import {LegalConsent} from './LegalConsent';
 import { SetupOrb } from './SetupOrb';
 import { generatePassword, passwordStrength } from './password-tools.js';
 import {UiIcon} from './ui-icons';
@@ -95,9 +96,9 @@ function SessionWorkspace({ client, setupCode, initialPage }: { client: SessionC
   if (state.phase === 'authenticated' && state.user) return <SignedInShell client={client} notice={state.notice ? <WorkspaceNotice key={`${state.notice}:${state.retryAfterSeconds ?? ''}`} notice={state.notice} seconds={state.retryAfterSeconds}/> : null}/>;
   if(state.phase==='recovery-codes')return <PublicShell setup="login" initialPage="account" blocking><RecoveryCodes client={client}/></PublicShell>;
   return <PublicShell setup={state.setup} initialPage={state.setup === 'required' ? 'account' : initialPage} accountStep={state.setup === 'required'||state.phase==='signing-in'||!!state.verification||!!state.notice}><section className="auth-workspace" aria-label="Account sign-in" lang="en" dir="ltr">
-    {state.setup !== 'required' && <h1>Girru · {state.mode === 'mock' ? 'Offline login exercise' : 'Account'}</h1>}
+    {!state.legalConsent&&state.setup !== 'required' && <h1>Girru · {state.mode === 'mock' ? 'Offline login exercise' : 'Account'}</h1>}
     {state.notice && <p role="status">{notices[state.notice]}{retryAfterNotice(state.retryAfterSeconds)}</p>}
-    {(state.phase === 'verifying'||state.phase==='signing-in') && state.verification ? <VerificationForm client={client} method={state.verification.method} google={state.verification.provider==='google'} busy={state.phase==='signing-in'}/> : state.phase === 'authenticated' && state.user ? null : state.phase === 'signed-out' && state.setup === 'required' ? <OwnerSetup client={client} setupCode={setupCode} initialPage={initialPage}/> : state.phase === 'signing-out' ? <><p role="status">Signing out on all devices…</p><button onClick={() => client.cancel()}>Clear locally; server outcome remains unknown</button></> : state.googleAccountConfirmation?<section className="setup-pane setup-welcome" aria-label="Confirm account creation">
+    {state.legalConsent?<LegalConsent state={state.legalConsent} onAgree={()=>void client.acceptLegalConsent()} onCancel={()=>client.cancelLegalConsent()} onRetry={()=>client.retryLegalConsent()}/>: (state.phase === 'verifying'||state.phase==='signing-in') && state.verification ? <VerificationForm client={client} method={state.verification.method} google={state.verification.provider==='google'} busy={state.phase==='signing-in'}/> : state.phase === 'authenticated' && state.user ? null : state.phase === 'signed-out' && state.setup === 'required' ? <OwnerSetup client={client} setupCode={setupCode} initialPage={initialPage}/> : state.phase === 'signing-out' ? <><p role="status">Signing out on all devices…</p><button onClick={() => client.cancel()}>Clear locally; server outcome remains unknown</button></> : state.googleAccountConfirmation?<section className="setup-pane setup-welcome" aria-label="Confirm account creation">
       <h1>Create your Girru account?</h1>
       <p>Google verified your identity.</p>
       <div className="setup-welcome-actions">
@@ -122,7 +123,7 @@ function SessionWorkspace({ client, setupCode, initialPage }: { client: SessionC
       {state.mode==='live'&&<button type="button" className="google-button" disabled={state.phase==='signing-in'} onClick={()=>void client.loginGoogle()}><GoogleMark/>Sign in with Google</button>}
       {state.phase === 'signing-in' && <button type="button" onClick={() => client.cancel()}>Cancel sign-in</button>}
     </form>}
-    {state.setup !== 'required' && <p>Settings credentials remain masked-only; no credential values are fetched.</p>}
+    {!state.legalConsent&&state.setup !== 'required' && <p>Settings credentials remain masked-only; no credential values are fetched.</p>}
   </section></PublicShell>;
 }
 function RecoveryCodes({client}:{client:SessionClient}){
