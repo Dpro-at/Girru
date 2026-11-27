@@ -12,16 +12,27 @@ on:
         description: Create a draft release after all platforms pass
         type: boolean
         default: false
+      verify_windows_run:
+        description: Recheck a checksummed Windows installer from this workflow run ID
+        type: string
+        required: false
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: desktop-release-${{ github.ref }}-${{ inputs.platform || 'all' }}
   cancel-in-progress: false
 
 jobs:
+  verify_windows:
+    if: ${{ inputs.verify_windows_run != '' }}
+    uses: ./.github/workflows/windows-installer-verification.yml
+    with:
+      run_id: ${{ inputs.verify_windows_run }}
   build:
+    if: ${{ inputs.verify_windows_run == '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -79,6 +90,19 @@ jobs:
         with:
           name: desktop-${{ matrix.platform }}
           path: packages/desktop/release/publish/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Verify installed branding on Windows
+        if: ${{ matrix.platform == 'win-x64' }}
+        run: node packages/desktop/scripts/verify-installed-branding.cjs
+      - name: Verify installed branding on Linux
+        if: ${{ matrix.platform == 'linux-x64' }}
+        run: xvfb-run -a node packages/desktop/scripts/verify-installed-branding.cjs
+      - uses: actions/upload-artifact@v4
+        if: ${{ matrix.platform == 'win-x64' || matrix.platform == 'linux-x64' }}
+        with:
+          name: installed-branding-${{ matrix.platform }}
+          path: packages/desktop/release/installed-*.png
           if-no-files-found: error
           retention-days: 14
 
