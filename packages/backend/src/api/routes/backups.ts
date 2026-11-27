@@ -16,6 +16,7 @@ import { dbDriver } from '../../db/pg/config.js';
 import { handleError } from '../error-handler.js';
 import { requestRestart } from '../restart-request.js';
 import { BackupError, backUpNow, backupStatus, deleteBackup, getBackup, requestRestore, setBackupsFolder, setBackupKeepDays, type BackupKind } from '../../services/backups.js';
+import { addDestination, listDestinations, pushToDestination, removeDestination, testDestination } from '../../services/backup-destinations.js';
 
 const POSTGRES = { available: false, reason: 'On PostgreSQL, back up the database with pg_dump outside the app' };
 
@@ -46,6 +47,23 @@ export async function backupRoutes(fastify: FastifyInstance) {
 
   fastify.put<{ Body: { keepDays?: unknown } | undefined }>('/api/backups/retention', async (request, reply) => {
     try { getUserIdFromRequest(request); if (!sqliteOnly(reply)) return; return await setBackupKeepDays(request.body?.keepDays); } catch (err) { return fail(reply, err, 'Retention'); }
+  });
+
+  // Off-site destinations (BACKUP-02): the places encrypted backups are copied to.
+  fastify.get('/api/backups/destinations', async (request, reply) => {
+    try { getUserIdFromRequest(request); if (!sqliteOnly(reply)) return; return { destinations: await listDestinations() }; } catch (err) { return fail(reply, err, 'Destinations'); }
+  });
+  fastify.post<{ Body: unknown }>('/api/backups/destinations', async (request, reply) => {
+    try { getUserIdFromRequest(request); if (!sqliteOnly(reply)) return; return { destination: await addDestination(request.body) }; } catch (err) { return fail(reply, err, 'Add destination'); }
+  });
+  fastify.delete<{ Params: { destId: string } }>('/api/backups/destinations/:destId', async (request, reply) => {
+    try { getUserIdFromRequest(request); if (!sqliteOnly(reply)) return; await removeDestination(request.params.destId); return { deleted: true }; } catch (err) { return fail(reply, err, 'Remove destination'); }
+  });
+  fastify.post<{ Params: { destId: string } }>('/api/backups/destinations/:destId/test', async (request, reply) => {
+    try { getUserIdFromRequest(request); if (!sqliteOnly(reply)) return; return await testDestination(request.params.destId); } catch (err) { return fail(reply, err, 'Test destination'); }
+  });
+  fastify.post<{ Params: { destId: string }; Body: { backupId?: unknown } | undefined }>('/api/backups/destinations/:destId/push', async (request, reply) => {
+    try { getUserIdFromRequest(request); if (!sqliteOnly(reply)) return; const bid = typeof request.body?.backupId === 'string' ? request.body.backupId : undefined; return { destination: await pushToDestination(request.params.destId, bid) }; } catch (err) { return fail(reply, err, 'Push'); }
   });
 
   fastify.post<{ Params: { id: string } }>('/api/backups/:id/restore', async (request, reply) => {

@@ -88,7 +88,7 @@ function writePrivate(file: string, data: unknown) {
 
 export { defaultBackupsFolder, backupsFolder };
 /** One sub-folder per workspace, so a test copy and the real data never mix. */
-function workspaceName(): string {
+export function workspaceName(): string {
   const id = readJson<{ id?: unknown }>(path.join(dataRoot(), 'instance.json'))?.id;
   // The data folder's own path is part of the name: a copy of the same workspace (a test copy) never shares its backups.
   const where = createHash('sha256').update(realish(dataRoot())).digest('hex').slice(0, 6);

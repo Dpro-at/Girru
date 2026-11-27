@@ -27,6 +27,25 @@ test('backups answers: only what the page shows, the same when projected twice',
  const keeps=backupsResponse('/api/backups',200,keepsBody).keeps;
  assert.deepEqual(keeps,{days:7,sundays:4,beforeUpdateDays:30,min:3,max:3650,presets:[3,7,14]});
 });
+test('destinations: the page can list/add/push/test/remove a place, and secrets never pass back',()=>{
+ const did='11111111-2222-3333-4444-555555555555';
+ for(const [m,p,b] of [['GET','/api/backups/destinations'],['POST','/api/backups/destinations',{type:'folder',folder:'/Volumes/Drive'}],['POST','/api/backups/destinations',{type:'folder',folder:'/Volumes/Drive',label:'Drive'}],['DELETE',`/api/backups/destinations/${did}`],['POST',`/api/backups/destinations/${did}/test`],['POST',`/api/backups/destinations/${did}/push`],['POST',`/api/backups/destinations/${did}/push`,{backupId:id}]]){
+  assert.ok(allowedBackups(m,p,b),`${m} ${p}`);assert.ok(allowed(m,p,b),`bridge ${m} ${p}`);assert.ok(allowedRequest(m,p,b),`client ${m} ${p}`);
+ }
+ for(const [m,p,b] of [['POST','/api/backups/destinations',{type:'folder',folder:'/x',secret:'k'}],['POST','/api/backups/destinations',{type:'folder'}],['PUT','/api/backups/destinations',{}],['GET','/api/backups/destinations',{}],['DELETE','/api/backups/destinations/not-a-uuid'],['POST',`/api/backups/destinations/${did}/push`,{backupId:'../bad'}],['POST',`/api/backups/destinations/${did}/test`,{}]]){
+  assert.equal(allowed(m,p,b),false,`${m} ${p}`);assert.equal(allowedRequest(m,p,b),false,`client ${m} ${p}`);
+ }
+ // The projection drops any secret and keeps only what the page shows.
+ const raw={destinations:[{id:did,type:'folder',label:'Drive',config:{folder:'/Volumes/Drive',password:'nope'},credentialId:'cred_x',enabled:true,createdAt:'2026-11-27T00:00:00.000Z',status:{lastPushAt:null,lastOkAt:'2026-11-27T01:00:00.000Z',lastError:null,lastErrorAt:null,lastVerifiedAt:'2026-11-27T01:00:00.000Z',backups:2}}]};
+ const proj=backupsResponse('/api/backups/destinations',200,raw);
+ assert.equal(proj.destinations.length,1);
+ const d=proj.destinations[0];
+ assert.deepEqual(Object.keys(d).sort(),['createdAt','enabled','folder','id','label','status','type']);
+ assert.equal(d.folder,'/Volumes/Drive');assert.equal(d.status.backups,2);
+ assert.ok(!JSON.stringify(proj).includes('nope'));assert.ok(!JSON.stringify(proj).includes('cred_x'));assert.ok(!JSON.stringify(proj).includes('password'));
+ assert.deepEqual(backupsResponse(`/api/backups/destinations/${did}/test`,200,{ok:true,extra:1}),{ok:true});
+ assert.deepEqual(backupsResponse(`/api/backups/destinations/${did}`,200,{deleted:true}),{deleted:true});
+});
 test('Settings › Backups: an owner place, plain words for when and what kind',()=>{
  const fake=role=>({getSnapshot:()=>({phase:'authenticated',user:{role}}),subscribe:()=>()=>{},request:async()=>{throw Error('no requests during render');}});
  for(const role of ['owner','user']){const html=renderToStaticMarkup(React.createElement(AppSettings,{signedIn:true,preference:'light',onTheme(){},onAccount(){},client:fake(role),initialTab:'backups',onOpenApps(){},onOpenTool(){}}));const nav=html.split('</nav>')[0];
