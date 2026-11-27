@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld('dproApp', {
   revealFolder: folder => ipcRenderer.invoke('dpro:reveal-folder', String(folder)),
   // CODE-OPEN-01: one file in Finder / Explorer (the fallback when Code is not installed).
   revealFile: file => ipcRenderer.invoke('dpro:reveal-file', String(file)),
+  openLocalModelProvider: provider => ipcRenderer.invoke('dpro:open-local-model-provider', String(provider)),
   info: () => ipcRenderer.invoke('dpro:app-info'),
   // MACAPP-01: updates of the installed app. The page reads and asks; installing is confirmed by the app itself.
   appUpdate: {

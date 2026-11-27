@@ -186,6 +186,11 @@ test('source boundary: only injected session transport may network; no browser s
       assert.deepEqual(source.match(/https:\/\/[^']+/g), ['https://ollama.com/download']);
       source = source.replace(/https:\/\/[^']+/g, 'download-page');
     }
+    if (name === 'legal-policy-contract.js') {
+      // Fixed policy identifiers are compared as text; only the injected session transport loads them.
+      assert.deepEqual(source.match(/https:\/\/[^']+/g), ['https://girru.dev/terms/', 'https://girru.dev/privacy/']);
+      source = source.replace(/https:\/\/[^']+/g, 'legal-policy-identifier');
+    }
     if (name === 'phone-contract.js') {
       // MOB-PAIR-01: the page where the owner gets the phone app (a user-opened link, never a transport target).
       assert.deepEqual(source.match(/https:\/\/[^']+/g), ['https://girru.dev/app']);

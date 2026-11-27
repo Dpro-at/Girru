@@ -33,6 +33,14 @@ on macOS); the redacted backend log in `…/Dpro/logs/backend.log`.
 npm start
 ```
 
+## First run
+
+On a new workspace, **Get started** first shows the current Terms of Use and Privacy Policy published at girru.dev. Google verification starts only after the reader reaches the end of both documents, checks the agreement box, and chooses **Agree and continue**. **Cancel** returns without starting Google. Missing, changed, unapproved, or unverifiable policies block this step; there is no silent cached fallback. A new account requires confirmation before Girru creates it. When the account service recognizes an existing Google identity, Girru signs in and offers the existing device setup when a compatible computer is available. A service that cannot check account existence asks for confirmation before continuing.
+
+The local backend verifies the published version and content digest again before starting primary Google sign-in. After successful authentication it records the accepted version, digest, effective date, language, policy URLs, and acceptance time against the local user. This receipt contains no chat content, Google token, or IP address, and is deleted with the local user. It is not a central account-service receipt. Existing signed-in Google account linking is unchanged.
+
+First run reviews discovered files, AI tools, the team, and optional phone pairing. To run a model on this computer, choose Ollama under **AI tools**, select a model, and use **Install** to start the command in the setup terminal. The second-computer path finishes at **AI tools** after choosing **Same as**. Approve the transfer on the source computer and apply it in **Computers**.
+
 ## Local app build
 
 ```sh

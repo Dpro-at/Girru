@@ -1,3 +1,4 @@
+import {LegalConsent} from './LegalConsent';
 import { SetupOrb } from './SetupOrb';
 import { generatePassword, passwordStrength } from './password-tools.js';
 import {UiIcon} from './ui-icons';
@@ -95,9 +96,16 @@ function SessionWorkspace({ client, setupCode, initialPage }: { client: SessionC
   if (state.phase === 'authenticated' && state.user) return <SignedInShell client={client} notice={state.notice ? <WorkspaceNotice key={`${state.notice}:${state.retryAfterSeconds ?? ''}`} notice={state.notice} seconds={state.retryAfterSeconds}/> : null}/>;
   if(state.phase==='recovery-codes')return <PublicShell setup="login" initialPage="account" blocking><RecoveryCodes client={client}/></PublicShell>;
   return <PublicShell setup={state.setup} initialPage={state.setup === 'required' ? 'account' : initialPage} accountStep={state.setup === 'required'||state.phase==='signing-in'||!!state.verification||!!state.notice}><section className="auth-workspace" aria-label="Account sign-in" lang="en" dir="ltr">
-    {state.setup !== 'required' && <h1>Girru · {state.mode === 'mock' ? 'Offline login exercise' : 'Account'}</h1>}
+    {!state.legalConsent&&state.setup !== 'required' && <h1>Girru · {state.mode === 'mock' ? 'Offline login exercise' : 'Account'}</h1>}
     {state.notice && <p role="status">{notices[state.notice]}{retryAfterNotice(state.retryAfterSeconds)}</p>}
-    {(state.phase === 'verifying'||state.phase==='signing-in') && state.verification ? <VerificationForm client={client} method={state.verification.method} google={state.verification.provider==='google'} busy={state.phase==='signing-in'}/> : state.phase === 'authenticated' && state.user ? null : state.phase === 'signed-out' && state.setup === 'required' ? <OwnerSetup client={client} setupCode={setupCode} initialPage={initialPage}/> : state.phase === 'signing-out' ? <><p role="status">Signing out on all devices…</p><button onClick={() => client.cancel()}>Clear locally; server outcome remains unknown</button></> : state.phase==='signing-in'&&state.setup==='required'?<section aria-label="Google account setup"><p role="status">Continue with Google in your browser…</p><button onClick={()=>client.cancel()}>Cancel</button></section>: state.phase === 'signed-out' && state.setup !== 'login' ? <section aria-label="Setup discovery">
+    {state.legalConsent?<LegalConsent state={state.legalConsent} onAgree={()=>void client.acceptLegalConsent()} onCancel={()=>client.cancelLegalConsent()} onRetry={()=>client.retryLegalConsent()}/>: (state.phase === 'verifying'||state.phase==='signing-in') && state.verification ? <VerificationForm client={client} method={state.verification.method} google={state.verification.provider==='google'} busy={state.phase==='signing-in'}/> : state.phase === 'authenticated' && state.user ? null : state.phase === 'signed-out' && state.setup === 'required' ? <OwnerSetup client={client} setupCode={setupCode} initialPage={initialPage}/> : state.phase === 'signing-out' ? <><p role="status">Signing out on all devices…</p><button onClick={() => client.cancel()}>Clear locally; server outcome remains unknown</button></> : state.googleAccountConfirmation?<section className="setup-pane setup-welcome" aria-label="Confirm account creation">
+      <h1>Create your Girru account?</h1>
+      <p>Google verified your identity.</p>
+      <div className="setup-welcome-actions">
+        <button type="button" className="primary" onClick={()=>void client.confirmGoogleAccountCreation()}>Create account</button>
+        <button type="button" className="link-button" onClick={()=>client.cancel()}>Cancel</button>
+      </div>
+    </section>:state.phase==='signing-in'&&state.setup==='required'?<section aria-label="Google account setup"><p role="status">Continue with Google in your browser…</p><button onClick={()=>client.cancel()}>Cancel</button></section>: state.phase === 'signed-out' && state.setup !== 'login' ? <section aria-label="Setup discovery">
       <p role="status">{state.setup === 'checking' ? 'Checking installation setup…' : state.setup === 'unavailable' ? 'Setup status unavailable. Sign-in is withheld; no automatic retry was sent.'
         : 'Check installation setup before signing in. No request has been sent automatically.'}</p>
       <p>Discovery does not verify an account, installation identity, or system readiness.</p>
@@ -115,7 +123,7 @@ function SessionWorkspace({ client, setupCode, initialPage }: { client: SessionC
       {state.mode==='live'&&<button type="button" className="google-button" disabled={state.phase==='signing-in'} onClick={()=>void client.loginGoogle()}><GoogleMark/>Sign in with Google</button>}
       {state.phase === 'signing-in' && <button type="button" onClick={() => client.cancel()}>Cancel sign-in</button>}
     </form>}
-    {state.setup !== 'required' && <p>Settings credentials remain masked-only; no credential values are fetched.</p>}
+    {!state.legalConsent&&state.setup !== 'required' && <p>Settings credentials remain masked-only; no credential values are fetched.</p>}
   </section></PublicShell>;
 }
 function RecoveryCodes({client}:{client:SessionClient}){
@@ -184,39 +192,25 @@ function OwnerSetup({ client, setupCode, initialPage }: { client: SessionClient;
   const [companyKind, setCompanyKind] = useState<string>();
   const [kindQuery, setKindQuery] = useState('');
   const back = () => { if (workspaceType === 'company') setAskKind(true); else setChooseType(true); };
-  const [enteredCode, setEnteredCode] = useState('');
-  const code = setupCode ?? enteredCode;
+  const code = setupCode ?? '';
   const hasSetupLink = SETUP_CODE.test(code);
   const [busy, setBusy] = useState(false); const [notice, setNotice] = useState<keyof typeof ownerSetupNotices | null>(null);
-  const withGoogle = (signin: boolean) => { writeSetupEntry(signin ? 'signin' : null); void client.loginGoogle({ setupToken: code }); };
-  if (welcome && hasSetupLink) return <section className="setup-pane setup-welcome" aria-label="Welcome to Girru">
+  const withGoogle = () => { writeSetupEntry(null); void client.loginGoogle({ setupToken: code, unifiedWelcome: true }); };
+  if (!hasSetupLink) return <p role="status">Open Girru on this computer to start registration.</p>;
+  if (welcome) return <section className="setup-pane setup-welcome" aria-label="Welcome to Girru">
     <span className="public-mark" aria-hidden="true"><DproMark/></span>
     <h1>Welcome to Girru</h1>
-    <p>Your company of AI agents, on this computer.</p>
     <div className="setup-welcome-actions">
-      <button type="button" className="primary google-button" disabled={google === false} onClick={() => withGoogle(false)}><GoogleMark/>Create account</button>
-      <button type="button" className="google-button" disabled={google === false} onClick={() => withGoogle(true)}><GoogleMark/>Sign in</button>
+      <button type="button" className="primary google-button" disabled={google !== true} onClick={withGoogle}><GoogleMark/>Get started</button>
     </div>
-    <p className="fine-print">{google === false ? 'Google sign-in is not ready on this computer.' : 'Your browser opens for Google. Your chats, files and agents stay on your computers.'}</p>
-    {/* A local account never needs Google or the Dpro account service: anyone running Girru from source can always use it. */}
-    <button type="button" className="link-button" onClick={() => { writeSetupEntry(null); setWelcome(false); }}>Use an email and password instead</button>
+    {google === false && (window.dproApp
+      ? <p className="fine-print" role="status">Google sign-in is unavailable on this computer.</p>
+      : <button type="button" className="link-button" onClick={() => { writeSetupEntry(null); setWelcome(false); }}>Use an email and password instead</button>)}
   </section>;
   if (chooseType) return <WorkspaceTypeStep value={workspaceType} companyName={companyName} onNext={(type, name) => { setWorkspaceType(type); setCompanyName(name); setChooseType(false); setAskKind(type === 'company'); if (type !== 'company') setCompanyKind(undefined); }}/>;
   if (askKind) return <KindStep orb workspaceType="company" value={companyKind} query={kindQuery} busy={false} more={0}
     kinds={COMPANY_KIND_CHOICES.filter(k => k.label.toLowerCase().includes(kindQuery.trim().toLowerCase()))} onQuery={setKindQuery} onMore={() => undefined}
     onBack={() => { setAskKind(false); setChooseType(true); }} onDone={id => { setCompanyKind(id); setAskKind(false); }}/>;
-  if (!hasSetupLink) return <section className="setup-pane" aria-label="Open the setup link">
-    <h2>Open setup on this computer</h2>
-    <p>Open the setup link shown by Girru on the installation computer. It connects this page to your new workspace.</p>
-    <label>Private setup link or code<input type="password" autoComplete="off" spellCheck={false}
-      onChange={event => {
-        const input = event.currentTarget.value.trim();
-        const prefix = window.location.origin + '/';
-        const code = input.startsWith(prefix) ? setupCodeFromFragment(input.slice(prefix.length)) : input;
-        if (code && SETUP_CODE.test(code)) { setEnteredCode(code); setWelcome(false); }
-      }}/></label>
-    <div className="setup-actions"><button type="button" onClick={back}>Back</button></div>
-  </section>;
   return <form className="owner-setup" aria-label="Create the owner account" method="post" onSubmit={async e => {
     e.preventDefault();
     if (password.length < 12) { setNotice('weak_password'); return; }

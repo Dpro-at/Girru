@@ -40,8 +40,8 @@ for (const scenario of ['first-run', 'existing-owner', 'error']) test(`offline d
     await s.client.login('demo@example.invalid', 'mock-only'); assert.equal(s.client.getSnapshot().phase, 'authenticated');
     assert.deepEqual(s.calls.slice(-2).map(r => r.path), ['/api/auth/login', '/api/auth/me']);
   } else if (scenario === 'first-run') {
-    // INSTALLER-07: first run shows the owner form (needs the setup code); still no sign-in.
-    assert.match(html, /Who is Girru for/); assert.doesNotMatch(html, /type="password"/);
+    // A bare first-run URL has no setup code. It directs the owner to the local app.
+    assert.match(html, /Open Girru on this computer to start registration/); assert.doesNotMatch(html, /type="password"|Get started/);
     assert.doesNotMatch(html, /Check your credentials/);
     await s.client.login('demo@example.invalid', 'mock-only'); assert.equal(s.calls.length, 1);
   } else {

@@ -2,11 +2,10 @@ import {ComputerSettings,ComputerAccountPart} from './ComputerSettings';
 import {VoiceSettings} from './VoiceSettings';
 import {FooterSettings} from './FooterSettings';
 import {ChatNoticeSettings} from './ChatNoticeSettings';
-import {PrimaryReplySettings} from './PrimaryReplySettings';
 import {WorkspacePackSettings} from './WorkspacePackSettings';
 import {PreferenceGroup,PreferenceRow} from './Preferences';
 import {AccountSettings} from './SettingsAccount';
-import {ReplyAppsSettings} from './ReplyAppsSettings';
+import {ReplySettingsPage} from './ReplySettingsPage';
 import {SavedKeys} from './SavedKeys';
 import {SshKeysSettings} from './SshKeysSettings';
 import {AgentPermissionsGrid} from './AgentPermissionsGrid';
@@ -71,7 +70,7 @@ const ROWS:Record<Place,Row>={
  * Memory has its own sub-places); without a slot (signed out, tests) the same
  * places sit on the left of the page.
  */
-export function AppSettings({ onOpenDeviceChat,onOpenChannelsStore,onOpenStore, signedIn, preference, onTheme, onAccount, onAgents, client, aboutOnly = false, initialTab = 'general', initialMemoryPane = 'rules', sidebarSlot, active = true, onOpenMemory, onOpenChat, onOpenApps, onOpenTool, onOpenGenvr, onApprovals, onBoard, onAgent, mcpOpenId }: { onOpenDeviceChat?:(id:string)=>void;onOpenChannelsStore?:()=>void;onOpenStore?: (local: 'claude-code' | 'codex') => void; signedIn: boolean; preference: ThemePreference; onTheme: (v: ThemePreference) => void; onAccount: () => void; onAgents?: () => void; client?: SessionClient; aboutOnly?: boolean; initialTab?: SettingsTab; initialMemoryPane?: MemorySettingsPane; sidebarSlot?: HTMLElement | null; active?: boolean; onOpenMemory?: () => void; onOpenChat?: () => void; onOpenApps?: () => void; onOpenTool?: (tool: Tool) => void; onOpenGenvr?: () => void; onApprovals?: () => void; onBoard?: () => void; onAgent?: (id: string) => void; mcpOpenId?: string }) {
+export function AppSettings({ onOpenDeviceChat,onOpenChannelsStore,onOpenStore,onOpenTerminal, signedIn, preference, onTheme, onAccount, onAgents, client, aboutOnly = false, initialTab = 'general', initialMemoryPane = 'rules', sidebarSlot, active = true, onOpenMemory, onOpenChat, onOpenApps, onOpenTool, onOpenGenvr, onApprovals, onBoard, onAgent, mcpOpenId }: { onOpenDeviceChat?:(id:string)=>void;onOpenChannelsStore?:()=>void;onOpenStore?: (local: 'claude-code' | 'codex') => void;onOpenTerminal?:()=>void; signedIn: boolean; preference: ThemePreference; onTheme: (v: ThemePreference) => void; onAccount: () => void; onAgents?: () => void; client?: SessionClient; aboutOnly?: boolean; initialTab?: SettingsTab; initialMemoryPane?: MemorySettingsPane; sidebarSlot?: HTMLElement | null; active?: boolean; onOpenMemory?: () => void; onOpenChat?: () => void; onOpenApps?: () => void; onOpenTool?: (tool: Tool) => void; onOpenGenvr?: () => void; onApprovals?: () => void; onBoard?: () => void; onAgent?: (id: string) => void; mcpOpenId?: string }) {
   const named=(t:SettingsTab):Place=>t==='models'?'replies':t==='sharing'?'move':t==='connections'?'accounts':t;
   const [query,setQuery]=useState('');const search=useRef<HTMLInputElement>(null);
   const info=useAppInfo();const [tab,setTab]=useState<Place>(named(initialTab));
@@ -114,10 +113,7 @@ export function AppSettings({ onOpenDeviceChat,onOpenChannelsStore,onOpenStore, 
         <PreferenceGroup title="Language"><PreferenceRow title="Program language" description="More languages come later."><span className="preference-status">English</span></PreferenceRow></PreferenceGroup>
       </>}
       {active_==='account'&&(live?<><AccountSettings client={client!}/>{owner&&<ComputerAccountPart client={client!}/>}</>:signIn('Account','Connect to your workspace to manage your account.'))}
-      {active_==='replies'&&<>
-        <PreferenceGroup title="Agent replies"><PreferenceRow title="Model for each agent" description="Select an agent to choose its model and provider." icon="cpu"><button type="button" onClick={live&&onAgents?onAgents:onAccount}>{live?'Choose agent…':'Sign in'}</button></PreferenceRow></PreferenceGroup>
-        {live&&owner&&<><PrimaryReplySettings client={client!} onAgents={onAgents}/><ReplyAppsSettings client={client!} onOpenChat={onOpenChat} onOpenStore={onOpenStore}/></>}
-      </>}
+      {active_==='replies'&&(live&&owner?<ReplySettingsPage client={client!} onOpenStore={onOpenStore} onOpenTerminal={onOpenTerminal}/>:signIn('Models and replies','Connect to your workspace to choose reply engines.'))}
       {active_==='move'&&owner&&<WorkspacePackSettings client={client!}/>}
       {active_==='voice'&&owner&&<VoiceSettings client={client!}/>}
       {active_==='permissions'&&owner&&<>

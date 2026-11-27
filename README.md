@@ -8,6 +8,8 @@
 
 An open-source operating system for AI agents—bringing your agents, models, tools, and projects into one workspace.
 
+**🧩 [Girru Store](https://github.com/Dpro-at/girru-store)** — Discover and contribute apps, extensions, MCP servers, skills, and specialties for your workspace. Build and share new Store items in the [Store repository](https://github.com/Dpro-at/girru-store).
+
 **🏠 Local-first · 🛡️ Security-focused · 🔓 Open source**
 
 **Your hardware. Your accounts. Your control.**
@@ -44,7 +46,7 @@ An open-source operating system for AI agents—bringing your agents, models, to
 
 **🏗️ A product of Dpro. Building since May 2025.**
 
-[🌐 Website](https://girru.dev/) · [⬇️ Download](https://github.com/Dpro-at/Girru/releases) · [✅ Features](FEATURES.md) · [📜 Changelog](https://girru.dev/changelog/) · [🤝 Contribute](CONTRIBUTING.md)
+[🌐 Website](https://girru.dev/) · [⬇️ Download](https://github.com/Dpro-at/Girru/releases) · [🧩 Store](https://github.com/Dpro-at/girru-store) · [✅ Features](FEATURES.md) · [📜 Changelog](https://girru.dev/changelog/) · [🤝 Contribute](CONTRIBUTING.md)
 
 </div>
 
@@ -276,6 +278,8 @@ Each channel has its own setup, credentials, permissions, and supported operatio
 
 Add capabilities through supported apps, extensions, and MCP integrations.
 
+The [Girru Store](https://github.com/Dpro-at/girru-store) is the separate catalogue for apps, MCP servers, skills, and specialties. Apps and extensions add executable capabilities; skills provide reusable guidance; specialties describe agent jobs. Girru reads the generated catalogue, while installation and tool access remain subject to host compatibility and owner permissions.
+
 Specialised areas include:
 
 - 📈 Market tools and trading workflows.
@@ -389,6 +393,8 @@ For source development, start with [CONTRIBUTING.md](CONTRIBUTING.md).
 Girru is free and open source.
 
 Contributions are welcome across development, integrations, testing, documentation, translations, accessibility, and design.
+
+Building an app, extension package, MCP listing, skill, or specialty? Contribute it in **[girru-store](https://github.com/Dpro-at/girru-store)** and follow its [contribution guide](https://github.com/Dpro-at/girru-store/blob/main/CONTRIBUTING.md). Shared workspace, memory, permissions, and desktop changes belong in this Girru repository.
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 

@@ -91,6 +91,6 @@ test('the controller turns 404 into "off" (nothing shows) and reads progress', a
 });
 
 test('no setup step and no choice: the steps are unchanged', () => {
-  const html = renderToStaticMarkup(React.createElement(SetupSteps, { current: 'Local model' }));
+  const html = renderToStaticMarkup(React.createElement(SetupSteps, { current: 'AI tools' }));
   assert.doesNotMatch(html, /Memory helper/);
 });

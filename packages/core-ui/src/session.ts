@@ -1,3 +1,5 @@
+import {parseLegalPolicy,type LegalAcceptance} from './legal-policy-contract.js';
+import type {LegalConsentState} from './LegalConsent';
 import {googleAuthRoute,allowedGoogleAuth,googleAuthResponse} from './google-auth-contract.js';
 /** CP13: the theme saved in the program. */
 export const THEME_PATH = '/api/me/theme';
@@ -100,7 +102,7 @@ export type User = Readonly<{ id: string; email: string; username: string; role:
 /** What the UI calls the account: the name typed at setup, else the user name. */
 export const displayName = (u: User): string => u.name ?? u.username;
 type BoundaryNotice = 'published_password' | 'account_inactive' | 'rate_limited' | 'origin_not_allowed' | 'host_not_allowed';
-export type SessionState = Readonly<{ mode: Mode; epoch: number; retryAfterSeconds?: number; setup?: 'checking' | 'required' | 'login' | 'unavailable'; phase: 'signed-out' | 'signing-in' | 'verifying' | 'recovery-codes' | 'authenticated' | 'signing-out'; verification?:Readonly<{method:'totp'|'recovery';expiresAt:number;provider?:'google'}>; user?: User; notice?: BoundaryNotice | 'invalid' | 'denied' | 'limited' | 'unavailable' | 'expired' | 'logout-confirmed' | 'logout-unknown' | 'recovered' | 'google-not-linked' }>;
+export type SessionState = Readonly<{ mode: Mode; epoch: number; legalConsent?:LegalConsentState; retryAfterSeconds?: number; googleAccountConfirmation?: boolean; setup?: 'checking' | 'required' | 'login' | 'unavailable'; phase: 'signed-out' | 'signing-in' | 'verifying' | 'recovery-codes' | 'authenticated' | 'signing-out'; verification?:Readonly<{method:'totp'|'recovery';expiresAt:number;provider?:'google'}>; user?: User; notice?: BoundaryNotice | 'invalid' | 'denied' | 'limited' | 'unavailable' | 'expired' | 'logout-confirmed' | 'logout-unknown' | 'recovered' | 'google-not-linked' }>;
 import { SessionFailure } from './session-failure';
 export { SessionFailure } from './session-failure';
 export interface WireRequest { method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; path: string; body?: unknown; headers: Readonly<Record<string, string>>; signal: AbortSignal }
@@ -446,7 +448,7 @@ export class SessionClient {
   #publish(state: SessionState) { this.#state = Object.freeze(state); this.#listeners.forEach(fn => fn()); }
   #reset(mode: Mode, phase: SessionState['phase'], notice?: SessionState['notice'], setup?: SessionState['setup'], delay?: number, recoveryCodes?:readonly string[]) {
     for (const controller of this.#pending) controller.abort();
-    this.#pending.clear(); this.#token = undefined; this.#verification=undefined;this.#recoveryCodes=recoveryCodes;
+    this.#pending.clear(); this.#legalGeneration++;this.#legalPending=undefined;this.#token = undefined; this.#verification=undefined;this.#recoveryCodes=recoveryCodes;
     this.#keep?.save(null); this.#keep = undefined;
     this.#publish({ mode, phase, epoch: this.#state.epoch + 1, ...(notice ? { notice } : {}), ...(setup ? { setup } : {}), ...(retryAfterSeconds(delay) !== undefined ? { retryAfterSeconds: delay } : {}) });
   }
@@ -527,18 +529,37 @@ export class SessionClient {
   async googleAvailable():Promise<boolean>{if(this.#state.mode!=='live')return false;try{const r=await this.#send('GET','/api/auth/google/status',undefined,undefined,this.#state.epoch);return r.status===200&&record(r.body)&&r.body.available===true;}catch{return false;}}
   #googlePendingNonce:string|undefined;
   #googleFlow:{flowId:string;clientNonce:string;setupToken?:string}|undefined;
-  async loginGoogle(setup?:{setupToken:string;name?:string;workspaceType?:'individual'|'company';companyName?:string;companyKind?:string}){
+  #legalGeneration=0;
+  #legalPending:{setup?:{setupToken:string;name?:string;workspaceType?:'individual'|'company';companyName?:string;companyKind?:string;unifiedWelcome?:true}}|undefined;
+  async loginGoogle(setup?:{setupToken:string;name?:string;workspaceType?:'individual'|'company';companyName?:string;companyKind?:string;unifiedWelcome?:true}){
+    if(this.#state.mode!=='live'||this.#state.phase!=='signed-out'||(setup?this.#state.setup!=='required':this.#state.setup!=='login')||this.#state.legalConsent?.status==='loading')return;
+    const generation=++this.#legalGeneration,epoch=this.#state.epoch;this.#legalPending={setup};this.#publish({...this.#state,legalConsent:{status:'loading'}});
+    try{const response=await this.#send('GET','/api/auth/google/policy',undefined,undefined,epoch);if(generation!==this.#legalGeneration||epoch!==this.#state.epoch)return;if(response.status!==200)throw Error();const policy=parseLegalPolicy(response.body);this.#publish({...this.#state,legalConsent:{status:'ready',policy}});}
+    catch{if(generation===this.#legalGeneration&&epoch===this.#state.epoch)this.#publish({...this.#state,legalConsent:{status:'failed'}});}
+  }
+  cancelLegalConsent(){this.#legalGeneration++;this.#legalPending=undefined;this.#publish({...this.#state,legalConsent:undefined});}
+  retryLegalConsent(){if(this.#state.legalConsent?.status==='failed'&&this.#legalPending)void this.loginGoogle(this.#legalPending.setup);}
+  async acceptLegalConsent(){const policy=this.#state.legalConsent?.status==='ready'?this.#state.legalConsent.policy:undefined,pending=this.#legalPending;if(!policy||!pending)return;const setup=pending.setup;this.#legalPending=undefined;await this.#beginGoogle(setup,{accepted:true,version:policy.version,contentSha256:policy.contentSha256});}
+  async #beginGoogle(setup:{setupToken:string;name?:string;workspaceType?:'individual'|'company';companyName?:string;companyKind?:string;unifiedWelcome?:true}|undefined,legalAcceptance:LegalAcceptance){
     if(this.#state.mode!=='live'||this.#state.phase!=='signed-out'||(setup?this.#state.setup!=='required':this.#state.setup!=='login'))return;
     const keep=this.#nextKeep;this.#reset('live','signing-in',undefined,this.#state.setup);const epoch=this.#state.epoch;
     const bytes=new Uint8Array(32);crypto.getRandomValues(bytes);const clientNonce=btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replaceAll('=','');
-    this.#googlePendingNonce=clientNonce;try{const started=await this.#send('POST','/api/auth/google/start',{kind:setup?'setup':'signin',clientNonce,...setup},undefined,epoch);
+    this.#googlePendingNonce=clientNonce;try{const started=await this.#send('POST','/api/auth/google/start',{kind:setup?'setup':'signin',clientNonce,...setup,legalAcceptance},undefined,epoch);
       if(started.status!==200||!record(started.body)||typeof started.body.flowId!=='string')throw Error();
       const flow={flowId:started.body.flowId,clientNonce,...(setup?{setupToken:setup.setupToken}:{})};this.#googleFlow=flow;this.#googlePendingNonce=undefined;
-      for(let n=0;n<240;n++){if(epoch!==this.#state.epoch)return;const status=await this.#send('POST','/api/auth/google/status',{flowId:flow.flowId,clientNonce},undefined,epoch);if(status.status!==200||!record(status.body)||status.body.state==='failed')throw Error();if(status.body.state==='ready'){await this.#finishGoogle(flow,epoch,keep);return;}await new Promise(resolve=>setTimeout(resolve,1000));}throw Error();
+      for(let n=0;n<240;n++){if(epoch!==this.#state.epoch)return;const status=await this.#send('POST','/api/auth/google/status',{flowId:flow.flowId,clientNonce},undefined,epoch);if(status.status!==200||!record(status.body)||status.body.state==='failed')throw Error();if(status.body.state==='ready'){if(setup?.unifiedWelcome&&status.body.requiresAccountCreation===true){this.#publish({...this.#state,googleAccountConfirmation:true});return;}await this.#finishGoogle(flow,epoch,keep);return;}await new Promise(resolve=>setTimeout(resolve,1000));}throw Error();
     }catch(error){if(epoch===this.#state.epoch)this.#reset('live','signed-out',googleNotice(error),this.#state.setup);}
   }
-  async #finishGoogle(flow:{flowId:string;clientNonce:string;setupToken?:string},epoch:number,keep:TokenKeep|undefined,verification?:{challenge:string;nonce:string;code:string},recovery=false){
-    const response=await this.#send('POST','/api/auth/google/finish',{...flow,...(verification?{verification}:{}),...(recovery?{recovery:true}:{})},undefined,epoch);
+  async confirmGoogleAccountCreation() {
+    const flow=this.#googleFlow;
+    if(!flow?.setupToken||!this.#state.googleAccountConfirmation)return;
+    const epoch=this.#state.epoch;
+    this.#publish({...this.#state,googleAccountConfirmation:false});
+    try { await this.#finishGoogle(flow,epoch,this.#nextKeep,undefined,false,true); }
+    catch(error) { if(epoch===this.#state.epoch)this.#reset('live','signed-out',googleNotice(error),this.#state.setup); }
+  }
+  async #finishGoogle(flow:{flowId:string;clientNonce:string;setupToken?:string},epoch:number,keep:TokenKeep|undefined,verification?:{challenge:string;nonce:string;code:string},recovery=false,confirmAccountCreation=false){
+    const response=await this.#send('POST','/api/auth/google/finish',{...flow,...(confirmAccountCreation?{confirmAccountCreation:true}:{}),...(verification?{verification}:{}),...(recovery?{recovery:true}:{})},undefined,epoch);
     if(epoch!==this.#state.epoch)return;if(response.status!==200)throw Error(response.status===409&&record(response.body)&&response.body.code==='google_account_not_linked'?GOOGLE_NOT_LINKED:'');const continuation=loginContinuation(response.body);
     if(continuation){if('verificationRequired' in continuation){if(continuation.expiresAt<=Date.now()||continuation.expiresAt>Date.now()+305000||continuation.verificationMethod!==(recovery?'recovery':'totp'))throw Error();this.#verification={email:'',challenge:continuation.challenge,nonce:continuation.nonce,method:continuation.verificationMethod,expiresAt:continuation.expiresAt};this.#googleFlow=flow;this.#publish({...this.#state,phase:'verifying',verification:{method:continuation.verificationMethod,expiresAt:continuation.expiresAt,provider:'google'}});return;}if(!recovery||!verification)throw Error();this.#googleFlow=undefined;keep?.save(null);this.#reset('live','signed-out','recovered','login');return;}
     if(recovery||!record(response.body)||typeof response.body.token!=='string'||!validDeviceToken(response.body.deviceToken))throw Error();const loginUser=user(response.body.user),token=response.body.token;const me=await this.#send('GET','/api/auth/me',undefined,token,epoch);if(epoch!==this.#state.epoch)return;if(me.status!==200||!record(me.body))throw Error();const current=user(me.body.user);if(current.id!==loginUser.id)throw Error();this.#googleFlow=undefined;this.#token=token;this.#keep=keep;keep?.save(token);this.#publish({mode:'live',phase:'authenticated',epoch,user:current});
