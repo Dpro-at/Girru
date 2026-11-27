@@ -115,8 +115,15 @@ async function waitForPage(child) {
 }
 
 async function inspect(executable, icon, root) {
+  const profile = path.join(root, 'profile');
+  if (process.platform === 'win32') {
+    // Branding is checked after the optional Windows microphone review. This marker
+    // belongs to the temporary CI profile and does not grant native permissions.
+    fs.mkdirSync(profile);
+    fs.writeFileSync(path.join(profile, 'permissions-reviewed-v3.json'), '{"reviewed":true}\n');
+  }
   const child = spawn(executable, [
-    `--user-data-dir=${path.join(root, 'profile')}`,
+    `--user-data-dir=${profile}`,
     '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${port}`,
   ], { stdio: 'inherit' });
   let ws;
