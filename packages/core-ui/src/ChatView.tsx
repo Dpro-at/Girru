@@ -31,6 +31,7 @@ import { AgentPanel } from './AgentPanel';
 import { ChangesPane, FilesPane } from './ProjectPanes';
 import { PanesController } from './panes';
 import { ChatOrb } from './ChatOrb';
+import { EmberBackdrop } from './EmberBackdrop';
 import { orbStateOf } from './chat-orb';
 import { TerminalPrefsController, TerminalTabs } from './terminal';
 import { TerminalPane } from './TerminalPane';
@@ -524,7 +525,8 @@ export function ChatView({ embeddedCode=false, onOpenCode, controller, mode, pro
         <button type="button" onClick={() => void trust?.set(outsideNotice.project.id, false)}>Trust it</button>
         <IconButton icon="close" label="OK, keep it outside" onClick={() => void trust?.set(outsideNotice.project.id, true)}/></div>}
     <div className="chat-thread" ref={thread} onScroll={onScroll} aria-label="Conversation">
-
+      {/* START-SCREEN: ambient ASCII embers behind an empty chat; fades while typing. */}
+      {empty && !embeddedCode && <EmberBackdrop dim={!!s.draft}/>}
       {s.threadPhase === 'loading' && <div className="chat-opening" role="status"><p className="chat-opening-head"><ChatOrb state="load"/>Loading the chat…</p><div className="sk" style={{ inlineSize: '70%' }}/><div className="sk" style={{ inlineSize: '90%' }}/><div className="sk" style={{ inlineSize: '55%' }}/></div>}
       {empty ? <div className="chat-empty">
         {/* CHAT-BUILD-01 stage 3 (CH5): one sentence and three ideas. */}

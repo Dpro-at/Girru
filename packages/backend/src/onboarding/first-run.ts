@@ -17,7 +17,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { all, lockName, one, run, sql, type Step } from '../repositories/sql-steps.js';
+import { lockName, one, run, sql, type Step } from '../repositories/sql-steps.js';
 import { bundledCli, subscriptionSearchDirs } from '../services/subscription-chat.js';
 /** A path typed into the owner's shell: single quotes, so spaces in an app's folder name stay one word. */
 const shellQuote = (p: string) => `'${p.replace(/'/g, `'\\''`)}'`;
@@ -25,7 +25,6 @@ import { storeP7Enabled } from '../services/store-p7.js';
 import { listLocalModels } from '../llm/local-models.js';
 import { firstRunDiscovery } from './discovery.js';
 import { enableFirstRunAutomaticImport } from '../memory/import/automatic-project-import.js';
-import { addAssistantMessage, createConversation } from '../repositories/chat-conversations.js';
 import { companyKind } from '../services/department-groups.js';
 
 export const FIRST_RUN_STEPS = ['discovery', 'tools', 'model', 'team', 'phone'] as const;
@@ -228,7 +227,6 @@ export function localModelCommand(step: LocalModelStep, modelId: string): string
 // ---- Finish: the Welcome chat -------------------------------------------------------
 
 export const WELCOME_CHOICES = ['Here in Girru', 'On my phone', 'Telegram', 'WhatsApp', 'Another channel'] as const;
-type AgentRow = { id: string; name: string; department: string | null; is_primary: number };
 
 /** Plain words for the team, e.g. "Nora (marketing), Omar (sales) and Lina (support)". */
 export function teamLine(agents: readonly { name: string; department: string | null }[], max = 6): string {
@@ -244,26 +242,21 @@ export function welcomeText(ownerName: string, mainName: string, team: readonly 
   return `${intro}\n\nA few quick questions, then we start. **Where do you want to talk to me?**\n\nNext, one at a time: what should I call you, should I keep the name ${mainName}, and which language you want me to use.`;
 }
 
-/** Ends the setup steps and opens the Welcome chat with the Main agent's greeting. Repeat calls return the same chat. */
+/**
+ * Ends the setup steps. The workspace then opens on an empty new chat — no greeting
+ * is seeded (START-SCREEN). Automatic project import still turns on. Repeat calls are a no-op.
+ */
 export async function finishFirstRun(userId: string): Promise<{ conversationId: string | null }> {
   const state = await sql().read(one<Row>('SELECT answers, completed FROM onboarding_state WHERE user_id = ?', userId));
   const a = answersOf(state?.answers);
   if (!state || a.firstRun !== true) return { conversationId: null };
   if (a.firstRunStep === 'discovery') throw Object.assign(new Error('Discovery must complete first'), {code:'discovery_required'});
-  if (state.completed === 1) return { conversationId: typeof a.welcomeChat === 'string' ? a.welcomeChat : null };
-  const owner = await sql().read(one<{ full_name: string | null }>('SELECT full_name FROM users WHERE id = ?', userId));
-  const agents = await sql().read(all<AgentRow>('SELECT id, name, department, is_primary FROM agents_config ORDER BY is_primary DESC, created_at ASC'));
-  const main = agents.find(x => x.is_primary === 1) ?? agents[0];
-  const team = agents.filter(x => x !== main);
-  const chat = await createConversation(userId, { title: 'Welcome', agentId: main?.id ?? null });
-  const text = welcomeText(owner?.full_name ?? '', main?.name ?? 'your Main agent', team);
-  await addAssistantMessage(chat.id, { runId: `welcome-${chat.id}`, content: text, durationMs: 0, status: 'complete', agentId: main?.id ?? null,
-    parts: [{ kind: 'text', text }, { kind: 'notice', code: 'choices', text: WELCOME_CHOICES.join('\n') }] });
+  if (state.completed === 1) return { conversationId: null };
   await sql().tx(function* () {
     yield* lockName(`onboarding_state:${userId}`);
     yield* run('UPDATE onboarding_state SET completed = 1, completed_at = CURRENT_TIMESTAMP, answers = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
-      JSON.stringify({ ...a, welcomeChat: chat.id }), userId);
+      JSON.stringify({ ...a }), userId);
   });
-  if(a.firstRunDiscovery===true)await enableFirstRunAutomaticImport(userId);
-  return { conversationId: chat.id };
+  if (a.firstRunDiscovery === true) await enableFirstRunAutomaticImport(userId);
+  return { conversationId: null };
 }

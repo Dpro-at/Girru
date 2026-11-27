@@ -4343,3 +4343,12 @@ html[data-desktop="win"] .titlebar-app-menu { margin-inline-start:-4px; }
 .legal-consent h1:focus { outline:none; }
 .legal-consent-reader:focus-visible { outline:2px solid var(--accent);outline-offset:3px; }
 @media(max-height:700px) { .legal-consent-reader { min-height:130px;height:30vh; } }
+
+/* START-SCREEN: an ambient ASCII-ember backdrop behind an empty chat (Girru, the fire). */
+.chat-layout .chat-thread { position:relative; }
+.chat-layout .chat-thread > .chat-empty { position:relative; z-index:1; }
+.chat-ember { position:absolute; inset:0; inline-size:100%; block-size:100%; pointer-events:none; z-index:0;
+  opacity:.14; animation:chat-ember-breathe 7.5s ease-in-out infinite; }
+.chat-ember[data-dim] { animation:none; opacity:.04; transition:opacity .6s ease; }
+@keyframes chat-ember-breathe { 0%, 100% { opacity:.1; } 50% { opacity:.4; } }
+@media (prefers-reduced-motion: reduce) { .chat-ember { animation:none; opacity:.22; } }

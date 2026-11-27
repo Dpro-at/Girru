@@ -28,7 +28,6 @@ const { firstRunRoutes } = await import('../src/api/routes/first-run.ts');
 const { issueSetupToken } = await import('../src/auth/setup-token.ts');
 const { aiTools, changeAiTool, localModelStep, localModelCommand, recommendedLocal, welcomeText, teamLine, firstRunState } = await import('../src/onboarding/first-run.ts');
 const { sql, one } = await import('../src/repositories/sql-steps.js');
-const { listConversationMessages } = await import('../src/repositories/chat-conversations.ts');
 
 const db = getDatabase();
 await db.initialize();
@@ -219,17 +218,12 @@ test('local model: recommendation by memory; command installs Ollama first only 
   if (!macNoBrew.ollama) assert.equal(macNoBrew.download, 'https://ollama.com/download');
 });
 
-test('finish opens one Welcome chat with the Main agent\'s greeting and the first question\'s answers', async () => {
+test('finish completes setup and seeds no chat (the workspace opens on an empty new chat)', async () => {
   const first = (await call('POST', '/api/first-run/finish')).json();
-  assert.ok(first.conversationId);
-  assert.deepEqual((await call('POST', '/api/first-run/finish')).json(), first, 'repeat returns the same chat');
+  assert.equal(first.conversationId, null, 'no Welcome chat is seeded; the workspace opens on an empty new chat');
+  assert.deepEqual((await call('POST', '/api/first-run/finish')).json(), first, 'repeat finish stays a no-op');
   assert.equal((await call('GET', '/api/first-run')).json().pending, false);
-  const [message] = await listConversationMessages(first.conversationId);
   assert.equal((await (await import('../src/memory/import/automatic-project-import.ts')).automaticImportSettings((await sql().read(one('SELECT id FROM users WHERE email=?',OWNER.email))).id)).enabled,true,'new discovery acknowledgement enables import only after setup finish');
-  assert.equal(message.role, 'assistant');
-  assert.match(message.content, /Hi Mohamed/);
-  assert.match(message.content, /Where do you want to talk to me\?/);
-  assert.ok(JSON.stringify(message.parts).includes('Telegram'));
 });
 
 test('the team summary counts exactly the agents hired (3 picked: no "more"; 250: six names and 244 more)', () => {
