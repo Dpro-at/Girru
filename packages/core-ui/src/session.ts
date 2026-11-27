@@ -536,6 +536,8 @@ export class SessionClient {
   #legalPending:{setup?:{setupToken:string;name?:string;workspaceType?:'individual'|'company';companyName?:string;companyKind?:string;unifiedWelcome?:true}}|undefined;
   async loginGoogle(setup?:{setupToken:string;name?:string;workspaceType?:'individual'|'company';companyName?:string;companyKind?:string;unifiedWelcome?:true}){
     if(this.#state.mode!=='live'||this.#state.phase!=='signed-out'||(setup?this.#state.setup!=='required':this.#state.setup!=='login')||this.#state.legalConsent?.status==='loading')return;
+    // The Terms/Privacy consent gate is shown only for a NEW owner (setup). A returning sign-in goes straight to Google.
+    if(!setup){await this.#beginGoogle(undefined);return;}
     const generation=++this.#legalGeneration,epoch=this.#state.epoch;this.#legalPending={setup};this.#publish({...this.#state,legalConsent:{status:'loading'}});
     try{const response=await this.#send('GET','/api/auth/google/policy',undefined,undefined,epoch);if(generation!==this.#legalGeneration||epoch!==this.#state.epoch)return;if(response.status!==200)throw Error();const policy=parseLegalPolicy(response.body);this.#publish({...this.#state,legalConsent:{status:'ready',policy}});}
     catch{if(generation===this.#legalGeneration&&epoch===this.#state.epoch)this.#publish({...this.#state,legalConsent:{status:'failed'}});}
@@ -543,11 +545,11 @@ export class SessionClient {
   cancelLegalConsent(){this.#legalGeneration++;this.#legalPending=undefined;this.#publish({...this.#state,legalConsent:undefined});}
   retryLegalConsent(){if(this.#state.legalConsent?.status==='failed'&&this.#legalPending)void this.loginGoogle(this.#legalPending.setup);}
   async acceptLegalConsent(){const policy=this.#state.legalConsent?.status==='ready'?this.#state.legalConsent.policy:undefined,pending=this.#legalPending;if(!policy||!pending)return;const setup=pending.setup;this.#legalPending=undefined;await this.#beginGoogle(setup,{accepted:true,version:policy.version,contentSha256:policy.contentSha256});}
-  async #beginGoogle(setup:{setupToken:string;name?:string;workspaceType?:'individual'|'company';companyName?:string;companyKind?:string;unifiedWelcome?:true}|undefined,legalAcceptance:LegalAcceptance){
+  async #beginGoogle(setup:{setupToken:string;name?:string;workspaceType?:'individual'|'company';companyName?:string;companyKind?:string;unifiedWelcome?:true}|undefined,legalAcceptance?:LegalAcceptance){
     if(this.#state.mode!=='live'||this.#state.phase!=='signed-out'||(setup?this.#state.setup!=='required':this.#state.setup!=='login'))return;
     const keep=this.#nextKeep;this.#reset('live','signing-in',undefined,this.#state.setup);const epoch=this.#state.epoch;
     const bytes=new Uint8Array(32);crypto.getRandomValues(bytes);const clientNonce=btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replaceAll('=','');
-    this.#googlePendingNonce=clientNonce;try{const started=await this.#send('POST','/api/auth/google/start',{kind:setup?'setup':'signin',clientNonce,...setup,legalAcceptance},undefined,epoch);
+    this.#googlePendingNonce=clientNonce;try{const started=await this.#send('POST','/api/auth/google/start',{kind:setup?'setup':'signin',clientNonce,...setup,...(legalAcceptance?{legalAcceptance}:{})},undefined,epoch);
       if(started.status!==200||!record(started.body)||typeof started.body.flowId!=='string')throw Error();
       const flow={flowId:started.body.flowId,clientNonce,...(setup?{setupToken:setup.setupToken}:{})};this.#googleFlow=flow;this.#googlePendingNonce=undefined;
       for(let n=0;n<240;n++){if(epoch!==this.#state.epoch)return;const status=await this.#send('POST','/api/auth/google/status',{flowId:flow.flowId,clientNonce},undefined,epoch);if(status.status!==200||!record(status.body)||status.body.state==='failed')throw Error();if(status.body.state==='ready'){if(setup?.unifiedWelcome&&status.body.requiresAccountCreation===true){this.#publish({...this.#state,googleAccountConfirmation:true});return;}await this.#finishGoogle(flow,epoch,keep);return;}await new Promise(resolve=>setTimeout(resolve,1000));}throw Error();
