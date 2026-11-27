@@ -1,0 +1,47 @@
+name: Verify built Windows installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Desktop workflow run containing the checksummed Windows installer
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.21.0'
+      - uses: actions/download-artifact@v4
+        with:
+          name: desktop-win-x64
+          path: packages/desktop/release
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify installer checksum
+        shell: pwsh
+        run: |
+          Set-Location packages/desktop/release
+          $manifest = (Get-Content SHA256SUMS-win-x64.txt -Raw).Trim()
+          if ($manifest -notmatch '^([0-9a-fA-F]{64})\s+(Girru-[0-9.]+-win-x64\.exe)$') {
+            throw 'Unexpected checksum manifest'
+          }
+          $actual = Get-FileHash -Algorithm SHA256 -LiteralPath $Matches[2]
+          if ($actual.Hash -ne $Matches[1]) { throw 'Windows installer checksum mismatch' }
+      - name: Verify installed branding
+        run: node packages/desktop/scripts/verify-installed-branding.cjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installed-branding-win-x64
+          path: packages/desktop/release/installed-*.png
+          if-no-files-found: error
+          retention-days: 14

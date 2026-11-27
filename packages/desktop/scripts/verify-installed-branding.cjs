@@ -47,18 +47,71 @@ function install(root) {
   return { executable: path.join(directory, 'AppRun'), icon: path.join(directory, '.DirIcon') };
 }
 
-async function waitForPage() {
-  for (let retry = 0; retry < 120; retry++) {
+async function connect(page) {
+  const ws = new WebSocket(page.webSocketDebuggerUrl);
+  await new Promise((resolve, reject) => {
+    ws.addEventListener('open', resolve, { once: true });
+    ws.addEventListener('error', reject, { once: true });
+  });
+  let id = 0;
+  const call = (method, params = {}) => new Promise((resolve, reject) => {
+    const request = ++id;
+    const listener = event => {
+      const message = JSON.parse(event.data);
+      if (message.id !== request) return;
+      ws.removeEventListener('message', listener);
+      if (message.error) reject(new Error(message.error.message));
+      else resolve(message.result);
+    };
+    ws.addEventListener('message', listener);
+    ws.send(JSON.stringify({ id: request, method, params }));
+  });
+  return { ws, call };
+}
+
+async function waitForPage(child) {
+  let lastPage = 'none';
+  const clicked = new Set();
+  for (let retry = 0; retry < 180; retry++) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(`The installed app exited before opening its interface: ${child.exitCode ?? child.signalCode}`);
+    }
+    let pages;
     try {
-      const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-      const page = pages.find(entry => entry.type === 'page' && /^http:\/\/127\.0\.0\.1:/.test(entry.url));
-      if (page) return page;
+      pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
     } catch (error) {
       if (error.cause?.code !== 'ECONNREFUSED') throw error;
     }
+    const page = pages?.find(entry => entry.type === 'page');
+    if (page && /^http:\/\/127\.0\.0\.1:/.test(page.url)) return page;
+    if (page) {
+      const name = new URL(page.url).pathname.split('/').at(-1);
+      if (name !== lastPage) console.log(`First launch: ${name}`);
+      lastPage = name;
+      if (!clicked.has(name) && ['permissions.html', 'welcome.html', 'failed.html'].includes(name)) {
+        const { ws, call } = await connect(page);
+        try {
+          const result = await call('Runtime.evaluate', {
+            expression: `(() => {
+              if (${JSON.stringify(name)} === 'failed.html') return document.body.innerText;
+              const button = document.querySelector(${JSON.stringify(name === 'permissions.html' ? '#next' : '#primary')});
+              if (!button || button.disabled) return false;
+              button.click();
+              document.querySelector('dialog[open] #confirm-separate')?.click();
+              return true;
+            })()`,
+            returnByValue: true,
+          });
+          if (name === 'failed.html') throw new Error(`Installed app startup failed: ${result.result.value}`);
+          if (result.result.value === true) clicked.add(name);
+        } finally {
+          ws.close();
+        }
+      }
+    }
     await delay(500);
   }
-  throw new Error('The installed application did not open its local interface');
+  throw new Error(`The installed app did not open its local interface. Last page: ${lastPage}`);
 }
 
 async function inspect(executable, icon, root) {
@@ -68,25 +121,9 @@ async function inspect(executable, icon, root) {
   ], { stdio: 'inherit' });
   let ws;
   try {
-    const page = await waitForPage();
-    ws = new WebSocket(page.webSocketDebuggerUrl);
-    await new Promise((resolve, reject) => {
-      ws.addEventListener('open', resolve, { once: true });
-      ws.addEventListener('error', reject, { once: true });
-    });
-    let id = 0;
-    const call = (method, params = {}) => new Promise((resolve, reject) => {
-      const request = ++id;
-      const listener = event => {
-        const message = JSON.parse(event.data);
-        if (message.id !== request) return;
-        ws.removeEventListener('message', listener);
-        if (message.error) reject(new Error(message.error.message));
-        else resolve(message.result);
-      };
-      ws.addEventListener('message', listener);
-      ws.send(JSON.stringify({ id: request, method, params }));
-    });
+    const connection = await connect(await waitForPage(child));
+    ws = connection.ws;
+    const { call } = connection;
     const expected = fs.readFileSync(path.join(desktop, '..', 'core-ui', 'src', 'girru-mark.png')).toString('base64');
     const expression = `[...document.querySelectorAll('.setup-welcome img.dpro-mark')].some(image =>
       image.complete && image.naturalWidth === 128 && image.getBoundingClientRect().width >= 80 &&
