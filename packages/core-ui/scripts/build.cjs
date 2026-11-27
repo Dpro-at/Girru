@@ -46,7 +46,7 @@ async function main(args = process.argv.slice(2)) {
         { tag: 'meta', attrs: { name: 'core-ui-dev-quick-login', content: devQuickLogin ? 'enabled' : 'disabled' }, injectTo: 'head' },
       ] }],
       css: { postcss: { plugins: [] } },
-      build: { outDir: output, emptyOutDir: false, license: true } });
+      build: { outDir: output, emptyOutDir: false, license: true, assetsInlineLimit(file,bytes) { if (file.includes('/agent-connect-dpro/studio/icons/') && file.endsWith('.svg') && bytes.length <= 16384) return true; return undefined; } } });
     copyNotices(output);
     completeBuild(root, buildId, channel);
     console.log(`${channel} build: ${output}\nManifest: ${path.join(root, 'dist', `${channel}.json`)}`);

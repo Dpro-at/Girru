@@ -620,3 +620,67 @@ bodies, known reply fields and fixed codes; it is wired into `session.ts` and
 `scripts/application-server.cjs`. The QR code is drawn by the own encoder in
 `src/qr-code.ts` (byte mode, level M). Tests: `tests/qr-code.test.cjs`,
 `tests/phone-contract.test.cjs`, `tests/phone-ui.test.cjs`.
+
+## Marketing (existing SEO Store app)
+
+Marketing opens the existing Store app with ID `seo`; its identity and legacy
+records are preserved. The recovered SEO overview, analytics, keyword and settings
+structure is adapted to the current Girru host. The old unfinished analytics
+fixtures are replaced with reports from the connected SEO Agent account.
+
+The Overview loads the authenticated workspace's sites automatically. Selecting a
+site opens Analytics with 7/30/90-day reports, clicks, impressions, CTR, average
+position, a daily chart and paginated query/page/country tables. Keywords shows the
+available Search Console queries, not a fabricated count of tracked keywords.
+Empty or failed reports stay unavailable rather than becoming zero-filled demos.
+CTR derives from total clicks/impressions and position is impression-weighted.
+Late responses from a previously selected site/period cannot replace the current
+report. Settings shows connection permissions and live MCP tool discovery.
+
+The frontend reads the installed app's authenticated `/api/ext/seo/marketing/`
+status/read/tools routes. The app forwards these through the existing SEO Agent
+MCP API and keeps its OAuth connection in the host's per-user encrypted store.
+No SEO Agent tokens enter the renderer. This dashboard requests read access only;
+it has no post/video publishing action. Publication tools and platform approvals
+remain separately gated and are not activated by opening a report.
+
+Native browser OAuth uses one-use opening tickets, PKCE, expiring state and a
+browser nonce. Only the exact opening/callback routes accept browser navigation;
+the ordinary host/origin/session guards remain in effect for data routes. The
+success page uses a green confirmation mark without reflecting provider bodies.
+Tests: `marketing-data.test.cjs` and `marketing-oauth.test.cjs`.
+
+### Social tab and footer integration
+
+The Social tab lazy-loads `agent-connect-dpro@0.3.1/studio` from npm. The existing
+package supplies the editor, platform previews, post library and account view;
+Girru does not implement a second editor. It mounts in connected mode with no
+sample posts/accounts and keeps X excluded. Brand icon SVGs are bounded and inlined
+at build time so the application's asset allowlist remains unchanged.
+
+Account metadata comes from SEO Agent's `list_social_accounts` MCP tool, backed by
+the same workspace-scoped `listAccounts()` used by its social accounts API. Tokens
+and provider credentials stay on SEO Agent. The connection needs `read:social` on
+a server that exposes the tool. A server/grant without that capability shows an
+availability notice; it does not claim the user's existing accounts disappeared
+or silently reconnect them. The account view is omitted until metadata is available.
+Existing connections can still be managed on SEO Agent itself.
+
+Local draft save/delete/undo uses browser storage scoped to the signed-in Girru
+user and a non-secret OAuth connection identifier returned by the installed app.
+Reauthorising into a different connection uses another namespace. Drafts are plain
+local content, not server posts; missing connection identity disables saving. No
+publication, scheduling, provider mutation or media-upload callback is supplied.
+The package publish button stays disabled and scheduling is hidden. Those actions
+cannot be enabled by merely editing a draft's status.
+
+Installed Marketing (`app:seo`) appears in the footer and its customization menu,
+and opens from My apps. Footer preferences use the existing per-user backend and
+preserve older orders/hidden choices. Without the installed app or for non-owner
+users the shortcut is unavailable. Tests cover the package adapter, multi-account
+metadata, draft isolation, blocked writes and footer persistence; browser acceptance
+uses an isolated mock backend for editing and write-blocking checks. The existing
+workspace account listing was also verified read-only against SEO Agent; this did
+not reconnect platforms, change accounts or publish content.
+
+Continuation: [Marketing integration handoff](../../docs/MARKETING_HANDOFF.md).

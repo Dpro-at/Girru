@@ -237,6 +237,18 @@
       "peerDependencies": {
         "@types/react": "^19.3.0"
       }
+    },
+    "agent-connect-dpro": {
+      "version": "0.3.1",
+      "license": "MIT",
+      "repository": {
+        "url": "git+https://github.com/Dpro-at/agent-connect.git"
+      },
+      "dist": {
+        "tarball": "https://registry.npmjs.org/agent-connect-dpro/-/agent-connect-dpro-0.3.1.tgz",
+        "integrity": "sha512-LCb5jx18p/tDIHxVp+RxMbZS9YYmyGGcDWk6p1tPXdhOtGgbPV05ps6xQYArg65oC4mGJstwmvoVAEppWHjHTA=="
+      },
+      "usage": "Browser-only studio export, lazy loaded inside existing Marketing app. Messaging adapters are not imported into the frontend."
     }
   },
   "installed": [

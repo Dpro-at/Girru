@@ -29,12 +29,16 @@ import { getUserIdFromRequest } from '../auth/jwt.js';
 import type { FastifyRequest } from 'fastify';
 import type { Message } from '../agent/types.js';
 import { extractAgentReply } from '../../extensions/shared/agent-reply.js';
+import { createMarketingCredentials } from './marketing-credentials.js';
+import { getCredentialManager } from '../credentials/manager.js';
 
 /**
  * Extension SDK API Interface
  * Extensions receive this interface when their register() hook is called
  */
 export interface ExtensionApi {
+  /** Store app id seo only: its own connection token, encrypted and user-scoped. */
+  marketingCredentials?: ReturnType<typeof createMarketingCredentials>;
   /** Parse at most 256 KiB of HTML into at most 64 KiB of untrusted text. No fetch/scripts; DOM whitespace preserved. Encode at every HTML sink. */
   htmlToText(input: string): string;
   /** Host integration for the separately installed Agent Connect package only. */
@@ -183,6 +187,11 @@ export function createExtensionApi(
   return {
     extensionId,
     htmlToText,
+    ...(extensionId==='seo'?{marketingCredentials:createMarketingCredentials(userId=>{
+      if(!checkPermissions(extensionId,['database']).granted)return false;
+      const user=db.prepare('SELECT status FROM users WHERE id = ?').get(userId) as {status:string}|undefined;
+      return user?.status==='active';
+    },getCredentialManager())}:{}),
     ...(extensionId==='agent-connect'&&channelHostCapabilityAllowed(db,extensionDir)?{channelHost:Object.freeze({...channelHost,...channelPolicy,loadLibrary:loadChannelLibrary})}:{}),
     ...(extensionId==='call-center'&&callCenterRuntimeAllowed(db,extensionDir)?{callCenterHost:Object.freeze({load:async()=>{const p=await loadCallCenterRuntime();if(!p)throw Error('Call Center is not enabled.');return p;}})}:{}),
     authorizeChannelRequest(request) {

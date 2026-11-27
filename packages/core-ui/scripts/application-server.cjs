@@ -1,3 +1,4 @@
+const {marketingOAuth}=require('./marketing-oauth.cjs');
 const {reportsRoute,allowedReports,reportsResponse}=require('../src/reports-contract.js');
 const {hostAppRoute,allowedHostApp,hostAppResponse}=require('../src/store-host-app-contract.js');
 const {storeAppAsset}=require('./store-app-assets.cjs');
@@ -423,6 +424,8 @@ function createApplicationServer({ healthCheck = null, browserController = null,
       if (duplicates.has(key)) return send(400);
       duplicates.add(key);
     }
+    // Only the nonce/state-protected OAuth browser routes accept a cross-site return.
+    if(!stage1ReadOnly&&raw.length<=8192&&marketingOAuth(req,res,{upstreamPort,launchToken,origin}))return;
     if ((req.headers.origin && req.headers.origin !== origin) || (req.headers['sec-fetch-site'] && !['same-origin', 'none'].includes(req.headers['sec-fetch-site']))) return send(403);
     // Docker readiness includes the private API. Only expose the fixed status on this origin.
     if (healthCheck && raw === '/api/health' && req.method === 'GET') {
