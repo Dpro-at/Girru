@@ -136,3 +136,14 @@ Channels use the existing Agent Connect package as a separate Store app. The cor
 The core payload omits Twilio and Puppeteer. Call Center installs its reviewed provider program from the Store; it preserves old phone data through the existing backup-first namespace migration. Trading installs its existing practice renderer while the trusted paper proof and ledger host remain in Girru. Browser installs the existing Puppeteer engine; API/tool grants and public-network restrictions stay in the core. All three use owner-controlled activation in My apps and require a restart when indicated. Removal retains data and permissions and retires active hosts.
 
 Trading renderer code is trusted same-origin application code, not an isolated third-party sandbox. Adding the app does not by itself grant paper execution authority. Browser Get installs only the program and pinned SDK archives, without downloading Chrome or importing browser profiles. A compatible cached browser or absolute operator `GIRRU_BROWSER_EXECUTABLE` is required. The native browser workspace evaluation remains separate.
+
+
+## Application icons
+
+Windows, macOS, and Linux use the rounded white Girru icon. The shared
+interface uses the transparent mark in `packages/core-ui/src/girru-mark.png`.
+
+The desktop master is `build/icon.png`, a 1024 × 1024 non-interlaced RGBA PNG
+with unfiltered rows. From `packages/desktop`, run
+`node scripts/make-icons.cjs` to regenerate the ICO and ICNS, then run
+`node --test test/icons.test.cjs` to verify the assets.

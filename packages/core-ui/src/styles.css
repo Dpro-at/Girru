@@ -1605,6 +1605,7 @@ button.status-item:hover { background:var(--row-hover); color:var(--text); }
 .app-shell.public-shell { grid-template-columns:minmax(0,1fr); grid-template-rows:34px minmax(0,1fr); grid-template-areas:'title' 'page'; }
 .public-welcome { max-width:420px; margin:auto; padding:32px 16px; display:flex; flex-direction:column; align-items:center; text-align:center; gap:10px; }
 .public-welcome .public-mark .dpro-mark { inline-size:56px; block-size:56px; }
+.setup-welcome .public-mark .dpro-mark { inline-size:80px; block-size:80px; }
 .public-welcome h1 { font-size:24px; line-height:1.25; margin:8px 0 0; letter-spacing:-.3px; }
 .public-welcome p { max-width:42ch; margin:0; color:var(--text-2); }
 .public-welcome button.primary { margin-block-start:8px; min-inline-size:140px; }
