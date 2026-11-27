@@ -15,7 +15,7 @@ import { getUserIdFromRequest } from '../../auth/jwt.js';
 import { dbDriver } from '../../db/pg/config.js';
 import { handleError } from '../error-handler.js';
 import { requestRestart } from '../restart-request.js';
-import { BackupError, backUpNow, backupStatus, deleteBackup, getBackup, requestRestore, setBackupsFolder, type BackupKind } from '../../services/backups.js';
+import { BackupError, backUpNow, backupStatus, deleteBackup, getBackup, requestRestore, setBackupsFolder, setBackupKeepDays, type BackupKind } from '../../services/backups.js';
 
 const POSTGRES = { available: false, reason: 'On PostgreSQL, back up the database with pg_dump outside the app' };
 
@@ -42,6 +42,10 @@ export async function backupRoutes(fastify: FastifyInstance) {
 
   fastify.put<{ Body: { folder?: unknown } | undefined }>('/api/backups/folder', async (request, reply) => {
     try { getUserIdFromRequest(request); if (!sqliteOnly(reply)) return; return await setBackupsFolder(request.body?.folder); } catch (err) { return fail(reply, err, 'Folder'); }
+  });
+
+  fastify.put<{ Body: { keepDays?: unknown } | undefined }>('/api/backups/retention', async (request, reply) => {
+    try { getUserIdFromRequest(request); if (!sqliteOnly(reply)) return; return await setBackupKeepDays(request.body?.keepDays); } catch (err) { return fail(reply, err, 'Retention'); }
   });
 
   fastify.post<{ Params: { id: string } }>('/api/backups/:id/restore', async (request, reply) => {

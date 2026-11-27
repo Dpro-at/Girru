@@ -12,6 +12,7 @@ const num = x => Number.isFinite(x) && x >= 0 ? x : 0;
 function parse(path) {
   if (path === '/api/backups') return { kind: 'list' };
   if (path === '/api/backups/folder') return { kind: 'folder' };
+  if (path === '/api/backups/retention') return { kind: 'retention' };
   const m = /^\/api\/backups\/([^/?#]+)(?:\/(restore|show))?$/.exec(path);
   if (!m || !ID.test(m[1])) return null;
   return { kind: m[2] || 'one', id: m[1] };
@@ -25,6 +26,7 @@ export function allowedBackups(method, path, body) {
     return method === 'POST' && record(body) && Object.keys(body).every(k => k === 'kind') && (body.kind === undefined || body.kind === 'manual' || body.kind === 'before-update');
   }
   if (r.kind === 'folder') return method === 'PUT' && record(body) && Object.keys(body).length === 1 && typeof body.folder === 'string' && body.folder.length > 0 && body.folder.length <= 1024;
+  if (r.kind === 'retention') return method === 'PUT' && record(body) && Object.keys(body).length === 1 && Number.isInteger(body.keepDays) && body.keepDays >= 3 && body.keepDays <= 3650;
   if (r.kind === 'restore' || r.kind === 'show') return method === 'POST' && body === undefined;
   return method === 'DELETE' && body === undefined;
 }
@@ -42,7 +44,7 @@ function status(s) {
   const r = record(s.lastRestore) ? s.lastRestore : null;
   return {
     available: true, folder: str(s.folder, 1024), cloud: s.cloud === true, defaultFolder: str(s.defaultFolder, 1024), runsAt: /^\d\d:\d\d$/.test(s.runsAt) ? s.runsAt : '03:00',
-    keeps: { days: num(k.days), sundays: num(k.sundays), beforeUpdateDays: num(k.beforeUpdateDays) }, running: s.running === true,
+    keeps: { days: num(k.days), sundays: num(k.sundays), beforeUpdateDays: num(k.beforeUpdateDays), min: num(k.min) || 3, max: num(k.max) || 3650, presets: Array.isArray(k.presets) ? k.presets.filter(Number.isInteger).slice(0, 8) : [] }, running: s.running === true,
     last: record(s.last) ? backup(s.last) : null, next: iso(s.next) ?? new Date(0).toISOString(),
     lastError: e ? { message: str(e.message, 300), at: iso(e.at) ?? new Date(0).toISOString() } : null,
     lastRestore: r ? { id: str(r.id, 64), at: iso(r.at) ?? new Date(0).toISOString(), ok: r.ok === true, ...(typeof r.error === 'string' ? { error: str(r.error, 300) } : {}) } : null,
@@ -57,6 +59,7 @@ export function backupsResponse(path, status_, body) {
   if (!r) return { code: 'unavailable' };
   if (r.kind === 'list') return record(v.backup) ? { backup: backup(v.backup) } : status(v);
   if (r.kind === 'folder') return { folder: str(v.folder, 1024), cloud: v.cloud === true };
+  if (r.kind === 'retention') return { keepDays: Number.isInteger(v.keepDays) ? v.keepDays : 0 };
   if (r.kind === 'restore') return { restarting: v.restarting === true, undoId: ID.test(v.undoId) ? v.undoId : '' };
   if (r.kind === 'show') return { shown: v.shown === true };
   return { deleted: v.deleted === true };

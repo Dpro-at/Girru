@@ -3,10 +3,10 @@ const {allowedBackups,backupsResponse,backupsRoute}=require('../src/backups-cont
 const {AppSettings}=require('../src/AppSettings.tsx');const {backupWhen,backupKind,nextWhen,SettingsBackups}=require('../src/SettingsBackups.tsx');
 const id='20261029-030000-daily';
 test('backups requests: only the page’s own, in both gates',()=>{
- for(const [m,p,b] of [['GET','/api/backups'],['POST','/api/backups',{}],['POST','/api/backups',{kind:'before-update'}],['PUT','/api/backups/folder',{folder:'/Users/x/Girru Backups'}],['POST',`/api/backups/${id}/restore`],['POST',`/api/backups/${id}/show`],['DELETE',`/api/backups/${id}`]]){
+ for(const [m,p,b] of [['GET','/api/backups'],['POST','/api/backups',{}],['POST','/api/backups',{kind:'before-update'}],['PUT','/api/backups/folder',{folder:'/Users/x/Girru Backups'}],['PUT','/api/backups/retention',{keepDays:7}],['PUT','/api/backups/retention',{keepDays:3}],['PUT','/api/backups/retention',{keepDays:365}],['POST',`/api/backups/${id}/restore`],['POST',`/api/backups/${id}/show`],['DELETE',`/api/backups/${id}`]]){
   assert.ok(allowedBackups(m,p,b),`${m} ${p}`);assert.ok(allowed(m,p,b),`bridge ${m} ${p}`);assert.ok(allowedRequest(m,p,b),`client ${m} ${p}`);
  }
- for(const [m,p,b] of [['POST','/api/backups',{kind:'daily'}],['POST','/api/backups',{kind:'manual',extra:1}],['GET','/api/backups',{}],['PUT','/api/backups/folder',{folder:''}],['PUT','/api/backups/folder',{folder:'/x',move:true}],['POST','/api/backups/../../etc/restore'],['POST',`/api/backups/${id}/restore`,{force:true}],['GET',`/api/backups/${id}`],['DELETE','/api/backups/all'],['POST',`/api/backups/${id}/copy`]]){
+ for(const [m,p,b] of [['POST','/api/backups',{kind:'daily'}],['POST','/api/backups',{kind:'manual',extra:1}],['GET','/api/backups',{}],['PUT','/api/backups/folder',{folder:''}],['PUT','/api/backups/folder',{folder:'/x',move:true}],['PUT','/api/backups/retention',{keepDays:2}],['PUT','/api/backups/retention',{keepDays:7,extra:1}],['PUT','/api/backups/retention',{keepDays:1.5}],['PUT','/api/backups/retention',{days:7}],['POST','/api/backups/../../etc/restore'],['POST',`/api/backups/${id}/restore`,{force:true}],['GET',`/api/backups/${id}`],['DELETE','/api/backups/all'],['POST',`/api/backups/${id}/copy`]]){
   assert.equal(allowed(m,p,b),false,`${m} ${p}`);assert.equal(allowedRequest(m,p,b),false,`client ${m} ${p}`);
  }
  assert.ok(backupsRoute('/api/backups/x'));assert.equal(backupsRoute('/api/backupsx'),false);
@@ -20,6 +20,12 @@ test('backups answers: only what the page shows, the same when projected twice',
  assert.deepEqual(backupsResponse(`/api/backups/${id}/restore`,200,{restarting:true,undoId:'20261029-184000-before-restore'}),{restarting:true,undoId:'20261029-184000-before-restore'});
  assert.deepEqual(backupsResponse('/api/backups',400,{error:'Choose a folder',code:'invalid_folder',stack:'x'}),{code:'invalid_folder',error:'Choose a folder'});
  assert.deepEqual(backupsResponse('/api/backups',200,{available:false,reason:'On PostgreSQL, use pg_dump'}),{available:false,reason:'On PostgreSQL, use pg_dump'});
+ // Retention: only the chosen number of days passes back; the keeps fields project with safe defaults.
+ assert.deepEqual(backupsResponse('/api/backups/retention',200,{keepDays:7,secret:'no'}),{keepDays:7});
+ assert.deepEqual(backupsResponse('/api/backups/retention',200,{keepDays:'x'}),{keepDays:0});
+ const keepsBody={available:true,folder:'/Users/x/Girru Backups',cloud:false,defaultFolder:'/Users/x/Girru Backups',runsAt:'03:00',keeps:{days:7,sundays:4,beforeUpdateDays:30,min:3,max:3650,presets:[3,7,14]},running:false,last:null,next:'2026-10-30T01:00:00.000Z',lastError:null,lastRestore:null,backups:[]};
+ const keeps=backupsResponse('/api/backups',200,keepsBody).keeps;
+ assert.deepEqual(keeps,{days:7,sundays:4,beforeUpdateDays:30,min:3,max:3650,presets:[3,7,14]});
 });
 test('Settings › Backups: an owner place, plain words for when and what kind',()=>{
  const fake=role=>({getSnapshot:()=>({phase:'authenticated',user:{role}}),subscribe:()=>()=>{},request:async()=>{throw Error('no requests during render');}});

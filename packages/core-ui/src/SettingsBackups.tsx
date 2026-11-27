@@ -7,7 +7,7 @@ import {Sheet} from './desktop-ui';
 
 type Kind='daily'|'manual'|'before-update'|'before-restore';
 export type Backup={id:string;kind:Kind;at:string;checked:boolean;size:number;parts:{data:boolean;audit:boolean;keys:boolean};keepUntil:string|null};
-export type BackupStatus={available:true;folder:string;cloud:boolean;defaultFolder:string;runsAt:string;keeps:{days:number;sundays:number;beforeUpdateDays:number};running:boolean;last:Backup|null;next:string;lastError:{message:string;at:string}|null;lastRestore:{id:string;at:string;ok:boolean;error?:string}|null;backups:Backup[]}|{available:false;reason:string};
+export type BackupStatus={available:true;folder:string;cloud:boolean;defaultFolder:string;runsAt:string;keeps:{days:number;sundays:number;beforeUpdateDays:number;min:number;max:number;presets:number[]};running:boolean;last:Backup|null;next:string;lastError:{message:string;at:string}|null;lastRestore:{id:string;at:string;ok:boolean;error?:string}|null;backups:Backup[]}|{available:false;reason:string};
 
 const DAY=86_400_000;
 const time=(d:Date)=>d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
@@ -45,7 +45,7 @@ const err=(r:{status:number;body:unknown},fallback:string)=>{const b=r.body as {
  */
 export function SettingsBackups({client,active=true}:{client:SessionClient;active?:boolean}){
  const [status,setStatus]=useState<BackupStatus|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState('');
- const [selected,setSelected]=useState(''),[sheet,setSheet]=useState<null|'restore'|'delete'|'folder'>(null),[restarting,setRestarting]=useState<null|boolean>(null);
+ const [selected,setSelected]=useState(''),[sheet,setSheet]=useState<null|'restore'|'delete'|'folder'|'retention'>(null),[restarting,setRestarting]=useState<null|boolean>(null);
  const list=useRef<HTMLDivElement>(null);
  const load=useCallback(async()=>{
   const r=await client.request({method:'GET',path:'/api/backups'});
@@ -93,7 +93,7 @@ export function SettingsBackups({client,active=true}:{client:SessionClient;activ
    <div className="backups-prop"><UiIcon name="refresh" size={14}/><span>Runs</span><strong>Every day {s.runsAt} · and before every update</strong></div>
    <button type="button" className="backups-prop" onClick={()=>setSheet('folder')} title="Change where backups are kept"><UiIcon name="folder" size={14}/><span>Kept in</span><strong>{home(s.folder)} <small>· only you can open it</small></strong><UiIcon name="chevron" size={12}/></button>
    {s.cloud&&<p className="backups-alert" role="alert"><UiIcon name="alert" size={14}/>This folder syncs to the cloud. Backups hold the keys to your saved secrets; choose a folder on this computer.</p>}
-   <div className="backups-prop"><UiIcon name="history" size={14}/><span>Keeps</span><strong>{s.keeps.days} days + {s.keeps.sundays} Sundays</strong></div>
+   <button type="button" className="backups-prop" onClick={()=>setSheet('retention')} title="Change how long backups are kept"><UiIcon name="history" size={14}/><span>Keeps</span><strong>{s.keeps.days} days + {s.keeps.sundays} Sundays</strong><UiIcon name="chevron" size={12}/></button>
   </div>
   <div className="backups-panes">
    <div className="backups-list" ref={list} role="listbox" aria-label="Backups list" onKeyDown={onListKey}>
@@ -125,7 +125,34 @@ export function SettingsBackups({client,active=true}:{client:SessionClient;activ
    <p>The backup from {lower(backupWhen(b.at,now))} is deleted for good. Your data and the other backups stay.</p>
   </Sheet>}
   {sheet==='folder'&&<FolderSheet client={client} status={s} onClose={()=>setSheet(null)} onSaved={async()=>{setSheet(null);setNotice('New backups go to the new folder. The old ones stay where they are.');await load();}}/>}
+  {sheet==='retention'&&<RetentionSheet client={client} status={s} onClose={()=>setSheet(null)} onSaved={async(days)=>{setSheet(null);setNotice(`Backups are now kept for ${days} days. Older ones are removed, but never your last ${Math.max(3,s.keeps.min)}.`);await load();}}/>}
  </div>;
+}
+
+/**
+ * How long backups are kept (BACKUP-02 D4): the owner picks 3, 7 or 14 days, or a
+ * custom number. The oldest beyond the window are removed automatically, but never
+ * the newest few, so a restore is always there.
+ */
+function RetentionSheet({client,status,onClose,onSaved}:{client:SessionClient;status:Extract<BackupStatus,{available:true}>;onClose:()=>void;onSaved:(days:number)=>void}){
+ const min=Math.max(3,status.keeps.min),max=status.keeps.max||3650,presets=status.keeps.presets.length?status.keeps.presets:[3,7,14];
+ const [days,setDays]=useState(status.keeps.days),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+ const clamped=Number.isFinite(days)?Math.round(days):min;
+ const valid=Number.isInteger(clamped)&&clamped>=min&&clamped<=max;
+ const save=async()=>{
+  if(!valid){setError(`Choose between ${min} and ${max} days.`);return;}
+  setBusy(true);setError('');
+  try{const r=await client.request({method:'PUT',path:'/api/backups/retention',body:{keepDays:clamped}});if(r.status!==200){setError(err(r,'That could not be saved.'));return;}onSaved((r.body as {keepDays:number}).keepDays);}
+  finally{setBusy(false);}
+ };
+ return <Sheet title="How long to keep backups" onClose={onClose} actions={<><button type="button" onClick={onClose}>Cancel</button><button type="button" className="primary" disabled={busy||!valid} onClick={()=>void save()}>{busy?'Saving…':'Save'}</button></>}>
+  <div className="backups-keepfor" role="group" aria-label="Keep backups for">
+   {presets.map(p=><button key={p} type="button" className="backups-chip" aria-pressed={clamped===p} onClick={()=>setDays(p)}>{p} days</button>)}
+  </div>
+  <label className="backups-field"><span>Or a custom number of days</span><input type="number" min={min} max={max} value={Number.isFinite(days)?days:''} onChange={e=>setDays(e.target.value===''?NaN:Number(e.target.value))} onKeyDown={e=>{if(e.key==='Enter')void save();}} aria-label="Days to keep backups"/></label>
+  <p className="fine-print">Backups older than this are removed on their own. Your newest {min} backups are always kept, and backups made before an update stay for {status.keeps.beforeUpdateDays} days.</p>
+  {error&&<p className="backups-alert" role="alert">{error}</p>}
+ </Sheet>;
 }
 
 function FolderSheet({client,status,onClose,onSaved}:{client:SessionClient;status:Extract<BackupStatus,{available:true}>;onClose:()=>void;onSaved:()=>void}){

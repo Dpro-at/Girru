@@ -133,6 +133,47 @@ test('retention keeps 14 days, 4 Sundays, before-update 30 days, and the newest'
   assert.deepEqual(B.expiredBackups([{ id: 'only', at: at('2025-01-01T03:00:00').toISOString(), kind: 'daily' }], now), [], 'the newest always stays');
 });
 
+test('keep for (D4): the owner sets the window; it drives retention but never drops below the newest 3', async () => {
+  const now = at('2026-10-29T12:00:00');
+  const list = [];
+  for (let d = 0; d < 20; d++) { const t = new Date(now.getTime() - d * 86_400_000); t.setHours(3, 0, 0, 0); list.push({ id: `k${d}`, at: t.toISOString(), kind: 'daily' }); }
+  // Default window (14): day 13 stays, matching BACKUP-01.
+  assert.ok(!new Set(B.expiredBackups(list, now)).has('k13'));
+  // A 3-day window: days within 3 stay, older non-Sundays go, but the newest 3 always stay.
+  const gone3 = new Set(B.expiredBackups(list, now, 3));
+  // now is 12:00 and backups sit at 03:00, so days 0–2 are inside a 72h window; the newest 3 are also kept outright.
+  for (let d = 0; d <= 2; d++) assert.ok(!gone3.has(`k${d}`), `day ${d} within window`);
+  // A 3-day window keeps far fewer than the 14-day default: within-window (~4) + up to
+  // 4 Sundays + the newest 3, so most of the 20 are removed.
+  assert.ok(gone3.size >= 9, `a tighter window removes more old backups (removed ${gone3.size})`);
+  assert.ok(new Set(B.expiredBackups(list, now, 14)).size < gone3.size, 'the default window keeps more than a 3-day window');
+  // Even the smallest window keeps at least 3 (never "last only").
+  const tiny = B.expiredBackups(list.slice(0, 3), now, 3);
+  assert.equal(tiny.length, 0, 'three backups with a tiny window: all kept');
+
+  // The setting is clamped and validated.
+  assert.equal(B.cleanKeepDays(7), 7);
+  assert.equal(B.cleanKeepDays('14'), 14);
+  assert.equal(B.cleanKeepDays(2), null);
+  assert.equal(B.cleanKeepDays(0), null);
+  assert.equal(B.cleanKeepDays(4000), null);
+  assert.equal(B.cleanKeepDays('x'), null);
+});
+
+test('keep for: the route stores the owner choice, owner only, and status shows it', async () => {
+  assert.equal(B.backupKeepDays(), 14, 'default window before any choice');
+  const r = await ok(call('b-owner', 'PUT', '/api/backups/retention', { keepDays: 7 }));
+  assert.equal(r.keepDays, 7);
+  assert.equal(B.backupKeepDays(), 7, 'cached right away');
+  assert.equal((await ok(call('b-owner', 'GET', '/api/backups'))).keeps.days, 7);
+  // Invalid and unauthorized are refused.
+  assert.equal((await call('b-owner', 'PUT', '/api/backups/retention', { keepDays: 2 })).statusCode, 400);
+  assert.equal((await call('b-owner', 'PUT', '/api/backups/retention', { keepDays: 'x' })).statusCode, 400);
+  assert.equal((await call('b-user', 'PUT', '/api/backups/retention', { keepDays: 7 })).statusCode, 403);
+  // Put it back so later tests see the default window.
+  await ok(call('b-owner', 'PUT', '/api/backups/retention', { keepDays: 14 }));
+});
+
 test('the daily job runs once after 03:00, catching up after sleep', async () => {
   assert.equal(B.nextDaily(at('2026-10-29T09:00:00'), null).getTime(), at('2026-10-29T09:00:00').getTime(), 'none yet: now');
   assert.equal(B.nextDaily(at('2026-10-29T09:00:00'), at('2026-10-29T03:00:05').toISOString()).getTime(), at('2026-10-30T03:00:00').getTime());

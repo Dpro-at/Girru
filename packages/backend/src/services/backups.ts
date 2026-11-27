@@ -47,6 +47,12 @@ export const DAILY_AT = '03:00';
 export const KEEP_DAYS = 14;
 export const KEEP_SUNDAYS = 4;
 export const KEEP_UPDATE_DAYS = 30;
+/** "Keep for" (board D4): the owner's choice of day window; presets 3/7/14 or a custom number. */
+export const KEEP_DAYS_PRESETS: readonly number[] = [3, 7, 14];
+/** Never fewer than this many days, and never fewer than this many of the newest backups (never "last only"). */
+export const KEEP_DAYS_MIN = 3;
+export const KEEP_DAYS_MAX = 3650;
+export const KEEP_MIN_COUNT = 3;
 
 const ID = /^\d{8}-\d{6}-(daily|manual|before-update|before-restore)$/;
 const MANIFEST = 'manifest.json';
@@ -131,6 +137,35 @@ export async function setBackupsFolder(input: unknown): Promise<{ folder: string
   return { folder: saved, cloud: isCloudFolder(saved) };
 }
 
+/** "Keep for" (board D4): the day window the owner chose, cached like the folder so retention can read it synchronously. */
+const KEEP_DAYS_KEY = 'backups.keep_days';
+let keepDaysCache: number | null = null;
+/** A whole number of days within the allowed range, or null for "not a valid choice". */
+export function cleanKeepDays(input: unknown): number | null {
+  const n = typeof input === 'number' ? input : typeof input === 'string' ? Number(input) : NaN;
+  if (!Number.isInteger(n) || n < KEEP_DAYS_MIN || n > KEEP_DAYS_MAX) return null;
+  return n;
+}
+/** The active day window: the owner's choice, else the 14-day default. */
+export function backupKeepDays(): number { return keepDaysCache ?? KEEP_DAYS; }
+/** On start: the owner's "keep for" choice from the database (same app_settings table as the folder). */
+export async function loadBackupKeepDays(): Promise<void> {
+  const { q } = await import('../repositories/sql-steps.js');
+  const row = await q.one<{ value: string }>('SELECT value FROM app_settings WHERE key = ?', KEEP_DAYS_KEY).catch(() => null);
+  keepDaysCache = row ? cleanKeepDays(row.value) : null;
+}
+export async function setBackupKeepDays(input: unknown): Promise<{ keepDays: number }> {
+  const days = cleanKeepDays(input);
+  if (days === null) throw new BackupError(400, 'invalid_keep_days', `Keep backups for between ${KEEP_DAYS_MIN} and ${KEEP_DAYS_MAX} days`);
+  const { q } = await import('../repositories/sql-steps.js');
+  await q.run(APP_SETTINGS_SQL);
+  await q.run('INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at', KEEP_DAYS_KEY, String(days), Date.now());
+  await loadBackupKeepDays();
+  // Apply the new window right away so the owner sees the effect without waiting for 03:00.
+  prune();
+  return { keepDays: backupKeepDays() };
+}
+
 function auditPath() { return path.resolve(process.env.AUDIT_DB_PATH || dataPathOr('./.data/audit/audit.db', 'audit', 'audit.db')); }
 function memoryDir() { return path.resolve(dataPathOr('../../.data/memory', 'memory')); }
 function uploadsDir() { return path.resolve(process.env.UPLOADS_DIR || dataPathOr('../../.data/uploads', 'uploads')); }
@@ -152,26 +187,31 @@ const pad = (n: number) => String(n).padStart(2, '0');
 export const backupId = (at: Date, kind: BackupKind) => `${at.getFullYear()}${pad(at.getMonth() + 1)}${pad(at.getDate())}-${pad(at.getHours())}${pad(at.getMinutes())}${pad(at.getSeconds())}-${kind}`;
 const localDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
-/** Ids that retention removes (newest first input or not). Pure, for the tests. */
-export function expiredBackups(list: Array<{ id: string; at: string; kind: BackupKind }>, now: Date): string[] {
+/**
+ * Ids that retention removes (newest first input or not). Pure, for the tests.
+ * `keepDays` is the owner's "keep for" window (board D4); whatever it is, at
+ * least the newest KEEP_MIN_COUNT backups always stay (never "last only").
+ */
+export function expiredBackups(list: Array<{ id: string; at: string; kind: BackupKind }>, now: Date, keepDays: number = KEEP_DAYS): string[] {
   const sorted = [...list].sort((a, b) => b.at.localeCompare(a.at));
-  const keep = new Set<string>(sorted.slice(0, 1).map((b) => b.id));
+  const keep = new Set<string>(sorted.slice(0, KEEP_MIN_COUNT).map((b) => b.id));
   const day = 86_400_000;
   const sundays: string[] = [];
   for (const b of sorted) {
     const age = now.getTime() - new Date(b.at).getTime();
     if (b.kind === 'before-update' || b.kind === 'before-restore') { if (age <= KEEP_UPDATE_DAYS * day) keep.add(b.id); continue; }
-    if (age <= KEEP_DAYS * day) { keep.add(b.id); continue; }
+    if (age <= keepDays * day) { keep.add(b.id); continue; }
     const d = new Date(b.at);
     if (d.getDay() === 0 && !sundays.includes(localDay(d)) && sundays.length < KEEP_SUNDAYS) { sundays.push(localDay(d)); keep.add(b.id); }
   }
   return sorted.filter((b) => !keep.has(b.id)).map((b) => b.id);
 }
-function keepUntil(b: { id: string; at: string; kind: BackupKind }, all: Array<{ id: string; at: string; kind: BackupKind }>): string | null {
-  const days = b.kind === 'before-update' || b.kind === 'before-restore' ? KEEP_UPDATE_DAYS : KEEP_DAYS;
+function keepUntil(b: { id: string; at: string; kind: BackupKind }, all: Array<{ id: string; at: string; kind: BackupKind }>, keepDays: number = KEEP_DAYS): string | null {
+  const isDaily = b.kind !== 'before-update' && b.kind !== 'before-restore';
+  const days = isDaily ? keepDays : KEEP_UPDATE_DAYS;
   const plain = new Date(new Date(b.at).getTime() + days * 86_400_000);
-  // A kept Sunday stays longer than its 14 days: until four newer Sundays exist.
-  if (days === KEEP_DAYS && new Date(b.at).getDay() === 0) {
+  // A kept Sunday stays longer than its day window: until four newer Sundays exist.
+  if (isDaily && new Date(b.at).getDay() === 0) {
     const later = new Set(all.filter((x) => x.at > b.at && new Date(x.at).getDay() === 0 && x.kind !== 'before-update' && x.kind !== 'before-restore').map((x) => localDay(new Date(x.at))));
     if (later.size < KEEP_SUNDAYS) return null;
   }
@@ -190,10 +230,10 @@ function manifests(): Manifest[] {
 }
 const isAudit = (e: Entry) => e.root === 'data' && path.join(path.resolve(dataRoot()), e.path) === auditPath();
 const isMain = (e: Entry) => (e.root === 'data' && path.join(path.resolve(dataRoot()), e.path) === path.resolve(mainDatabasePath())) || (e.root === 'database' && e.path === path.basename(mainDatabasePath()));
-const info = (m: Manifest, all: Manifest[]): BackupInfo => ({
+const info = (m: Manifest, all: Manifest[], keepDays: number = backupKeepDays()): BackupInfo => ({
   id: m.id, kind: m.kind, at: m.at, checked: m.checked, size: m.entries.reduce((s, e) => s + (e.stored || 0), 0),
   parts: { data: m.entries.some((e) => isMain(e) && e.check === 'ok'), audit: m.entries.some((e) => isAudit(e) && e.check === 'ok'), keys: m.entries.some((e) => e.root === 'data' && e.path.startsWith('encryption' + path.sep) && (e.type === 'file' || e.check === 'ok')) },
-  keepUntil: keepUntil(m, all),
+  keepUntil: keepUntil(m, all, keepDays),
   ...(m.restoreTest ? { restoreTested: m.restoreTest.ok } : storeP9Enabled() ? { restoreTested: null } : {}),
 });
 
@@ -219,7 +259,7 @@ export function backupStatus(now: Date = new Date()) {
   return {
     available: true,
     folder, cloud: isCloudFolder(folder), defaultFolder: defaultBackupsFolder(),
-    runsAt: DAILY_AT, keeps: { days: KEEP_DAYS, sundays: KEEP_SUNDAYS, beforeUpdateDays: KEEP_UPDATE_DAYS },
+    runsAt: DAILY_AT, keeps: { days: backupKeepDays(), sundays: KEEP_SUNDAYS, beforeUpdateDays: KEEP_UPDATE_DAYS, min: KEEP_DAYS_MIN, max: KEEP_DAYS_MAX, presets: KEEP_DAYS_PRESETS },
     running: !!running,
     last: all[0] ? info(all[0], all) : null,
     next: nextDaily(now, all[0]?.at ?? null).toISOString(),
@@ -491,7 +531,7 @@ async function make(kind: BackupKind, now: Date): Promise<BackupInfo> {
 export function prune(now: Date = new Date()): string[] {
   const base = workspaceBackupsDir();
   const all = manifests();
-  const gone = expiredBackups(all, now);
+  const gone = expiredBackups(all, now, backupKeepDays());
   for (const id of gone) fs.rmSync(path.join(base, id), { recursive: true, force: true });
   try {
     for (const n of fs.readdirSync(base)) {
