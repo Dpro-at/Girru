@@ -7,12 +7,15 @@ import {Sheet} from './desktop-ui';
 
 type Kind='daily'|'manual'|'before-update'|'before-restore';
 export type Backup={id:string;kind:Kind;at:string;checked:boolean;size:number;parts:{data:boolean;audit:boolean;keys:boolean};keepUntil:string|null};
-export type DestType='folder'|'sftp'|'webdav'|'s3';
+export type DestType='folder'|'sftp'|'webdav'|'s3'|'gdrive'|'dropbox'|'onedrive';
 export type DestStatus={lastPushAt:string|null;lastOkAt:string|null;lastError:string|null;lastErrorAt:string|null;lastVerifiedAt:string|null;backups:number};
 export type Destination={id:string;type:DestType;label:string;folder:string;enabled:boolean;createdAt:string;status:DestStatus};
 /** Types the owner can add today; the rest are shown but not yet selectable. */
 const DEST_READY:DestType[]=['folder'];
-const DEST_LABELS:Record<DestType,string>={folder:'External drive or NAS folder',sftp:'SFTP server',webdav:'WebDAV',s3:'S3-compatible storage'};
+/** Direct places still to build, then cloud places that wait on Girru Connect sign-in. */
+const DEST_DIRECT:DestType[]=['folder','sftp','webdav','s3'];
+const DEST_CLOUD:DestType[]=['gdrive','dropbox','onedrive'];
+const DEST_LABELS:Record<DestType,string>={folder:'External drive or NAS folder',sftp:'SFTP server',webdav:'WebDAV',s3:'S3-compatible storage',gdrive:'Google Drive',dropbox:'Dropbox',onedrive:'OneDrive'};
 export type BackupStatus={available:true;folder:string;cloud:boolean;defaultFolder:string;runsAt:string;keeps:{days:number;sundays:number;beforeUpdateDays:number;min:number;max:number;presets:number[]};running:boolean;last:Backup|null;next:string;lastError:{message:string;at:string}|null;lastRestore:{id:string;at:string;ok:boolean;error?:string}|null;backups:Backup[]}|{available:false;reason:string};
 
 const DAY=86_400_000;
@@ -177,8 +180,9 @@ function AddPlaceSheet({client,onClose,onSaved}:{client:SessionClient;onClose:()
  };
  return <Sheet title="Add a place for backups" onClose={onClose} actions={<><button type="button" onClick={onClose}>Cancel</button><button type="button" className="primary" disabled={busy||!canSave} onClick={()=>void save()}>{busy?'Adding…':'Add place'}</button></>}>
   <div className="backups-place-types" role="radiogroup" aria-label="Kind of place">
-   {(['folder','sftp','webdav','s3'] as DestType[]).map(t=>{const avail=DEST_READY.includes(t);return <button key={t} type="button" role="radio" aria-checked={type===t} disabled={!avail} className="backups-type" onClick={()=>setType(t)}>{DEST_LABELS[t]}{!avail&&<small> · coming</small>}</button>;})}
+   {DEST_DIRECT.map(t=>{const avail=DEST_READY.includes(t);return <button key={t} type="button" role="radio" aria-checked={type===t} disabled={!avail} className="backups-type" onClick={()=>setType(t)}>{DEST_LABELS[t]}{!avail&&<small> · coming</small>}</button>;})}
   </div>
+  <p className="fine-print backups-cloud-note">Cloud places — {DEST_CLOUD.map(t=>DEST_LABELS[t]).join(', ')} — arrive with Girru Connect sign-in. Your data is encrypted here first, and the sign-in stays on this computer.</p>
   {type==='folder'&&<>
    <label className="backups-field"><span>Folder</span><input autoFocus value={folder} onChange={e=>setFolder(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')void save();}} placeholder="/Volumes/My Drive/Girru" aria-label="Destination folder" spellCheck={false}/></label>
    <label className="backups-field"><span>Name (optional)</span><input value={label} onChange={e=>setLabel(e.target.value)} placeholder="External drive" aria-label="Place name"/></label>

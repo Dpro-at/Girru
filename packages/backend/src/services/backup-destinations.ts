@@ -19,17 +19,21 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { pipeline } from 'node:stream/promises';
 import { dataRoot, realish } from '../config/data-root.js';
 import { BackupError, backupStatus, getBackup, workspaceName } from './backups.js';
 import { encryptBackupArchive } from './backup-archive.js';
 
-export type DestinationType = 'folder' | 'sftp' | 'webdav' | 's3';
+export type DestinationType = 'folder' | 'sftp' | 'webdav' | 's3' | 'gdrive' | 'dropbox' | 'onedrive';
 /** Types the owner can add today; others are shown as "coming" and never faked. */
 export const AVAILABLE_TYPES: readonly DestinationType[] = ['folder'];
+/** Direct places still to build. */
 export const COMING_TYPES: readonly DestinationType[] = ['sftp', 'webdav', 's3'];
+/** Cloud places that wait on the Girru Connect sign-in broker (GIRRU-CONNECT-01); the token would live only on the computer. */
+export const CLOUD_TYPES: readonly DestinationType[] = ['gdrive', 'dropbox', 'onedrive'];
+const ALL_TYPES: readonly DestinationType[] = ['folder', 'sftp', 'webdav', 's3', 'gdrive', 'dropbox', 'onedrive'];
 
 export interface DestinationStatus {
   lastPushAt: string | null;
@@ -77,7 +81,7 @@ async function loadDestinations(): Promise<Destination[]> {
 function readJsonString(s: string): unknown[] { try { const v = JSON.parse(s); return Array.isArray(v) ? v : []; } catch { return []; } }
 function isDestination(d: unknown): d is Destination {
   const o = d as Partial<Destination> | null;
-  return !!o && typeof o.id === 'string' && (o.type === 'folder' || o.type === 'sftp' || o.type === 'webdav' || o.type === 's3')
+  return !!o && typeof o.id === 'string' && typeof o.type === 'string' && ALL_TYPES.includes(o.type as DestinationType)
     && typeof o.label === 'string' && typeof o.config === 'object' && o.config !== null && typeof o.createdAt === 'string';
 }
 async function saveDestinations(list: Destination[]): Promise<void> {
@@ -108,29 +112,54 @@ interface Adapter {
   remove(dest: Destination, name: string): Promise<void>;
 }
 
+/** Create a file that must not already exist and must not be a symlink, and write `write` through it. */
+const O_SAFE = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW ?? 0);
+async function writeNew(file: string, write: (fd: number) => Promise<void> | void): Promise<void> {
+  const fd = fs.openSync(file, O_SAFE, 0o600);
+  try { await write(fd); } finally { fs.closeSync(fd); }
+}
+
 /** A folder on this computer, an external drive or a mounted NAS share. */
 const folderAdapter: Adapter = {
   type: 'folder',
   async ensure(dest) {
     const base = folderBase(dest);
     fs.mkdirSync(base, { recursive: true, mode: 0o700 });
-    // Prove it is writable with a throwaway probe.
-    const probe = path.join(base, `.probe-${process.pid}`);
-    fs.writeFileSync(probe, 'ok', { mode: 0o600 });
-    fs.rmSync(probe, { force: true });
+    assertRealBase(dest, base);
+    // Prove it is writable with a throwaway probe that can neither clobber nor follow a planted link.
+    const probe = path.join(base, `.probe-${randomBytes(8).toString('hex')}`);
+    try { await writeNew(probe, (fd) => { fs.writeSync(fd, 'ok'); }); } finally { fs.rmSync(probe, { force: true }); }
   },
   async put(dest, name, localFile) {
     const target = folderTarget(dest, name);
     fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
-    const tmp = `${target}.uploading`;
-    fs.copyFileSync(localFile, tmp);
-    fs.chmodSync(tmp, 0o600);
-    fs.renameSync(tmp, target);
+    const tmp = `${target}.uploading-${randomBytes(8).toString('hex')}`;
+    try {
+      await writeNew(tmp, (fd) => pipeline(fs.createReadStream(localFile), fs.createWriteStream(tmp, { fd, autoClose: false })));
+      fs.renameSync(tmp, target); // rename does not follow the final component: a link at `target` is replaced, not written through
+    } catch (err) { fs.rmSync(tmp, { force: true }); throw err; }
   },
-  async get(dest, name, localFile) { fs.copyFileSync(folderTarget(dest, name), localFile); },
+  async get(dest, name, localFile) {
+    // O_NOFOLLOW: a link planted at the stored name is refused rather than read through.
+    const src = folderTarget(dest, name);
+    const fd = fs.openSync(src, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+    try { await pipeline(fs.createReadStream(src, { fd, autoClose: false }), fs.createWriteStream(localFile, { mode: 0o600 })); } finally { fs.closeSync(fd); }
+  },
   async list(dest) { try { return fs.readdirSync(folderBase(dest)); } catch { return []; } },
   async remove(dest, name) { fs.rmSync(folderTarget(dest, name), { force: true }); },
 };
+
+/** The place's backup folder must be a real directory under the chosen folder, never reached through a symlink. */
+function assertRealBase(dest: Destination, base: string): void {
+  const folder = dest.config.folder;
+  try {
+    const expected = path.join(fs.realpathSync(folder), REMOTE_DIR, workspaceName());
+    if (fs.realpathSync(base) !== expected) throw new BackupError(400, 'invalid_destination', 'The backup folder on the place is not where it should be');
+  } catch (err) {
+    if (err instanceof BackupError) throw err;
+    throw new BackupError(400, 'invalid_destination', 'The backup folder on the place could not be opened');
+  }
+}
 
 const ADAPTERS: Record<string, Adapter> = { folder: folderAdapter };
 function adapterFor(dest: Destination): Adapter {
@@ -177,7 +206,8 @@ export async function addDestination(input: unknown): Promise<DestinationView> {
   const o = (input ?? {}) as Record<string, unknown>;
   const type = o.type;
   if (type !== 'folder') {
-    if (type === 'sftp' || type === 'webdav' || type === 's3') throw new BackupError(400, 'type_not_ready', `Backups to ${type} are coming soon`);
+    if (typeof type === 'string' && (CLOUD_TYPES as readonly string[]).includes(type)) throw new BackupError(400, 'needs_connect', 'Cloud backups arrive with Girru Connect sign-in — coming soon');
+    if (typeof type === 'string' && (COMING_TYPES as readonly string[]).includes(type)) throw new BackupError(400, 'type_not_ready', `Backups to ${type} are coming soon`);
     throw new BackupError(400, 'invalid_type', 'Unknown place');
   }
   const label = typeof o.label === 'string' && o.label.trim() ? o.label.trim().slice(0, 120) : 'External folder';

@@ -67,7 +67,7 @@ function status(s) {
     backups: Array.isArray(s.backups) ? s.backups.slice(0, 500).map(backup).filter(b => b.id) : [],
   };
 }
-const DEST_TYPES = ['folder', 'sftp', 'webdav', 's3'];
+const DEST_TYPES = ['folder', 'sftp', 'webdav', 's3', 'gdrive', 'dropbox', 'onedrive'];
 /** A backup place: its label and non-secret settings plus status — never any secret. */
 function destination(d) {
   const v = record(d) ? d : {};

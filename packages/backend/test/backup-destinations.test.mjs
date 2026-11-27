@@ -107,6 +107,29 @@ test('a place is owner-only, validated, and coming types are honest', async () =
   assert.equal((await call('d-owner', 'POST', '/api/backups/destinations', { type: 'folder', folder: join(data, 'x') })).statusCode, 400);
   // Not-yet-available types are refused, not faked.
   for (const type of ['sftp', 'webdav', 's3']) assert.equal((await call('d-owner', 'POST', '/api/backups/destinations', { type, folder: drive })).statusCode, 400, type);
+  // Cloud types wait on Girru Connect and say so, rather than pretending to work.
+  for (const type of ['gdrive', 'dropbox', 'onedrive']) {
+    const r = await call('d-owner', 'POST', '/api/backups/destinations', { type });
+    assert.equal(r.statusCode, 400, type);
+    assert.equal(r.json().code, 'needs_connect', type);
+  }
+});
+
+test('a place whose folder is swapped for a symlink is refused (no write-through)', async () => {
+  const { symlinkSync, mkdirSync: mk, rmSync, existsSync: ex } = await import('node:fs');
+  const drive2 = join(dir, 'Drive2');
+  const evil = join(dir, 'evil-target');
+  mk(drive2, { recursive: true }); mk(evil, { recursive: true });
+  const added = (await ok(call('d-owner', 'POST', '/api/backups/destinations', { type: 'folder', label: 'drive2', folder: drive2 }))).destination;
+  // Someone replaces the place's backup subfolder with a link to somewhere else.
+  rmSync(join(drive2, 'girru-offsite'), { recursive: true, force: true });
+  symlinkSync(evil, join(drive2, 'girru-offsite'));
+  const r = await call('d-owner', 'POST', `/api/backups/destinations/${added.id}/push`);
+  assert.equal(r.statusCode, 400, r.body);
+  assert.equal(r.json().code, 'invalid_destination');
+  assert.equal(findBlob(evil).length, 0, 'nothing is written through the link');
+  assert.ok(!ex(join(evil, 'workspace')) || findBlob(evil).every((f) => !f.endsWith('.gbk')), 'no backup blob escaped');
+  await ok(call('d-owner', 'DELETE', `/api/backups/destinations/${added.id}`)); // leave only the first place for the next test
 });
 
 test('removing a place forgets it but leaves the backups on it', async () => {
