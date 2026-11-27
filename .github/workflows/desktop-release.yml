@@ -73,6 +73,14 @@ jobs:
         run: npm --prefix packages/desktop run ${{ matrix.target }}
       - name: Verify unpacked runtime
         run: node packages/desktop/scripts/verify-release.cjs
+      - name: Collect checksummed installers
+        run: node packages/desktop/scripts/collect-release.cjs ${{ matrix.platform }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.platform }}
+          path: packages/desktop/release/publish/*
+          if-no-files-found: error
+          retention-days: 14
       - name: Verify installed branding on Windows
         if: ${{ matrix.platform == 'win-x64' }}
         run: node packages/desktop/scripts/verify-installed-branding.cjs
@@ -84,14 +92,6 @@ jobs:
         with:
           name: installed-branding-${{ matrix.platform }}
           path: packages/desktop/release/installed-*.png
-          if-no-files-found: error
-          retention-days: 14
-      - name: Collect checksummed installers
-        run: node packages/desktop/scripts/collect-release.cjs ${{ matrix.platform }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: desktop-${{ matrix.platform }}
-          path: packages/desktop/release/publish/*
           if-no-files-found: error
           retention-days: 14
 

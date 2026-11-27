@@ -20,8 +20,14 @@ function installer(extension) {
 function install(root) {
   if (process.platform === 'win32') {
     const directory = path.join(root, 'installed');
-    execFileSync(installer('.exe'), ['/S', `/D=${directory}`], { timeout: 120_000 });
+    // Close the inherited handles so the NSIS process cannot keep the test waiting
+    // on pipes held by a child after setup finishes.
+    execFileSync(installer('.exe'), ['/S', '/currentuser', `/D=${directory}`], {
+      timeout: 240_000,
+      stdio: 'ignore',
+    });
     const executable = path.join(directory, 'Girru.exe');
+    assert.ok(fs.existsSync(executable), 'NSIS must install Girru.exe in the isolated directory');
     const icon = path.join(root, 'platform-icon.png');
     execFileSync('powershell.exe', [
       '-NoProfile', '-NonInteractive', '-Command',
