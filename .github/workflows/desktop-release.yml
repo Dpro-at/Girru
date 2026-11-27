@@ -12,16 +12,27 @@ on:
         description: Create a draft release after all platforms pass
         type: boolean
         default: false
+      verify_windows_run:
+        description: Recheck a checksummed Windows installer from this workflow run ID
+        type: string
+        required: false
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: desktop-release-${{ github.ref }}-${{ inputs.platform || 'all' }}
   cancel-in-progress: false
 
 jobs:
+  verify_windows:
+    if: ${{ inputs.verify_windows_run != '' }}
+    uses: ./.github/workflows/windows-installer-verification.yml
+    with:
+      run_id: ${{ inputs.verify_windows_run }}
   build:
+    if: ${{ inputs.verify_windows_run == '' }}
     strategy:
       fail-fast: false
       matrix:

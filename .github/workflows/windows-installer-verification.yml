@@ -1,7 +1,7 @@
 name: Verify built Windows installer
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
       run_id:
         description: Desktop workflow run containing the checksummed Windows installer
