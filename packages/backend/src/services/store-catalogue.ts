@@ -127,6 +127,7 @@ export async function readStore(ownerId:string,source:LocalCatalogue=localCatalo
  let updates:Awaited<ReturnType<typeof checkForUpdates>>=[];
  try{updates=await checkForUpdates(ownerId);}catch{/* No registry here: no registry updates. */}
  const {installed:registry,present}=source.have();
+ const installedStore=await installedApps();
  const items:StoreEntry[]=index.items.map(x=>{
   const state:StoreState=x.id.startsWith('girru:')?'included':x.id.startsWith('registry:')?(registry.has(x.id)?'installed':'available'):x.id.startsWith('store:')?(registry.has(x.id)?'installed':source.addable?.().has(x.id)?'available':'elsewhere'):'elsewhere';
   if(x.id==='store:browser'){
@@ -136,7 +137,8 @@ export async function readStore(ownerId:string,source:LocalCatalogue=localCatalo
   }
   if(x.id===CODE_ITEM){const c=codeState(source.codeRuntime?.()??null);return {...x,...(c.version?{version:c.version}:{}),state:c.state,present:c.state==='included'||c.state==='installed',update:c.update,hash:consentHash(x)};}
   if(x.id===GENVR_ITEM){const c=genvrState(source.genvrRuntime?.()??null);return {...x,...(c.version?{version:c.version}:{}),state:c.state,present:c.state==='included'||c.state==='installed',update:c.update,hash:consentHash(x)};}
-  const update=updates.find(u=>'registry:'+u.extension_id===x.id)?.latest_version??null;
+  const local=x.id.startsWith('store:')?installedStore[x.id.slice(6)]:undefined;
+  const update=local?.source==='store'&&local.version!==x.version?x.version:updates.find(u=>'registry:'+u.extension_id===x.id)?.latest_version??null;
   return {...x,state,present:state==='included'||state==='installed'||present.has(x.id),update:state==='installed'?update:null,hash:consentHash(x)};
  });
  return {schema:index.schema,featured:index.featured,collections:index.collections,// The category row is fixed (SA1 v2); More shows only when something is in it.

@@ -51,12 +51,13 @@ test('footer: usual footer first, each person saves their own, unknown values re
   assert.equal((await call('GET', 'ft-owner')).json().footer.iconsOnly, true);
   assert.notDeepEqual((await call('GET', 'ft-user')).json().footer.hidden, ['board']);
   const moved = (await call('PUT', 'ft-owner', { order: ['store', 'chat'] })).json().footer;
-  assert.deepEqual(moved.order.slice(0, 3), ['store', 'computers', 'chat']);
-  assert.equal(moved.order.length, 17);
+  assert.deepEqual(moved.order.slice(0, 3), ['store', 'marketing', 'computers']);
+  assert.equal(moved.order.length, 19);
   assert.ok(moved.order.includes('runs'), 'RUNS-01: Runs is a footer section');
+  const marketing=await call('PUT', 'ft-owner', {hidden:['marketing']});assert.equal(marketing.statusCode,200);assert.deepEqual(marketing.json().footer.hidden,['marketing']);
   assert.ok(moved.order.includes('browser'), 'Browser remains available after reordering an older footer');
   assert.equal((await call('PUT', 'ft-owner', { order: ['apps'] })).statusCode, 400, 'SA6: Apps is no footer section any more');
-  assert.deepEqual((await import(join(backendDir, 'src/api/routes/ui-footer.ts'))).footerPrefs({ order: ['apps', 'chat'] }).order.slice(0, 3), ['store', 'computers', 'chat'], 'an older saved Apps place becomes the Store; Computers follows it');
+  assert.deepEqual((await import(join(backendDir, 'src/api/routes/ui-footer.ts'))).footerPrefs({ order: ['apps', 'chat'] }).order.slice(0, 3), ['store', 'marketing', 'computers'], 'an older saved Apps place becomes the Store; Computers follows it');
   for (const bad of [{}, { hidden: ['settings'] }, { hidden: ['mcp'] }, { hidden: ['chat', 'chat'] }, { order: ['nope'] }, { iconsOnly: 'yes' }, { other: true }, []])
     assert.equal((await call('PUT', 'ft-owner', bad)).statusCode, 400, JSON.stringify(bad));
 });

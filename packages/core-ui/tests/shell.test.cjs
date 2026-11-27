@@ -144,6 +144,8 @@ test('source boundary: only injected session transport may network; no browser s
     let source = fs.readFileSync(path.join(root, 'src', name), 'utf8');
     // Only a validated, non-sensitive theme preference may persist in browser storage.
     if (name === 'app-navigation.ts') source = source.replace("localStorage.getItem('dpro.theme')", 'undefined').replace("localStorage.setItem('dpro.theme', value)", 'undefined');
+    // Marketing persists bounded, user-and-connection-scoped draft content only.
+    if(name==='MarketingSocial.tsx'){assert.equal((source.match(/\blocalStorage\b/g)||[]).length,1);assert.match(source,/draftStore\(localStorage,client\.getSnapshot\(\)\.user!\.id,status\.connectionId!\)/);source=source.replace('localStorage','reviewedDraftStorage');}
     // dev-session-keep.ts alone may use session storage, and only for the local test build.
     if (name === 'dev-session-keep.ts') assert.doesNotMatch(source, /\b(XMLHttpRequest|WebSocket|EventSource|localStorage|indexedDB|dangerouslySetInnerHTML)\b|document\.cookie/, name);
     else assert.doesNotMatch(source, /\b(XMLHttpRequest|WebSocket|EventSource|localStorage|sessionStorage|indexedDB|dangerouslySetInnerHTML)\b|document\.cookie/, name);

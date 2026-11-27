@@ -1,3 +1,4 @@
+import {marketingRoute,allowedMarketing,marketingResponse} from './marketing-contract.js';
 import {parseLegalPolicy,type LegalAcceptance} from './legal-policy-contract.js';
 import type {LegalConsentState} from './LegalConsent';
 import {googleAuthRoute,allowedGoogleAuth,googleAuthResponse} from './google-auth-contract.js';
@@ -124,6 +125,7 @@ function user(value: unknown): User {
 }
 // Reject before URL normalization. No generic URL, header, key or mutation escape hatch.
 export function allowedRequest(method: string, path: string, body?: unknown): boolean {
+  if(marketingRoute(path))return allowedMarketing(method,path,body);
   if(googleAuthRoute(path))return allowedGoogleAuth(method,path,body);
   if(computerRoute(path))return allowedComputer(method,path,body);
   if(path===VOICE_LIBRARY_PATH)return allowedVoiceLibrary(method,path,body);
@@ -238,6 +240,7 @@ function safeResponse(path: string, response: WireResponse): WireResponse {
   return delay === undefined ? projected : { ...projected, retryAfterSeconds: delay };
 }
 function projectResponse(path: string, response: WireResponse): WireResponse {
+  if(marketingRoute(path))return {status:response.status,body:marketingResponse(path,response.status,response.body)};
   if(path===VOICE_LIBRARY_PATH)return {status:response.status,body:voiceLibraryResponse(response.status,response.body)};
   if(path===BROWSER_APP_PATH)return {status:response.status,body:browserAppResponse(response.status,response.body)};
   if (path === CHAT_VOICE_PATH) return {status:response.status,body:chatVoiceResponse(response.status,response.body)};
@@ -656,6 +659,7 @@ export class SessionClient {
     } catch { if (epoch === this.#state.epoch) { keep.save(null); this.#reset('live', 'signed-out'); } return false; }
   }
   request = async (request: Request, signal?: AbortSignal): Promise<WireResponse> => {
+    if(marketingRoute(request.path)&&this.#state.user?.role!=='owner')throw new SessionFailure('blocked');
     if (!this.#token || this.#state.phase !== 'authenticated') throw new SessionFailure('blocked');
     // The public adapter transport cannot call login/logout or add arbitrary request fields.
     if (googleAuthRoute(request.path)&&!request.path.startsWith('/api/auth/google/link') || request.path === '/api/setup/status' || request.path === OWNER_SETUP_PATH || request.path === '/api/chat' || request.path === '/api/auth/login' || request.path === '/api/auth/logout' || Object.keys(request).some(k => !['method', 'path', 'body'].includes(k))) throw new SessionFailure('blocked');
