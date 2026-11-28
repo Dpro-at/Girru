@@ -135,11 +135,15 @@ async function saveDestinations(list: Destination[]): Promise<void> {
 // --- per-place status (state file) -------------------------------------------
 
 const stateFile = () => path.join(dataRoot(), STATE_FILE);
-const readState = (): Record<string, DestinationStatus> => readJson<Record<string, DestinationStatus>>(stateFile()) ?? {};
+/** The state map has no prototype, so no id (such as "__proto__") can reach shared object behaviour. */
+const readState = (): Record<string, DestinationStatus> => Object.assign(Object.create(null) as Record<string, DestinationStatus>, readJson<Record<string, DestinationStatus>>(stateFile()) ?? {});
+/** Only ids shaped like the ones Girru makes are used as keys. */
+const SAFE_ID = /^[A-Za-z0-9_-]{1,80}$/;
 function patchStatus(id: string, p: Partial<DestinationStatus>) {
-  try { const s = readState(); s[id] = { ...emptyStatus(), ...s[id], ...p }; writePrivate(stateFile(), s); } catch { /* the copy itself matters more */ }
+  if (!SAFE_ID.test(id)) return;
+  try { const s = readState(); const prev = Object.hasOwn(s, id) ? s[id] : undefined; s[id] = { ...emptyStatus(), ...prev, ...p }; writePrivate(stateFile(), s); } catch { /* the copy itself matters more */ }
 }
-const statusOf = (id: string): DestinationStatus => readState()[id] ?? emptyStatus();
+const statusOf = (id: string): DestinationStatus => { const s = readState(); return SAFE_ID.test(id) && Object.hasOwn(s, id) ? s[id] : emptyStatus(); };
 
 // --- adapters ----------------------------------------------------------------
 
@@ -562,7 +566,7 @@ export async function removeDestination(id: string): Promise<void> {
   await saveDestinations(list.filter((d) => d.id !== id));
   // Leave the owner's backups where they are; only forget the place, its secret and its status.
   await forgetSecret(found.credentialId);
-  try { const s = readState(); delete s[id]; writePrivate(stateFile(), s); } catch { /* best effort */ }
+  try { const s = readState(); if (SAFE_ID.test(id) && Object.hasOwn(s, id)) { delete s[id]; writePrivate(stateFile(), s); } } catch { /* best effort */ }
 }
 
 async function getDestination(id: string): Promise<Destination> {

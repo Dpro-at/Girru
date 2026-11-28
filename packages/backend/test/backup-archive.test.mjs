@@ -5,7 +5,7 @@
 // Run: node --import tsx --test test/backup-archive.test.mjs
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, rmSync, openSync, fstatSync, closeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes, createHash, createCipheriv } from 'node:crypto';
@@ -76,10 +76,15 @@ test('round-trip: encrypt to one blob, decrypt to the exact same files', async (
   assert.ok(existsSync(blob + '.meta.json'), 'the sidecar is written');
   assert.equal(meta.algorithm, 'aes-256-gcm');
   assert.ok(typeof meta.keyId === 'string' && meta.keyId.length > 0);
-  assert.equal(statSync(blob).mode & 0o777, 0o600, 'owner-only');
+  // One open handle for the mode check and the read, so both see the same file.
+  const blobFd = openSync(blob, 'r');
+  let cipher;
+  try {
+    assert.equal(fstatSync(blobFd).mode & 0o777, 0o600, 'owner-only');
+    cipher = readFileSync(blobFd);
+  } finally { closeSync(blobFd); }
 
   // The provider sees only ciphertext: no plaintext marker, no readable paths.
-  const cipher = readFileSync(blob);
   assert.ok(!cipher.includes(Buffer.from(marker)), 'no plaintext memory in the blob');
   assert.ok(!cipher.includes(Buffer.from('agent-player.db')), 'no plaintext file names in the blob');
   assert.ok(!cipher.includes(Buffer.from('JWT_SECRET')), 'no plaintext secret in the blob');

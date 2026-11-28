@@ -5,7 +5,7 @@
 // Run: node --import tsx --test test/backup-destinations.test.mjs
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, openSync, fstatSync, closeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -85,8 +85,13 @@ test('add a folder place, push, and the place holds only ciphertext that restore
   const blob = files.find((f) => f.endsWith('.gbk'));
   const sidecar = files.find((f) => f.endsWith('.gbk.meta.json'));
   assert.ok(blob && sidecar, 'blob and sidecar written');
-  assert.equal(statSync(blob).mode & 0o777, 0o600, 'owner-only on the place');
-  const bytes = readFileSync(blob);
+  // One open handle for the mode check and the read, so both see the same file.
+  const blobFd = openSync(blob, 'r');
+  let bytes;
+  try {
+    assert.equal(fstatSync(blobFd).mode & 0o777, 0o600, 'owner-only on the place');
+    bytes = readFileSync(blobFd);
+  } finally { closeSync(blobFd); }
   assert.ok(!bytes.includes(Buffer.from(marker)), 'no plaintext memory on the place');
   assert.ok(!bytes.includes(Buffer.from('rules.md')), 'no plaintext file names on the place');
   assert.ok(!bytes.includes(Buffer.from('SQLite format 3')), 'no readable database header on the place');
@@ -159,7 +164,7 @@ test('the SFTP step offers the owner’s own SSH servers (names only), owner-onl
   assert.equal(nas.keyName, 'id_ed25519'); assert.equal(nas.login, 'girru'); assert.equal(nas.port, 22);
   const office = hosts.find((h) => h.alias === 'office-backup');
   assert.equal(office.keyName, null); assert.equal(office.port, null);
-  assert.ok(!JSON.stringify(hosts).includes('nope.example.com'), 'another user’s host never appears');
+  assert.ok(!hosts.some((h) => h.host === 'nope.example.com' || h.alias === 'secret-host'), 'another user’s host never appears');
   // Owner only.
   assert.equal((await call('d-user', 'GET', '/api/backups/ssh-hosts')).statusCode, 403);
 });
