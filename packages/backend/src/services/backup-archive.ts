@@ -240,6 +240,10 @@ async function unpack(src: AsyncIterable<Buffer>, destDir: string, maxBytes: num
     const target = entryTarget(destDir, e.p);
     fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
     const out = fs.createWriteStream(target, { mode: 0o600 });
+    // A stream error (also one raised while closing) is reported through the write
+    // or the end below, never as an uncaught 'error' event.
+    let outErr: Error | null = null;
+    out.on('error', (err) => { outErr ??= err; });
     try {
       let left = e.n;
       while (left > 0) {
@@ -249,7 +253,10 @@ async function unpack(src: AsyncIterable<Buffer>, destDir: string, maxBytes: num
         buf = buf.subarray(take);
         left -= take;
       }
-    } finally { await new Promise<void>((res) => out.end(res)); }
+    } finally {
+      await new Promise<void>((res) => { if (out.destroyed || outErr) { res(); return; } out.once('error', () => res()); out.end(() => res()); });
+    }
+    if (outErr) throw outErr;
   }
 
   // Drain the rest so the decrypt pipeline ends naturally (that is what runs
@@ -290,6 +297,10 @@ export async function decryptBackupArchive(encFile: string, meta: ArchiveMeta, d
   const parent = path.dirname(path.resolve(destDir));
   fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
   const staging = fs.mkdtempSync(path.join(parent, '.restoring-'));
+  // The unpack step may still be writing its current file when the pipeline
+  // rejects (an earlier stage failed). Wait for it to settle before removing the
+  // staging folder, so no file is open in it and nothing recreates it afterwards.
+  let unpacking: Promise<void> | null = null;
   try {
     // One pass: decrypt → gunzip → hash → unpack. decipher.final() (reached as the
     // pipeline drains) throws on a bad GCM tag, so a tampered blob fails closed.
@@ -298,7 +309,7 @@ export async function decryptBackupArchive(encFile: string, meta: ArchiveMeta, d
       decipher,
       createGunzip(),
       hashTap(plainHash),
-      (source: AsyncIterable<Buffer>) => unpack(source, staging, meta.originalSize, meta.id),
+      (source: AsyncIterable<Buffer>) => (unpacking = unpack(source, staging, meta.originalSize, meta.id)),
     );
     const gotPlain = plainHash.digest();
     const wantPlain = Buffer.from(meta.originalSha256, 'hex');
@@ -307,6 +318,7 @@ export async function decryptBackupArchive(encFile: string, meta: ArchiveMeta, d
     if (fs.existsSync(destDir)) throw new ArchiveError('exists', 'The restore target already exists');
     fs.renameSync(staging, destDir);
   } catch (err) {
+    if (unpacking) await (unpacking as Promise<void>).catch(() => undefined);
     fs.rmSync(staging, { recursive: true, force: true });
     throw err;
   }

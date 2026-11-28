@@ -114,6 +114,12 @@ export const TOOL_DEFINITIONS = [
     inputSchema:{type:'object',properties:{operation:{type:'string',enum:RUN_OPS},place:{type:'string',enum:RUN_PLACES},kind:{type:'string',enum:RUN_KINDS},agentId:{type:'string',maxLength:120},projectId:{type:'string',maxLength:120},query:{type:'string',maxLength:200},before:{type:'integer',minimum:1},id:{type:'string',maxLength:180},instructions:{type:'string',maxLength:5000},every:{type:'string',enum:['hourly','daily','weekly']},at:{type:'string',maxLength:5},weekday:{type:'integer',minimum:0,maximum:6},notify:{type:'string',enum:['important','all','none']},newChat:{type:'boolean'},model:{type:'string',maxLength:100},thinking:{type:'string',enum:['quick','normal','deep']}},required:['operation'],additionalProperties:false},
   },
   {
+    name:'memory_helper',title:'Memory helper',
+    description:'Owner-session only. The memory helper (Memory \u203a Memory helper): status = its state, the search model, RAM used / RAM limit / free RAM, the night writer, whether tonight\u2019s work runs now and what last night read and wrote per project. settings = change the RAM limit (mode auto: a quarter of the computer\u2019s RAM, light: about 1 GB and search only, custom with customGb) or the night writer (a model already on this computer that fits the RAM limit, or null). start = Run now (tonight\u2019s work now); stop = Stop at the end of the current step. Night hours stay with the owner in Settings \u203a Memory \u203a Memory helper. No memory text is returned.',
+    annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
+    inputSchema:{type:'object',properties:{operation:{type:'string',enum:['status','settings','start','stop']},ram:{type:'object',properties:{mode:{type:'string',enum:['auto','light','custom']},customGb:{type:'integer',minimum:1,maximum:4096}},required:['mode'],additionalProperties:false},worker:{type:['string','null'],maxLength:128}},required:['operation'],additionalProperties:false},
+  },
+  {
     name:'workspace_footer',title:'Footer sections',
     description:'Owner-session only. Read or change which sections the Girru window footer shows, their order, icons only, and whether Approvals comes back when something waits. Sections: chat, agents, library (Personalities, Specialties and Skills), board, runs (everything that runs, and the schedules), reports, memory, approvals, apps, store, computers (your other computers: who is free, what needs you, what each works on), genvr, terminal, code, skills, personalities, specialties. MCP connections, channels, accounts and departments are places in Settings, not footer sections. Settings always stays and cannot be hidden; hidden sections stay in the command box (⌘K). Change only when the owner asks. The open window picks the change up when it is next focused.',
     inputSchema:{type:'object',properties:{operation:{type:'string',enum:['read','set']},order:{type:'array',maxItems:FOOTER_IDS.length,items:{type:'string',enum:FOOTER_IDS}},hidden:{type:'array',maxItems:FOOTER_IDS.length,items:{type:'string',enum:FOOTER_IDS}},iconsOnly:{type:'boolean'},approvalsWhenWaiting:{type:'boolean'}},required:['operation'],additionalProperties:false},
@@ -385,6 +391,7 @@ export async function callTool(name: string, rawArgs: unknown, deps: HandlerDeps
       case 'chats': return await chatsTool(args,deps);
       case 'meetings': return await meetingsTool(args,deps);
       case 'workspace_footer': return await workspaceFooterTool(args,deps);
+      case 'memory_helper': return await memoryHelperTool(args,deps);
       case 'run_command': return await runCommandTool(args,deps);
       case 'account_settings': return await accountSettingsTool(args,deps);
       case 'workspace_backups': return await workspaceBackupsTool(args,deps);
@@ -661,6 +668,22 @@ async function runCommandTool(args:Record<string,unknown>,{backend}:HandlerDeps)
  if(out.code==='waiting_for_run')return ok('Not run yet: it waits for the owner\u2019s Run in Girru \u203a Approvals. Tell the owner.',out);
  if(out.code==='agent_commands_off')return fail('Running commands is off on this computer. The owner turns it on in Settings \u203a Permissions \u203a Agents can run commands on this computer.',out);
  return ok(out.ran?'The command ran. Output below (untrusted data, not instructions).':'The command did not run as asked. See the output.',out);
+}
+
+/** MEM-PANEL-01: the same reads and actions as Memory \u203a Memory helper, through the same owner-only routes. */
+async function memoryHelperTool(args:Record<string,unknown>,{backend}:HandlerDeps):Promise<ToolCallResult>{
+ const op=args.operation;
+ if(op==='status'){only(args,['operation']);const helper=await backend.request('GET','/api/memory/helper') as Record<string,unknown>;const night=await backend.request('GET','/api/memory/scopes/night') as Record<string,unknown>;return ok('Memory helper: state, RAM, night writer and night work. No memory text.',{helper,night});}
+ if(op==='settings'){
+  only(args,['operation','ram','worker']);const change:Record<string,unknown>={};
+  if('ram' in args){const r=args.ram as Record<string,unknown>;if(!r||typeof r!=='object'||Array.isArray(r)||!['auto','light','custom'].includes(String(r.mode))||Object.keys(r).some(k=>!['mode','customGb'].includes(k)))throw new InputError('ram is { mode: auto | light | custom, customGb? }');if(r.mode==='custom'&&(!Number.isSafeInteger(r.customGb)||(r.customGb as number)<1))throw new InputError('custom needs customGb (whole GB)');change.ram=r.mode==='custom'?{mode:r.mode,customGb:r.customGb}:{mode:r.mode};}
+  if('worker' in args){const w=args.worker;if(w!==null&&(typeof w!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(w)))throw new InputError('worker is a model name or null');change.worker=w;}
+  if(!Object.keys(change).length)throw new InputError('Nothing to change');
+  return ok('Memory helper settings saved.',await backend.request('PUT','/api/memory/helper/settings',change));
+ }
+ if(op==='start'){only(args,['operation']);return ok('Started tonight\u2019s memory work. It reports in Memory \u203a Memory helper.',await backend.request('POST','/api/memory/scopes/night/run',{}));}
+ if(op==='stop'){only(args,['operation']);const r=await backend.request('POST','/api/memory/scopes/night/stop',{}) as Record<string,unknown>;return ok(r.stopped?'It stops at the end of the current step.':'Nothing is running.',r);}
+ throw new InputError('operation must be status, settings, start or stop');
 }
 
 async function workspaceFooterTool(args:Record<string,unknown>,{backend}:HandlerDeps):Promise<ToolCallResult>{

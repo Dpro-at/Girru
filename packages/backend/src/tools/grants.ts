@@ -68,6 +68,10 @@ export const DEFAULT_AGENT_TOOLS: readonly string[] = [
   'memory_trash', // MEM-TRASH-01: read-only Trash list; owner's own turns only
   'memory_restore', // MEM-TRASH-01: undo a delete (memory or project); owner's own turns only
   'memory_trash_empty', // MEM-TRASH-01: forget what is in the Trash; every call needs owner approval
+  'memory_helper_status', // MEM-PANEL-01: read-only helper state, RAM and last night; owner's own turns only
+  'memory_helper_settings', // MEM-PANEL-01: RAM limit and night writer; every call needs owner approval
+  'memory_night_run', // MEM-PANEL-01: Run now; owner's own turns only
+  'memory_night_stop', // MEM-PANEL-01: Stop; owner's own turns only
   'memory_project_trash', // MEM-TRASH-01: move a project to the Trash; every call needs owner approval
   'memory_groups', // MEM-UX-02: read-only groups of projects; owner's own turns only
   'memory_group_apply', // MEM-UX-02: groups of projects + share within; every call needs owner approval

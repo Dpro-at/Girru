@@ -36,6 +36,7 @@ import { defaultDataDir } from '../config/secrets-bootstrap.js';
 import { memoryHelperEnabled } from '../services/memory-helper-switch.js';
 import { DEFAULT_EMBEDDING_MODEL, isLoopbackUrl, getEmbeddingService, resetEmbeddingService } from './embedding.js';
 import { all, sql } from '../repositories/sql-steps.js';
+import { chosenWorker } from './helper-settings.js';
 
 /** The embedding model's download, as Ollama lists it (shown before the download starts). */
 export const EMBEDDING_SIZE_BYTES = 640 * 1024 * 1024;
@@ -132,14 +133,16 @@ export function setMemoryHelperDeps(partial: Partial<HelperDeps> | null): void {
 let state: HelperState | null = null;
 let lastPersist = 0;
 
+/** The search model's name (MEM-PANEL-01 routes and tools). */
+export function helperEmbeddingModel(): string { return embeddingModel(); }
+
 function embeddingModel(): string {
   return process.env.MEMORY_EMBEDDING_MODEL || DEFAULT_EMBEDDING_MODEL;
 }
 
-/** The small memory worker: only when MEMORY_WORKER_MODEL names a model (V3-10; its choice waits for the board). */
+/** The night writer (V3-10): MEMORY_WORKER_MODEL, else the owner's choice in Settings › Memory › Memory helper (MEM-PANEL-01). */
 function workerModel(): string | null {
-  const v = String(process.env.MEMORY_WORKER_MODEL ?? '').trim();
-  return v && !/^(0|off|false|no)$/i.test(v) ? v : null;
+  return chosenWorker();
 }
 
 function fresh(): HelperState {

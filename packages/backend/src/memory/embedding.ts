@@ -43,6 +43,13 @@ export const DEFAULT_EMBEDDING_MODEL = 'qwen3-embedding:0.6b';
 export const OLLAMA_RETRY_MS = 60_000;
 const OLLAMA_TIMEOUT_MS = 30_000;
 const MAX_BATCH = 32;
+/**
+ * Context window asked of the embedding model. Chunks are about 400 tokens, so
+ * 2048 is plenty; Ollama's default (32768 for qwen3-embedding) makes the 0.6b
+ * model hold about 4.7 GB of RAM instead of about 1 GB (MEM-PANEL-01 live check).
+ * Longer input is cut by Ollama itself.
+ */
+export const EMBED_NUM_CTX = 2048;
 export const QUERY_INSTRUCTION =
   'Given a question in any language (Arabic, Iraqi Arabic, English or German), retrieve the stored note in any language that answers it';
 
@@ -135,7 +142,7 @@ class OllamaProvider implements EmbeddingProvider {
         method: 'POST',
         redirect: 'error',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: this.model, input }),
+        body: JSON.stringify({ model: this.model, input, options: { num_ctx: EMBED_NUM_CTX } }),
         signal: AbortSignal.timeout(OLLAMA_TIMEOUT_MS),
       });
       if (!res.ok) throw new Error(`Ollama embed HTTP ${res.status}`);

@@ -46,7 +46,9 @@ const stubFetch = async (url, init = {}) => {
   const u = String(url);
   if (u === `${DEAD}/api/embed` && embedOn) {
     embedCalls++;
-    const { input } = JSON.parse(init.body);
+    const { input, options } = JSON.parse(init.body);
+    // MEM-PANEL-01: a small context keeps the search model near 1 GB of RAM.
+    if (options?.num_ctx !== 2048) throw new Error(`embed asked for num_ctx ${options?.num_ctx}`);
     return new Response(JSON.stringify({ embeddings: input.map((t) => Array.from({ length: 16 }, (_, i) => ((t.length + i) % 7) / 7 + 0.01)) }), { status: 200 });
   }
   if (u !== `${DEAD}/api/chat`) throw new Error(`unexpected network call in test: ${u}`);

@@ -10,7 +10,7 @@ import type { ExplorerItem, ExplorerPage, PinnedFact, WeeklySummary } from './me
 import type { DatabaseLevel, ProjectDatabases, ProjectDesign, ProjectGroup, TrashItem, TrashList } from './memory-desktop-contract.js';
 
 /** A sidebar place: Needs you, All memories, a drawer kind, a project, a group, an agent, one person (P9), Archived or Trash. */
-export type Place = 'needs' | 'all' | 'owner' | 'experience' | 'tasks' | 'people' | 'agents' | 'archived' | 'trash' | `project:${string}` | `group:${string}` | `agent:${string}` | `people:${string}`;
+export type Place = 'needs' | 'helper' | 'all' | 'owner' | 'experience' | 'tasks' | 'people' | 'agents' | 'archived' | 'trash' | `project:${string}` | `group:${string}` | `agent:${string}` | `people:${string}`;
 export type ProjectView = 'memories' | 'design' | 'databases' | 'files';
 /** Views that fill the content area from the ⋯ menu (Project files: from the Coding apps group, P6). */
 export type Extra = 'map' | 'handoffs' | 'files' | 'project-files' | null;

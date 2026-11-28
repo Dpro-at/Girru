@@ -6,7 +6,7 @@ const semanticWrites=new Set([
  'memory_review_decide','memory_review_routine','memory_graph_review','memory_graph_topic','memory_graph_sync',
  'memory_scope_apply','memory_access_apply','memory_scope_forget','memory_group_apply','memory_bridge_apply',
  'memory_corrected_checked','memory_question_answer','memory_question_forget','memory_privacy_decide',
- 'memory_doctor_fix','memory_reflect','handoff_save','run_note',
+ 'memory_doctor_fix','memory_reflect','handoff_save','run_note','memory_helper_settings','memory_night_run',
 ]);
 export function storedRunAllowsTool(name:string):boolean{return !currentStoredRunPrincipal()||!semanticWrites.has(name);}
 export function assertStoredRunToolAuthority(name:string):void{if(!storedRunAllowsTool(name))throw Error('background_semantic_memory_write_not_authorized');}
