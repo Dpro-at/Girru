@@ -32,10 +32,21 @@ export function readLine(d: ProjectDocument): string {
   if (d.reason) return `Read · ${d.reason}`;
   return d.pages ? `Read · ${d.pages} ${d.pages === 1 ? 'page' : 'pages'}` : 'Read';
 }
+/** MEM-PANEL-01: when the memory helper last read it ("read last night", "read 3 days ago"). */
+export function readWhen(iso: string | null, now = new Date()): string | null {
+  if (!iso) return null;
+  // The page contract keeps times as UTC without the zone (19 characters); read them as UTC.
+  const t = new Date(iso.length === 19 ? `${iso}Z` : iso); if (Number.isNaN(t.getTime())) return null;
+  const day = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((day(now) - day(t)) / 86_400_000);
+  if (days <= 0) return t.getHours() < 7 ? 'read last night' : 'read today';
+  if (days === 1) return t.getHours() >= 20 ? 'read last night' : 'read yesterday';
+  return `read ${days} days ago`;
+}
 function DocRow({ d }: { d: ProjectDocument }) {
   const ext = (/\.([a-z0-9]+)$/i.exec(d.path)?.[1] ?? '').toLowerCase();
   return <li className="dk-doc"><span className="dk-doc-type" data-unread={d.status === 'unreadable' || undefined}>{TYPE_BADGE[ext] ?? (ext.slice(0, 4).toUpperCase() || 'FILE')}</span><span className="dk-row-text"><span className="dk-row-main">{d.path}</span>
-    <span className="dk-row-sub">{d.purpose ?? readLine(d)}</span></span>
+    <span className="dk-row-sub">{d.purpose ?? readLine(d)}{d.status !== 'unreadable' && readWhen(d.readAt) ? ` · ${readWhen(d.readAt)}` : ''}</span></span>
     <span className="fine-print">{ago(d.updatedAt)}</span></li>;
 }
 

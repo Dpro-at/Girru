@@ -61,7 +61,7 @@ export type RoleTemplate = { id: string; name: string; memoryRead: DrawerKind[];
 export type AccessOverview = { version: number; rules: AccessRule[]; templates: RoleTemplate[] };
 /** MEM-READ-01 MR6 */
 export type PeriodSummary = { period: 'today' | 'week' | 'month'; label: string; from: string; sessions: number; sources: string[]; done: string[]; left: string[]; next: string[]; handoffs: Array<{ from: string; at: string; done: string[]; left: string[]; next: string[] }> };
-export type ProjectDocument = { path: string; updatedAt: string; status: 'ok' | 'unreadable'; reason: string | null; pages: number | null; bytes: number; purpose?: string };
+export type ProjectDocument = { path: string; updatedAt: string; status: 'ok' | 'unreadable'; reason: string | null; pages: number | null; bytes: number; purpose?: string; readAt: string | null };
 export type ProjectDocuments = { key: ProjectDocument[]; other: ProjectDocument[] };
 /** MEM-READ-01 MR7: a project's size in tokens (estimates). */
 export type ProjectSize = { memories: { count: number; tokens: number }; keyFiles: { count: number; tokens: number }; documents: { count: number; tokens: number }; summaries: { count: number; tokens: number }; total: number; perReply: number; biggest: { name: string; tokens: number } | null };

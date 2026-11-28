@@ -66,6 +66,8 @@
 //   POST   /api/memory/cache/clear                       { confirm: true }
 
 const record = x => !!x && typeof x === 'object' && !Array.isArray(x);
+/** MEM-PANEL-01: last night per project (slug → files read, summary written). */
+const byProject = x => { const out = {}; if (x && typeof x === 'object' && !Array.isArray(x)) for (const [k, v] of Object.entries(x).slice(0, 500)) if (/^[a-z0-9][a-z0-9_-]{0,63}$/.test(k) && v && typeof v === 'object') out[k] = { files: Number.isSafeInteger(v.files) && v.files >= 0 ? v.files : 0, summary: v.summary === true }; return out; };
 const onlyKeys = (x, keys) => Object.keys(x).every(k => keys.includes(k));
 // eslint-disable-next-line no-control-regex
 const badChars = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F‪-‮⁦-⁩]/u;
@@ -205,6 +207,7 @@ export function memoryPagesPath(path) {
     case '/api/memory/scopes/ask-agent': return with_('ask-agent', null);
     case '/api/memory/scopes/night': return with_('night', null);
     case '/api/memory/scopes/night/run': return with_('night-run', null);
+    case '/api/memory/scopes/night/stop': return with_('night-stop', null);
     case '/api/memory/scopes/night/report': return with_('night-report', null);
     case '/api/memory/scopes/night/report/done': return with_('night-done', null);
 
@@ -294,7 +297,7 @@ export function allowedMemoryPages(method, path, body) {
     case 'hidden-keys': return method === 'GET' && body === undefined;
     case 'ask-agent-job': return method === 'GET' && body === undefined;
     case 'night': return (method === 'GET' && body === undefined) || (method === 'PUT' && record(body) && onlyKeys(body, ['enabled', 'from', 'to']) && (body.enabled === undefined || typeof body.enabled === 'boolean') && ['from', 'to'].every(k => body[k] === undefined || (typeof body[k] === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(body[k]))));
-    case 'night-run': case 'night-done': return method === 'POST' && body === undefined;
+    case 'night-run': case 'night-done': case 'night-stop': return method === 'POST' && body === undefined;
     case 'night-report': return method === 'GET' && body === undefined;
     case 'project-size': case 'project-documents': case 'project-summaries': return method === 'GET' && body === undefined;
     case 'ask-agent': return method === 'POST' && record(body) && onlyKeys(body, ['agentId', 'request', 'text', 'drawer']) && agentId(body.agentId) && text(body.request, 500) && typeof body.text === 'string' && body.text.length <= 50000 && (body.drawer === undefined || validDrawerId(body.drawer));
@@ -652,7 +655,7 @@ export function memoryPagesResponse(path, status, body) {
     }
     case 'ask-agent': if (typeof body.jobId !== 'string' || !/^[0-9a-f-]{36}$/.test(body.jobId)) fail(); return { jobId: body.jobId };
     case 'project-documents': {
-      const doc = d => record(d) && typeof d.path === 'string' ? { path: clip(d.path, 400), updatedAt: whenOrNull(d.updatedAt) ?? new Date(0).toISOString(), status: d.status === 'unreadable' ? 'unreadable' : 'ok', reason: typeof d.reason === 'string' ? clip(d.reason, 200) : null, pages: Number.isSafeInteger(d.pages) ? d.pages : null, bytes: count(d.bytes), ...(typeof d.purpose === 'string' ? { purpose: clip(d.purpose, 120) } : {}) } : null;
+      const doc = d => record(d) && typeof d.path === 'string' ? { path: clip(d.path, 400), updatedAt: whenOrNull(d.updatedAt) ?? new Date(0).toISOString(), status: d.status === 'unreadable' ? 'unreadable' : 'ok', reason: typeof d.reason === 'string' ? clip(d.reason, 200) : null, pages: Number.isSafeInteger(d.pages) ? d.pages : null, bytes: count(d.bytes), ...(typeof d.purpose === 'string' ? { purpose: clip(d.purpose, 120) } : {}), readAt: whenOrNull(d.readAt) } : null;
       const docs = x => (Array.isArray(x) ? x : []).slice(0, 600).map(doc).filter(Boolean);
       return { key: docs(body.key), other: docs(body.other) };
     }
@@ -669,12 +672,14 @@ export function memoryPagesResponse(path, status, body) {
     }
     case 'night': case 'night-report': {
       const hm = x => (typeof x === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(x) ? x : '01:00');
-      const rep = r => (record(r) && typeof r.night === 'string' ? { night: clip(r.night, 10), startedAt: clip(r.startedAt, 40), endedAt: clip(r.endedAt, 40), stopped: ['done', 'used', 'unplugged', 'hours', 'error'].includes(r.stopped) ? r.stopped : 'done',
-        files: count(r.files), projects: count(r.projects), proposals: count(r.proposals), summaries: (Array.isArray(r.summaries) ? r.summaries : []).slice(0, 50).filter(x => typeof x === 'string').map(x => clip(x, 120)), keys: count(r.keys), duplicates: count(r.duplicates) } : null);
+      const rep = r => (record(r) && typeof r.night === 'string' ? { night: clip(r.night, 10), startedAt: clip(r.startedAt, 40), endedAt: clip(r.endedAt, 40), stopped: ['done', 'used', 'unplugged', 'hours', 'error', 'stopped', 'low_ram'].includes(r.stopped) ? r.stopped : 'done',
+        files: count(r.files), projects: count(r.projects), proposals: count(r.proposals), summaries: (Array.isArray(r.summaries) ? r.summaries : []).slice(0, 50).filter(x => typeof x === 'string').map(x => clip(x, 120)), keys: count(r.keys), duplicates: count(r.duplicates), byProject: byProject(r.byProject) } : null);
       if (p.route === 'night-report') return { report: rep(body.report) };
-      return { ...(record(body.settings) ? { settings: { enabled: body.settings.enabled === true, from: hm(body.settings.from), to: hm(body.settings.to) } } : {}), ...('last' in body ? { last: rep(body.last) } : {}) };
+      return { ...(record(body.settings) ? { settings: { enabled: body.settings.enabled === true, from: hm(body.settings.from), to: hm(body.settings.to) } } : {}), ...('last' in body ? { last: rep(body.last) } : {}),
+        ...('running' in body ? { running: body.running === true, step: ['read', 'summaries', 'tidy'].includes(body.step) ? body.step : null } : {}) };
     }
     case 'night-run': return { started: body.started === true };
+    case 'night-stop': return { stopped: body.stopped === true };
     case 'night-done': return { ok: body.ok === true };
     case 'ask-agent-job': {
       if (body.state === 'running') return { state: 'running' };

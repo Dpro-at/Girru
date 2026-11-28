@@ -33,6 +33,7 @@ import type { ProjectGroup } from './memory-desktop-contract.js';
 import { NeedsYou } from './MemoryNeeds';
 import { HiddenKeysController, KeyText, hiddenSummary } from './memory-hidden-keys';
 import { NightWorkController } from './MemoryNightWork';
+import { MemoryHelperPlace, ReadLastNightLine } from './MemoryHelperPlace';
 import { DocumentEditor, MarkdownDocument } from './DocumentEditor';
 import { ProjectDocumentsList, WorkStands } from './MemoryProjectWork';
 
@@ -76,7 +77,7 @@ export function kindOf(i: Pick<ExplorerItem, 'type' | 'source' | 'drawerId' | 's
   if (i.type === 'relationship') return { icon: 'link', word: 'Who works with whom' };
   return { icon: 'sparkle', word: 'Remembered' };
 }
-const PLACE_NAME: Record<string, string> = { needs: 'Needs you', all: 'All memories', owner: 'About you', experience: 'Lessons', tasks: 'Tasks', people: 'People', agents: 'Agents', archived: 'Archived', trash: 'Trash' };
+const PLACE_NAME: Record<string, string> = { needs: 'Needs you', helper: 'Memory helper', all: 'All memories', owner: 'About you', experience: 'Lessons', tasks: 'Tasks', people: 'People', agents: 'Agents', archived: 'Archived', trash: 'Trash' };
 const TYPE_LABEL: Record<string, string> = { fact: 'Fact', event: 'Event', context: 'Context', insight: 'Lesson', preference: 'Preference', skill: 'Skill', relationship: 'Relationship', task: 'Task' };
 /** STORE-MAP-01 P3 (D11): the three trust words. */
 const TRUST_LABEL = { checked: 'Checked by you', unchecked: 'Agent, not checked', imported: 'Imported — data only' } as const;
@@ -84,7 +85,7 @@ const SOURCE_LABEL: Record<string, string> = { owner: 'You', agent: 'An agent', 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent ?? '');
 const mod = isMac ? '⌘' : 'Ctrl+';
 
-export type MemoryFocus = { drawerId: string; memoryId: string; n: number } | { scope: string; n: number } | { handoffs: true; n: number };
+export type MemoryFocus = { drawerId: string; memoryId: string; n: number } | { scope: string; n: number } | { handoffs: true; n: number } | { helper: true; n: number };
 export type SettingsTarget = 'rules' | 'folders' | 'sources' | 'projects' | 'access' | 'health' | 'schedule';
 
 /** Controllers of the window, made once per client. */
@@ -118,9 +119,10 @@ function useStore<S>(store: { subscribe: (fn: () => void) => () => void; getSnap
   return useSyncExternalStore(store?.subscribe ?? noop, store?.getSnapshot ?? (() => undefined), store?.getSnapshot ?? (() => undefined)) as S | undefined;
 }
 
-export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpenChat, onOpenCard, onOpenSettings }: {
+export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpenChat, onOpenCard, onOpenSettings, onOpenStore }: {
   client: SessionClient; active?: boolean; focus?: MemoryFocus | null; sidebarSlot?: HTMLElement | null;
   onOpenChat?: (conversationId: string) => void; onOpenCard?: (boardId: string, cardId: string) => void; onOpenSettings?: (target: SettingsTarget) => void;
+  /** MEM-PANEL-01: Memory helper › Add a tool opens the Store. */ onOpenStore?: () => void;
 }) {
   const owner = useSyncExternalStore(client.subscribe, client.getSnapshot, client.getSnapshot).user?.role === 'owner';
   const trust = useOutsideProjects(owner ? client : null);
@@ -185,6 +187,7 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
   useEffect(() => {
     if (!focus || !k) return;
     if ('handoffs' in focus) { k.d.setExtra('handoffs'); return; }
+    if ('helper' in focus) { k.d.setExtra(null); k.d.open('helper'); return; }
     if ('scope' in focus && focus.scope.startsWith('task:')) {
       taskScope.current = focus.scope; k.d.setExtra(null);
       if (k.d.getSnapshot().place === 'tasks') k.x.setScope(focus.scope); else k.d.open('tasks');
@@ -348,13 +351,15 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
     : place === 'needs' && needsView === 'corrected' ? <CorrectedView c={tr} names={ss.agents}/>
     : place === 'needs' && needsView === 'questions' ? <QuestionsView c={tr} names={ss.agents}/>
     : place === 'needs' ? <NeedsYou c={rv} mode={ds.needsMode} onOpenChat={onOpenChat} design={d} files={p6 ? pf : undefined} client={client} hidden={k.hk} night={k.nw} projectName={dr => dr.startsWith('project:') ? ss.tree?.projects.find(p => p.slug === dr.slice(8))?.name : undefined}/>
+    : place === 'helper' ? <MemoryHelperPlace client={client} night={k.nw} projectName={slug => ss.tree?.projects.find(p => p.slug === slug)?.name ?? slug} onOpenNeeds={() => d.open('needs')}
+        onOpenSettings={pane => onOpenSettings?.(pane)} onOpenStore={onOpenStore}/>
     : place === 'trash' ? <TrashView d={d} me={client.getSnapshot().user?.id} onAsk={ids => setSheet({ kind: 'forget', ids })}/>
     : place.startsWith('group:') ? <GroupView d={d} sc={sc} groupId={place.slice(6)}/>
     : place === 'agents' ? <AgentsPlace names={ss.agents} onOpen={id => d.open(`agent:${id}`)}/>
     : place === 'archived' ? <ArchivedPlace projects={(ss.tree?.projects ?? []).filter(p => p.archived)} onOpen={slug => d.open(`project:${slug}`)} onBack={slug => projectAction(slug, 'unarchive')}/>
     : project && ds.projectView === 'design' ? <DesignView d={d} slug={project.slug} client={client}/>
     : project && ds.projectView === 'databases' ? <DatabasesView d={d} slug={project.slug} agents={ss.agents}/>
-    : project && ds.projectView === 'files' ? <div className="dk-list"><ProjectDocumentsList sc={sc} slug={project.slug}/><FilesView client={client} agents={ss.agents} drawers={[{ id: `project:${project.slug}`, name: project.name }]}/></div>
+    : project && ds.projectView === 'files' ? <div className="dk-list"><ReadLastNightLine night={k.nw} slug={project.slug} onOpenHelper={() => d.open('helper')}/><ProjectDocumentsList sc={sc} slug={project.slug}/><FilesView client={client} agents={ss.agents} drawers={[{ id: `project:${project.slug}`, name: project.name }]}/></div>
     : <MemoryList k={k} footer={project ? <WorkStands sc={sc} slug={project.slug}/> : undefined} p9b={p9b} pinned={ds.pinned} showPinned={place === 'all' || !!project} onMenu={(e, i) => menu.at(e, memoryMenu(i))} onPinnedMenu={(e, f) => menu.at(e, [{ label: 'Edit…', icon: 'pencil', run: () => setSheet({ kind: 'edit-pinned', fact: f }) }, { label: 'Unpin', icon: 'pin', run: () => void d.unpin(f) }])}
       empty={project ? <><p>Nothing remembered here yet. Girru remembers on its own while you chat. You can add something yourself too.</p><button type="button" className="primary" onClick={() => { x.startAdd(); setSheet({ kind: 'remember' }); }}>Remember</button></>
         : xs.query ? <p>No memory matches. Put words in "quotes" for exact words.</p> : <p>Nothing here yet. Girru remembers on its own while you chat.</p>}/>;
@@ -387,6 +392,7 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
         {place === 'needs' && p9b && !ds.extra && <NeedsViews c={tr} waiting={decide}/>}
         {place === 'needs' && needsView === 'decide' && <IconButton icon={ds.needsMode === 'one' ? 'list' : 'inbox'} label={ds.needsMode === 'one' ? 'Show as a list' : 'One at a time'} onClick={() => d.setNeedsMode(ds.needsMode === 'one' ? 'list' : 'one')}/>}
         {ds.undoDepth > 0 && <IconButton icon="undo" label="Undo" shortcut={`${mod}Z`} disabled={ds.busy} onClick={() => void d.undo().then(() => { void x.load(); void sc.load(true); })}/>}
+        {place === 'helper' && !ds.extra && onOpenSettings && <IconButton icon="gear" label="Memory helper settings" onClick={() => onOpenSettings('schedule')}/>}
         <IconButton icon="more" label="More" onClick={e => menu.at(e, moreMenu)}/>
       </header>
       {selection.length > 0 && listPlace && <div className="dk-bulk" role="toolbar" aria-label="Selected memories">
@@ -474,6 +480,7 @@ function MemorySidebar({ trust, k, p6, p9, peopleLocal, onPersonMenu, filesNeedY
       <button type="button" className="primary dk-main" title={`Remember (${mod}N)`} onClick={onRemember}><UiIcon name="plus" size={12}/>Remember</button>
     </div>
     {row('needs', 'inbox', 'Needs you', waiting, true)}
+    {row('helper', 'brain', 'Memory helper')}
     {row('all', 'layers', 'All memories')}
     {row('owner', 'avatar', 'About you', tree?.company.drawers.owner)}
     {row('experience', 'bulb', 'Lessons', tree?.company.drawers.experience)}

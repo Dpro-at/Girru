@@ -10,8 +10,8 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { Store } from './memory-store';
 import type { Requester } from './memory-store';
-import { MEMORY_HELPER_PATH, MEMORY_HELPER_RETRY_PATH } from './memory-helper-contract.js';
-import type { HelperReply, HelperStatus } from './memory-helper-contract.js';
+import { MEMORY_HELPER_PATH, MEMORY_HELPER_RETRY_PATH, MEMORY_HELPER_SETTINGS_PATH } from './memory-helper-contract.js';
+import type { HelperRam, HelperReply, HelperSettings, HelperSettingsReply, HelperStatus, WorkerCandidate } from './memory-helper-contract.js';
 import { Popover } from './desktop-ui';
 import { UiIcon } from './ui-icons';
 
@@ -21,6 +21,8 @@ export type HelperState = Readonly<{
   status: HelperStatus | null; needsYou: boolean;
   /** Bytes per second, smoothed (for "about N minutes"). */
   rate: number | null; busy: boolean;
+  /** MEM-PANEL-01: the RAM line, the settings and the models that could be the night writer. */
+  ram: HelperRam | null; settings: HelperSettings | null; candidates: readonly WorkerCandidate[];
 }>;
 
 /** Sent after a try now, so every place showing the helper reads it again. */
@@ -31,7 +33,7 @@ export class MemoryHelperController extends Store<HelperState> {
   #timer: ReturnType<typeof setTimeout> | undefined;
   #last: { at: number; bytes: number } | null = null;
   constructor(client: Requester, private readonly watchWhenReady = false) {
-    super({ phase: 'loading', status: null, needsYou: false, rate: null, busy: false }, client);
+    super({ phase: 'loading', status: null, needsYou: false, rate: null, busy: false, ram: null, settings: null, candidates: [] }, client);
   }
   async load(): Promise<void> {
     let r;
@@ -39,8 +41,8 @@ export class MemoryHelperController extends Store<HelperState> {
     if (this.disposed) return;
     if (!r || (r.status !== 200 && r.status !== 404 && r.status !== 403)) { this.publish({ phase: this.getSnapshot().status ? 'ready' : 'error' }); this.#next(10_000); return; }
     if (r.status !== 200) { this.publish({ phase: 'off', status: null }); return; }
-    const { status, row } = r.body as HelperReply;
-    this.publish({ phase: 'ready', status, needsYou: row.state === 'needs_you', rate: this.#rate(status) });
+    const { status, row, ram, settings, candidates } = r.body as HelperReply;
+    this.publish({ phase: 'ready', status, needsYou: row.state === 'needs_you', rate: this.#rate(status), ram: ram ?? null, settings: settings ?? null, candidates: candidates ?? [] });
     this.#next(ACTIVE.has(status.phase) ? 1_500 : status.phase === 'fallback' ? 30_000 : this.watchWhenReady ? 60_000 : null);
   }
   /** "Try now" / "Try again": the job goes on where it stopped. */
@@ -51,6 +53,21 @@ export class MemoryHelperController extends Store<HelperState> {
     // The other places (footer pill, Health row) read again too, so they never disagree for long.
     if (typeof window !== 'undefined') window.dispatchEvent(new Event(HELPER_CHANGED));
     await this.load();
+  }
+  /** Settings › Memory › Memory helper: the RAM limit or the night writer. Returns null when saved, else a plain reason. */
+  async saveSettings(patch: Partial<{ ram: { mode: 'auto' | 'light' | 'custom'; customGb?: number }; worker: string | null }>): Promise<string | null> {
+    this.publish({ busy: true });
+    let r;
+    try { r = await this.req('PUT', MEMORY_HELPER_SETTINGS_PATH, patch); } catch { r = null; }
+    this.publish({ busy: false });
+    if (r && r.status === 200) {
+      const b = r.body as HelperSettingsReply;
+      this.publish({ settings: b.settings, ram: b.ram, candidates: b.candidates });
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event(HELPER_CHANGED));
+      return null;
+    }
+    const code = r && typeof (r.body as { code?: unknown })?.code === 'string' ? (r.body as { code: string }).code : 'unavailable';
+    return SETTINGS_REFUSED[code] ?? 'Not saved. Try again.';
   }
   override dispose() { clearTimeout(this.#timer); super.dispose(); }
   #next(ms: number | null) { clearTimeout(this.#timer); if (ms !== null && !this.disposed) this.#timer = setTimeout(() => void this.load(), ms); }
@@ -95,6 +112,25 @@ export function nextTry(s: HelperStatus, now = Date.now()): string | null {
   if (min < 60) return `in ${min} minutes`;
   return `at ${new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 }
+const SETTINGS_REFUSED: Record<string, string> = {
+  worker_too_big: 'This model does not fit in the RAM limit.',
+  worker_not_installed: 'This model is not on this computer.',
+  worker_off_in_light: 'Light keeps the night writer off. Choose Automatic or Custom first.',
+  invalid_settings: 'Not saved: that value is not allowed.',
+};
+
+/** One word per step (MEM-PANEL-01): every place says the same, and "Downloading" only while a download runs. */
+export function stepWord(s: HelperStatus, needsYou: boolean): { word: string; tone: 'ok' | 'working' | 'attention' } {
+  if (needsYou) return { word: 'Needs you', tone: 'attention' };
+  switch (s.phase) {
+    case 'ready': return { word: 'Ready', tone: 'ok' };
+    case 'downloading': return { word: `Downloading ${s.percent ?? 0}%`, tone: 'working' };
+    case 'reembedding': return { word: 'Updating memories', tone: 'working' };
+    case 'fallback': return { word: 'Basic recall for now', tone: s.reason === 'hash_chosen' || s.reason === 'not_loopback' ? 'ok' : 'attention' };
+    default: return { word: 'Checking', tone: 'working' };
+  }
+}
+
 /** The owner chose basic recall, or the runtime is not on this computer: nothing will happen, so nothing shows on the main screens. */
 export const chosenBasic = (s: HelperStatus) => s.phase === 'fallback' && (s.reason === 'hash_chosen' || s.reason === 'not_loopback');
 
@@ -139,9 +175,10 @@ export function HelperDetails({ st, onRetry }: { st: HelperState; onRetry: () =>
   const when = nextTry(s);
   return <div className="helper-details">
     <h4><UiIcon name="brain" size={14}/>Memory helper</h4>
-    {s.phase === 'ready'
-      ? <p>Ready. Memory understands what you mean, in every language, on this computer only.</p>
-      : <p>Girru {failed ? 'gets' : 'is downloading'} the part that helps it understand what you mean, in every language ({size}, once). It runs on this computer only. Memory already works; it gets better when this is done.</p>}
+    {s.phase === 'ready' ? <p>Ready. Memory understands what you mean, in every language, on this computer only.</p>
+      : s.phase === 'downloading' || failed ? <p>Girru {failed ? 'gets' : 'is downloading'} the part that helps it understand what you mean, in every language ({size}, once). It runs on this computer only. Memory already works; it gets better when this is done.</p>
+      : s.phase === 'reembedding' ? <p>Ready. Girru updates the memories saved so far, in the background.</p>
+      : <p>Checking that the part that helps Girru understand what you mean is in place. This takes a few seconds.</p>}
     {s.phase === 'downloading' && <><Progress s={s}/><p className="fine-print" role="status">{mb(s.completedBytes)} of {mb(s.sizeBytes)} MB{timeLeft(s, st.rate) ? ` · ${timeLeft(s, st.rate)}` : ''}</p></>}
     {s.phase === 'reembedding' && <p className="fine-print" role="status">Updating the memories saved so far…</p>}
     {failed && <div className="helper-paused" role="status">
@@ -193,11 +230,17 @@ export function SetupHelperPill({ client }: { client: Requester }) {
   return bar ? createPortal(pill, bar) : <div className="setup-helper-bar">{pill}</div>;
 }
 
-/** M3: after setup, the footer pill next to Settings; gone once the helper is ready. */
-export function FooterHelperPill({ client }: { client: Requester }) {
+/** M3 + MEM-PANEL-01: the footer pill next to Settings, always there; it opens Memory › Memory helper. */
+export function FooterHelperPill({ client, onOpen }: { client: Requester; onOpen?: () => void }) {
   const [st, c] = useMemoryHelper(client, false);
-  if (st.phase !== 'ready' || !st.status || st.status.phase === 'ready' || chosenBasic(st.status)) return null;
-  return <Pill st={st} c={c} place="footer"/>;
+  if (st.phase !== 'ready' || !st.status || chosenBasic(st.status)) return null;
+  if (!onOpen) return st.status.phase === 'ready' ? null : <Pill st={st} c={c} place="footer"/>;
+  const s = st.status, w = stepWord(s, st.needsYou);
+  const label = w.word === 'Ready' ? 'Memory helper' : `Memory helper · ${w.word}`;
+  return <button type="button" className="status-item helper-pill" data-state={s.phase === 'ready' && !st.needsYou ? 'ready' : st.needsYou ? 'needs-you' : s.phase === 'fallback' ? 'paused' : 'working'}
+    title="Memory helper (Memory › Memory helper)" aria-label={label} onClick={onOpen}>
+    <span className="helper-dot" aria-hidden="true"/><UiIcon name="brain" size={12}/><span>{label}</span>
+  </button>;
 }
 
 // ---- Settings › Memory › Health (M4–M6) -----------------------------------------------------

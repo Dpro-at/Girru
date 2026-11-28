@@ -4,11 +4,15 @@ import { UiIcon } from './ui-icons';
 
 type Requester = { request(r: { method: string; path: string; body?: unknown }): Promise<{ status: number; body: unknown }> };
 export type NightSettings = { enabled: boolean; from: string; to: string };
-export type NightReport = { night: string; startedAt: string; endedAt: string; stopped: 'done' | 'used' | 'unplugged' | 'hours' | 'error'; files: number; projects: number; proposals: number; summaries: string[]; keys: number; duplicates: number };
-type State = { settings: NightSettings | null; last: NightReport | null; report: NightReport | null; busy: boolean; notice: string | null };
+export type NightReport = { night: string; startedAt: string; endedAt: string; stopped: 'done' | 'used' | 'unplugged' | 'hours' | 'error' | 'stopped' | 'low_ram'; files: number; projects: number; proposals: number; summaries: string[]; keys: number; duplicates: number;
+  /** MEM-PANEL-01: per project slug, files read and whether a summary was written. */ byProject?: Record<string, { files: number; summary: boolean }> };
+export type NightStep = 'read' | 'summaries' | 'tidy';
+type State = { settings: NightSettings | null; last: NightReport | null; report: NightReport | null; busy: boolean; notice: string | null; running: boolean; step: NightStep | null };
 
 export class NightWorkController {
-  private state: State = { settings: null, last: null, report: null, busy: false, notice: null };
+  private state: State = { settings: null, last: null, report: null, busy: false, notice: null, running: false, step: null };
+  #watch: ReturnType<typeof setTimeout> | undefined;
+  #disposed = false;
   private listeners = new Set<() => void>();
   constructor(private readonly client: Requester) {}
   subscribe = (l: () => void) => { this.listeners.add(l); return () => { this.listeners.delete(l); }; };
@@ -17,7 +21,13 @@ export class NightWorkController {
   async load() {
     try {
       const r = await this.client.request({ method: 'GET', path: '/api/memory/scopes/night' });
-      if (r.status === 200) { const b = r.body as { settings: NightSettings; last: NightReport | null }; this.publish({ settings: b.settings, last: b.last }); }
+      if (r.status === 200) {
+        const b = r.body as { settings: NightSettings; last: NightReport | null; running?: boolean; step?: NightStep | null };
+        this.publish({ settings: b.settings, last: b.last, running: b.running === true, step: b.step ?? null });
+        // While it runs, read again every 2 seconds so the step and Stop stay right.
+        clearTimeout(this.#watch);
+        if (b.running && !this.#disposed) this.#watch = setTimeout(() => void this.load(), 2_000);
+      }
     } catch { /* stays as it is */ }
   }
   async loadReport() {
@@ -32,11 +42,21 @@ export class NightWorkController {
       return true;
     } catch { this.publish({ busy: false, notice: 'Not saved (no connection).' }); return false; }
   }
+  /** Start now: tonight's work at once (it does not wait for the hours or the charger). */
   async runNow() {
     this.publish({ busy: true, notice: null });
-    try { const r = await this.client.request({ method: 'POST', path: '/api/memory/scopes/night/run' }); this.publish({ busy: false, notice: r.status === 200 ? 'Started. It stops on its own when it is done.' : 'Did not start.' }); }
+    try { const r = await this.client.request({ method: 'POST', path: '/api/memory/scopes/night/run' }); this.publish({ busy: false, running: r.status === 200 || this.state.running, notice: r.status === 200 ? 'Started. It stops on its own when it is done.' : 'Did not start.' }); }
     catch { this.publish({ busy: false, notice: 'Did not start (no connection).' }); }
+    await this.load();
   }
+  /** Stop: it ends after the step it is on; Start now goes on later. */
+  async stop() {
+    this.publish({ busy: true, notice: null });
+    try { const r = await this.client.request({ method: 'POST', path: '/api/memory/scopes/night/stop' }); const stopped = r.status === 200 && (r.body as { stopped?: boolean }).stopped === true; this.publish({ busy: false, notice: stopped ? 'It stops after the step it is on.' : 'Nothing is running.' }); }
+    catch { this.publish({ busy: false, notice: 'Not stopped (no connection).' }); }
+    await this.load();
+  }
+  dispose() { this.#disposed = true; clearTimeout(this.#watch); this.listeners.clear(); }
   async done() {
     try { await this.client.request({ method: 'POST', path: '/api/memory/scopes/night/report/done' }); } catch { /* the row goes anyway */ }
     this.publish({ report: null });
@@ -44,7 +64,7 @@ export class NightWorkController {
 }
 
 const time = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }); };
-const STOPPED: Record<NightReport['stopped'], string> = { done: 'stopped when done', used: 'stopped when the computer was used', unplugged: 'stopped when it left the charger', hours: 'stopped at the end of the hours', error: 'stopped after an error' };
+const STOPPED: Record<NightReport['stopped'], string> = { done: 'stopped when done', used: 'stopped when the computer was used', unplugged: 'stopped when it left the charger', hours: 'stopped at the end of the hours', error: 'stopped after an error', stopped: 'stopped when you asked', low_ram: 'waited: too little free RAM' };
 export function lastNightLine(r: NightReport | null): string {
   if (!r) return 'No night yet.';
   return `Last night: ${time(r.startedAt)}–${time(r.endedAt)} · ${r.files} ${r.files === 1 ? 'file' : 'files'} read · ${STOPPED[r.stopped]}`;
@@ -69,7 +89,7 @@ export function NightWorkSettings({ c }: { c: NightWorkController }) {
       <li><b>Write the summaries:</b> today per project; on Monday the week; on the 1st the month.</li>
       <li><b>Tidy:</b> hide keys it finds and count duplicates. It never forgets anything on its own.</li>
     </ol>
-    <p className="fine-print">{lastNightLine(s.last)} · <button type="button" className="link-button" disabled={s.busy} onClick={() => void c.runNow()}>Run now</button></p>
+    <p className="fine-print">{lastNightLine(s.last)} · {s.running ? <button type="button" className="link-button" disabled={s.busy} onClick={() => void c.stop()}>Stop</button> : <button type="button" className="link-button" disabled={s.busy} onClick={() => void c.runNow()}>Start now</button>}</p>
     <p className="fine-print">Stops on its own when you use the computer, it leaves the charger, or the hours end; continues the next night. A computer that is off at night does it the next time it is idle for 20 minutes. Everything runs on this computer; no paid calls.</p>
     {s.notice && <p className="fine-print" role="status">{s.notice}</p>}
   </section>;
