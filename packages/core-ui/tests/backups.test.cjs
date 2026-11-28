@@ -29,20 +29,36 @@ test('backups answers: only what the page shows, the same when projected twice',
 });
 test('destinations: the page can list/add/push/test/remove a place, and secrets never pass back',()=>{
  const did='11111111-2222-3333-4444-555555555555';
- for(const [m,p,b] of [['GET','/api/backups/destinations'],['POST','/api/backups/destinations',{type:'folder',folder:'/Volumes/Drive'}],['POST','/api/backups/destinations',{type:'folder',folder:'/Volumes/Drive',label:'Drive'}],['DELETE',`/api/backups/destinations/${did}`],['POST',`/api/backups/destinations/${did}/test`],['POST',`/api/backups/destinations/${did}/push`],['POST',`/api/backups/destinations/${did}/push`,{backupId:id}]]){
+ for(const [m,p,b] of [['GET','/api/backups/destinations'],['POST','/api/backups/destinations',{type:'folder',folder:'/Volumes/Drive'}],['POST','/api/backups/destinations',{type:'folder',folder:'/Volumes/Drive',label:'Drive'}],
+  // the self-hosted types, with their own settings and secrets (secrets allowed inbound, never echoed)
+  ['POST','/api/backups/destinations',{type:'sftp',host:'nas',username:'u',password:'p'}],['POST','/api/backups/destinations',{type:'sftp',host:'nas',username:'u',privateKey:'K',port:2222,path:'b',passphrase:'x',label:'NAS'}],
+  ['POST','/api/backups/destinations',{type:'webdav',url:'https://dav/me',username:'u',password:'p'}],['POST','/api/backups/destinations',{type:'s3',endpoint:'https://s3',bucket:'b',accessKeyId:'AK',secretAccessKey:'SK',region:'eu',prefix:'g'}],
+  // cloud types pass the gate so the server can answer "needs_connect"
+  ['POST','/api/backups/destinations',{type:'gdrive'}],['POST','/api/backups/destinations',{type:'dropbox',label:'Dropbox'}],
+  ['DELETE',`/api/backups/destinations/${did}`],['POST',`/api/backups/destinations/${did}/test`],['POST',`/api/backups/destinations/${did}/push`],['POST',`/api/backups/destinations/${did}/push`,{backupId:id}]]){
   assert.ok(allowedBackups(m,p,b),`${m} ${p}`);assert.ok(allowed(m,p,b),`bridge ${m} ${p}`);assert.ok(allowedRequest(m,p,b),`client ${m} ${p}`);
  }
- for(const [m,p,b] of [['POST','/api/backups/destinations',{type:'folder',folder:'/x',secret:'k'}],['POST','/api/backups/destinations',{type:'folder'}],['PUT','/api/backups/destinations',{}],['GET','/api/backups/destinations',{}],['DELETE','/api/backups/destinations/not-a-uuid'],['POST',`/api/backups/destinations/${did}/push`,{backupId:'../bad'}],['POST',`/api/backups/destinations/${did}/test`,{}]]){
+ for(const [m,p,b] of [['POST','/api/backups/destinations',{type:'folder',folder:'/x',secret:'k'}],['POST','/api/backups/destinations',{type:'folder'}],['PUT','/api/backups/destinations',{}],['GET','/api/backups/destinations',{}],['DELETE','/api/backups/destinations/not-a-uuid'],['POST',`/api/backups/destinations/${did}/push`,{backupId:'../bad'}],['POST',`/api/backups/destinations/${did}/test`,{}],
+  // self-hosted: missing a required field, an unknown key, no secret, a bad port
+  ['POST','/api/backups/destinations',{type:'sftp',host:'nas',username:'u'}],['POST','/api/backups/destinations',{type:'sftp',host:'nas',username:'u',password:'p',evil:1}],['POST','/api/backups/destinations',{type:'sftp',host:'nas',username:'u',password:'p',port:0}],
+  ['POST','/api/backups/destinations',{type:'webdav',url:'https://dav',username:'u'}],['POST','/api/backups/destinations',{type:'s3',endpoint:'https://s3',bucket:'b',accessKeyId:'AK'}],
+  // cloud with stray settings, and an unknown type
+  ['POST','/api/backups/destinations',{type:'gdrive',folder:'/x'}],['POST','/api/backups/destinations',{type:'ftp',host:'h'}]]){
   assert.equal(allowed(m,p,b),false,`${m} ${p}`);assert.equal(allowedRequest(m,p,b),false,`client ${m} ${p}`);
  }
- // The projection drops any secret and keeps only what the page shows.
+ // The projection drops any secret and the credentialId, and keeps only what the page shows.
  const raw={destinations:[{id:did,type:'folder',label:'Drive',config:{folder:'/Volumes/Drive',password:'nope'},credentialId:'cred_x',enabled:true,createdAt:'2026-11-27T00:00:00.000Z',status:{lastPushAt:null,lastOkAt:'2026-11-27T01:00:00.000Z',lastError:null,lastErrorAt:null,lastVerifiedAt:'2026-11-27T01:00:00.000Z',backups:2}}]};
  const proj=backupsResponse('/api/backups/destinations',200,raw);
  assert.equal(proj.destinations.length,1);
  const d=proj.destinations[0];
- assert.deepEqual(Object.keys(d).sort(),['createdAt','enabled','folder','id','label','status','type']);
- assert.equal(d.folder,'/Volumes/Drive');assert.equal(d.status.backups,2);
+ assert.deepEqual(Object.keys(d).sort(),['config','createdAt','enabled','folder','id','label','status','type']);
+ assert.equal(d.folder,'/Volumes/Drive');assert.deepEqual(d.config,{folder:'/Volumes/Drive'});assert.equal(d.status.backups,2);
  assert.ok(!JSON.stringify(proj).includes('nope'));assert.ok(!JSON.stringify(proj).includes('cred_x'));assert.ok(!JSON.stringify(proj).includes('password'));
+ // A remote place shows its non-secret settings; its secret fields are stripped even if present in config.
+ const s3raw={destinations:[{id:did,type:'s3',label:'S3',config:{endpoint:'https://s3',region:'eu',bucket:'b',prefix:'g',accessKeyId:'AK',secretAccessKey:'LEAK'},credentialId:'cred_y',enabled:true,createdAt:'2026-11-27T00:00:00.000Z',status:{lastPushAt:null,lastOkAt:null,lastError:null,lastErrorAt:null,lastVerifiedAt:null,backups:0}}]};
+ const s3d=backupsResponse('/api/backups/destinations',200,s3raw).destinations[0];
+ assert.deepEqual(s3d.config,{endpoint:'https://s3',region:'eu',bucket:'b',prefix:'g',accessKeyId:'AK'});
+ assert.ok(!JSON.stringify(s3d).includes('LEAK')&&!JSON.stringify(s3d).includes('secretAccessKey')&&!JSON.stringify(s3d).includes('cred_y'));
  assert.deepEqual(backupsResponse(`/api/backups/destinations/${did}/test`,200,{ok:true,extra:1}),{ok:true});
  assert.deepEqual(backupsResponse(`/api/backups/destinations/${did}`,200,{deleted:true}),{deleted:true});
 });

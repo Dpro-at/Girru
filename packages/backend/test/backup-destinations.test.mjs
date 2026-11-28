@@ -105,7 +105,7 @@ test('a place is owner-only, validated, and coming types are honest', async () =
   assert.equal((await call('d-user', 'POST', '/api/backups/destinations', { type: 'folder', folder: drive })).statusCode, 403);
   // A folder inside the data folder is refused.
   assert.equal((await call('d-owner', 'POST', '/api/backups/destinations', { type: 'folder', folder: join(data, 'x') })).statusCode, 400);
-  // Not-yet-available types are refused, not faked.
+  // The self-hosted types need their own settings; a folder-shaped body is refused.
   for (const type of ['sftp', 'webdav', 's3']) assert.equal((await call('d-owner', 'POST', '/api/backups/destinations', { type, folder: drive })).statusCode, 400, type);
   // Cloud types wait on Girru Connect and say so, rather than pretending to work.
   for (const type of ['gdrive', 'dropbox', 'onedrive']) {

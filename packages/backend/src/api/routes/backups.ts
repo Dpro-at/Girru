@@ -54,7 +54,7 @@ export async function backupRoutes(fastify: FastifyInstance) {
     try { getUserIdFromRequest(request); if (!sqliteOnly(reply)) return; return { destinations: await listDestinations() }; } catch (err) { return fail(reply, err, 'Destinations'); }
   });
   fastify.post<{ Body: unknown }>('/api/backups/destinations', async (request, reply) => {
-    try { getUserIdFromRequest(request); if (!sqliteOnly(reply)) return; return { destination: await addDestination(request.body) }; } catch (err) { return fail(reply, err, 'Add destination'); }
+    try { const owner = getUserIdFromRequest(request); if (!sqliteOnly(reply)) return; return { destination: await addDestination(request.body, owner) }; } catch (err) { return fail(reply, err, 'Add destination'); }
   });
   fastify.delete<{ Params: { destId: string } }>('/api/backups/destinations/:destId', async (request, reply) => {
     try { getUserIdFromRequest(request); if (!sqliteOnly(reply)) return; await removeDestination(request.params.destId); return { deleted: true }; } catch (err) { return fail(reply, err, 'Remove destination'); }

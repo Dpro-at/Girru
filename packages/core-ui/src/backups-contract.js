@@ -10,6 +10,30 @@ const iso = x => typeof x === 'string' && !Number.isNaN(Date.parse(x)) ? x : nul
 const num = x => Number.isFinite(x) && x >= 0 ? x : 0;
 
 const DEST_ID = /^[0-9a-f-]{36}$/i;
+// What the page may send to add each kind of place. Secrets (password, privateKey,
+// passphrase, secretAccessKey) are allowed IN here so the server can store them in
+// the vault; they are never echoed back (see the destination() projector below).
+const DEST_FIELDS = {
+  folder: { str: { folder: 1024 }, req: ['folder'] },
+  sftp: { str: { host: 255, username: 128, path: 1024, password: 1024, privateKey: 16384, passphrase: 1024 }, num: ['port'], req: ['host', 'username'], oneOf: ['password', 'privateKey'] },
+  webdav: { str: { url: 1024, username: 128, password: 1024 }, req: ['url', 'username', 'password'] },
+  s3: { str: { endpoint: 1024, bucket: 63, accessKeyId: 128, secretAccessKey: 1024, region: 64, prefix: 512 }, req: ['endpoint', 'bucket', 'accessKeyId', 'secretAccessKey'] },
+};
+const labelOk = (l) => l === undefined || (typeof l === 'string' && l.length <= 120);
+function allowAddDestination(body) {
+  if (!record(body) || typeof body.type !== 'string' || !body.type || body.type.length > 16) return false;
+  // Cloud places carry no settings here; the server answers "needs_connect".
+  if (body.type === 'gdrive' || body.type === 'dropbox' || body.type === 'onedrive') return Object.keys(body).every((k) => k === 'type' || k === 'label') && labelOk(body.label);
+  const spec = DEST_FIELDS[body.type];
+  if (!spec) return false;
+  const allowed = new Set(['type', 'label', ...Object.keys(spec.str || {}), ...(spec.num || [])]);
+  if (!Object.keys(body).every((k) => allowed.has(k)) || !labelOk(body.label)) return false;
+  for (const [k, max] of Object.entries(spec.str || {})) { const v = body[k]; if (v !== undefined && (typeof v !== 'string' || v.length > max)) return false; }
+  for (const k of (spec.num || [])) { const v = body[k]; if (v !== undefined) { const n = typeof v === 'number' ? v : Number(v); if (!Number.isInteger(n) || n < 1 || n > 65535) return false; } }
+  for (const k of spec.req) { const v = body[k]; if (typeof v !== 'string' || v.trim().length === 0) return false; }
+  if (spec.oneOf && !spec.oneOf.some((k) => typeof body[k] === 'string' && body[k].length > 0)) return false;
+  return true;
+}
 function parse(path) {
   if (path === '/api/backups') return { kind: 'list' };
   if (path === '/api/backups/folder') return { kind: 'folder' };
@@ -33,12 +57,7 @@ export function allowedBackups(method, path, body) {
   if (r.kind === 'retention') return method === 'PUT' && record(body) && Object.keys(body).length === 1 && Number.isInteger(body.keepDays) && body.keepDays >= 3 && body.keepDays <= 3650;
   if (r.kind === 'destinations') {
     if (method === 'GET') return body === undefined;
-    return method === 'POST' && record(body) && Object.keys(body).every(k => k === 'type' || k === 'label' || k === 'folder')
-      && typeof body.type === 'string' && body.type.length > 0 && body.type.length <= 16
-      && (body.folder === undefined || (typeof body.folder === 'string' && body.folder.length > 0 && body.folder.length <= 1024))
-      && (body.label === undefined || (typeof body.label === 'string' && body.label.length <= 120))
-      // A folder place must carry its folder (the only kind the page can add today).
-      && (body.type !== 'folder' || (typeof body.folder === 'string' && body.folder.length > 0));
+    return method === 'POST' && allowAddDestination(body);
   }
   if (r.kind === 'dest-test') return method === 'POST' && body === undefined;
   if (r.kind === 'dest-push') return method === 'POST' && (body === undefined || (record(body) && Object.keys(body).every(k => k === 'backupId') && (body.backupId === undefined || (typeof body.backupId === 'string' && ID.test(body.backupId)))));
@@ -68,14 +87,24 @@ function status(s) {
   };
 }
 const DEST_TYPES = ['folder', 'sftp', 'webdav', 's3', 'gdrive', 'dropbox', 'onedrive'];
+// Only these config keys ever pass back out, per type — an allow-list, so a secret
+// can never reach the page even if one somehow landed in config (it never does:
+// secrets live in the vault, keyed by credentialId, which is also never projected).
+const SAFE_CONFIG = {
+  folder: ['folder'], sftp: ['host', 'port', 'username', 'path', 'hostKeyHash'], webdav: ['url', 'username'],
+  s3: ['endpoint', 'region', 'bucket', 'prefix', 'accessKeyId'], gdrive: [], dropbox: [], onedrive: [],
+};
 /** A backup place: its label and non-secret settings plus status — never any secret. */
 function destination(d) {
   const v = record(d) ? d : {};
+  const type = DEST_TYPES.includes(v.type) ? v.type : 'folder';
   const cfg = record(v.config) ? v.config : {};
   const s = record(v.status) ? v.status : {};
+  const config = {};
+  for (const k of (SAFE_CONFIG[type] || [])) { const val = cfg[k]; if (typeof val === 'string') config[k] = val.slice(0, 1024); else if (typeof val === 'number') config[k] = String(val); }
   return {
-    id: str(v.id, 64), type: DEST_TYPES.includes(v.type) ? v.type : 'folder', label: str(v.label, 120),
-    folder: str(cfg.folder, 1024), enabled: v.enabled === true, createdAt: iso(v.createdAt) ?? new Date(0).toISOString(),
+    id: str(v.id, 64), type, label: str(v.label, 120),
+    folder: str(cfg.folder, 1024), config, enabled: v.enabled === true, createdAt: iso(v.createdAt) ?? new Date(0).toISOString(),
     status: { lastPushAt: iso(s.lastPushAt), lastOkAt: iso(s.lastOkAt), lastError: typeof s.lastError === 'string' ? s.lastError.slice(0, 300) : null, lastErrorAt: iso(s.lastErrorAt), lastVerifiedAt: iso(s.lastVerifiedAt), backups: num(s.backups) },
   };
 }
