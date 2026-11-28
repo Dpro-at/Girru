@@ -31,6 +31,8 @@ const db = getDatabase();
 await db.initialize();
 const OWNER = 'night-owner';
 db.prepare(`INSERT INTO users (id, email, username, password_hash, role, status, email_verified) VALUES (?, ?, ?, 'x', 'owner', 'active', 1)`).run(OWNER, `${OWNER}@example.test`, OWNER);
+// MEM-PANEL-01: the real RAM check is not part of these tests (unknown = go on).
+(await load('src/memory/helper-settings.ts')).setRamDeps({ availableBytes: async () => null });
 const N = await load('src/memory/night-work.ts');
 const at = (h, m = 0, d = 12) => new Date(2026, 10, d, h, m);
 

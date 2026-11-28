@@ -21,11 +21,16 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import { all, one, run, sql } from '../repositories/sql-steps.js';
+import { chosenWorker, ramTooLow, unloadModel } from './helper-settings.js';
+
+const byProject = (r: NightReport, slug: string) => ((r.byProject ??= {})[slug] ??= { files: 0, summary: false });
 
 export interface NightSettings { enabled: boolean; from: string; to: string }
 export interface NightReport {
-  night: string; startedAt: string; endedAt: string; stopped: 'done' | 'used' | 'unplugged' | 'hours' | 'error';
+  night: string; startedAt: string; endedAt: string; stopped: 'done' | 'used' | 'unplugged' | 'hours' | 'error' | 'stopped' | 'low_ram';
   files: number; projects: number; proposals: number; summaries: string[]; keys: number; duplicates: number; seen: boolean;
+  /** MEM-PANEL-01: per project (slug): files read and whether a summary was written. */
+  byProject?: Record<string, { files: number; summary: boolean }>;
 }
 export interface MachineState { idleSeconds: number | null; onPower: boolean | null }
 
@@ -100,29 +105,35 @@ export async function machineState(): Promise<MachineState> {
   return { idleSeconds: null, onPower: null };
 }
 
-export interface NightDeps { state?: () => Promise<MachineState>; now?: () => Date; steps?: Partial<NightSteps> }
+export interface NightDeps { state?: () => Promise<MachineState>; now?: () => Date; steps?: Partial<NightSteps>; /** Tests: is RAM too low (default: real check). */ ramLow?: () => Promise<boolean> }
 interface NightSteps {
-  readFiles(ownerId: string): Promise<{ files: number; projects: number; proposals: number }>;
-  summaries(ownerId: string, now: Date): Promise<string[]>;
+  readFiles(ownerId: string): Promise<{ files: number; projects: number; proposals: number; bySlug?: Record<string, number> }>;
+  summaries(ownerId: string, now: Date): Promise<string[] | { names: string[]; slugs: string[] }>;
   tidy(ownerId: string): Promise<{ keys: number; duplicates: number }>;
 }
 
 const DEFAULT_STEPS: NightSteps = {
   async readFiles(ownerId) {
     let files = 0, projects = 0;
+    const bySlug: Record<string, number> = {};
     try {
       const { indexOwner } = await import('./docs/indexer.js');
       const reports = await indexOwner(ownerId);
-      for (const r of reports) { files += r.changed ?? 0; if ((r.changed ?? 0) > 0) projects++; }
+      const refs = new Map((await sql().read(all<{ id: string; ref_id: string }>("SELECT id, ref_id FROM doc_index_sources WHERE owner_id = ? AND kind = 'project'", ownerId)).catch(() => [])).map((r) => [r.id, r.ref_id]));
+      for (const r of reports) {
+        files += r.changed ?? 0;
+        if ((r.changed ?? 0) > 0) { projects++; const slug = refs.get(r.sourceId); if (slug) bySlug[slug] = (bySlug[slug] ?? 0) + (r.changed ?? 0); }
+      }
     } catch { /* the document index is optional */ }
     const before = await pendingProposals(ownerId);
     try { const { runAutomaticImportNow } = await import('./import/automatic-project-import.js'); await runAutomaticImportNow(ownerId); } catch { /* import off or nothing to do */ }
-    return { files, projects, proposals: Math.max(0, (await pendingProposals(ownerId)) - before) };
+    return { files, projects, proposals: Math.max(0, (await pendingProposals(ownerId)) - before), bySlug };
   },
   async summaries(ownerId, now) {
     const { projectSummaries, summariesText } = await import('./project-summaries.js');
     const { listProjects } = await import('./scopes/store.js');
     const written: string[] = [];
+    const slugs: string[] = [];
     for (const p of (await listProjects(ownerId)).filter((x) => !x.archived && !x.notProject).slice(0, 200)) {
       const list = (await projectSummaries(ownerId, p.slug, now)).filter((s) => s.period === 'today' || (s.period === 'week' && now.getDay() === 1) || (s.period === 'month' && now.getDate() === 1));
       if (!list.length) continue;
@@ -132,8 +143,9 @@ const DEFAULT_STEPS: NightSteps = {
           ON CONFLICT (owner_id, slug, period, period_key) DO UPDATE SET text = excluded.text, sessions = excluded.sessions, created_at = excluded.created_at`, ownerId, p.slug, s.period, key, summariesText([s]), s.sessions, now.toISOString()); });
       }
       written.push(p.name);
+      slugs.push(p.slug);
     }
-    return written;
+    return { names: written, slugs };
   },
   async tidy(ownerId) {
     const { hideKeysInSavedMemories } = await import('./hidden-keys.js');
@@ -149,6 +161,21 @@ async function pendingProposals(ownerId: string): Promise<number> {
 }
 
 const running = new Map<string, Promise<NightReport>>();
+/** MEM-PANEL-01: the step a run is on, and owners who asked it to stop (Stop in Memory › Memory helper). */
+const progress = new Map<string, 'read' | 'summaries' | 'tidy'>();
+const stopAsked = new Set<string>();
+
+/** Whether tonight's work runs now for this owner, and on which step. */
+export function nightRunning(ownerId: string): { running: boolean; step: 'read' | 'summaries' | 'tidy' | null } {
+  return { running: running.has(ownerId), step: progress.get(ownerId) ?? null };
+}
+
+/** Stop at the end of the current step (Undo = Start now). False when nothing runs. */
+export function stopNightWorkFor(ownerId: string): boolean {
+  if (!running.has(ownerId)) return false;
+  stopAsked.add(ownerId);
+  return true;
+}
 
 /** Run tonight's work for one owner (also "Run now"). Stops between steps when it should; saves the report. */
 export async function runNightWork(ownerId: string, deps: NightDeps & { force?: boolean } = {}): Promise<NightReport> {
@@ -158,7 +185,9 @@ export async function runNightWork(ownerId: string, deps: NightDeps & { force?: 
     const s = await nightSettings(ownerId), start = now();
     const report: NightReport = { night: nightKey(s, start), startedAt: start.toISOString(), endedAt: start.toISOString(), stopped: 'done', files: 0, projects: 0, proposals: 0, summaries: [], keys: 0, duplicates: 0, seen: false };
     const why = async (): Promise<NightReport['stopped'] | null> => {
+      if (stopAsked.has(ownerId)) return 'stopped';
       if (deps.force) return null;
+      if (await (deps.ramLow ?? ramTooLow)()) return 'low_ram';
       const m = await state();
       if (m.onPower === false) return 'unplugged';
       if (m.idleSeconds !== null && m.idleSeconds < 60) return 'used';
@@ -168,11 +197,21 @@ export async function runNightWork(ownerId: string, deps: NightDeps & { force?: 
     try {
       for (const step of ['read', 'summaries', 'tidy'] as const) {
         const stop = await why(); if (stop) { report.stopped = stop; break; }
-        if (step === 'read') Object.assign(report, await steps.readFiles(ownerId));
-        else if (step === 'summaries') report.summaries = await steps.summaries(ownerId, now());
-        else Object.assign(report, await steps.tidy(ownerId));
+        progress.set(ownerId, step);
+        if (step === 'read') {
+          const r = await steps.readFiles(ownerId);
+          report.files = r.files; report.projects = r.projects; report.proposals = r.proposals;
+          for (const [slug, n] of Object.entries(r.bySlug ?? {})) byProject(report, slug).files += n;
+        } else if (step === 'summaries') {
+          const r = await steps.summaries(ownerId, now());
+          if (Array.isArray(r)) report.summaries = r;
+          else { report.summaries = r.names; for (const slug of r.slugs) byProject(report, slug).summary = true; }
+        } else Object.assign(report, await steps.tidy(ownerId));
       }
     } catch { report.stopped = 'error'; }
+    progress.delete(ownerId); stopAsked.delete(ownerId);
+    // The night writer leaves the RAM when the work ends (RAM limit, MEM-PANEL-01).
+    const writer = chosenWorker(); if (writer) await unloadModel(writer).catch(() => false);
     report.endedAt = now().toISOString();
     const quiet = !report.files && !report.proposals && !report.summaries.length && !report.keys && !report.duplicates;
     await sql().tx(function* () {
@@ -182,7 +221,7 @@ export async function runNightWork(ownerId: string, deps: NightDeps & { force?: 
         ownerId, s.enabled ? 1 : 0, s.from, s.to, report.stopped === 'done' ? report.night : s.lastNight, quiet && report.stopped === 'done' ? null : JSON.stringify(report), report.endedAt);
     });
     return report;
-  })().finally(() => running.delete(ownerId));
+  })().finally(() => { running.delete(ownerId); progress.delete(ownerId); stopAsked.delete(ownerId); });
   running.set(ownerId, work);
   return work;
 }
@@ -217,5 +256,7 @@ export function stopNightWork(): void { clearInterval(timer); timer = undefined;
 export async function tick(deps: NightDeps = {}): Promise<void> {
   const owners = await sql().read(all<{ id: string }>("SELECT id FROM users WHERE role = 'owner' AND status = 'active'"));
   const m = await (deps.state ?? machineState)(), now = (deps.now ?? (() => new Date()))();
+  // Too little free RAM: wait for the next tick (no report; nothing is stopped while you chat).
+  if (await (deps.ramLow ?? ramTooLow)()) return;
   for (const o of owners) if (nightDue(await nightSettings(o.id), now, m)) await runNightWork(o.id, deps);
 }

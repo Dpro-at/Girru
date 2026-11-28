@@ -22,4 +22,5 @@ export { memoryTrustReviewTool, memoryCorrectedCheckedTool, memoryQuestionAnswer
 export { projectTrustReviewTool, projectTrustApplyTool } from './project-trust.js'; // REPO-TRUST-01: Outside projects
 export { memoryRecallTool } from './recall.js';
 export { memoryTrashTool, memoryRestoreTool, memoryTrashEmptyTool, memoryProjectTrashTool, memoryGroupsTool, memoryGroupApplyTool } from './desktop.js';
+export { memoryHelperStatusTool, memoryHelperSettingsTool, memoryNightRunTool, memoryNightStopTool } from './helper.js';
 export { projectDesignTool, projectDesignApplyTool, projectDatabasesTool, projectDatabasesApplyTool } from './project-tech.js';

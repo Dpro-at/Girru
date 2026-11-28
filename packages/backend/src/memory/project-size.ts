@@ -90,16 +90,16 @@ export function keyFilePurpose(path: string): string {
   return 'Rules for Cursor';
 }
 
-export interface ProjectDocument { path: string; updatedAt: string; status: 'ok' | 'unreadable'; reason: string | null; pages: number | null; bytes: number; purpose?: string }
+export interface ProjectDocument { path: string; updatedAt: string; status: 'ok' | 'unreadable'; reason: string | null; pages: number | null; bytes: number; purpose?: string; /** MEM-PANEL-01: when the memory helper last read it. */ readAt: string | null }
 
 /** The project's documents: key files first (with what each is for), then the others, newest first. */
 export async function projectDocuments(ownerId: string, slug: string): Promise<{ key: ProjectDocument[]; other: ProjectDocument[] }> {
-  let rows: Array<{ path: string; mtime: number; status: 'ok' | 'unreadable'; reason: string | null; pages: number | null; bytes: number }> = [];
+  let rows: Array<{ path: string; mtime: number; status: 'ok' | 'unreadable'; reason: string | null; pages: number | null; bytes: number; indexed: string | null }> = [];
   try {
-    rows = await sql().read(all(`SELECT f.display_path AS path, f.mtime_ms AS mtime, f.status, f.reason, f.pages, f.bytes FROM doc_index_files f JOIN doc_index_sources s ON s.id = f.source_id
+    rows = await sql().read(all(`SELECT f.display_path AS path, f.mtime_ms AS mtime, f.status, f.reason, f.pages, f.bytes, f.indexed_at AS indexed FROM doc_index_files f JOIN doc_index_sources s ON s.id = f.source_id
       WHERE s.owner_id = ? AND s.kind = 'project' AND s.ref_id = ? ORDER BY f.mtime_ms DESC LIMIT 600`, ownerId, slug));
   } catch { rows = []; }
-  const doc = (r: typeof rows[number]): ProjectDocument => ({ path: r.path, updatedAt: new Date(Number(r.mtime) || 0).toISOString(), status: r.status, reason: r.reason ?? null, pages: r.pages ?? null, bytes: Number(r.bytes) || 0 });
+  const doc = (r: typeof rows[number]): ProjectDocument => ({ path: r.path, updatedAt: new Date(Number(r.mtime) || 0).toISOString(), status: r.status, reason: r.reason ?? null, pages: r.pages ?? null, bytes: Number(r.bytes) || 0, readAt: r.indexed ?? null });
   const order = ['CLAUDE', 'AGENTS', 'GEMINI', 'HANDOFF', 'BACKLOG', 'TASKS', 'DECISIONS', 'README'];
   const rank = (p: string) => { const i = order.findIndex((x) => p.split('/').at(-1)!.toUpperCase().startsWith(x)); return i < 0 ? order.length : i; };
   const key = rows.filter((r) => KEY_FILE.test(r.path)).sort((a, b) => rank(a.path) - rank(b.path) || a.path.length - b.path.length).map((r) => ({ ...doc(r), purpose: keyFilePurpose(r.path) }));

@@ -70,6 +70,7 @@ import {
   memoryAccessApplyTool,
   memoryScopeForgetTool,
   memoryTrashTool, memoryRestoreTool, memoryTrashEmptyTool, memoryProjectTrashTool, memoryGroupsTool, memoryGroupApplyTool,
+  memoryHelperStatusTool, memoryHelperSettingsTool, memoryNightRunTool, memoryNightStopTool,
   projectDesignTool, projectDesignApplyTool, projectDatabasesTool, projectDatabasesApplyTool,
   memoryMoveTool,
   memoryBridgeTool,
@@ -149,6 +150,7 @@ const CORE_TOOLS: Tool[] = [
   memoryDoctorTool, memoryDoctorFixTool, memoryMoveTool,
   memoryScopesTool, memoryScopeApplyTool, memoryAccessApplyTool, memoryScopeForgetTool,
   projectDesignTool, projectDesignApplyTool, projectDatabasesTool, projectDatabasesApplyTool, // DESIGN-FIND-01 / PROJECT-TECH-01: reads for the project's runs; changes need owner approval
+  memoryHelperStatusTool, memoryHelperSettingsTool, memoryNightRunTool, memoryNightStopTool, // MEM-PANEL-01: owner-only helper status, Start now / Stop; settings need owner approval
   memoryTrashTool, memoryRestoreTool, memoryTrashEmptyTool, memoryProjectTrashTool, memoryGroupsTool, memoryGroupApplyTool, // MEM-UX-02: owner-only Trash + groups; empty / project trash / group changes need owner approval
   memoryBridgeTool, memoryBridgeApplyTool, // MEM-BRIDGE-01: owner-only; apply needs owner approval
   projectSyncTool, projectSyncApplyTool, // PROJECT-SYNC-01: one preview for files + handoff + facts; apply needs owner approval

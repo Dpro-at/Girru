@@ -36,6 +36,7 @@ The public definitions in `src/tools.ts` (and domain modules) and `publicToolCat
 | `workspace_rules` | Rules agents follow | `list`, `read`, `conflicts`, `effective`, `versions`, `files`, `suggest` |
 | `workspace_tasks` | Project task files | `list`, `get`, `activity`, `continue`, `sort`, `people`, `checklist`, `schedule` |
 | `workspace_runs` | Runs | `list`, `get`, `schedules`, `schedule_runs`, `schedule_task`, `stop`, `retry` |
+| `memory_helper` | Memory helper: state, RAM limit, night writer, night work | `status`, `settings`, `start`, `stop` |
 | `workspace_footer` | Footer sections | `read`, `set` |
 | `run_command` | Run a command in a project | See the tool input schema |
 | `account_settings` | Account security and updates | `two_step`, `devices`, `sign_out_device`, `updates`, `check_updates` |
