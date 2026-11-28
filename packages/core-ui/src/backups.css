@@ -48,6 +48,62 @@ button.backups-prop:hover{background:var(--row-active)}
 .app-shell .backups button.backups-prop,.app-shell .backups .backups-row{box-shadow:none;border-radius:6px;justify-content:initial;padding:0 6px}
 .app-shell .backups .backups-row{border-radius:0;padding:0 12px;border-bottom:1px solid var(--border)!important}
 .app-shell .backups p.backups-notice,.app-shell .backups p.backups-alert{background:transparent;padding:0;border:0;box-shadow:none;max-width:none;min-height:0;height:auto}
+/* BACKUP-02 — "Kept in" name + path chip, "Where backups go" cards, and the
+   two-step "Add a place" sheet (board backup-offsite/page-redesign). */
+.backups-kept{cursor:default}
+.backups-kept strong{display:flex;align-items:center;gap:8px;min-width:0}
+.backups-path{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;font-weight:400;color:var(--muted);background:var(--row-active);padding:1px 7px;border-radius:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.backups-prop-acts{display:flex;align-items:center;gap:12px;justify-self:end}
+.backups-prop-acts .link{font-size:12px}
+.backups-places{display:flex;flex-direction:column;gap:8px}
+.backups-places-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.backups-places-head h3{margin:0;font-size:14px}
+.backups-places-head>button{display:inline-flex;align-items:center;gap:6px}
+.backups-places-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.backups-place{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:11px;padding:10px 12px;border:1px solid var(--border);border-radius:11px}
+.backups-place-ico{width:30px;height:30px;border-radius:8px;background:var(--row-active);display:grid;place-items:center;flex:none}
+.backups-place-ico svg{color:var(--muted)}
+.backups-place-main{min-width:0}
+.backups-place-main strong{display:block;font-size:13px;font-weight:600}
+.backups-place-main small{display:block;color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.backups-place-main small.backups-place-err{color:var(--danger)}
+.backups-chip-status{font-size:11px;padding:3px 9px;border-radius:999px;font-weight:600;white-space:nowrap}
+.backups-chip-status.is-base{color:var(--muted);background:var(--row-active)}
+.backups-chip-status.is-ok{color:#3FB97B;background:color-mix(in srgb,#3FB97B 18%,transparent)}
+.backups-chip-status.is-warn{color:#C98A2B;background:color-mix(in srgb,#C98A2B 20%,transparent)}
+.backups-chip-status.is-err{color:var(--danger);background:color-mix(in srgb,var(--danger) 16%,transparent)}
+.backups-place-actions{display:flex;align-items:center;gap:4px}
+/* add-a-place: steps, kinds list, grouped fields */
+.backups-step{color:var(--text-3);font-size:11px;margin:0 0 10px}
+.backups-kgroup{color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin:14px 0 7px}
+.backups-kgroup:first-child{margin-top:0}
+.backups-kinds{display:flex;flex-direction:column;gap:7px}
+.backups-kind{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:11px;width:100%;padding:10px 11px;border:1px solid var(--border);border-radius:10px;background:transparent;color:var(--text);font:inherit;text-align:start;cursor:pointer}
+button.backups-kind:hover{background:var(--row-active)}
+.backups-kind[aria-checked=true]{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.backups-kind.is-coming{opacity:.6;cursor:default}
+.backups-kind-main{min-width:0}
+.backups-kind-main b{font-size:13px}
+.backups-kind-main small{display:block;color:var(--muted);font-size:12px}
+.backups-kind-radio{width:16px;height:16px;border-radius:50%;border:2px solid var(--border);flex:none}
+.backups-kind[aria-checked=true] .backups-kind-radio{border-color:var(--accent);box-shadow:inset 0 0 0 3px var(--accent)}
+.backups-back{display:inline-flex;align-items:center;gap:5px;background:none;border:0;color:var(--muted);font:inherit;font-size:12px;cursor:pointer;padding:0;margin-bottom:10px}
+.backups-back svg{transform:rotate(180deg)}
+.backups-fields{display:flex;flex-direction:column;gap:11px}
+.backups-grid2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+.backups-folderpick{display:flex;gap:8px;align-items:center}
+.backups-folderpick input{flex:1;min-width:0}
+.backups-folderpick>button{flex:none}
+.backups-place-types{display:flex;gap:7px}
+.backups-type{border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text);font:inherit;font-size:12.5px;padding:6px 12px;cursor:pointer}
+.backups-type[aria-checked=true]{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}
+.backups-reassure{display:flex;gap:8px;align-items:flex-start;background:var(--row-active);border:1px solid var(--border);border-radius:10px;padding:9px 11px;margin-top:12px;color:var(--muted);font-size:12px}
+.backups-reassure svg{flex:none;margin-top:2px;color:#3FB97B}
+.backups-add-actions{display:flex;align-items:center;gap:8px}
+.backups-test-ok{display:inline-flex;align-items:center;gap:5px;color:#3FB97B;font-size:12.5px;font-weight:500}
+.backups-keepfor{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px}
+.backups-chip{border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text);font:inherit;font-size:12.5px;padding:6px 12px;cursor:pointer}
+.backups-chip[aria-pressed=true]{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}
 /* Settings › About and updates in the installed app (MACAPP-01). */
 .app-update-head{display:flex;align-items:center;gap:10px}
 .app-update-head h3{flex:1;margin:0}

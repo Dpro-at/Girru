@@ -525,15 +525,17 @@ export async function listDestinations(): Promise<DestinationView[]> {
   return list.map((d) => ({ ...d, status: statusOf(d.id) }));
 }
 
+/** The kind the owner may add today, or the right refusal for a coming / cloud / unknown one. */
+function resolveKind(type: unknown): DestinationType {
+  if (typeof type === 'string' && (CLOUD_TYPES as readonly string[]).includes(type)) throw new BackupError(400, 'needs_connect', 'Cloud backups arrive with Girru Connect sign-in — coming soon');
+  if (typeof type === 'string' && (AVAILABLE_TYPES as readonly string[]).includes(type)) return type as DestinationType;
+  if (typeof type === 'string' && (COMING_TYPES as readonly string[]).includes(type)) throw new BackupError(400, 'type_not_ready', `Backups to ${type} are coming soon`);
+  throw new BackupError(400, 'invalid_type', 'Unknown place');
+}
+
 export async function addDestination(input: unknown, ownerId = ''): Promise<DestinationView> {
   const o = (input ?? {}) as Record<string, unknown>;
-  const type = o.type;
-  if (typeof type === 'string' && (CLOUD_TYPES as readonly string[]).includes(type)) throw new BackupError(400, 'needs_connect', 'Cloud backups arrive with Girru Connect sign-in — coming soon');
-  if (!(typeof type === 'string' && (AVAILABLE_TYPES as readonly string[]).includes(type))) {
-    if (typeof type === 'string' && (COMING_TYPES as readonly string[]).includes(type)) throw new BackupError(400, 'type_not_ready', `Backups to ${type} are coming soon`);
-    throw new BackupError(400, 'invalid_type', 'Unknown place');
-  }
-  const kind = type as DestinationType;
+  const kind = resolveKind(o.type);
   const label = typeof o.label === 'string' && o.label.trim() ? o.label.trim().slice(0, 120) : (DEFAULT_LABEL[kind] ?? 'Backup place');
   const built = buildInput(kind, o);
 
@@ -575,6 +577,23 @@ export async function testDestination(id: string): Promise<{ ok: true }> {
   const dest = await getDestination(id);
   try { await adapterFor(dest).ensure(dest); patchStatus(id, { lastError: null, lastErrorAt: null }); return { ok: true }; }
   catch (err) { const msg = err instanceof Error ? err.message.slice(0, 200) : 'The place could not be reached'; patchStatus(id, { lastError: msg, lastErrorAt: new Date().toISOString() }); throw err instanceof BackupError ? err : new BackupError(502, 'unreachable', msg); }
+}
+
+/**
+ * Check a place from a config the owner is still filling in, before it is added:
+ * validate it, reach it (adapter.ensure), and report back — but never save the
+ * place, and never keep its secret (a temporary vault entry is removed at the end).
+ */
+export async function testDestinationConfig(input: unknown, ownerId = ''): Promise<{ ok: true }> {
+  const o = (input ?? {}) as Record<string, unknown>;
+  const kind = resolveKind(o.type);
+  const built = buildInput(kind, o);
+  const id = uuidv4();
+  const credentialId = built.secret && Object.keys(built.secret).length ? await storeSecret(ownerId, id, built.secret) : null;
+  const dest: Destination = { id, type: kind, label: 'test', config: built.config, credentialId, enabled: true, createdAt: new Date().toISOString() };
+  try { await adapterFor(dest).ensure(dest); return { ok: true }; }
+  catch (err) { throw err instanceof BackupError ? err : new BackupError(502, 'unreachable', err instanceof Error ? err.message.slice(0, 200) : 'The place could not be reached'); }
+  finally { await forgetSecret(credentialId); }
 }
 
 /**

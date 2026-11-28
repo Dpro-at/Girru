@@ -224,3 +224,22 @@ test('a swapped SFTP host key is refused on a later connect', async () => {
   Dest.__setRemoteTransports({ sftp: fakeSftp }); // restore for any later work
   assert.equal(prev, FAKE_HOSTKEY);
 });
+
+test('a place can be tested from a not-yet-saved config, saving nothing and keeping no secret', async () => {
+  const { getCredentialVault } = await import(join(backendDir, 'src/encryption/credential-vault.ts'));
+  const places = () => call('d-owner', 'GET', '/api/backups/destinations').then((r) => r.json().destinations.length);
+  const creds = async () => (await getCredentialVault().query({ service: 'backup-destination' })).length;
+  const before = await places();
+  const credsBefore = await creds();
+  // A folder (no network) and a WebDAV place (fake transport) both report reachable.
+  const fdir = join(dir, 'TestDrive'); mkdirSync(fdir, { recursive: true });
+  assert.equal((await ok(call('d-owner', 'POST', '/api/backups/destinations/test', { type: 'folder', folder: fdir }))).ok, true);
+  assert.equal((await ok(call('d-owner', 'POST', '/api/backups/destinations/test', { type: 'webdav', url: 'http://127.0.0.1/dav', username: 'u', password: 'test-only-pw' }))).ok, true);
+  // No place was saved, and the WebDAV test left no credential behind in the vault.
+  assert.equal(await places(), before, 'testing adds no place');
+  assert.equal(await creds(), credsBefore, 'testing leaves no secret in the vault');
+  // Owner only; a folder inside the data folder is refused; cloud still says needs_connect.
+  assert.equal((await call('d-user', 'POST', '/api/backups/destinations/test', { type: 'folder', folder: fdir })).statusCode, 403);
+  assert.equal((await call('d-owner', 'POST', '/api/backups/destinations/test', { type: 'folder', folder: join(data, 'x') })).statusCode, 400);
+  assert.equal((await call('d-owner', 'POST', '/api/backups/destinations/test', { type: 'gdrive' })).json().code, 'needs_connect');
+});

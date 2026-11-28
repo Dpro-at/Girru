@@ -4,19 +4,30 @@ import type {SessionClient} from './session';
 import {UiIcon} from './ui-icons';
 import type {UiIconName} from './ui-icons';
 import {Sheet} from './desktop-ui';
+import {canRevealFolder,revealFolder} from './chat-actions';
 
 type Kind='daily'|'manual'|'before-update'|'before-restore';
 export type Backup={id:string;kind:Kind;at:string;checked:boolean;size:number;parts:{data:boolean;audit:boolean;keys:boolean};keepUntil:string|null};
 export type DestType='folder'|'sftp'|'webdav'|'s3'|'gdrive'|'dropbox'|'onedrive';
 export type DestStatus={lastPushAt:string|null;lastOkAt:string|null;lastError:string|null;lastErrorAt:string|null;lastVerifiedAt:string|null;backups:number};
 export type Destination={id:string;type:DestType;label:string;folder:string;config:Record<string,string>;enabled:boolean;createdAt:string;status:DestStatus};
-/** Types the owner can add today; the rest (cloud) are shown but not yet selectable. */
-const DEST_READY:DestType[]=['folder','sftp','webdav','s3'];
-/** Direct (self-hosted) places, then cloud places that wait on Girru Connect sign-in. */
+/** Direct (self-hosted) places the owner can add today, then cloud places that wait on Girru Connect sign-in. */
 const DEST_DIRECT:DestType[]=['folder','sftp','webdav','s3'];
 const DEST_CLOUD:DestType[]=['gdrive','dropbox','onedrive'];
 const DEST_LABELS:Record<DestType,string>={folder:'External drive or NAS folder',sftp:'SFTP server',webdav:'WebDAV',s3:'S3-compatible storage',gdrive:'Google Drive',dropbox:'Dropbox',onedrive:'OneDrive'};
 const DEST_ICON:Record<DestType,UiIconName>={folder:'folder',sftp:'server',webdav:'globe',s3:'box',gdrive:'globe',dropbox:'globe',onedrive:'globe'};
+/** One-line description shown beside each kind when adding a place. */
+const DEST_DESC:Record<DestType,string>={folder:'A folder on a drive or a mounted share',sftp:'A server you reach over SSH',webdav:'A WebDAV address with a sign-in',s3:'S3, R2, B2, Wasabi, MinIO…',gdrive:'Sign-in stays on this computer',dropbox:'Sign-in stays on this computer',onedrive:'Sign-in stays on this computer'};
+/** The last segment of a path — the folder's own name. */
+export const base=(p:string)=>p.replace(/\/+$/,'').split('/').pop()||p;
+/** The one status chip a place card shows. */
+export function placeChip(st:DestStatus):{label:string;kind:'ok'|'warn'|'err'}{
+ if(st.lastError)return {label:'Problem',kind:'err'};
+ if(st.lastVerifiedAt)return {label:'✓ Checked',kind:'ok'};
+ return {label:'Not sent',kind:'warn'};
+}
+/** The desktop folder picker when running inside the app; absent in a plain browser. */
+const folderPicker=()=>typeof window==='undefined'?undefined:(window as unknown as {dproApp?:{chooseProjectFolders?:(o?:{multiple:boolean})=>Promise<string[]>}}).dproApp?.chooseProjectFolders;
 /** A short, human line for where a place is, from its non-secret settings only. */
 function placeLocation(d:Destination):string{
  const c=d.config||{};
@@ -123,21 +134,22 @@ export function SettingsBackups({client,active=true}:{client:SessionClient;activ
   {notice&&<p role="status" className="backups-notice">{notice}</p>}
   <div className="backups-props">
    <div className="backups-prop"><UiIcon name="refresh" size={14}/><span>Runs</span><strong>Every day {s.runsAt} · and before every update</strong></div>
-   <button type="button" className="backups-prop" onClick={()=>setSheet('folder')} title="Change where backups are kept"><UiIcon name="folder" size={14}/><span>Kept in</span><strong>{home(s.folder)} <small>· only you can open it</small></strong><UiIcon name="chevron" size={12}/></button>
+   <div className="backups-prop backups-kept"><UiIcon name="folder" size={14}/><span>Kept in</span><strong>{base(s.folder)}<span className="backups-path" dir="ltr">{home(s.folder)}</span></strong><span className="backups-prop-acts">{canRevealFolder()&&<button type="button" className="link" onClick={()=>revealFolder(s.folder)}>Reveal</button>}<button type="button" className="link" onClick={()=>setSheet('folder')}>Change</button></span></div>
    {s.cloud&&<p className="backups-alert" role="alert"><UiIcon name="alert" size={14}/>This folder syncs to the cloud. Backups hold the keys to your saved secrets; choose a folder on this computer.</p>}
    <button type="button" className="backups-prop" onClick={()=>setSheet('retention')} title="Change how long backups are kept"><UiIcon name="history" size={14}/><span>Keeps</span><strong>{s.keeps.days} days + {s.keeps.sundays} Sundays</strong><UiIcon name="chevron" size={12}/></button>
   </div>
   <section className="backups-places" aria-label="Where backups go">
    <header className="backups-places-head"><h3>Where backups go</h3><button type="button" className="tool" onClick={()=>setSheet('addplace')} title="Add a place"><UiIcon name="plus" size={15}/>Add a place</button></header>
-   <p className="fine-print">Your data is always kept in the folder above. Add other places — an external drive, a NAS, an SFTP or WebDAV server, or S3-compatible storage — for an off-site copy. Backups are encrypted on this computer before they leave, so the place only ever holds scrambled data, and each place’s sign-in is kept in your vault.</p>
+   <p className="fine-print">Add an off-site copy — a drive, a NAS, SFTP, WebDAV or S3. Each copy is encrypted here first, so the place only ever holds scrambled data.</p>
    <ul className="backups-places-list">
-    <li className="backups-place"><UiIcon name="folder" size={15}/><div className="backups-place-main"><strong>This computer</strong><small>{home(s.folder)} · always on</small></div><small className="backups-place-state" data-ok>baseline</small></li>
-    {dests.map(d=><li key={d.id} className="backups-place"><UiIcon name={DEST_ICON[d.type]} size={15}/>
-     <div className="backups-place-main"><strong>{d.label}</strong><small>{placeLocation(d)}{d.status.lastOkAt?` · last sent ${lower(backupWhen(d.status.lastOkAt,now))}`:' · not sent yet'}{d.status.lastVerifiedAt?', checked':''}</small>{d.status.lastError&&<small className="backups-place-err"><UiIcon name="alert" size={12}/>{d.status.lastError}</small>}</div>
+    <li className="backups-place"><span className="backups-place-ico"><UiIcon name="folder" size={16}/></span><div className="backups-place-main"><strong>This computer</strong><small dir="ltr">{base(s.folder)} · always on</small></div><span className="backups-chip-status is-base">Baseline</span></li>
+    {dests.map(d=>{const chip=placeChip(d.status);return <li key={d.id} className="backups-place"><span className="backups-place-ico"><UiIcon name={DEST_ICON[d.type]} size={16}/></span>
+     <div className="backups-place-main"><strong>{d.label}</strong><small dir="ltr">{placeLocation(d)}{d.status.lastOkAt?` · sent ${lower(backupWhen(d.status.lastOkAt,now))}`:''}</small>{chip.kind==='err'&&<small className="backups-place-err">{d.status.lastError}</small>}</div>
+     <span className={`backups-chip-status is-${chip.kind}`}>{chip.label}</span>
      <div className="backups-place-actions">
-      <button type="button" disabled={!!busyPlace} onClick={()=>void pushPlace(d.id)} title="Send the latest backup to this place">{busyPlace===d.id?'Sending…':'Send now'}</button>
-      <button type="button" className="tool" disabled={!!busyPlace} onClick={()=>void removePlace(d.id)} title="Remove this place" aria-label="Remove this place"><UiIcon name="trash" size={14}/></button>
-     </div></li>)}
+      <button type="button" className="tool" disabled={!!busyPlace} onClick={()=>void pushPlace(d.id)} title="Send the latest backup to this place">{busyPlace===d.id?'Sending…':'Send now'}</button>
+      <details className="st-menu"><summary className="tool" title="More" aria-label="More"><UiIcon name="more" size={15}/></summary><div role="menu"><button type="button" role="menuitem" disabled={!!busyPlace} onClick={e=>{(e.currentTarget.closest('details') as HTMLDetailsElement).open=false;void removePlace(d.id);}}><UiIcon name="trash" size={14}/>Remove this place…</button></div></details>
+     </div></li>;})}
    </ul>
   </section>
   <div className="backups-panes">
@@ -176,77 +188,114 @@ export function SettingsBackups({client,active=true}:{client:SessionClient;activ
 }
 
 /**
- * Add a place backups are copied to (BACKUP-02 slices 3–4). A folder on an
- * external drive or a NAS, an SFTP server, a WebDAV share, or S3-compatible
- * storage. Each place’s sign-in is sent once to be kept in the vault and is
- * never shown again. The cloud providers are shown but wait on Girru Connect —
- * nothing there is faked.
+ * Add a place backups are copied to (BACKUP-02), in two clear steps (board
+ * backup-offsite/page-redesign): step 1 picks the kind from a grouped, iconed
+ * list (self-hosted first; cloud shown dimmed as "coming"); step 2 shows only
+ * that kind's fields, grouped Where / Sign-in, with a native Choose… folder
+ * picker and a Test before Add. Each place's sign-in is sent once to be kept in
+ * the vault and never shown again.
  */
 function AddPlaceSheet({client,onClose,onSaved}:{client:SessionClient;onClose:()=>void;onSaved:(label:string)=>void}){
+ const [step,setStep]=useState<1|2>(1);
  const [type,setType]=useState<DestType>('folder'),[label,setLabel]=useState('');
  const [f,setF]=useState<Record<string,string>>({port:'22',region:'us-east-1'});
  const [auth,setAuth]=useState<'password'|'key'>('password');
+ const [test,setTest]=useState<'idle'|'checking'|'ok'>('idle');
  const [error,setError]=useState(''),[busy,setBusy]=useState(false);
  const v=(k:string)=>f[k]??'';
- const set=(k:string)=>(e:{target:{value:string}})=>setF(s=>({...s,[k]:e.target.value}));
- const ready=DEST_READY.includes(type);
- const canSave=ready&&(
+ const set=(k:string)=>(e:{target:{value:string}})=>{setF(s=>({...s,[k]:e.target.value}));setTest('idle');};
+ const pick=folderPicker();
+ const choose=async()=>{try{const paths=await pick?.({multiple:false});if(paths&&paths[0]){setF(s=>({...s,folder:paths[0]}));setTest('idle');}}catch{/* keep what is typed */}};
+ const canSave=
   type==='folder'?!!v('folder').trim():
   type==='sftp'?!!v('host').trim()&&!!v('username').trim()&&(auth==='password'?!!v('password'):!!v('privateKey')):
   type==='webdav'?!!v('url').trim()&&!!v('username').trim()&&!!v('password'):
-  type==='s3'?!!v('endpoint').trim()&&!!v('bucket').trim()&&!!v('accessKeyId').trim()&&!!v('secretAccessKey'):false);
- const save=async()=>{
-  if(!canSave)return;setBusy(true);setError('');
+  type==='s3'?!!v('endpoint').trim()&&!!v('bucket').trim()&&!!v('accessKeyId').trim()&&!!v('secretAccessKey'):false;
+ const buildBody=():Record<string,unknown>=>{
   const b:Record<string,unknown>={type};
   if(label.trim())b.label=label.trim();
   if(type==='folder')b.folder=v('folder').trim();
   if(type==='sftp'){b.host=v('host').trim();b.username=v('username').trim();if(v('port').trim())b.port=v('port').trim();if(v('path').trim())b.path=v('path').trim();if(auth==='password')b.password=v('password');else{b.privateKey=v('privateKey');if(v('passphrase'))b.passphrase=v('passphrase');}}
   if(type==='webdav'){b.url=v('url').trim();b.username=v('username').trim();b.password=v('password');}
   if(type==='s3'){b.endpoint=v('endpoint').trim();b.bucket=v('bucket').trim();if(v('region').trim())b.region=v('region').trim();if(v('prefix').trim())b.prefix=v('prefix').trim();b.accessKeyId=v('accessKeyId').trim();b.secretAccessKey=v('secretAccessKey');}
-  try{const r=await client.request({method:'POST',path:'/api/backups/destinations',body:b});if(r.status!==200){setError(err(r,'That place could not be added.'));return;}onSaved((r.body as {destination:Destination}).destination.label);}
+  return b;
+ };
+ const runTest=async()=>{
+  if(!canSave||busy)return;setBusy(true);setError('');setTest('checking');
+  try{const r=await client.request({method:'POST',path:'/api/backups/destinations/test',body:buildBody()});if(r.status!==200){setTest('idle');setError(err(r,'That place could not be reached.'));return;}setTest('ok');}
+  finally{setBusy(false);}
+ };
+ const save=async()=>{
+  if(!canSave||busy)return;setBusy(true);setError('');
+  try{const r=await client.request({method:'POST',path:'/api/backups/destinations',body:buildBody()});if(r.status!==200){setTest('idle');setError(err(r,'That place could not be added.'));return;}onSaved((r.body as {destination:Destination}).destination.label);}
   finally{setBusy(false);}
  };
  const field=(k:string,span:string,props:Record<string,unknown>={})=><label className="backups-field"><span>{span}</span><input value={v(k)} onChange={set(k)} spellCheck={false} {...props}/></label>;
- return <Sheet title="Add a place for backups" onClose={onClose} actions={<><button type="button" onClick={onClose}>Cancel</button><button type="button" className="primary" disabled={busy||!canSave} onClick={()=>void save()}>{busy?'Adding…':'Add place'}</button></>}>
-  <div className="backups-place-types" role="radiogroup" aria-label="Kind of place">
-   {DEST_DIRECT.map(t=><button key={t} type="button" role="radio" aria-checked={type===t} className="backups-type" onClick={()=>setType(t)}>{DEST_LABELS[t]}</button>)}
-  </div>
-  <p className="fine-print backups-cloud-note">Cloud places — {DEST_CLOUD.map(t=>DEST_LABELS[t]).join(', ')} — arrive with Girru Connect sign-in. Your data is encrypted here first, and the sign-in stays on this computer.</p>
-  {type==='folder'&&<>
-   {field('folder','Folder',{autoFocus:true,placeholder:'/Volumes/My Drive/Girru','aria-label':'Destination folder',onKeyDown:(e:KeyboardEvent)=>{if(e.key==='Enter')void save();}})}
-   <p className="fine-print">A folder on an external drive or a mounted network share. Because the copy is encrypted here first, a cloud-synced folder is fine too.</p>
-  </>}
-  {type==='sftp'&&<>
-   {field('host','Host',{autoFocus:true,placeholder:'backup.example.com','aria-label':'SFTP host'})}
-   {field('port','Port',{type:'number',min:1,max:65535,'aria-label':'SFTP port'})}
-   {field('username','User',{placeholder:'girru','aria-label':'SFTP user'})}
-   {field('path','Folder on the server (optional)',{placeholder:'backups','aria-label':'Remote folder'})}
-   <div className="backups-place-types" role="radiogroup" aria-label="How to sign in">
-    <button type="button" role="radio" aria-checked={auth==='password'} className="backups-type" onClick={()=>setAuth('password')}>Password</button>
-    <button type="button" role="radio" aria-checked={auth==='key'} className="backups-type" onClick={()=>setAuth('key')}>Private key</button>
+ const reassure=type==='folder'
+  ?'Encrypted here before it leaves — the place only ever holds scrambled data. A cloud-synced folder is fine too.'
+  :'Encrypted here before it leaves — the place only ever holds scrambled data; your sign-in is kept in your vault.';
+ const actions=step===1
+  ?<><button type="button" onClick={onClose}>Cancel</button><button type="button" className="primary" onClick={()=>{setError('');setStep(2);}}>Next</button></>
+  :<><button type="button" onClick={onClose}>Cancel</button><span className="backups-add-actions">{test==='ok'?<span className="backups-test-ok"><UiIcon name="check" size={13}/>Reachable</span>:<button type="button" disabled={busy||!canSave} onClick={()=>void runTest()}>{test==='checking'?'Checking…':'Test'}</button>}<button type="button" className="primary" disabled={busy||!canSave} onClick={()=>void save()}>{busy&&test!=='checking'?'Adding…':'Add place'}</button></span></>;
+ return <Sheet title="Add a place for backups" onClose={onClose} actions={actions}>
+  {step===1?<>
+   <div className="backups-step">Step 1 of 2 — choose the kind of place</div>
+   <div className="backups-kgroup">On your own storage</div>
+   <div className="backups-kinds" role="radiogroup" aria-label="Kind of place">
+    {DEST_DIRECT.map(t=><button key={t} type="button" role="radio" aria-checked={type===t} className="backups-kind" onClick={()=>{setType(t);setTest('idle');}}>
+     <span className="backups-place-ico"><UiIcon name={DEST_ICON[t]} size={16}/></span>
+     <span className="backups-kind-main"><b>{DEST_LABELS[t]}</b><small>{DEST_DESC[t]}</small></span>
+     <span className="backups-kind-radio" aria-hidden="true"/></button>)}
    </div>
-   {auth==='password'?field('password','Password',{type:'password','aria-label':'SFTP password',autoComplete:'off'}):<>
-    <label className="backups-field"><span>Private key</span><textarea value={v('privateKey')} onChange={set('privateKey')} rows={4} spellCheck={false} placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" aria-label="SFTP private key"/></label>
-    {field('passphrase','Key passphrase (optional)',{type:'password','aria-label':'Key passphrase',autoComplete:'off'})}
+   <div className="backups-kgroup">Cloud — arrives with Girru Connect</div>
+   <div className="backups-kind is-coming" aria-disabled="true">
+    <span className="backups-place-ico"><UiIcon name="globe" size={16}/></span>
+    <span className="backups-kind-main"><b>{DEST_CLOUD.map(t=>DEST_LABELS[t]).join(' · ')}</b><small>Sign-in stays on this computer</small></span>
+    <span className="backups-chip-status is-base">Coming</span></div>
+  </>:<>
+   <button type="button" className="backups-back" onClick={()=>{setError('');setStep(1);}}><UiIcon name="chevron" size={13}/>Kinds</button>
+   <div className="backups-step">Step 2 of 2 — {DEST_LABELS[type]}</div>
+   {type==='folder'&&<div className="backups-fields">
+    <label className="backups-field"><span>Folder</span><div className="backups-folderpick"><input value={v('folder')} onChange={set('folder')} autoFocus spellCheck={false} placeholder="/Volumes/My Drive/Girru" aria-label="Destination folder" onKeyDown={(e:KeyboardEvent)=>{if(e.key==='Enter'&&canSave)void save();}}/>{pick&&<button type="button" className="tool" onClick={()=>void choose()}>Choose…</button>}</div></label>
+   </div>}
+   {type==='sftp'&&<>
+    <div className="backups-kgroup">Where</div>
+    <div className="backups-fields">
+     {field('host','Host',{autoFocus:true,placeholder:'backup.example.com','aria-label':'SFTP host'})}
+     <div className="backups-grid2">{field('port','Port',{type:'number',min:1,max:65535,'aria-label':'SFTP port'})}{field('path','Folder on the server (optional)',{placeholder:'backups','aria-label':'Remote folder'})}</div>
+    </div>
+    <div className="backups-kgroup">Sign-in</div>
+    <div className="backups-fields">
+     {field('username','User',{placeholder:'girru','aria-label':'SFTP user'})}
+     <div className="backups-place-types" role="radiogroup" aria-label="How to sign in">
+      <button type="button" role="radio" aria-checked={auth==='password'} className="backups-type" onClick={()=>{setAuth('password');setTest('idle');}}>Password</button>
+      <button type="button" role="radio" aria-checked={auth==='key'} className="backups-type" onClick={()=>{setAuth('key');setTest('idle');}}>Private key</button>
+     </div>
+     {auth==='password'?field('password','Password',{type:'password','aria-label':'SFTP password',autoComplete:'off'}):<>
+      <label className="backups-field"><span>Private key</span><textarea value={v('privateKey')} onChange={set('privateKey')} rows={4} spellCheck={false} placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" aria-label="SFTP private key"/></label>
+      {field('passphrase','Key passphrase (optional)',{type:'password','aria-label':'Key passphrase',autoComplete:'off'})}
+     </>}
+    </div>
    </>}
-   <p className="fine-print">The first connection pins the server’s host key, so a swapped server is refused later. Your sign-in is kept in the vault, not here.</p>
+   {type==='webdav'&&<>
+    <div className="backups-kgroup">Where</div>
+    <div className="backups-fields">{field('url','Address',{autoFocus:true,placeholder:'https://dav.example.com/remote.php/dav/files/me','aria-label':'WebDAV address'})}</div>
+    <div className="backups-kgroup">Sign-in</div>
+    <div className="backups-fields"><div className="backups-grid2">{field('username','User',{'aria-label':'WebDAV user'})}{field('password','Password',{type:'password','aria-label':'WebDAV password',autoComplete:'off'})}</div></div>
+   </>}
+   {type==='s3'&&<>
+    <div className="backups-kgroup">Where</div>
+    <div className="backups-fields">
+     {field('endpoint','Endpoint',{autoFocus:true,placeholder:'https://s3.eu-central-1.amazonaws.com','aria-label':'S3 endpoint'})}
+     <div className="backups-grid2">{field('bucket','Bucket',{placeholder:'my-backups','aria-label':'S3 bucket'})}{field('region','Region',{placeholder:'us-east-1','aria-label':'S3 region'})}</div>
+     {field('prefix','Folder in the bucket (optional)',{placeholder:'girru','aria-label':'S3 prefix'})}
+    </div>
+    <div className="backups-kgroup">Sign-in</div>
+    <div className="backups-fields"><div className="backups-grid2">{field('accessKeyId','Access key ID',{'aria-label':'S3 access key id',autoComplete:'off'})}{field('secretAccessKey','Secret key',{type:'password','aria-label':'S3 secret key',autoComplete:'off'})}</div></div>
+   </>}
+   <label className="backups-field" style={{marginTop:'11px'}}><span>Name (optional)</span><input value={label} onChange={e=>setLabel(e.target.value)} placeholder={DEST_LABELS[type]} aria-label="Place name"/></label>
+   <div className="backups-reassure"><UiIcon name="lock" size={14}/><span>{reassure}</span></div>
   </>}
-  {type==='webdav'&&<>
-   {field('url','Address',{autoFocus:true,placeholder:'https://dav.example.com/remote.php/dav/files/me','aria-label':'WebDAV address'})}
-   {field('username','User',{'aria-label':'WebDAV user'})}
-   {field('password','Password',{type:'password','aria-label':'WebDAV password',autoComplete:'off'})}
-   <p className="fine-print">An https address (http only to a computer on your own network). The sign-in is kept in the vault.</p>
-  </>}
-  {type==='s3'&&<>
-   {field('endpoint','Endpoint',{autoFocus:true,placeholder:'https://s3.eu-central-1.amazonaws.com','aria-label':'S3 endpoint'})}
-   {field('bucket','Bucket',{placeholder:'my-backups','aria-label':'S3 bucket'})}
-   {field('region','Region',{placeholder:'us-east-1','aria-label':'S3 region'})}
-   {field('prefix','Folder in the bucket (optional)',{placeholder:'girru','aria-label':'S3 prefix'})}
-   {field('accessKeyId','Access key ID',{'aria-label':'S3 access key id',autoComplete:'off'})}
-   {field('secretAccessKey','Secret key',{type:'password','aria-label':'S3 secret key',autoComplete:'off'})}
-   <p className="fine-print">Works with S3, MinIO, Backblaze B2, Wasabi and the like. The secret key is kept in the vault.</p>
-  </>}
-  <label className="backups-field"><span>Name (optional)</span><input value={label} onChange={e=>setLabel(e.target.value)} placeholder={DEST_LABELS[type]} aria-label="Place name"/></label>
   {error&&<p className="backups-alert" role="alert">{error}</p>}
  </Sheet>;
 }

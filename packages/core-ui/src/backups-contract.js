@@ -39,6 +39,7 @@ function parse(path) {
   if (path === '/api/backups/folder') return { kind: 'folder' };
   if (path === '/api/backups/retention') return { kind: 'retention' };
   if (path === '/api/backups/destinations') return { kind: 'destinations' };
+  if (path === '/api/backups/destinations/test') return { kind: 'dest-try' };
   const dm = /^\/api\/backups\/destinations\/([^/?#]+)(?:\/(push|test))?$/.exec(path);
   if (dm) return DEST_ID.test(dm[1]) ? { kind: 'dest-' + (dm[2] || 'one'), destId: dm[1] } : null;
   const m = /^\/api\/backups\/([^/?#]+)(?:\/(restore|show))?$/.exec(path);
@@ -59,6 +60,7 @@ export function allowedBackups(method, path, body) {
     if (method === 'GET') return body === undefined;
     return method === 'POST' && allowAddDestination(body);
   }
+  if (r.kind === 'dest-try') return method === 'POST' && allowAddDestination(body);
   if (r.kind === 'dest-test') return method === 'POST' && body === undefined;
   if (r.kind === 'dest-push') return method === 'POST' && (body === undefined || (record(body) && Object.keys(body).every(k => k === 'backupId') && (body.backupId === undefined || (typeof body.backupId === 'string' && ID.test(body.backupId)))));
   if (r.kind === 'dest-one') return method === 'DELETE' && body === undefined;
@@ -120,7 +122,7 @@ export function backupsResponse(path, status_, body) {
   if (r.kind === 'retention') return { keepDays: Number.isInteger(v.keepDays) ? v.keepDays : 0 };
   if (r.kind === 'destinations') return record(v.destination) ? { destination: destination(v.destination) } : { destinations: Array.isArray(v.destinations) ? v.destinations.slice(0, 50).map(destination) : [] };
   if (r.kind === 'dest-push') return { destination: destination(v.destination) };
-  if (r.kind === 'dest-test') return { ok: v.ok === true };
+  if (r.kind === 'dest-test' || r.kind === 'dest-try') return { ok: v.ok === true };
   if (r.kind === 'dest-one') return { deleted: v.deleted === true };
   if (r.kind === 'restore') return { restarting: v.restarting === true, undoId: ID.test(v.undoId) ? v.undoId : '' };
   if (r.kind === 'show') return { shown: v.shown === true };

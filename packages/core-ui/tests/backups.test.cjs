@@ -1,6 +1,6 @@
 require('./load.cjs');const {test}=require('node:test'),assert=require('node:assert/strict'),React=require('react'),{renderToStaticMarkup}=require('react-dom/server');
 const {allowedBackups,backupsResponse,backupsRoute}=require('../src/backups-contract.js');const {allowed}=require('../scripts/application-server.cjs');const {allowedRequest}=require('../src/session.ts');
-const {AppSettings}=require('../src/AppSettings.tsx');const {backupWhen,backupKind,nextWhen,SettingsBackups}=require('../src/SettingsBackups.tsx');
+const {AppSettings}=require('../src/AppSettings.tsx');const {backupWhen,backupKind,nextWhen,SettingsBackups,placeChip,base}=require('../src/SettingsBackups.tsx');
 const id='20261029-030000-daily';
 test('backups requests: only the page’s own, in both gates',()=>{
  for(const [m,p,b] of [['GET','/api/backups'],['POST','/api/backups',{}],['POST','/api/backups',{kind:'before-update'}],['PUT','/api/backups/folder',{folder:'/Users/x/Girru Backups'}],['PUT','/api/backups/retention',{keepDays:7}],['PUT','/api/backups/retention',{keepDays:3}],['PUT','/api/backups/retention',{keepDays:365}],['POST',`/api/backups/${id}/restore`],['POST',`/api/backups/${id}/show`],['DELETE',`/api/backups/${id}`]]){
@@ -35,6 +35,8 @@ test('destinations: the page can list/add/push/test/remove a place, and secrets 
   ['POST','/api/backups/destinations',{type:'webdav',url:'https://dav/me',username:'u',password:'p'}],['POST','/api/backups/destinations',{type:'s3',endpoint:'https://s3',bucket:'b',accessKeyId:'AK',secretAccessKey:'SK',region:'eu',prefix:'g'}],
   // cloud types pass the gate so the server can answer "needs_connect"
   ['POST','/api/backups/destinations',{type:'gdrive'}],['POST','/api/backups/destinations',{type:'dropbox',label:'Dropbox'}],
+  // pre-save Test takes the same per-kind shape as Add
+  ['POST','/api/backups/destinations/test',{type:'folder',folder:'/Volumes/Drive'}],['POST','/api/backups/destinations/test',{type:'webdav',url:'https://dav/me',username:'u',password:'p'}],['POST','/api/backups/destinations/test',{type:'s3',endpoint:'https://s3',bucket:'b',accessKeyId:'AK',secretAccessKey:'SK'}],
   ['DELETE',`/api/backups/destinations/${did}`],['POST',`/api/backups/destinations/${did}/test`],['POST',`/api/backups/destinations/${did}/push`],['POST',`/api/backups/destinations/${did}/push`,{backupId:id}]]){
   assert.ok(allowedBackups(m,p,b),`${m} ${p}`);assert.ok(allowed(m,p,b),`bridge ${m} ${p}`);assert.ok(allowedRequest(m,p,b),`client ${m} ${p}`);
  }
@@ -43,7 +45,9 @@ test('destinations: the page can list/add/push/test/remove a place, and secrets 
   ['POST','/api/backups/destinations',{type:'sftp',host:'nas',username:'u'}],['POST','/api/backups/destinations',{type:'sftp',host:'nas',username:'u',password:'p',evil:1}],['POST','/api/backups/destinations',{type:'sftp',host:'nas',username:'u',password:'p',port:0}],
   ['POST','/api/backups/destinations',{type:'webdav',url:'https://dav',username:'u'}],['POST','/api/backups/destinations',{type:'s3',endpoint:'https://s3',bucket:'b',accessKeyId:'AK'}],
   // cloud with stray settings, and an unknown type
-  ['POST','/api/backups/destinations',{type:'gdrive',folder:'/x'}],['POST','/api/backups/destinations',{type:'ftp',host:'h'}]]){
+  ['POST','/api/backups/destinations',{type:'gdrive',folder:'/x'}],['POST','/api/backups/destinations',{type:'ftp',host:'h'}],
+  // pre-save Test: wrong method, and a config missing a required field
+  ['GET','/api/backups/destinations/test'],['POST','/api/backups/destinations/test',{type:'folder'}],['POST','/api/backups/destinations/test',{type:'s3',endpoint:'https://s3',bucket:'b',accessKeyId:'AK'}]]){
   assert.equal(allowed(m,p,b),false,`${m} ${p}`);assert.equal(allowedRequest(m,p,b),false,`client ${m} ${p}`);
  }
  // The projection drops any secret and the credentialId, and keeps only what the page shows.
@@ -60,7 +64,15 @@ test('destinations: the page can list/add/push/test/remove a place, and secrets 
  assert.deepEqual(s3d.config,{endpoint:'https://s3',region:'eu',bucket:'b',prefix:'g',accessKeyId:'AK'});
  assert.ok(!JSON.stringify(s3d).includes('LEAK')&&!JSON.stringify(s3d).includes('secretAccessKey')&&!JSON.stringify(s3d).includes('cred_y'));
  assert.deepEqual(backupsResponse(`/api/backups/destinations/${did}/test`,200,{ok:true,extra:1}),{ok:true});
+ assert.deepEqual(backupsResponse('/api/backups/destinations/test',200,{ok:true,secret:'x'}),{ok:true});
  assert.deepEqual(backupsResponse(`/api/backups/destinations/${did}`,200,{deleted:true}),{deleted:true});
+});
+test('place cards: the folder name is the basename, and one status chip reflects the place’s state',()=>{
+ assert.equal(base('/Users/x/GirruBackups/backups'),'backups');assert.equal(base('/Volumes/My Drive/Girru/'),'Girru');
+ const st=o=>({lastPushAt:null,lastOkAt:null,lastError:null,lastErrorAt:null,lastVerifiedAt:null,backups:0,...o});
+ assert.deepEqual(placeChip(st({lastVerifiedAt:'2026-11-27T01:00:00.000Z',lastOkAt:'2026-11-27T01:00:00.000Z'})),{label:'✓ Checked',kind:'ok'});
+ assert.deepEqual(placeChip(st({})),{label:'Not sent',kind:'warn'});
+ assert.deepEqual(placeChip(st({lastError:'unreachable',lastVerifiedAt:'2026-11-27T01:00:00.000Z'})),{label:'Problem',kind:'err'}); // an error wins over a past check
 });
 test('Settings › Backups: an owner place, plain words for when and what kind',()=>{
  const fake=role=>({getSnapshot:()=>({phase:'authenticated',user:{role}}),subscribe:()=>()=>{},request:async()=>{throw Error('no requests during render');}});
