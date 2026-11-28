@@ -107,13 +107,20 @@ export function helperSettings(): HelperSettings {
   return structuredClone(cached);
 }
 
+const MODES = { auto: 'auto', light: 'light', custom: 'custom' } as const;
+
 function save(s: HelperSettings): void {
   const f = file();
   fs.mkdirSync(path.dirname(f), { recursive: true });
   const tmp = `${f}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(s, null, 2), { mode: 0o600 });
+  // Only fixed words, a whole number and a checked model name reach the file.
+  const mode = MODES[s.ram.mode] ?? 'auto';
+  const customGb = mode === 'custom' && Number.isInteger(s.ram.customGb) ? Math.floor(Number(s.ram.customGb)) : null;
+  const worker = typeof s.worker === 'string' && MODEL_NAME.test(s.worker) ? s.worker : null;
+  const clean: HelperSettings = { version: 1, ram: { mode, customGb }, worker };
+  fs.writeFileSync(tmp, JSON.stringify(clean, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, f);
-  cached = structuredClone(s);
+  cached = structuredClone(clean);
 }
 
 /** Tests: read the file again. */
@@ -215,7 +222,7 @@ export async function setHelperSettings(input: unknown, embeddingModel: string):
       if (!Number.isInteger(n) || n < 1 || n > Math.max(1, totalGb)) throw new HelperSettingsError(`customGb is a whole number from 1 to ${Math.max(1, totalGb)}`, 'invalid_settings');
       customGb = n;
     }
-    next.ram = { mode: r.mode, customGb };
+    next.ram = { mode: MODES[r.mode], customGb };
   }
   if (b.worker !== undefined) {
     if (b.worker !== null && (typeof b.worker !== 'string' || !MODEL_NAME.test(b.worker))) throw new HelperSettingsError('worker is a model name or null', 'invalid_settings');
@@ -226,7 +233,10 @@ export async function setHelperSettings(input: unknown, embeddingModel: string):
       if (b.worker !== undefined) throw new HelperSettingsError('Light keeps the night writer off; choose Automatic or Custom first', 'worker_off_in_light');
     } else {
       const installed = await installedModels();
-      if (!installed.some((m) => m.model === next.worker || m.model === `${next.worker}:latest`)) throw new HelperSettingsError('The night writer must already be on this computer', 'worker_not_installed');
+      const found = installed.find((m) => m.model === next.worker || m.model === `${next.worker}:latest`);
+      if (!found) throw new HelperSettingsError('The night writer must already be on this computer', 'worker_not_installed');
+      // Save the name as this computer lists it, never the text that came in.
+      next.worker = found.model;
       const loaded = await loadedModels();
       const need = ramFor(embeddingModel, installed, loaded) + ramFor(next.worker, installed, loaded);
       if (need > limitBytes(next)) throw new HelperSettingsError('This model does not fit in the RAM limit', 'worker_too_big');
