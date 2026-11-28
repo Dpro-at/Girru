@@ -34,7 +34,11 @@ let n = 0;
 const folder = () => { const d = join(base, `p${++n}`); fs.mkdirSync(d); return d; };
 const code = (c) => (e) => { assert.ok(e instanceof S.SafeFileError, `expected SafeFileError, got ${e}`); assert.equal(e.code, c, e.message); return true; };
 const tempsIn = (d) => fs.readdirSync(d).filter((x) => x.includes('.girru-') && x.endsWith('.tmp'));
-test.after(() => { S.setSafeFileHooksForTests(null); process.chdir(backendDir); fs.rmSync(base, { recursive: true, force: true }); });
+test.after(() => {
+  S.setSafeFileHooksForTests(null); process.chdir(backendDir);
+  // Windows can still hold a handle for a moment (EPERM): retry, and never fail the run over removing a temp folder.
+  try { fs.rmSync(base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { /* left in the temp folder */ }
+});
 
 test('switch is on by default; 0 / false / no / off turn it off', () => {
   assert.equal(storeP7Enabled({}), true);
