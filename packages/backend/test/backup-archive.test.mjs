@@ -72,11 +72,10 @@ test('round-trip: encrypt to one blob, decrypt to the exact same files', async (
 
   const blob = join(dir, 'out', 'a.gbk');
   const meta = await A.encryptBackupArchive('20261127-120000-manual', src, blob, km);
-  assert.ok(existsSync(blob), 'the blob is written');
   assert.ok(existsSync(blob + '.meta.json'), 'the sidecar is written');
   assert.equal(meta.algorithm, 'aes-256-gcm');
   assert.ok(typeof meta.keyId === 'string' && meta.keyId.length > 0);
-  // One open handle for the mode check and the read, so both see the same file.
+  // One open handle (it fails if the blob was not written) for the mode check and the read, so both see the same file.
   const blobFd = openSync(blob, 'r');
   let cipher;
   try {
