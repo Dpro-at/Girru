@@ -7,10 +7,15 @@ export type NightSettings = { enabled: boolean; from: string; to: string };
 export type NightReport = { night: string; startedAt: string; endedAt: string; stopped: 'done' | 'used' | 'unplugged' | 'hours' | 'error' | 'stopped' | 'low_ram'; files: number; projects: number; proposals: number; summaries: string[]; keys: number; duplicates: number;
   /** MEM-PANEL-01: per project slug, files read and whether a summary was written. */ byProject?: Record<string, { files: number; summary: boolean }> };
 export type NightStep = 'read' | 'summaries' | 'tidy';
-type State = { settings: NightSettings | null; last: NightReport | null; report: NightReport | null; busy: boolean; notice: string | null; running: boolean; step: NightStep | null };
+/** MEM-LIVE-01: what it does now, and what it did (newest first). */
+export type NightNow = { step: NightStep | null; file: string | null; project: string | null; read: number; startedAt: string };
+export type NightEvent = { at: string; kind: 'start' | 'read' | 'idea' | 'summary' | 'tidy' | 'done' | 'stopped'; text: string; project: string | null };
+type State = { settings: NightSettings | null; last: NightReport | null; report: NightReport | null; busy: boolean; notice: string | null; running: boolean; step: NightStep | null;
+  now: NightNow | null; events: NightEvent[]; /** When this page saw it finish (ms), for "Just finished". */ finishedAt: number | null };
 
 export class NightWorkController {
-  private state: State = { settings: null, last: null, report: null, busy: false, notice: null, running: false, step: null };
+  private state: State = { settings: null, last: null, report: null, busy: false, notice: null, running: false, step: null, now: null, events: [], finishedAt: null };
+  #idleMs = 0;
   #watch: ReturnType<typeof setTimeout> | undefined;
   #disposed = false;
   private listeners = new Set<() => void>();
@@ -22,17 +27,24 @@ export class NightWorkController {
     try {
       const r = await this.client.request({ method: 'GET', path: '/api/memory/scopes/night' });
       if (r.status === 200) {
-        const b = r.body as { settings: NightSettings; last: NightReport | null; running?: boolean; step?: NightStep | null };
+        const b = r.body as { settings: NightSettings; last: NightReport | null; running?: boolean; step?: NightStep | null; now?: NightNow | null; events?: NightEvent[] };
         const wasRunning = this.state.running, prevLast = this.state.last;
-        this.publish({ settings: b.settings, last: b.last, running: b.running === true, step: b.step ?? null });
+        this.publish({ settings: b.settings, last: b.last, running: b.running === true, step: b.step ?? null, now: b.now ?? null, events: b.events ?? [],
+          ...(wasRunning && b.running !== true ? { finishedAt: Date.now() } : {}) });
         // It finished: say so, and say it plainly when there was nothing new (no report is kept then).
-        if (wasRunning && b.running !== true) this.publish({ notice: b.last && b.last !== prevLast && JSON.stringify(b.last) !== JSON.stringify(prevLast) ? 'Done.' : 'Done. Nothing new to read.' });
+        // A stop already says so in the list (and the footer); no "Done." under it.
+        if (wasRunning && b.running !== true) this.publish({ notice: b.events?.[0]?.kind === 'stopped' ? null : b.last && b.last !== prevLast && JSON.stringify(b.last) !== JSON.stringify(prevLast) ? 'Done.' : 'Done. Nothing new to read.' });
         // While it runs, read again every 2 seconds so the step and Stop stay right.
         clearTimeout(this.#watch);
-        if (b.running && !this.#disposed) this.#watch = setTimeout(() => void this.load(), 2_000);
+        if (!this.#disposed && (b.running || this.#idleMs)) this.#watch = setTimeout(() => void this.load(), b.running ? 2_000 : this.#idleMs);
       }
-    } catch { /* stays as it is */ }
+    } catch {
+      clearTimeout(this.#watch);
+      if (!this.#disposed && this.#idleMs) this.#watch = setTimeout(() => void this.load(), this.#idleMs);
+    }
   }
+  /** Keep reading while it rests too (the footer: it may start on its own at night). */
+  watch(idleMs: number) { this.#disposed = false; this.#idleMs = idleMs; void this.load(); }
   async loadReport() {
     try { const r = await this.client.request({ method: 'GET', path: '/api/memory/scopes/night/report' }); if (r.status === 200) this.publish({ report: (r.body as { report: NightReport | null }).report }); } catch { /* no row */ }
   }
@@ -52,10 +64,10 @@ export class NightWorkController {
     catch { this.publish({ busy: false, notice: 'Did not start (no connection).' }); }
     await this.load();
   }
-  /** Stop: it ends after the step it is on; Run now goes on later. */
+  /** Stop: it ends after the file it is on; Run now goes on later. */
   async stop() {
     this.publish({ busy: true, notice: null });
-    try { const r = await this.client.request({ method: 'POST', path: '/api/memory/scopes/night/stop' }); const stopped = r.status === 200 && (r.body as { stopped?: boolean }).stopped === true; this.publish({ busy: false, notice: stopped ? 'It stops after the step it is on.' : 'Nothing is running.' }); }
+    try { const r = await this.client.request({ method: 'POST', path: '/api/memory/scopes/night/stop' }); const stopped = r.status === 200 && (r.body as { stopped?: boolean }).stopped === true; this.publish({ busy: false, notice: stopped ? 'It stops after the file it is on.' : 'Nothing is running.' }); }
     catch { this.publish({ busy: false, notice: 'Not stopped (no connection).' }); }
     await this.load();
   }
@@ -64,6 +76,19 @@ export class NightWorkController {
     try { await this.client.request({ method: 'POST', path: '/api/memory/scopes/night/report/done' }); } catch { /* the row goes anyway */ }
     this.publish({ report: null });
   }
+}
+
+/** Few words for the footer pill while night work runs, or just after (MEM-LIVE-01). */
+export function nightPillWord(ns: { running: boolean; now: NightNow | null; events: NightEvent[]; finishedAt: number | null }, nowMs = Date.now()): string | null {
+  if (ns.running) {
+    const n = ns.now;
+    if (!n || !n.step) return 'Night work: starting';
+    if (n.step === 'read') return `Night work: reading, ${n.read} ${n.read === 1 ? 'file' : 'files'} read`;
+    return n.step === 'summaries' ? 'Night work: writing summaries' : 'Night work: tidying';
+  }
+  const top = ns.events[0];
+  if (ns.finishedAt !== null && nowMs - ns.finishedAt < 60_000 && top && (top.kind === 'done' || top.kind === 'stopped')) return top.text.slice(0, 80);
+  return null;
 }
 
 const time = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }); };

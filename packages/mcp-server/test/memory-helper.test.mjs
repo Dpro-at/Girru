@@ -20,3 +20,12 @@ test('memory_helper reads and acts through the owner-only helper and night route
  }
  assert.equal(calls.length,n);
 });
+
+test('memory_helper status passes on what the night work is doing now, newest first',async()=>{
+ const night={running:true,step:'read',now:{step:'read',file:'docs/storage-map.md',project:'girru',read:12,startedAt:'2026-11-28T01:04:00.000Z'},events:[{at:'2026-11-28T01:09:00.000Z',kind:'read',text:'Read README.md',project:'girru'}]};
+ const backend={request:async(method,path)=>path==='/api/memory/scopes/night'?night:{ok:true}};
+ const r=await callTool('memory_helper',{operation:'status'},{backend});
+ assert.notEqual(r.isError,true);
+ const text=JSON.stringify(r);
+ assert.ok(text.includes('docs/storage-map.md')&&text.includes('Read README.md'),'now and events reach the coding app');
+});

@@ -32,10 +32,10 @@
  *   GET  /api/memory/scopes/projects/:slug/export  -> { project, files: [{ name, content }] }
  *   POST /api/memory/scopes/ask-agent              { agentId, request, text, drawer? } -> { jobId }  Ask an agent in the shared editor (MR5; proposal only, nothing saved)
  *   GET  /api/memory/scopes/ask-agent/:jobId       -> { state: running | done (text, note) | error (code, error) }
- *   GET  /api/memory/scopes/night                  -> { settings: { enabled, from, to }, last: report | null, running, step }   Night work (MR9)
+ *   GET  /api/memory/scopes/night                  -> { settings: { enabled, from, to }, last: report | null, running, step, now, events }   Night work (MR9; now/events MEM-LIVE-01)
  *   PUT  /api/memory/scopes/night                  { enabled?, from?, to? } -> { settings }
  *   POST /api/memory/scopes/night/run              -> { started: true }   Run now (stops between steps on its own)
- *   POST /api/memory/scopes/night/stop             -> { stopped }         Stop at the end of the current step (MEM-PANEL-01)
+ *   POST /api/memory/scopes/night/stop             -> { stopped }         Stop after the file it is on (MEM-PANEL-01, MEM-LIVE-01)
  *   GET  /api/memory/scopes/night/report           -> { report | null }   the morning row in Needs you
  *   POST /api/memory/scopes/night/report/done      -> { ok: true }
  *   GET  /api/memory/scopes/hidden-keys            -> { total, drawers: [{ drawer, count, memories, kinds }] } keys hidden since the owner last answered (MR2; runs the one-time pass first)
@@ -70,7 +70,7 @@ import { answerHiddenKeys, hiddenKeysReport, hideKeysOnce, revealKey } from '../
 import { AskAgentError, askJob, startAskJob } from '../../memory/ask-agent.js';
 import { projectDocuments, projectSize } from '../../memory/project-size.js';
 import { projectSummaries } from '../../memory/project-summaries.js';
-import { NightInputError, dismissNightReport, lastNight, nightReport, nightRunning, nightSettings, runNightWork, setNightSettings, stopNightWorkFor } from '../../memory/night-work.js';
+import { NightInputError, dismissNightReport, lastNight, nightEvents, nightReport, nightRunning, nightSettings, runNightWork, setNightSettings, stopNightWorkFor } from '../../memory/night-work.js';
 import { isValidDrawerKey } from '../../memory/drawers.js';
 import { provenanceJobStatus, setChecked } from '../../memory/validity.js';
 import { vectorJobStatus } from '../../memory/vectors.js';
@@ -182,7 +182,8 @@ export async function memoryScopeRoutes(fastify: FastifyInstance) {
   // ---- night work (MEM-READ-01 MR9) ----
   route('GET', '/api/memory/scopes/night', async (owner) => {
     const s = await nightSettings(owner.userId!);
-    return { settings: { enabled: s.enabled, from: s.from, to: s.to }, last: await lastNight(owner.userId!), ...nightRunning(owner.userId!) };
+    // MEM-LIVE-01: `now` (the file it is on) and `events` (what it did, newest first; the last run when idle).
+    return { settings: { enabled: s.enabled, from: s.from, to: s.to }, last: await lastNight(owner.userId!), ...nightRunning(owner.userId!), events: await nightEvents(owner.userId!) };
   });
   route('PUT', '/api/memory/scopes/night', async (owner, request, reply) => {
     try {

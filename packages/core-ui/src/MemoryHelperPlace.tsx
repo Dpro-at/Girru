@@ -12,7 +12,7 @@ import type { HelperRam, HelperStatus, WorkerCandidate } from './memory-helper-c
 import { stepWord, timeLeft, useMemoryHelper } from './MemoryHelper';
 import type { HelperState } from './MemoryHelper';
 import { NightWorkController, NightWorkSettings } from './MemoryNightWork';
-import type { NightReport, NightSettings, NightStep } from './MemoryNightWork';
+import type { NightEvent, NightNow, NightReport, NightSettings, NightStep } from './MemoryNightWork';
 
 const GIB = 1024 ** 3;
 /** "1 GB", "3.5 GB", "32 GB". */
@@ -43,7 +43,7 @@ export function NightBar({ settings, last, now = new Date() }: { settings: Night
   const bands = from < to ? [[from, to]] : [[from, 1440], [0, to]];
   const done = last ? at(last.endedAt) : null;
   return <div className="helper-night" data-off={!settings.enabled || undefined}>
-    <div className="helper-night-bar" role="img" aria-label={settings.enabled ? `Learns every night from ${settings.from} to ${settings.to}` : 'Learning at night is off'}>
+    <div className="helper-night-bar" role="img" aria-label={settings.enabled ? `Works every night from ${settings.from} to ${settings.to}` : 'Night work is off'}>
       {settings.enabled && bands.map(([a, b]) => <i key={a} className="helper-night-band" style={{ insetInlineStart: pct(a), inlineSize: pct(b - a) }}/>)}
       {done !== null && <i className="helper-night-done" style={{ insetInlineStart: pct(done) }} title={`Finished last night at ${parse(last!.endedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}/>}
       <i className="helper-night-now" style={{ insetInlineStart: pct(now.getHours() * 60 + now.getMinutes()) }} title="Now"/>
@@ -55,10 +55,48 @@ export function NightBar({ settings, last, now = new Date() }: { settings: Night
 const STEP: Record<NightStep, string> = { read: 'reading the files that changed', summaries: 'writing the summaries', tidy: 'tidying' };
 /** One sentence about last night (or now). */
 export function lastNightSentence(last: NightReport | null): string {
-  if (!last) return 'It has not learned yet. Tonight it starts on its own.';
+  if (!last) return 'It has not run yet. Tonight it starts on its own.';
   if (last.stopped === 'low_ram') return 'Last night it waited: the computer had too little free RAM.';
   const parts = [`read ${last.files} ${last.files === 1 ? 'file' : 'files'}`, `wrote ${last.summaries.length} ${last.summaries.length === 1 ? 'summary' : 'summaries'}`];
   return `Last night it ${parts.join(', ')}${last.stopped === 'done' ? '' : ' and stopped early; it goes on the next night'}.`;
+}
+
+// ---- MEM-LIVE-01: what night work is doing now, and what it did ----------------------------
+
+const STEPS: ReadonlyArray<{ id: NightStep; name: string }> = [{ id: 'read', name: 'Read files' }, { id: 'summaries', name: 'Write summaries' }, { id: 'tidy', name: 'Tidy' }];
+const EVENT_ICON: Record<NightEvent['kind'], UiIconName> = { start: 'play', read: 'file', idea: 'bulb', summary: 'note', tidy: 'eraser', done: 'check', stopped: 'pause' };
+const hhmm = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
+
+/** The three steps: done, on it, or still to come. */
+export function NightSteps({ step, finished }: { step: NightStep | null; finished: boolean }) {
+  const at = finished ? STEPS.length : step ? STEPS.findIndex(x => x.id === step) : 0;
+  return <ol className="night-steps" aria-label="Steps">
+    {STEPS.map((x, i) => <li key={x.id} data-state={i < at ? 'done' : i === at ? 'now' : 'next'}>
+      <span className="night-step-mark" aria-hidden="true">{i < at ? <UiIcon name="check" size={12}/> : <i/>}</span>{x.name}
+      <span className="sr-only">{i < at ? ' (done)' : i === at ? ' (now)' : ''}</span></li>)}
+  </ol>;
+}
+
+/** What it did, newest first. An idea row opens Needs you. */
+export function NightEventList({ events, projectName, onOpenNeeds, label }: { events: NightEvent[]; projectName: (slug: string) => string; onOpenNeeds?: () => void; label: string }) {
+  return <ul className="night-events" aria-label={label}>
+    {events.map((e, i) => <li key={`${e.at}-${i}`} data-kind={e.kind}>
+      <time dateTime={e.at}>{hhmm(e.at)}</time>
+      <UiIcon name={EVENT_ICON[e.kind]} size={13}/>
+      {e.kind === 'idea' && onOpenNeeds ? <button type="button" className="link-button" onClick={onOpenNeeds}>{e.text}</button> : <span className="night-event-text" title={e.text}>{e.text}</span>}
+      {e.project && <span className="fine-print night-event-project">{projectName(e.project)}</span>}
+    </li>)}
+  </ul>;
+}
+
+/** While it runs: the file it is on. */
+export function NightNowLine({ now, projectName }: { now: NightNow; projectName: (slug: string) => string }) {
+  const what = now.step === 'summaries' ? 'Writing the summaries' : now.step === 'tidy' ? 'Tidying' : now.file ? <>Reading <b>{now.file}</b></> : 'Looking for new and changed files';
+  return <div className="night-now" role="status">
+    <UiIcon name={now.step === 'summaries' ? 'note' : now.step === 'tidy' ? 'eraser' : 'file'} size={15}/>
+    <span className="night-now-text">{what}{now.project && now.step === 'read' ? <span className="fine-print"> · {projectName(now.project)}</span> : null}</span>
+    <span className="fine-print">{now.read} {now.read === 1 ? 'file' : 'files'} read</span>
+  </div>;
 }
 
 type Tool = 'search' | 'files' | 'apps' | 'writer';
@@ -137,6 +175,7 @@ export function MemoryHelperPlace({ client, night, projectName = s => s, onOpenN
   const [st, c] = useMemoryHelper(client, true);
   const ns = useSyncExternalStore(night.subscribe, night.getSnapshot, night.getSnapshot);
   const [tool, setTool] = useState<Tool>('search');
+  const [allEvents, setAllEvents] = useState(false);
   useEffect(() => { void night.load(); void night.loadReport(); }, [night]);
   if (st.phase === 'loading') return <p className="dk-side-note" role="status">Loading…</p>;
   if (st.phase === 'off') return <div className="dk-empty"><UiIcon name="brain" size={20}/><p>The memory helper is turned off on this installation. Memory finds things by words.</p></div>;
@@ -156,12 +195,23 @@ export function MemoryHelperPlace({ client, night, projectName = s => s, onOpenN
       </section>
       <section className="helper-block" aria-label="Night work">
         <h3>Night work{ns.running ? <span className="fine-print"> · running now{ns.step ? `: ${STEP[ns.step]}` : ''}</span> : null}</h3>
-        {ns.settings && <NightBar settings={ns.settings} last={last}/>}
-        <p>{lastNightSentence(last)}{ideas > 0 && <> {onOpenNeeds ? <button type="button" className="link-button" onClick={onOpenNeeds}>{ideas} {ideas === 1 ? 'idea waits' : 'ideas wait'} for you</button> : `${ideas} ideas wait for you`}.</>}</p>
+        {ns.running ? <>
+          <NightSteps step={ns.now?.step ?? ns.step} finished={false}/>
+          {ns.now && <NightNowLine now={ns.now} projectName={projectName}/>}
+          {ns.events.length > 0 && <><span className="fine-print">What it is doing</span>
+            <NightEventList events={ns.events.slice(0, 8)} projectName={projectName} onOpenNeeds={onOpenNeeds} label="What it is doing"/></>}
+        </> : ns.settings && <NightBar settings={ns.settings} last={last}/>}
+        {!ns.running && ns.events.length > 0 && <>
+          <NightSteps step={null} finished={ns.events[0]?.kind === 'done'}/>
+          <span className="fine-print">Last run</span>
+          <NightEventList events={allEvents ? ns.events : ns.events.slice(0, 5)} projectName={projectName} onOpenNeeds={onOpenNeeds} label="Last run"/>
+          {ns.events.length > 5 && <button type="button" className="link-button" onClick={() => setAllEvents(v => !v)}>{allEvents ? 'Show less' : `Show everything it did (${ns.events.length})`}</button>}
+        </>}
+        {!ns.running && <p>{lastNightSentence(last)}{ideas > 0 && <> {onOpenNeeds ? <button type="button" className="link-button" onClick={onOpenNeeds}>{ideas} {ideas === 1 ? 'idea waits' : 'ideas wait'} for you</button> : `${ideas} ideas wait for you`}.</>}</p>}
         <div className="actions">
           {ns.running ? <button type="button" disabled={ns.busy} onClick={() => void night.stop()}><UiIcon name="pause" size={12}/>Stop</button>
             : <button type="button" className="primary" disabled={ns.busy} onClick={() => void night.runNow()}>Run now</button>}
-          <span className="fine-print">{ns.settings?.enabled === false ? 'Learning at night is off.' : 'At night only while the computer rests and charges.'}</span>
+          <span className="fine-print">{ns.running ? 'Stop ends after the file it is on. Nothing is lost; Run now goes on from there.' : ns.settings?.enabled === false ? 'Night work is off.' : 'At night only while the computer rests and charges.'}</span>
         </div>
         {ns.notice && <p className="fine-print" role="status">{ns.notice}</p>}
       </section>

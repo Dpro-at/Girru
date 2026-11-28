@@ -84,7 +84,8 @@ Use these MCP tools through the owner's authenticated local session.
 
 - The memory helper is Memory › Memory helper (the footer pill opens it). It finds memories by meaning in any language and works every night (01:00–06:00, only while the computer rests and charges): it reads new and changed files, turns notes into ideas that wait in Needs you, writes summaries per project and tidies. It never forgets anything by itself.
 - `status` reads its state (Ready, Checking, Learning, Needs you), the RAM its models use, the RAM limit and the free RAM, the night writer, whether tonight's work runs now and what last night read per project. No memory text.
-- `start` (Run now) and `stop` (Stop, at the end of the current step) only when the owner asks. Night work waits while the computer has less than 2 GB of free RAM; Run now does not wait.
+- When the owner asks what the helper is doing, use `status`: while night work runs it gives the step, the file it is on and the newest things it did (file names and counts, no memory text); after it ends, the last run. The footer pill says the same in a few words.
+- `start` (Run now) and `stop` (Stop, after the file it is on) only when the owner asks. Night work waits while the computer has less than 2 GB of free RAM; Run now does not wait.
 - `settings` changes the RAM limit (`auto`: a quarter of the computer's RAM; `light`: about 1 GB, search only, the night writer stays off; `custom` with whole `customGb`) or the night writer (a model already on this computer that fits the limit, or null). Only on the owner's instruction; inside Girru the owner approves each change. Night hours are the owner's, in Settings › Memory › Memory helper.
 
 ## Store (tool `workspace_store`, the Store section)

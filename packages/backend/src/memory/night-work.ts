@@ -31,7 +31,14 @@ export interface NightReport {
   files: number; projects: number; proposals: number; summaries: string[]; keys: number; duplicates: number; seen: boolean;
   /** MEM-PANEL-01: per project (slug): files read and whether a summary was written. */
   byProject?: Record<string, { files: number; summary: boolean }>;
+  /** MEM-LIVE-01: what it did, newest first (file names, project slugs, counts; no memory text). */
+  events?: NightEvent[];
 }
+export type NightStep = 'read' | 'summaries' | 'tidy';
+export interface NightEvent { at: string; kind: 'start' | 'read' | 'idea' | 'summary' | 'tidy' | 'done' | 'stopped'; text: string; project: string | null }
+/** While it runs: the step, the file it is on and how many files it read so far. */
+export interface NightNow { step: NightStep | null; file: string | null; project: string | null; read: number; startedAt: string }
+const MAX_LIVE_EVENTS = 200, MAX_SAVED_EVENTS = 64;
 export interface MachineState { idleSeconds: number | null; onPower: boolean | null }
 
 const DEFAULTS: NightSettings = { enabled: true, from: '01:00', to: '06:00' };
@@ -106,35 +113,42 @@ export async function machineState(): Promise<MachineState> {
 }
 
 export interface NightDeps { state?: () => Promise<MachineState>; now?: () => Date; steps?: Partial<NightSteps>; /** Tests: is RAM too low (default: real check). */ ramLow?: () => Promise<boolean> }
+interface StepHooks {
+  onFile?: (f: { project: string | null; file: string; phase: 'reading' | 'read' }) => void;
+  onSummary?: (name: string, slug: string) => void;
+  shouldStop?: () => boolean;
+}
 interface NightSteps {
-  readFiles(ownerId: string): Promise<{ files: number; projects: number; proposals: number; bySlug?: Record<string, number> }>;
-  summaries(ownerId: string, now: Date): Promise<string[] | { names: string[]; slugs: string[] }>;
+  readFiles(ownerId: string, hooks?: StepHooks): Promise<{ files: number; projects: number; proposals: number; bySlug?: Record<string, number> }>;
+  summaries(ownerId: string, now: Date, hooks?: StepHooks): Promise<string[] | { names: string[]; slugs: string[] }>;
   tidy(ownerId: string): Promise<{ keys: number; duplicates: number }>;
 }
 
 const DEFAULT_STEPS: NightSteps = {
-  async readFiles(ownerId) {
+  async readFiles(ownerId, hooks = {}) {
     let files = 0, projects = 0;
     const bySlug: Record<string, number> = {};
     try {
       const { indexOwner } = await import('./docs/indexer.js');
-      const reports = await indexOwner(ownerId);
+      const reports = await indexOwner(ownerId, { shouldStop: hooks.shouldStop, onFile: hooks.onFile && ((f) => hooks.onFile!({ project: f.project, file: f.file, phase: f.phase })) });
       const refs = new Map((await sql().read(all<{ id: string; ref_id: string }>("SELECT id, ref_id FROM doc_index_sources WHERE owner_id = ? AND kind = 'project'", ownerId)).catch(() => [])).map((r) => [r.id, r.ref_id]));
       for (const r of reports) {
         files += r.changed ?? 0;
         if ((r.changed ?? 0) > 0) { projects++; const slug = refs.get(r.sourceId); if (slug) bySlug[slug] = (bySlug[slug] ?? 0) + (r.changed ?? 0); }
       }
     } catch { /* the document index is optional */ }
+    if (hooks.shouldStop?.()) return { files, projects, proposals: 0, bySlug };
     const before = await pendingProposals(ownerId);
     try { const { runAutomaticImportNow } = await import('./import/automatic-project-import.js'); await runAutomaticImportNow(ownerId); } catch { /* import off or nothing to do */ }
     return { files, projects, proposals: Math.max(0, (await pendingProposals(ownerId)) - before), bySlug };
   },
-  async summaries(ownerId, now) {
+  async summaries(ownerId, now, hooks = {}) {
     const { projectSummaries, summariesText } = await import('./project-summaries.js');
     const { listProjects } = await import('./scopes/store.js');
     const written: string[] = [];
     const slugs: string[] = [];
     for (const p of (await listProjects(ownerId)).filter((x) => !x.archived && !x.notProject).slice(0, 200)) {
+      if (hooks.shouldStop?.()) break;
       const list = (await projectSummaries(ownerId, p.slug, now)).filter((s) => s.period === 'today' || (s.period === 'week' && now.getDay() === 1) || (s.period === 'month' && now.getDate() === 1));
       if (!list.length) continue;
       for (const s of list) {
@@ -144,6 +158,7 @@ const DEFAULT_STEPS: NightSteps = {
       }
       written.push(p.name);
       slugs.push(p.slug);
+      hooks.onSummary?.(p.name, p.slug);
     }
     return { names: written, slugs };
   },
@@ -162,12 +177,21 @@ async function pendingProposals(ownerId: string): Promise<number> {
 
 const running = new Map<string, Promise<NightReport>>();
 /** MEM-PANEL-01: the step a run is on, and owners who asked it to stop (Stop in Memory › Memory helper). */
-const progress = new Map<string, 'read' | 'summaries' | 'tidy'>();
+const progress = new Map<string, NightStep>();
 const stopAsked = new Set<string>();
+/** MEM-LIVE-01: what a run is doing now, and what it did (newest first). */
+const live = new Map<string, NightNow & { events: NightEvent[] }>();
 
-/** Whether tonight's work runs now for this owner, and on which step. */
-export function nightRunning(ownerId: string): { running: boolean; step: 'read' | 'summaries' | 'tidy' | null } {
-  return { running: running.has(ownerId), step: progress.get(ownerId) ?? null };
+/** Whether tonight's work runs now for this owner, on which step, and the file it is on. */
+export function nightRunning(ownerId: string): { running: boolean; step: NightStep | null; now: NightNow | null } {
+  const l = live.get(ownerId);
+  return { running: running.has(ownerId), step: progress.get(ownerId) ?? null, now: l ? { step: progress.get(ownerId) ?? null, file: l.file, project: l.project, read: l.read, startedAt: l.startedAt } : null };
+}
+/** What it did: the running list while it works, otherwise the last saved run (newest first). */
+export async function nightEvents(ownerId: string): Promise<NightEvent[]> {
+  const l = live.get(ownerId);
+  if (l) return l.events.slice();
+  return (await lastNight(ownerId))?.events ?? [];
 }
 
 /** Stop at the end of the current step (Undo = Run now). False when nothing runs. */
@@ -177,6 +201,11 @@ export function stopNightWorkFor(ownerId: string): boolean {
   return true;
 }
 
+const STOP_TEXT: Record<Exclude<NightReport['stopped'], 'done'>, string> = {
+  stopped: 'Stopped when you asked. Run now goes on from here.', used: 'Stopped: you are using the computer', unplugged: 'Stopped: the charger was unplugged',
+  hours: 'Stopped: the night hours ended', low_ram: 'Waiting: too little free RAM', error: 'Stopped: something went wrong; it tries again tonight',
+};
+
 /** Run tonight's work for one owner (also "Run now"). Stops between steps when it should; saves the report. */
 export async function runNightWork(ownerId: string, deps: NightDeps & { force?: boolean } = {}): Promise<NightReport> {
   const prev = running.get(ownerId); if (prev) return prev;
@@ -184,6 +213,21 @@ export async function runNightWork(ownerId: string, deps: NightDeps & { force?: 
     const now = deps.now ?? (() => new Date()), state = deps.state ?? machineState, steps = { ...DEFAULT_STEPS, ...deps.steps };
     const s = await nightSettings(ownerId), start = now();
     const report: NightReport = { night: nightKey(s, start), startedAt: start.toISOString(), endedAt: start.toISOString(), stopped: 'done', files: 0, projects: 0, proposals: 0, summaries: [], keys: 0, duplicates: 0, seen: false };
+    const l = { step: null, file: null, project: null, read: 0, startedAt: start.toISOString(), events: [] as NightEvent[] } as NightNow & { events: NightEvent[] };
+    live.set(ownerId, l);
+    const say = (kind: NightEvent['kind'], text: string, project: string | null = null) => {
+      l.events.unshift({ at: now().toISOString(), kind, text: text.slice(0, 300), project });
+      if (l.events.length > MAX_LIVE_EVENTS) l.events.length = MAX_LIVE_EVENTS;
+    };
+    const hooks: StepHooks = {
+      shouldStop: () => stopAsked.has(ownerId),
+      onFile: (f) => {
+        if (f.phase === 'reading') { l.file = f.file; l.project = f.project; return; }
+        l.read++; say('read', `Read ${f.file}`, f.project);
+      },
+      onSummary: (name, slug) => say('summary', `Summary written: ${name}`, slug),
+    };
+    say('start', deps.force ? 'Started (Run now)' : 'Started');
     const why = async (): Promise<NightReport['stopped'] | null> => {
       if (stopAsked.has(ownerId)) return 'stopped';
       if (deps.force) return null;
@@ -197,18 +241,28 @@ export async function runNightWork(ownerId: string, deps: NightDeps & { force?: 
     try {
       for (const step of ['read', 'summaries', 'tidy'] as const) {
         const stop = await why(); if (stop) { report.stopped = stop; break; }
-        progress.set(ownerId, step);
+        progress.set(ownerId, step); l.step = step; l.file = null; l.project = null;
         if (step === 'read') {
-          const r = await steps.readFiles(ownerId);
+          const r = await steps.readFiles(ownerId, hooks);
           report.files = r.files; report.projects = r.projects; report.proposals = r.proposals;
           for (const [slug, n] of Object.entries(r.bySlug ?? {})) byProject(report, slug).files += n;
+          if (r.proposals > 0) say('idea', `${r.proposals} ${r.proposals === 1 ? 'idea waits' : 'ideas wait'} for you in Needs you`);
         } else if (step === 'summaries') {
-          const r = await steps.summaries(ownerId, now());
+          const r = await steps.summaries(ownerId, now(), hooks);
           if (Array.isArray(r)) report.summaries = r;
           else { report.summaries = r.names; for (const slug of r.slugs) byProject(report, slug).summary = true; }
-        } else Object.assign(report, await steps.tidy(ownerId));
+        } else {
+          const t = await steps.tidy(ownerId);
+          Object.assign(report, t);
+          say('tidy', t.keys || t.duplicates ? `Tidied: ${t.keys} hidden ${t.keys === 1 ? 'key' : 'keys'}, ${t.duplicates} ${t.duplicates === 1 ? 'duplicate' : 'duplicates'} found` : 'Tidied: nothing to fix');
+        }
+        l.file = null; l.project = null;
+        if (stopAsked.has(ownerId)) { report.stopped = 'stopped'; break; }
       }
     } catch { report.stopped = 'error'; }
+    if (report.stopped === 'done') say('done', `Done: ${report.files} ${report.files === 1 ? 'file' : 'files'} read, ${report.summaries.length} ${report.summaries.length === 1 ? 'summary' : 'summaries'}, ${report.proposals} ${report.proposals === 1 ? 'idea' : 'ideas'}`);
+    else say('stopped', STOP_TEXT[report.stopped]);
+    report.events = l.events.slice(0, MAX_SAVED_EVENTS);
     progress.delete(ownerId); stopAsked.delete(ownerId);
     // The night writer leaves the RAM when the work ends (RAM limit, MEM-PANEL-01).
     const writer = chosenWorker(); if (writer) await unloadModel(writer).catch(() => false);
@@ -221,7 +275,7 @@ export async function runNightWork(ownerId: string, deps: NightDeps & { force?: 
         ownerId, s.enabled ? 1 : 0, s.from, s.to, report.stopped === 'done' ? report.night : s.lastNight, quiet && report.stopped === 'done' ? null : JSON.stringify(report), report.endedAt);
     });
     return report;
-  })().finally(() => { running.delete(ownerId); progress.delete(ownerId); stopAsked.delete(ownerId); });
+  })().finally(() => { running.delete(ownerId); progress.delete(ownerId); stopAsked.delete(ownerId); live.delete(ownerId); });
   running.set(ownerId, work);
   return work;
 }

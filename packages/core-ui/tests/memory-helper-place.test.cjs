@@ -63,8 +63,8 @@ test('the RAM line names RAM; the night bar shows the hours; the sentence says w
   assert.match(line, /Uses <b>1 GB of RAM<\/b> · this computer has 32 GB RAM · RAM limit <b>8 GB<\/b> \(Automatic\)/);
   const bar = renderToStaticMarkup(React.createElement(NightBar, { settings: { enabled: true, from: '22:00', to: '06:00' }, last: null, now: new Date(2026, 10, 28, 15, 0) }));
   assert.equal((bar.match(/helper-night-band/g) ?? []).length, 2, 'a window over midnight is two bands');
-  assert.match(bar, /Learns every night from 22:00 to 06:00/);
-  assert.equal(lastNightSentence(null), 'It has not learned yet. Tonight it starts on its own.');
+  assert.match(bar, /Works every night from 22:00 to 06:00/);
+  assert.equal(lastNightSentence(null), 'It has not run yet. Tonight it starts on its own.');
   assert.equal(lastNightSentence({ files: 12, summaries: ['a', 'b'], stopped: 'done' }), 'Last night it read 12 files, wrote 2 summaries.');
   assert.match(lastNightSentence({ files: 0, summaries: [], stopped: 'low_ram' }), /too little free RAM/);
 });

@@ -247,7 +247,13 @@ const yieldTurn = () => new Promise<void>((r) => setImmediate(r));
 export interface IndexReport { sourceId: string; state: string; files: number; changed: number; removed: number; unreadable: number; chunks: number; reembedded: number; limited: boolean; skipped?: string }
 
 /** One run of one source (see the header). */
-export async function indexSource(sourceId: string, opts: { embedder?: EmbeddingService } = {}): Promise<IndexReport> {
+/** MEM-LIVE-01: night work follows the read file by file, and may ask to stop after the file it is on. */
+export interface IndexProgress {
+  onFile?: (f: { sourceId: string; project: string | null; file: string; phase: 'reading' | 'read' }) => void;
+  shouldStop?: () => boolean;
+}
+
+export async function indexSource(sourceId: string, opts: { embedder?: EmbeddingService } & IndexProgress = {}): Promise<IndexReport> {
   assertNoLegacyMemoryFileAccess();
   assertNoDefaultMemoryAccess();
   const base: IndexReport = { sourceId, state: 'ready', files: 0, changed: 0, removed: 0, unreadable: 0, chunks: 0, reembedded: 0, limited: false };
@@ -272,19 +278,26 @@ export async function indexSource(sourceId: string, opts: { embedder?: Embedding
     let chunkBudget = MAX_CHUNKS_PER_SOURCE;
     for (const r of existing.values()) chunkBudget -= r.chunks;
     let filesLeft = MAX_FILES;
+    // Stopped on request: what was read stays; nothing is counted as gone and nothing is re-embedded this time.
+    let stopped = false;
+    const project = source.kind === 'project' ? source.ref_id : null;
     for (const { root, label } of roots) {
+      if (stopped) break;
       if (filesLeft <= 0) { limited = true; break; }
       const scan = await scanRoot(root);
       if (scan.limited) limited = true;
       if (scan.root) scannedRoots.add(scan.root);
       if (scan.root && !scan.limited) completeRoots.add(scan.root);
       for (const found of scan.files.slice(0, filesLeft)) {
+        if (opts.shouldStop?.()) { stopped = true; break; }
         if (whole.has(found.rel)) continue;
         filesLeft--;
         const fileId = fileIdOf(sourceId, found.root, found.rel);
         seen.add(fileId);
         const prev = existing.get(fileId);
         if (prev && prev.bytes === found.bytes && prev.mtime_ms === found.mtimeMs) continue;
+        const shown = (label ? `${label}/${found.rel}` : found.rel).split(path.sep).join('/');
+        opts.onFile?.({ sourceId, project, file: shown, phase: 'reading' });
         const data = await readFound(found);
         if (!data) continue;
         const hash = sha(data);
@@ -292,7 +305,7 @@ export async function indexSource(sourceId: string, opts: { embedder?: Embedding
           await sql().read(run('UPDATE doc_index_files SET bytes = ?, mtime_ms = ? WHERE id = ?', found.bytes, found.mtimeMs, fileId));
           continue;
         }
-        const display = (label ? `${label}/${found.rel}` : found.rel).split(path.sep).join('/');
+        const display = shown;
         const ex = extractChunks(found.kind, data, found.rel);
         let chunks: Array<DocChunk & { model: string | null; vec: Buffer | null }> = [];
         if (ex.ok) {
@@ -308,18 +321,19 @@ export async function indexSource(sourceId: string, opts: { embedder?: Embedding
           status: ex.ok ? 'ok' : 'unreadable', reason: ex.ok ? ex.info ?? null : ex.reason, pages: ex.ok ? ex.pages : null, chunks,
         }));
         base.changed++;
+        opts.onFile?.({ sourceId, project, file: shown, phase: 'read' });
         await yieldTurn();
       }
     }
     // Gone: not found in a folder walked completely, a folder no longer in the source (or gone), or a missing file.
-    for (const r of existing.values()) {
+    for (const r of stopped ? [] : existing.values()) {
       if (seen.has(r.id)) continue;
       if (completeRoots.has(r.root) || !scannedRoots.has(r.root) || !(await stillThere(r.root, r.rel_path))) {
         await sql().tx(() => dropFileStep(sourceId, r.id));
         base.removed++;
       }
     }
-    base.reembedded = await reembedSource(sourceId, embedder);
+    base.reembedded = stopped ? 0 : await reembedSource(sourceId, embedder);
     const totals = await sql().read(one<{ files: number; chunks: number; unreadable: number }>(`
       SELECT COUNT(*) AS files, COALESCE(SUM(chunks), 0) AS chunks, COALESCE(SUM(CASE WHEN status = 'unreadable' THEN 1 ELSE 0 END), 0) AS unreadable
         FROM doc_index_files WHERE source_id = ?`, sourceId));
@@ -382,14 +396,14 @@ export async function docIndexIdle(): Promise<void> {
 }
 
 /** Every enabled source of an owner, one after another (the scheduled job; resumes an interrupted run). */
-export async function indexOwner(ownerId: string): Promise<IndexReport[]> {
+export async function indexOwner(ownerId: string, opts: IndexProgress = {}): Promise<IndexReport[]> {
   assertNoLegacyMemoryFileAccess();
   assertNoDefaultMemoryAccess();
   if (!docIndexEnabled()) return [];
   await ensureProjectSources(ownerId);
   const rows = await sql().read(all<{ id: string }>('SELECT id FROM doc_index_sources WHERE owner_id = ? AND enabled = 1 ORDER BY id', ownerId));
   const out: IndexReport[] = [];
-  for (const r of rows) out.push(await indexSource(r.id));
+  for (const r of rows) { if (opts.shouldStop?.()) break; out.push(await indexSource(r.id, opts)); }
   return out;
 }
 

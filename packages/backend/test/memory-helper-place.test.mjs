@@ -141,7 +141,7 @@ test('night work: waits under 2 GB free RAM unless the owner starts it; Stop end
   const stopSteps = { ...steps, readFiles: async () => { order.push('read'); assert.equal(N.nightRunning(OWNER).step, 'read'); assert.equal(N.stopNightWorkFor(OWNER), true); return { files: 1, projects: 1, proposals: 0 }; } };
   const stopped = await N.runNightWork(OWNER, { steps: stopSteps, now: () => at(1, 10, 13), state: idle, ramLow: async () => false });
   assert.equal(stopped.stopped, 'stopped'); assert.deepEqual(order, ['read']);
-  assert.deepEqual(N.nightRunning(OWNER), { running: false, step: null });
+  assert.deepEqual(N.nightRunning(OWNER), { running: false, step: null, now: null });
   // The next run is not stopped by the old request.
   const again = await N.runNightWork(OWNER, { steps, now: () => at(1, 20, 13), state: idle, ramLow: async () => false });
   assert.equal(again.stopped, 'done');
