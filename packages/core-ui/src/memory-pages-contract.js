@@ -66,6 +66,20 @@
 //   POST   /api/memory/cache/clear                       { confirm: true }
 
 const record = x => !!x && typeof x === 'object' && !Array.isArray(x);
+/** MEM-LIVE-01: what night work is doing now (null when it rests). */
+function nightNow(n) {
+  if (!record(n)) return null;
+  const str = (x, max) => (typeof x === 'string' ? x.slice(0, max) : null);
+  return { step: ['read', 'summaries', 'tidy'].includes(n.step) ? n.step : null, file: str(n.file, 400), project: str(n.project, 120),
+    read: Number.isInteger(n.read) && n.read >= 0 ? Math.min(n.read, 1e7) : 0, startedAt: str(n.startedAt, 40) ?? '' };
+}
+const NIGHT_EVENT_KINDS = ['start', 'read', 'idea', 'summary', 'tidy', 'done', 'stopped'];
+/** MEM-LIVE-01: what night work did, newest first (at most 200). */
+function nightEvents(list) {
+  return (Array.isArray(list) ? list : []).slice(0, 200).filter(e => record(e) && typeof e.text === 'string' && typeof e.at === 'string' && NIGHT_EVENT_KINDS.includes(e.kind))
+    .map(e => ({ at: e.at.slice(0, 40), kind: e.kind, text: e.text.slice(0, 300), project: typeof e.project === 'string' ? e.project.slice(0, 120) : null }));
+}
+
 /** MEM-PANEL-01: last night per project (slug → files read, summary written). */
 const byProject = x => { const out = {}; if (x && typeof x === 'object' && !Array.isArray(x)) for (const [k, v] of Object.entries(x).slice(0, 500)) if (/^[a-z0-9][a-z0-9_-]{0,63}$/.test(k) && v && typeof v === 'object') out[k] = { files: Number.isSafeInteger(v.files) && v.files >= 0 ? v.files : 0, summary: v.summary === true }; return out; };
 const onlyKeys = (x, keys) => Object.keys(x).every(k => keys.includes(k));
@@ -676,7 +690,9 @@ export function memoryPagesResponse(path, status, body) {
         files: count(r.files), projects: count(r.projects), proposals: count(r.proposals), summaries: (Array.isArray(r.summaries) ? r.summaries : []).slice(0, 50).filter(x => typeof x === 'string').map(x => clip(x, 120)), keys: count(r.keys), duplicates: count(r.duplicates), byProject: byProject(r.byProject) } : null);
       if (p.route === 'night-report') return { report: rep(body.report) };
       return { ...(record(body.settings) ? { settings: { enabled: body.settings.enabled === true, from: hm(body.settings.from), to: hm(body.settings.to) } } : {}), ...('last' in body ? { last: rep(body.last) } : {}),
-        ...('running' in body ? { running: body.running === true, step: ['read', 'summaries', 'tidy'].includes(body.step) ? body.step : null } : {}) };
+        ...('running' in body ? { running: body.running === true, step: ['read', 'summaries', 'tidy'].includes(body.step) ? body.step : null } : {}),
+        // MEM-LIVE-01: the file it is on, and what it did (newest first).
+        ...('now' in body ? { now: nightNow(body.now) } : {}), ...('events' in body ? { events: nightEvents(body.events) } : {}) };
     }
     case 'night-run': return { started: body.started === true };
     case 'night-stop': return { stopped: body.stopped === true };

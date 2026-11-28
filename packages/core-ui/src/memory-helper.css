@@ -96,3 +96,28 @@
 .helper-lastnight { display:flex; align-items:center; gap:10px; margin:0 0 10px; padding:10px 14px; border-radius:10px; background:var(--surface); box-shadow:inset 0 0 0 1px var(--border); font-size:12.5px; color:var(--text-2, var(--muted)); }
 .helper-lastnight > svg { color:var(--accent); flex:none; }
 .helper-lastnight .link-button { margin-inline-start:auto; display:inline-flex; align-items:center; gap:6px; }
+
+/* MEM-LIVE-01: what night work is doing now, and what it did. */
+.night-steps { display:flex; align-items:center; gap:10px; margin:0; padding:0; list-style:none; font-size:12.5px; }
+.night-steps li { display:flex; align-items:center; gap:7px; color:var(--muted); }
+.night-steps li:not(:last-child)::after { content:""; inline-size:28px; block-size:1px; background:var(--border); margin-inline-start:3px; }
+.night-steps li[data-state="done"], .night-steps li[data-state="now"] { color:var(--text); }
+.night-step-mark { inline-size:14px; display:grid; place-items:center; }
+.night-step-mark i { inline-size:8px; block-size:8px; border-radius:50%; border:1.5px solid var(--muted); box-sizing:border-box; }
+.night-steps li[data-state="done"] .night-step-mark { color:var(--mem-ok); }
+.night-steps li[data-state="now"] .night-step-mark i { border:0; background:var(--accent); box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 22%,transparent); animation:night-breathe 1.6s ease-in-out infinite; }
+.night-now { display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:9px; background:var(--subtle); color:var(--accent); font-size:13px; min-width:0; }
+.night-now-text { color:var(--text); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+.night-now > .fine-print { white-space:nowrap; }
+.night-events { margin:0; padding:0; list-style:none; display:grid; }
+.night-events li { display:grid; grid-template-columns:44px 16px minmax(0,1fr) auto; gap:8px; align-items:center; padding:5px 0; border-block-start:1px solid var(--border); font-size:12.5px; color:var(--text-2); }
+.night-events time { color:var(--muted); font-variant-numeric:tabular-nums; }
+.night-events li > svg { color:var(--muted); }
+.night-events li[data-kind="idea"] > svg { color:var(--mem-warn); }
+.night-events li[data-kind="summary"] > svg, .night-events li[data-kind="start"] > svg { color:var(--accent); }
+.night-events li[data-kind="done"] > svg { color:var(--mem-ok); }
+.night-events .link-button { justify-self:start; text-align:start; }
+.night-event-text { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.night-event-project { white-space:nowrap; }
+@keyframes night-breathe { 50% { opacity:.45; } }
+@media (prefers-reduced-motion: reduce) { .night-steps li[data-state="now"] .night-step-mark i { animation:none; } }

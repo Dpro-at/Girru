@@ -14,6 +14,7 @@ import { MEMORY_HELPER_PATH, MEMORY_HELPER_RETRY_PATH, MEMORY_HELPER_SETTINGS_PA
 import type { HelperRam, HelperReply, HelperSettings, HelperSettingsReply, HelperStatus, WorkerCandidate } from './memory-helper-contract.js';
 import { Popover } from './desktop-ui';
 import { UiIcon } from './ui-icons';
+import { NightWorkController, nightPillWord } from './MemoryNightWork';
 
 export type HelperState = Readonly<{
   /** `off`: the switch is off or this person may not see it (404/403); nothing shows. */
@@ -233,11 +234,21 @@ export function SetupHelperPill({ client }: { client: Requester }) {
 /** M3 + MEM-PANEL-01: the footer pill next to Settings, always there; it opens Memory › Memory helper. */
 export function FooterHelperPill({ client, onOpen }: { client: Requester; onOpen?: () => void }) {
   const [st, c] = useMemoryHelper(client, false);
+  // MEM-LIVE-01: the pill also says when night work runs, and for a minute after it ends.
+  const wantsNight = !!onOpen;
+  const night = useMemo(() => (wantsNight ? new NightWorkController(client) : null), [client, wantsNight]);
+  useEffect(() => { if (!night) return; night.watch(30_000); return () => night.dispose(); }, [night]);
+  const empty = useMemo<Parameters<typeof nightPillWord>[0]>(() => ({ running: false, now: null, events: [], finishedAt: null }), []);
+  const snap = (): Parameters<typeof nightPillWord>[0] => (night ? night.getSnapshot() : empty);
+  const ns = useSyncExternalStore(night ? night.subscribe : () => () => {}, snap, snap);
+  const [, tick] = useState(0);
+  useEffect(() => { if (ns.finishedAt === null) return; const t = setTimeout(() => tick(n => n + 1), Math.max(0, 60_000 - (Date.now() - ns.finishedAt)) + 50); return () => clearTimeout(t); }, [ns.finishedAt]);
   if (st.phase !== 'ready' || !st.status || chosenBasic(st.status)) return null;
   if (!onOpen) return st.status.phase === 'ready' ? null : <Pill st={st} c={c} place="footer"/>;
   const s = st.status, w = stepWord(s, st.needsYou);
-  const label = w.word === 'Ready' ? 'Memory helper' : `Memory helper · ${w.word}`;
-  return <button type="button" className="status-item helper-pill" data-state={s.phase === 'ready' && !st.needsYou ? 'ready' : st.needsYou ? 'needs-you' : s.phase === 'fallback' ? 'paused' : 'working'}
+  const nightWord = w.word === 'Ready' ? nightPillWord(ns) : null;
+  const label = nightWord ? `Memory helper · ${nightWord}` : w.word === 'Ready' ? 'Memory helper' : `Memory helper · ${w.word}`;
+  return <button type="button" className="status-item helper-pill" data-state={ns.running && nightWord ? 'working' : s.phase === 'ready' && !st.needsYou ? 'ready' : st.needsYou ? 'needs-you' : s.phase === 'fallback' ? 'paused' : 'working'}
     title="Memory helper (Memory › Memory helper)" aria-label={label} onClick={onOpen}>
     <span className="helper-dot" aria-hidden="true"/><UiIcon name="brain" size={12}/><span>{label}</span>
   </button>;
