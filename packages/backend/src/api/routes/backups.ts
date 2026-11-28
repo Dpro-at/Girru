@@ -17,6 +17,7 @@ import { handleError } from '../error-handler.js';
 import { requestRestart } from '../restart-request.js';
 import { BackupError, backUpNow, backupStatus, deleteBackup, getBackup, requestRestore, setBackupsFolder, setBackupKeepDays, type BackupKind } from '../../services/backups.js';
 import { addDestination, listDestinations, pushToDestination, removeDestination, testDestination, testDestinationConfig } from '../../services/backup-destinations.js';
+import { listSshHostsWithKey } from '../../discovery/service.js';
 
 const POSTGRES = { available: false, reason: 'On PostgreSQL, back up the database with pg_dump outside the app' };
 
@@ -59,6 +60,11 @@ export async function backupRoutes(fastify: FastifyInstance) {
   // Pre-flight: test a place from a not-yet-saved config (reaches it, keeps nothing).
   fastify.post<{ Body: unknown }>('/api/backups/destinations/test', async (request, reply) => {
     try { const owner = getUserIdFromRequest(request); if (!sqliteOnly(reply)) return; return await testDestinationConfig(request.body, owner); } catch (err) { return fail(reply, err, 'Test config'); }
+  });
+  // The owner's own SSH servers (from ~/.ssh/config discovery), to offer in the SFTP step.
+  // Names and addresses only — never a key's contents.
+  fastify.get('/api/backups/ssh-hosts', async (request, reply) => {
+    try { const owner = getUserIdFromRequest(request); if (!sqliteOnly(reply)) return; return { hosts: await listSshHostsWithKey(owner) }; } catch (err) { return fail(reply, err, 'SSH hosts'); }
   });
   fastify.delete<{ Params: { destId: string } }>('/api/backups/destinations/:destId', async (request, reply) => {
     try { getUserIdFromRequest(request); if (!sqliteOnly(reply)) return; await removeDestination(request.params.destId); return { deleted: true }; } catch (err) { return fail(reply, err, 'Remove destination'); }

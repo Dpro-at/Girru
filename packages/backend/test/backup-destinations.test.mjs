@@ -142,3 +142,24 @@ test('removing a place forgets it but leaves the backups on it', async () => {
   // A push to a forgotten place is a 404.
   assert.equal((await call('d-owner', 'POST', `/api/backups/destinations/${id}/push`)).statusCode, 404);
 });
+
+test('the SFTP step offers the owner’s own SSH servers (names only), owner-only', async () => {
+  // Discovery's ssh_hosts table (the real one is built from ~/.ssh/config at first run).
+  db.exec(`CREATE TABLE IF NOT EXISTS ssh_hosts (user_id TEXT NOT NULL, alias TEXT NOT NULL, host TEXT, login TEXT, port INTEGER, key_name TEXT, created_at TEXT NOT NULL, PRIMARY KEY (user_id, alias))`);
+  const ins = db.prepare(`INSERT OR REPLACE INTO ssh_hosts (user_id, alias, host, login, port, key_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`);
+  const t = new Date().toISOString();
+  ins.run('d-owner', 'nas.local', 'nas.local', 'girru', 22, 'id_ed25519', t);
+  ins.run('d-owner', 'office-backup', 'backup.example.com', 'mohamed', null, null, t);
+  ins.run('d-user', 'secret-host', 'nope.example.com', 'x', 22, 'k', t); // another owner's host must never leak
+
+  const hosts = (await ok(call('d-owner', 'GET', '/api/backups/ssh-hosts'))).hosts;
+  assert.equal(hosts.length, 2, 'only this owner’s hosts');
+  const nas = hosts.find((h) => h.alias === 'nas.local');
+  assert.deepEqual(Object.keys(nas).sort(), ['alias', 'host', 'keyName', 'login', 'port'], 'names only — no secret fields');
+  assert.equal(nas.keyName, 'id_ed25519'); assert.equal(nas.login, 'girru'); assert.equal(nas.port, 22);
+  const office = hosts.find((h) => h.alias === 'office-backup');
+  assert.equal(office.keyName, null); assert.equal(office.port, null);
+  assert.ok(!JSON.stringify(hosts).includes('nope.example.com'), 'another user’s host never appears');
+  // Owner only.
+  assert.equal((await call('d-user', 'GET', '/api/backups/ssh-hosts')).statusCode, 403);
+});

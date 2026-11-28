@@ -82,6 +82,8 @@ button.backups-prop:hover{background:var(--row-active)}
 button.backups-kind:hover{background:var(--row-active)}
 .backups-kind[aria-checked=true]{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent)}
 .backups-kind.is-coming{opacity:.6;cursor:default}
+.backups-sshhost{cursor:default}
+.backups-sshhost>.tool{flex:none}
 .backups-kind-main{min-width:0}
 .backups-kind-main b{font-size:13px}
 .backups-kind-main small{display:block;color:var(--muted);font-size:12px}

@@ -10,6 +10,8 @@ type Kind='daily'|'manual'|'before-update'|'before-restore';
 export type Backup={id:string;kind:Kind;at:string;checked:boolean;size:number;parts:{data:boolean;audit:boolean;keys:boolean};keepUntil:string|null};
 export type DestType='folder'|'sftp'|'webdav'|'s3'|'gdrive'|'dropbox'|'onedrive';
 export type DestStatus={lastPushAt:string|null;lastOkAt:string|null;lastError:string|null;lastErrorAt:string|null;lastVerifiedAt:string|null;backups:number};
+/** One of the owner's SSH servers (from ~/.ssh/config discovery), offered in the SFTP step — names only. */
+export type SshHost={alias:string;host:string|null;port:number|null;login:string|null;keyName:string|null};
 export type Destination={id:string;type:DestType;label:string;folder:string;config:Record<string,string>;enabled:boolean;createdAt:string;status:DestStatus};
 /** Direct (self-hosted) places the owner can add today, then cloud places that wait on Girru Connect sign-in. */
 const DEST_DIRECT:DestType[]=['folder','sftp','webdav','s3'];
@@ -201,9 +203,13 @@ function AddPlaceSheet({client,onClose,onSaved}:{client:SessionClient;onClose:()
  const [f,setF]=useState<Record<string,string>>({port:'22',region:'us-east-1'});
  const [auth,setAuth]=useState<'password'|'key'>('password');
  const [test,setTest]=useState<'idle'|'checking'|'ok'>('idle');
+ const [hosts,setHosts]=useState<SshHost[]|null>(null),[keyName,setKeyName]=useState('');
  const [error,setError]=useState(''),[busy,setBusy]=useState(false);
  const v=(k:string)=>f[k]??'';
  const set=(k:string)=>(e:{target:{value:string}})=>{setF(s=>({...s,[k]:e.target.value}));setTest('idle');};
+ // The owner's own servers, loaded once when they reach the SFTP step.
+ useEffect(()=>{if(type!=='sftp'||hosts!==null)return;void client.request({method:'GET',path:'/api/backups/ssh-hosts'}).then(r=>{setHosts(r.status===200?((r.body as {hosts:SshHost[]}).hosts??[]):[]);}).catch(()=>setHosts([]));},[type,hosts,client]);
+ const useHost=(h:SshHost)=>{setF(s=>({...s,host:h.host||h.alias,port:h.port?String(h.port):'22',...(h.login?{username:h.login}:{})}));setKeyName(h.keyName||'');setTest('idle');};
  const pick=folderPicker();
  const choose=async()=>{try{const paths=await pick?.({multiple:false});if(paths&&paths[0]){setF(s=>({...s,folder:paths[0]}));setTest('idle');}}catch{/* keep what is typed */}};
  const canSave=
@@ -259,6 +265,16 @@ function AddPlaceSheet({client,onClose,onSaved}:{client:SessionClient;onClose:()
     <label className="backups-field"><span>Folder</span><div className="backups-folderpick"><input value={v('folder')} onChange={set('folder')} autoFocus spellCheck={false} placeholder="/Volumes/My Drive/Girru" aria-label="Destination folder" onKeyDown={(e:KeyboardEvent)=>{if(e.key==='Enter'&&canSave)void save();}}/>{pick&&<button type="button" className="tool" onClick={()=>void choose()}>Choose…</button>}</div></label>
    </div>}
    {type==='sftp'&&<>
+    {hosts&&hosts.length>0&&<>
+     <div className="backups-kgroup" style={{marginTop:0}}>From your servers</div>
+     <div className="backups-kinds">
+      {hosts.map(h=><div key={h.alias} className="backups-kind backups-sshhost">
+       <span className="backups-place-ico"><UiIcon name="server" size={16}/></span>
+       <span className="backups-kind-main"><b>{h.alias}</b><small dir="ltr">{h.login?h.login+'@':''}{h.host||h.alias}{h.port&&h.port!==22?':'+h.port:''}{h.keyName?` · key ${h.keyName}`:''} · from ~/.ssh/config</small></span>
+       <button type="button" className="tool" onClick={()=>useHost(h)}>Use</button></div>)}
+     </div>
+     <p className="fine-print">Found in your ~/.ssh/config — pick one to fill the fields, or type your own below.</p>
+    </>}
     <div className="backups-kgroup">Where</div>
     <div className="backups-fields">
      {field('host','Host',{autoFocus:true,placeholder:'backup.example.com','aria-label':'SFTP host'})}
@@ -271,6 +287,7 @@ function AddPlaceSheet({client,onClose,onSaved}:{client:SessionClient;onClose:()
       <button type="button" role="radio" aria-checked={auth==='password'} className="backups-type" onClick={()=>{setAuth('password');setTest('idle');}}>Password</button>
       <button type="button" role="radio" aria-checked={auth==='key'} className="backups-type" onClick={()=>{setAuth('key');setTest('idle');}}>Private key</button>
      </div>
+     {keyName&&<p className="fine-print">This server uses the key <code>{keyName}</code> from ~/.ssh. Paste it below, or use a password — Girru never reads your key files.</p>}
      {auth==='password'?field('password','Password',{type:'password','aria-label':'SFTP password',autoComplete:'off'}):<>
       <label className="backups-field"><span>Private key</span><textarea value={v('privateKey')} onChange={set('privateKey')} rows={4} spellCheck={false} placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" aria-label="SFTP private key"/></label>
       {field('passphrase','Key passphrase (optional)',{type:'password','aria-label':'Key passphrase',autoComplete:'off'})}

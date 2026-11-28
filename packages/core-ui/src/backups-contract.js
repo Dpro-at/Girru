@@ -39,6 +39,7 @@ function parse(path) {
   if (path === '/api/backups/folder') return { kind: 'folder' };
   if (path === '/api/backups/retention') return { kind: 'retention' };
   if (path === '/api/backups/destinations') return { kind: 'destinations' };
+  if (path === '/api/backups/ssh-hosts') return { kind: 'ssh-hosts' };
   if (path === '/api/backups/destinations/test') return { kind: 'dest-try' };
   const dm = /^\/api\/backups\/destinations\/([^/?#]+)(?:\/(push|test))?$/.exec(path);
   if (dm) return DEST_ID.test(dm[1]) ? { kind: 'dest-' + (dm[2] || 'one'), destId: dm[1] } : null;
@@ -61,6 +62,7 @@ export function allowedBackups(method, path, body) {
     return method === 'POST' && allowAddDestination(body);
   }
   if (r.kind === 'dest-try') return method === 'POST' && allowAddDestination(body);
+  if (r.kind === 'ssh-hosts') return method === 'GET' && body === undefined;
   if (r.kind === 'dest-test') return method === 'POST' && body === undefined;
   if (r.kind === 'dest-push') return method === 'POST' && (body === undefined || (record(body) && Object.keys(body).every(k => k === 'backupId') && (body.backupId === undefined || (typeof body.backupId === 'string' && ID.test(body.backupId)))));
   if (r.kind === 'dest-one') return method === 'DELETE' && body === undefined;
@@ -111,6 +113,18 @@ function destination(d) {
   };
 }
 
+/** One SSH server the owner can pick for an SFTP place: names and addresses only, never a key's contents. */
+function sshHost(h) {
+  const o = record(h) ? h : {};
+  return {
+    alias: str(o.alias, 120),
+    host: typeof o.host === 'string' ? o.host.slice(0, 255) : null,
+    port: Number.isInteger(o.port) && o.port > 0 ? o.port : null,
+    login: typeof o.login === 'string' ? o.login.slice(0, 128) : null,
+    keyName: typeof o.keyName === 'string' ? o.keyName.slice(0, 255) : null,
+  };
+}
+
 /** Only what the page shows passes back. */
 export function backupsResponse(path, status_, body) {
   const v = record(body) ? body : {};
@@ -123,6 +137,7 @@ export function backupsResponse(path, status_, body) {
   if (r.kind === 'destinations') return record(v.destination) ? { destination: destination(v.destination) } : { destinations: Array.isArray(v.destinations) ? v.destinations.slice(0, 50).map(destination) : [] };
   if (r.kind === 'dest-push') return { destination: destination(v.destination) };
   if (r.kind === 'dest-test' || r.kind === 'dest-try') return { ok: v.ok === true };
+  if (r.kind === 'ssh-hosts') return { hosts: Array.isArray(v.hosts) ? v.hosts.slice(0, 200).map(sshHost) : [] };
   if (r.kind === 'dest-one') return { deleted: v.deleted === true };
   if (r.kind === 'restore') return { restarting: v.restarting === true, undoId: ID.test(v.undoId) ? v.undoId : '' };
   if (r.kind === 'show') return { shown: v.shown === true };

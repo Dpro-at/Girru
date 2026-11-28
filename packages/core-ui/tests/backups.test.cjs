@@ -86,3 +86,13 @@ test('Settings › Backups: an owner place, plain words for when and what kind',
  assert.equal(backupKind({...base,kind:'daily',at:'2026-10-29T03:00:00'},now),'automatic');assert.equal(backupKind({...base,kind:'daily',at:'2026-10-11T03:00:00'},now),'Sunday');
  assert.equal(backupKind({...base,kind:'before-update',at:'2026-10-29T18:25:00'},now),'before an update');assert.equal(backupKind({...base,kind:'manual',at:'2026-10-29T18:25:00'},now),'by you');
 });
+test('ssh-hosts: the SFTP step may read the owner’s servers, names only, no secrets',()=>{
+ assert.ok(allowedBackups('GET','/api/backups/ssh-hosts'));assert.ok(allowed('GET','/api/backups/ssh-hosts'));assert.ok(allowedRequest('GET','/api/backups/ssh-hosts'));
+ assert.equal(allowed('POST','/api/backups/ssh-hosts',{}),false);assert.equal(allowedRequest('GET','/api/backups/ssh-hosts',{}),false); // GET takes no body
+ const raw={hosts:[{alias:'nas',host:'nas.local',port:22,login:'girru',keyName:'id_ed25519',secret:'nope',extra:1},{alias:'x',host:null,port:null,login:null,keyName:null}]};
+ const proj=backupsResponse('/api/backups/ssh-hosts',200,raw);
+ assert.equal(proj.hosts.length,2);
+ assert.deepEqual(Object.keys(proj.hosts[0]).sort(),['alias','host','keyName','login','port']);
+ assert.equal(proj.hosts[0].keyName,'id_ed25519');assert.equal(proj.hosts[1].keyName,null);
+ assert.ok(!JSON.stringify(proj).includes('nope')&&!JSON.stringify(proj).includes('extra'));
+});
