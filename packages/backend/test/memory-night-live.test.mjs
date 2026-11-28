@@ -126,3 +126,21 @@ test('due but too little free RAM: it waits, says so, and the wait clears when i
   await N.tick({ state: async () => ({ idleSeconds: 5, onPower: true }), now: () => new Date(2026, 10, 13, 14, 0), steps, ramLow: async () => true });
   assert.equal(N.nightRunning(W).waiting, null);
 });
+
+test('ideas: one line per new idea with its id and project, never its text; extra ones as a count', async () => {
+  const I = 'idea-owner';
+  db.prepare(`INSERT INTO users (id, email, username, password_hash, role, status, email_verified) VALUES (?, ?, ?, 'x', 'owner', 'active', 1)`).run(I, `${I}@example.test`, I);
+  const ideas = Array.from({ length: 23 }, (_, n) => ({ id: `prop-${n}`, project: n % 2 ? 'girru' : null }));
+  const steps = {
+    async readFiles() { return { files: 1, projects: 1, proposals: 23, ideas }; },
+    async summaries() { return []; }, async tidy() { return { keys: 0, duplicates: 0 }; },
+  };
+  await N.runNightWork(I, { force: true, state, now, steps });
+  const ev = (await N.nightEvents(I)).filter((e) => e.kind === 'idea');
+  const withRef = ev.filter((e) => e.ref);
+  assert.equal(withRef.length, 20, 'twenty lines with an id');
+  assert.ok(withRef.every((e) => e.text === 'Idea for you in Needs you'), 'no idea text is kept');
+  assert.deepEqual(withRef.slice(0, 2).map((e) => e.ref), ['prop-0', 'prop-1'], 'newest first');
+  assert.equal(withRef.find((e) => e.ref === 'prop-1').project, 'girru');
+  assert.equal(ev.find((e) => !e.ref).text, '3 more ideas wait for you in Needs you');
+});

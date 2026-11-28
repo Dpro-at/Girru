@@ -352,6 +352,7 @@ export function MemoryWindow({ client, active = false, focus, sidebarSlot, onOpe
     : place === 'needs' && needsView === 'questions' ? <QuestionsView c={tr} names={ss.agents}/>
     : place === 'needs' ? <NeedsYou c={rv} mode={ds.needsMode} onOpenChat={onOpenChat} design={d} files={p6 ? pf : undefined} client={client} hidden={k.hk} night={k.nw} projectName={dr => dr.startsWith('project:') ? ss.tree?.projects.find(p => p.slug === dr.slice(8))?.name : undefined}/>
     : place === 'helper' ? <MemoryHelperPlace client={client} night={k.nw} projectName={slug => ss.tree?.projects.find(p => p.slug === slug)?.name ?? slug} onOpenNeeds={() => d.open('needs')}
+      ideaTitle={id => rs?.texts[`p:${id}`]} onOpenIdea={id => { d.open('needs'); if (rs?.items.some(i => i.key === `p:${id}`)) void rv.openItem(`p:${id}`); }}
         onOpenSettings={pane => onOpenSettings?.(pane)} onOpenStore={onOpenStore}/>
     : place === 'trash' ? <TrashView d={d} me={client.getSnapshot().user?.id} onAsk={ids => setSheet({ kind: 'forget', ids })}/>
     : place.startsWith('group:') ? <GroupView d={d} sc={sc} groupId={place.slice(6)}/>

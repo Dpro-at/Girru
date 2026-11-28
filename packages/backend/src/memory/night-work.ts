@@ -35,10 +35,11 @@ export interface NightReport {
   events?: NightEvent[];
 }
 export type NightStep = 'read' | 'summaries' | 'tidy';
-export interface NightEvent { at: string; kind: 'start' | 'read' | 'idea' | 'summary' | 'tidy' | 'done' | 'stopped'; text: string; project: string | null }
+export interface NightEvent { at: string; kind: 'start' | 'read' | 'idea' | 'summary' | 'tidy' | 'done' | 'stopped'; text: string; project: string | null;
+  /** An idea's proposal id (the page shows its title from Needs you; the text is never kept here). */ ref?: string | null }
 /** While it runs: the step, the file it is on and how many files it read so far. */
 export interface NightNow { step: NightStep | null; file: string | null; project: string | null; read: number; startedAt: string }
-const MAX_LIVE_EVENTS = 200, MAX_SAVED_EVENTS = 64;
+const MAX_LIVE_EVENTS = 200, MAX_SAVED_EVENTS = 64, MAX_IDEA_EVENTS = 20;
 export interface MachineState { idleSeconds: number | null; onPower: boolean | null }
 
 const DEFAULTS: NightSettings = { enabled: true, from: '01:00', to: '06:00' };
@@ -119,7 +120,7 @@ interface StepHooks {
   shouldStop?: () => boolean;
 }
 interface NightSteps {
-  readFiles(ownerId: string, hooks?: StepHooks): Promise<{ files: number; projects: number; proposals: number; bySlug?: Record<string, number> }>;
+  readFiles(ownerId: string, hooks?: StepHooks): Promise<{ files: number; projects: number; proposals: number; bySlug?: Record<string, number>; ideas?: Array<{ id: string; project: string | null }> }>;
   summaries(ownerId: string, now: Date, hooks?: StepHooks): Promise<string[] | { names: string[]; slugs: string[] }>;
   tidy(ownerId: string): Promise<{ keys: number; duplicates: number }>;
 }
@@ -139,8 +140,10 @@ const DEFAULT_STEPS: NightSteps = {
     } catch { /* the document index is optional */ }
     if (hooks.shouldStop?.()) return { files, projects, proposals: 0, bySlug };
     const before = await pendingProposals(ownerId);
+    const seen = new Set((await pendingIdeas(ownerId)).map((i) => i.id));
     try { const { runAutomaticImportNow } = await import('./import/automatic-project-import.js'); await runAutomaticImportNow(ownerId); } catch { /* import off or nothing to do */ }
-    return { files, projects, proposals: Math.max(0, (await pendingProposals(ownerId)) - before), bySlug };
+    const ideas = (await pendingIdeas(ownerId)).filter((i) => !seen.has(i.id));
+    return { files, projects, proposals: Math.max(0, (await pendingProposals(ownerId)) - before), bySlug, ideas };
   },
   async summaries(ownerId, now, hooks = {}) {
     const { projectSummaries, summariesText } = await import('./project-summaries.js');
@@ -170,6 +173,12 @@ const DEFAULT_STEPS: NightSteps = {
     return { keys, duplicates: Number(dup?.n ?? 0) };
   },
 };
+
+/** Pending ideas (ids and project only; never their text), newest first. */
+async function pendingIdeas(ownerId: string): Promise<Array<{ id: string; project: string | null }>> {
+  const rows = await sql().read(all<{ id: string; drawer_kind: string; drawer_key: string }>("SELECT id, drawer_kind, drawer_key FROM memory_file_proposals WHERE user_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 2000", ownerId)).catch(() => []);
+  return rows.map((r) => ({ id: String(r.id), project: r.drawer_kind === 'project' && r.drawer_key ? String(r.drawer_key) : null }));
+}
 
 async function pendingProposals(ownerId: string): Promise<number> {
   return Number((await sql().read(one<{ n: number }>("SELECT COUNT(*) AS n FROM memory_file_proposals WHERE user_id = ? AND status = 'pending'", ownerId)).catch(() => null))?.n ?? 0);
@@ -220,8 +229,8 @@ export async function runNightWork(ownerId: string, deps: NightDeps & { force?: 
     const report: NightReport = { night: nightKey(s, start), startedAt: start.toISOString(), endedAt: start.toISOString(), stopped: 'done', files: 0, projects: 0, proposals: 0, summaries: [], keys: 0, duplicates: 0, seen: false };
     const l = { step: null, file: null, project: null, read: 0, startedAt: start.toISOString(), events: [] as NightEvent[] } as NightNow & { events: NightEvent[] };
     live.set(ownerId, l);
-    const say = (kind: NightEvent['kind'], text: string, project: string | null = null) => {
-      l.events.unshift({ at: now().toISOString(), kind, text: text.slice(0, 300), project });
+    const say = (kind: NightEvent['kind'], text: string, project: string | null = null, ref: string | null = null) => {
+      l.events.unshift({ at: now().toISOString(), kind, text: text.slice(0, 300), project, ...(ref ? { ref } : {}) });
       if (l.events.length > MAX_LIVE_EVENTS) l.events.length = MAX_LIVE_EVENTS;
     };
     const hooks: StepHooks = {
@@ -251,7 +260,11 @@ export async function runNightWork(ownerId: string, deps: NightDeps & { force?: 
           const r = await steps.readFiles(ownerId, hooks);
           report.files = r.files; report.projects = r.projects; report.proposals = r.proposals;
           for (const [slug, n] of Object.entries(r.bySlug ?? {})) byProject(report, slug).files += n;
-          if (r.proposals > 0) say('idea', `${r.proposals} ${r.proposals === 1 ? 'idea waits' : 'ideas wait'} for you in Needs you`);
+          // One line per new idea (its title shows on the page from Needs you); the rest as a count.
+          const ideas = (r.ideas ?? []).slice(0, MAX_IDEA_EVENTS);
+          for (const i of ideas.slice().reverse()) say('idea', 'Idea for you in Needs you', i.project, i.id);
+          const more = Math.max(0, r.proposals - ideas.length);
+          if (more > 0) say('idea', `${ideas.length ? `${more} more` : more} ${more === 1 ? 'idea waits' : 'ideas wait'} for you in Needs you`);
         } else if (step === 'summaries') {
           const r = await steps.summaries(ownerId, now(), hooks);
           if (Array.isArray(r)) report.summaries = r;
