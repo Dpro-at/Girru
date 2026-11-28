@@ -83,3 +83,19 @@ test('waiting for free RAM: the contract keeps it, the footer says it, the page 
   assert.equal(c.getSnapshot().waiting.reason, 'low_ram');
   c.dispose();
 });
+
+test('ideas: the title comes from Needs you, the contract keeps only a safe id, a click opens that idea', () => {
+  const out = memoryPagesResponse('/api/memory/scopes/night', 200, { events: [
+    { at: 'a', kind: 'idea', text: 'Idea for you in Needs you', project: 'girru', ref: 'prop-1' },
+    { at: 'b', kind: 'idea', text: 'Idea for you in Needs you', project: null, ref: '../etc' },
+    { at: 'c', kind: 'read', text: 'Read a.md', project: null, ref: 'prop-2' },
+  ] });
+  assert.equal(out.events[0].ref, 'prop-1');
+  assert.equal('ref' in out.events[1], false, 'an unsafe id is dropped');
+  assert.equal('ref' in out.events[2], false, 'only ideas carry an id');
+  const opened = [];
+  const list = renderToStaticMarkup(React.createElement(NightEventList, { events: out.events, projectName: s => s, label: 'Last run',
+    ideaTitle: id => (id === 'prop-1' ? 'Release notes are written in English' : undefined), onOpenIdea: id => opened.push(id), onOpenNeeds: () => {} }));
+  assert.ok(list.includes('Idea: Release notes are written in English'));
+  assert.ok(list.includes('>Idea for you in Needs you<'), 'no title yet: the plain words');
+});

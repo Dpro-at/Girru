@@ -11,7 +11,8 @@ export type NightStep = 'read' | 'summaries' | 'tidy';
 export type NightNow = { step: NightStep | null; file: string | null; project: string | null; read: number; startedAt: string };
 /** Due tonight but waiting for free RAM (the computer has less than 2 GB free). */
 export type NightWaiting = { reason: 'low_ram'; since: string };
-export type NightEvent = { at: string; kind: 'start' | 'read' | 'idea' | 'summary' | 'tidy' | 'done' | 'stopped'; text: string; project: string | null };
+export type NightEvent = { at: string; kind: 'start' | 'read' | 'idea' | 'summary' | 'tidy' | 'done' | 'stopped'; text: string; project: string | null;
+  /** An idea's id: its title comes from Needs you (decrypted there, never kept in the night list). */ ref?: string };
 type State = { settings: NightSettings | null; last: NightReport | null; report: NightReport | null; busy: boolean; notice: string | null; running: boolean; step: NightStep | null;
   now: NightNow | null; events: NightEvent[]; waiting: NightWaiting | null; /** When this page saw it finish (ms), for "Just finished". */ finishedAt: number | null };
 

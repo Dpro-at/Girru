@@ -77,7 +77,8 @@ const NIGHT_EVENT_KINDS = ['start', 'read', 'idea', 'summary', 'tidy', 'done', '
 /** MEM-LIVE-01: what night work did, newest first (at most 200). */
 function nightEvents(list) {
   return (Array.isArray(list) ? list : []).slice(0, 200).filter(e => record(e) && typeof e.text === 'string' && typeof e.at === 'string' && NIGHT_EVENT_KINDS.includes(e.kind))
-    .map(e => ({ at: e.at.slice(0, 40), kind: e.kind, text: e.text.slice(0, 300), project: typeof e.project === 'string' ? e.project.slice(0, 120) : null }));
+    .map(e => ({ at: e.at.slice(0, 40), kind: e.kind, text: e.text.slice(0, 300), project: typeof e.project === 'string' ? e.project.slice(0, 120) : null,
+      ...(e.kind === 'idea' && typeof e.ref === 'string' && /^[A-Za-z0-9_.:-]{1,120}$/.test(e.ref) ? { ref: e.ref } : {}) }));
 }
 
 /** MEM-PANEL-01: last night per project (slug → files read, summary written). */

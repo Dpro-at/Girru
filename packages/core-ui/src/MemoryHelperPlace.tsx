@@ -77,13 +77,19 @@ export function NightSteps({ step, finished }: { step: NightStep | null; finishe
   </ol>;
 }
 
-/** What it did, newest first. An idea row opens Needs you. */
-export function NightEventList({ events, projectName, onOpenNeeds, label }: { events: NightEvent[]; projectName: (slug: string) => string; onOpenNeeds?: () => void; label: string }) {
+/** What it did, newest first. An idea row shows its title from Needs you and opens that idea. */
+export function NightEventList({ events, projectName, onOpenNeeds, onOpenIdea, ideaTitle, label }: { events: NightEvent[]; projectName: (slug: string) => string; onOpenNeeds?: () => void;
+  onOpenIdea?: (id: string) => void; ideaTitle?: (id: string) => string | undefined; label: string }) {
   return <ul className="night-events" aria-label={label}>
     {events.map((e, i) => <li key={`${e.at}-${i}`} data-kind={e.kind}>
       <time dateTime={e.at}>{hhmm(e.at)}</time>
       <UiIcon name={EVENT_ICON[e.kind]} size={13}/>
-      {e.kind === 'idea' && onOpenNeeds ? <button type="button" className="link-button" onClick={onOpenNeeds}>{e.text}</button> : <span className="night-event-text" title={e.text}>{e.text}</span>}
+      {e.kind === 'idea' ? (() => {
+        const title = e.ref ? ideaTitle?.(e.ref) : undefined;
+        const text = title ? `Idea: ${title}` : e.text;
+        const open = e.ref && onOpenIdea ? () => onOpenIdea(e.ref!) : onOpenNeeds;
+        return open ? <button type="button" className="link-button night-event-text" title={text} dir="auto" onClick={open}>{text}</button> : <span className="night-event-text" title={text} dir="auto">{text}</span>;
+      })() : <span className="night-event-text" title={e.text}>{e.text}</span>}
       {e.project && <span className="fine-print night-event-project">{projectName(e.project)}</span>}
     </li>)}
   </ul>;
@@ -168,9 +174,9 @@ function ToolDetails({ tool, st, c, last, projectName, onOpenSettings, onRetry }
 }
 
 /** Memory › Memory helper. */
-export function MemoryHelperPlace({ client, night, projectName = s => s, onOpenNeeds, onOpenSettings, onOpenStore }: {
+export function MemoryHelperPlace({ client, night, projectName = s => s, onOpenNeeds, onOpenIdea, ideaTitle, onOpenSettings, onOpenStore }: {
   client: Requester; night: NightWorkController; projectName?: (slug: string) => string;
-  onOpenNeeds?: () => void; onOpenSettings?: (pane: 'sources' | 'schedule') => void; onOpenStore?: () => void;
+  onOpenNeeds?: () => void; onOpenIdea?: (id: string) => void; ideaTitle?: (id: string) => string | undefined; onOpenSettings?: (pane: 'sources' | 'schedule') => void; onOpenStore?: () => void;
 }) {
   const [st, c] = useMemoryHelper(client, true);
   const ns = useSyncExternalStore(night.subscribe, night.getSnapshot, night.getSnapshot);
@@ -199,12 +205,12 @@ export function MemoryHelperPlace({ client, night, projectName = s => s, onOpenN
           <NightSteps step={ns.now?.step ?? ns.step} finished={false}/>
           {ns.now && <NightNowLine now={ns.now} projectName={projectName}/>}
           {ns.events.length > 0 && <><span className="fine-print">What it is doing</span>
-            <NightEventList events={ns.events.slice(0, 8)} projectName={projectName} onOpenNeeds={onOpenNeeds} label="What it is doing"/></>}
+            <NightEventList events={ns.events.slice(0, 8)} projectName={projectName} onOpenNeeds={onOpenNeeds} onOpenIdea={onOpenIdea} ideaTitle={ideaTitle} label="What it is doing"/></>}
         </> : ns.settings && <NightBar settings={ns.settings} last={last}/>}
         {!ns.running && ns.events.length > 0 && <>
           <NightSteps step={null} finished={ns.events[0]?.kind === 'done'}/>
           <span className="fine-print">Last run</span>
-          <NightEventList events={allEvents ? ns.events : ns.events.slice(0, 5)} projectName={projectName} onOpenNeeds={onOpenNeeds} label="Last run"/>
+          <NightEventList events={allEvents ? ns.events : ns.events.slice(0, 5)} projectName={projectName} onOpenNeeds={onOpenNeeds} onOpenIdea={onOpenIdea} ideaTitle={ideaTitle} label="Last run"/>
           {ns.events.length > 5 && <button type="button" className="link-button" onClick={() => setAllEvents(v => !v)}>{allEvents ? 'Show less' : `Show everything it did (${ns.events.length})`}</button>}
         </>}
         {!ns.running && ns.waiting && <p className="night-waiting" role="status"><UiIcon name="hourglass" size={13}/>Waiting: this computer has less than 2 GB of free RAM. It starts on its own when RAM is free; Run now starts it anyway.</p>}
