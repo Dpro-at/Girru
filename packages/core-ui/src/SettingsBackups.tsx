@@ -4,10 +4,42 @@ import type {SessionClient} from './session';
 import {UiIcon} from './ui-icons';
 import type {UiIconName} from './ui-icons';
 import {Sheet} from './desktop-ui';
+import {canRevealFolder,revealFolder} from './chat-actions';
 
 type Kind='daily'|'manual'|'before-update'|'before-restore';
 export type Backup={id:string;kind:Kind;at:string;checked:boolean;size:number;parts:{data:boolean;audit:boolean;keys:boolean};keepUntil:string|null};
-export type BackupStatus={available:true;folder:string;cloud:boolean;defaultFolder:string;runsAt:string;keeps:{days:number;sundays:number;beforeUpdateDays:number};running:boolean;last:Backup|null;next:string;lastError:{message:string;at:string}|null;lastRestore:{id:string;at:string;ok:boolean;error?:string}|null;backups:Backup[]}|{available:false;reason:string};
+export type DestType='folder'|'sftp'|'webdav'|'s3'|'gdrive'|'dropbox'|'onedrive';
+export type DestStatus={lastPushAt:string|null;lastOkAt:string|null;lastError:string|null;lastErrorAt:string|null;lastVerifiedAt:string|null;backups:number};
+/** One of the owner's SSH servers (from ~/.ssh/config discovery), offered in the SFTP step — names only. */
+export type SshHost={alias:string;host:string|null;port:number|null;login:string|null;keyName:string|null};
+export type Destination={id:string;type:DestType;label:string;folder:string;config:Record<string,string>;enabled:boolean;createdAt:string;status:DestStatus};
+/** Direct (self-hosted) places the owner can add today, then cloud places that wait on Girru Connect sign-in. */
+const DEST_DIRECT:DestType[]=['folder','sftp','webdav','s3'];
+const DEST_CLOUD:DestType[]=['gdrive','dropbox','onedrive'];
+const DEST_LABELS:Record<DestType,string>={folder:'External drive or NAS folder',sftp:'SFTP server',webdav:'WebDAV',s3:'S3-compatible storage',gdrive:'Google Drive',dropbox:'Dropbox',onedrive:'OneDrive'};
+const DEST_ICON:Record<DestType,UiIconName>={folder:'folder',sftp:'server',webdav:'globe',s3:'box',gdrive:'globe',dropbox:'globe',onedrive:'globe'};
+/** One-line description shown beside each kind when adding a place. */
+const DEST_DESC:Record<DestType,string>={folder:'A folder on a drive or a mounted share',sftp:'A server you reach over SSH',webdav:'A WebDAV address with a sign-in',s3:'S3, R2, B2, Wasabi, MinIO…',gdrive:'Sign-in stays on this computer',dropbox:'Sign-in stays on this computer',onedrive:'Sign-in stays on this computer'};
+/** The last segment of a path — the folder's own name. */
+export const base=(p:string)=>p.replace(/\/+$/,'').split('/').pop()||p;
+/** The one status chip a place card shows. */
+export function placeChip(st:DestStatus):{label:string;kind:'ok'|'warn'|'err'}{
+ if(st.lastError)return {label:'Problem',kind:'err'};
+ if(st.lastVerifiedAt)return {label:'✓ Checked',kind:'ok'};
+ return {label:'Not sent',kind:'warn'};
+}
+/** The desktop folder picker when running inside the app; absent in a plain browser. */
+const folderPicker=()=>typeof window==='undefined'?undefined:(window as unknown as {dproApp?:{chooseProjectFolders?:(o?:{multiple:boolean})=>Promise<string[]>}}).dproApp?.chooseProjectFolders;
+/** A short, human line for where a place is, from its non-secret settings only. */
+function placeLocation(d:Destination):string{
+ const c=d.config||{};
+ if(d.type==='folder')return home(d.folder||c.folder||'');
+ if(d.type==='sftp')return `${c.username?c.username+'@':''}${c.host||''}${c.port&&c.port!=='22'?':'+c.port:''}${c.path?'/'+c.path:''}`;
+ if(d.type==='webdav')return c.url||'';
+ if(d.type==='s3')return `${c.bucket||''}${c.endpoint?' · '+c.endpoint.replace(/^https?:\/\//,''):''}`;
+ return DEST_LABELS[d.type];
+}
+export type BackupStatus={available:true;folder:string;cloud:boolean;defaultFolder:string;runsAt:string;keeps:{days:number;sundays:number;beforeUpdateDays:number;min:number;max:number;presets:number[]};running:boolean;last:Backup|null;next:string;lastError:{message:string;at:string}|null;lastRestore:{id:string;at:string;ok:boolean;error?:string}|null;backups:Backup[]}|{available:false;reason:string};
 
 const DAY=86_400_000;
 const time=(d:Date)=>d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
@@ -45,13 +77,16 @@ const err=(r:{status:number;body:unknown},fallback:string)=>{const b=r.body as {
  */
 export function SettingsBackups({client,active=true}:{client:SessionClient;active?:boolean}){
  const [status,setStatus]=useState<BackupStatus|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState('');
- const [selected,setSelected]=useState(''),[sheet,setSheet]=useState<null|'restore'|'delete'|'folder'>(null),[restarting,setRestarting]=useState<null|boolean>(null);
+ const [selected,setSelected]=useState(''),[sheet,setSheet]=useState<null|'restore'|'delete'|'folder'|'retention'|'addplace'>(null),[restarting,setRestarting]=useState<null|boolean>(null);
+ const [dests,setDests]=useState<Destination[]>([]),[busyPlace,setBusyPlace]=useState('');
  const list=useRef<HTMLDivElement>(null);
  const load=useCallback(async()=>{
   const r=await client.request({method:'GET',path:'/api/backups'});
   if(r.status!==200){setError('The backups could not be read.');return;}
   const s=r.body as BackupStatus;setStatus(s);setError('');
   if(s.available)setSelected(old=>s.backups.some(b=>b.id===old)?old:s.backups[0]?.id??'');
+  const d=await client.request({method:'GET',path:'/api/backups/destinations'});
+  if(d.status===200)setDests((d.body as {destinations:Destination[]}).destinations??[]);
  },[client]);
  useEffect(()=>{if(active)void load();},[active,load]);
  useEffect(()=>{if(!notice)return;const t=window.setTimeout(()=>setNotice(''),6000);return()=>window.clearTimeout(t);},[notice]);
@@ -75,6 +110,16 @@ export function SettingsBackups({client,active=true}:{client:SessionClient;activ
   finally{setBusy(false);}
  };
  const show=()=>{if(b)void client.request({method:'POST',path:`/api/backups/${encodeURIComponent(b.id)}/show`});};
+ const pushPlace=async(id:string)=>{
+  if(busyPlace)return;setBusyPlace(id);setError('');setNotice('');
+  try{const r=await client.request({method:'POST',path:`/api/backups/destinations/${encodeURIComponent(id)}/push`});if(r.status!==200){setError(err(r,'The backup could not be sent to that place.'));}else{setNotice('Backup sent and checked at the place.');}await load();}
+  finally{setBusyPlace('');}
+ };
+ const removePlace=async(id:string)=>{
+  if(busyPlace)return;setBusyPlace(id);setError('');
+  try{const r=await client.request({method:'DELETE',path:`/api/backups/destinations/${encodeURIComponent(id)}`});if(r.status!==200){setError(err(r,'That place could not be removed.'));return;}setNotice('Place removed. The backups already on it stay.');await load();}
+  finally{setBusyPlace('');}
+ };
  const onListKey=(e:KeyboardEvent)=>{
   const i=s.backups.findIndex(x=>x.id===selected);
   if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();const n=s.backups[Math.min(s.backups.length-1,Math.max(0,i+(e.key==='ArrowDown'?1:-1)))];if(n){setSelected(n.id);list.current?.querySelector<HTMLElement>(`[data-id="${n.id}"]`)?.focus();}}
@@ -91,10 +136,24 @@ export function SettingsBackups({client,active=true}:{client:SessionClient;activ
   {notice&&<p role="status" className="backups-notice">{notice}</p>}
   <div className="backups-props">
    <div className="backups-prop"><UiIcon name="refresh" size={14}/><span>Runs</span><strong>Every day {s.runsAt} · and before every update</strong></div>
-   <button type="button" className="backups-prop" onClick={()=>setSheet('folder')} title="Change where backups are kept"><UiIcon name="folder" size={14}/><span>Kept in</span><strong>{home(s.folder)} <small>· only you can open it</small></strong><UiIcon name="chevron" size={12}/></button>
+   <div className="backups-prop backups-kept"><UiIcon name="folder" size={14}/><span>Kept in</span><strong>{base(s.folder)}<span className="backups-path" dir="ltr">{home(s.folder)}</span></strong><span className="backups-prop-acts">{canRevealFolder()&&<button type="button" className="link" onClick={()=>revealFolder(s.folder)}>Reveal</button>}<button type="button" className="link" onClick={()=>setSheet('folder')}>Change</button></span></div>
    {s.cloud&&<p className="backups-alert" role="alert"><UiIcon name="alert" size={14}/>This folder syncs to the cloud. Backups hold the keys to your saved secrets; choose a folder on this computer.</p>}
-   <div className="backups-prop"><UiIcon name="history" size={14}/><span>Keeps</span><strong>{s.keeps.days} days + {s.keeps.sundays} Sundays</strong></div>
+   <button type="button" className="backups-prop" onClick={()=>setSheet('retention')} title="Change how long backups are kept"><UiIcon name="history" size={14}/><span>Keeps</span><strong>{s.keeps.days} days + {s.keeps.sundays} Sundays</strong><UiIcon name="chevron" size={12}/></button>
   </div>
+  <section className="backups-places" aria-label="Where backups go">
+   <header className="backups-places-head"><h3>Where backups go</h3><button type="button" className="tool" onClick={()=>setSheet('addplace')} title="Add a place"><UiIcon name="plus" size={15}/>Add a place</button></header>
+   <p className="fine-print">Add an off-site copy — a drive, a NAS, SFTP, WebDAV or S3. Each copy is encrypted here first, so the place only ever holds scrambled data.</p>
+   <ul className="backups-places-list">
+    <li className="backups-place"><span className="backups-place-ico"><UiIcon name="folder" size={16}/></span><div className="backups-place-main"><strong>This computer</strong><small dir="ltr">{base(s.folder)} · always on</small></div><span className="backups-chip-status is-base">Baseline</span></li>
+    {dests.map(d=>{const chip=placeChip(d.status);return <li key={d.id} className="backups-place"><span className="backups-place-ico"><UiIcon name={DEST_ICON[d.type]} size={16}/></span>
+     <div className="backups-place-main"><strong>{d.label}</strong><small dir="ltr">{placeLocation(d)}{d.status.lastOkAt?` · sent ${lower(backupWhen(d.status.lastOkAt,now))}`:''}</small>{chip.kind==='err'&&<small className="backups-place-err">{d.status.lastError}</small>}</div>
+     <span className={`backups-chip-status is-${chip.kind}`}>{chip.label}</span>
+     <div className="backups-place-actions">
+      <button type="button" className="tool" disabled={!!busyPlace} onClick={()=>void pushPlace(d.id)} title="Send the latest backup to this place">{busyPlace===d.id?'Sending…':'Send now'}</button>
+      <details className="st-menu"><summary className="tool" title="More" aria-label="More"><UiIcon name="more" size={15}/></summary><div role="menu"><button type="button" role="menuitem" disabled={!!busyPlace} onClick={e=>{(e.currentTarget.closest('details') as HTMLDetailsElement).open=false;void removePlace(d.id);}}><UiIcon name="trash" size={14}/>Remove this place…</button></div></details>
+     </div></li>;})}
+   </ul>
+  </section>
   <div className="backups-panes">
    <div className="backups-list" ref={list} role="listbox" aria-label="Backups list" onKeyDown={onListKey}>
     {!s.backups.length?<div className="backups-empty"><UiIcon name="shield" size={24}/><p>No backup yet. Back up now, or Girru makes the first one at {s.runsAt}.</p></div>
@@ -125,7 +184,163 @@ export function SettingsBackups({client,active=true}:{client:SessionClient;activ
    <p>The backup from {lower(backupWhen(b.at,now))} is deleted for good. Your data and the other backups stay.</p>
   </Sheet>}
   {sheet==='folder'&&<FolderSheet client={client} status={s} onClose={()=>setSheet(null)} onSaved={async()=>{setSheet(null);setNotice('New backups go to the new folder. The old ones stay where they are.');await load();}}/>}
+  {sheet==='retention'&&<RetentionSheet client={client} status={s} onClose={()=>setSheet(null)} onSaved={async(days)=>{setSheet(null);setNotice(`Backups are now kept for ${days} days. Older ones are removed, but never your last ${Math.max(3,s.keeps.min)}.`);await load();}}/>}
+  {sheet==='addplace'&&<AddPlaceSheet client={client} onClose={()=>setSheet(null)} onSaved={async(label)=>{setSheet(null);setNotice(`Added “${label}”. Use “Send now” to copy your latest backup there.`);await load();}}/>}
  </div>;
+}
+
+/**
+ * Add a place backups are copied to (BACKUP-02), in two clear steps (board
+ * backup-offsite/page-redesign): step 1 picks the kind from a grouped, iconed
+ * list (self-hosted first; cloud shown dimmed as "coming"); step 2 shows only
+ * that kind's fields, grouped Where / Sign-in, with a native Choose… folder
+ * picker and a Test before Add. Each place's sign-in is sent once to be kept in
+ * the vault and never shown again.
+ */
+function AddPlaceSheet({client,onClose,onSaved}:{client:SessionClient;onClose:()=>void;onSaved:(label:string)=>void}){
+ const [step,setStep]=useState<1|2>(1);
+ const [type,setType]=useState<DestType>('folder'),[label,setLabel]=useState('');
+ const [f,setF]=useState<Record<string,string>>({port:'22',region:'us-east-1'});
+ const [auth,setAuth]=useState<'password'|'key'>('password');
+ const [test,setTest]=useState<'idle'|'checking'|'ok'>('idle');
+ const [hosts,setHosts]=useState<SshHost[]|null>(null),[keyName,setKeyName]=useState('');
+ const [error,setError]=useState(''),[busy,setBusy]=useState(false);
+ const v=(k:string)=>f[k]??'';
+ const set=(k:string)=>(e:{target:{value:string}})=>{setF(s=>({...s,[k]:e.target.value}));setTest('idle');};
+ // The owner's own servers, loaded once when they reach the SFTP step.
+ useEffect(()=>{if(type!=='sftp'||hosts!==null)return;void client.request({method:'GET',path:'/api/backups/ssh-hosts'}).then(r=>{setHosts(r.status===200?((r.body as {hosts:SshHost[]}).hosts??[]):[]);}).catch(()=>setHosts([]));},[type,hosts,client]);
+ const useHost=(h:SshHost)=>{setF(s=>({...s,host:h.host||h.alias,port:h.port?String(h.port):'22',...(h.login?{username:h.login}:{})}));setKeyName(h.keyName||'');setTest('idle');};
+ const pick=folderPicker();
+ const choose=async()=>{try{const paths=await pick?.({multiple:false});if(paths&&paths[0]){setF(s=>({...s,folder:paths[0]}));setTest('idle');}}catch{/* keep what is typed */}};
+ const canSave=
+  type==='folder'?!!v('folder').trim():
+  type==='sftp'?!!v('host').trim()&&!!v('username').trim()&&(auth==='password'?!!v('password'):!!v('privateKey')):
+  type==='webdav'?!!v('url').trim()&&!!v('username').trim()&&!!v('password'):
+  type==='s3'?!!v('endpoint').trim()&&!!v('bucket').trim()&&!!v('accessKeyId').trim()&&!!v('secretAccessKey'):false;
+ const buildBody=():Record<string,unknown>=>{
+  const b:Record<string,unknown>={type};
+  if(label.trim())b.label=label.trim();
+  if(type==='folder')b.folder=v('folder').trim();
+  if(type==='sftp'){b.host=v('host').trim();b.username=v('username').trim();if(v('port').trim())b.port=v('port').trim();if(v('path').trim())b.path=v('path').trim();if(auth==='password')b.password=v('password');else{b.privateKey=v('privateKey');if(v('passphrase'))b.passphrase=v('passphrase');}}
+  if(type==='webdav'){b.url=v('url').trim();b.username=v('username').trim();b.password=v('password');}
+  if(type==='s3'){b.endpoint=v('endpoint').trim();b.bucket=v('bucket').trim();if(v('region').trim())b.region=v('region').trim();if(v('prefix').trim())b.prefix=v('prefix').trim();b.accessKeyId=v('accessKeyId').trim();b.secretAccessKey=v('secretAccessKey');}
+  return b;
+ };
+ const runTest=async()=>{
+  if(!canSave||busy)return;setBusy(true);setError('');setTest('checking');
+  try{const r=await client.request({method:'POST',path:'/api/backups/destinations/test',body:buildBody()});if(r.status!==200){setTest('idle');setError(err(r,'That place could not be reached.'));return;}setTest('ok');}
+  finally{setBusy(false);}
+ };
+ const save=async()=>{
+  if(!canSave||busy)return;setBusy(true);setError('');
+  try{const r=await client.request({method:'POST',path:'/api/backups/destinations',body:buildBody()});if(r.status!==200){setTest('idle');setError(err(r,'That place could not be added.'));return;}onSaved((r.body as {destination:Destination}).destination.label);}
+  finally{setBusy(false);}
+ };
+ const field=(k:string,span:string,props:Record<string,unknown>={})=><label className="backups-field"><span>{span}</span><input value={v(k)} onChange={set(k)} spellCheck={false} {...props}/></label>;
+ const reassure=type==='folder'
+  ?'Encrypted here before it leaves — the place only ever holds scrambled data. A cloud-synced folder is fine too.'
+  :'Encrypted here before it leaves — the place only ever holds scrambled data; your sign-in is kept in your vault.';
+ const actions=step===1
+  ?<><button type="button" onClick={onClose}>Cancel</button><button type="button" className="primary" onClick={()=>{setError('');setStep(2);}}>Next</button></>
+  :<><button type="button" onClick={onClose}>Cancel</button><span className="backups-add-actions">{test==='ok'?<span className="backups-test-ok"><UiIcon name="check" size={13}/>Reachable</span>:<button type="button" disabled={busy||!canSave} onClick={()=>void runTest()}>{test==='checking'?'Checking…':'Test'}</button>}<button type="button" className="primary" disabled={busy||!canSave} onClick={()=>void save()}>{busy&&test!=='checking'?'Adding…':'Add place'}</button></span></>;
+ return <Sheet title="Add a place for backups" onClose={onClose} actions={actions}>
+  {step===1?<>
+   <div className="backups-step">Step 1 of 2 — choose the kind of place</div>
+   <div className="backups-kgroup">On your own storage</div>
+   <div className="backups-kinds" role="radiogroup" aria-label="Kind of place">
+    {DEST_DIRECT.map(t=><button key={t} type="button" role="radio" aria-checked={type===t} className="backups-kind" onClick={()=>{setType(t);setTest('idle');}}>
+     <span className="backups-place-ico"><UiIcon name={DEST_ICON[t]} size={16}/></span>
+     <span className="backups-kind-main"><b>{DEST_LABELS[t]}</b><small>{DEST_DESC[t]}</small></span>
+     <span className="backups-kind-radio" aria-hidden="true"/></button>)}
+   </div>
+   <div className="backups-kgroup">Cloud — arrives with Girru Connect</div>
+   <div className="backups-kind is-coming" aria-disabled="true">
+    <span className="backups-place-ico"><UiIcon name="globe" size={16}/></span>
+    <span className="backups-kind-main"><b>{DEST_CLOUD.map(t=>DEST_LABELS[t]).join(' · ')}</b><small>Sign-in stays on this computer</small></span>
+    <span className="backups-chip-status is-base">Coming</span></div>
+  </>:<>
+   <button type="button" className="backups-back" onClick={()=>{setError('');setStep(1);}}><UiIcon name="chevron" size={13}/>Kinds</button>
+   <div className="backups-step">Step 2 of 2 — {DEST_LABELS[type]}</div>
+   {type==='folder'&&<div className="backups-fields">
+    <label className="backups-field"><span>Folder</span><div className="backups-folderpick"><input value={v('folder')} onChange={set('folder')} autoFocus spellCheck={false} placeholder="/Volumes/My Drive/Girru" aria-label="Destination folder" onKeyDown={(e:KeyboardEvent)=>{if(e.key==='Enter'&&canSave)void save();}}/>{pick&&<button type="button" className="tool" onClick={()=>void choose()}>Choose…</button>}</div></label>
+   </div>}
+   {type==='sftp'&&<>
+    {hosts&&hosts.length>0&&<>
+     <div className="backups-kgroup" style={{marginTop:0}}>From your servers</div>
+     <div className="backups-kinds">
+      {hosts.map(h=><div key={h.alias} className="backups-kind backups-sshhost">
+       <span className="backups-place-ico"><UiIcon name="server" size={16}/></span>
+       <span className="backups-kind-main"><b>{h.alias}</b><small dir="ltr">{h.login?h.login+'@':''}{h.host||h.alias}{h.port&&h.port!==22?':'+h.port:''}{h.keyName?` · key ${h.keyName}`:''} · from ~/.ssh/config</small></span>
+       <button type="button" className="tool" onClick={()=>useHost(h)}>Use</button></div>)}
+     </div>
+     <p className="fine-print">Found in your ~/.ssh/config — pick one to fill the fields, or type your own below.</p>
+    </>}
+    <div className="backups-kgroup">Where</div>
+    <div className="backups-fields">
+     {field('host','Host',{autoFocus:true,placeholder:'backup.example.com','aria-label':'SFTP host'})}
+     <div className="backups-grid2">{field('port','Port',{type:'number',min:1,max:65535,'aria-label':'SFTP port'})}{field('path','Folder on the server (optional)',{placeholder:'backups','aria-label':'Remote folder'})}</div>
+    </div>
+    <div className="backups-kgroup">Sign-in</div>
+    <div className="backups-fields">
+     {field('username','User',{placeholder:'girru','aria-label':'SFTP user'})}
+     <div className="backups-place-types" role="radiogroup" aria-label="How to sign in">
+      <button type="button" role="radio" aria-checked={auth==='password'} className="backups-type" onClick={()=>{setAuth('password');setTest('idle');}}>Password</button>
+      <button type="button" role="radio" aria-checked={auth==='key'} className="backups-type" onClick={()=>{setAuth('key');setTest('idle');}}>Private key</button>
+     </div>
+     {keyName&&<p className="fine-print">This server uses the key <code>{keyName}</code> from ~/.ssh. Paste it below, or use a password — Girru never reads your key files.</p>}
+     {auth==='password'?field('password','Password',{type:'password','aria-label':'SFTP password',autoComplete:'off'}):<>
+      <label className="backups-field"><span>Private key</span><textarea value={v('privateKey')} onChange={set('privateKey')} rows={4} spellCheck={false} placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" aria-label="SFTP private key"/></label>
+      {field('passphrase','Key passphrase (optional)',{type:'password','aria-label':'Key passphrase',autoComplete:'off'})}
+     </>}
+    </div>
+   </>}
+   {type==='webdav'&&<>
+    <div className="backups-kgroup">Where</div>
+    <div className="backups-fields">{field('url','Address',{autoFocus:true,placeholder:'https://dav.example.com/remote.php/dav/files/me','aria-label':'WebDAV address'})}</div>
+    <div className="backups-kgroup">Sign-in</div>
+    <div className="backups-fields"><div className="backups-grid2">{field('username','User',{'aria-label':'WebDAV user'})}{field('password','Password',{type:'password','aria-label':'WebDAV password',autoComplete:'off'})}</div></div>
+   </>}
+   {type==='s3'&&<>
+    <div className="backups-kgroup">Where</div>
+    <div className="backups-fields">
+     {field('endpoint','Endpoint',{autoFocus:true,placeholder:'https://s3.eu-central-1.amazonaws.com','aria-label':'S3 endpoint'})}
+     <div className="backups-grid2">{field('bucket','Bucket',{placeholder:'my-backups','aria-label':'S3 bucket'})}{field('region','Region',{placeholder:'us-east-1','aria-label':'S3 region'})}</div>
+     {field('prefix','Folder in the bucket (optional)',{placeholder:'girru','aria-label':'S3 prefix'})}
+    </div>
+    <div className="backups-kgroup">Sign-in</div>
+    <div className="backups-fields"><div className="backups-grid2">{field('accessKeyId','Access key ID',{'aria-label':'S3 access key id',autoComplete:'off'})}{field('secretAccessKey','Secret key',{type:'password','aria-label':'S3 secret key',autoComplete:'off'})}</div></div>
+   </>}
+   <label className="backups-field" style={{marginTop:'11px'}}><span>Name (optional)</span><input value={label} onChange={e=>setLabel(e.target.value)} placeholder={DEST_LABELS[type]} aria-label="Place name"/></label>
+   <div className="backups-reassure"><UiIcon name="lock" size={14}/><span>{reassure}</span></div>
+  </>}
+  {error&&<p className="backups-alert" role="alert">{error}</p>}
+ </Sheet>;
+}
+
+/**
+ * How long backups are kept (BACKUP-02 D4): the owner picks 3, 7 or 14 days, or a
+ * custom number. The oldest beyond the window are removed automatically, but never
+ * the newest few, so a restore is always there.
+ */
+function RetentionSheet({client,status,onClose,onSaved}:{client:SessionClient;status:Extract<BackupStatus,{available:true}>;onClose:()=>void;onSaved:(days:number)=>void}){
+ const min=Math.max(3,status.keeps.min),max=status.keeps.max||3650,presets=status.keeps.presets.length?status.keeps.presets:[3,7,14];
+ const [days,setDays]=useState(status.keeps.days),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+ const clamped=Number.isFinite(days)?Math.round(days):min;
+ const valid=Number.isInteger(clamped)&&clamped>=min&&clamped<=max;
+ const save=async()=>{
+  if(!valid){setError(`Choose between ${min} and ${max} days.`);return;}
+  setBusy(true);setError('');
+  try{const r=await client.request({method:'PUT',path:'/api/backups/retention',body:{keepDays:clamped}});if(r.status!==200){setError(err(r,'That could not be saved.'));return;}onSaved((r.body as {keepDays:number}).keepDays);}
+  finally{setBusy(false);}
+ };
+ return <Sheet title="How long to keep backups" onClose={onClose} actions={<><button type="button" onClick={onClose}>Cancel</button><button type="button" className="primary" disabled={busy||!valid} onClick={()=>void save()}>{busy?'Saving…':'Save'}</button></>}>
+  <div className="backups-keepfor" role="group" aria-label="Keep backups for">
+   {presets.map(p=><button key={p} type="button" className="backups-chip" aria-pressed={clamped===p} onClick={()=>setDays(p)}>{p} days</button>)}
+  </div>
+  <label className="backups-field"><span>Or a custom number of days</span><input type="number" min={min} max={max} value={Number.isFinite(days)?days:''} onChange={e=>setDays(e.target.value===''?NaN:Number(e.target.value))} onKeyDown={e=>{if(e.key==='Enter')void save();}} aria-label="Days to keep backups"/></label>
+  <p className="fine-print">Backups older than this are removed on their own. Your newest {min} backups are always kept, and backups made before an update stay for {status.keeps.beforeUpdateDays} days.</p>
+  {error&&<p className="backups-alert" role="alert">{error}</p>}
+ </Sheet>;
 }
 
 function FolderSheet({client,status,onClose,onSaved}:{client:SessionClient;status:Extract<BackupStatus,{available:true}>;onClose:()=>void;onSaved:()=>void}){

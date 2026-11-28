@@ -113,6 +113,18 @@ export async function listSshHosts(userId: string): Promise<Array<{ alias: strin
     'SELECT alias, host, port, login FROM ssh_hosts WHERE user_id = ? ORDER BY alias', userId);
 }
 
+/**
+ * Same as listSshHosts, plus the name of the key the ~/.ssh/config entry points at
+ * (a file name only — the key itself is never read or stored). Used by the backup
+ * "Add a place" SFTP step to offer a known server and show which key it uses.
+ */
+export async function listSshHostsWithKey(userId: string): Promise<Array<{ alias: string; host: string | null; port: number | null; login: string | null; keyName: string | null }>> {
+  await init();
+  const rows = await q.all<{ alias: string; host: string | null; port: number | null; login: string | null; key_name: string | null }>(
+    'SELECT alias, host, port, login, key_name FROM ssh_hosts WHERE user_id = ? ORDER BY alias', userId);
+  return rows.map((r) => ({ alias: r.alias, host: r.host, port: r.port, login: r.login, keyName: r.key_name }));
+}
+
 const homeRel = (home: string, file: string) => { if (!path.isAbsolute(file)) return file; // a path from another system (e.g. C:\\… on a Mac) as it is
   const r = path.relative(home, file); return r && !r.startsWith('..') && !path.isAbsolute(r) ? `~${path.sep}${r}` : file; };
 const isDir = async (p: string) => (await discoveryFs.lstat(p).catch(() => null))?.isDirectory() === true;

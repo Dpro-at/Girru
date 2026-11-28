@@ -82,7 +82,8 @@ export async function initializeBackend(fastify: FastifyInstance): Promise<Start
   // are SQLite-only and off on PostgreSQL (Q-33), where no SQLite file is opened.
   if (dbDriver() !== 'postgres') fastify.decorate('db', getDatabase());
   // BACKUP-01: the owner's backup folder, so the agent tools' protected folders include it from the start.
-  await (await import('../services/backups.js')).loadBackupsFolder();
+  // BACKUP-02 (D4): the owner's "keep for" window, read once into the retention cache.
+  { const b = await import('../services/backups.js'); await b.loadBackupsFolder(); await b.loadBackupKeepDays(); }
   console.log('[Server] ✅ Database initialized\n');
 
   // STORE-MAP-01 P3: project memory keys follow the switch (ids while on, slugs again when it goes off),
