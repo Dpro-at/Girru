@@ -32,7 +32,8 @@ export class NightWorkController {
         this.publish({ settings: b.settings, last: b.last, running: b.running === true, step: b.step ?? null, now: b.now ?? null, events: b.events ?? [],
           ...(wasRunning && b.running !== true ? { finishedAt: Date.now() } : {}) });
         // It finished: say so, and say it plainly when there was nothing new (no report is kept then).
-        if (wasRunning && b.running !== true) this.publish({ notice: b.last && b.last !== prevLast && JSON.stringify(b.last) !== JSON.stringify(prevLast) ? 'Done.' : 'Done. Nothing new to read.' });
+        // A stop already says so in the list (and the footer); no "Done." under it.
+        if (wasRunning && b.running !== true) this.publish({ notice: b.events?.[0]?.kind === 'stopped' ? null : b.last && b.last !== prevLast && JSON.stringify(b.last) !== JSON.stringify(prevLast) ? 'Done.' : 'Done. Nothing new to read.' });
         // While it runs, read again every 2 seconds so the step and Stop stay right.
         clearTimeout(this.#watch);
         if (!this.#disposed && (b.running || this.#idleMs)) this.#watch = setTimeout(() => void this.load(), b.running ? 2_000 : this.#idleMs);

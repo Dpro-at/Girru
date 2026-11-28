@@ -110,8 +110,8 @@
 .night-now-text { color:var(--text); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
 .night-now > .fine-print { white-space:nowrap; }
 .night-events { margin:0; padding:0; list-style:none; display:grid; }
-.night-events li { display:grid; grid-template-columns:44px 16px minmax(0,1fr) auto; gap:8px; align-items:center; padding:5px 0; border-block-start:1px solid var(--border); font-size:12.5px; color:var(--text-2); }
-.night-events time { color:var(--muted); font-variant-numeric:tabular-nums; }
+.night-events li { display:grid; grid-template-columns:max-content 16px minmax(0,1fr) auto; gap:8px; align-items:center; padding:5px 0; border-block-start:1px solid var(--border); font-size:12.5px; color:var(--text-2); }
+.night-events time { color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap; min-inline-size:4.5em; }
 .night-events li > svg { color:var(--muted); }
 .night-events li[data-kind="idea"] > svg { color:var(--mem-warn); }
 .night-events li[data-kind="summary"] > svg, .night-events li[data-kind="start"] > svg { color:var(--accent); }

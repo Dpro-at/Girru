@@ -61,3 +61,13 @@ test('the live view: steps, the file it is on, and the list with an idea that op
   assert.ok(list.indexOf('Read README.md') < list.indexOf('Started (Run now)'), 'newest first');
   assert.match(list, /<button[^>]*>3 ideas wait for you in Needs you<\/button>/);
 });
+
+test('after Stop the notice does not say Done', async () => {
+  let running = true;
+  const stoppedEv = [{ at: '2026-11-28T01:20:00.000Z', kind: 'stopped', text: 'Stopped when you asked. Run now goes on from here.', project: null }];
+  const client = { request: async () => ({ status: 200, body: memoryPagesResponse('/api/memory/scopes/night', 200, { settings: { enabled: true, from: '01:00', to: '06:00' }, last: null, running, step: running ? 'read' : null, now: null, events: running ? [] : stoppedEv }) }) };
+  const c = new NightWorkController(client);
+  await c.load(); running = false; await c.load();
+  assert.equal(c.getSnapshot().notice, null);
+  c.dispose();
+});

@@ -237,7 +237,7 @@ export function FooterHelperPill({ client, onOpen }: { client: Requester; onOpen
   // MEM-LIVE-01: the pill also says when night work runs, and for a minute after it ends.
   const wantsNight = !!onOpen;
   const night = useMemo(() => (wantsNight ? new NightWorkController(client) : null), [client, wantsNight]);
-  useEffect(() => { if (!night) return; night.watch(30_000); return () => night.dispose(); }, [night]);
+  useEffect(() => { if (!night) return; night.watch(10_000); return () => night.dispose(); }, [night]);
   const empty = useMemo<Parameters<typeof nightPillWord>[0]>(() => ({ running: false, now: null, events: [], finishedAt: null }), []);
   const snap = (): Parameters<typeof nightPillWord>[0] => (night ? night.getSnapshot() : empty);
   const ns = useSyncExternalStore(night ? night.subscribe : () => () => {}, snap, snap);
