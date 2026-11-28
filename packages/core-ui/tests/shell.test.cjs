@@ -162,6 +162,12 @@ test('source boundary: only injected session transport may network; no browser s
       assert.match(source, /await client\.request\(/);
       source = source.replace('https://your-host/identity/v1', 'owner-entered-service-placeholder');
     }
+    if (name === 'SettingsBackups.tsx') {
+      // Two owner-entered address placeholders (WebDAV, S3 endpoint); requests still use the injected session transport.
+      assert.deepEqual(source.match(/https?:\/\/[^']+/g), ['https://dav.example.com/remote.php/dav/files/me', 'https://s3.eu-central-1.amazonaws.com']);
+      assert.match(source, /await client\.request\(/);
+      source = source.replace(/https?:\/\/[^']+/g, 'owner-entered-address-placeholder');
+    }
     if (name === 'reports-contract.js') {
       // A fixed reserved base parses relative report routes; it is never a network destination.
       assert.deepEqual(source.match(/https?:\/\/[^']+/g), ['https://local.invalid']);
