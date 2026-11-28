@@ -692,7 +692,8 @@ export function memoryPagesResponse(path, status, body) {
       return { ...(record(body.settings) ? { settings: { enabled: body.settings.enabled === true, from: hm(body.settings.from), to: hm(body.settings.to) } } : {}), ...('last' in body ? { last: rep(body.last) } : {}),
         ...('running' in body ? { running: body.running === true, step: ['read', 'summaries', 'tidy'].includes(body.step) ? body.step : null } : {}),
         // MEM-LIVE-01: the file it is on, and what it did (newest first).
-        ...('now' in body ? { now: nightNow(body.now) } : {}), ...('events' in body ? { events: nightEvents(body.events) } : {}) };
+        ...('now' in body ? { now: nightNow(body.now) } : {}),
+        ...('waiting' in body ? { waiting: record(body.waiting) && body.waiting.reason === 'low_ram' && typeof body.waiting.since === 'string' ? { reason: 'low_ram', since: body.waiting.since.slice(0, 40) } : null } : {}), ...('events' in body ? { events: nightEvents(body.events) } : {}) };
     }
     case 'night-run': return { started: body.started === true };
     case 'night-stop': return { stopped: body.stopped === true };

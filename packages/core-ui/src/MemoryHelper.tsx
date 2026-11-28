@@ -248,7 +248,7 @@ export function FooterHelperPill({ client, onOpen }: { client: Requester; onOpen
   const s = st.status, w = stepWord(s, st.needsYou);
   const nightWord = w.word === 'Ready' ? nightPillWord(ns) : null;
   const label = nightWord ? `Memory helper · ${nightWord}` : w.word === 'Ready' ? 'Memory helper' : `Memory helper · ${w.word}`;
-  return <button type="button" className="status-item helper-pill" data-state={ns.running && nightWord ? 'working' : s.phase === 'ready' && !st.needsYou ? 'ready' : st.needsYou ? 'needs-you' : s.phase === 'fallback' ? 'paused' : 'working'}
+  return <button type="button" className="status-item helper-pill" data-state={ns.running && nightWord ? 'working' : nightWord && ns.waiting ? 'waiting' : s.phase === 'ready' && !st.needsYou ? 'ready' : st.needsYou ? 'needs-you' : s.phase === 'fallback' ? 'paused' : 'working'}
     title="Memory helper (Memory › Memory helper)" aria-label={label} onClick={onOpen}>
     <span className="helper-dot" aria-hidden="true"/><UiIcon name="brain" size={12}/><span>{label}</span>
   </button>;

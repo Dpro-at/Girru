@@ -9,12 +9,14 @@ export type NightReport = { night: string; startedAt: string; endedAt: string; s
 export type NightStep = 'read' | 'summaries' | 'tidy';
 /** MEM-LIVE-01: what it does now, and what it did (newest first). */
 export type NightNow = { step: NightStep | null; file: string | null; project: string | null; read: number; startedAt: string };
+/** Due tonight but waiting for free RAM (the computer has less than 2 GB free). */
+export type NightWaiting = { reason: 'low_ram'; since: string };
 export type NightEvent = { at: string; kind: 'start' | 'read' | 'idea' | 'summary' | 'tidy' | 'done' | 'stopped'; text: string; project: string | null };
 type State = { settings: NightSettings | null; last: NightReport | null; report: NightReport | null; busy: boolean; notice: string | null; running: boolean; step: NightStep | null;
-  now: NightNow | null; events: NightEvent[]; /** When this page saw it finish (ms), for "Just finished". */ finishedAt: number | null };
+  now: NightNow | null; events: NightEvent[]; waiting: NightWaiting | null; /** When this page saw it finish (ms), for "Just finished". */ finishedAt: number | null };
 
 export class NightWorkController {
-  private state: State = { settings: null, last: null, report: null, busy: false, notice: null, running: false, step: null, now: null, events: [], finishedAt: null };
+  private state: State = { settings: null, last: null, report: null, busy: false, notice: null, running: false, step: null, now: null, events: [], waiting: null, finishedAt: null };
   #idleMs = 0;
   #watch: ReturnType<typeof setTimeout> | undefined;
   #disposed = false;
@@ -27,9 +29,9 @@ export class NightWorkController {
     try {
       const r = await this.client.request({ method: 'GET', path: '/api/memory/scopes/night' });
       if (r.status === 200) {
-        const b = r.body as { settings: NightSettings; last: NightReport | null; running?: boolean; step?: NightStep | null; now?: NightNow | null; events?: NightEvent[] };
+        const b = r.body as { settings: NightSettings; last: NightReport | null; running?: boolean; step?: NightStep | null; now?: NightNow | null; events?: NightEvent[]; waiting?: NightWaiting | null };
         const wasRunning = this.state.running, prevLast = this.state.last;
-        this.publish({ settings: b.settings, last: b.last, running: b.running === true, step: b.step ?? null, now: b.now ?? null, events: b.events ?? [],
+        this.publish({ settings: b.settings, last: b.last, running: b.running === true, step: b.step ?? null, now: b.now ?? null, events: b.events ?? [], waiting: b.waiting ?? null,
           ...(wasRunning && b.running !== true ? { finishedAt: Date.now() } : {}) });
         // It finished: say so, and say it plainly when there was nothing new (no report is kept then).
         // A stop already says so in the list (and the footer); no "Done." under it.
@@ -79,13 +81,14 @@ export class NightWorkController {
 }
 
 /** Few words for the footer pill while night work runs, or just after (MEM-LIVE-01). */
-export function nightPillWord(ns: { running: boolean; now: NightNow | null; events: NightEvent[]; finishedAt: number | null }, nowMs = Date.now()): string | null {
+export function nightPillWord(ns: { running: boolean; now: NightNow | null; events: NightEvent[]; finishedAt: number | null; waiting?: NightWaiting | null }, nowMs = Date.now()): string | null {
   if (ns.running) {
     const n = ns.now;
     if (!n || !n.step) return 'Night work: starting';
     if (n.step === 'read') return `Night work: reading, ${n.read} ${n.read === 1 ? 'file' : 'files'} read`;
     return n.step === 'summaries' ? 'Night work: writing summaries' : 'Night work: tidying';
   }
+  if (ns.waiting) return 'Night work waits: little free RAM';
   const top = ns.events[0];
   if (ns.finishedAt !== null && nowMs - ns.finishedAt < 60_000 && top && (top.kind === 'done' || top.kind === 'stopped')) return top.text.slice(0, 80);
   return null;

@@ -49,7 +49,7 @@ names and counts, no memory text). Use it to tell the owner what the helper is d
         `Memory helper: ${row.word} (search model ${status.model}).`,
         `RAM: models use ${gb(ram.modelsBytes)} of ${gb(ram.totalBytes)}; limit ${gb(ram.limitBytes)} (${ram.mode}); available ${gb(ram.availableBytes)}.`,
         `Night writer: ${status.worker ? `${status.worker.model} (${status.worker.phase})` : 'off'}.`,
-        `Night work: ${night.enabled ? `${night.from}–${night.to}` : 'off'}${now.running ? `, running now (${now.step ?? 'starting'}${now.now?.file ? `, reading ${now.now.file}` : ''}, ${now.now?.read ?? 0} files read so far)` : ''}.`,
+        `Night work: ${night.enabled ? `${night.from}–${night.to}` : 'off'}${now.waiting ? `, due but waiting: too little free RAM (needs 2 GB free) since ${now.waiting.since.slice(11, 16)}` : ''}${now.running ? `, running now (${now.step ?? 'starting'}${now.now?.file ? `, reading ${now.now.file}` : ''}, ${now.now?.read ?? 0} files read so far)` : ''}.`,
         ...(events.length ? [`${now.running ? 'Doing now' : 'Last run'}, newest first:`, ...events.map((e) => `- ${e.at.slice(11, 16)} ${e.text}${e.project ? ` (${e.project})` : ''}`)] : []),
         last ? `Last night: ${last.files} files read, ${last.summaries.length} summaries, ${last.proposals} ideas wait in Needs you (stopped: ${last.stopped}).` : 'No night work yet.',
       ];

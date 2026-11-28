@@ -71,3 +71,15 @@ test('after Stop the notice does not say Done', async () => {
   assert.equal(c.getSnapshot().notice, null);
   c.dispose();
 });
+
+test('waiting for free RAM: the contract keeps it, the footer says it, the page explains it', async () => {
+  const out = memoryPagesResponse('/api/memory/scopes/night', 200, { running: false, step: null, now: null, events: [], waiting: { reason: 'low_ram', since: '2026-11-28T01:00:00.000Z', extra: 1 } });
+  assert.deepEqual(out.waiting, { reason: 'low_ram', since: '2026-11-28T01:00:00.000Z' });
+  assert.equal(memoryPagesResponse('/api/memory/scopes/night', 200, { running: false, waiting: { reason: 'other', since: 'x' } }).waiting, null);
+  assert.equal(nightPillWord({ running: false, now: null, events: [], finishedAt: null, waiting: { reason: 'low_ram', since: 'x' } }), 'Night work waits: little free RAM');
+  assert.equal(nightPillWord({ running: true, now: NOW, events: [], finishedAt: null, waiting: { reason: 'low_ram', since: 'x' } }), 'Night work: reading, 12 files read', 'running wins');
+  const client = { request: async () => ({ status: 200, body: out }) };
+  const c = new NightWorkController(client); await c.load();
+  assert.equal(c.getSnapshot().waiting.reason, 'low_ram');
+  c.dispose();
+});
