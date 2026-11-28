@@ -121,3 +121,7 @@
 .night-event-project { white-space:nowrap; }
 @keyframes night-breathe { 50% { opacity:.45; } }
 @media (prefers-reduced-motion: reduce) { .night-steps li[data-state="now"] .night-step-mark i { animation:none; } }
+/* MEM-LIVE-01: due but waiting for free RAM. */
+.helper-pill[data-state="waiting"] { color:var(--mem-warn); border-color:color-mix(in srgb,var(--mem-warn) 35%,var(--border)); }
+.helper-pill[data-state="waiting"] .helper-dot { background:var(--mem-warn); }
+.night-waiting { display:flex; align-items:center; gap:8px; color:var(--mem-warn); }

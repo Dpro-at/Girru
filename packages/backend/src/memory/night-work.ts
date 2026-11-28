@@ -181,11 +181,15 @@ const progress = new Map<string, NightStep>();
 const stopAsked = new Set<string>();
 /** MEM-LIVE-01: what a run is doing now, and what it did (newest first). */
 const live = new Map<string, NightNow & { events: NightEvent[] }>();
+/** MEM-LIVE-01: owners whose night work is due but waits (too little free RAM), and since when. */
+export interface NightWaiting { reason: 'low_ram'; since: string }
+const waiting = new Map<string, NightWaiting>();
 
 /** Whether tonight's work runs now for this owner, on which step, and the file it is on. */
-export function nightRunning(ownerId: string): { running: boolean; step: NightStep | null; now: NightNow | null } {
+export function nightRunning(ownerId: string): { running: boolean; step: NightStep | null; now: NightNow | null; waiting: NightWaiting | null } {
   const l = live.get(ownerId);
-  return { running: running.has(ownerId), step: progress.get(ownerId) ?? null, now: l ? { step: progress.get(ownerId) ?? null, file: l.file, project: l.project, read: l.read, startedAt: l.startedAt } : null };
+  return { running: running.has(ownerId), step: progress.get(ownerId) ?? null, now: l ? { step: progress.get(ownerId) ?? null, file: l.file, project: l.project, read: l.read, startedAt: l.startedAt } : null,
+    waiting: running.has(ownerId) ? null : waiting.get(ownerId) ?? null };
 }
 /** What it did: the running list while it works, otherwise the last saved run (newest first). */
 export async function nightEvents(ownerId: string): Promise<NightEvent[]> {
@@ -209,6 +213,7 @@ const STOP_TEXT: Record<Exclude<NightReport['stopped'], 'done'>, string> = {
 /** Run tonight's work for one owner (also "Run now"). Stops between steps when it should; saves the report. */
 export async function runNightWork(ownerId: string, deps: NightDeps & { force?: boolean } = {}): Promise<NightReport> {
   const prev = running.get(ownerId); if (prev) return prev;
+  waiting.delete(ownerId);
   const work = (async () => {
     const now = deps.now ?? (() => new Date()), state = deps.state ?? machineState, steps = { ...DEFAULT_STEPS, ...deps.steps };
     const s = await nightSettings(ownerId), start = now();
@@ -310,7 +315,13 @@ export function stopNightWork(): void { clearInterval(timer); timer = undefined;
 export async function tick(deps: NightDeps = {}): Promise<void> {
   const owners = await sql().read(all<{ id: string }>("SELECT id FROM users WHERE role = 'owner' AND status = 'active'"));
   const m = await (deps.state ?? machineState)(), now = (deps.now ?? (() => new Date()))();
-  // Too little free RAM: wait for the next tick (no report; nothing is stopped while you chat).
-  if (await (deps.ramLow ?? ramTooLow)()) return;
-  for (const o of owners) if (nightDue(await nightSettings(o.id), now, m)) await runNightWork(o.id, deps);
+  const due: string[] = [];
+  for (const o of owners) { if (nightDue(await nightSettings(o.id), now, m)) due.push(o.id); else waiting.delete(o.id); }
+  if (!due.length) return;
+  // Too little free RAM: wait for the next tick (no report; nothing is stopped while you chat). The footer says it waits.
+  if (await (deps.ramLow ?? ramTooLow)()) {
+    for (const id of due) if (!waiting.has(id)) waiting.set(id, { reason: 'low_ram', since: now.toISOString() });
+    return;
+  }
+  for (const id of due) await runNightWork(id, deps);
 }

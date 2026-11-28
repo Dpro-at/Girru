@@ -104,3 +104,25 @@ test('the agent status tool lists what it did, newest first', async () => {
   assert.ok(Array.isArray(res.data.events));
   assert.match(res.content[0].text, /Last run, newest first:/);
 });
+
+test('due but too little free RAM: it waits, says so, and the wait clears when it runs', async () => {
+  const W = 'wait-owner';
+  db.prepare(`INSERT INTO users (id, email, username, password_hash, role, status, email_verified) VALUES (?, ?, ?, 'x', 'owner', 'active', 1)`).run(W, `${W}@example.test`, W);
+  let ran = 0;
+  const steps = { async readFiles() { ran++; return { files: 0, projects: 0, proposals: 0 }; }, async summaries() { return []; }, async tidy() { return { keys: 0, duplicates: 0 }; } };
+  const night = () => new Date(2026, 10, 13, 2, 0);
+  const idle = async () => ({ idleSeconds: 9999, onPower: true });
+  await N.tick({ state: idle, now: night, steps, ramLow: async () => true });
+  const w = N.nightRunning(W).waiting;
+  assert.deepEqual(w && w.reason, 'low_ram');
+  assert.equal(ran, 0, 'nothing ran');
+  const since = w.since;
+  await N.tick({ state: idle, now: () => new Date(2026, 10, 13, 2, 5), steps, ramLow: async () => true });
+  assert.equal(N.nightRunning(W).waiting.since, since, 'the first time it waited is kept');
+  await N.tick({ state: idle, now: () => new Date(2026, 10, 13, 2, 10), steps, ramLow: async () => false });
+  assert.ok(ran >= 1, 'it ran once RAM was free');
+  assert.equal(N.nightRunning(W).waiting, null, 'no longer waiting');
+  // Outside the hours and not idle long enough: not due, so never "waiting".
+  await N.tick({ state: async () => ({ idleSeconds: 5, onPower: true }), now: () => new Date(2026, 10, 13, 14, 0), steps, ramLow: async () => true });
+  assert.equal(N.nightRunning(W).waiting, null);
+});

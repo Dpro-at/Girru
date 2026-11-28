@@ -207,6 +207,7 @@ export function MemoryHelperPlace({ client, night, projectName = s => s, onOpenN
           <NightEventList events={allEvents ? ns.events : ns.events.slice(0, 5)} projectName={projectName} onOpenNeeds={onOpenNeeds} label="Last run"/>
           {ns.events.length > 5 && <button type="button" className="link-button" onClick={() => setAllEvents(v => !v)}>{allEvents ? 'Show less' : `Show everything it did (${ns.events.length})`}</button>}
         </>}
+        {!ns.running && ns.waiting && <p className="night-waiting" role="status"><UiIcon name="hourglass" size={13}/>Waiting: this computer has less than 2 GB of free RAM. It starts on its own when RAM is free; Run now starts it anyway.</p>}
         {!ns.running && <p>{lastNightSentence(last)}{ideas > 0 && <> {onOpenNeeds ? <button type="button" className="link-button" onClick={onOpenNeeds}>{ideas} {ideas === 1 ? 'idea waits' : 'ideas wait'} for you</button> : `${ideas} ideas wait for you`}.</>}</p>}
         <div className="actions">
           {ns.running ? <button type="button" disabled={ns.busy} onClick={() => void night.stop()}><UiIcon name="pause" size={12}/>Stop</button>
