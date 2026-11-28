@@ -23,7 +23,10 @@ export class NightWorkController {
       const r = await this.client.request({ method: 'GET', path: '/api/memory/scopes/night' });
       if (r.status === 200) {
         const b = r.body as { settings: NightSettings; last: NightReport | null; running?: boolean; step?: NightStep | null };
+        const wasRunning = this.state.running, prevLast = this.state.last;
         this.publish({ settings: b.settings, last: b.last, running: b.running === true, step: b.step ?? null });
+        // It finished: say so, and say it plainly when there was nothing new (no report is kept then).
+        if (wasRunning && b.running !== true) this.publish({ notice: b.last && b.last !== prevLast && JSON.stringify(b.last) !== JSON.stringify(prevLast) ? 'Done.' : 'Done. Nothing new to read.' });
         // While it runs, read again every 2 seconds so the step and Stop stay right.
         clearTimeout(this.#watch);
         if (b.running && !this.#disposed) this.#watch = setTimeout(() => void this.load(), 2_000);

@@ -34,6 +34,9 @@ test('settings, hours and Start now go through the allow-list; bad hours are ref
   assert.equal(await c.save({ from: '02:00' }), true);
   await c.runNow();
   assert.ok(calls.some(r => r.path === '/api/memory/scopes/night/run'));
+  // It ended at once with the same last night (nothing new): the page says so plainly.
+  assert.equal(c.getSnapshot().running, false);
+  assert.equal(c.getSnapshot().notice, 'Done. Nothing new to read.');
   assert.equal(allowedRequest('PUT', '/api/memory/scopes/night', { from: '25:00' }), false);
   assert.equal(allowedRequest('PUT', '/api/memory/scopes/night', { every: 15 }), false);
   const html = renderToStaticMarkup(React.createElement(NightWorkSettings, { c }));
