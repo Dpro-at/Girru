@@ -16,7 +16,7 @@ import type { Tool, ToolResult, ToolExecutionContext } from '../types.js';
 import { memoryHelperEnabled } from '../../services/memory-helper-switch.js';
 import { helperEmbeddingModel, memoryHelperRow, memoryHelperStatus, retryMemoryHelper } from '../../memory/helper.js';
 import { GIB, HelperSettingsError, helperSettings, ramView, setHelperSettings, workerCandidates } from '../../memory/helper-settings.js';
-import { lastNight, nightRunning, nightSettings, runNightWork, stopNightWorkFor } from '../../memory/night-work.js';
+import { lastNight, nightEvents, nightRunning, nightSettings, runNightWork, stopNightWorkFor } from '../../memory/night-work.js';
 import { auditTool, ownerGate } from './scopes.js';
 
 const fail = (tool: string, msg: string): ToolResult => ({ content: [{ type: 'text', text: `${tool} refused: ${msg}` }], error: msg });
@@ -37,23 +37,25 @@ export const memoryHelperStatusTool: Tool = {
   name: 'memory_helper_status',
   description: `The memory helper (owner only, read only): its state (Ready, Checking, Learning, Needs you), the search
 model, the RAM it uses and its RAM limit, free RAM, the night writer, whether tonight's work runs now, and what
-last night read and wrote per project. Use it before asking the owner to Run now or to change the RAM limit.`,
+last night read and wrote per project. While it runs: the step, the file it is on and the newest things it did (file
+names and counts, no memory text). Use it to tell the owner what the helper is doing, before asking to Run now or to change the RAM limit.`,
   input_schema: { type: 'object', properties: {} },
   async execute(_params: unknown, context?: ToolExecutionContext): Promise<ToolResult> {
     return gated('memory_helper_status', context, async (ownerId) => {
       const status = memoryHelperStatus(), row = memoryHelperRow(), ram = await ramView();
       const settings = helperSettings(), candidates = await workerCandidates(helperEmbeddingModel());
-      const night = await nightSettings(ownerId), now = nightRunning(ownerId), last = await lastNight(ownerId);
+      const night = await nightSettings(ownerId), now = nightRunning(ownerId), last = await lastNight(ownerId), events = (await nightEvents(ownerId)).slice(0, 12);
       const lines = [
         `Memory helper: ${row.word} (search model ${status.model}).`,
         `RAM: models use ${gb(ram.modelsBytes)} of ${gb(ram.totalBytes)}; limit ${gb(ram.limitBytes)} (${ram.mode}); available ${gb(ram.availableBytes)}.`,
         `Night writer: ${status.worker ? `${status.worker.model} (${status.worker.phase})` : 'off'}.`,
-        `Night work: ${night.enabled ? `${night.from}–${night.to}` : 'off'}${now.running ? `, running now (${now.step ?? 'starting'})` : ''}.`,
+        `Night work: ${night.enabled ? `${night.from}–${night.to}` : 'off'}${now.running ? `, running now (${now.step ?? 'starting'}${now.now?.file ? `, reading ${now.now.file}` : ''}, ${now.now?.read ?? 0} files read so far)` : ''}.`,
+        ...(events.length ? [`${now.running ? 'Doing now' : 'Last run'}, newest first:`, ...events.map((e) => `- ${e.at.slice(11, 16)} ${e.text}${e.project ? ` (${e.project})` : ''}`)] : []),
         last ? `Last night: ${last.files} files read, ${last.summaries.length} summaries, ${last.proposals} ideas wait in Needs you (stopped: ${last.stopped}).` : 'No night work yet.',
       ];
       return ok(lines.join('\n'), {
         phase: status.phase, word: row.word, needsYou: row.state === 'needs_you', model: status.model,
-        ram, settings, candidates, worker: status.worker, night: { ...night, ...now }, last,
+        ram, settings, candidates, worker: status.worker, night: { ...night, ...now }, last, events,
       });
     });
   },
@@ -104,13 +106,13 @@ ideas that wait in Needs you, write the summaries, tidy. It runs in the backgrou
 
 export const memoryNightStopTool: Tool = {
   name: 'memory_night_stop',
-  description: `Stop tonight's memory work at the end of the step it is on (the owner's "Stop"). Nothing is lost; Run now goes on later.`,
+  description: `Stop tonight's memory work after the file it is on (the owner's "Stop"). Nothing is lost; Run now goes on later.`,
   input_schema: { type: 'object', properties: {} },
   async execute(_params: unknown, context?: ToolExecutionContext): Promise<ToolResult> {
     return gated('memory_night_stop', context, async (ownerId) => {
       const stopped = stopNightWorkFor(ownerId);
       if (stopped) auditTool(context, 'memory.night_stop', 'memory_night_work', ownerId, {});
-      return ok(stopped ? 'It stops at the end of the current step.' : 'Nothing is running.', { stopped });
+      return ok(stopped ? 'It stops after the file it is on.' : 'Nothing is running.', { stopped });
     });
   },
 };
