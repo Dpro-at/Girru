@@ -1,7 +1,7 @@
 // MEM-PANEL-01 (board v3, approved 2026-11-28): Memory › Memory helper, its own
 // place right under Needs you (the footer pill opens it), and Settings › Memory
 // › Memory helper with the RAM limit. Three blocks: it finds what you mean, it
-// learns every night (24-hour bar, Start now / Stop), its tools (tiles; the
+// night work (24-hour bar, Run now / Stop), its tools (tiles; the
 // selected tile shows its details on the right). One RAM line on top.
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
@@ -154,13 +154,13 @@ export function MemoryHelperPlace({ client, night, projectName = s => s, onOpenN
         <h3>It finds what you mean</h3>
         <p>Ask in your own words, in any language or dialect: it finds the memory that means the same, even when the words are different.</p>
       </section>
-      <section className="helper-block" aria-label="It learns every night">
-        <h3>It learns every night{ns.running ? <span className="fine-print"> · learning now{ns.step ? `: ${STEP[ns.step]}` : ''}</span> : null}</h3>
+      <section className="helper-block" aria-label="Night work">
+        <h3>Night work{ns.running ? <span className="fine-print"> · running now{ns.step ? `: ${STEP[ns.step]}` : ''}</span> : null}</h3>
         {ns.settings && <NightBar settings={ns.settings} last={last}/>}
         <p>{lastNightSentence(last)}{ideas > 0 && <> {onOpenNeeds ? <button type="button" className="link-button" onClick={onOpenNeeds}>{ideas} {ideas === 1 ? 'idea waits' : 'ideas wait'} for you</button> : `${ideas} ideas wait for you`}.</>}</p>
         <div className="actions">
           {ns.running ? <button type="button" disabled={ns.busy} onClick={() => void night.stop()}><UiIcon name="pause" size={12}/>Stop</button>
-            : <button type="button" className="primary" disabled={ns.busy} onClick={() => void night.runNow()}>Start now</button>}
+            : <button type="button" className="primary" disabled={ns.busy} onClick={() => void night.runNow()}>Run now</button>}
           <span className="fine-print">{ns.settings?.enabled === false ? 'Learning at night is off.' : 'At night only while the computer rests and charges.'}</span>
         </div>
         {ns.notice && <p className="fine-print" role="status">{ns.notice}</p>}

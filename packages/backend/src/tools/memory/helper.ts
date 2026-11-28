@@ -5,7 +5,7 @@
  * memory_helper_status    read only: state, RAM (used / limit / available), the
  *                         night writer, tonight's work and last night per project
  * memory_helper_settings  change the RAM limit or the night writer ('settings' approval)
- * memory_night_run        start tonight's work now (Start now)
+ * memory_night_run        start tonight's work now (Run now)
  * memory_night_stop       stop it at the end of the current step (Stop)
  *
  * Gates (all): the owner account, in the owner's own turn, never a turn that
@@ -37,7 +37,7 @@ export const memoryHelperStatusTool: Tool = {
   name: 'memory_helper_status',
   description: `The memory helper (owner only, read only): its state (Ready, Checking, Learning, Needs you), the search
 model, the RAM it uses and its RAM limit, free RAM, the night writer, whether tonight's work runs now, and what
-last night read and wrote per project. Use it before asking the owner to Start now or to change the RAM limit.`,
+last night read and wrote per project. Use it before asking the owner to Run now or to change the RAM limit.`,
   input_schema: { type: 'object', properties: {} },
   async execute(_params: unknown, context?: ToolExecutionContext): Promise<ToolResult> {
     return gated('memory_helper_status', context, async (ownerId) => {
@@ -89,7 +89,7 @@ Night hours are changed in Settings › Memory › Memory helper by the owner.`,
 
 export const memoryNightRunTool: Tool = {
   name: 'memory_night_run',
-  description: `Start tonight's memory work now (the owner's "Start now"): read new and changed files, turn notes into
+  description: `Start tonight's memory work now (the owner's "Run now"): read new and changed files, turn notes into
 ideas that wait in Needs you, write the summaries, tidy. It runs in the background and stops when asked (memory_night_stop).`,
   input_schema: { type: 'object', properties: {} },
   async execute(_params: unknown, context?: ToolExecutionContext): Promise<ToolResult> {
@@ -104,7 +104,7 @@ ideas that wait in Needs you, write the summaries, tidy. It runs in the backgrou
 
 export const memoryNightStopTool: Tool = {
   name: 'memory_night_stop',
-  description: `Stop tonight's memory work at the end of the step it is on (the owner's "Stop"). Nothing is lost; Start now goes on later.`,
+  description: `Stop tonight's memory work at the end of the step it is on (the owner's "Stop"). Nothing is lost; Run now goes on later.`,
   input_schema: { type: 'object', properties: {} },
   async execute(_params: unknown, context?: ToolExecutionContext): Promise<ToolResult> {
     return gated('memory_night_stop', context, async (ownerId) => {

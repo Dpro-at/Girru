@@ -34,7 +34,7 @@
  *   GET  /api/memory/scopes/ask-agent/:jobId       -> { state: running | done (text, note) | error (code, error) }
  *   GET  /api/memory/scopes/night                  -> { settings: { enabled, from, to }, last: report | null, running, step }   Night work (MR9)
  *   PUT  /api/memory/scopes/night                  { enabled?, from?, to? } -> { settings }
- *   POST /api/memory/scopes/night/run              -> { started: true }   Start now (stops between steps on its own)
+ *   POST /api/memory/scopes/night/run              -> { started: true }   Run now (stops between steps on its own)
  *   POST /api/memory/scopes/night/stop             -> { stopped }         Stop at the end of the current step (MEM-PANEL-01)
  *   GET  /api/memory/scopes/night/report           -> { report | null }   the morning row in Needs you
  *   POST /api/memory/scopes/night/report/done      -> { ok: true }

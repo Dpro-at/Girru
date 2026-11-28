@@ -131,7 +131,7 @@ test('night work: waits under 2 GB free RAM unless the owner starts it; Stop end
   const low = await N.runNightWork(OWNER, { steps, now: () => at(1, 30), state: idle, ramLow: async () => true });
   assert.equal(low.stopped, 'low_ram'); assert.deepEqual(order, []);
   const started = await N.runNightWork(OWNER, { steps, now: () => at(1, 40), state: idle, ramLow: async () => true, force: true });
-  assert.equal(started.stopped, 'done', 'Start now does not wait for RAM');
+  assert.equal(started.stopped, 'done', 'Run now does not wait for RAM');
   assert.deepEqual(started.byProject, { girru: { files: 3, summary: true }, flowxtra: { files: 2, summary: false } });
   assert.deepEqual(started.summaries, ['Girru']);
   assert.equal((await N.lastNight(OWNER)).byProject.girru.files, 3);

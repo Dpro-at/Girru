@@ -170,7 +170,7 @@ export function nightRunning(ownerId: string): { running: boolean; step: 'read' 
   return { running: running.has(ownerId), step: progress.get(ownerId) ?? null };
 }
 
-/** Stop at the end of the current step (Undo = Start now). False when nothing runs. */
+/** Stop at the end of the current step (Undo = Run now). False when nothing runs. */
 export function stopNightWorkFor(ownerId: string): boolean {
   if (!running.has(ownerId)) return false;
   stopAsked.add(ownerId);

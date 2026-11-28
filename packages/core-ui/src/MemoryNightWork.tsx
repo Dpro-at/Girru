@@ -45,14 +45,14 @@ export class NightWorkController {
       return true;
     } catch { this.publish({ busy: false, notice: 'Not saved (no connection).' }); return false; }
   }
-  /** Start now: tonight's work at once (it does not wait for the hours or the charger). */
+  /** Run now: tonight's work at once (it does not wait for the hours or the charger). */
   async runNow() {
     this.publish({ busy: true, notice: null });
     try { const r = await this.client.request({ method: 'POST', path: '/api/memory/scopes/night/run' }); this.publish({ busy: false, running: r.status === 200 || this.state.running, notice: r.status === 200 ? 'Started. It stops on its own when it is done.' : 'Did not start.' }); }
     catch { this.publish({ busy: false, notice: 'Did not start (no connection).' }); }
     await this.load();
   }
-  /** Stop: it ends after the step it is on; Start now goes on later. */
+  /** Stop: it ends after the step it is on; Run now goes on later. */
   async stop() {
     this.publish({ busy: true, notice: null });
     try { const r = await this.client.request({ method: 'POST', path: '/api/memory/scopes/night/stop' }); const stopped = r.status === 200 && (r.body as { stopped?: boolean }).stopped === true; this.publish({ busy: false, notice: stopped ? 'It stops after the step it is on.' : 'Nothing is running.' }); }
@@ -92,7 +92,7 @@ export function NightWorkSettings({ c }: { c: NightWorkController }) {
       <li><b>Write the summaries:</b> today per project; on Monday the week; on the 1st the month.</li>
       <li><b>Tidy:</b> hide keys it finds and count duplicates. It never forgets anything on its own.</li>
     </ol>
-    <p className="fine-print">{lastNightLine(s.last)} · {s.running ? <button type="button" className="link-button" disabled={s.busy} onClick={() => void c.stop()}>Stop</button> : <button type="button" className="link-button" disabled={s.busy} onClick={() => void c.runNow()}>Start now</button>}</p>
+    <p className="fine-print">{lastNightLine(s.last)} · {s.running ? <button type="button" className="link-button" disabled={s.busy} onClick={() => void c.stop()}>Stop</button> : <button type="button" className="link-button" disabled={s.busy} onClick={() => void c.runNow()}>Run now</button>}</p>
     <p className="fine-print">Stops on its own when you use the computer, it leaves the charger, or the hours end; continues the next night. A computer that is off at night does it the next time it is idle for 20 minutes. Everything runs on this computer; no paid calls.</p>
     {s.notice && <p className="fine-print" role="status">{s.notice}</p>}
   </section>;

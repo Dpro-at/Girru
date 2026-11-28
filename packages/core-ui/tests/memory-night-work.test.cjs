@@ -25,7 +25,7 @@ function client(calls = []) {
   } };
 }
 
-test('settings, hours and Start now go through the allow-list; bad hours are refused before sending', async () => {
+test('settings, hours and Run now go through the allow-list; bad hours are refused before sending', async () => {
   const calls = [];
   const c = new NightWorkController(client(calls));
   await c.load();
@@ -40,7 +40,7 @@ test('settings, hours and Start now go through the allow-list; bad hours are ref
   assert.equal(allowedRequest('PUT', '/api/memory/scopes/night', { from: '25:00' }), false);
   assert.equal(allowedRequest('PUT', '/api/memory/scopes/night', { every: 15 }), false);
   const html = renderToStaticMarkup(React.createElement(NightWorkSettings, { c }));
-  for (const w of ['Work on memory at night', 'While the computer is idle and charging', 'Read new and changed files', 'Learn from the day', 'Write the summaries', 'Tidy:', 'Start now']) assert.ok(html.includes(w), w);
+  for (const w of ['Work on memory at night', 'While the computer is idle and charging', 'Read new and changed files', 'Learn from the day', 'Write the summaries', 'Tidy:', 'Run now']) assert.ok(html.includes(w), w);
 });
 
 test('the morning report is one row; Done takes it away', async () => {
